@@ -295,3 +295,36 @@ func TestSnapshotPriorScreenRebuilds(t *testing.T) {
 		t.Fatal("an impossible visible-row count produced a snapshot")
 	}
 }
+
+// TestAltScreenSnapshotHasNoHistory checks the alternate screen's bounded snapshot:
+// its content/cursor/alt flag round-trip, a history window on an alt frame is corrupt
+// (Valid false, and Bounded drops the history while keeping the frame).
+func TestAltScreenSnapshotHasNoHistory(t *testing.T) {
+	t.Parallel()
+	sc := NewScreen(2, 6, []Cell{
+		{Rune: 'A', Style: Style{Bold: true}},
+		{Rune: 'L'}, {Rune: 'T'},
+		{Rune: 'x'},
+	})
+	sc.Alt = true
+	sc.Cursor = Cursor{Row: 1, Col: 1, Visible: true, Shape: "block"}
+	history := []Line{{Cells: []Cell{{Rune: 'h'}}}}
+	snap := SnapshotScreenWithHistory(sc, history)
+	if snap == nil || !snap.Alt || len(snap.History) != 0 {
+		t.Fatalf("alt snapshot = %+v", snap)
+	}
+	if len(snap.Rows) != 2 || snap.Rows[0].Cells[0].Rune != 'A' || !snap.Rows[0].Cells[0].Bold {
+		t.Fatalf("alt content = %+v", snap.Rows)
+	}
+	if snap.Cursor != (SavedCursor{Row: 1, Col: 1, Visible: true, Shape: "block"}) {
+		t.Fatalf("alt cursor = %+v", snap.Cursor)
+	}
+	corrupt := *snap
+	corrupt.History = []SavedRow{{Cells: []SavedCell{{Rune: 'h'}}}}
+	if corrupt.Valid() {
+		t.Fatal("an alt frame with a history window reported valid")
+	}
+	if got := corrupt.Bounded(); got == nil || !got.Alt || len(got.History) != 0 || len(got.Rows) == 0 {
+		t.Fatalf("bounded alt frame = %+v", got)
+	}
+}

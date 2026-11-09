@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"fmt"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
@@ -27,6 +28,10 @@ type Options struct {
 	EventBudget time.Duration
 	// OS provides files, processes and watchers (nil: hostos.NopOS, everything unsupported).
 	OS hostos.OS
+	// HTTPClient, when set, is the client behind gvim.http.get (tests inject a TLS
+	// httptest client or a scripted RoundTripper). Nil uses the safe production
+	// transport: https only, public-address dial checks, no proxy.
+	HTTPClient *http.Client
 	// Services provides display width, diff, fuzzy, grep, decode, git root (nil:
 	// every call that needs one returns CodeUnsupported).
 	Services pluginapi.Services
@@ -124,6 +129,7 @@ type Runtime struct {
 	noticeAt  map[string]time.Time
 	stopHooks []func()
 	ioR       *ioRuntime // the IO areas' runtime-level state (ioruntime.go), created on first use
+	http      *httpState // restricted HTTP GET state (http.go); nil only before New fills it
 	started   bool
 	stopped   bool
 	gid       uint64
@@ -148,6 +154,7 @@ func New(o Options) *Runtime {
 		debug:     os.Getenv("GVIM_PLUGIN_DEBUG") == "1",
 		plugins:   map[string]*plugin{},
 		waits:     map[pluginapi.Token]*wait{},
+		http:      newHTTPState(o.HTTPClient),
 		log:       &logRing{sink: o.LogSink},
 		noticeAt:  map[string]time.Time{},
 	}

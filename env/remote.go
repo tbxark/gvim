@@ -43,6 +43,12 @@ type Remote struct {
 	detectors []config.EnvDetector
 	trusted   func() bool
 	run       RemoteRunner
+	// captureRun runs the activation baseline/recipe. The app supplies an
+	// interactive-login-shell runner here (bash/zsh -ilc when available) while detection
+	// stays on the plain sh -c runner: detection is passive and may run in an untrusted
+	// workspace, so it must not source the user's interactive rc through a project cwd.
+	// Nil falls back to run.
+	captureRun RemoteRunner
 
 	// Detection state (one bounded remote probe).
 	detected    trust.DetectedEnv
@@ -57,22 +63,44 @@ type Remote struct {
 	unset     []string
 	capturing bool
 	lastErr   error
+	// notice is a user-facing fallback/limitation message from the app's runner (for
+	// example "interactive shell failed; using sh -c"); it is shown in the startup
+	// notice and the Settings Environment rows.
+	notice string
 }
 
 // NewRemote builds the provider for a remote workspace rooted at root (the remote
 // absolute path; call SetRoot once the connection expanded a ~ root). None of the
 // methods runs anything until Warm or Overlay is called: the app calls Warm in the
 // background after the authority connects, so the UI never waits on the remote host.
-func NewRemote(root string, detectors []config.EnvDetector, trusted func() bool, run RemoteRunner) *Remote {
+func NewRemote(root string, detectors []config.EnvDetector, trusted func() bool, run RemoteRunner, captureRun ...RemoteRunner) *Remote {
 	if len(detectors) == 0 {
 		detectors = config.DefaultEnvDetectors()
 	}
-	return &Remote{
+	p := &Remote{
 		root:      root,
 		detectors: append([]config.EnvDetector(nil), detectors...),
 		trusted:   trusted,
 		run:       run,
 	}
+	if len(captureRun) > 0 && captureRun[0] != nil {
+		p.captureRun = captureRun[0]
+	}
+	return p
+}
+
+// SetNotice records the user-facing fallback/limitation message of the capture runner.
+func (p *Remote) SetNotice(text string) {
+	p.mu.Lock()
+	p.notice = text
+	p.mu.Unlock()
+}
+
+// Notice returns the last user-facing fallback/limitation message, or "".
+func (p *Remote) Notice() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.notice
 }
 
 // Root returns the remote root the probes use.
@@ -289,7 +317,10 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 // environments. Activation runs with set -a in the remote workspace directory.
 func (p *Remote) captureRemote(snippet, dir string) (set, unset []string, err error) {
 	p.mu.Lock()
-	run := p.run
+	run := p.captureRun
+	if run == nil {
+		run = p.run
+	}
 	root := p.root
 	p.mu.Unlock()
 	if run == nil {

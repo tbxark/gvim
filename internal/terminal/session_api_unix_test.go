@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // startWithScrollback starts /bin/sh -c script with a scrollback of lines rows.
@@ -194,5 +195,47 @@ func TestSearchScrollback(t *testing.T) {
 	lines, _ := s.Scrollback(matches[0], 1)
 	if len(lines) != 1 || !strings.Contains(lines[0].Text(), "line-10") {
 		t.Fatalf("the match row = %v, want line-42", lines)
+	}
+}
+
+// TestSessionTitleFromOSC checks the title the child sets with OSC 0/2: the last
+// one wins, a reset clears it, and OSC 1 (icon name only) does not change it.
+func TestSessionTitleFromOSC(t *testing.T) {
+	s := startSh(t, "printf '\033]0;first title\007'; sleep 0.1; printf '\033]2;second title\007'; sleep 30")
+	waitFor(t, s, "the OSC 0 title", func(Screen) bool { return s.Title() == "first title" })
+	waitFor(t, s, "the OSC 2 title", func(Screen) bool { return s.Title() == "second title" })
+
+	reset := startSh(t, "printf '\033]2;gone\007'; sleep 0.1; printf '\033]2;\007'; sleep 30")
+	waitFor(t, reset, "the title reset", func(Screen) bool { return reset.Title() == "" })
+
+	icon := startSh(t, "printf '\033]1;icon only\007'; sleep 30")
+	waitFor(t, icon, "the child to print", hasText(""))
+	if got := icon.Title(); got != "" {
+		t.Fatalf("OSC 1 changed the title to %q", got)
+	}
+}
+
+// TestCleanTitle checks the one title sanitizer: controls stripped, trimmed and
+// bounded on a rune boundary.
+func TestCleanTitle(t *testing.T) {
+	tests := map[string]string{
+		"plain":           "plain",
+		"  spaced  ":      "spaced",
+		"\033]0;evil\007": "]0;evil",
+		"a\x00b\nc":       "abc",
+		"\xff\xfeos":      "os",
+	}
+	for in, want := range tests {
+		if got := CleanTitle(in); got != want {
+			t.Errorf("CleanTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+	long := strings.Repeat("x", MaxTitleRunes+40)
+	if got := CleanTitle(long); utf8.RuneCountInString(got) != MaxTitleRunes {
+		t.Fatalf("long title length = %d, want %d", utf8.RuneCountInString(got), MaxTitleRunes)
+	}
+	wide := strings.Repeat("界", MaxTitleRunes+5)
+	if got := CleanTitle(wide); utf8.RuneCountInString(got) != MaxTitleRunes {
+		t.Fatalf("wide long title length = %d, want %d", utf8.RuneCountInString(got), MaxTitleRunes)
 	}
 }

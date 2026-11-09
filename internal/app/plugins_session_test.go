@@ -66,6 +66,14 @@ func newSession(t *testing.T, opts Options) *pluginSession {
 	must(t, err)
 	s.rt, s.m = rt, rt.model
 	t.Cleanup(func() {
+		// Close the model before the test's TempDirs are removed: an open save, a queued
+		// plugin state write or a dock close is background work that can still create a
+		// file under the workspace/config dir after the test body returns, which races
+		// TempDir's RemoveAll ("directory not empty"). Model.Close waits for saves, stops
+		// the dock and the plugin runtime (whose Stop flushes state), so every temp tree
+		// is quiescent before the cleanup removes it. Without this the test runtime was
+		// simply closed without going through the lifecycle the real app uses.
+		s.m.Close()
 		close(s.stop)
 		rt.close()
 	})

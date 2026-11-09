@@ -668,24 +668,36 @@ still loads unchanged.
   they share the entry's view position only when ownership moves (each keeps its own
   cursor while mirrored); large/virtual buffers and remote workspaces are independent,
   and the mirror's plugin seams see a new document id after a handoff.
-- **Remote file finder (landed).** A remote launch's quick-open file mode enumerates the
-  remote workspace through `authority.Files().ReadDir` (streaming into the ordinary
-  `finder.Index`, so the palette's poll-while-loading and query-sequence staleness guards
-  are shared); the local file index is never started and a local project switch is refused
-  (it would enumerate the local disk). The walk is bounded (50k files, 20k directories,
-  depth 64), skips the walker's skip dirs/hidden entries, rejects unsafe remote entry names
-  (separators, `..`, NUL) and never traverses symlinks; ctx cancellation ends the index
-  with `context.Canceled`. Ignored entries are dropped through the same bounded remote
-  .gitignore reader as the explorer (root/nested patterns, 64 KiB/file, 64 levels, 4096
-  rules; the batch lives for one index lifetime, so an edited ignore file reaches the
-  palette when the index restarts after a reconnect or the File Explorer: Refresh action). A root read failure is the index error and is shown as a
+- **Remote file finder (landed).** A remote launch's quick-open file mode fills the ordinary `finder.Index` (the palette's
+  poll-while-loading and query-sequence staleness guards are shared); the local file index
+  is never started and a local project switch is refused (it would enumerate the local
+  disk). In a git work tree it uses Fresh's project-file list: one bounded authority
+  one-shot `git rev-parse --is-inside-work-tree`, then one bounded
+  `git ls-files -z -s --cached --others --exclude-standard` (8 MiB / 20 s) fed through the
+  additive `finder.StartFunc`. That single listing traversal replaces the recursive
+  per-directory ReadDir for the git path and needs no client-side .gitignore reader:
+  tracked files (including tracked files that match .gitignore) and untracked non-ignored
+  files are emitted. The listing is filtered before emit — no .git internals, hidden path
+  segments, intermediate skip directories, invalid or non-UTF-8 names, or paths beyond the
+  finder's remote depth bound — while the Index keeps the 50k file cap, truncation and
+  cancellation semantics, and every Restart/refresh re-runs the remote git listing (a new
+  carrier or a changed work tree is picked up). Cases the one pass cannot represent — no
+  git work tree, git missing/failing, a truncated listing, or a nested repository/submodule
+  that git lists by name only — fall back to the previous recursive authority walk (bounded
+  directories/depth, skip dirs/hidden, no symlink traversal, remote .gitignore reader)
+  instead of silently dropping files. A root read failure of the fallback walk is the index
+  error and is shown as a
   `File search failed: ...` row; a truncated list shows an incomplete-list row instead of
   posing as the whole project; subdirectory failures keep the rest (partial list). A `~`
   workspace root is expanded remotely (one bounded shell command) so the palette root and
   the walk use the remote absolute path; a failed expansion leaves the root unchanged and
   surfaces the enumeration error, never a local fallback. Remote rows join with slashes and
-  the local file preview is never used for a remote file mode (the remote data bullet below wires an authority-backed previewer). Gaps: the finder index itself still walks the backend rather than listing git's files (the project-search grep fallback now uses `git ls-files`; the finder does not), remote file
-  preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
+  the local file preview is never used for a remote file mode (the remote data bullet below wires an authority-backed previewer). Gaps: Quick Open's default hidden filter still leaves hidden tracked files out (the git
+  listing is filtered like the walk), the fallback walk paths still use the client-side
+  remote ignore reader, nested-repository/submodule contents appear only through the
+  fallback path, non-UTF-8 paths are omitted (Fresh leaves them out too), and a truncated
+  git listing falls back to the recursive walk rather than keeping a partial one. Remote
+  file preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
   remote workspace instead of silently searching the local project, the palette file
   preview is cleared, and the local git-status adapter is replaced by an inert one: local
   git must not look up remote paths), and the remote workspace's plugin/agent project root

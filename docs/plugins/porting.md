@@ -350,6 +350,34 @@ restore and its once-per-project rule, the untrusted→`trust_changed` deferral,
 fallback, restore failure and missing-dotnet status, the explicit restore command, install-help
 popup/copy/native restart, and that non-C# buffers are ignored. The tests set the fake host's trust
 level and raise `after_file_open` themselves.
+### Clangd support: no server-specific LSP request (port residual)
+
+Fresh's `clangd_support.ts` sends clangd's non-standard `textDocument/switchSourceHeader` request
+through the language-server channel, shows a floating project-setup panel, and turns clangd's
+`textDocument/clangd.fileStatus` notification into the status row. gvim's plugin API deliberately
+allows only read requests from a fixed allowlist (it refuses server-specific methods before they
+reach a server), has no plugin event for server custom notifications, and has no floating-panel
+primitive for this content. The port (`plugin/bundled/plugins/clangd_support/`, opt-in) therefore:
+
+* replaces the switch request with a same-stem lookup over C-family source/header extensions in the
+  buffer directory, the workspace root and their `include/`/`src/` children. It does not read
+  `compile_commands.json`, so it cannot resolve headers in arbitrary include paths or clangd's
+  canonical counterpart when names/cases differ; one match opens, several use `gvim.ui.select`, and
+  no match is a status row;
+* renders the project setup as a read-only virtual buffer (one reused buffer, refreshed in place)
+  rather than Fresh's `PanelManager` card; the analysis lines follow Fresh (compile_commands.json
+  candidates, `.clangd`/`.clangd/compile_flags.txt`, CMake/Bazel/Makefile hints, general tips);
+* opens `.clangd` from the buffer directory or the workspace root, like Fresh's `getCwd` + buffer
+  directory targets, and reports when neither has one;
+* has no `lsp/custom_notification` handling (`textDocument/clangd.fileStatus`, `$/memoryUsage`), so
+  clangd's file-status line never reaches gvim's status row;
+* registers the same three user commands as Fresh, no keys and no settings.
+
+Tests: `plugin/bundled/clangd_support_test.go` covers the command table/no bindings, source→header and
+header→source switches (single match, picker choice), no-match/unsupported/no-active-file statuses,
+the project-setup buffer with a ready project and with missing compile/.clangd pieces (including buffer
+reuse and build-system hints), and open-config found/missing. The tests register openable targets on
+both the fake host and the fake OS.
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

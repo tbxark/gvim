@@ -88,6 +88,40 @@ returns `unsupported`. In a remote workspace the URL opens on the machine runnin
 browser is local). This is the safer equivalent of Fresh's dashboard `openUrl` (which spawns
 `xdg-open`/`open` fire-and-forget with no scheme policy or confirmation).
 
+## gvim.http
+
+```text
+gvim.http.get(url, opts?) ⏳ -> {status = 200, body = "...", headers = {...}} | nil, err
+opt 800 -> timeout_ms (default 5000, clamped 100..10000)
+```
+
+A bounded HTTPS GET for plugins. The explicit user opt-in is host-enforced: the plugin's USER
+config layer must contain `plugins.<name>.settings.network = true` (the project layer never grants
+it), otherwise the call fails with `unsupported` before any DNS or request. The policy:
+
+* **Only `https`.** `http://`, `javascript:`, `file:`, `data:`, `ssh:` and every other scheme are
+  refused; credentials in the URL (`user:pass@host`) are refused.
+* **SSRF policy.** `localhost`/`.localhost`/`.local` names and loopback, private, link-local,
+  multicast, unspecified, CGNAT, documentation/benchmarking literal addresses are refused. A DNS
+  name is resolved by the host itself and **every** resolved address must be public; a DNS failure
+  is final (no fallback to the hostname or another resolver). The dialer connects to a validated
+  literal address; the proxy from the environment is ignored and TLS 1.2 is the floor.
+* **Redirects.** At most 3, and every hop is revalidated with the same scheme/SSRF policy; a
+  redirect to `http` or a local/private target fails the call.
+* **Limits.** Default timeout 5 s (`timeout_ms` 100 ms..10 s); response body at most 1 MiB
+  (pre-checked `Content-Length` plus a limited reader); at most 2 concurrent requests per plugin
+  and 4 globally. The body stays in memory and is never written to disk.
+* **Headers.** Callers cannot set request headers at all — the host sends a fixed
+  `User-Agent: gvim-plugin/<version>` and `Accept: application/json`, so no Authorization/Cookie
+  can be sent. Only safe response headers are returned: `content-type`, `content-length`, `etag`,
+  `last-modified`, `cache-control`, `link` and `x-ratelimit-{limit,remaining,reset}`.
+
+The call is awaitable Work: it never blocks the update loop. Failures are returned as `nil, err`
+(`invalid` for policy, `timeout`, `too_large`, `io` for network/DNS, `unsupported` when the
+network setting is off); a caller that wants a silent degradation handles the error. This is the
+capability behind the dashboard's opt-in GitHub PR section; there is no generic fetch API for
+non-JSON/plain-text scraping, no authentication/token, and no response cache.
+
 ## gvim.proc and gvim.env
 
 ```text

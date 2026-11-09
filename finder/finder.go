@@ -170,6 +170,15 @@ func Start(ctx context.Context, root string) *Index {
 	})
 }
 
+// StartFunc begins an index over any enumeration function and returns at once. enum is
+// called on every run (initial and after Restart) with a context and the emit callback;
+// it must return when ctx is done and stop when emit returns false. It is the seam a
+// backend with a flat file list (for example a remote `git ls-files` over the authority)
+// uses to feed the same Index the local walk fills. Start uses StartFunc internally.
+func StartFunc(ctx context.Context, enum func(context.Context, func(string) bool) error) *Index {
+	return startWith(ctx, enum)
+}
+
 // startWith is Start over any enumeration. Tests use it to feed a fake list.
 // enum must return when ctx is done and must stop when emit returns false.
 func startWith(ctx context.Context, enum func(context.Context, func(string) bool) error) *Index {

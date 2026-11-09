@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-four plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-five plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp` and `csharp_support` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support` and `clangd_support` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -27,6 +27,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `lsp_help` | on | none (event driven: an LSP server error puts an install hint on the status row, and the LSP status click opens the help popup) | none |
 | `asm_lsp` | **off** | Assembly: Create .asm-lsp.toml, Assembly: Show LSP Help | none |
 | `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
+| `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
 | `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
@@ -228,6 +229,26 @@ open-file restore covers the common case); Fresh's "Disable C# LSP" action is re
 LSP status menu (gvim has no plugin call to disable a language's server); Fresh's `dotnet --version`
 precheck is replaced by running restore and reporting a start error; and the plugin ships only English
 i18n strings.
+
+**clangd_support** (reduced Fresh port): the C/C++ clangd helper. **Clangd: Switch Source/Header**
+opens the counterpart file for the active C-family buffer; Fresh asks clangd for it with the
+non-standard `textDocument/switchSourceHeader` request, which gvim's read-only LSP allowlist does not
+carry, so the port uses a bounded same-named lookup instead: the stem is looked up with the header
+extensions (`h`, `hh`, `hpp`, `hxx`, `hp`) for a source (`c`, `cc`, `cpp`, `cxx`) and with the source
+extensions for a header, in the buffer's directory, the workspace root, `include/` and `src/` under
+both, never outside the workspace. One match opens directly; several open a picker; none/unsupported
+(or no active file) puts an explanatory status row. **Clangd: Project Setup** shows (and re-shows in a
+read-only virtual buffer) the project root, whether `compile_commands.json` is present (checking the
+root, `build/`, `out/` and `cmake-build-debug/`) or missing with the usual cmake/bear tip, whether
+`.clangd` (or `.clangd/compile_flags.txt`) is present, build-system hints for CMake/Bazel/Makefile and
+the general tips; it refreshes the same buffer instead of opening another. **Clangd: Open Project
+Config** opens the `.clangd` next to the buffer or at the workspace root, or says it was not found.
+Commands are palette rows; no keys and no settings. It is opt-in (`default_enabled: false`). Reductions
+(also in porting.md): no clangd `textDocument/switchSourceHeader` (so no include-database-aware switch;
+the heuristic does not follow `compile_commands.json` include paths or rename-case variations), no
+`textDocument/clangd.fileStatus`/`$/memoryUsage` custom-notification status line (gvim's plugin API does
+not expose server custom notifications), and the project setup is a virtual buffer rather than Fresh's
+floating panel.
 **compare_files** (port of Fresh's own compare plugin; reduced): **Compare Files...** (or **Compare
 Active File With...**) opens the two paths you type and shows them as two editable splits of the
 current tab — changed lines get a background, in-line changes a highlighted span, a gutter glyph and
@@ -289,7 +310,14 @@ Repository**/**Open Branch** rows are appended to the Actions section (the branc
 http(s), shows a modal Yes/No confirmation naming the URL, and launches the platform browser
 opener without a shell (see [api-system.md](api-system.md#gvimurl)); a non-GitHub https origin is
 still openable as a repo row but has no branch URL, and unsafe/unopenable origins stay plain text.
-Reductions: no weather/GitHub/network sections, no third-party section API or Utility Dock
+The GitHub PR section is opt-in: set `plugins.dashboard.settings.github_prs = true` and
+`plugins.dashboard.settings.network = true` (the host network gate; project config never grants
+it), and a GitHub `origin` makes one bounded REST request
+(`https://api.github.com/repos/<owner>/<repo>/pulls`) rendered as up to six open PRs. Without a
+token a private or missing repository returns 404 and the section shows a muted `unavailable`
+line (no notice, the rest of the dashboard is unaffected); failures and the disabled state are
+also one muted line. Weather is not ported (no wttr.in request/formatting), and the third-party
+section API is still absent. Reductions: no weather, no third-party section API or Utility Dock
 placement and no sessions section.
 
 **code_tour** (reduced Fresh port): loads a Fresh `.fresh-tour.json` or a VS Code Edit CodeTour

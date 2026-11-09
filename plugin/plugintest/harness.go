@@ -3,6 +3,7 @@ package plugintest
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"runtime"
 	"sort"
 	"strconv"
@@ -34,9 +35,12 @@ type Options struct {
 	HeapLimit int64
 	Services  pluginapi.Services // nil: a *FakeServices
 	OS        hostos.OS          // nil: a fresh *FakeOS
-	Host      *FakeHost          // nil: a fresh one
-	Now       func() time.Time   // clock of the runtime (nil: the harness's manual clock)
-	Locale    string             // gvim.i18n locale ("" means "en")
+	// HTTPClient is the client behind gvim.http.get (nil: the production safe client);
+	// tests pass a TLS httptest client or a scripted RoundTripper.
+	HTTPClient *http.Client
+	Host       *FakeHost        // nil: a fresh one
+	Now        func() time.Time // clock of the runtime (nil: the harness's manual clock)
+	Locale     string           // gvim.i18n locale ("" means "en")
 	// Settings are the plugins.<name>.settings layers of the config, per plugin name.
 	Settings map[string]plugin.PluginSettings
 	// WorkspaceStateFile/WorkspaceStateData are a daemon workspace's per-workspace
@@ -114,7 +118,8 @@ func New(t *testing.T, files Files, o Options) *Harness {
 	}
 	h.RT = plugin.New(plugin.Options{
 		Timeout: o.Timeout, EventBudget: o.EventBudget, HeapLimit: heap, OS: osImpl, Services: svc,
-		Version: "test", Platform: "test", Locale: o.Locale, CheckGoroutine: true, Now: now,
+		HTTPClient: o.HTTPClient,
+		Version:    "test", Platform: "test", Locale: o.Locale, CheckGoroutine: true, Now: now,
 		WorkspaceStateFile: o.WorkspaceStateFile, WorkspaceState: wsState,
 		WorkspaceStateReadOnly: wsReadOnly, WorkspaceStateNote: wsNote,
 	})

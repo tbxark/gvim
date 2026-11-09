@@ -140,6 +140,11 @@ func (t *Tabs) tabBaseLabels() []string {
 			name = launchTitle(p.Launch())
 		}
 		if name == "" {
+			// A session/record title (OSC 0/2) names a plain shell's tab, live or
+			// restored; an explicit rename and the launch record still take precedence.
+			name = cleanTabTitle(p.TitleText())
+		}
+		if name == "" {
 			name = "Terminal " + strconv.Itoa(i+1)
 		}
 		out[i] = name
@@ -1046,7 +1051,7 @@ func (t *Tabs) SavedState() terminal.SavedState {
 func (t *Tabs) savedTabOf(i int, p *Panel) terminal.SavedTab {
 	rec := p.SavedState()
 	return terminal.SavedTab{
-		Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width,
+		Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width, Title: rec.Title,
 		Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
 		Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
 		Source: rec.Source, Live: rec.Live, Screen: rec.Screen,
@@ -1118,7 +1123,7 @@ func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
 	p.gen = t.genBase()
 	p.Restore(terminal.SavedState{
 		Version: terminal.SavedStateVersion, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
-		Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
+		Title: tab.Title, Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
 		Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
 		Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
 	})
@@ -1143,7 +1148,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 	saved := st.Tabs
 	if len(saved) == 0 {
 		saved = []terminal.SavedTab{{
-			Open: st.Open, Cwd: st.Cwd, Width: st.Width, Rows: st.Rows,
+			Open: st.Open, Cwd: st.Cwd, Width: st.Width, Title: st.Title, Rows: st.Rows,
 			LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv,
 			Agent: st.Agent, Ephemeral: st.Ephemeral, LaunchDir: st.LaunchDir,
 			Source: st.Source, Live: st.Live, Screen: st.Screen,
@@ -1158,7 +1163,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		p.gen = t.genBase()
 		p.Restore(terminal.SavedState{
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
-			Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
+			Title: tab.Title, Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
 			Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
 			Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
 			ExitCode: tab.ExitCode, ExitKnown: tab.ExitKnown,

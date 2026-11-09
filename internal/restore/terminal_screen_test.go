@@ -234,3 +234,85 @@ func TestTerminalExitStatusRoundTrip(t *testing.T) {
 		t.Fatalf("old record = %+v, %v, %v", old, ok, err)
 	}
 }
+
+// TestTerminalTitleRoundTrip checks the additive OSC 0/2 title survives the record
+// per tab and at the top level, is cleaned/bounded on load, and an old record has
+// none.
+func TestTerminalTitleRoundTrip(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", terminal.MaxTitleRunes+20)
+	dir := t.TempDir()
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"},
+		Title: "editor title \033bad\n",
+		Tabs: []terminal.SavedTab{
+			{Name: "a", Open: true, Rows: []string{"out"}, Title: "tab title"},
+			{Name: "b", Open: true, Rows: []string{"out"}, Title: long},
+		},
+	}
+	if err := SaveTerminal(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok {
+		t.Fatalf("LoadTerminal = %v, %v", ok, err)
+	}
+	if got.Title != "editor title bad" {
+		t.Fatalf("top-level title = %q", got.Title)
+	}
+	if got.Tabs[0].Title != "tab title" {
+		t.Fatalf("tab title = %q", got.Tabs[0].Title)
+	}
+	if n := len([]rune(got.Tabs[1].Title)); n != terminal.MaxTitleRunes {
+		t.Fatalf("long tab title = %d runes, want %d", n, terminal.MaxTitleRunes)
+	}
+	// Old record: no title, nothing invented.
+	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}}
+	if err := SaveTerminal(dir, legacy); err != nil {
+		t.Fatal(err)
+	}
+	old, ok, err := LoadTerminal(dir)
+	if err != nil || !ok || old.Title != "" || len(old.Tabs) != 0 {
+		t.Fatalf("old record = %+v, %v, %v", old, ok, err)
+	}
+}
+
+// TestLoadTerminalAltScreenContent checks an alt frame with a (corrupt) history
+// window is bounded on load: the frame content and alt flag stay, the history is
+// dropped rather than making the whole record paint wrong rows.
+func TestLoadTerminalAltScreenContent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	screen := terminal.SavedScreen{
+		Cols:    4,
+		Alt:     true,
+		History: []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'h'}}}},
+		Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+			{Rune: 'A', Bold: true}, {Rune: 'L'}, {Rune: 'T'},
+		}}},
+		Cursor: terminal.SavedCursor{Row: 0, Col: 0, Visible: true},
+	}
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"ALT"}, Title: "alt-app",
+		Screen: &screen,
+		Tabs:   []terminal.SavedTab{{Name: "a", Open: true, Rows: []string{"ALT"}, Screen: &screen, Title: "alt-app"}},
+	}
+	if err := SaveTerminal(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok || got.Screen == nil || got.Tabs[0].Screen == nil {
+		t.Fatalf("LoadTerminal = %+v, %v, %v", got, ok, err)
+	}
+	for name, snap := range map[string]*terminal.SavedScreen{"top": got.Screen, "tab": got.Tabs[0].Screen} {
+		if !snap.Alt || len(snap.History) != 0 || len(snap.Rows) == 0 {
+			t.Fatalf("%s alt frame = %+v", name, snap)
+		}
+		if snap.Rows[0].Cells[0].Rune != 'A' || !snap.Rows[0].Cells[0].Bold {
+			t.Fatalf("%s alt content = %+v", name, snap.Rows)
+		}
+	}
+	if got.Title != "alt-app" || got.Tabs[0].Title != "alt-app" {
+		t.Fatalf("alt title = %q / %q", got.Title, got.Tabs[0].Title)
+	}
+}

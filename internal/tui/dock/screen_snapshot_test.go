@@ -376,3 +376,131 @@ func TestRevivedTabStopsPaintingTheSavedCursor(t *testing.T) {
 		t.Fatalf("the revived tab lost its styled history row: %+v", g.At(0, 1))
 	}
 }
+
+// TestPanelCapturesAndRestoresTitle checks the OSC 0/2 title: captured with the
+// tab, restored as the plain-shell tab label (behind an explicit rename and the
+// launch record), re-saved, and cleaned/bounded.
+func TestPanelCapturesAndRestoresTitle(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.title = "vim main.go"
+	term.screen = newScreen(20, "out")
+	p := newTestPanel(t, &fakeStarter{term: term})
+	for range 2 {
+		st := p.SavedState()
+		if st.Title != "vim main.go" {
+			t.Fatalf("captured title = %q", st.Title)
+		}
+	}
+	restore := func(title string, launch []string) *Tabs {
+		var tabs Tabs
+		tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+		tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+		tabs.Restore(terminal.SavedState{
+			Version: terminal.SavedStateVersion, Open: true, Title: title, Rows: []string{"out"},
+			LaunchArgv: launch,
+			Tabs: []terminal.SavedTab{{
+				Name: "", Open: true, Title: title, Rows: []string{"out"}, LaunchArgv: launch,
+			}},
+		})
+		return &tabs
+	}
+	restored := restore("vim main.go", nil)
+	if got := restored.TabNames()[0]; !strings.Contains(got, "vim main.go") {
+		t.Fatalf("restored tab label = %q, want the recorded title", got)
+	}
+	if st := restored.SavedState(); st.Title != "vim main.go" || st.Tabs[0].Title != "vim main.go" {
+		t.Fatalf("re-saved title = %q / %q", st.Title, st.Tabs[0].Title)
+	}
+	// An explicit rename still wins.
+	restored.RenameActive("mine")
+	if got := restored.TabNames()[0]; !strings.Contains(got, "mine") || strings.Contains(got, "vim") {
+		t.Fatalf("renamed label = %q", got)
+	}
+	// A launch record keeps its program name over the OSC title.
+	launch := restore("some title", []string{"/bin/bash"})
+	if got := launch.TabNames()[0]; !strings.Contains(got, "bash") || strings.Contains(got, "some title") {
+		t.Fatalf("launch label = %q", got)
+	}
+	// Capture cleans controls and bounds the title.
+	bad := newFakeTerm()
+	bad.title = "\033]0;bad\007\n" + strings.Repeat("x", terminal.MaxTitleRunes+10)
+	bad.screen = newScreen(20, "out")
+	badPanel := newTestPanel(t, &fakeStarter{term: bad})
+	got := badPanel.SavedState().Title
+	if strings.ContainsAny(got, "\x1b\n\x00") || len([]rune(got)) > terminal.MaxTitleRunes {
+		t.Fatalf("unclean title = %q (%d runes)", got, len([]rune(got)))
+	}
+}
+
+// TestAltScreenContentAndTitleRoundTrip checks the alternate screen's content is
+// captured first-class (alt flag, styled rows, cursor, no history) and restored into
+// the read-only prior transcript with the recorded title; a corrupt alt frame with a
+// history window is ignored whole but the title still restores.
+func TestAltScreenContentAndTitleRoundTrip(t *testing.T) {
+	t.Parallel()
+	red := color.RGBA{R: 255, A: 255}
+	term := newFakeTerm()
+	term.title = "alt-app"
+	screen := terminal.NewScreen(2, 6, []terminal.Cell{
+		{Rune: 'A', Style: terminal.Style{Fg: red, Bold: true}},
+		{Rune: 'L'}, {Rune: 'T'},
+		{Rune: 'x'},
+	})
+	screen.Alt = true
+	screen.Cursor = terminal.Cursor{Row: 1, Col: 1, Visible: true, Shape: "bar"}
+	term.screen = screen
+	p := newTestPanel(t, &fakeStarter{term: term})
+	st := p.SavedState()
+	if st.Screen == nil || !st.Screen.Alt || len(st.Screen.History) != 0 {
+		t.Fatalf("captured alt frame = %+v", st.Screen)
+	}
+	if len(st.Screen.Rows) != 2 || st.Screen.Rows[0].Cells[0].Rune != 'A' || !st.Screen.Rows[0].Cells[0].Bold {
+		t.Fatalf("captured alt content = %+v", st.Screen.Rows)
+	}
+	if st.Title != "alt-app" {
+		t.Fatalf("captured alt title = %q", st.Title)
+	}
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(st)
+	panel := tabs.tabs[0]
+	if !panel.savedAlt {
+		t.Fatal("restored alt flag was lost")
+	}
+	if len(panel.prior) != 2 || panel.prior[0].Cells[0].Rune != 'A' || panel.prior[0].Cells[0].Style.Fg == nil {
+		t.Fatalf("restored alt content = %+v", panel.prior)
+	}
+	if got := tabs.TabNames()[0]; !strings.Contains(got, "alt-app") {
+		t.Fatalf("restored alt tab label = %q", got)
+	}
+	if st2 := tabs.SavedState(); st2.Screen == nil || !st2.Screen.Alt || st2.Title != "alt-app" || len(st2.Screen.Rows) == 0 {
+		t.Fatalf("re-saved alt frame = %+v", st2.Screen)
+	}
+
+	// A corrupt alt frame (history window) is ignored whole, the title still restores.
+	corrupt := st
+	corrupt.Screen = &terminal.SavedScreen{
+		Cols:    6,
+		Alt:     true,
+		History: []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'h'}}}},
+		Rows:    []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'A'}}}},
+	}
+	corrupt.Rows = []string{"out"}
+	for i := range corrupt.Tabs {
+		corrupt.Tabs[i].Screen = corrupt.Screen
+		corrupt.Tabs[i].Rows = []string{"out"}
+	}
+	var bad Tabs
+	bad.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+	bad.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	bad.Restore(corrupt)
+	badPanel := bad.tabs[0]
+	if badPanel.savedAlt || badPanel.prior[0].Cells[0].Style.Fg != nil {
+		t.Fatal("a corrupt alt frame was applied")
+	}
+	if badPanel.titleText != "alt-app" {
+		t.Fatalf("the title was lost with the corrupt alt frame: %q", badPanel.titleText)
+	}
+}

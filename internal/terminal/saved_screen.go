@@ -215,6 +215,11 @@ func (s *SavedScreen) Valid() bool {
 	if len(s.History) > MaxSavedHistoryRows {
 		return false
 	}
+	if s.Alt && len(s.History) > 0 {
+		// The alternate screen has no scrollback; a recorded alt frame with a
+		// history window is corrupt and is ignored whole.
+		return false
+	}
 	for _, row := range s.Rows {
 		if len(row.Cells) > s.Cols {
 			return false
@@ -281,7 +286,9 @@ func (s *SavedScreen) Bounded() *SavedScreen {
 	}
 	out := &SavedScreen{Cols: cols, Alt: s.Alt}
 	out.Rows = boundedSavedRows(s.Rows, rows, cols)
-	out.History = boundedSavedRows(s.History, MaxSavedHistoryRows, cols)
+	if !s.Alt {
+		out.History = boundedSavedRows(s.History, MaxSavedHistoryRows, cols)
+	}
 	out.Cursor = boundCursor(s.Cursor, len(out.Rows), cols)
 	return out.trimBytes()
 }

@@ -42,7 +42,14 @@ local backend applies the same rule as the remote ones.
 An `EnvProvider` is merged into LOCAL children only. A remote launch never sends the
 local overlay: its environment is `env.Remote`, whose marker probe and activation
 recipe run on the REMOTE host through the authority's one-shot surface (a raw exec with no
-env map of its own, so capture cannot recurse). The captured delta is the environment the
+env map of its own, so capture cannot recurse). Marker detection stays a passive `sh -c`
+probe (it may run in an untrusted workspace, so it must not source an interactive rc from a
+project cwd); the trusted activation baseline/recipe runs under the user's interactive login
+shell when one is available — `bash -ilc` or `zsh -ilc`, preferring `$SHELL` when it is
+bash/zsh — so a detector that depends on interactive rc initialization captures the same
+environment the remote terminal gets. If no such shell is found, or the interactive
+invocation fails, the capture falls back to the previous `sh -c` path and records an
+explicit notice (startup notice and the Settings Environment rows). The captured delta is the environment the
 remote terminal, the shell/formatter runner, remote LSP and remote project search/git grep
 receive. That keeps a local secret (or any local variable) out of every ssh command and
 makes the remote project environment actually take effect (R13-13); Fresh's
@@ -314,9 +321,10 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   from the authority, never the local overlay, so a remote-captured variable cannot leak back
   into local children.
 - Remote launches' environment (R13-13): `env.Remote` detects the configured markers on the
-  remote host (one bounded shell probe of the marker files) and activates the recipe through
-  the authority one-shot surface, diffing the remote activated environment against the remote
-  login baseline. Its captured delta is what the remote terminal, shell/formatter runner,
+  remote host (one bounded passive `sh -c` probe of the marker files) and activates the recipe
+  through the authority one-shot surface under the remote interactive login shell
+  (`bash -ilc`/`zsh -ilc` when detected), diffing the remote activated environment against
+  the same interactive-login baseline. Its captured delta is what the remote terminal, shell/formatter runner,
   remote LSP, remote project search and git grep receive; the local overlay is passed to no
   remote process. Activation is trust-gated exactly like the local path. The provider is
   warmed in the background after the authority connects (the remote root is expanded first);
@@ -389,14 +397,17 @@ Residuals of this slice (documented, not bugs):
   the safe version (respawn the recorded login shell or a user-approved argv, transcript
   preserved, never a silent replay of an arbitrary command) is not landed yet, so the
   terminal is restarted explicitly today.
-- Remote environment residuals: the probe/capture runs through `sh -c` on the ssh exec
-  channel with the remote login baseline, not through the user's interactive remote login
-  shell, so a detector whose activation needs interactive-shell initialization may capture a
-  different delta than a remote terminal would; changed remote env input files are not
-  watched (Env: Reload or a new activation re-captures), the detection result is cached until
-  Refresh/reconnect, the Settings Environment rows show the remote facts only after the
-  background warm, and there is no status-row indicator of the active remote environment yet
-  (Fresh shows one). Local behavior is unchanged.
+- Remote environment residuals: interactive-login capture supports bash and zsh only; other
+  shells (fish, csh, ...) keep the `sh -c` fallback, and a bash/zsh whose interactive rc is
+  unavailable or fails falls back per capture with a notice. Marker detection deliberately
+  stays on `sh -c` (passive, untrusted-safe), so a shell whose rc changes detection semantics
+  still differs from the terminal. Shell startup output before the command is discarded via a
+  NUL marker; the interactive shell is run once per baseline/recipe capture (two remote
+  commands), so rc-sourcing latency is paid per capture but not per spawn. Changed remote env
+  input files are not watched (Env: Reload or a new activation re-captures), the detection
+  result is cached until Refresh/reconnect, the Settings Environment rows show the remote
+  facts only after the background warm, and there is no status-row indicator of the active
+  remote environment yet (Fresh shows one). Local behavior is unchanged.
 - SSH authentication/connection residuals: ssh-agent forwarding and \`ssh_config\` reading
   (ProxyJump, Host aliases, IdentityAgent, host-key algorithms) are not implemented; the known
   hosts file is the default \`~/.ssh/known_hosts\` only; a supplied password/passphrase/2FA

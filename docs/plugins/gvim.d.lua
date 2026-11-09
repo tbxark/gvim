@@ -1058,6 +1058,12 @@ gvim.url = {}
 ---@return true|nil, string?
 function gvim.url.open(url) end
 
+gvim.http = {}
+---@param url string
+---@param opts? {timeout_ms?: integer}
+---@return {status: integer, body: string, headers: table<string, string>}|nil, string?
+function gvim.http.get(url, opts) end
+
 gvim.proc = {}
 ---@param argv string[]
 ---@param opts? {cwd?: string, env?: table<string, string>, stdin?: string, timeout_ms?: integer, max_output?: integer, merge_stderr?: boolean}

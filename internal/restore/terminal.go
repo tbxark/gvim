@@ -76,6 +76,7 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	if st.Version != terminal.SavedStateVersion || (len(st.Rows) == 0 && len(st.Tabs) == 0) {
 		return terminal.SavedState{}, false, nil
 	}
+	st.Title = terminal.CleanTitle(st.Title)
 	st.Rows = boundTerminalRows(st.Rows)
 	// The styled screen snapshot is bounded/cleaned the same way: a corrupt or
 	// hand-edited snapshot is dropped rather than painted.
@@ -87,6 +88,7 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	}
 	kept := st.Tabs[:0]
 	for _, tab := range st.Tabs {
+		tab.Title = terminal.CleanTitle(tab.Title)
 		tab.Rows = boundTerminalRows(tab.Rows)
 		tab.Screen = tab.Screen.Bounded()
 		if len(tab.Rows) == 0 && !tab.Open {

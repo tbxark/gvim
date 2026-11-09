@@ -27,11 +27,20 @@ type Session struct {
 	// still go to the emulator (session.go feed).
 	osc52p osc52Parser
 	osc52  osc52Handler
+	// title is the terminal title the child last set with OSC 0/2, cleaned and
+	// bounded. Its own mutex: the emulator's Title callback may run while feed
+	// holds s.mu.
+	titleMu sync.Mutex
+	title   string
 
 	mu        sync.Mutex // guards emu, closed and the child's reported modes
 	emu       *vt.Emulator
 	closed    bool // set by teardown; emu is not written after it
 	appCursor bool // application cursor keys (DECCKM) is on, see noteMode
+	// kitty is the child's Kitty keyboard protocol flags stack per screen. The
+	// dock reads it to encode keys in CSI-u form when the child enabled the
+	// protocol; zero means legacy encoding.
+	kitty kittyKeyboard
 	// The state the dock reads to decide about scrollback and mouse forwarding;
 	// all of it is reported by the child through the emulator's callbacks.
 	cwd       string             // OSC 7 working directory, or "" until the child reports one
@@ -74,10 +83,14 @@ func newSession(pty ptyProc, cols, rows, scrollbackLines int) *Session {
 		s.emu.SetScrollbackSize(1)
 	}
 	s.emu.SetCallbacks(vt.Callbacks{
-		EnableMode:       func(mode ansi.Mode) { s.noteMode(mode, true) },
-		DisableMode:      func(mode ansi.Mode) { s.noteMode(mode, false) },
-		AltScreen:        func(on bool) { s.altScreen = on },
+		EnableMode:  func(mode ansi.Mode) { s.noteMode(mode, true) },
+		DisableMode: func(mode ansi.Mode) { s.noteMode(mode, false) },
+		AltScreen: func(on bool) {
+			s.altScreen = on
+			s.kitty.setAltScreen(on)
+		},
 		WorkingDirectory: func(path string) { s.cwd = osc7Path(path) },
+		Title:            s.setTitle,
 	})
 	// relayReplies starts first: the emulator blocks on replies until they are read.
 	go s.relayReplies()
@@ -177,6 +190,18 @@ func (s *Session) AppCursorKeys() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.appCursor
+}
+
+// KittyKeyboardFlags returns the Kitty keyboard protocol enhancement flags the
+// child currently has in effect, or zero when it never enabled the protocol (or
+// popped all of its entries). The dock uses it to decide between CSI-u and legacy
+// key encoding for that child. The flags are per screen, so a child that pushed
+// them on the main screen and is now on the alternate screen reports the alternate
+// screen's stack.
+func (s *Session) KittyKeyboardFlags() uint8 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.kitty.flags()
 }
 
 // noteMode records the modes the emulator turns on and off. The emulator calls it while
@@ -297,6 +322,13 @@ func (s *Session) feed(p []byte) bool {
 		return false
 	}
 	_, _ = s.emu.Write(p)
+	// The emulator has consumed the bytes (and may have switched screens through
+	// the AltScreen callback), so parse the child's kitty keyboard controls now.
+	// The replies go into the same inbox as the emulator's own query answers: the
+	// inbox is the only writer to the PTY, so they cannot interleave.
+	for _, reply := range s.kitty.scan(p) {
+		s.in.push(reply)
+	}
 	return true
 }
 

@@ -247,8 +247,8 @@ background tabs' exited markers current.
   instant, because the frozen screen stays on show.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
   launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
-  plus the additive `exit_code`/`exit_known` pair for an exited tab and its
-  transcript) plus the active index; an old record without the exit pair restores
+  plus the additive `title` (OSC 0/2), `exit_code`/`exit_known` pair for an exited
+  tab and its transcript) plus the active index; an old record without the exit pair restores
   exactly as before (`exited`, status unknown, and no marker is invented) and the
   marker line is an ordinary bounded transcript row, so the record format stays
   version 1; the top-level fields keep mirroring the active tab, so a
@@ -286,6 +286,19 @@ background tabs' exited markers current.
   works). The gvim extension `terminal.restore_live` (default `true`) turns the
   dive revival off, making every restored tab read-only. In daemon mode the tab
   set is scoped per workspace (see Terminal tabs in daemon workspaces below).
+- **Terminal title.** A child's OSC 0 (icon+window title) and OSC 2 (window title)
+  set the session's terminal title, mirroring Fresh's Event::Title; the session
+  keeps the last one, cleaned (control characters and invalid UTF-8 dropped,
+  trimmed) and bounded to 256 runes, and an empty payload (a title reset) clears
+  it. OSC 1 only sets the icon name and deliberately does not change the title.
+  The title is additive in the saved record: a `title` per tab and mirrored at the
+  top level, so a restored tab keeps its recorded title and re-saves it even
+  without a live shell; an old record has no `title` and keeps its derived label.
+  The visible effect is the tab label: an explicit rename wins, then the launch
+  record's program/agent name, then the recorded (or live) OSC title, then
+  `Terminal N`; the strip still disambiguates and truncates it like any other
+  title. The record format stays version 1, old readers ignore the field, and a
+  corrupt/overlong title is cleaned again on load.
 - **Screen snapshot.** Next to the text rows the record carries an optional
   `screen` object: a bounded, **styled** snapshot of the backing-file remainder —
   the visible screen, a styled history window above it, the cursor and the
@@ -293,7 +306,11 @@ background tabs' exited markers current.
   `#rrggbb` and bold/underline/reverse; the cursor keeps its zero-based
   row/column, visibility and shape (`block`/`underline`/`bar`, read from the
   emulator's DECSCUSR state), and `alt` records that the saved visible screen was
-  the alternate screen (which has no history). It is additive and omitted when
+  the alternate screen. The alternate screen's **content** is captured first-class
+  as the visible frame (with its styles and cursor, no history); a corrupt record
+  that carries both `alt` and a history window is ignored whole, and the restored
+  read-only transcript paints the alt frame unchanged (a revived shell starts on
+  its own main screen rather than replaying the alt program). It is additive and omitted when
   there is nothing to keep — the format stays version 1 and an old record
   restores the plain text transcript exactly as before (absent fields mean no
   styles/cursor/history/alt). Bounds: at most 200 visible rows and 512 columns,
@@ -369,13 +386,17 @@ snapshot); gvim persists bounded text rows plus the bounded styled snapshot
 revives on the explicit dive with a fresh PTY, and
 `terminal.restore_live = false` turns that off. Full backing-file semantics
 still do not round-trip: the scrollback is a bounded styled window, not
-byte-exact (deep history beyond 200 rows is text-only), OSC sequences (title,
-cwd, clipboard, hyperlinks) are not replayed, per-cell hyperlinks are not
+byte-exact (deep history beyond 200 rows is text-only), OSC 1 icon names, OSC 7
+cwd, OSC 52 clipboard and hyperlinks are not replayed, per-cell hyperlinks are not
 representable in the snapshot (the cell encoding has no link field), the cursor
 shape is recorded but the read-only view paints it as a block (the restored shell
-does not inherit the old DECSCUSR mode), and alternate-screen content is recorded
-as a flag/marker rather than replayed (a revived shell starts on the main
-screen). Fresh can bring live tabs back without a dive because its layout focuses
+does not inherit the old DECSCUSR mode), the recorded OSC 0/2 title is not
+recombined with a foreground-process name the way Fresh's combine_terminal_title
+does (gvim has no pty foreground cache), and alternate-screen content is restored
+only as the read-only transcript frame: a revived shell starts on its own main
+screen, the main screen's history while the alt screen was active is not captured
+(the alt screen has no scrollback), and the alt frame is bounded by the same
+snapshot limits as the visible screen. Fresh can bring live tabs back without a dive because its layout focuses
 the tab; gvim's dock is not restored into an editor split, so the dive is the
 first user action on the dock. A buffer shared across workspaces and extract-tab
 are the #19b policy decisions and remain open.
@@ -812,10 +833,24 @@ These are known gaps, not bugs:
   workspace installs no handler even when the config is on. There is no reply for a child
   that ignores its stdin or has no read path — the capability is "response can reach the
   child's PTY input", not a promise that a given program consumes it.
-- **the kitty keyboard protocol** — **decision:** not ported, because there is no seam to
-  port against. x/vt v0.1.0 encodes child keys with legacy bytes only; its `SendKey` carries
-  the explicit `TODO: Support Kitty, CSI u, and XTerm modifyOtherKeys` and the emulator
-  exposes no keyboard-mode API. Reimplementing the protocol inside gvim would mean owning
-  the emulator's input encoding stack; revisit when x/vt lands it. The outer terminal's
-  keyboard protocol is Bubble Tea's business, not x/vt's.
+- **the kitty keyboard protocol (child side)** — **implemented**, with Fresh's limits.
+  The emulator answers the child's `CSI ? u` query with the flags the child pushed, and
+  tracks `CSI > flags u` (push), `CSI < n u` (pop) and `CSI = flags ; mode u`
+  (set/add/remove) in a separate flags stack for the main and alternate screens, so a TUI that
+  switches screens keeps the right mode; stacks and partial sequences are bounded (64 entries,
+  128 bytes). While the flags are non-zero the dock encodes the keys it sends to that child in
+  CSI-u form following the protocol reference: with disambiguation, Esc, modified printable keys,
+  modified Enter/Tab/Backspace and chords such as Ctrl+I / Alt+[ become `CSI ... u` (Ctrl+I
+  is no longer the Tab byte), and functional keys use their CSI form even unmodified (arrows
+  `CSI A`, F3 `CSI 13~`, not the DECCKM `SS3 A`); the alternate-keys,
+  report-all-keys and associated-text flags add their fields. Unmodified text, Enter, Tab and
+  Backspace keep their legacy bytes, and a child that never enables the protocol or pops all flags
+  gets exactly the old legacy encoding (the app-cursor SS3/CSI rules apply only there).
+  Limits, matching Fresh: the dock forwards key presses only — release events are not sent to the
+  child even when report-event-types is set (repeats arrive as presses), so presses carry no
+  event-type field; modifier-only keys, media keys and the protocol's F13+ codes are not encoded;
+  and gvim's own host-terminal kitty negotiation/parsing stays Bubble Tea's job (the editor does
+  not request extra host flags). The flags live in the session, so a restarted shell starts at
+  zero and a child that pops all entries (or exits) is back on legacy encoding; a child that pushes
+  on the main screen and leaves it gets its main-screen flags back when it returns.
 - **close_on_exit for report-split terminals**: gvim only has the dock.

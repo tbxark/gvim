@@ -7,9 +7,10 @@
 -- picked up by the next paint.
 --
 -- Reduction vs Fresh (docs/plugins/bundled.md):
---   * weather, GitHub PRs and the network sections are not ported (no network
---     fetches from a bundled plugin); the public third-party section API is not
---     ported either (gvim cannot pass Lua closures between plugin runtimes).
+--   * weather is not ported, and the third-party section API is absent. GitHub PRs
+--     are a user-opt-in section (github_prs + network settings) over the bounded
+--     gvim.http.get capability: public repos only, failures are a muted unavailable
+--     line, and the response never touches disk.
 --   * the disk section shells out to df for the workspace mount and $HOME only.
 --   * every row is clickable: recent-file rows are path line targets and the
 --     action rows (including the Git section's branch-log row) are action line
@@ -29,6 +30,14 @@ local settings = gvim.settings.define {
   refresh_seconds = {
     type = "integer", default = 5, minimum = 1, maximum = 60,
     description = "How often the dashboard refreshes its git/disk/clock content while visible",
+  },
+  github_prs = {
+    type = "boolean", default = false,
+    description = "Show open GitHub pull requests for the workspace repository (needs network = true)",
+  },
+  network = {
+    type = "boolean", default = false,
+    description = "Allow this plugin to make bounded HTTPS GET requests (currently only the GitHub PR section)",
   },
 }
 
@@ -63,6 +72,9 @@ local INNER_MAX = 110
 local SIZE_FRACTION = 0.9
 local GIT_TTL_MS = 15000
 local DISK_TTL_MS = 60000
+local GITHUB_TTL_MS = 60000
+local GITHUB_API = "https://api.github.com"
+local GITHUB_MAX_ROWS = 6
 local RECENT_MAX = 10
 local MAX_ACTIONS = 8
 local MAX_RECENT_ROWS = 10
@@ -160,6 +172,7 @@ local state = {
   rows = {},             -- { kind = "recent"|"action", label, path?, action? }
   frame = "",            -- last painted frame text (skip identical writes)
   git = nil,             -- { at, branch, url, repo_url, branch_url, ... }
+  github = nil,          -- { at, rows, unavailable, loading } from the GitHub REST API
   click_rows = {},       -- non-focusable clickable lines: { index, action }
   disk = nil,            -- { at, rows = { {mount, pct, free} } }
   timer = nil,
@@ -327,6 +340,72 @@ local function fetch_git()
   }
 end
 
+-- GitHub PRs (opt-in) -----------------------------------------------------
+-- The section is off unless github_prs is true. The host also requires the user
+-- layer setting network = true; without it gvim.http.get refuses before any DNS.
+-- Only public repositories can be read without a token: a 404 (private/missing) or
+-- any other failure renders one muted unavailable line, never a notice, and never
+-- blocks the rest of the dashboard.
+
+local function github_nwo(repo_url)
+  local owner, repo = (repo_url or ""):match("^https://github%.com/([%w%-%._]+)/([%w%-%._]+)$")
+  if not owner then
+    return nil
+  end
+  return owner .. "/" .. repo
+end
+
+local function fetch_github()
+  if not settings.github_prs then
+    state.github = nil
+    return
+  end
+  local now = now_ms()
+  if state.github and state.github.at and now - state.github.at < GITHUB_TTL_MS then
+    return
+  end
+  local nwo = state.git and github_nwo(state.git.repo_url) or nil
+  if not nwo then
+    state.github = { at = now, unavailable = "not a github repository" }
+    return
+  end
+  local url = GITHUB_API .. "/repos/" .. nwo .. "/pulls?state=open&per_page=" .. tostring(GITHUB_MAX_ROWS)
+  state.github = { at = now, loading = true }
+  local res, err = gvim.http.get(url, { timeout_ms = 5000 })
+  if not res then
+    local text = tostring(err)
+    local reason = "unavailable"
+    if text:find("network is disabled", 1, true) then
+      reason = "network disabled (set network = true)"
+    end
+    state.github = { at = now, unavailable = reason }
+    return
+  end
+  if res.status ~= 200 then
+    state.github = { at = now, unavailable = "unavailable" }
+    return
+  end
+  local ok, list = pcall(json.decode, res.body)
+  if not ok or type(list) ~= "table" then
+    state.github = { at = now, unavailable = "invalid response" }
+    return
+  end
+  local rows = {}
+  for _, pr in ipairs(list) do
+    if #rows >= GITHUB_MAX_ROWS then
+      break
+    end
+    if type(pr) == "table" and pr.number then
+      rows[#rows + 1] = {
+        number = pr.number,
+        title = tostring(pr.title or ""),
+        draft = pr.draft == true,
+      }
+    end
+  end
+  state.github = { at = now, rows = rows }
+end
+
 -- disk data --------------------------------------------------------------
 
 local function fetch_disk()
@@ -461,6 +540,25 @@ local function build_rows(inner)
   elseif state.git and state.git.missing then
     heading("Git")
     kv("repository", "none in this workspace", STYLE.muted)
+  end
+  if settings.github_prs then
+    if #lines > 0 then
+      lines[#lines + 1] = { text = "" }
+    end
+    heading("GitHub")
+    local gh = state.github
+    if not gh or gh.loading then
+      kv("PRs", "loading…", STYLE.muted)
+    elseif gh.unavailable then
+      kv("PRs", gh.unavailable, STYLE.muted)
+    elseif not gh.rows or #gh.rows == 0 then
+      kv("PRs", "no open PRs", STYLE.muted)
+    else
+      for _, pr in ipairs(gh.rows) do
+        local title = pr.draft and ("draft " .. pr.title) or pr.title
+        kv("#" .. tostring(pr.number), title, STYLE.value)
+      end
+    end
   end
   if #recent > 0 then
     if #lines > 0 then
@@ -675,6 +773,13 @@ local function refresh(force)
     if not ok then
       gvim.log.debug("dashboard: git: " .. tostring(err))
       state.git = { at = at, missing = true }
+    end
+  end
+  if settings.github_prs and (force or not state.github or at - (state.github.at or 0) > GITHUB_TTL_MS) then
+    local ok, err = pcall(fetch_github)
+    if not ok then
+      gvim.log.debug("dashboard: github: " .. tostring(err))
+      state.github = { at = at, unavailable = "unavailable" }
     end
   end
   if force or not state.disk or at - (state.disk.at or 0) > DISK_TTL_MS then

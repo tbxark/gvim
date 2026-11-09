@@ -168,6 +168,9 @@ func (p *Panel) SavedState() terminal.SavedState {
 	// into a dead one. A dive clears wasLive, so an attempted revive is recorded as the
 	// resulting state.
 	st.Live = (p.term != nil && !p.exited) || p.wasLive
+	// The terminal title the child set (OSC 0/2), persisted so a restored tab keeps
+	// its name and label; a restored-but-not-revived tab re-saves the recorded one.
+	st.Title = p.TitleText()
 	// The styled screen snapshot preserves the visible screen's colours/attributes
 	// across the restore (Fresh's backing file keeps the screen too). A live terminal
 	// snapshots its screen; a restored tab without a shell keeps the styled tail of
@@ -301,6 +304,7 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	}
 	p.exitCode, p.exitKnown = st.ExitCode, st.ExitKnown
 	p.exitMarker = false
+	p.titleText = terminal.CleanTitle(st.Title)
 	p.restored = true
 	p.wasLive = st.Live
 	p.reflowed = false

@@ -59,7 +59,7 @@ type settingsRuntime struct {
 // detector matched, whether an environment is active and the trust level that
 // gates activation. They read the env.Provider, never a subprocess.
 func (s *settingsService) projectEnvFacts() []envFact {
-	facts := make([]envFact, 0, 3)
+	facts := make([]envFact, 0, 4)
 	if det, ok := s.env.Detected(); ok {
 		facts = append(facts, envFact{
 			name: "Project environment", value: det.Name + " (" + string(det.Kind) + ")",
@@ -74,6 +74,14 @@ func (s *settingsService) projectEnvFacts() []envFact {
 		facts = append(facts, envFact{name: "Active environment", value: "system", note: "no activation applied"})
 	}
 	facts = append(facts, envFact{name: "Project environment trust", value: s.envTrust(), note: "activation needs a trusted workspace"})
+	// A remote capture runner may fall back from an interactive login shell to sh -c
+	// after startup; keep the notice visible in Settings instead of only in the startup
+	// line.
+	if n, ok := s.env.(interface{ Notice() string }); ok {
+		if notice := n.Notice(); notice != "" {
+			facts = append(facts, envFact{name: "Environment shell", value: "fallback", note: notice})
+		}
+	}
 	return facts
 }
 

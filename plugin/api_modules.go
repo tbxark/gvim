@@ -46,6 +46,7 @@ var installers = []func(*apiEnv){
 	installWorkspace,
 	installPlugins,
 	installLSP,
+	installHTTP,
 }
 
 // extraInstallers run after installers; tests add fakes here (export_test.go).

@@ -2,11 +2,17 @@ package bundled_test
 
 import (
 	"encoding/json"
+	"io"
 	"io/fs"
+	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/tbxark/gvim/plugin"
 
 	"github.com/tbxark/gvim/plugin/bundled"
 	"github.com/tbxark/gvim/plugin/plugintest"
@@ -462,5 +468,163 @@ func TestDashboardURLNormalization(t *testing.T) {
 				t.Fatalf("branch target = %v, want %v (targets %+v)", branch, tc.branch, r.host.LineTargets(id))
 			}
 		})
+	}
+}
+
+// githubTransport answers the GitHub PR request with a fixed response and records the
+// requests, so the dashboard tests never touch the network.
+type githubTransport struct {
+	mu       sync.Mutex
+	requests []*url.URL
+	status   int
+	body     string
+	err      error
+}
+
+func (g *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	g.mu.Lock()
+	g.requests = append(g.requests, req.URL)
+	g.mu.Unlock()
+	if g.err != nil {
+		return nil, g.err
+	}
+	status := g.status
+	if status == 0 {
+		status = 200
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(g.body)),
+		Request:    req,
+	}, nil
+}
+
+func (g *githubTransport) count() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.requests)
+}
+
+func (g *githubTransport) first() *url.URL {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.requests) == 0 {
+		return nil
+	}
+	return g.requests[0]
+}
+
+func dashboardGitHubSettings(network bool) map[string]plugin.PluginSettings {
+	return map[string]plugin.PluginSettings{
+		dashboardPlugin: {User: map[string]any{"github_prs": true, "network": network}},
+	}
+}
+
+// dashboardSettle waits for the dashboard's async git/HTTP refresh to paint the wanted
+// text, running Work and the plugin pump in between.
+func dashboardSettle(t *testing.T, r *rig, want string) string {
+	t.Helper()
+	var text string
+	for i := 0; i < 40; i++ {
+		r.h.Settle()
+		text = dashboardText(t, r.host)
+		if strings.Contains(text, want) {
+			return text
+		}
+	}
+	return text
+}
+
+// TestDashboardGitHubOptIn: with github_prs + network in the user settings and a GitHub
+// origin, the dashboard makes one bounded REST request and renders the PR rows.
+func TestDashboardGitHubOptIn(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: `[{"number":12,"title":"Fix the thing","state":"open"},{"number":34,"title":"Add docs","state":"open","draft":true}]`}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(true),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#12")
+	if !strings.Contains(text, "GitHub") || !strings.Contains(text, "#12") || !strings.Contains(text, "Fix the thing") {
+		t.Fatalf("dashboard text misses the PR section:\n%s", text)
+	}
+	if tr.count() != 1 {
+		t.Fatalf("GitHub requests = %d, want one", tr.count())
+	}
+	u := tr.first()
+	if u == nil || u.Host != "api.github.com" || !strings.Contains(u.Path, "/repos/me/repo/pulls") || u.Query().Get("state") != "open" || u.Query().Get("per_page") != "6" {
+		t.Fatalf("GitHub request = %v", u)
+	}
+}
+
+// TestDashboardGitHubDisabled: without the explicit github_prs setting there is no GitHub
+// section and no request at all.
+func TestDashboardGitHubDisabled(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: `[]`}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardText(t, r.host)
+	if strings.Contains(text, "GitHub") {
+		t.Fatalf("the GitHub section rendered without opt-in:\n%s", text)
+	}
+	if tr.count() != 0 {
+		t.Fatalf("GitHub requests = %d without opt-in", tr.count())
+	}
+}
+
+// TestDashboardGitHubNetworkDisabled: github_prs without the host network setting is a
+// silent unavailable section, and no request is attempted.
+func TestDashboardGitHubNetworkDisabled(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: `[]`}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(false),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "network disabled")
+	if !strings.Contains(text, "GitHub") || !strings.Contains(text, "network disabled") {
+		t.Fatalf("dashboard text misses the network-disabled state:\n%s", text)
+	}
+	if tr.count() != 0 {
+		t.Fatalf("a request escaped the disabled network gate: %d", tr.count())
+	}
+	if len(r.h.NoticeTexts()) != 0 {
+		t.Fatalf("the disabled section raised notices: %v", r.h.NoticeTexts())
+	}
+}
+
+// TestDashboardGitHubUnavailable: a private/missing repo (404) or any failure shows one
+// muted unavailable line, never a notice, and the rest of the dashboard renders.
+func TestDashboardGitHubUnavailable(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{status: 404, body: `{"message":"Not Found"}`}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(true),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "unavailable")
+	if !strings.Contains(text, "GitHub") || !strings.Contains(text, "unavailable") {
+		t.Fatalf("dashboard text misses the unavailable state:\n%s", text)
+	}
+	if !strings.Contains(text, "Open Settings") {
+		t.Fatalf("the rest of the dashboard did not render:\n%s", text)
+	}
+	if len(r.h.NoticeTexts()) != 0 {
+		t.Fatalf("a failed GitHub fetch raised notices: %v", r.h.NoticeTexts())
 	}
 }

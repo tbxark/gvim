@@ -73,6 +73,10 @@ type Panel struct {
 	// saved width of a restored transcript); a content-width change reflows the
 	// rows to the new width (transcript.go reflowPrior).
 	priorWidth int
+	// titleText is the terminal title recorded for this tab (OSC 0/2): the live
+	// session's current title while a shell runs, or the restored one while dead.
+	// It is a tab-label fallback behind an explicit rename and the launch record.
+	titleText string
 	// savedCursor/savedAlt/savedVisibleRows describe a restored styled snapshot:
 	// the saved cursor, alternate-screen flag and how many trailing prior rows were
 	// the visible screen. They let a restored-but-not-revived tab re-save the full
@@ -321,6 +325,20 @@ func (p *Panel) Agents() []Agent { return p.effects.Agents }
 // record is what a restart replays and what the tab strip titles a terminal with
 // (Fresh names a tab after the program it runs).
 func (p *Panel) Launch() terminal.Launch { return p.launch.Clean() }
+
+// TitleText returns the terminal title of this panel: the live shell's OSC 0/2
+// title while it runs, else the title recorded with the restored tab. It is the
+// tab-label fallback behind an explicit rename and the launch record. The title
+// method is optional on the terminal port, so a test fake without it reports "".
+func (p *Panel) TitleText() string {
+	if p.term != nil {
+		if titler, ok := p.term.(interface{ Title() string }); ok {
+			return terminal.CleanTitle(titler.Title())
+		}
+		return ""
+	}
+	return terminal.CleanTitle(p.titleText)
+}
 
 // launchProgram closes the shell the dock holds and starts argv, recording rec as
 // the launch a restart should use. The record is set before the start, so a failed
@@ -585,7 +603,11 @@ func (p *Panel) SendKey(k tea.Key) {
 	if !p.Running() {
 		return
 	}
-	b, ok := dockBytes(k, p.term.AppCursorKeys())
+	flags := 0
+	if kt, ok := p.term.(interface{ KittyKeyboardFlags() uint8 }); ok {
+		flags = int(kt.KittyKeyboardFlags())
+	}
+	b, ok := dockBytesFlags(k, p.term.AppCursorKeys(), flags)
 	if !ok {
 		return
 	}

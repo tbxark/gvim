@@ -20,8 +20,9 @@ import (
 // shell would, so the ~ expansion is exercised end to end (not just string-built).
 type execOneShot struct{ home string }
 
-func (o execOneShot) Run(ctx context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+func (o execOneShot) Run(ctx context.Context, argv []string, opts hostos.ProcOptions) (hostos.ProcResult, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = opts.Cwd
 	cmd.Env = append(os.Environ(), "HOME="+o.home)
 	var out, errb strings.Builder
 	cmd.Stdout = &out

@@ -1,0 +1,7 @@
+{
+  "name": "clangd_support",
+  "version": "1.0.0",
+  "description": "Clangd helper: switch between a C/C++ source and its header, inspect the project's compile_commands.json/.clangd setup, and open the project .clangd configuration",
+  "api": 2,
+  "default_enabled": false
+}

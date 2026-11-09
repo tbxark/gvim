@@ -19,15 +19,16 @@ import (
 // resize. Its Updates channel starts with one pending signal, so a wait for output
 // returns at once. Its Done channel stays open until a test closes it.
 type fakeTerm struct {
-	writes    []string
-	pastes    []string
-	resizes   [][2]int
-	closed    bool
-	writeErr  error
-	screen    terminal.Screen
-	appCursor bool // the shell's DECCKM mode, reported by AppCursorKeys
-	updates   chan struct{}
-	done      chan struct{}
+	writes     []string
+	pastes     []string
+	resizes    [][2]int
+	closed     bool
+	writeErr   error
+	screen     terminal.Screen
+	appCursor  bool  // the shell's DECCKM mode, reported by AppCursorKeys
+	kittyFlags uint8 // the child's kitty keyboard flags, reported by KittyKeyboardFlags
+	updates    chan struct{}
+	done       chan struct{}
 
 	// The scrollback, OSC 7 and mouse state the dock reads.
 	history       []string              // the history rows, oldest first
@@ -36,6 +37,7 @@ type fakeTerm struct {
 	alt           bool                  // the alternate screen
 	exitCode      int                   // the status ExitStatus reports
 	exitOK        bool                  // whether the fake reports an exit status
+	title         string                // the OSC 0/2 title the fake reports
 	mouse         bool                  // the shell asked for mouse reporting
 	drag          bool                  // the shell asked for drag motion (1002)
 	allMotion     bool                  // the shell asked for all motion (1003)
@@ -70,11 +72,13 @@ func (f *fakeTerm) Resize(cols, rows int) error {
 	return nil
 }
 
-func (f *fakeTerm) Screen() terminal.Screen  { return f.screen }
-func (f *fakeTerm) Updates() <-chan struct{} { return f.updates }
-func (f *fakeTerm) Done() <-chan struct{}    { return f.done }
-func (f *fakeTerm) AppCursorKeys() bool      { return f.appCursor }
-func (f *fakeTerm) Close() error             { f.closed = true; return nil }
+func (f *fakeTerm) Screen() terminal.Screen   { return f.screen }
+func (f *fakeTerm) Updates() <-chan struct{}  { return f.updates }
+func (f *fakeTerm) Done() <-chan struct{}     { return f.done }
+func (f *fakeTerm) AppCursorKeys() bool       { return f.appCursor }
+func (f *fakeTerm) KittyKeyboardFlags() uint8 { return f.kittyFlags }
+func (f *fakeTerm) Title() string             { return f.title }
+func (f *fakeTerm) Close() error              { f.closed = true; return nil }
 
 // Scrollback returns the history window the dock asks for.
 func (f *fakeTerm) Scrollback(from, count int) (lines []terminal.Line, total int) {

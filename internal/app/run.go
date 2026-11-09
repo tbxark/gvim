@@ -634,15 +634,22 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// it) never reaches the remote host (#R13-13, Fresh's backend-agnostic provider).
 	var authSlot authority.Slot
 	var envRemote *env.Remote
+	var envShell *remoteEnvShell
 	var envProvider workspaceEnv
 	if opts.Remote != nil {
+		rootOf := func() string {
+			if envRemote == nil {
+				return ""
+			}
+			return envRemote.Root()
+		}
+		envShell = newRemoteEnvShell(func() authority.Slot { return authSlot }, rootOf, func(msg string) {
+			if envRemote != nil {
+				envRemote.SetNotice(msg)
+			}
+		})
 		envRemote = env.NewRemote(opts.Remote.Workspace(), cfg.EnvDetectors(), trustedLive,
-			newRemoteEnvRunner(func() authority.Slot { return authSlot }, func() string {
-				if envRemote == nil {
-					return ""
-				}
-				return envRemote.Root()
-			}))
+			envShell.RunDetect, envShell.RunCapture)
 		envProvider = envRemote
 	} else {
 		envProvider = env.New(root, cfg.EnvDetectors(), trustedLive)
@@ -887,6 +894,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// and no UI update ever waits on the remote host.
 		if envRemote != nil {
 			envRemote.SetRoot(remoteRoot)
+			// Probe the interactive login shell synchronously (one bounded remote
+			// command) so a fallback notice can join the startup notices; detection and
+			// capture themselves stay off the UI update loop.
+			if envShell != nil {
+				envShell.Prepare(ctx)
+				if notice := envShell.Notice(); notice != "" {
+					openNotices = append(openNotices, notice)
+				}
+			}
 			go envRemote.Warm(ctx)
 		}
 		// Project search and Git Grep run on the remote host through the authority's

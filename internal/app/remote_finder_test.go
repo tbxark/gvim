@@ -153,8 +153,12 @@ func TestRemoteFileIndexExpandsTildeRoot(t *testing.T) {
 	if strings.Join(files, ",") != "main.go" {
 		t.Fatalf("files = %v", files)
 	}
-	if len(one.calls) != 1 || !strings.Contains(one.calls[0], "cd") {
+	if len(one.calls) < 1 || !strings.Contains(one.calls[0], "cd") {
 		t.Fatalf("expansion commands = %v", one.calls)
+	}
+	// The second command is the git work-tree probe; it falls back to the walk here.
+	if len(one.calls) > 1 && !strings.Contains(one.calls[1], "rev-parse") {
+		t.Fatalf("second command = %q, want the git probe", one.calls[1])
 	}
 }
 

@@ -21,15 +21,15 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `77c3ec7` plus the merged round-27 work (190–195,197,198;
-196 audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
-golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 116 KiB / de 82
-KiB / both 198 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
-EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r27-tests.log`). The audit ran build/gofmt/
-i18n_check plus targeted round-27 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
-search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, real-tmux,
-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh
-reference: `refs/fresh` same date.
+Last verified: 2026-11-09, tree commit `66f8f69` plus the merged round-28 work (199–204; 205
+audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
+golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 110 KiB / de 82
+KiB / both 193 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
+EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r28-tests.log`). The audit ran build/gofmt/
+i18n_check plus targeted round-28 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
+search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain
+security/secret-tool, real-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching
+remain UNTESTED. Fresh reference: `refs/fresh` same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -1516,6 +1516,100 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-28 outcome (2026-11-09, merged working tree on `66f8f69`).** Six tasks landed (199–204);
+205 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
+0: 76 packages ok, no FAIL (log `/tmp/gvim-r28-tests.log`). The audit read the diff and ran targeted
+tests; the Lead ran the full suite.
+**Restricted plugin HTTPS GET + GitHub PR dashboard section (199).** `gvim.http.get(url, opts?)`
+is a bounded HTTPS GET with a host-enforced user opt-in: the plugin's USER config layer must contain
+`plugins.<name>.settings.network = true` (project layer never grants it), otherwise `unsupported`
+before any DNS/request. Only https; credentials refused; SSRF policy refuses localhost/.local/
+loopback/private/link-local/multicast/unspecified/CGNAT/documentation·benchmarking literal addresses,
+resolves a DNS name host-side and requires EVERY resolved address public (DNS failure final, no
+fallback/other resolver), dials a validated literal, ignores environment proxy, TLS 1.2 floor.
+Redirects ≤3 and every hop revalidated (http/local/private fails); timeout default 5 s (100 ms–10 s
+clamp); body ≤1 MiB (Content-Length precheck + limited reader); ≤2 concurrent/plugin and 4 global;
+body memory-only never disk. Callers cannot set request headers (fixed User-Agent gvim-plugin/<version>
++ Accept application/json, no Authorization/Cookie); only safe response headers returned (content-type/
+length/etag/last-modified/cache-control/link/x-ratelimit-*). Awaitable Work never blocks the update
+loop; failures nil,err (invalid/timeout/too_large/io/unsupported). Dashboard opt-in
+plugins.dashboard.settings.github_prs=true + network=true: a GitHub origin makes one bounded
+https://api.github.com/repos/<owner>/<repo>/pulls request rendered as up to six open PRs; without a
+token a private/missing repo 404 → muted “unavailable” line (rest of dashboard unaffected), failures/
+disabled also one muted line. Weather is not ported; third-party section API still absent; no generic
+fetch/auth/token/cache (R13-6/R13-24).
+**Remote environment interactive-login capture (200).** Marker detection stays a passive `sh -c` probe
+(may run in an untrusted workspace, so it must not source an interactive rc from a project cwd). The
+trusted activation baseline/recipe runs under the user's interactive login shell when available —
+`bash -ilc` or `zsh -ilc`, preferring `$SHELL` when it is bash/zsh — so a detector depending on
+interactive rc initialization captures the same environment the remote terminal gets; if no such
+shell is found or the interactive invocation fails, capture falls back to the previous `sh -c` path
+with an explicit notice (startup notice and Settings Environment rows). Startup output before the
+command is discarded via a NUL marker; one remote command per baseline/recipe capture. Residuals:
+bash/zsh only (fish/csh etc keep sh -c), rc unavailable/fails falls back per capture with notice,
+detection stays sh -c so semantics can differ, changed env input files are not watched (Env: Reload or
+new activation recaptures), detection cached until Refresh/reconnect, Settings rows show remote facts
+only after background warm, no status-row active remote-environment indicator; local unchanged (R13-18).
+**Remote finder git candidate index (201).** In a remote git work tree the quick-open index fills from
+Fresh's project-file list in ONE remote listing traversal: one bounded `git rev-parse --is-inside-work-
+tree` + one bounded `git ls-files -z -s --cached --others --exclude-standard` (8 MiB/20 s,
+authority one-shot) fed through the additive `finder.StartFunc`, replacing recursive per-directory
+ReadDir and the client-side remote .gitignore reader on that path. Lists tracked files (including
+tracked-ignored) + untracked non-ignored; emit filters .git internals/hidden segments/intermediate skip
+dirs/invalid or non-UTF-8 names/remote depth bound; keeps the 50k cap, truncation and cancellation
+semantics; every Restart/refresh re-runs the remote git listing (new carrier/work tree picked up).
+No-git-work-tree, git missing/failing/truncated, or nested repo/submodule listed by name only fall
+back to the previous recursive authority walk (bounded dirs/depth, skip dirs/hidden, no symlink
+traversal, remote .gitignore reader) rather than dropping files; a root read failure is the index
+error. Residuals: Quick Open's default hidden filter still omits tracked hidden files; fallback paths
+still use the client-side remote ignore reader; nested repo contents appear only via fallback; non-UTF-8
+omitted (Fresh too); truncated git listing falls back rather than keeping a partial one; no local
+fallback (R13-8/R13-3).
+**Terminal OSC title + alternate-screen restore (202).** A child's OSC 0 (icon+window title) and OSC 2
+(window title) set the session title mirroring Fresh's Event::Title; last one kept, control chars/
+invalid UTF-8 dropped, trimmed, bounded 256 runes, empty payload clears; OSC 1 only sets the icon name
+and deliberately does not change the title. Title is additive in the saved record (per tab + mirrored
+top level), restored tab keeps its recorded title and re-saves it; old records have no title and keep
+derived label; label precedence explicit rename > launch program/agent name > recorded/live OSC title >
+Terminal N; version 1, corrupt/overlong cleaned on load. Alternate-screen CONTENT is captured
+first-class as the visible frame (styles/cursor, no history); a corrupt record carrying both alt and a
+history window is ignored whole; restored read-only transcript paints the alt frame unchanged; a
+revived shell starts on its own main screen, not replaying the alt program; alt-only restore as
+read-only frame; main history while alt active is not captured; bounded by snapshot limits. Residuals:
+OSC 1 icon names, OSC 7 cwd, OSC 52 clipboard and hyperlinks are not replayed; per-cell hyperlinks not
+representable; read-only cursor block; cursor shape not inherited; recorded title not recombined with a
+foreground-process name (no pty foreground cache); live tabs still need a dive (R13-15).
+**Child-side kitty keyboard protocol (203).** The emulator answers the child's `CSI ? u` query with the
+flags the child pushed and tracks `CSI > flags u` push, `CSI < n u` pop and `CSI = flags ; mode u` set/
+add/remove in separate flags stacks for main/alternate screens (bounded 64 entries, partial 128 bytes;
+sequences may split across PTY reads; unknown CSI/u ignored). While flags are nonzero the dock encodes
+keys sent to that child in CSI-u form: disambiguation, Esc, modified printable keys, modified Enter/
+Tab/Backspace, Ctrl+I/Alt+[ etc.; arrows use CSI A/F3 CSI 13~ (not DECCKM SS3); alternate-keys/
+report-all-keys/associated-text add fields. Unmodified text/Enter/Tab/Backspace keep legacy bytes; no
+flags or popped all = old legacy encoding. Limits matching Fresh: presses only (no release events even
+with report-event-types), modifier-only/media keys and protocol F13+ not encoded; host-terminal kitty
+negotiation stays Bubble Tea's job. Flags live in the session, reset on restart, per-screen restored
+when returning to main. No keybinding change; child TUIs get the protocol (R13-15/R13-6).
+**clangd_support reduced port (204).** New bundled Lua plugin clangd_support (off; no bindings/
+settings; commands Clangd: Switch Source/Header / Project Setup / Open Project Config; bundled set
+now 25 plugins/9 on/16 off/54 commands): bounded same-stem C/header lookup (c/cc/cpp/cxx ↔ h/hh/hpp/
+hxx/hp) in buffer dir/workspace root/include//src children, one opens/many gvim.ui.select; project
+setup analysis (compile_commands.json root/build/out/cmake-build-debug, .clangd/compile_flags.txt,
+CMake/Bazel/Makefile hints/general tips) in reused read-only virtual buffer; Open Project Config finds
+.clangd in buffer dir/workspace root or reports missing. Unported: no textDocument/
+switchSourceHeader (LSP allowlist; heuristic workspace-local same-stem only), no clangd fileStatus/
+$/memoryUsage custom notifications (no plugin server-custom-notification event/status line), virtual
+buffer not floating PanelManager panel, no ancestor .clangd walk. Tests recorded (R13-6).
+**Test lifecycle fix.** The full suite first exposed TestUserPluginWorksEndToEnd failing at TempDir
+cleanup (“directory not empty”): the test session did not wait for background config/state/dock/plugin
+stopping. The test lifecycle helper now closes the Model first and waits for saves/dock/plugin stop
+before TempDir cleanup; targeted count=50 + app count=2 PASS, then full suite EXIT 0. This is test-
+infrastructure only, not a product parity change.
+Metrics: palette 240, settings 69 in 14 sections, bundled 25 (9 on)/16 off, plugin API 244 functions/
+1489 lines level 2 (gvim.http.get added); i18n en 1015 / 579 per locale, 564 KiB text (under 640 KiB
+cap), ≈654 KiB JSON, heap 110-82-193 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r28-tests.log);
+real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
 **Round-27 outcome (2026-11-09, merged working tree on `77c3ec7`).** Eight tasks landed (190–195,
 197,198); 196 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout
 1200s` EXIT 0: 76 packages ok, no FAIL (log `/tmp/gvim-r27-tests.log`). The audit read the diff and
@@ -1968,12 +2062,12 @@ for parity status.
 | Documented "not applicable" commands | n/a | 4 | `internal/tui/notice_na.go` (detach, update, update log, wave). Inspect Theme now runs (round 5), and the round-1 trust command runs. |
 | Menus / menu actions | 8 / 103 static actions, 31 separators, 2 static submenus + 1 dynamic | 8 / 103 static actions, 31 separators, 2 static submenus + the dynamic theme submenu | Static parity is exact against Fresh's `translated_menus()` (103 actions / 31 separators / 2 static submenus); the dynamic "Copy with Formatting" submenu is filled at run time from the theme catalog (`internal/tui/menubar/dynamic.go`). Round 5 adds plugin-contributed rows (`gvim.menu.add_item`, `internal/tui/menubar/plugins.go`, at most 32 rows, owner-cleaned). Help's label row says "gvim" where Fresh writes its version. |
 | Keymap presets | 5 | 5 | Same names and inheritance graph. Round 7 closed R2-4: the overlay contexts (`prompt`, `searchPrompt`, `popup`, `menu`, `settings`, `dock`) consult the keymap before built-ins with fall-through; own/in-effect counts are now default 245/243, macos 60/266, macos-gui 52/317, emacs 98/309, vscode 9/248 (`keymap/common_set_test.go`, `docs/keybindings.md`). `completion`/`compositeBuffer` are not emitted; residual R7-4. |
-| Bundled plugins | 50 | 24 (9 on by default) | Round 10 added git_grep/git_explorer/env_manager (all opt-in); round 11 added no port; r25 added asm_lsp (reduced, opt-in); r27 added csharp_support (reduced, opt-in). 15 off: flash, vi_mode, live_diff, git_log, compare_files, merge_conflict, dashboard, code_tour, lsp_navigation, find_references, git_grep, git_explorer, env_manager, asm_lsp, csharp_support. `docs/plugins/bundled.md`. |
-| Bundled plugin commands | ~180 | 51 registration sites | +2 r25 asm_lsp (Assembly: Create .asm-lsp.toml / Show LSP Help) and +2 r27 csharp_support (C#: Restore Project / Show LSP Help); no bindings. prior count 47 (dashboard line-target migration adds no command; git_grep 2, env_manager 4, compare_files 8 via one table, lsp_help 0). |
+| Bundled plugins | 50 | 25 (9 on by default) | Round 10 added git_grep/git_explorer/env_manager (all opt-in); round 11 added no port; r25 asm_lsp; r27 csharp_support; r28 clangd_support (all opt-in/reduced). 16 off: flash, vi_mode, live_diff, git_log, compare_files, merge_conflict, dashboard, code_tour, lsp_navigation, find_references, git_grep, git_explorer, env_manager, asm_lsp, csharp_support, clangd_support. `docs/plugins/bundled.md`. |
+| Bundled plugin commands | ~180 | 54 registration sites | +2 r25 asm_lsp, +2 r27 csharp_support, +3 r28 clangd_support (Clangd: Switch Source/Header / Project Setup / Open Project Config); no bindings. prior count 47 (dashboard line-target migration adds no command; git_grep 2, env_manager 4, compare_files 8 via one table, lsp_help 0). |
 | Themes | 10 built-in themes, theme files by name/path/URL/`builtin://`, `extends` inheritance, attributes on every colour, theme editor, colour picker/mouse editing, inspect-at-cursor, plugin theme overrides, per-cell provenance, background images | 10 built-ins + user themes; plugin theme files; URL themes (round 16, cached/validated); no packaged repo/browser | `theme/data/*.json`, `theme/{theme,registry,form,url}.go`, `internal/tui/{theme_edit,inspect}.go`, `internal/app/theme_url.go`, `docs/themes.md`; Fresh `docs/features/themes.md`. Rounds 4–13 built themes/extends/editor/picker/inspect/provenance/plugin files. Round 16 adds URL themes: https (or loopback http) under the update transport policy, size cap, existing parser/validator, cache under user config keyed by URL hash, last-known-good offline, clear failure notice, builtins never fetch; `--theme` same forms and policy; Settings can select a URL fetched at this start (uncached reported, not fetched in Update); `repo#fragment` packaged-repository form rejected with the explicit message. Tests theme/url_test. Open: packaged repo install/marketplace/browser, startup-only URL fetch/cache refresh, background images, drag-and-drop/inheritance edges (R13-6/R13-20). |
 | LSP server entries | built-in + plugin helpers + universal servers | 62 built-in entries; universal_lsp is config-only | `lsp/manager/defaults.go`; gvim routes lists/universal entries and draws hints/tokens/folds/diagnostics, but no built-in universal server ships (Fresh's quicklsp is a separate user-installed Rust binary — decision recorded; user-configured universal_lsp works fully). `process_limits` is enforced on Linux (cgroup v2/ulimit fallback) and recorded as unreachable on macOS/Windows. |
 | Bundled plugin idle heap | n/a | about 7.27 MiB of the 8 MiB gate (9 default-enabled; ~9.3 MiB session baseline) | `TestBundledPluginsIdleHeap` measures the gate in a fresh process (a test budget, not a production cap); the production per-slice heap guard is a separate sampled circuit breaker (128 MiB limit, 1 ms samples after the first 2 ms, forced-GC confirmation; process-wide) and is not a strict hard limit. The heap-guard test now runs a single fresh child with strict parsing and keeps its 4× test ceiling; a late 1 ms sample can miss one doubling near that boundary (observed max 255 MiB for a 64 MiB test limit), so 4× carries a scheduling-tail risk and is a test contract, not a memory guarantee. Evidence: `plugin/budgets_test.go`, `docs/plugins/limits.md`, `docs/plugins/bundled.md`. |
-| Plugin API surface | ~372 methods | 243 functions | `docs/plugins/gvim.d.lua` is 1483 lines, API level 2; r26 adds `gvim.url.open` (+5 lines; http(s) only, confirmation, argv-only opener). Remaining gaps: R9-5 (composite substitution/dock/per-panel/windowEmbed/markdown-in-text), package manager/HTTP, project-local plugins. |
+| Plugin API surface | ~372 methods | 244 functions | `docs/plugins/gvim.d.lua` is 1489 lines, API level 2; r26 `gvim.url.open`; r28 `gvim.http.get` (HTTPS GET with user network opt-in/SSRF/timeout/body/concurrency limits). Remaining gaps: R9-5 (composite substitution/dock/per-panel/windowEmbed/markdown-in-text), package manager/generic HTTP fetch (gvim.http.get is bounded HTTPS GET only), project-local plugins. |
 | Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages; new round-20 knobs auto_attach/daemon.materialized_workspaces/ssh.* are top-level user config (no Settings rows, project refused where security/memory-relevant) | Rounds 3–11 built the page/editors/reset/Reload/Contents/non-scalar plumbing; rounds 12–19 added Environment/Plugins/Keybindings/declared settings, theme preview, locale row, completion rows, URL/update config-only rows, settings action notices. Values/keys/pending/reset/layer behaviour unchanged; structured field/row names stay schema identifiers. Residuals R8-3 remain open TUI gaps (declared plugin settings read-only, no gallery/install page, whole-array LSP JSON rather than per-field dialogs, no in-page key capture/second writer, no env activation, no per-field reset-vs-inherit/full undo, Reload palette-row only, generic Fresh widget runtime not ported). |
 | Terminal | PTY terminal panes and utility dock, tabs (≤16, per-workspace in a daemon) with strip/rename/click/quick-switch/per-tab close_on_exit, tab reordering (palette rows, Ctrl+Shift+PgUp/PgDn where modified keys arrive, mouse drag; persisted order), live/scrollback modes, OSC 7 paths, launch/agent/resume records + Run Agent picker, restart, shell override, selection/copy, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, ConPTY on Windows, SSH terminal, opt-in OSC 52 clipboard read/paste, Live restore with styled screen snapshot and dock modes | **partial** — rounds 10–17 built slice A/tabs/agents/remote terminal, per-workspace scoping, reorder, OSC 52 read and Live restore; round 17 adds a bounded styled visible-screen snapshot in the version-1 record (≤200×512 cells, rune/fg/bg/bold/underline/reverse, exact-tail match on restore, corrupt ignored), read-only Scrollback (restored)/frozen modes with Ctrl+Space pager/live toggle, and revive into live mode with snapshot above new output; tab identity/order/revive-once/restore_live unchanged. Evidence: `internal/terminal/*`, `internal/tui/dock/*`, `internal/restore/terminal.go`, `docs/terminal.md`. | Open: Fresh's full backing-file semantics (bytes/cursor/alternate-screen/OSC/hyperlinks), only visible screen styled (older history text-only), revive via explicit dive (dock not restored into editor split), remote launches restore no layout/terminal state, per-tab splits/kitty/reflow/report-split; R13-15/R13-6. |
 | Explorer options | `file_explorer.width/side/follow_active_buffer/auto_open_on_last_buffer_close/compact_directories/preview_tabs/…` + sticky parents | 5 options + sticky parents implemented | width percent/columns with grip, left/right side geometry, follow + reveal, auto-open on last close, compact chains, sticky band; side toggle session-only and 4 keys accepted-ignored (R3-3). |
@@ -2018,9 +2112,9 @@ for parity status.
 | Area | Fresh features (evidence) | gvim status | gvim evidence | Notable sub-gaps |
 |---|---|---|---|---|
 | LSP | diagnostics, hover, definition/implementation/references, completion (server + no-LSP buffer words; snippets/auto-import/resolve; auto-popup; multi-buffer words; trigger characters/live re-filter), rename, code actions/file ops, signature help, format, folds, inlay hints, semantic tokens, diagnostics panel/quickfix/inline/staleness, multi-server only/except, universal servers, status/mute, pull/workspace diagnostics, progress, process limits (Linux), env/init options, root markers, C header routing, remote LSP over SSH with remote env | **partial** (#7 A–E; rounds 7–14; round-15 auto-popup/multi-buffer; round-16 trigger/live-filter; r21 Backspace full-pool re-filter; r23 multi-buffer dabbrev; r26 multi-cursor plain accept; r27 snippet/auto-import multi-caret) | `lsp/{client,handler,requests,capabilities,snippet,progress,raw,limits}.go`, `lsp/manager/{manager,router}.go`, `internal/lsphost/{lsp,lsp_data}.go`, `internal/tui/{lsp,lsp_data,workspace_edit,diagpanel}.go` + inline hints, `editor/completion_words.go` + `internal/tui/completion_words.go`, `internal/app/{remote_lsp,remote_watch}.go`, `authority` LongRunning, `commands/lsp_commands.go`, `docs/lsp.md`/`docs/authority.md` | Rounds 4–15 as before (router/edits/status/staleness, hints/tokens/folds/pull diagnostics, panel/quickfix/progress, workspace edits, inline tier 2, cancel/process limits, remote LSP, completion safety/local-first/snippet/UTF-16/resolve/version+overlap guard/auto-popup/multi-buffer words). Round 16: advertised `completionProvider.triggerCharacters` (static+dynamic, union over eligible servers) open immediately with no debounce when `suggest_on_trigger_characters` is on; open list live-filters further word chars locally without a new request (case-insensitive label/insert prefix, synthetic range, dismiss+one re-ask when empty) with version/caret guards; active-buffer dabbrev cycling already existed (M-/). Verified: `labelDetails` is parsed into the item detail and rendered (Fresh renders labelDetails/detail next to the label; `refs/fresh/crates/fresh-editor/src/app/popup_actions.rs:707-714`; gvim `lsp/requests.go` completionItem; fallback item.detail). Fresh's completion popup renders label/detail only and **never documentation** (`refs/fresh/crates/fresh-editor/src/services/lsp/async_handler.rs:478-481`), so gvim not showing completion documentation is **not a gap**. Open (R13-7/R7-5/R13-3): non-word closes popup and passes through, matching Fresh (popup.rs/e2e; not a gap); Backspace now re-filters the full pool, highlighted row preserves candidate identity across typing/Backspace, falling back to first only when filtered out, Fresh multi-buffer dabbrev ported, large-file deferral, multi-cursor plain accept landed (snippet/import multi-caret still refused), request-id bookkeeping; LSP trigger chars landed but no server-side live-list refresh beyond local filter; no built-in universal server, per-OS limits Linux-only, remote retry only one restart, no remote install probe, remote trust uses local store; stricter stop-on-refused workspace-edit model (§4 item 18). |
-| Plugins runtime and host API | TypeScript on QuickJS, sandbox-lite with per-plugin contexts, ~372-method API, overlays/virtual text/conceals/soft breaks/folds/line targets, explorer decorations/slots, project environment, prompts/toolbars, modes/contexts, windows/splits, virtual+composite buffers, buffer groups, terminals, authority/remote, LSP requests, HTTP, widgets/floating/dock panels/sidebar sections, i18n, package manager, menus, events | **partial, runtime different; API level 2 (tiers 1a+1b+1c + r10 edge APIs + r17 state + r18 shared runtime + r19 full scope/authority OS + r20 editor-global ids)** | `plugin/`, `pluginapi/`, `internal/pluginhost/`, `internal/tui/plugin*.go` + `plugin_shared.go` + `pluginpanel/`, `decorations/`, `env/`, `docs/plugins/` (6 API pages + events + 1478-line gvim.d.lua) — Lua 5.1 runtime difference; API level 2. Rounds 5–19 as before. Round 20: editor-global plugin window/buffer ids across the shared daemon runtime (per-mux sequence on Bind, seq<<40|local, host decode/refuse foreign/released CodeClosed, global ids in returns/events, ReleaseWorkspace frees closed/evicted sequence; direct launches sequence 0). OPEN: 40-bit local-id hard cap, editor-scoped overlays model-local, editor-scoped widget state rebuilt not cloned, buffer-bearing mount cannot be editor-scoped; remote/authority workspaces own runtime; R9-5 composite/dock/windowEmbed/package manager/project-local plugins (R13-24). |
-| Bundled plugin feature set | 50 plugins (git, search, diagnostics, markdown, diff, agents, devcontainers, k8s, pkg, audit, helpers) | **partial: 24 ported (+ native equivalents where genuine); all remaining plugins are open work** | `plugin/bundled/plugins/` (24; 9 default-enabled), `plugin/bundled/lib/{finder.lua,git.lua}`, `docs/plugins/bundled.md`; Fresh `plugins/*.ts` + `docs/features/git.md` §Diff Chunk Navigation | Ported through r27: diagnostics_panel, git_log/live_diff, compare_files, path_complete/lsp_help, lsp_navigation/find_references/dashboard/code_tour, git_grep/git_explorer/env_manager (opt-in), asm_lsp (r25 reduced helper), csharp_support (r27 reduced helper, opt-in: nearest-project dotnet restore once/session + csharp-ls install help; no setLspRootUri/Roslyn needs-restore event/Disable action, direct dotnet run instead of --version precheck, English-only). Remaining ports OPEN: orchestrator, live_sessions, agent_* family, devcontainer, k8s, pkg, audit_mode, welcome, language helpers, diff_nav residuals. `docs/plugins/bundled.md`/`porting.md`. |
-| Terminal | PTY terminal panes and utility dock, terminal tabs (≤16) with strip/rename/per-tab close_on_exit/persistence/reordering, live/scrollback modes, keyboard capture, OSC 7 paths, launch records + agent resume + Run Agent picker, restart, shell override, selection/copy, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, ConPTY, remote SSH terminal, opt-in OSC 52 read/paste, Live restore with styled screen/history snapshot/cursor/alt flag | **partial** (slices A+B; per-workspace tabs; remote terminal; phase-2 reorder+OSC52; r15 Live restore; r17 styled screen; r20 backing-file remainder) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved,launch,session_backend,osc52}.go`, `internal/tui/dock/{tabs,discover,live_restore,screen_snapshot_test}.go`, `internal/app/{workspace_capture,clipboard_osc52,agent_discover}.go`, `internal/restore/{terminal,session}.go`, `authority`, `docs/terminal.md` | R15/V17 Live restore (live flag, revive-on-first-dive, transcript/styled screen). r26 adds `{terminal_restart}` status element (Resume/Restart program/title, exit N only nonzero, signal, hover underline+bold, live+restored, click restart_terminal, keyboard equivalent; no OS-foreground program name/hover style differs/marker timing). Round 20: bounded 200-row/512 KiB styled history window + cursor row/col/visible/shape + alternate-screen flag in the v1 record, exact visible/history row-text match or ignored whole, old records unchanged, re-wrap drops metadata; read-only view paints history styles + reversed cursor; first dive hands live cursor/screen; daemon path. Tests cursor/alt/history/bounds/corruption/migration. OPEN: scrollback bounded styled not byte-exact (deep history text-only), OSC (title/cwd/clipboard/hyperlinks) not replayed, per-cell hyperlinks not representable, read-only cursor painted block, alt-screen marker not replayed, explicit dive, remote no state, per-tab splits/kitty/reflow/report-split; R13-15/R13-6. |
+| Plugins runtime and host API | TypeScript on QuickJS, sandbox-lite with per-plugin contexts, ~372-method API, overlays/virtual text/conceals/soft breaks/folds/line targets, explorer decorations/slots, project environment, prompts/toolbars, modes/contexts, windows/splits, virtual+composite buffers, buffer groups, terminals, authority/remote, LSP requests, HTTP, widgets/floating/dock panels/sidebar sections, i18n, package manager, menus, events | **partial, runtime different; API level 2 (tiers 1a+1b+1c + r10 edge APIs + r17 state + r18 shared runtime + r19 full scope/authority OS + r20 editor-global ids)** | `plugin/`, `pluginapi/`, `internal/pluginhost/`, `internal/tui/plugin*.go` + `plugin_shared.go` + `pluginpanel/`, `decorations/`, `env/`, `docs/plugins/` (6 API pages + events + 1489-line gvim.d.lua); r28 gvim.http.get bounded HTTPS GET — Lua 5.1 runtime difference; API level 2. Rounds 5–19 as before. Round 20: editor-global plugin window/buffer ids across the shared daemon runtime (per-mux sequence on Bind, seq<<40|local, host decode/refuse foreign/released CodeClosed, global ids in returns/events, ReleaseWorkspace frees closed/evicted sequence; direct launches sequence 0). OPEN: 40-bit local-id hard cap, editor-scoped overlays model-local, editor-scoped widget state rebuilt not cloned, buffer-bearing mount cannot be editor-scoped; remote/authority workspaces own runtime; R9-5 composite/dock/windowEmbed/package manager/project-local plugins (R13-24). |
+| Bundled plugin feature set | 50 plugins (git, search, diagnostics, markdown, diff, agents, devcontainers, k8s, pkg, audit, helpers) | **partial: 25 ported (+ native equivalents where genuine); all remaining plugins are open work** | `plugin/bundled/plugins/` (25; 9 default-enabled), `plugin/bundled/lib/{finder.lua,git.lua}`, `docs/plugins/bundled.md`; Fresh `plugins/*.ts` + `docs/features/git.md` §Diff Chunk Navigation | Ported through r28: diagnostics_panel, git_log/live_diff, compare_files, path_complete/lsp_help, lsp_navigation/find_references/dashboard/code_tour, git_grep/git_explorer/env_manager (opt-in), asm_lsp (r25 reduced), csharp_support (r27 reduced), clangd_support (r28 reduced, opt-in: same-stem source/header switch heuristic, project setup analysis buffer, .clangd open; no textDocument/switchSourceHeader, no clangd fileStatus/$memoryUsage notifications, virtual buffer not floating panel, no ancestor .clangd walk). Remaining ports OPEN: orchestrator, live_sessions, agent_* family, devcontainer, k8s, pkg, audit_mode, welcome, remaining language helpers (deno/rust/slang etc.), diff_nav residuals. `docs/plugins/bundled.md`/`porting.md`. |
+| Terminal | PTY terminal panes and utility dock, terminal tabs (≤16) with strip/rename/per-tab close_on_exit/persistence/reordering, live/scrollback modes, keyboard capture, OSC 7 paths, launch records + agent resume + Run Agent picker, restart, shell override, selection/copy, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, ConPTY, remote SSH terminal, opt-in OSC 52 read/paste, Live restore with styled screen/history snapshot/cursor/alt flag | **partial** (slices A+B; per-workspace tabs; remote terminal; phase-2 reorder+OSC52; r15 Live restore; r17 styled screen; r20 backing-file remainder) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved,launch,session_backend,osc52}.go`, `internal/tui/dock/{tabs,discover,live_restore,screen_snapshot_test}.go`, `internal/app/{workspace_capture,clipboard_osc52,agent_discover}.go`, `internal/restore/{terminal,session}.go`, `authority`, `docs/terminal.md` | R15/V17 Live restore (live flag, revive-on-first-dive, transcript/styled screen). r28 adds OSC0/2 title persistence and alt-screen content restore; r26 adds `{terminal_restart}` status element; r28 child-side kitty keyboard protocol (presses only, flags per screen) (Resume/Restart program/title, exit N only nonzero, signal, hover underline+bold, live+restored, click restart_terminal, keyboard equivalent; no OS-foreground program name/hover style differs/marker timing). Round 20: bounded 200-row/512 KiB styled history window + cursor row/col/visible/shape + alternate-screen flag in the v1 record, exact visible/history row-text match or ignored whole, old records unchanged, re-wrap drops metadata; read-only view paints history styles + reversed cursor; first dive hands live cursor/screen; daemon path. Tests cursor/alt/history/bounds/corruption/migration. OPEN: scrollback bounded styled not byte-exact (deep history text-only), OSC (title/cwd/clipboard/hyperlinks) not replayed, per-cell hyperlinks not representable, read-only cursor painted block, alt-screen marker not replayed, explicit dive, remote no state, per-tab splits/kitty/reflow/report-split; R13-15/R13-6. |
 | Git surfaces | review diff (stage/unstage/discard/comments/export), range/stash reviews, git log with live diff, git blame panel with history, live diff baselines, diff chunk nav, git grep, git explorer, git find file, statusbar branch, gutter marks | **partial** | `gitstate/`, `plugin/bundled/plugins/git_gutter`, `git_statusbar`, `git_find_file`, `git_blame`, `merge_conflict`, `internal/tui/git.go`; Fresh `docs/features/git.md` | Missing: Review Diff (/range/stash), Git Log, Live Diff, Git Grep, Git Explorer, blame panel/history stepping (gvim has a reduced inline blame), merge view (reduced to in-buffer resolution), diff hunk sources beyond the HEAD gutter, review comments/export. Implemented: gutter hunk marks + next/prev change, branch statusbar, git find file, merge-conflict resolution, compare-as-difftool. |
 | Session, restore, daemon | session restore/save, hot exit, crash recovery, remote hot-exit staging/recovery, split-layout persistence, --restore/--no-restore/--simple, daemon mode with attach/detach/open-file forwarding, multi-client attach + auto-attach, materialized-workspace cap/LRU eviction, cross-workspace shared buffers, workspace registry v2 with authority_spec, daemon-hosted remote authority/jump box, remote session restore, remote trust record/reconnect, checked exit durability, host marks, extract/close | **partial** (r12 daemon MVP; r13 #19a; r16 registry v2; r17 jump box; r18 remote session restore; r19 multi-client/auto-attach/hot-exit/trust/reconnect; r20 shared buffers/eviction) | `internal/app/{session_plan,session_open,hotexit,daemon_runtime,daemon_hosts,daemon_authority,workspace_host,workspace_capture,workspace_exit,remote_watch,remote_session,remote_recovery,workspace_shared,workspace_evict}.go`, `internal/editor/shared.go`, `internal/daemon/{workspaces,workspace_protocol,server,client}.go`, `internal/cli/{root,args}.go`, `internal/tui/{model,workspace_host,split_state,split/persist}.go`, `session`, `internal/restore`, `trust/`, `docs/architecture.md` §8/§8.1 | R12–19 as before (MVP/registry/open-file/durability/split/host marks/co-tenant/jump box/remote session restore/multi-client/auto-attach/remote hot-exit/trust/reconnect). Round 20: shared buffers for daemon LOCAL workspaces (owner+mirrors, ownership on focus/switch, version-guarded sync/full reload, close/evict promotes, direct/remote independent; residuals only OpenFile starts sharing/OpenLoaded-startup independent, tab close no promotion, large/virtual/>8 MiB independent, remote independent, mirror cursor separate, plugin id after handoff); materialized-workspace cap+LRU eviction (user-only daemon.materialized_workspaces default8 range1..64, project refused; capture-first/fallback, active never, capture+fallback failure keeps overcap+reports, remote excluded, status notice). OPEN: remote eviction excluded, #19b remainder shared-buffer paths, no fork/daemonize, Windows pipes, workspace CLI. Static gates passed; full suite EXIT 0 (76 packages, log /tmp/gvim-r20-fixed.log) after the daemon deadlock and helper frame-drop fixes. |
 | Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon, multi-client/auto-attach, switcher, New Workspace, Run Agent, agent discovery/resume, live sessions, extract variants, close confirmation, co-tenant workspaces, cross-workspace shared buffers, materialized-workspace cap+LRU eviction, jump-box remote workspaces, shared daemon plugin runtime + full window-scope/focus + editor-global plugin ids | **partial** (r13 #19a/#20b; r16 registry v2; r17 jump box; r18 shared runtime/session restore/extract variants; r19 full window scope/config/waits/multi-client/auto-attach; r20 shared buffers/eviction/editor-global ids; r21 shared-buffer close rule; r22 shared OpenLoaded/conflict label; r24 conflict Save As guard/new-path sharing/owner rekey; r27 mixed file+terminal extract) | `internal/daemon`, `internal/app/{workspace_host,workspace_capture,workspace_exit,workspace_extract,workspace_shared,workspace_evict,daemon_authority,remote_session,agent_discover,terminal_agents}.go`, `internal/editor/shared.go`, `internal/document/shared.go`, `internal/tui/{workspace_host,workspace_ui,workspace_tags,plugin_shared,agent_discover,agent_picker}.go`, `internal/pluginhost`, `internal/agentdiscover`, `docs/architecture.md` §8.1 — R13–19 as before. Round 20: cross-workspace shared buffers (OpenFile owner/mirror, ownership on focus/switch, change version guard/full reload, close/evict promotion, independent direct/remote); materialized-workspace cap+LRU eviction (capture-first, fallback, active never, overcap report, remote excluded); editor-global plugin window/buffer ids (seq<<40|local, CodeClosed foreign/released, ReleaseWorkspace). OPEN: sharing starts OpenFile/OpenLoaded but not plugin/API-created tabs, daemon open-file request switches owner, mirrors separate cursor/view unless ownership moves, Save As plan-to-write reservation landed r25 (in-process; dropped-plan leak/non-gvim writers/disk-exists semantics residuals); dormant-owner path unknown until rematerialize; plugin/API tabs load but cannot register owner; plugin seam new doc id; shared conflict label persistence landed r24; large/virtual/>8 MiB/remote independent, mirror cursor separate, plugin seam new doc id after handoff, remote eviction excluded, eviction/workspace CLI; auto_attach/named-daemon differences; extract mixed file+terminal landed r27 (co-tenant-only/no PTY handover/default-name conflicts/no undo-drag; residual), extract terminal-in-multi/drag-drop; orchestrator/live_sessions/agent_* (R13-1/R13-14/R13-24). |
@@ -3484,6 +3578,66 @@ for parity status.
      notices, asm_lsp config-refused (gvim-only fallback). docs/i18n.md + budgets refreshed; de
      fallback/key-guard tests. Catalogue en 1015 / de 579 keys, 564 KiB key+value (under 640 KiB
      cap), ≈654 KiB embedded JSON; loader heap en116/de82/both198.
+172. **clangd_support reduced port (204; R13-6).** New bundled Lua plugin clangd_support (off; no
+     bindings/settings; commands Clangd: Switch Source/Header / Project Setup / Open Project Config;
+     default set/idle heap unchanged), reduced from Fresh plugins/clangd_support.ts. Landed: switch
+     source/header as bounded same-stem lookup (C c/cc/cpp/cxx ↔ h/hh/hpp/hxx/hp) in buffer dir,
+     workspace root and include//src/ children; one match opens, several use gvim.ui.select, no-match/
+     unsupported/no-active-file statuses. Project setup analysis (project root; compile_commands.json
+     in root/build/out/cmake-build-debug or missing+cmake/bear tip; .clangd or .clangd/compile_flags.txt
+     present/missing; CMake/Bazel/Makefile hints; general tips) shown in a reused read-only virtual
+     buffer. Open Project Config finds .clangd in buffer dir/workspace root or reports missing. Tests:
+     command table/no bindings; source→header open; header→source picker; no-match/unsupported; project
+     setup ready+missing (buffer reuse/hints); open-config found/missing. OPEN vs Fresh: no
+     textDocument/switchSourceHeader (gvim LSP allowlist refuses server-specific methods; heuristic
+     workspace-local same-stem only, no include-database-aware switch), no textDocument/clangd.
+     fileStatus or $/memoryUsage custom notifications (no plugin server-custom-notification event/status
+     line), a virtual buffer instead of a floating PanelManager panel, .clangd search only buffer dir/
+     workspace root (no ancestor walk, matching Fresh's targets). Remaining language helpers/other
+     plugins OPEN.
+173. **Restricted plugin HTTPS GET + GitHub PR section (199; R13-6/R13-24).** gvim.http.get(url,
+     opts?): user layer plugins.<name>.settings.network=true host-enforced (project never grants);
+     only https/no credentials; SSRF localhost/.local/loopback/private/link-local/multicast/
+     unspecified/CGNAT/doc-benchmark literal refused, DNS all addresses public/failure final, literal
+     dial, env proxy ignored, TLS1.2 floor; redirects <=3 revalidated; timeout default5s clamp100ms-
+     10s; body<=1MiB Content-Length+limited reader; <=2/plugin,4 global; memory-only; no caller headers
+     (fixed UA/Accept JSON, no Authorization/Cookie), safe response headers only; awaitable Work no UI
+     block; nil,err invalid/timeout/too_large/io/unsupported. Dashboard opt-in github_prs+network: GitHub
+     origin one bounded api.github.com pulls request, <=6 open PRs; 404/failure/disabled muted line;
+     weather not ported/third-party API absent/no generic fetch/auth/cache.
+174. **Remote interactive-login env capture (200; R13-18).** Marker detection stays passive sh -c
+     (untrusted-safe, no project rc); trusted baseline/recipe runs under user's interactive login shell
+     when available (bash -ilc/zsh -ilc, prefer $SHELL), matching terminal rc initialization; absent/
+     failure falls back to sh -c with explicit startup/Settings notice. Startup output discarded via NUL
+     marker; one remote command per baseline/recipe. Residuals: bash/zsh only; rc unavailable/fails
+     fallback notice; detection still sh -c (semantics can differ); env files not watched (Reload/new
+     activation); cached until Refresh/reconnect; Settings rows after warm; no status-row active-env
+     indicator; local unchanged.
+175. **Remote finder git candidate index (201; R13-8/R13-3).** Remote git work tree quick-open fills
+     from ONE bounded git rev-parse --is-inside-work-tree + ONE bounded git ls-files -z -s --cached
+     --others --exclude-standard (8MiB/20s, authority one-shot) via additive finder.StartFunc, replacing
+     recursive ReadDir + client remote .gitignore reader on that path; tracked incl tracked-ignored +
+     untracked non-ignored; emit filters .git/hidden/intermediate skip/invalid/non-UTF8/depth; keeps 50k
+     cap/truncation/cancel; Restart/refresh reruns listing. No-work-tree/git missing/fail/truncated/
+     nested-by-name fall back to recursive authority walk (bounded dirs/depth, skip dirs/hidden, no
+     symlink, remote gitignore); root read failure = index error. Residuals: Quick Open hidden filter
+     omits tracked hidden; fallback uses client ignore reader; nested contents only fallback; non-UTF8
+     omitted; truncated falls back not partial; no local fallback.
+176. **Terminal OSC title + alternate-screen restore (202; R13-15).** OSC0/2 title (control/invalid
+     UTF8 dropped, trim, <=256 runes, empty clears; OSC1 icon only) title additive v1 per tab+top,
+     restored keeps, old records derived label; precedence rename > launch program/agent > recorded/live
+     title > Terminal N; corrupt/overlong cleaned. Alt content captured first-class visible frame
+     (styles/cursor/no history); alt+history corrupt ignored whole; restored read-only paints alt frame;
+     revived shell own main screen; main history while alt not captured; bounded snapshot. Residuals:
+     OSC1/OSC7/OSC52/hyperlinks not replayed; per-cell hyperlink unrepresentable; cursor block/shape not
+     inherited; no foreground process title recombination; live tabs need dive.
+177. **Child-side kitty keyboard protocol (203; R13-15/R13-6).** Emulator answers CSI ? u with current
+     flags; tracks CSI > flags u push, CSI < n u pop, CSI = flags;mode u set/add/remove, separate main/
+     alt stacks; bounded 64/128 bytes/partial split PTY reads; unknown ignored. Nonzero flags encode
+     sent keys CSI-u (disambiguation/Esc/modified printable/Enter/Tab/Backspace/Ctrl+I/Alt+[; arrows CSI
+     A/F3 CSI13~; alt-keys/report-all/associated-text fields); unmodified text/Enter/Tab/Backspace legacy;
+     no flags→legacy. Presses only (no releases/report-event-type), modifier-only/media/F13+ not encoded;
+     host kitty stays Bubble Tea; flags session-reset on restart, per-screen restored.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -3611,7 +3765,7 @@ Round 5 recorded six gaps (R5-1 closed in round 6):
   settings schema/values). Remaining plugin-host gaps are R9-5 (composite API native
   substitution, dock/fullscreen placement, independent per-panel views, windowEmbed live panes,
   markdown-in-text, plugin explorer rows/decorations/slots with the git_explorer wave, package
-  manager/HTTP/project-local plugins).
+  manager/generic HTTP (restricted gvim.http.get landed r28)/project-local plugins).
 - **R5-3 (P2, M, slices A+B landed rounds 10–11; remaining R10-4/R11-4)** — theming is now:
   registry/forms/extends/fallbacks/named colours/inspect/native editor/plugin overrides (rounds
   5–6), accent audit + Settings four-chip preview + colour picker/mouse editing (round 10), and
@@ -3763,7 +3917,7 @@ Round 9 recorded five gaps:
 - **R9-5 (P2, L, explorer rows landed round 10)** — round 10's explorer decoration/slot host
   API + git_explorer port closed the plugin-explorer-rows part. Remaining: composite buffers
   recorded as a native substitution (API surface only), dock/fullscreen placement, independent
-  per-panel views, windowEmbed live panes, markdown-in-text, package manager/HTTP/project-local
+  per-panel views, windowEmbed live panes, markdown-in-text, package manager/generic HTTP (restricted gvim.http.get landed r28)/project-local
   plugins, render_line. `docs/plugins/api-ui.md`.
 Round 10 recorded four gaps:
 
@@ -3875,7 +4029,7 @@ Round 13 recorded five open gaps:
   unsafe/cancelled/error/opened, terminal restart/resume + signal, palette preview degradation,
   asm_lsp config-refused (gvim-only fallback), English byte-identical; docs/i18n + budgets refreshed;
   de fallback/key-guard tests. Metrics: en 1015, every non-English 579; key+value 564 KiB (under
-  640 KiB cap), embedded JSON ≈654 KiB, heap en116/de82/both198; i18n_check green. OPEN: rows
+  640 KiB cap), embedded JSON ≈654 KiB, heap en110/de82/both193; i18n_check green. OPEN: rows
   without Fresh keys, structured schema names, some keybinding help/plugin-manager edges;
   restore_live config-only; self-update absent.
 - **R13-6 (P2, L/XL; open TUI backlog after round 19)** — GPM console mouse, kitty keyboard, legacy
@@ -3885,7 +4039,7 @@ Round 13 recorded five open gaps:
   extract/shared buffers (R13-14/R13-1), live-restore full backing file/remote state (R13-15), input
   edges (R13-16), theme background/drag, plugin gallery/env activation/in-page capture, composite API,
   orchestrator/live_sessions/agent_*/devcontainer/k8s/pkg/audit_mode/welcome/remaining language
-  helpers (r25 ported asm_lsp reduced helper, opt-in; r27/task197 exclusive-asset config create; r27 ported csharp_support reduced helper, opt-in:
+  helpers (r28 ported clangd_support reduced helper, opt-in; no server-specific switchSourceHeader/fileStatus notifications/floating panel/ancestor .clangd walk; r28 restricted gvim.http.get/plugin GitHub PR section; r25 ported asm_lsp reduced helper, opt-in; r27/task197 exclusive-asset config create; r27 ported csharp_support; r28 ported clangd_support reduced helper, opt-in (same-stem switch/project setup/.clangd open; no server-specific switchSourceHeader/fileStatus notifications/floating panel/ancestor .clangd walk):
   nearest-project restore once/session + csharp-ls install help; no setLspRootUri/Roslyn needs-restore
   event/Disable action/--version precheck, English-only; no plugin-API Disable action/per-language
   restart/error metadata/remote-home global check/overlong never-key), auto_attach default/named-
@@ -4076,9 +4230,9 @@ Round 13 recorded five open gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 13 | Plugin host remainder (tiers 1a–1c; explorer/env edges): **composite buffers API remains OPEN** (createCompositeBuffer layouts/alignment/cursor/hunks/close and #15's composite surface; the native Compare covers the user feature, not the API), dock/fullscreen placement, independent per-panel views, windowEmbed live panes, markdown-in-text, package manager/HTTP/project-local plugins, render_line | P2 | L | `pluginapi`, `plugin`, `decorations`, `internal/tui/pluginpanel`, `internal/tui/plugin_*.go` | R9-5; no substitution closure |
+| 13 | Plugin host remainder (tiers 1a–1c; explorer/env edges): **composite buffers API remains OPEN** (createCompositeBuffer layouts/alignment/cursor/hunks/close and #15's composite surface; the native Compare covers the user feature, not the API), dock/fullscreen placement, independent per-panel views, windowEmbed live panes, markdown-in-text, package manager/generic HTTP (restricted gvim.http.get landed r28)/project-local plugins, render_line | P2 | L | `pluginapi`, `plugin`, `decorations`, `internal/tui/pluginpanel`, `internal/tui/plugin_*.go` | R9-5; no substitution closure |
 
-| 14 | Port the remaining bundled plugins (OPEN): orchestrator, live_sessions, agent_* family, devcontainer, k8s-workspace, pkg, audit_mode, welcome/welcome_screen, language helpers, **diff_nav residuals (R13-9: merged navigation landed; large-file/Compare/command+i18n gaps open)**. Ported through r27: diagnostics_panel, git_log/live_diff, compare_files, path_complete/lsp_help, Finder/lsp_navigation/find_references/dashboard/code_tour, git_grep/git_explorer/env_manager, asm_lsp (reduced helper; no plugin-API Disable/per-language restart/error metadata/remote home checks/overlong never-key), csharp_support (reduced helper; no setLspRootUri/Roslyn needs-restore event/Disable action/--version precheck, English-only); phase 2 added the native external Claude/Codex history scanner (part of the agent discovery surface, not a plugin port). Native equivalents only where genuine (compare_files user feature + #15 API open, native theme editor, native project search, native markdown compose) with residual gaps listed; dashboard/live_grep/welcome are partial equivalents whose missing features stay open. Nothing is closed by size/dependency/effort | P1 | L each; XL total | `plugin/bundled/plugins`, `plugin/bundled/lib`, `internal/agentdiscover/` | R13-6/R13-9; dependencies only order the work |
+| 14 | Port the remaining bundled plugins (OPEN): orchestrator, live_sessions, agent_* family, devcontainer, k8s-workspace, pkg, audit_mode, welcome/welcome_screen, language helpers, **diff_nav residuals (R13-9: merged navigation landed; large-file/Compare/command+i18n gaps open)**. Ported through r28: diagnostics_panel, git_log/live_diff, compare_files, path_complete/lsp_help, Finder/lsp_navigation/find_references/dashboard/code_tour, git_grep/git_explorer/env_manager, asm_lsp (reduced helper; no plugin-API Disable/per-language restart/error metadata/remote home checks/overlong never-key), csharp_support (reduced helper; no setLspRootUri/Roslyn needs-restore event/Disable action/--version precheck, English-only), clangd_support (reduced helper; no server-specific switchSourceHeader/fileStatus notifications/floating panel/ancestor .clangd walk); phase 2 added the native external Claude/Codex history scanner (part of the agent discovery surface, not a plugin port). Native equivalents only where genuine (compare_files user feature + #15 API open, native theme editor, native project search, native markdown compose) with residual gaps listed; dashboard/live_grep/welcome are partial equivalents whose missing features stay open. Nothing is closed by size/dependency/effort | P1 | L each; XL total | `plugin/bundled/plugins`, `plugin/bundled/lib`, `internal/agentdiscover/` | R13-6/R13-9; dependencies only order the work |
 
 | 16 | Plugin package manager/registry (Fresh `pkg`: install/update/remove from git, registry sync, consent dialog) — OPEN TUI feature (pkg plugin 3642 lines port plus the native package-manager surface); dependency ordering only, not a closure | P2 | L | `plugin/`, `shellcmd`, package manager | R13-6 |
 
@@ -5236,31 +5390,50 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-28 verification (2026-11-09, merged tree on `66f8f69`; 199–204 landed; 205 audit).**
+  STATIC GATES PASS (Lead, default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint
+  0, purity, import rules, menus, i18n_check with catalogue heap en 110 KiB / de 82 KiB / both 193
+  KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76
+  packages ok, no FAIL line (log `/tmp/gvim-r28-tests.log`). The first full run exposed a test-session
+  cleanup race (TempDir cleanup vs background config/state/dock/plugin stop) in
+  TestUserPluginWorksEndToEnd; the test lifecycle helper now closes the Model first and waits for
+  saves/dock/plugin stop (targeted count=50 + app count=2 PASS), then the full suite EXIT 0. This is
+  test infrastructure, not a product parity change. Tracks: 199 restricted plugin HTTPS GET + GitHub
+  PR section; 200 remote interactive-login env capture + fallback notice; 201 remote finder single
+  git-listing candidate index + recursive fallback; 202 OSC0/2 title persistence + alt-screen content
+  restore; 203 child-side kitty keyboard protocol (presses only, bounded per-screen flag stacks); 204
+  clangd_support reduced port (25 plugins/9 on/16 off/54 commands).
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-27 landed csharp_support, multi-cursor snippet/auto-import accept, remote paste conflict flow,
-  mixed file+terminal extract, real SSH keychain, update-command terminal, asm_lsp exclusive create,
-  i18n remainder 6; full suite EXIT 0 (76 packages, log /tmp/gvim-r27-tests.log); §5.5 is round-28/29
-  plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–27 had their gate sets
-  run. Round 27 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-28 landed restricted plugin HTTPS/GitHub PR, remote interactive env capture, remote finder
+  git candidate listing, terminal OSC title/alt restore, child kitty keyboard, clangd_support; full
+  suite EXIT 0 (76 packages, log /tmp/gvim-r28-tests.log); §5.5 is round-29/30 plan; TUI-only scope/
+  genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–28 had their gate sets
+  run. Round 28 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  116 KiB / de 82 KiB / both 198 KiB, git diff --check). Final full
+  110 KiB / de 82 KiB / both 193 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r27-tests.log`. The audit ran build/gofmt/i18n_check plus targeted round-27 tests and
-  diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
-  recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
-  production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling
-  violation that may be sampling delay or a guard fault, not proof the guard never fired. LSP manager
-  fake-server async dispatch fix 40/40 remains. Real-host verification remains UNTESTED rather than
-  passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
-  realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_
-  hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching;
-  ~/… expansion against a local real `sh`, not a live host. Phase-2 exit-path limits are in §4 item
-  82/§6. Treat statuses as pointers, not proof.
+  `/tmp/gvim-r28-tests.log`. A first run exposed a test-session cleanup race (TempDir cleanup vs
+  background saves/dock/plugin stop); the test helper now closes the Model and waits before cleanup
+  (targeted count=50 + app count=2 PASS), then the full suite passed. The audit ran build/gofmt/
+  i18n_check plus targeted round-28 tests and diff review only; the Lead ran the full suite. Heap-guard
+  semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-only fresh-
+  child/strict/4× fix, production sampled circuit breaker (not a strict hard limit); beyond 4× is a
+  test-ceiling violation that may be sampling delay or a guard fault, not proof the guard never fired.
+  LSP manager fake-server async dispatch fix 40/40 remains. Real-host verification remains UNTESTED
+  rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/
+  plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/
+  known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
+  switching; ~/… expansion against a local real `sh`, not a live host. Phase-2 exit-path limits are
+  in §4 item 82/§6. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.
@@ -5340,30 +5513,36 @@ remain open), project search's user feature (native panel; provider/large-file c
 open), and markdown compose/source's user feature (native page view/dual; remaining markdown gaps
 stay open). dashboard/live_grep/welcome_screen are partial equivalents at best — their missing
 user features stay open; gvim's merged diff-navigation landed in git_gutter but R13-9's large-file/Compare/command-i18n residuals stay open, not equivalent to the standalone diff_nav plugin.
-No other missing Fresh TUI functionality is recorded as a substitution: multi-cursor resolve-based
-completion/request-id/large-file deferral; remote paste has no Overwrite All/Skip All and overwrite
-is remove-then-copy (re-creation race; decision not remembered across multi-item paste); mixed extract
-is co-tenant-only/no PTY handover/default-name conflicts/no undo-drag/cross-workspace shared buffers;
-SSH keychain real backends are opt-in/fake-tested/real host UNTESTED (macOS password argv exposure,
-Linux keyring-DBus needed; passphrases/2FA not stored); update_command has no download/install engine
-and no Settings row (local machine, close_on_exit drops output); asm_lsp exclusive create local partial
-crash/remote claim-write cleanup edge/once-only; csharp_support missing setLspRootUri/Roslyn event/
-Disable/--version precheck/English-only; URL http(s)-only/no non-GitHub branch URL/opener not
-configurable; dashboard weather/GitHub/network/section API/dock/mouse/sessions OPEN; terminal restart
-indicator lacks OS foreground name/different hover/marker at capture (remote terminal no state); remote
-preview head-only >256 KiB/no semantic-LSP/no remote preview buffer; shared Save As reservation
-in-process/dropped-plan leak/non-gvim writers/disk exists/dormant-owner; remote search failed/truncated
-defaults/widened notices/match limit after merge/nested inner ignore/finder snapshot; plugin copy
-descendant no-overwrite/partial tree/no-cap backend/16 MiB fallback; remote explorer drag/move/undo/
-whole-subtree transaction/mode-mtime-hardlink-xattr/watch latency/Windows; remote marker scan/hot-exit
-local-staging privacy/conflict/ownership; SSH 2FA/signature detail/real host; remote env; live-restore
-byte-exact/OSC/hyperlinks/alt replay; extract mixed gaps above; input GPM/kitty; update terminal output
-slice only; URL packaged; auto_attach nuances; plugin ports (r25 asm_lsp, r27 csharp_support ported;
-remaining OPEN); universal; ConPTY; i18n boundary are OPEN (R13-1…R13-24). Landed/no longer open:
-r27 csharp_support, multi-cursor snippet/auto-import accept, remote paste conflict flow, mixed
-file+terminal extract, real SSH keychain, update command terminal, asm_lsp exclusive config create, i18n
-remainder 6; prior r26 URL/terminal preview/multi-cursor plain accept/asm_lsp; prior rounds. Real hosts
-remain UNTESTED. Full suite EXIT 0 (76 packages, log /tmp/gvim-r27-tests.log).
+No other missing Fresh TUI functionality is recorded as a substitution: plugin HTTP remains HTTPS
+GET-only with user network opt-in/SSRF/timeout/body/concurrency limits, no generic fetch/auth/token/
+cache; dashboard GitHub PR is opt-in/bounded, weather and third-party section API remain OPEN; remote
+env interactive capture is bash/zsh-only with sh -c fallback/notice, no active remote-env status
+indicator, env files unwatched; remote finder git path can fall back to recursive walk, hides tracked
+hidden files, omits non-UTF-8/nested contents only via fallback/truncated listing fallback; terminal
+OSC1 icon/OSC7 cwd/OSC52/hyperlinks not replayed, cursor shape not inherited, alt frame read-only/no
+main history while alt active; kitty child protocol presses only (no releases/report-event-type;
+modifier-only/media/F13+ not encoded); clangd_support no server-specific switchSourceHeader/fileStatus
+custom notifications/floating panel/ancestor .clangd walk; csharp_support no setLspRootUri/Roslyn
+needs-restore event/Disable/--version precheck/English-only; asm_lsp exclusive create local crash-
+partial/remote claim-write cleanup/once-only; multi-cursor resolve-based completion/large-file/request-
+id; remote paste no All variants and overwrite remove-then-copy re-creation race; mixed extract
+co-tenant-only/no PTY handover/default-name conflicts/no undo-drag/shared buffers; SSH keychain opt-in
+fake-tested (macOS argv exposure/Linux keyring-DBus, 2FA/passphrase not stored)/real host UNTESTED;
+update_command no download/install engine/no Settings row; URL http(s)-only/no non-GitHub branch URL/
+opener not configurable; dashboard weather/GitHub-network/section API/dock/mouse/sessions OPEN;
+terminal restart indicator lacks OS foreground name/different hover/marker at capture; remote preview
+head-only >256 KiB/no semantic-LSP/no remote preview buffer; shared Save As reservation in-process/
+dropped-plan leak/non-gvim writers/disk exists/dormant-owner; remote search failed/truncated defaults/
+widened notices/match limit after merge/nested inner ignore/finder snapshot; plugin copy descendant
+no-overwrite/partial tree/no-cap backend/16 MiB fallback; remote explorer drag/move/undo/whole-subtree
+transaction/mode-mtime-hardlink-xattr/watch latency/Windows; remote marker scan/hot-exit local-staging
+privacy/conflict/ownership; SSH 2FA/signature detail/real host; remote env fallback; live-restore
+byte-exact/OSC gaps; input GPM/kitty host; URL packaged; auto_attach nuances; plugin ports (r28
+clangd_support, r27 csharp_support, r25 asm_lsp ported; remaining OPEN); universal; ConPTY; i18n
+boundary are OPEN (R13-1…R13-24). Landed/no longer open: r28 plugin HTTPS/GitHub PR, remote
+interactive env capture, remote finder git listing, OSC title/alt restore, kitty child protocol,
+clangd_support; prior rounds. Real hosts remain UNTESTED. Full suite EXIT 0 (76 packages, log
+/tmp/gvim-r28-tests.log); first-run test lifecycle race fixed (test infrastructure).
 
 **gvim-only additions (not parity requirements).** Round-18 remote `.gitignore` filtering + polled directory watching and extract variants (into an existing workspace, terminal saved-state migration, multi-select tabs) are gvim extensions, not Fresh gaps; they are documented in §4 items 122/123 and must keep working but do not count toward Fresh parity. `gvim config show`/`config paths` (show is
 trust-gated), `gvim grammar`, the in-process `uitest` harness, `cmd/gvimdebug`, the screenshot sweep,

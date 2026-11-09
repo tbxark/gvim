@@ -3,11 +3,13 @@ package bundled_test
 import (
 	"fmt"
 	"io/fs"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/plugin/bundled"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
@@ -45,6 +47,11 @@ type rigOpts struct {
 	probe    string            // Lua source of an extra plugin "probe"
 	extra    map[string]string // extra plugin files by path, e.g. "live_diff/init.lua"
 	encoding string            // the encoding of the first buffer (default utf-8)
+	// settings are the plugins.<name>.settings layers, by plugin name, applied to the
+	// matching source before Start.
+	settings map[string]plugin.PluginSettings
+	// httpClient is the runtime's gvim.http client (nil: the production safe client).
+	httpClient *http.Client
 }
 
 type rig struct {
@@ -95,7 +102,13 @@ func startRig(t *testing.T, o rigOpts) *rig {
 	if timeout == 0 {
 		timeout = 200 * time.Millisecond
 	}
-	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: r.os, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second})
+	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: r.os, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second, HTTPClient: o.httpClient})
+	for i := range r.h.Sources {
+		if st, ok := o.settings[r.h.Sources[i].Name]; ok {
+			r.h.Sources[i].Settings = st.User
+			r.h.Sources[i].ProjectSettings = st.Project
+		}
+	}
 	r.h.Start()
 	return r
 }
