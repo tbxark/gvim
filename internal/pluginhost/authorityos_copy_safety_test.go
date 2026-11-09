@@ -5,6 +5,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -107,5 +108,59 @@ func TestAuthorityOSCopyCanonicalAliasesRefused(t *testing.T) {
 	}
 	if calls := local.Calls(); len(calls) != 0 {
 		t.Fatalf("a refused copy touched the local OS: %v", calls)
+	}
+}
+
+// TestAuthorityOSCopyWithoutStreamerRefusesExistingDestination: on a backend with no
+// atomic WriteStream the whole-file fallback truncates the destination. A destination
+// hard-linked to the source would therefore destroy the source, and realpath cannot
+// identify hard links; refuse an existing destination instead. A missing destination
+// still takes the bounded fallback (no pre-existing data to lose).
+func TestAuthorityOSCopyWithoutStreamerRefusesExistingDestination(t *testing.T) {
+	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
+	remote.files["/srv/proj/a.txt"] = "source data"
+	remote.files["/srv/proj/b.txt"] = "keep me"
+	slot, _, _ := authorityTestSlot(remote)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "a.txt", "b.txt")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("copy over an existing destination without a streamer = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if got := remote.files["/srv/proj/b.txt"]; got != "keep me" {
+		t.Fatalf("refused copy changed the destination: %q", got)
+	}
+	if got := remote.files["/srv/proj/a.txt"]; got != "source data" {
+		t.Fatalf("refused copy changed the source: %q", got)
+	}
+	if calls := local.Calls(); len(calls) != 0 {
+		t.Fatalf("refused copy touched the local OS: %v", calls)
+	}
+}
+
+// TestAuthorityOSCopyRootIntoChildRefused: the filesystem root is a prefix of every
+// absolute path, including a destination that does not exist, so the usual "source + /"
+// test must not let a root tree copy recurse into its own filesystem. The refusal must
+// happen before any mkdir/write.
+func TestAuthorityOSCopyRootIntoChildRefused(t *testing.T) {
+	remote := &fakeMutableFiles{fakeRemoteFiles: &fakeRemoteFiles{
+		files: map[string]string{},
+		dirs: map[string][]hostos.DirEntry{
+			"/":    {{Name: "tmp", Kind: "dir"}},
+			"/tmp": {},
+		},
+	}}
+	slot, _, _ := authorityTestSlot(remote)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "/", "/tmp/root-copy")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeInvalid {
+		t.Fatalf("root tree copy into child = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if len(remote.mkdirs) != 0 {
+		t.Fatalf("refused root copy created directories: %v", remote.mkdirs)
+	}
+	if calls := local.Calls(); len(calls) != 0 {
+		t.Fatalf("refused root copy touched the local OS: %v", calls)
 	}
 }

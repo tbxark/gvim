@@ -635,7 +635,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var authSlot authority.Slot
 	var envRemote *env.Remote
 	var envShell *remoteEnvShell
-	var envWatch *remoteEnvWatch
+	var envWatch envWatchReplanner
 	var envProvider workspaceEnv
 	if opts.Remote != nil {
 		rootOf := func() string {
@@ -657,7 +657,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		envRemote.SetMarkerProber(newRemoteMarkerProber(func() authority.Slot { return authSlot }))
 		envProvider = envRemote
 	} else {
-		envProvider = env.New(root, cfg.EnvDetectors(), trustedLive)
+		localProvider := env.New(root, cfg.EnvDetectors(), trustedLive)
+		envProvider = localProvider
+		if watching {
+			// Local detector markers are watched with the editor's fsnotify watcher so a
+			// created/removed .envrc/.nvmrc/.venv refreshes detection off the UI loop. If
+			// fsnotify is unavailable the provider carries an Env: Reload degradation
+			// notice instead of blocking or polling the tree.
+			envWatch = startLocalEnvWatch(ctx, localProvider, root)
+		} else {
+			localProvider.SetWatchNotice("Local environment: file watching is off; changed detector markers are picked up on Env: Reload")
+		}
 	}
 	levelLive := func() string { return string(levelOf()) }
 	// The workspace spawn gate (docs/trust.md): Fresh's executable-path rule with the

@@ -612,3 +612,121 @@ func TestLayoutRules(t *testing.T) {
 		}
 	}
 }
+
+// TestTabAcceptsTheSelectedSuggestion covers Fresh's prompt_accept_suggestion in the
+// command palette: Tab fills the selected row's value into the query, preserving the
+// >/#/: mode prefix, and the palette stays open (Enter remains the run/open key).
+func TestTabAcceptsTheSelectedSuggestion(t *testing.T) {
+	t.Run("command", func(t *testing.T) {
+		p := New(commandOptions(">Save", nil))
+		i := p.nav.Selected()
+		if i < 0 || i >= len(p.rows) || p.rows[i].disabled {
+			t.Fatalf("no enabled command row selected: i=%d rows=%+v", i, p.rows)
+		}
+		want := ">" + p.rows[i].name
+		if cmd := p.update(key(tea.KeyTab)); cmd != nil {
+			t.Fatalf("Tab on a command row returned a command: %v", cmd)
+		}
+		if got := p.input.Value(); got != want {
+			t.Fatalf("query after Tab = %q, want %q", got, want)
+		}
+		if !p.Active() {
+			t.Fatal("Tab closed the command palette; only Enter should run the command")
+		}
+	})
+
+	t.Run("command keeps the selected row", func(t *testing.T) {
+		p := New(Options{Query: ">Cmd", Commands: fakeCommands(20)})
+		p.update(key(tea.KeyDown))
+		p.update(key(tea.KeyDown))
+		i := p.nav.Selected()
+		want := ">" + p.rows[i].name
+		p.update(key(tea.KeyTab))
+		if got := p.input.Value(); got != want {
+			t.Fatalf("query after Tab = %q, want the selected row %q", got, want)
+		}
+	})
+
+	t.Run("buffer", func(t *testing.T) {
+		p := New(Options{Query: "#al", Buffers: []Buffer{{Name: "alpha"}, {Name: "beta"}}})
+		i := p.nav.Selected()
+		want := "#" + p.rows[i].name
+		p.update(key(tea.KeyTab))
+		if got := p.input.Value(); got != want {
+			t.Fatalf("query after Tab = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("line", func(t *testing.T) {
+		p := New(Options{Query: ":12:3"})
+		p.update(key(tea.KeyTab))
+		if got := p.input.Value(); got != ":12:3" {
+			t.Fatalf("query after Tab = %q, want the line target :12:3", got)
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		files := &fakeFiles{files: []string{"main.go", "main_test.go", "other.txt"}}
+		p := New(Options{Files: files, Ranker: &fakeRanker{}})
+		settle(t, p, p.Init(), 4)
+		for _, c := range "mai" {
+			settle(t, p, p.update(typed(string(c))), 4)
+		}
+		i := p.nav.Selected()
+		if i < 0 || i >= len(p.rows) {
+			t.Fatalf("no file row selected: %+v", p.rows)
+		}
+		want := p.rows[i].rel
+		cmd := p.update(key(tea.KeyTab))
+		settle(t, p, cmd, 4)
+		if got := p.input.Value(); got != want {
+			t.Fatalf("query after Tab = %q, want the file %q", got, want)
+		}
+		if !p.Active() {
+			t.Fatal("Tab closed the file palette; it should only accept the suggestion")
+		}
+	})
+}
+
+// TestTabLeavesAMessageOrDisabledRowAlone: a message row (not a suggestion) and a
+// command the state does not allow are not accepted.
+func TestTabLeavesAMessageOrDisabledRowAlone(t *testing.T) {
+	t.Run("message", func(t *testing.T) {
+		p := New(Options{Query: ":abc"})
+		if cmd := p.update(key(tea.KeyTab)); cmd != nil {
+			t.Fatalf("Tab on a message row returned a command: %v", cmd)
+		}
+		if got := p.input.Value(); got != ":abc" {
+			t.Fatalf("query after Tab = %q, want it unchanged", got)
+		}
+	})
+	t.Run("disabled command", func(t *testing.T) {
+		st := &commands.State{} // no text buffer: save is unavailable
+		p := New(Options{Query: ">Save", Commands: []commands.Entry{{Name: "Save File", Action: "save"}}, State: st})
+		if len(p.rows) == 0 || !p.rows[0].disabled {
+			t.Fatalf("the save row is not disabled: %+v", p.rows)
+		}
+		if cmd := p.update(key(tea.KeyTab)); cmd != nil {
+			t.Fatalf("Tab on a disabled row returned a command: %v", cmd)
+		}
+		if got := p.input.Value(); got != ">Save" {
+			t.Fatalf("query after Tab = %q, want it unchanged", got)
+		}
+	})
+}
+
+// TestTabIsANoOpInLiveGrep: Fresh's floating Live Grep overlay consumes Tab without
+// accepting its opaque suggestion values; the gvim mode matches.
+func TestTabIsANoOpInLiveGrep(t *testing.T) {
+	p := New(Options{Live: true})
+	before := p.input.Value()
+	if cmd := p.update(key(tea.KeyTab)); cmd != nil {
+		t.Fatalf("Tab in Live Grep returned a command: %v", cmd)
+	}
+	if got := p.input.Value(); got != before {
+		t.Fatalf("Live Grep query after Tab = %q, want %q", got, before)
+	}
+	if !p.Active() {
+		t.Fatal("Tab closed Live Grep")
+	}
+}

@@ -1220,3 +1220,196 @@ func TestRemoteSearchTrackedCandidateUnderSkipDirStillSearched(t *testing.T) {
 		t.Fatalf("files = %v, want the tracked skip-dir candidate and a.go", names)
 	}
 }
+
+// nestedCandidateScript answers the top-level Fresh git listing, a nested repository's own
+// bounded listing, and rg. rg emits one match per explicitly passed candidate path; a
+// widened run is answered by the caller's widen function.
+func nestedCandidateScript(top, nested []byte, nestedCode int, nestedTruncated bool) *fakeOneShot {
+	one := &fakeOneShot{}
+	one.script = func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		joined := strings.Join(argv, " ")
+		switch {
+		case strings.Contains(joined, "rev-parse"):
+			return hostos.ProcResult{Stdout: []byte("true")}, nil
+		case strings.Contains(joined, "-C nested") && strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: nested, Code: nestedCode, Truncated: nestedTruncated}, nil
+		case strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: top}, nil
+		case len(argv) > 0 && argv[0] == "rg":
+			idx := -1
+			for i, a := range argv {
+				if a == "--" {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				return hostos.ProcResult{}, errors.New("rg without explicit candidates: " + joined)
+			}
+			var out strings.Builder
+			for _, p := range argv[idx+1:] {
+				fmt.Fprintf(&out, "%s:1:1:todo %s\n", p, p)
+			}
+			return hostos.ProcResult{Stdout: []byte(out.String())}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected remote command: " + joined)
+	}
+	return one
+}
+
+// TestRemoteSearchResolvesNestedRepositoryCandidates checks the provable nested-gitignore
+// slice: a nested repository listed by name gets its own bounded git listing, so its
+// tracked-ignored files are candidates and its untracked ignored files are not; the search
+// then uses explicit candidate paths (no widened scan) and no degradation notice.
+func TestRemoteSearchResolvesNestedRepositoryCandidates(t *testing.T) {
+	top := []byte(gitLsEntry("100644", "a.go") + gitLsEntry("160000", "nested"))
+	nested := []byte(gitLsEntry("100644", "tracked.log") + gitLsEntry("100644", ".config") + gitLsEntry("", "keep.go"))
+	one := nestedCandidateScript(top, nested, 0, false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	names := remoteSearchFileNames(t, batches)
+	sort.Strings(names)
+	want := "a.go,nested/.config,nested/keep.go,nested/tracked.log"
+	if got := strings.Join(names, ","); got != want {
+		t.Fatalf("files = %v, want the nested git listing candidates %s", names, want)
+	}
+	if notice := doneBatchNotice(t, batches); notice != "" {
+		t.Fatalf("notice = %q, want no degradation when every nested listing is complete", notice)
+	}
+	calls := rgCalls(one)
+	if len(calls) != 1 || len(argvAfterSlashSlash(calls[0])) == 0 || strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
+		t.Fatalf("rg calls = %v, want one explicit-candidate run without widening", calls)
+	}
+	passed := map[string]bool{}
+	for _, p := range argvAfterSlashSlash(calls[0]) {
+		passed[p] = true
+	}
+	if !passed["nested/tracked.log"] || !passed["nested/keep.go"] || passed["nested/ignored.log"] {
+		t.Fatalf("explicit candidates = %v, want the nested git scope", passed)
+	}
+}
+
+// TestRemoteSearchNestedListingFailureKeepsFallbackWithNotice checks the all-or-nothing
+// rule: when a nested repository listing fails, NO partial nested candidate set is used;
+// the widened walk fallback with its notice remains, so an incomplete candidate list is
+// never presented as complete.
+func TestRemoteSearchNestedListingFailureKeepsFallbackWithNotice(t *testing.T) {
+	top := []byte(gitLsEntry("100644", "a.go") + gitLsEntry("160000", "nested"))
+	one := nestedCandidateScript(top, nil, 1, false)
+	// The widened fallback returns a nested file; the prefix walk filter accepts it.
+	base := one.script
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte("a.go:1:1:todo a\nnested/inner.go:1:1:todo n\n")}, nil
+		}
+		return base(ctx, argv, o)
+	}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	if notice := doneBatchNotice(t, batches); !strings.Contains(notice, "nested repositories") {
+		t.Fatalf("notice = %q, want the nested fallback notice", notice)
+	}
+	calls := rgCalls(one)
+	if len(calls) != 1 || !strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
+		t.Fatalf("rg calls = %v, want the widened fallback (no partial explicit candidates)", calls)
+	}
+	if len(argvAfterSlashSlash(calls[0])) != 0 {
+		t.Fatalf("partial nested candidates were used despite the failed listing: %v", calls[0])
+	}
+	names := remoteSearchFileNames(t, batches)
+	if got := strings.Join(names, ","); got != "a.go,nested/inner.go" {
+		t.Fatalf("files = %v, want the widened prefix-walk results", names)
+	}
+}
+
+// TestRemoteSearchNestedRepoInsideNestedRepoKeepsFallback checks an inner nested
+// repository/submodule also keeps the fallback: this slice only proves one level of nested
+// listings, so it must not silently drop the deeper repository's files.
+func TestRemoteSearchNestedRepoInsideNestedRepoKeepsFallback(t *testing.T) {
+	top := []byte(gitLsEntry("160000", "nested"))
+	nested := []byte(gitLsEntry("160000", "inner"))
+	one := nestedCandidateScript(top, nested, 0, false)
+	base := one.script
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte("nested/inner/x.go:1:1:todo x\n")}, nil
+		}
+		return base(ctx, argv, o)
+	}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	if notice := doneBatchNotice(t, batches); !strings.Contains(notice, "nested repositories") {
+		t.Fatalf("notice = %q, want the nested fallback notice", notice)
+	}
+	calls := rgCalls(one)
+	if len(calls) != 1 || !strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
+		t.Fatalf("rg calls = %v, want the widened fallback", calls)
+	}
+}
+
+// TestRemoteSearchNestedListingCancellation checks cancellation reaches a nested
+// repository's own bounded git listing: the search channel closes with no Done batch and
+// falls back to nothing, so a slow nested host cannot outlive the user's cancel.
+func TestRemoteSearchNestedListingCancellation(t *testing.T) {
+	top := []byte(gitLsEntry("160000", "nested"))
+	nestedStarted := make(chan struct{})
+	one := &fakeOneShot{script: func(ctx context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		joined := strings.Join(argv, " ")
+		switch {
+		case strings.Contains(joined, "rev-parse"):
+			return hostos.ProcResult{Stdout: []byte("true")}, nil
+		case strings.Contains(joined, "ls-files") && strings.Contains(joined, "-C nested"):
+			close(nestedStarted)
+			<-ctx.Done()
+			return hostos.ProcResult{}, ctx.Err()
+		case strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: top}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected remote command: " + joined)
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	cancel := make(chan struct{})
+	ch := s.ProjectSearchBatches(searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles}, cancel)
+	select {
+	case <-nestedStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the nested repository listing did not start")
+	}
+	close(cancel)
+	var seenDone bool
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case b, ok := <-ch:
+			if !ok {
+				if seenDone {
+					t.Fatal("a cancelled nested search sent a Done batch")
+				}
+				return
+			}
+			if b.Done {
+				seenDone = true
+			}
+		case <-deadline:
+			t.Fatal("a cancelled nested search did not close its channel")
+		}
+	}
+}

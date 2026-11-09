@@ -47,6 +47,10 @@ type Tabs struct {
 	// Sync its live revival starts (a tea.Cmd, so Update never blocks on the spawn).
 	// A second dive before the sync replaces it with the newest target.
 	dive *Panel
+	// hostBlurred is the outer terminal window's focus state, inherited by every
+	// tab (and by tabs created later); a child is focused only while the window and
+	// the dock both have the keyboard. Zero value = focused.
+	hostBlurred bool
 	// nextGen is the next shell-generation namespace. Messages carry only a
 	// generation, and every Panel counts its generations from 0, so each tab gets a
 	// disjoint million-wide range; otherwise an output/exit of one tab could match
@@ -297,6 +301,7 @@ func (t *Tabs) NewTab() tea.Cmd {
 	p.SetHost(t.host)
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
+	p.hostBlurred = t.hostBlurred
 	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, "")
@@ -522,6 +527,7 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	p.SetHost(t.host)
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
+	p.hostBlurred = t.hostBlurred
 	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, name)
@@ -539,6 +545,16 @@ func (t *Tabs) Open() bool { p := t.Active(); return p != nil && p.Open() }
 
 // Focus reports whether the active tab has the keyboard focus.
 func (t *Tabs) Focus() bool { p := t.Active(); return p != nil && p.Focus() }
+
+// SetHostFocused merges the outer terminal window's focus into every tab: a
+// terminal program is focused only while the window and the dock both have the
+// keyboard. It is kept on the tab container so tabs started later inherit it.
+func (t *Tabs) SetHostFocused(focused bool) {
+	t.hostBlurred = !focused
+	for _, p := range t.tabs {
+		p.SetHostFocused(focused)
+	}
+}
 
 // SetFocus sets the keyboard focus: giving it to the dock clears it on the other
 // tabs, taking it away clears it on the active one.
@@ -1140,6 +1156,7 @@ func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
 	p.SetHost(t.host)
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
+	p.hostBlurred = t.hostBlurred
 	p.gen = t.genBase()
 	p.Restore(terminal.SavedState{
 		Version: terminal.SavedStateVersion, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
@@ -1180,6 +1197,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		p.SetHost(t.host)
 		p.SetPorts(t.ports)
 		p.SetEffects(t.effects)
+		p.hostBlurred = t.hostBlurred
 		p.gen = t.genBase()
 		p.Restore(terminal.SavedState{
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,

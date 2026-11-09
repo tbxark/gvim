@@ -136,6 +136,9 @@ type Provider struct {
 	lastErr    error
 	incomplete bool
 	capturing  bool
+	// watchNotice is the local detector/marker watcher's degradation message ("" when
+	// watching works or was not attempted), shown in the Settings Environment rows.
+	watchNotice string
 }
 
 // New builds the provider for root with the configured detectors. It detects the
@@ -157,6 +160,35 @@ func (p *Provider) Detectors() []config.EnvDetector {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return append([]config.EnvDetector(nil), p.detectors...)
+}
+
+// RefreshDetection re-runs the passive local marker/require scan with the current
+// detector list and updates the detected environment. The app's local file watcher calls
+// it off the UI update loop when a marker/require entry changes; the active recipe and its
+// capture cache are untouched (detection and activation are separate, and the capture
+// fingerprint already handles env-input content changes).
+func (p *Provider) RefreshDetection() {
+	p.mu.RLock()
+	detectors := append([]config.EnvDetector(nil), p.detectors...)
+	p.mu.RUnlock()
+	det, incomplete := trust.DetectEnv(p.root, detectors)
+	p.mu.Lock()
+	p.detected, p.found, p.incomplete = det, det.Name != "", incomplete
+	p.mu.Unlock()
+}
+
+// SetWatchNotice records the local detector watcher's state ("" when watching works).
+func (p *Provider) SetWatchNotice(text string) {
+	p.mu.Lock()
+	p.watchNotice = text
+	p.mu.Unlock()
+}
+
+// WatchNotice returns the local detector watcher's degradation message, or "".
+func (p *Provider) WatchNotice() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.watchNotice
 }
 
 // SetDetectors replaces the detector list at runtime (a config Reload that changed

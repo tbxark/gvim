@@ -52,9 +52,10 @@ type settingsService struct {
 	// env is the workspace environment provider for the Environment rows and the
 	// read-only detectors page; nil when the app wired none.
 	env workspaceEnv
-	// envWatch is the remote env-input/detector watcher, when the launch is remote. A
-	// config Reload that changes env.detectors re-plans its bounded watch set.
-	envWatch *remoteEnvWatch
+	// envWatch is the env-input/detector watcher of the launch (local fsnotify or the
+	// remote authority watcher). A config Reload that changes env.detectors re-plans its
+	// bounded watch set.
+	envWatch envWatchReplanner
 
 	// lastDiags are the diagnostics of the last reload, so a write-then-reload
 	// path can verify that the file it wrote still loads (the plugin toggle rolls
@@ -488,6 +489,12 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.mu.Unlock()
 	s.applyEnvDetectorChange(previous, cfg)
 	return change, nil
+}
+
+// envWatchReplanner is the detector-watch surface shared by the local and remote env
+// watchers; a config Reload that changes env.detectors calls Replan.
+type envWatchReplanner interface {
+	Replan(detectors []config.EnvDetector)
 }
 
 // applyEnvDetectorChange re-plans the remote env watcher/provider when a config Reload

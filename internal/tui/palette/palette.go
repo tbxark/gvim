@@ -419,6 +419,15 @@ func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "down":
 		p.nav.Select(p.nav.Selected() + 1)
 		return nil
+	case "tab":
+		// Fresh's prompt_accept_suggestion: Tab fills the selected suggestion into
+		// the query instead of running it. Enter still opens/runs the row. In Live
+		// Grep's floating overlay Fresh makes Tab a no-op (the suggestion values are
+		// opaque), so gvim does the same.
+		if p.live {
+			return nil
+		}
+		return p.acceptSuggestion()
 	}
 	if p.live {
 		if cmd, ok := p.liveKey(tea.Key(msg).Keystroke()); ok {
@@ -441,6 +450,52 @@ func (p *Palette) edit(msg tea.Msg) tea.Cmd {
 		return read
 	}
 	return tea.Batch(read, p.requery())
+}
+
+// acceptSuggestion fills the selected row's value into the query and re-queries,
+// preserving the mode prefix (" >", ":", "#"). It is Fresh's Tab
+// (prompt_accept_suggestion) for all four quick-open modes. A message row, a disabled
+// command, a missing selection or a row from another mode changes nothing. The palette
+// stays open; Enter still runs/opens the row.
+func (p *Palette) acceptSuggestion() tea.Cmd {
+	i := p.nav.Selected()
+	if i < 0 || i >= len(p.rows) {
+		return nil
+	}
+	r := p.rows[i]
+	if r.disabled || r.kind == rowMessage {
+		return nil
+	}
+	mode, _ := commands.ParseQuery(p.input.Value())
+	var prefix, value string
+	switch mode {
+	case commands.ModeCommand:
+		if r.kind != rowCommand {
+			return nil
+		}
+		prefix, value = ">", r.name
+	case commands.ModeBuffer:
+		if r.kind != rowBuffer {
+			return nil
+		}
+		prefix, value = "#", r.name
+	case commands.ModeLine:
+		if r.kind != rowLine {
+			return nil
+		}
+		prefix = ":"
+		value = strconv.Itoa(r.line)
+		if r.col > 0 {
+			value += ":" + strconv.Itoa(r.col)
+		}
+	default:
+		if r.kind != rowFile {
+			return nil
+		}
+		value = r.rel
+	}
+	p.input.SetValue(prefix + value)
+	return p.requery()
 }
 
 // click runs the row under a left click. Other buttons, and clicks that miss the

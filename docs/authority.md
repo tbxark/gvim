@@ -758,16 +758,23 @@ Remote project search uses Fresh's project-file scope (`project_files`): a compl
 `git ls-files --cached --others --exclude-standard` listing is authoritative in a work tree
 — tracked files (including tracked files that match .gitignore and tracked dotfiles) and
 untracked non-hidden files are candidates, passed explicitly to rg/grep in bounded batches
-so ignored trees are never scanned into the output cap. Nested repositories/submodules are
-walked for content with the walk rules below; their own `.gitignore` is not applied (a
-recorded residual). When there is no complete listing (non-git workspace, git failure, or a
-too-large/nested batch fallback to the whole-tree tool), the candidate filter applies the
-`Fresh` walk scope: hidden path segments and `IGNORED_DIRS` (`.git`, `node_modules`,
-`target`, `__pycache__`, `.hg`, `.svn`, `.DS_Store`) are refused. The explicit-candidate
+so ignored trees are never scanned into the output cap. Each nested repository/submodule
+listed by name (up to 8) is then resolved with its own bounded
+`git ls-files --cached --others --exclude-standard`, so its `.gitignore` applies exactly as
+git defines it (tracked-ignored files included, untracked ignored files left out); those
+candidates join the explicit batches, and a complete resolution carries no degradation
+notice. Resolution is all-or-nothing: more than 8 nested repositories, a failed/truncated
+or non-UTF-8 listing, a path escaping the workspace, or a deeper nested
+repository/submodule leaves every prefix unresolved and keeps the widened whole-tree walk,
+which prunes hidden path segments and `IGNORED_DIRS` (`.git`, `node_modules`, `target`,
+`__pycache__`, `.hg`, `.svn`, `.DS_Store`) and carries the non-fatal notice — a partial
+nested candidate set is never presented as complete, and a deeper nested repository's own
+`.gitignore` is not applied in that fallback (recorded residual). The explicit-candidate
 half keeps git's exception: a tracked candidate under such a directory is still searched
 because git lists it; only walked/nested content is pruned. All commands run through the
-authority one-shot surface with the remote cwd, stay bounded/cancellable, and never read
-the local disk; a degradation is carried as a non-fatal panel notice.
+authority one-shot surface with the remote cwd, stay bounded/cancellable (the search context
+bounds every nested listing), and never read the local disk; a degradation is carried as a
+non-fatal panel notice.
 
 ### Windowed remote reads (remote large-file mode)
 

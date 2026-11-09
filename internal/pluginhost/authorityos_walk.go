@@ -181,7 +181,9 @@ func (o *authorityOS) Copy(ctx context.Context, from, to string) error {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: source and destination are the same path", from)
 	}
 	if st.Kind == "dir" {
-		if strings.HasPrefix(dstReal, srcReal+"/") {
+		// The filesystem root is a prefix of every absolute destination; the generic
+		// "src + /" test would miss it, so refuse a root source explicitly.
+		if srcReal == "/" || strings.HasPrefix(dstReal, srcReal+"/") {
 			return pluginapi.Errf(pluginapi.CodeInvalid, "cannot copy %s into itself", from)
 		}
 		return o.copyTree(ctx, srcReal, dstReal, from, to)
@@ -336,6 +338,15 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 func (o *authorityOS) copyFile(ctx context.Context, src, dst, display string, size int64, mode fs.FileMode) error {
 	if streamer := authority.WriteStreams(o.files()); streamer != nil {
 		return o.copyStreamedFile(ctx, streamer, src, dst, display, size, mode)
+	}
+	if _, err := o.files().Stat(ctx, dst); err == nil {
+		// Without an atomic replace surface, the whole-file fallback opens the
+		// destination for truncation. A destination hard-linked to the source would then
+		// truncate the source itself, and realpath cannot distinguish hard links (it
+		// canonicalizes paths, not inodes). Refuse instead of risking source data.
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend cannot atomically replace an existing destination (it has no streamed-write surface); refusing to risk a hard-link alias", display)
+	} else if pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
+		return mapErr(err, dst)
 	}
 	if size > remoteCopyFileMax {
 		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded on this backend: it has no streamed-write surface)", display, remoteCopyFileMax)

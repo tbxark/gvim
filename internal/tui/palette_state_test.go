@@ -86,3 +86,37 @@ func TestPaletteSaveFileRunsOnADirtyBuffer(t *testing.T) {
 		t.Fatalf("Enter ran %#v, want RunCommandMsg{Action: save}", run)
 	}
 }
+
+// TestPaletteTabAcceptsSuggestionWithoutRunningTheCommand drives Tab through the root:
+// it must reach the palette overlay (not the editor), leave the palette open and run no
+// command; Enter still runs the selected row.
+func TestPaletteTabAcceptsSuggestionWithoutRunningTheCommand(t *testing.T) {
+	lt := newLSPTest(t, nil, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.m.ed = &dirtyEd{lspEd: lt.ed, modified: true}
+	lt.m.openPalette(">save file")
+	before := len(lt.m.overlays)
+	if _, ok := lt.m.overlays[before-1].(*palette.Palette); !ok {
+		t.Fatalf("the top overlay is %T, not the palette", lt.m.overlays[before-1])
+	}
+	cmd := press(lt.m, special(tea.KeyTab))
+	for _, msg := range deliver(cmd) {
+		if run, ok := msg.(palette.RunCommandMsg); ok {
+			t.Fatalf("Tab ran %q; only Enter should run the selected command", run.Action)
+		}
+	}
+	if len(lt.m.overlays) != before {
+		t.Fatalf("Tab closed/changed the palette overlay: %d -> %d", before, len(lt.m.overlays))
+	}
+	if _, ok := lt.m.overlays[len(lt.m.overlays)-1].(*palette.Palette); !ok {
+		t.Fatal("the palette is no longer the top overlay after Tab")
+	}
+
+	cmd = press(lt.m, special(tea.KeyEnter))
+	if cmd == nil {
+		t.Fatal("Enter on the accepted Save File suggestion started no command")
+	}
+	run, ok := cmd().(palette.RunCommandMsg)
+	if !ok || run.Action != "save" {
+		t.Fatalf("Enter ran %#v, want RunCommandMsg{Action: save}", cmd())
+	}
+}

@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `0650fd4` plus the merged round-35 work (243–247; 248
+Last verified: 2026-11-09, tree commit `40598e7` plus the merged round-36 work (249–253; 254
 audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
-golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 119 KiB / de 88
+golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 124 KiB / de 82
 KiB / both 207 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
-EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r35-final.log`). The audit ran build/gofmt/
-i18n_check plus targeted round-35 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
+EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r36-final.log`). The audit ran build/gofmt/
+i18n_check plus targeted round-36 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
 search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain
 security/secret-tool, real-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching
 remain UNTESTED. Fresh reference: `refs/fresh` same date.
@@ -1513,6 +1513,67 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-36 outcome (2026-11-09, merged working tree on `40598e7`).** Five tasks landed (249–253);
+254 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
+0: 76 packages ok, no FAIL (log `/tmp/gvim-r36-final.log`). The audit read the diff and ran targeted
+tests; the Lead ran the full suite.
+**Host-window + dock focus merged for DECSET 1004 (249).** gvim enables View.ReportFocus for every
+workspace, so Bubble Tea reports the real outer-window focus as FocusMsg/BlurMsg; the model merges it
+with the dock's keyboard focus and forwards the effective state to the dock (Tabs.SetHostFocused/
+Panel.SetHostFocused). A child receives focus-in only when window AND dock are focused, and focus-out
+when either loses focus: switching to the editor, tab switch (old tab out/new in), hiding the dock, or
+blurring the outer window; moving in pager/scrollback does not blur. Repeated/redundant calls (window
+blur while dock already unfocused, window focus while a file buffer has the keyboard) send nothing, and
+a new tab inherits the current window state. FocusMsg still performs the remote-authority
+reconnect-on-activate; BlurMsg is never a reconnect point and only updates the merged focus. Reports
+are only sent to a child that opted into 1004. Residuals: the window half depends on the outer terminal
+honoring focus reporting (no events leaves the child believing focused; tmux needs its own focus
+reporting configured), initial state is assumed focused until the first blur, focus mode is not
+persisted in terminal.json (revived shell starts with 1004 off until the program asks), and a restored
+read-only transcript has no child so receives nothing (R13-15).
+**Local detector content-change invalidation — detection-only (250).** A bounded local fsnotify watch
+invalidates detection when a configured detector marker/require content changes: bounded/cancellable/
+non-blocking with a clear degradation path. It is DETECTION-ONLY: it does not re-activate the recipe
+and does not recapture the capture cache. No self-trigger loop/resource leak; UI remains non-blocking
+(R13-18).
+**Remote nested-repository git candidates (251).** After the complete top-level Fresh git candidate
+listing, up to 8 nested repositories/submodules listed by name are each resolved with their own
+bounded `git -C <prefix> ls-files -z -s --cached --others --exclude-standard` through the authority
+(same search context/cancellation, remote cwd, no local fallback). Their candidates join the explicit
+rg/grep batches, so the nested repo's own .gitignore applies exactly as git defines it: tracked-
+ignored and tracked dotfiles included, untracked non-hidden included, untracked ignored excluded;
+success adds no widened scan/degradation notice. Resolution is ALL-OR-NOTHING: more than 8 prefixes,
+a failed/truncated/non-UTF-8 listing, a path escaping the workspace, or a deeper nested repository/
+submodule leaves every prefix unresolved and keeps the widened whole-tree walk (prunes hidden path
+segments and IGNORED_DIRS, non-fatal notice) — a partial nested candidate set is never presented as
+complete. Residual: a deeper nested repository's own .gitignore is not applied in that fallback
+(R13-11/R13-23).
+**Plugin copy root-source bypass + no-streamer hard-link safety (252).** A second read-only safety
+review fixed a root source/subpath bypass: source `/` is now explicitly rejected (previously src + "/"
+became `//` and could bypass the inside-tree/source comparison). The no-streamed-write fallback is
+now allowed only for a NEW destination: if the destination already exists (or cannot be proven absent)
+copy returns unsupported instead of truncating, because path canonicalization cannot identify a hard
+link and an existing destination hard-linked to the source would otherwise destroy the source. With
+the streamed-write surface an existing destination is atomically replaced (temp commit/abort), so the
+hard-link boundary is safe there. Residuals: the no-streamer NEW-path case still has a concurrent-
+creation race between the absence proof and the whole-file fallback write (not a no-overwrite
+guarantee); canonicalization remains a pre-write proof (concurrent symlink swap after it is a
+documented TOCTOU); remote hard-link identity cannot be compared like local os.SameFile; parents are
+created before the claim; failure after claim can leave a partial destination; the 16 MiB whole-file
+fallback, shrink/grow/cancel, metadata and partial-tree residuals are unchanged (R13-19/R13-21).
+**Palette Tab accepts the selected suggestion (253).** Palette keyboard now matches Fresh's
+prompt_accept_suggestion: Up/Down move selection, PageUp/PageDown page it, Enter runs/opens the
+selected row, Escape closes. Tab ACCEPTS the selected suggestion into the query instead of running it
+(file mode fills the ranked path; command/buffer/line modes fill the command/buffer name or line
+target, preserving the >, # or : prefix); the palette stays open, rows re-query, Enter then runs/opens.
+A message row, a disabled command or no selection leaves the query unchanged. In Live Grep's floating
+overlay Tab is a no-op as in Fresh. Tests/docs cover keyboard/state; this was a concrete missing
+interaction, not styling (R3/R13-3).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1107 / 579 per locale, 572 KiB text (under 640 KiB cap), ≈662 KiB JSON,
+heap 124-82-207 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r36-final.log); real hosts
+UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-35 outcome (2026-11-09, merged working tree on `0650fd4`).** Five tasks landed (243–247);
 248 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
@@ -4338,6 +4399,32 @@ for parity status.
 213. **i18n extraction round-35 (247; R13-5).** terminal/env/workspace new notices English
      byte-identical; rules/budget/docs/fallback/formatting tests. en 1107/de 579, 572 KiB text,
      ≈662 KiB JSON, heap 119-88-207.
+214. **Host window + dock focus merged for DECSET 1004 (249; R13-15).** View.ReportFocus all
+     workspaces; FocusMsg/BlurMsg real outer focus merged with dock keyboard focus; child focus-in only
+     both focused, out when either loses; tab switch/hide dock/blur; pager no blur; repeated/redundant
+     ignored; new tab inherits; FocusMsg still remote reconnect-on-activate, Blur never reconnect; reports
+     only after 1004 opt-in. Residuals outer-terminal focus support/tmux config, assumed focused initial,
+     focus mode not persisted, restored no child.
+215. **Local detector content-change invalidation — detection-only (250; R13-18).** bounded local
+     fsnotify marker/require content change invalidates detection; bounded/cancel/non-blocking/clear
+     degradation; detection-only — no recipe re-activation, no capture-cache recapture; no self-trigger
+     loop/resource leak.
+216. **Remote nested-repository git candidates (251; R13-11/R13-23).** up to 8 nested repos resolved
+     one layer with bounded git -C <prefix> ls-files through authority (same context/cancel/remote cwd/
+     no local); candidates join explicit batches, nested .gitignore applies (tracked-ignored/dotfiles in,
+     untracked ignored out; no notice on success). All-or-nothing: >8/failed/truncated/non-UTF8/escaping/
+     deeper nested => all unresolved + widened walk + notice, never partial-as-complete. Residual deeper
+     nested .gitignore not applied in fallback.
+217. **Plugin copy root-source bypass + no-streamer hard-link safety (252; R13-19/R13-21).** source /
+     explicitly rejected (src+"/" -> // bypass fixed); no-streamer fallback only for NEW destination;
+     existing/uncertain destination unsupported (cannot prove not hard-linked to source); streamer existing
+     target atomically replaced safe. Residuals no-streamer new-path concurrent-creation race (no no-
+     overwrite guarantee), canonicalization TOCTOU symlink swap, remote hardlink identity not SameFile,
+     parents/failure-after-claim partial, 16MiB/shrink/grow/cancel/metadata/partial tree.
+218. **Palette Tab accepts selected suggestion (253; R3/R13-3).** Up/Down/PageUp/PageDown/Enter/Esc; Tab
+     fills selected suggestion into query (file ranked path; command/buffer/line name/target preserve
+     >/#/: prefix), palette stays open/rows re-query, Enter runs; message/disabled/no selection unchanged;
+     Live Grep floating overlay Tab no-op as Fresh; keyboard/state tests/docs.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6203,21 +6290,35 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-36 verification (2026-11-09, merged tree on `40598e7`; 249–253 landed; 254 audit).**
+  STATIC GATES PASS (Lead, default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint
+  0, purity, import rules, menus, i18n_check with catalogue heap en 124 KiB / de 82 KiB / both 207
+  KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76
+  packages ok, no FAIL line (log `/tmp/gvim-r36-final.log`). The audit ran build/gofmt/i18n_check
+  plus targeted round-36 tests/diff review only; the Lead ran the full suite. Tracks: 249 host-window
+  + dock focus merged for DECSET 1004; 250 local detector content-change invalidation DETECTION-ONLY;
+  251 remote nested-repository git candidate slice (up to 8, one layer, all-or-nothing); 252 plugin
+  copy root-source bypass fix + no-streamer hard-link safety; 253 palette Tab accepts the selected
+  suggestion.
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-35 landed detector reload (detection-only), remote search walked filter, DECSET 1004 focus
-  forwarding, plugin copy canonicalization/capability refusal, i18n extraction; full suite EXIT 0 (76
-  packages, log /tmp/gvim-r35-final.log); §5.5 is round-36/37 plan; TUI-only scope/genuine-
+  (round-36 landed host/dock focus merge, local detector invalidation detection-only, nested git
+  candidates, plugin copy root-source/no-streamer hardlink safety, palette Tab accept; full suite EXIT 0
+  (76 packages, log /tmp/gvim-r36-final.log); §5.5 is round-37/38 plan; TUI-only scope/genuine-
   equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–35 had their gate sets
-  run. Round 35 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–36 had their gate sets
+  run. Round 36 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  119 KiB / de 88 KiB / both 207 KiB, git diff --check). Final full
+  124 KiB / de 82 KiB / both 207 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r35-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-35 tests and
+  `/tmp/gvim-r36-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-36 tests and
   diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
   recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
   production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling

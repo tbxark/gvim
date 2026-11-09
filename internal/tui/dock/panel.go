@@ -73,6 +73,15 @@ type Panel struct {
 	// saved width of a restored transcript); a content-width change reflows the
 	// rows to the new width (transcript.go reflowPrior).
 	priorWidth int
+	// termFocusSet/termFocus remember the last focus state reported to the current
+	// session, so combined window/dock focus changes never send a duplicate.
+	termFocusSet bool
+	termFocus    bool
+	// hostBlurred is the outer terminal window's focus state (true when the OS
+	// window is not focused). The child gets focus-in only when the dock has the
+	// keyboard focus AND the window is focused; zero value = focused, matching a
+	// program started without a focus report.
+	hostBlurred bool
 	// autoExitScroll asks the next Sync/Show to open the read-only scrollback view
 	// when the shell has exited, so the frozen transcript (ending in Fresh's exit
 	// marker) is what the dock shows, like Fresh's read-only exited terminal. It is
@@ -165,7 +174,7 @@ func (p *Panel) SetFocus(v bool) {
 	was := p.focus
 	p.focus = v
 	if was != v {
-		p.reportTerminalFocus(v)
+		p.reportTerminalFocus(v && !p.hostBlurred)
 	}
 	if !v {
 		p.ClearHover()
@@ -253,8 +262,21 @@ func (p *Panel) focusDock() {
 	}
 	if !p.focus {
 		p.focus = true
-		p.reportTerminalFocus(true)
+		p.reportTerminalFocus(!p.hostBlurred)
 	}
+}
+
+// SetHostFocused merges the outer terminal window's focus into the child's focus
+// report: a terminal program is focused only while both the OS window and the dock
+// hold the keyboard. It reports only on a real change (a window focus event with
+// the dock on a file buffer changes nothing for the terminal).
+func (p *Panel) SetHostFocused(focused bool) {
+	blurred := !focused
+	if p.hostBlurred == blurred {
+		return
+	}
+	p.hostBlurred = blurred
+	p.reportTerminalFocus(p.focus && focused)
 }
 
 // terminalFocuser is the optional focus-reporting half of a terminal session
@@ -271,9 +293,15 @@ func (p *Panel) reportTerminalFocus(focused bool) {
 	if p.term == nil {
 		return
 	}
-	if f, ok := p.term.(terminalFocuser); ok {
-		f.Focus(focused)
+	if p.termFocusSet && p.termFocus == focused {
+		return
 	}
+	f, ok := p.term.(terminalFocuser)
+	if !ok {
+		return
+	}
+	p.termFocus, p.termFocusSet = focused, true
+	f.Focus(focused)
 }
 
 // start starts a shell unless one is starting or running. A shell that has exited
@@ -522,9 +550,10 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		p.applied = shellSize{msg.cols, msg.rows}
 		p.armed, p.resizing, p.writing = false, false, false
 		p.queue = nil
-		// The replacement session starts with the dock's current focus state (a
-		// focus call may have happened before this session existed).
-		p.reportTerminalFocus(p.focus)
+		// The replacement session starts with the dock's current combined focus
+		// state (a focus call may have happened before this session existed).
+		p.termFocusSet = false
+		p.reportTerminalFocus(p.focus && !p.hostBlurred)
 		if p.open {
 			// The dock was shown to get this shell, so the shell takes the focus.
 			p.focusDock()
@@ -558,6 +587,7 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.exited = true
 			p.exitCode, p.exitKnown = msg.code, msg.codeOK
 			p.exitMarker = true
+			p.termFocusSet = false
 			p.focus = false
 			p.queue = nil
 			p.scroll = scrollState{}

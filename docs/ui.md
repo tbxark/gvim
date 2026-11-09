@@ -103,6 +103,15 @@ same card, between its borders:
   `…`. A narrower frame drops the column and keeps the full-width list. The preview is
   a plain-text head: it has no syntax colours and does not scroll (see §4.5 of
   `docs/parity.md`).
+**Palette keyboard.** Up/Down move the selection, PageUp/PageDown page it, Enter
+runs/opens the selected row and Escape closes the palette. Tab accepts the selected
+suggestion into the query instead of running it (Fresh's `prompt_accept_suggestion`): in
+the file mode it fills the ranked path, in command/buffer/line modes the command name,
+buffer name or line target, preserving the `>`, `#` or `:` mode prefix; the palette stays
+open, the rows re-query, and Enter then runs/opens it. A message row, a disabled command
+or no selection leaves the query unchanged. In Live Grep's floating overlay Tab is a
+no-op, as in Fresh (its suggestion values are opaque).
+
 - **Live Grep toolbar** (one row between the title border and the item rows, in Live
   Grep mode only). The match modes and the scopes are `Alt+<letter> Label:on|off`
   segments: `Alt+C` case, `Alt+G` regex, `Alt+O` whole word; `Alt+L` files,

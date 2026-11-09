@@ -856,10 +856,19 @@ A child can ask for focus in/out reports with `ESC [ ? 1004 h` (xterm's mode). T
 session tracks the mode from the emulator and, while it is on, writes the
 canonical `CSI I` (focus in) / `CSI O` (focus out) bytes into the child's input
 through the same asynchronous inbox as key input and emulator replies. Reports
-are sent only on real transitions: the dock forwards a focus-in when the tab or
-the dock gains the keyboard, a focus-out when the editor takes it back, on a tab
-switch (old tab out, new tab in) and when the dock is hidden; toggling scrollback
-and moving inside the pager do not blur the shell. A repeated focus call is
+are sent only on real transitions and only when the terminal is focused in the
+combined sense: gvim enables `View.ReportFocus` for every workspace, so Bubble Tea
+reports the real outer-window focus as `FocusMsg`/`BlurMsg`; the model merges it
+with the dock's keyboard focus and forwards the effective state to the dock
+(`Tabs.SetHostFocused` / `Panel.SetHostFocused`). A child receives a focus-in when
+the window and the dock are both focused and a focus-out when either loses them —
+switching to the editor, switching tabs (old tab out, new tab in), hiding the dock
+or blurring the outer window; moving inside the pager/scrollback does not blur.
+Repeated or redundant calls (window blur while the dock was already unfocused,
+window focus while a file buffer has the keyboard) send nothing, and a new tab
+inherits the current window state. The model's `FocusMsg` path still performs the
+remote-authority reconnect-on-activate; `BlurMsg` is never a reconnect point and
+only updates the merged focus. A repeated focus call is
 ignored. If the child enables 1004 while the dock already has the focus, the
 session sends the initial focus-in after that output chunk, so a program that
 starts asking mid-session begins focused; disabling the mode stops the reports
@@ -871,13 +880,17 @@ mouse, keyboard and clipboard forwarding are unaffected.
 
 Fresh asks its host terminal for focus events itself (for its focus announcer) but
 does not forward them to embedded terminals, so this forwarding is a gvim
-extension. Its one remaining difference: gvim currently forwards only the dock's
-keyboard focus, not the OS window focus — with `View.ReportFocus` enabled only for
-a remote workspace authority, losing focus of the outer terminal window while the
-dock is focused does not send a blur to the child (and regaining it does not send
-a focus-in); switching the keyboard to the editor or hiding the dock does. Focus
-mode is not persisted in `terminal.json`: a revived shell starts with the mode
-off until the program asks again.
+extension. Both halves are now real: the OS-window focus comes from the host
+terminal's own DECSET 1004 reports (Bubble Tea translates them to
+`FocusMsg`/`BlurMsg`) and the dock keyboard focus is local, and the child only
+ever sees their conjunction. How reliable the window half is therefore depends
+on the outer terminal honoring focus reporting: a host that does not emit focus
+events leaves the child believing the window is focused, and a multiplexer such as
+tmux only passes the events when its own focus reporting is configured. The
+initial state is assumed focused until the first blur arrives, focus mode is not
+persisted in `terminal.json` (a revived shell starts with 1004 off until the
+program asks again), and no focus reports are sent to a restored read-only
+transcript because it has no child.
 
 ## close_on_exit
 

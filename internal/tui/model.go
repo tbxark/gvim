@@ -194,6 +194,10 @@ type Model struct {
 	lsp lspState
 	// dock is the terminal dock under the body (see dock_glue.go and the dock package).
 	dock dock.Tabs
+	// hostFocused is the outer terminal window's focus (Bubble Tea FocusMsg/BlurMsg,
+	// reported because View enables ReportFocus). Terminal children get focus-in only
+	// while both the window and the dock have the keyboard.
+	hostFocused bool
 	// discover scans for terminal sessions outside gvim, for the Discover Agent
 	// Sessions picker (see agent_discover.go). Nil disables the scan.
 	discover AgentDiscoverer
@@ -299,12 +303,14 @@ func New(deps Deps) *Model {
 		env:             deps.Env,
 		view:            newViewState(viewOptionsOf(deps.View)),
 		largeWindows:    deps.LargeWindows,
+		hostFocused:     true,
 	}
 	m.view.languages = deps.Languages
 	// The inlay-hints toggle starts from the configured display option; the Toggle
 	// Inlay Hints command flips it for the rest of the session.
 	m.lsp.inlay = m.view.opts.EnableInlayHints
 	m.dock = dockNewPanel(m)
+	m.dock.SetHostFocused(m.hostFocused)
 	m.notes.sink = deps.NoticeSink
 	m.notes.record("", deps.Notice)
 	for _, w := range deps.Warnings {
@@ -483,9 +489,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.clockCmd()
 	}
 	if _, ok := msg.(tea.FocusMsg); ok {
-		// Activation of the terminal window is the reconnect-on-activate point of a
-		// remote workspace authority.
+		// The outer terminal window gained the focus: merge it into the dock's focus
+		// reporting (a child that asked for DECSET 1004 events is focused again when
+		// the dock itself has the keyboard) and keep the remote reconnect-on-activate
+		// point.
+		m.hostFocused = true
+		m.dock.SetHostFocused(true)
 		return m, m.beginAuthorityReconnect()
+	}
+	if _, ok := msg.(tea.BlurMsg); ok {
+		// The outer window lost the focus: no terminal child may think it is focused.
+		// A blur is not a reconnect point (the connection is unrelated to the OS
+		// window).
+		m.hostFocused = false
+		m.dock.SetHostFocused(false)
+		return m, nil
 	}
 	if forced, ok := msg.(updateForcedMsg); ok {
 		m.applyUpdateStatus(forced.status)
@@ -3241,9 +3259,11 @@ func (m *Model) View() tea.View {
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
-	// A remote authority reconnects when the terminal window is activated, so the
-	// program must report focus.
-	v.ReportFocus = m.auth.Status != nil
+	// Focus reporting is always on: terminal children that enable DECSET 1004 need
+	// the real outer-window focus merged with the dock's keyboard focus (the model
+	// forwards FocusMsg/BlurMsg to the dock), and a remote authority still reconnects
+	// when the window is activated.
+	v.ReportFocus = true
 	v.MouseMode = tea.MouseModeAllMotion
 	if x, y, ok := m.caret(); ok {
 		v.Cursor = tea.NewCursor(x, y)

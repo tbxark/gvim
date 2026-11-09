@@ -38,6 +38,11 @@ const (
 // the finder's local skip list.
 var remoteGrepSkipDirs = []string{".git", "node_modules", "target", "__pycache__", ".hg", ".svn", ".DS_Store"}
 
+// remoteNestedMaxRepos bounds how many nested repositories/submodules one search resolves
+// with their own bounded git listings. More than this keeps the widened walk fallback (with
+// the non-fatal notice), never a guessed/incomplete candidate set.
+const remoteNestedMaxRepos = 8
+
 // remoteSearch is the project-wide search over a remote workspace: a searchpanel.Searcher
 // and BatchSearcher that runs ripgrep (or grep) through the authority's one-shot surface
 // with the remote workspace as cwd. The local project search is never consulted.
@@ -301,10 +306,15 @@ type remoteProjectResultScope struct {
 	listed    bool
 	tracked   map[string]bool
 	untracked map[string]bool
-	// prefixes are nested repositories/submodules git lists only by name. Their contents
-	// are accepted when their own path is not hidden; the inner repository's own ignore
-	// rules are not applied by this single git call.
+	// prefixes are nested repositories/submodules git lists only by name. When every
+	// prefix resolves to its own complete bounded git listing (nestedListed), the prefix
+	// list is replaced by those explicit candidate files and the inner repository's
+	// .gitignore applies. Otherwise the prefixes are a walk fallback (hidden/IGNORED_DIRS
+	// only, inner .gitignore not applied) with a degradation notice.
 	prefixes []string
+	// nestedListed is true when all prefixes were resolved into complete per-repository
+	// candidate lists: no prefix walk remains, so the explicit batch path is used.
+	nestedListed bool
 	// paths is the ordered candidate file list (tracked files, then untracked non-hidden
 	// files) used to pass explicit paths to the search tool in bounded batches.
 	paths []string
@@ -379,7 +389,82 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 			}
 		}
 	}
+	s.resolveNestedPrefixes(ctx, scope)
 	return scope
+}
+
+// resolveNestedPrefixes replaces each nested repository/submodule prefix with the
+// candidates of its own bounded git ls-files --cached --others --exclude-standard listing,
+// so its .gitignore is applied exactly as git defines it (tracked-ignored files included,
+// untracked ignored files left out). This is all-or-nothing: more than
+// remoteNestedMaxRepos prefixes, a failed/truncated/non-UTF-8 listing, a path that escapes
+// the workspace, or another nested repository inside one of them leaves every prefix in
+// place so the existing widened walk fallback (with its notice) runs instead -- an
+// incomplete nested candidate set is never presented as complete. Each command is bounded
+// by the search context, so cancellation/timeouts stop between prefixes and inside a
+// command.
+func (s *remoteSearch) resolveNestedPrefixes(ctx context.Context, scope *remoteProjectResultScope) {
+	if len(scope.prefixes) == 0 || len(scope.prefixes) > remoteNestedMaxRepos {
+		return
+	}
+	type nestedListing struct {
+		prefix    string
+		paths     []string
+		tracked   map[string]bool
+		untracked map[string]bool
+	}
+	var listings []nestedListing
+	for _, prefix := range scope.prefixes {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		relPrefix := strings.TrimSuffix(prefix, "/")
+		res, err := s.run(ctx, s.root, []string{"git", "-C", relPrefix, "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--cached", "--others", "--exclude-standard"})
+		if err != nil || res.Code != 0 || res.Truncated {
+			return
+		}
+		entry := nestedListing{prefix: prefix, tracked: map[string]bool{}, untracked: map[string]bool{}}
+		for _, raw := range strings.Split(string(res.Stdout), "\x00") {
+			if raw == "" {
+				continue
+			}
+			pathPart, tracked, submodule := parseGitLsFilesEntry(raw)
+			if pathPart == "" || pathPart == ".git" || strings.HasPrefix(pathPart, ".git/") || submodule || strings.HasSuffix(pathPart, "/") {
+				// Another nested repository/submodule inside this one cannot be resolved by
+				// this slice; keep the whole fallback instead of dropping its contents.
+				return
+			}
+			if !utf8.ValidString(pathPart) {
+				return
+			}
+			full := path.Join(prefix, pathPart)
+			if !strings.HasPrefix(full, prefix) {
+				return
+			}
+			if tracked {
+				entry.tracked[full] = true
+				entry.paths = append(entry.paths, full)
+			} else {
+				entry.untracked[full] = true
+				if !hiddenRemotePath(pathPart) {
+					entry.paths = append(entry.paths, full)
+				}
+			}
+		}
+		listings = append(listings, entry)
+	}
+	// Every prefix resolved completely: swap the walk prefixes for explicit candidates.
+	scope.prefixes = nil
+	scope.nestedListed = true
+	for _, entry := range listings {
+		for full := range entry.tracked {
+			scope.tracked[full] = true
+		}
+		for full := range entry.untracked {
+			scope.untracked[full] = true
+		}
+		scope.paths = append(scope.paths, entry.paths...)
+	}
 }
 
 // parseGitLsFilesEntry splits one NUL field of `git ls-files -z -s`: a tracked entry is
