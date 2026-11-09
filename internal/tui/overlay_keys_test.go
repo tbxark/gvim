@@ -349,6 +349,77 @@ func firstPromptCopyMsg(t *testing.T, cmd tea.Cmd) promptCopyMsg {
 // confirm's question) without mutating it. With a native writer the Copied notice waits
 // for that write's result; a failure says so and a reader-only clipboard is reported as
 // an unconfirmed OSC 52 request, never as Copied.
+// TestPromptSelectAllThroughRoot: Ctrl+A in the prompt context marks the whole input for
+// replacement through the real overlay Update path. Typing replaces it, Backspace/Delete
+// clear it, and an arrow cancels the selection while keeping the text.
+func TestPromptSelectAllThroughRoot(t *testing.T) {
+	keys := fakeKeymap{"prompt|a|ctrl": {Action: "prompt_select_all"}}
+	open := func(t *testing.T) (*Model, *prompt.Line, *[]string) {
+		t.Helper()
+		m := overlayModel(t, keys)
+		changed := &[]string{}
+		p := prompt.NewLine(m.styles, prompt.LineOptions{
+			Label: "Value:", Input: "old.txt",
+			OnChange: func(s string) { *changed = append(*changed, s) },
+		})
+		m.pushOverlay(p)
+		return m, p, changed
+	}
+
+	t.Run("typing replaces the whole input", func(t *testing.T) {
+		m, p, _ := open(t)
+		m.Update(ctrl('a'))
+		m.Update(typed("n"))
+		if got := p.Value(); got != "n" {
+			t.Fatalf("value after Ctrl+A + n = %q, want n", got)
+		}
+	})
+
+	t.Run("backspace clears the whole input", func(t *testing.T) {
+		m, p, changed := open(t)
+		m.Update(ctrl('a'))
+		m.Update(special(tea.KeyBackspace))
+		if got := p.Value(); got != "" {
+			t.Fatalf("value after Ctrl+A + Backspace = %q, want empty", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "" {
+			t.Fatalf("onChange = %q, want one empty value", *changed)
+		}
+	})
+
+	t.Run("delete clears the whole input", func(t *testing.T) {
+		m, p, changed := open(t)
+		m.Update(ctrl('a'))
+		m.Update(special(tea.KeyDelete))
+		if got := p.Value(); got != "" {
+			t.Fatalf("value after Ctrl+A + Delete = %q, want empty", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "" {
+			t.Fatalf("onChange = %q, want one empty value", *changed)
+		}
+	})
+
+	t.Run("arrow cancels selection and keeps text", func(t *testing.T) {
+		m, p, _ := open(t)
+		m.Update(ctrl('a'))
+		m.Update(special(tea.KeyLeft))
+		m.Update(typed("x"))
+		if got := p.Value(); got != "old.txxt" {
+			t.Fatalf("value after Ctrl+A + Left + x = %q, want old.txxt", got)
+		}
+	})
+
+	t.Run("ctrl+v paste replaces", func(t *testing.T) {
+		m, p, _ := open(t)
+		m.Update(ctrl('a'))
+		m.Update(ctrl('v'))
+		m.Update(tea.PasteMsg{Content: "new"})
+		if got := p.Value(); got != "new" {
+			t.Fatalf("value after Ctrl+A + Ctrl+V = %q, want new", got)
+		}
+	})
+}
+
 func TestPromptCopyReportsNativeWriterResult(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		cb := &promptCutClipboard{}

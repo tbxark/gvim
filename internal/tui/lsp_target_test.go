@@ -78,3 +78,41 @@ func TestLSPDisableLanguageTargetWithoutPortIsANotice(t *testing.T) {
 		t.Fatalf("notice = %q, want the no-server notice", lt.m.notice)
 	}
 }
+
+func TestLSPDisableLanguageTargetMapsTsxOpenLanguage(t *testing.T) {
+	port := &fakeLSP{}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.tsx", lines: []string{"export const x = <div/>"}})
+	cmd, err := lt.m.doAction("lsp_disable_language_target", map[string]any{
+		"path":     "/p/a.tsx",
+		"language": "tsx",
+	}, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lt.settle(cmd, 3)
+	if !port.muted["tsx"] {
+		t.Fatalf("muted = %+v, want tsx (the native openLanguage target)", port.muted)
+	}
+	if strings.Contains(lt.m.notice, "active document changed") {
+		t.Fatalf("notice = %q, want the valid tsx mapping accepted", lt.m.notice)
+	}
+}
+
+func TestLSPDisableLanguageTargetAcceptsTsxLanguageMapping(t *testing.T) {
+	port := &fakeLSP{}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.tsx", lines: []string{"export const x = <div/>"}})
+	// Simulate a user language mapping that names the buffer's language tsx (rather than
+	// the TypeScript detection default) before the target action runs.
+	lt.m.langs["/p/a.tsx"] = "tsx"
+	cmd, err := lt.m.doAction("lsp_disable_language_target", map[string]any{
+		"path":     "/p/a.tsx",
+		"language": "tsx",
+	}, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lt.settle(cmd, 3)
+	if !port.muted["tsx"] {
+		t.Fatalf("muted = %+v, want the tsx language mapping target", port.muted)
+	}
+}

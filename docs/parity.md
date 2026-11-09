@@ -21,13 +21,13 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `38080d4` (the round-60 commit; the previous round's commit is
-folded in) plus the merged round-61 work. Static gates PASS (Lead, final pass after all writes stopped;
-default GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
-i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check, gofmt clean).
-Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r61-final5.log`). The audit ran build/gofmt/i18n_check plus targeted round-61 tests/diff
-review. Real-host SSH/jump-box/agent-forwarding/
+Last verified: 2026-11-10, tree commit `b4ee547` (the round-61 commit; the previous round's commit is
+folded in) plus the merged round-62 work. Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r62-final3.log`); 0 FAIL. The supplied round-62 gate log covers the full suite, not a new
+heap/static-gate measurement: the last recorded static PASS remains Round61 (heap en 127 KiB / de 83 KiB /
+both 210 KiB), and the changed-package build/CGO/windows/vet/lint0/purity/import/gofmt/diff checks were
+reported green separately. Targeted round-62 tests pass; real-host checks remain UNTESTED. Real-host SSH/jump-box/agent-forwarding/
 search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/
 secret-tool, real-tmux, Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching remain
 UNTESTED. Fresh reference: `refs/fresh` same
@@ -1531,6 +1531,36 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-62 outcome (2026-11-10, merged working tree on `b4ee547`).** Two slices plus docs:
+the prompt-select-all overlay action and the opt-in Deno/Slang helper Disable actions. Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r62-final3.log`); no new heap/static measurement was supplied with this log (last static
+Round61 heap 127-83-210 KiB). No commit was made.
+**Prompt select-all (item 315).** Ctrl+A in the default/VS Code prompt context marks the whole input as
+the invisible prefill selection: printable typing, bracketed paste and Ctrl+V replace it; Backspace/Delete
+clear it once (no onChange on an already-empty field), clear a stale validation error, and no callback
+fires for an empty selection; an arrow cancels the selection while keeping text. The macOS/Emacs presets
+retain their own Ctrl+A prompt Home binding. Keymap counts/docs updated; unit and real root Update tests
+cover typing, Ctrl+V pending prefill, empty/no-onChange, error clearing, Backspace/Delete and arrow.
+RESIDUALS: the selection is deliberately invisible (no reverse-video highlight; documented); the Ctrl+V
+replacement is covered at the prompt unit seam, not a real root/terminal clipboard; real terminal
+clipboards UNTESTED.
+**Deno/Slang Disable (item 316).** The opt-in deno_lsp and slang_lsp help popups offer controlled
+Disable actions only when the active buffer has an exact recognized language and gvim.has("lsp"); the
+plugin re-checks after the popup, carries path/language, and never claims async success. Deno accepts
+typescript/javascript and maps a TypeScript/tsx buffer to the native tsx target; the TUI accepts the
+post-open tsx language only for a .tsx TypeScript document. Slang requires exactly slang. text/
+unrecognized languages (e.g. default .cjs/.slangh) offer no row and never pass text to the native mute.
+i18n keys/docs/tests cover all six Deno extensions, both Slang extensions, tab switch/language change,
+missing LSP, strict-language refusals and no false success. RESIDUALS: .cjs/.slangh need a configured
+language entry to be recognized (documented); the TUI tsx mapping is covered with a fake LSP port, no
+real server/remote integration; real LSP/host UNTESTED.
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 253/in effect
+251, macos 60/273, macos-gui 52/324, emacs 98/316, vscode 9/256; i18n en 1184 / 581 per locale
+(plugin-local i18n files add the Disable/status keys), 575 KiB text, ≈665 KiB JSON; no new heap
+measurement (last 127-83-210 KiB, Round61). Full suite EXIT 0 (77 packages, log /tmp/gvim-r62-final3.log);
+real hosts UNTESTED; no full-parity claim.
 **Round-61 outcome (2026-11-10, merged working tree on `38080d4`).** Two slices plus docs: the
 remote-project-search glob/finder-health closure (R13-11) and the opt-in Rust LSP helper's Disable action
 (R13-6). Static gates PASS; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77
@@ -6598,6 +6628,20 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      LSP-port mute, and the plugin never claims the async result. Tests cover delegation and refusal
      (non-Rust, no LSP, changed target). Residuals: no real LSP-server/remote e2e; mute is language-wide at
      the port, not a per-buffer/server setting.
+315. **Prompt select-all (R2-4).** Ctrl+A in the default/VS Code prompt context sets an
+     invisible whole-input prefill; typing, bracketed paste and Ctrl+V replace it, Backspace/Delete clear
+     it once (no onChange on empty, stale validation error cleared), arrows cancel keeping text; macOS/Emacs
+     keep their own Ctrl+A prompt Home. Keymap counts/docs updated; unit + real root Update tests cover
+     typing, Ctrl+V pending prefill, empty/no-onChange, error clearing, Backspace/Delete and arrow.
+     Residuals: no visual selection highlight (documented); Ctrl+V replacement only at prompt unit seam,
+     not a real root/terminal clipboard; real terminal UNTESTED.
+316. **Deno/Slang Disable actions (R13-6).** Opt-in deno_lsp/slang_lsp help popups offer controlled
+     lsp_disable_language_target only for exact recognized languages + gvim.has("lsp"), re-check after the
+     popup, carry path/language and never claim async success. Deno accepts typescript/javascript, maps
+     TypeScript/tsx to native tsx; TUI accepts tsx only for a .tsx TypeScript doc; Slang requires exactly
+     slang; text/unrecognized (.cjs/.slangh default) never dispatch. i18n/docs/tests cover extensions,
+     tab/language changes, missing LSP, refusals and no false success. Residuals: .cjs/.slangh require a
+     configured language entry (documented); TUI tsx mapping uses a fake port; no real server/remote e2e.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -8623,6 +8667,13 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-62 verification (2026-11-10, merged tree on `b4ee547`).** FULL SUITE PASS: final
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0, 77 packages ok, 0 FAIL (log
+  `/tmp/gvim-r62-final3.log`). The supplied log covers the full suite; no new heap/static measurement
+  accompanied it (last recorded static PASS Round61 heap en 127 KiB / de 83 KiB / both 210 KiB), while
+  changed-package build/CGO/windows/vet/lint0/purity/import/gofmt/diff checks were reported green.
+  Tracks: prompt select-all; Deno/Slang Disable; docs/keymap counts. Real-host checks remain UNTESTED.
+  No full-parity claim.
 - **Round-61 verification (2026-11-10, merged tree on `38080d4`).** STATIC GATES PASS (Lead,
   final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
   golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 127 KiB / de 83 KiB /
@@ -8713,16 +8764,15 @@ Round 13 recorded five open gaps:
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
   (round-60 landed prompt copy/cut identity/owner/token, welcome startup toggle state, remote
-  candidate-listing degradation, native env/LSP withdrawal; round-61 adds remote glob/finder-health and
-  rust_lsp Disable; full suite EXIT 0 (77 packages, log /tmp/gvim-r61-final5.log); real-host checks
+  candidate-listing degradation, native env/LSP withdrawal; round-61 adds remote glob/finder-health and rust_lsp Disable; round-62 adds prompt select-all and
+  Deno/Slang Disable; full suite EXIT 0 (77 packages, log /tmp/gvim-r62-final3.log); real-host checks
   UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–61 had their full gate sets
-  run. Round 61 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
-  native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check). Final full
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–62 had their full-suite gate runs
+  (Rounds 2–61 also recorded static gates; Round62 supplied the full-suite log). Round 62 final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r61-final5.log`. The audit ran build/gofmt/i18n_check plus targeted round-61 tests and
-  diff review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
+  `/tmp/gvim-r62-final3.log`; no new heap/static measurement accompanied that log (last recorded static
+  PASS Round61 heap en 127 KiB / de 83 KiB / both 210 KiB). The audit ran targeted round-62 tests and
+  diff review only; the Lead ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts
   policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching, local

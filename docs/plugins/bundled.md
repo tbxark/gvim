@@ -472,17 +472,36 @@ explicit-config rules, the `typescript`/`javascript` `lsp` configuration entry (
 `auto_start: false`, `root_markers: ["deno.json", "deno.jsonc"]`,
 `initialization_options: { enable: true }`), the workspace-authority probe note and local-only
 LookPath caveat, the native Start/Restart LSP Server and Show LSP Status actions, and the upstream
-installation link. No keys and no settings; opt-in (`default_enabled: false`). Reductions (also in
-porting.md): the plugin itself does not select/restore language servers (core does), no
-active-window root tracking, and no LSP-menu/disable/register seam; Check Project's presence check
-is the authority-following `deno --version` probe; the plugin's local LookPath is never used for
-presence. Tests: `plugin/bundled/deno_lsp_test.go` covers the
+installation link. The popup also offers **Disable Deno LSP for this language** when the active
+buffer is a TypeScript/JavaScript file (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`) and
+`gvim.has("lsp")` is true: it re-checks that active TS/JS buffer and LSP feature, captures that
+buffer's path/language and dispatches the controlled native `lsp_disable_language_target` action;
+the TUI re-validates the target before the root-level LSP-port mute. The language gate is strict:
+`buf:language()` must be `typescript` or `javascript` (Fresh's `DENO_LANGUAGES` only has those two);
+a `.tsx` buffer is also accepted when its language is `tsx`, and a `.tsx` detected as `typescript`
+targets `tsx` to match gvim's native `openLanguage` mapping; the controlled native target action
+accepts that post-open tsx language for a TypeScript-detected .tsx buffer (TUI integration test),
+so the mute reaches the same server that LSP opened. The extension set is supported only when the
+buffer is already recognized as `typescript`/`javascript`: `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`,
+`.cjs`. Fresh's default `languages` table maps JavaScript only js/jsx/mjs and has no cjs; gvim
+matches that, so `.cjs` (and any other extension not mapped to javascript in the user's `languages`
+entries) is text/unrecognized by default and must be configured before this action appears. `.jsx`
+detected as react is not a JS language and is likewise rejected. A text/unrecognized language shows
+`status.not_deno`, offers no disable row and never passes `text` to the native mute. A tab switch,
+non-TS/JS buffer or missing LSP gives the matching notice and does not dispatch; the plugin never
+claims the async result. No keys and no settings; opt-in (`default_enabled: false`). Reductions (also in porting.md):
+the plugin itself does not select/restore language servers (core does), no active-window root
+tracking, no LSP-menu contribution/register seam, and Configure/restart-for-language is absent;
+Check Project's presence check is the authority-following `deno --version` probe; the plugin's
+local LookPath is never used for presence. Tests: `plugin/bundled/deno_lsp_test.go` covers the
 manifest/commands/no bindings, the curl installer regardless of a local brew, an authority probe
 succeeding despite a local LookPath miss, ready only for a successful version check, non-zero
 exit/timeout/signal never ready, probe start and workspace-trust-gate failures (not a missing-binary
 claim), the probe-failure/ready/no-config states, `deno.jsonc` and a custom workspace root, the help
 popup's native auto-selection/explicit-config/plugin-toggle text and actions plus
-copy/check/native-restart dispatch.
+copy/check/native-restart dispatch, and the controlled Disable action (recognized TS/JS extensions, exact target args and
+strict-language/tsx mapping, real default-config detection of unmapped `.cjs`, unrecognized-language/
+no-LSP refusals, no false success).
 
 **slang_lsp** (reduced Fresh port): the Slang shader language-server helper. Fresh's `slang-lsp.ts`
 is an LSP URI-scheme provider: it claims `slang-synth://` and, when go-to-definition lands on a
@@ -506,7 +525,16 @@ Language Server Help** opens a popup covering the `lsp.slang` configuration (and
 `languages.slang` entry for `.slang`/`.slangh` when gvim does not detect them), the native
 `slang-synth://` builtin-module flow (local-only, bounded, read-only cache), verification/restart
 notes, the release link and https://shader-slang.org/docs/, with copy/check and the native
-Start/Restart LSP Server and Show LSP Status actions. No keys/settings; opt-in
+Start/Restart LSP Server and Show LSP Status actions. When the active buffer is `.slang`/`.slangh`
+and `gvim.has("lsp")` is true, the popup also offers **Disable Slang LSP**: it re-checks the active
+Slang buffer and LSP feature, captures that buffer's path/language and dispatches the controlled
+native `lsp_disable_language_target` action; the TUI validates the target before the root-level
+LSP-port mute. The gate requires `buf:language() == "slang"` exactly: Fresh has no default
+`.slangh` language mapping, and gvim's default detection leaves it text/empty, so `.slangh` needs a
+user `languages.slang` entry (or Set Language) before this action is available. A `.slang`/`.slangh`
+buffer detected as text is not a Slang buffer, shows `status.not_slang`, offers no disable row and
+never passes `text` to the native mute. A tab switch, non-Slang buffer or missing LSP gives the
+matching notice and does not dispatch; no async success is claimed. No keys/settings; opt-in
 (`default_enabled: false`). Reductions (also in porting.md): no generic plugin URI-scheme/external-URI API and no
 plugin-provided schemes; the native flow is local-only with no remote generation; no version-keyed
 persistent cache (each request regenerates); the helper itself does not handle synth URIs. The

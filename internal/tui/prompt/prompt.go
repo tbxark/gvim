@@ -196,6 +196,15 @@ func (l *Line) Active() bool { return !l.closed }
 // Value returns the current input.
 func (l *Line) Value() string { return l.field.Value() }
 
+// SelectAll is Fresh's prompt_select_all: mark the whole text as a prefill selection and
+// put the caret at its end. The text field has no selection model, so the next printable
+// key or paste replaces the text; Backspace/Delete clear it, and an arrow cancels the
+// selection while keeping the text for editing.
+func (l *Line) SelectAll() {
+	l.prefill = true
+	l.field.CursorEnd()
+}
+
 // CutValue is Fresh's prompt_cut without a selection: copy the whole prompt text and
 // clear the field, as the prompt has no selection to cut in gvim.
 func (l *Line) CutValue() string {
@@ -266,7 +275,20 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		l.closed = true
 		return l, done(Done{Tag: l.tag, Outcome: Submitted, Text: text})
 	}
-	l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
+	if l.prefill && (ks == "backspace" || ks == "delete") {
+		before := l.field.Value()
+		l.untouch(true)
+		l.errText = ""
+		if before != "" && l.onChange != nil {
+			l.onChange("")
+		}
+		return l, nil
+	}
+	// Ctrl+V must keep the selected prefill: its clipboard read arrives as a PasteMsg,
+	// whose untouch(true) replaces the whole text. Untouching here would append instead.
+	if ks != "ctrl+v" {
+		l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
+	}
 	cmd := l.edit(kp)
 	if tea.Key(kp).Keystroke() != "ctrl+v" {
 		cmd = nil

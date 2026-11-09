@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/pluginapi"
 
 	bundled "github.com/tbxark/gvim/plugin/bundled"
@@ -433,4 +434,245 @@ func TestDenoLspCheckNonZeroExitIsNotReady(t *testing.T) {
 			}
 		}
 	})
+}
+
+func denoDisableRig(t *testing.T, lspEnabled bool, buffers ...rigBuffer) *rig {
+	t.Helper()
+	if len(buffers) == 0 {
+		buffers = []rigBuffer{{"/work/a.ts", "const x = 1\n"}}
+	}
+	r := startRig(t, rigOpts{
+		plugins: []string{"deno_lsp"},
+		buffers: buffers,
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	r.host.LSP().Enabled = lspEnabled
+	for _, b := range r.host.Buffers {
+		switch strings.ToLower(b.Info.Path) {
+		case "/work/a.ts", "/work/a.tsx":
+			b.Info.Language = "typescript"
+		case "/work/a.js", "/work/a.jsx", "/work/a.mjs", "/work/a.cjs":
+			b.Info.Language = "javascript"
+		}
+	}
+	return r
+}
+
+func denoDisableAction(t *testing.T, r *rig) (pluginapi.Token, string) {
+	t.Helper()
+	if err := r.h.Run("deno_lsp.help", nil); err != nil {
+		t.Fatal(err)
+	}
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	for _, a := range ov.ActionPopup.Actions {
+		if a.ID == "act:lsp_disable_language" {
+			return ov.Token, a.Label
+		}
+	}
+	t.Fatalf("help popup lacks disable action: %+v", ov.ActionPopup.Actions)
+	return 0, ""
+}
+
+func TestDenoLspDisableTargetsTheActiveLanguage(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ ext, language string }{
+		{"ts", "typescript"}, {"tsx", "tsx"},
+		{"js", "javascript"}, {"jsx", "javascript"}, {"mjs", "javascript"}, {"cjs", "javascript"},
+	} {
+		t.Run(tt.ext, func(t *testing.T) {
+			t.Parallel()
+			path := "/work/a." + tt.ext
+			r := denoDisableRig(t, true, rigBuffer{path, "x\n"})
+			token, label := denoDisableAction(t, r)
+			if label != "Disable Deno LSP for this language" {
+				t.Fatalf("disable label = %q", label)
+			}
+			r.h.Resolve(pluginapi.Completion{Token: token, Values: []any{"act:lsp_disable_language"}})
+			found := false
+			for _, call := range r.host.Cmd().Calls {
+				if call.Action == "lsp_disable_language_target" {
+					found = true
+					if call.Args["path"] != path || call.Args["language"] != tt.language {
+						t.Fatalf("target args = %+v", call.Args)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("commands = %v, want the controlled disable target", r.host.Cmd().Ran())
+			}
+			for _, notice := range r.h.NoticeTexts() {
+				if strings.Contains(strings.ToLower(notice), "disabled") {
+					t.Fatalf("plugin claimed async disable success: %v", r.h.NoticeTexts())
+				}
+			}
+		})
+	}
+}
+
+func TestDenoLspDisableRefusesNonTargetTab(t *testing.T) {
+	t.Parallel()
+	r := denoDisableRig(t, true,
+		rigBuffer{"/work/a.ts", "x\n"},
+		rigBuffer{"/work/notes.md", "# notes\n"},
+	)
+	token, _ := denoDisableAction(t, r)
+	r.host.SetActive(r.ids["/work/notes.md"])
+	r.h.Resolve(pluginapi.Completion{Token: token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched for a non-TS/JS active buffer: %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "Open a TypeScript or JavaScript file first (.ts, .tsx, .js, .jsx, .mjs, .cjs)" {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestDenoLspDisableRequiresLSP(t *testing.T) {
+	t.Parallel()
+	// Without LSP the action is not offered at all.
+	r := denoDisableRig(t, false)
+	if err := r.h.Run("deno_lsp.help", nil); err != nil {
+		t.Fatal(err)
+	}
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	for _, a := range ov.ActionPopup.Actions {
+		if a.ID == "act:lsp_disable_language" {
+			t.Fatalf("disable action offered without LSP: %+v", ov.ActionPopup.Actions)
+		}
+	}
+	// The action can still become stale if LSP disappears after the popup opened.
+	r2 := denoDisableRig(t, true)
+	token, _ := denoDisableAction(t, r2)
+	r2.host.LSP().Enabled = false
+	r2.h.Resolve(pluginapi.Completion{Token: token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r2.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched after LSP disappeared: %v", r2.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r2.h); got != "No language server is configured" {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestDenoLspDisableRejectsUnrecognizedLanguages(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, path, language string
+	}{
+		{"cjs detected as text", "/work/a.cjs", "text"},
+		{"tsx detected as text", "/work/a.tsx", "text"},
+		{"jsx detected as react", "/work/a.jsx", "react"},
+		{"ts detected as text", "/work/a.ts", "text"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := denoDisableRig(t, true, rigBuffer{tt.path, "x\n"})
+			for _, b := range r.host.Buffers {
+				if b.Info.Path == tt.path {
+					b.Info.Language = tt.language
+				}
+			}
+			if err := r.h.Run("deno_lsp.help", nil); err != nil {
+				t.Fatal(err)
+			}
+			ov := r.host.UI().Last("action_popup")
+			if ov == nil {
+				t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+			}
+			for _, a := range ov.ActionPopup.Actions {
+				if a.ID == "act:lsp_disable_language" {
+					t.Fatalf("disable offered for language %q: %+v", tt.language, ov.ActionPopup.Actions)
+				}
+			}
+			if runs := r.host.Cmd().Ran(); len(runs) != 0 {
+				t.Fatalf("unrecognized language dispatched: %v", runs)
+			}
+		})
+	}
+}
+
+func TestDenoLspDisableRechecksLanguageAfterPopup(t *testing.T) {
+	t.Parallel()
+	r := denoDisableRig(t, true)
+	token, _ := denoDisableAction(t, r)
+	for _, b := range r.host.Buffers {
+		if b.Info.Path == "/work/a.ts" {
+			b.Info.Language = "text"
+		}
+	}
+	r.h.Resolve(pluginapi.Completion{Token: token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched after language became text: %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "Open a TypeScript or JavaScript file first (.ts, .tsx, .js, .jsx, .mjs, .cjs)" {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestDenoLspTsxLanguageIDMapsToTsxTarget(t *testing.T) {
+	t.Parallel()
+	r := denoDisableRig(t, true, rigBuffer{"/work/a.tsx", "x\n"})
+	for _, b := range r.host.Buffers {
+		if b.Info.Path == "/work/a.tsx" {
+			b.Info.Language = "tsx"
+		}
+	}
+	token, _ := denoDisableAction(t, r)
+	r.h.Resolve(pluginapi.Completion{Token: token, Values: []any{"act:lsp_disable_language"}})
+	found := false
+	for _, call := range r.host.Cmd().Calls {
+		if call.Action == "lsp_disable_language_target" {
+			found = true
+			if call.Args["path"] != "/work/a.tsx" || call.Args["language"] != "tsx" {
+				t.Fatalf("target args = %+v", call.Args)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("commands = %v, want tsx target", r.host.Cmd().Ran())
+	}
+}
+
+func TestDenoLspDisableAbsentForUnmappedCJSDefault(t *testing.T) {
+	t.Parallel()
+	// Use the real default config detection path rather than a hand-set fake language:
+	// Fresh/gvim's default languages table does not map cjs to javascript.
+	detected := config.Defaults().EditorFor("", "/work/a.cjs").Language
+	if detected == "javascript" {
+		t.Fatalf("default config detects a.cjs as javascript; scheme B expects an unmapped/Text default")
+	}
+	if detected != "" && detected != "text" {
+		t.Fatalf("default config language for a.cjs = %q, want empty/Text", detected)
+	}
+	r := denoDisableRig(t, true, rigBuffer{"/work/a.cjs", "x\n"})
+	for _, b := range r.host.Buffers {
+		if b.Info.Path == "/work/a.cjs" {
+			b.Info.Language = detected
+		}
+	}
+	if err := r.h.Run("deno_lsp.help", nil); err != nil {
+		t.Fatal(err)
+	}
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	for _, a := range ov.ActionPopup.Actions {
+		if a.ID == "act:lsp_disable_language" {
+			t.Fatalf("disable offered for default-unmapped .cjs: %+v", ov.ActionPopup.Actions)
+		}
+	}
+	if runs := r.host.Cmd().Ran(); len(runs) != 0 {
+		t.Fatalf("default-unmapped .cjs dispatched: %v", runs)
+	}
 }

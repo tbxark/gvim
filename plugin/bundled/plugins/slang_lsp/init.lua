@@ -22,6 +22,50 @@ local function first_line(text)
   return (tostring(text or ""):match("^[^\r\n]*")) or ""
 end
 
+local SLANG_EXTENSIONS = { slang = true, slangh = true }
+
+local function is_slang_path(path)
+  local name = tostring(path or ""):lower()
+  local ext = name:match("%.([^.]+)$")
+  return ext ~= nil and SLANG_EXTENSIONS[ext] == true
+end
+
+local function active_slang_buffer()
+  local buf = gvim.buf.current()
+  if not buf or not is_slang_path(buf:path()) then
+    return nil
+  end
+  -- gvim's language id must be exactly slang. A .slang/.slangh buffer detected as text
+  -- (for example .slangh without a configured languages.slang entry) is not a Slang
+  -- buffer and must never pass "text" to the native language mute.
+  if tostring(buf:language() or ""):lower() ~= "slang" then
+    return nil
+  end
+  return buf
+end
+
+-- disable_slang_lsp is the controlled native language disable: re-check the active
+-- Slang buffer and the LSP feature, carry that buffer's path/language, and let the TUI
+-- re-validate the exact target before the root-level LSP-port mute.
+local function disable_slang_lsp()
+  local buf = active_slang_buffer()
+  if not buf then
+    gvim.status(t("status.not_slang"))
+    return
+  end
+  if not gvim.has("lsp") then
+    gvim.status(t("status.no_lsp"))
+    return
+  end
+  local ran, err = gvim.command.run("lsp_disable_language_target", {
+    path = buf:path(),
+    language = tostring(buf:language() or ""),
+  })
+  if not ran then
+    gvim.status(t("status.action_failed", { action = "lsp_disable_language_target", error = tostring(err) }))
+  end
+end
+
 local function proc_output(result)
   local out = first_line(result.stdout)
   if out == "" then
@@ -78,16 +122,20 @@ end
 -- show_help explains the configuration/verification steps this helper supports, the native
 -- local-only slang-synth flow, and the plugin API gap it does not expose.
 local function show_help()
+  local actions = {
+    { id = "copy:install", label = t("actions.copy_install", { command = INSTALL_COMMAND }) },
+    { id = "act:check", label = t("actions.check") },
+    { id = "act:lsp_restart", label = t("actions.restart") },
+    { id = "act:show_lsp_status", label = t("actions.status") },
+  }
+  if active_slang_buffer() and gvim.has("lsp") then
+    actions[#actions + 1] = { id = "act:lsp_disable_language", label = t("actions.disable") }
+  end
+  actions[#actions + 1] = { id = "dismiss", label = t("actions.dismiss") }
   local choice = gvim.ui.action_popup({
     title = t("help.title"),
     message = t("help.message"),
-    actions = {
-      { id = "copy:install", label = t("actions.copy_install", { command = INSTALL_COMMAND }) },
-      { id = "act:check", label = t("actions.check") },
-      { id = "act:lsp_restart", label = t("actions.restart") },
-      { id = "act:show_lsp_status", label = t("actions.status") },
-      { id = "dismiss", label = t("actions.dismiss") },
-    },
+    actions = actions,
   })
   if not choice or choice == "dismiss" then
     return
@@ -99,6 +147,10 @@ local function show_help()
   local action = choice:match("^act:(.+)$")
   if action == "check" then
     check_slang()
+    return
+  end
+  if action == "lsp_disable_language" then
+    disable_slang_lsp()
     return
   end
   if action then

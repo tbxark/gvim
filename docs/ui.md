@@ -193,7 +193,11 @@ open.
 **One-line prompt keyboard.** Up/Down walk the prompt history; when the prompt shows a plugin
 suggestion list, Up/Down/Tab/Shift+Tab move the highlight and fill the field, and PageUp/PageDown move
 the highlight by the visible suggestion rows and clamp at the ends (Fresh prompt_page_up/prompt_page_down).
-Ctrl+C copies the whole prompt text and Ctrl+X cuts it (copy then clear), as Fresh's prompt_copy/
+Ctrl+A marks the whole prompt text as selected (Fresh prompt_select_all) in the default and VS Code
+presets; this is an invisible prefill state, not a reverse-video/background-highlighted selection.
+The macOS and Emacs presets keep their Ctrl+A prompt Home binding instead. Typing or pasting replaces
+it, Backspace/Delete clears it, and an arrow cancels the selection while keeping the text. Ctrl+C copies
+the whole prompt text and Ctrl+X cuts it (copy then clear), as Fresh's prompt_copy/
 prompt_cut do when the field has no selection. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
 success and Copy failed on an error, while Cut also waits before clearing. The OSC 52 write alone
 is best-effort, so without a native writer the copy is reported as requested (not Copied) and the

@@ -2061,19 +2061,35 @@ func (m *Model) lspSetLanguageEnabledTarget(enabled bool, path, language string)
 		return nil
 	}
 	lang := m.lspLanguage(doc)
-	if path == "" || language == "" || docPath(doc) != path || lang != strings.ToLower(language) {
+	want := strings.ToLower(language)
+	if path == "" || want == "" || docPath(doc) != path {
 		m.notice = "The active document changed; the language server was not changed"
 		return nil
 	}
+	// A .tsx file detected as TypeScript is opened as the "tsx" language by the
+	// lsphost openLanguage rule (typescriptreact server). Let a caller pass that
+	// post-open language so the mute targets the same server, while a stale caller
+	// still cannot target an unrelated language.
+	if lang != want {
+		tsxOpenLanguage := lang == "typescript" && want == "tsx" && strings.EqualFold(filepath.Ext(path), ".tsx")
+		if !tsxOpenLanguage {
+			m.notice = "The active document changed; the language server was not changed"
+			return nil
+		}
+	}
+	muteLang := want
+	if lang == want {
+		muteLang = lang
+	}
 	if enabled && m.lsp.port == nil {
-		m.notice = m.lspNoServer(lang)
+		m.notice = m.lspNoServer(muteLang)
 		return nil
 	}
 	if !enabled && m.lsp.port == nil {
-		m.notice = m.lspNoServer(lang)
+		m.notice = m.lspNoServer(muteLang)
 		return nil
 	}
-	return m.lspSetLanguage(!enabled, lang)
+	return m.lspSetLanguage(!enabled, muteLang)
 }
 
 // lspServerActionDone applies the end of a status-popup action.

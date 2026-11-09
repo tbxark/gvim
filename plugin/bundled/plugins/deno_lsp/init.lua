@@ -72,6 +72,70 @@ local function first_line(text)
   return (tostring(text or ""):match("^[^\r\n]*")) or ""
 end
 
+local DENO_EXTENSIONS = { ts = true, tsx = true, js = true, jsx = true, mjs = true, cjs = true }
+local DENO_LANGUAGES = { typescript = true, javascript = true }
+
+-- deno_target is the language the native LSP port must mute, or nil when this is not a
+-- recognized Deno TypeScript/JavaScript buffer. Fresh's DENO_LANGUAGES has only
+-- typescript/javascript; a text/unrecognized language must never be sent as the target.
+-- For .tsx, gvim's native openLanguage maps TypeScript detection to the tsx server; a
+-- buffer already identified as tsx is accepted as tsx too. A .tsx detected as JavaScript
+-- stays javascript (openLanguage has no tsx rewrite for it).
+local function deno_target(buf)
+  local path = buf:path()
+  if type(path) ~= "string" or path == "" then
+    return nil
+  end
+  local ext = tostring(path):lower():match("%.([^.]+)$")
+  if ext == nil or not DENO_EXTENSIONS[ext] then
+    return nil
+  end
+  local language = tostring(buf:language() or ""):lower()
+  if ext == "tsx" then
+    if language == "typescript" or language == "tsx" then
+      return "tsx"
+    end
+    if language == "javascript" then
+      return "javascript"
+    end
+    return nil
+  end
+  if DENO_LANGUAGES[language] then
+    return language
+  end
+  return nil
+end
+
+local function active_deno_buffer()
+  local buf = gvim.buf.current()
+  if not buf then
+    return nil, nil
+  end
+  return buf, deno_target(buf)
+end
+
+-- disable_deno_lsp is the controlled native language disable: re-check the active
+-- TypeScript/JavaScript buffer and the LSP feature, carry that buffer's path/language,
+-- and let the TUI re-validate the exact target before the root-level LSP-port mute.
+local function disable_deno_lsp()
+  local buf, target = active_deno_buffer()
+  if not buf or not target then
+    gvim.status(t("status.not_deno"))
+    return
+  end
+  if not gvim.has("lsp") then
+    gvim.status(t("status.no_lsp"))
+    return
+  end
+  local ran, err = gvim.command.run("lsp_disable_language_target", {
+    path = buf:path(),
+    language = target,
+  })
+  if not ran then
+    gvim.status(t("status.action_failed", { action = "lsp_disable_language_target", error = tostring(err) }))
+  end
+end
+
 -- probe_error describes why a completed process is not a successful version check.
 -- proc.run's result.ok is false on a non-zero exit, a signal or a timeout, so checking
 -- only "result exists" would report a probe that never succeeded as a runnable runtime.
@@ -144,17 +208,22 @@ end
 -- workspace-authority probe and the native LSP actions. Its copy/check/restart actions reuse
 -- the command implementations above, so there is one source of behaviour.
 local function show_help()
+  local actions = {
+    { id = "copy:curl", label = t("actions.copy_curl", { command = CURL_INSTALL }) },
+    { id = "copy:brew", label = t("actions.copy_brew", { command = BREW_INSTALL }) },
+    { id = "act:check", label = t("actions.check") },
+    { id = "act:lsp_restart", label = t("actions.restart") },
+    { id = "act:show_lsp_status", label = t("actions.status") },
+  }
+  local buf, target = active_deno_buffer()
+  if buf and target and gvim.has("lsp") then
+    actions[#actions + 1] = { id = "act:lsp_disable_language", label = t("actions.disable") }
+  end
+  actions[#actions + 1] = { id = "dismiss", label = t("actions.dismiss") }
   local choice = gvim.ui.action_popup({
     title = t("help.title"),
     message = t("help.message"),
-    actions = {
-      { id = "copy:curl", label = t("actions.copy_curl", { command = CURL_INSTALL }) },
-      { id = "copy:brew", label = t("actions.copy_brew", { command = BREW_INSTALL }) },
-      { id = "act:check", label = t("actions.check") },
-      { id = "act:lsp_restart", label = t("actions.restart") },
-      { id = "act:show_lsp_status", label = t("actions.status") },
-      { id = "dismiss", label = t("actions.dismiss") },
-    },
+    actions = actions,
   })
   if not choice or choice == "dismiss" then
     return
@@ -170,6 +239,10 @@ local function show_help()
   local action = choice:match("^act:(.+)$")
   if action == "check" then
     check_project()
+    return
+  end
+  if action == "lsp_disable_language" then
+    disable_deno_lsp()
     return
   end
   if action then

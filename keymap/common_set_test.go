@@ -18,11 +18,11 @@ var presetNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 // (keymap.ConsultedContexts), plus the gvim-specific keys TestGvimExtensions lists; a
 // change to any count must be argued for here.
 //
-//	default     file 252  held 252  in effect 250  global 14 normal 146 prompt 27 searchPrompt 7 popup 6 menu 6 settings 5 explorer 30 terminal 6 dock 3
-//	macos       file  60  held 312  in effect 273  global 14 normal 160 prompt 32 searchPrompt 9 popup 6 menu 6 settings 5 explorer 30 terminal 8 dock 3
-//	macos-gui   file  52  held 364  in effect 324  global 16 normal 204 prompt 32 searchPrompt 11 popup 6 menu 6 settings 5 explorer 32 terminal 9 dock 3
-//	emacs       file  98  held 350  in effect 316  global 14 normal 191 prompt 36 searchPrompt 9 popup 9 menu 11 settings 5 explorer 32 terminal 6 dock 3
-//	vscode      file   9  held 261  in effect 255  global 14 normal 151 prompt 27 searchPrompt 7 popup 6 menu 6 settings 5 explorer 30 terminal 6 dock 3
+//	default     file 253  held 253  in effect 251  global 14 normal 146 prompt 28 searchPrompt 7 popup 6 menu 6 settings 5 explorer 30 terminal 6 dock 3
+//	macos       file  60  held 313  in effect 273  global 14 normal 160 prompt 32 searchPrompt 9 popup 6 menu 6 settings 5 explorer 30 terminal 8 dock 3
+//	macos-gui   file  52  held 365  in effect 324  global 16 normal 204 prompt 32 searchPrompt 11 popup 6 menu 6 settings 5 explorer 32 terminal 9 dock 3
+//	emacs       file  98  held 351  in effect 316  global 14 normal 191 prompt 36 searchPrompt 9 popup 9 menu 11 settings 5 explorer 32 terminal 6 dock 3
+//	vscode      file   9  held 262  in effect 256  global 14 normal 151 prompt 28 searchPrompt 7 popup 6 menu 6 settings 5 explorer 30 terminal 6 dock 3
 //
 // The held count is larger than the file plus the parent's file because the parent's
 // overridden bindings are kept in file order (the last one wins), and "in effect" is
@@ -44,11 +44,11 @@ var presetCounts = []struct {
 	dock         int
 	file         int
 }{
-	{"default", 252, 250, 14, 146, 27, 7, 6, 6, 5, 30, 6, 3, 252},
-	{"macos", 312, 273, 14, 160, 32, 9, 6, 6, 5, 30, 8, 3, 60},
-	{"macos-gui", 364, 324, 16, 204, 32, 11, 6, 6, 5, 32, 9, 3, 52},
-	{"emacs", 350, 316, 14, 191, 36, 9, 9, 11, 5, 32, 6, 3, 98},
-	{"vscode", 261, 255, 14, 151, 27, 7, 6, 6, 5, 30, 6, 3, 9},
+	{"default", 253, 251, 14, 146, 28, 7, 6, 6, 5, 30, 6, 3, 253},
+	{"macos", 313, 273, 14, 160, 32, 9, 6, 6, 5, 30, 8, 3, 60},
+	{"macos-gui", 365, 324, 16, 204, 32, 11, 6, 6, 5, 32, 9, 3, 52},
+	{"emacs", 351, 316, 14, 191, 36, 9, 9, 11, 5, 32, 6, 3, 98},
+	{"vscode", 262, 256, 14, 151, 28, 7, 6, 6, 5, 30, 6, 3, 9},
 }
 
 func TestPresetBindingCounts(t *testing.T) {

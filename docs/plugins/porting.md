@@ -719,7 +719,22 @@ surface instead:
   entries (`command: "deno"`, `args: ["lsp"]`, `auto_start: false`,
   `root_markers: ["deno.json", "deno.jsonc"]`, `initialization_options: {"enable": true}`),
   the workspace-authority probe note and local-only LookPath caveat, the native Start/Restart LSP
-  Server and Show LSP Status actions, and the upstream installation link.
+  Server and Show LSP Status actions, and the upstream installation link. When the active buffer is
+  TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`) and `gvim.has("lsp")`, it also
+  offers `Disable Deno LSP for this language`: the action re-checks the active buffer/LSP feature
+  after the popup, captures that buffer's path/language and dispatches the controlled native
+  `lsp_disable_language_target` command; a tab switch to a non-target file or a missing LSP is a
+  notice with no dispatch, and the plugin never claims the async mute succeeded. The language gate
+  is strict: only `buf:language()` `typescript`/`javascript` is a Deno buffer (plus `.tsx` language
+  `tsx`); `.tsx` detected as `typescript` targets `tsx` per native `openLanguage`, and the
+  controlled target action accepts that post-open `tsx` language for a TypeScript-detected .tsx
+  buffer (TUI integration test), so the mute reaches the same server LSP opened. The extension set
+  is supported only when already recognized as `typescript`/`javascript`: `.ts`, `.tsx`, `.js`,
+  `.jsx`, `.mjs`, `.cjs`. Fresh's default languages map javascript only js/jsx/mjs and has no cjs
+  (gvim matches this); `.cjs` and any unmapped extension require a user `languages` entry before
+  the action appears. `.jsx` detected as react is not a JS language. Text/unrecognized languages
+  show `status.not_deno`, offer no action, and never pass `text` to the native mute. No LSP-menu row or native-selection configuration is added by this
+  helper.
 
 Not ported in the plugin: server selection/baseline restore (native core owns it now), the
 active-window root decision, and the Fresh debug log. The presence check is the authority-following
@@ -731,8 +746,11 @@ Tests: `plugin/bundled/deno_lsp_test.go` covers the manifest/command table/no bi
 always-curl installer and clipboard/status, an authority probe succeeding despite a local LookPath
 miss, ready only for a successful version check, non-zero exit/timeout/signal never ready, probe
 start/workspace-trust-gate failures (not a missing-binary claim), the probe-failure/ready/no-config
-states plus `deno.jsonc` and a custom workspace root, and the help popup's native
-auto-selection/explicit-config/plugin-toggle text and actions plus copy/check/native-restart dispatch.
+states plus `deno.jsonc` and a custom workspace root, the help popup's native
+auto-selection/explicit-config/plugin-toggle text and actions plus copy/check/native-restart dispatch,
+and the controlled Disable action (recognized TS/JS extensions, target args,
+strict-language/tsx mapping, real default-config detection of unmapped `.cjs`,
+unrecognized-language/no-LSP refusals, no false success).
 
 ### Slang: native slang-synth external locations + helper plugin (native flow landed)
 
@@ -778,7 +796,13 @@ install/check/help half; it does not handle synth URIs:
 * `Slang: Language Server Help` explains adding `lsp.slang` (and a user `languages.slang` entry
   for `.slang`/`.slangh` when needed), the native local-only `slang-synth://` flow, the
   missing generic plugin URI API, verification/restart steps, the releases/docs links, and offers
-  copy/check plus the native Start/Restart LSP Server and Show LSP Status actions.
+  copy/check plus the native Start/Restart LSP Server and Show LSP Status actions. For an active
+  `.slang`/`.slangh` buffer with `gvim.has("lsp")`, it also offers **Disable Slang LSP** with the
+  same post-popup target re-check and controlled `lsp_disable_language_target` path/language
+  dispatch; the language must be exactly `slang`. Fresh has no default `.slangh` mapping and gvim
+  detects it as text/empty unless a user `languages.slang` entry (or Set Language) applies, so a
+  default `.slangh` is refused with `status.not_slang` and never sends `text`; tab switch/non-Slang/
+  missing LSP is a notice with no dispatch and no async-success claim.
 
 Not ported: a generic plugin-provided URI-scheme claim or `lsp_open_external_uri` hook (still no
 plugin API), arbitrary external-URI providers, remote/SSH generation (the native flow refuses
@@ -790,8 +814,10 @@ registers no keys/settings, and the native Slang LSP entry (if the user configur
 Tests: `plugin/bundled/slang_lsp_test.go` covers the manifest/visible commands/no bindings, the
 copy instruction (clipboard/status), both tools OK (version lines, argv order), one tool failing
 (non-zero exit named), a start failure preserved verbatim and not rewritten as missing, and the help
-popup's message/actions plus copy/check/native-restart dispatch. The native flow is covered by
-`internal/app/slang_synth_test.go` and `internal/lsphost/external_uri_test.go`.
+popup's message/actions plus copy/check/native-restart dispatch, and the controlled Disable action
+(both extensions, strict `slang` language, target args, real default-config detection of unmapped
+`.slangh`, text-language/no-LSP refusals, no false success). The native flow is
+covered by `internal/app/slang_synth_test.go` and `internal/lsphost/external_uri_test.go`.
 
 ### Notes for porters (learned from the bundled ports)
 

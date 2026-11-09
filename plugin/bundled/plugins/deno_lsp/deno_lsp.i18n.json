@@ -25,6 +25,9 @@
     "status.version_failed_no_config": "deno --version did not exit successfully on the workspace (%{error}), so Deno is not usable and there is no deno.json or deno.jsonc in %{root}; the project cannot be reported ready. Fix the Deno runtime on the workspace host: %{install} (see Deno: Language Server Help).",
     "status.exit_code": "exit code %{code}",
     "status.timeout": "timed out",
-    "status.signal": "signal %{signal}"
+    "status.signal": "signal %{signal}",
+    "actions.disable": "Disable Deno LSP for this language",
+    "status.not_deno": "Open a TypeScript or JavaScript file first (.ts, .tsx, .js, .jsx, .mjs, .cjs)",
+    "status.no_lsp": "No language server is configured"
   }
 }

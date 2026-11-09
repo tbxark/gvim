@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 252 | 250 |
+| `default` | 253 | 251 |
 | `macos` | 60 | 273 |
 | `macos-gui` | 52 | 324 |
 | `emacs` | 98 | 316 |
-| `vscode` | 9 | 255 |
+| `vscode` | 9 | 256 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
@@ -34,8 +34,10 @@ server (completion, hover, definition, references, implementation, rename, code 
 commands, case transforms, folding and the view, tabs and splits, the explorer, the terminal
 dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
 Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, page keys for
-its suggestion list, word deletion, paste, and copy/cut of the whole prompt text (the field has no
-selection; copy/cut report only after a native clipboard write confirms them, and a cut keeps the
+its suggestion list, select-all (Ctrl+A marks the whole input for replacement as an invisible prefill
+with no reverse-video highlight; the macOS and Emacs presets keep their own Ctrl+A prompt move-start
+binding), word deletion, paste, and
+copy/cut of the whole prompt text (the field has no selection; copy/cut report only after a native clipboard write confirms them, and a cut keeps the
 prompt on failure or when only OSC 52 is available, where both report requested rather than Copied;
 a late result is dropped unless it belongs to the same active prompt, workspace generation and latest
 copy/cut operation; copy/cut are single-flight, use only the native writer when one exists, and a

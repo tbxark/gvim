@@ -77,6 +77,30 @@ func TestEditorForBuiltinLanguages(t *testing.T) {
 			}
 			return ""
 		}},
+		{"cjs has no default language mapping", "", "a.cjs", func(s EditorSettings) string {
+			if s.Language == "javascript" {
+				return "a.cjs must require an explicit languages entry, not default to javascript"
+			}
+			if s.Language != "text" && s.Language != "" {
+				return "a.cjs default should be text/empty, got " + s.Language
+			}
+			return ""
+		}},
+		{"slangh has no default language mapping", "", "a.slangh", func(s EditorSettings) string {
+			if s.Language == "slang" {
+				return "a.slangh must require an explicit languages entry, not default to slang"
+			}
+			if s.Language != "text" && s.Language != "" {
+				return "a.slangh default should be text/empty, got " + s.Language
+			}
+			return ""
+		}},
+		{"slang is a default Slang extension", "", "a.slang", func(s EditorSettings) string {
+			if s.Language != "slang" {
+				return "a.slang should resolve to slang by default"
+			}
+			return ""
+		}},
 		{"unknown language gets the globals", "Rust", "main.rs", func(s EditorSettings) string {
 			if s.Language != "rust" || s.UseTabs || s.TabSize != 4 || !s.AutoClose || !s.AutoIndent {
 				return "rust: want the global defaults"
