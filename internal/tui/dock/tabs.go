@@ -545,6 +545,51 @@ func (t *Tabs) Starting() bool { p := t.Active(); return p != nil && p.Starting(
 // Exited reports whether the active tab's shell has exited.
 func (t *Tabs) Exited() bool { p := t.Active(); return p != nil && p.Exited() }
 
+// RestartInfo is what the status row's {terminal_restart} element shows for an
+// exited dock tab: the program a restart will run (the basename of the resume or
+// launch argv's program; "" for a plain shell), how the process ended, and
+// whether the restart rejoins an agent conversation.
+type RestartInfo struct {
+	Program      string
+	ExitCode     int
+	ExitKnown    bool
+	ResumesAgent bool
+}
+
+// ExitedRestartInfo returns the restart description of the active tab while its
+// shell has exited. A plain shell has no Program, matching Fresh's "Restart
+// terminal"; the resume argv wins over the launch argv for the program name (it
+// is what a restart runs), but the Resume wording needs terminal.resume_agents
+// on and a non-empty resume argv, exactly like the status bar's rule.
+func (t *Tabs) ExitedRestartInfo() (RestartInfo, bool) {
+	p := t.Active()
+	if p == nil || !p.Exited() {
+		return RestartInfo{}, false
+	}
+	info := RestartInfo{ExitCode: p.exitCode, ExitKnown: p.exitKnown}
+	launch := p.Launch()
+	info.ResumesAgent = t.effects.ResumeAgents && len(launch.ResumeArgv) > 0
+	argv := launch.ResumeArgv
+	if len(argv) == 0 {
+		argv = launch.Argv
+	}
+	info.Program = restartProgramName(argv)
+	return info, true
+}
+
+// restartProgramName is the short program name a restart runs: the basename of
+// argv[0] with Unix or Windows separators, or "" for an empty argv.
+func restartProgramName(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	program := argv[0]
+	if i := strings.LastIndexAny(program, "/\\"); i >= 0 {
+		program = program[i+1:]
+	}
+	return program
+}
+
 // Restored reports whether the active tab is a restored transcript.
 func (t *Tabs) Restored() bool { p := t.Active(); return p != nil && p.Restored() }
 

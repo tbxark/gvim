@@ -740,8 +740,16 @@ still loads unchanged.
   used as the panel already has it, otherwise the file's head (at most 256 KiB) is read through
   the authority's bounded windowed read with an honest truncated marker and stale-request guard
   (the panel's sequence drops superseded answers; a disconnected authority is an error, never a
-  local read). Remaining remote gaps: the preview is plain text (no remote syntax spans) and
-  head-only for files over 256 KiB; the explicit-candidate path needs a complete remote
+  local read). The preview now carries syntax spans from the same shared highlighter as the
+  local preview (`internal/app/preview_highlight.go`): up to 256 KiB and 4000 lines, one cached
+  highlighter per file in an 8-entry bounded cache (safe for concurrent preview commands),
+  CPU-only inside the preview command and with no extra remote I/O. An open-buffer preview is
+  highlighted from the panel's text; a remote head is highlighted over that bounded head. Files
+  over the caps or without a grammar stay plain text, and a truncated head can cut a multi-line
+  construct (best-effort colouring). Remaining remote gaps: the preview is head-only for files
+  over 256 KiB (including its syntax colouring) and has no semantic/LSP spans; Fresh renders its
+  overlay preview as a real buffer through the text pipeline, while gvim has no remote preview
+  buffer and only this bounded head highlighter; the explicit-candidate path needs a complete remote
   git listing (a failed/truncated listing keeps the tool's defaults, can omit tracked files
   matching .gitignore, and is reported with the non-fatal notice); a candidate list too
   large for the batched path falls back to the widened whole-tree scan (reported with the

@@ -141,7 +141,7 @@ type StatusView struct {
 	DiagSlot        bool       // reserve the blank diagnostic-count slot
 	Diags           DiagCounts // diagnostics of the active document; shown as " [E:1 W:2 I:3] "
 	ReadOnly        bool       // the document is read-only; shown as " [RO] "
-	TerminalRestart string     // "Restart terminal" while the dock's shell has exited, or ""
+	TerminalRestart string     // the {terminal_restart} label while the dock's shell has exited (Fresh: "⟳ Restart claude (exit 1)"), or ""
 	// Update is the release the check found, as the {update} element shows it
 	// ("Update: v0.4.2"), or "" while no newer release is known.
 	Update string

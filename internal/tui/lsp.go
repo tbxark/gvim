@@ -1158,6 +1158,9 @@ func (m *Model) acceptCompletion(c *lspCompletion, index int) tea.Cmd {
 		return nil
 	}
 	item := c.items[index]
+	if m.multiCursorAccept(c, item) {
+		return nil
+	}
 	if item.ResolveToken != 0 {
 		resolver, ok := m.lsp.port.(CompletionResolver)
 		if !ok {
@@ -1197,6 +1200,61 @@ func (m *Model) completionResolved(msg completionResolvedMsg) tea.Cmd {
 		m.notice = err.Error()
 	}
 	return nil
+}
+
+// completionAtCarets is the optional editor view that accepts one completion at every
+// caret as one atomic edit with a version guard. The app adapter implements it; a fake
+// or an editor without it keeps the single-caret accept path.
+type completionAtCarets interface {
+	ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error)
+}
+
+// multiCursorAccept accepts the completion at every caret when the active document has
+// extra carets. It reports whether it handled the acceptance. It follows Fresh's
+// insert_completion_text: each caret replaces its own identifier prefix with the same
+// text in one atomic edit (one undo step), and the version captured at the request stays
+// the guard. A snippet or auto-import completion is refused with a notice for now: those
+// carry additional edits/caret offsets whose per-caret semantics are not covered by this
+// bounded slice, so the single-caret path stays byte-identical and nothing is applied at
+// the wrong places.
+func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
+	doc := m.ed.Active()
+	if doc == nil || docPath(doc) != c.path {
+		return false
+	}
+	lister, ok := doc.(editorpane.CaretLister)
+	if !ok || len(lister.Cursors()) == 0 {
+		return false
+	}
+	if item.Snippet || len(item.Additional) > 0 || item.ResolveToken != 0 {
+		m.closeCompletion(c)
+		m.notice = "completion: a snippet or import completion applies with one cursor; collapse the extra carets"
+		return true
+	}
+	accepter, ok := m.ed.(completionAtCarets)
+	if !ok {
+		m.closeCompletion(c)
+		m.notice = "completion: multi-cursor acceptance is not available in this editor"
+		return true
+	}
+	var expect *editor.Version
+	if c.versionOK {
+		expect = &c.version
+	}
+	wordChars := m.docLanguageSettings(doc).WordCharacters
+	_, err := accepter.ApplyCompletionAtCarets(c.path, item.Insert, wordChars, expect)
+	m.closeCompletion(c)
+	if err != nil {
+		switch {
+		case errors.Is(err, editor.ErrStale):
+			m.notice = "completion is stale: the document changed, so nothing was applied"
+		case errors.Is(err, editor.ErrOverlappingEdits):
+			m.notice = "completion edits overlap, so nothing was applied"
+		default:
+			m.notice = err.Error()
+		}
+	}
+	return true
 }
 
 // applyCompletionItem inserts one accepted item and its additional edits (an

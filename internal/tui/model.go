@@ -93,9 +93,12 @@ type Model struct {
 	searchSeed *find.State
 
 	width, height int
-	explorerOpen  bool // the panel is shown
-	explorerFocus bool // the panel has keyboard focus
-	tabFocus      bool // the tab strip has keyboard focus (F6 cycle)
+	// statusRestartHover is the pointer over the clickable {terminal_restart}
+	// status element; its hover hit area is the same run the click uses.
+	statusRestartHover bool
+	explorerOpen       bool // the panel is shown
+	explorerFocus      bool // the panel has keyboard focus
+	tabFocus           bool // the tab strip has keyboard focus (F6 cycle)
 	// The Contents sidebar section (see markdown_toc.go): contents is its tree
 	// and settings, contentsFocus says it holds the keyboard, and
 	// explorerCollapsed folds the tree when the section is stacked under it.
@@ -737,6 +740,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
 		}
+		m.updateStatusRestartHover(msg.Mouse())
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
@@ -820,6 +824,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.answer(msg)
 	case fileResultMsg:
 		cmd = tea.Batch(m.fileDone(msg), m.gitCmd())
+	case urlOpenedMsg:
+		m.openURLDone(msg)
 	case browser.Open:
 		if m.splits.pick != nil {
 			m.comparePicked(msg.Path)
@@ -1507,6 +1513,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return m.bookmarkAnswer(tag, d)
 	case projectReplaceTag:
 		return m.projectReplaceAnswer(tag, d)
+	case urlOpenTag:
+		return m.openURLAnswer(tag, d)
 	}
 	return nil
 }
@@ -2827,7 +2835,9 @@ func (m *Model) statusView() statusView {
 	if m.dock.Open() && m.dock.Exited() {
 		// Fresh's {terminal_restart} for a terminal whose process quit: gvim's
 		// terminal is the dock, so its exited shell is the affordance.
-		s.TerminalRestart = "Restart terminal"
+		if info, ok := m.dock.ExitedRestartInfo(); ok {
+			s.TerminalRestart = terminalRestartText(info)
+		}
 	}
 	if doc := m.ed.Active(); doc != nil {
 		line, col := virtualPosition(doc)
@@ -2858,6 +2868,30 @@ func (m *Model) statusView() statusView {
 		s.Extra = append(s.Extra, item)
 	}
 	return s
+}
+
+// terminalRestartText is Fresh's {terminal_restart} label: the arrow, "Resume
+// <program>" when the restart rejoins an agent, "Restart <program>" for a launch
+// command, "Restart terminal" for a plain shell, and " (exit N)" only for a
+// non-zero code (exit 0 is omitted, as Fresh does). A signal exit shows
+// " (signal)" (gvim's extension: the Rust indicator has no signal field).
+func terminalRestartText(info dock.RestartInfo) string {
+	label := "Restart terminal"
+	if info.Program != "" {
+		verb := "Restart"
+		if info.ResumesAgent {
+			verb = "Resume"
+		}
+		label = verb + " " + info.Program
+	}
+	if info.ExitKnown {
+		if info.ExitCode < 0 {
+			label += " (signal)"
+		} else if info.ExitCode != 0 {
+			label += " (exit " + strconv.Itoa(info.ExitCode) + ")"
+		}
+	}
+	return "⟳ " + label
 }
 
 // virtualPosition returns the line and column the status row shows for the
@@ -3129,6 +3163,27 @@ func (m *Model) popOverlay() {
 	}
 }
 
+// updateStatusRestartHover keeps the {terminal_restart} hover in step with the
+// pointer. The hover hit area is the element's own status run, the same one the
+// click handler matches, so hover and click cannot drift apart.
+func (m *Model) updateStatusRestartHover(mo tea.Mouse) {
+	hover := false
+	l := m.layout()
+	if l.StatusOn && mo.Y == l.StatusY {
+		for i := range l.Status {
+			r := &l.Status[i]
+			if r.Kind != hitStatusSegment || r.Index != frame.StatusSegmentTerminalRestart {
+				continue
+			}
+			if mo.X >= r.X && mo.X < r.X+max(ansi.StringWidth(r.Text), 1) {
+				hover = true
+			}
+			break
+		}
+	}
+	m.statusRestartHover = hover
+}
+
 // paintStatus fills the status row and writes its segments. A hidden status row
 // paints nothing.
 func (m *Model) paintStatus(g *grid.Grid, l layout) {
@@ -3150,6 +3205,15 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 	// and turns faint: a secondary value beside the rest of the row.
 	muted := bar
 	muted.Faint = true
+	// Fresh paints {terminal_restart} with the ERROR role; gvim uses the theme's
+	// error foreground over the bar, and the hovered element takes an underline
+	// (Fresh's Hover::Swap equivalent on a bar with no background to swap).
+	restart := bar
+	if fg := style.Cell(m.styles.DiagError).FG; fg != nil {
+		restart.FG, restart.Bold = fg, true
+	} else if fg := style.Cell(m.styles.DiagWarning).FG; fg != nil {
+		restart.FG, restart.Bold = fg, true
+	}
 	g.Fill(0, g.Width(), l.StatusY, bar)
 	for _, r := range l.Status {
 		st := bar
@@ -3158,6 +3222,12 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 			st = warning
 		case r.Style == frame.StyleMuted:
 			st = muted
+		case r.Kind == hitStatusSegment && r.Index == frame.StatusSegmentTerminalRestart:
+			st = restart
+			if m.statusRestartHover {
+				st.Underline = true
+				st.Bold = true
+			}
 		case r.Kind == hitStatusPalette:
 			st = palette
 		}

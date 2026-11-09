@@ -1,0 +1,7 @@
+{
+  "name": "asm_lsp",
+  "version": "1.0.0",
+  "description": "Assembly LSP helper: offers a project .asm-lsp.toml with the detected assembler dialect and instruction set, and install help when asm-lsp is missing",
+  "api": 2,
+  "default_enabled": false
+}

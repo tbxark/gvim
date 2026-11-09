@@ -224,11 +224,27 @@ background tabs' exited markers current.
   `Scrollback (restored)` title. The marker is written once per exit (a
   restore/restart cycle deduplicates it) and is not painted from the styled
   snapshot (it sits after the visible screen, outside its strict text match).
-  Deliberate divergences: gvim has no status-bar restart indicator yet (the
-  palette/menu Restart remains the only affordance; a status-bar element is an
-  OPEN follow-up), it does not infer a foreground program name for the label, and
-  the marker is appended when the transcript is captured (save or restart) rather
-  than at the exit instant, because the frozen screen stays on show.
+  gvim also implements Fresh's clickable status-bar element `{terminal_restart}`
+  (`frame.StatusElementTerminalRestart`; its click is the existing
+  `restart_terminal` action, and the hover hit area is the same painted run):
+  the label is `⟳ Resume <program>` when `terminal.resume_agents` is on and the
+  record has a non-empty resume argv, `⟳ Restart <program>` for a launch argv,
+  `⟳ Restart terminal` for a plain shell, plus ` (exit N)` only for a non-zero
+  code (exit 0 omitted, as Fresh does) or ` (signal)` for a Unix signal. The
+  program is the basename of the resume (preferred) or launch argv's program.
+  The element appears for both a live exit and a restored exited tab (the record
+  persists the status and launch record), takes the theme's error foreground, is
+  underlined+bold while the pointer is over it, and disappears once the shell is
+  restarted; the keyboard equivalent stays the palette/menu "Restart Terminal
+  Process" row (action `restart_terminal`). A narrow status row follows the
+  frame's normal squeeze rule: the longer label is dropped or clipped with the
+  rest of its group, never overflowing the row (tested). Deliberate divergences
+  that remain: the program name comes from the recorded launch/resume argv, not
+  the OS foreground process; the hover is underline+bold rather than Fresh's
+  ERROR-colour swap; signal exits append ` (signal)` because gvim records -1
+  where Fresh's i32 exit code has no signal field; and the marker is appended
+  when the transcript is captured (save or restart) rather than at the exit
+  instant, because the frozen screen stays on show.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
   launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
   plus the additive `exit_code`/`exit_known` pair for an exited tab and its

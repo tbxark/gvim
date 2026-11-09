@@ -344,6 +344,20 @@ rust-analyzer withholds resolveProvider otherwise, and its completion popup like
 label/detail only; gvim keeps the same server-compatibility advertisement and the same visible
 behaviour.
 
+**Multiple cursors.** Completion in a document with extra carets follows Fresh's popup
+handlers. Typing a word character and Backspace while the popup is open go through the normal
+insert_char/delete_backward actions, so every caret edits in lock-step (one undo group) and the
+list re-filters from the primary caret's word; a non-word key still follows the dismissal rules
+above. Accepting a plain candidate replaces each caret's own word prefix with the same text as
+one atomic edit (one undo step): each caret keeps its own prefix length, ends after its own
+inserted text, and the document version captured at the request is the stale guard, exactly as
+the single-caret accept uses it. Two carets whose replacement ranges overlap (both inside one
+word) refuse the accept as a whole and write nothing. Snippet and auto-import candidates are
+single-caret in this bounded slice: with extra carets the popup dismisses with a notice and
+nothing is written, because their caret offsets/additional edits are not defined per caret here.
+With one caret the existing accept path is unchanged: server edit range, snippet expansion,
+additional import edits, resolve and cursor placement all behave as before.
+
 **Accepting a language-server completion.** A server item is inserted with everything the
 server asked for in one edit: its snippet text is expanded, the import edits of an
 auto-import candidate (`additionalTextEdits`) are applied together with the insert, and an

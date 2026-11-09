@@ -981,3 +981,61 @@ func TestRemoteSearchNestedRepoFallsBackWithNotice(t *testing.T) {
 		t.Fatalf("rg calls = %v, want one widened fallback", calls)
 	}
 }
+
+// TestRemoteSearchPreviewSyntaxSpans checks the remote preview now carries syntax spans
+// from the shared highlighter: a bounded remote head of a Go file is coloured, an open
+// buffer's text is coloured without any remote read, a grammarless file stays plain, and a
+// file over the line cap stays plain. No local file is involved.
+func TestRemoteSearchPreviewSyntaxSpans(t *testing.T) {
+	fs := newRemoteFS()
+	fs.put("/remote/w/a.go", "package main\n\nfunc todo() {}\n")
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/a.go", Name: "a.go", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Spans) == 0 {
+		t.Fatalf("remote Go preview has no syntax spans: %+v", res)
+	}
+	kinds := map[string]bool{}
+	for _, span := range res.Spans {
+		kinds[span.Kind] = true
+		if span.End <= span.Start {
+			t.Fatalf("empty span: %+v", span)
+		}
+	}
+	if !kinds["keyword"] && !kinds["namespace"] && !kinds["function"] {
+		t.Fatalf("span kinds = %v, want syntax kinds", kinds)
+	}
+	// An open buffer's text is highlighted without touching the authority.
+	fs.setErr(errors.New("remote workspace is disconnected"))
+	res, _ = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/a.go", Name: "a.go", Text: "package main\n\nvar todo = 1\n", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 3,
+	})
+	if res.Err != "" || len(res.Spans) == 0 {
+		t.Fatalf("open-buffer preview spans = %+v err %q", res.Spans, res.Err)
+	}
+	fs.setErr(nil)
+	// No grammar: plain text (the content is not a language the sniffer recognizes).
+	fs.put("/remote/w/notes.zzz", "hello there\nplain notes\n")
+	res, _ = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/notes.zzz", Name: "notes.zzz", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 2,
+	})
+	if len(res.Spans) != 0 {
+		t.Fatalf("a grammarless preview had spans: %+v", res.Spans)
+	}
+	// Over the preview line cap: plain text, matching the local preview's bound.
+	var many strings.Builder
+	for i := 0; i < previewHighlightLines+5; i++ {
+		many.WriteString("x\n")
+	}
+	fs.put("/remote/w/many.go", many.String())
+	res, _ = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/many.go", Name: "many.go", Line: 1, EndLine: 1, EndCol: 2, Start: 0, Lines: 3,
+	})
+	if len(res.Spans) != 0 {
+		t.Fatalf("an over-line-cap preview had spans: %d", len(res.Spans))
+	}
+}

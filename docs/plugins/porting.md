@@ -285,6 +285,33 @@ diff_nav plugin/command namespace or its i18n keys; the side-by-side Compare vie
 navigation; large-file buffers keep git_gutter's "not tracked" notice; live_diff must be loaded to
 contribute its active-diff hunks.
 
+### Assembly LSP: project config offer (port residual)
+
+Fresh's `asm-lsp.ts` helper has three parts: the install-help popup for a missing server, the
+"Disable Assembly LSP" popup action, and the `.asm-lsp.toml` config offer. gvim's port
+(`plugin/bundled/plugins/asm_lsp/`) keeps the config offer and the install help, in Lua over the
+existing API only:
+
+* The offer waits in `plugins_loaded`/`after_file_open` like Fresh, but gvim's `lsp_server_error`
+  payload is only `{error}` (no language, `error_type` or `server_command`), so the port claims a
+  failure only when the active buffer is an assembly file and the message names `asm`/`assembly`;
+* "Disable Assembly LSP" is not ported: the plugin API has no call to disable a language's LSP
+  server. The help popup offers the native Start/Restart, Show LSP Status and copy-install actions
+  instead (the native LSP status menu has Stop and per-buffer toggle);
+* restarting after the config is written uses the native `lsp_restart` action for the active
+  language, not Fresh's `restartLspForLanguage(offer.language)`;
+* the global asm-lsp config check goes through the workspace file system, so a remote/SSH workspace
+  checks the remote home (the local home is not reachable from the plugin API). The project config
+  path uses `gvim.workspace.root()`, the authority-correct project directory;
+* the "don't ask again" choice is per project root in `gvim.state`; a root long enough to overflow
+  the 256-byte state-key cap persists a stable suffix instead of failing the write.
+
+Tests: `plugin/bundled/asm_lsp_test.go` covers command registration/no bindings, the offer and
+created TOML for NASM/GAS, MASM + ARM64 detection, the project/XDG-global skip rules, the never-ask
+choice, the install-help popup/clipboard/native restart, and that non-assembly buffers are ignored.
+The harness does not run the real loader's startup flush, so the tests raise `plugins_loaded`
+explicitly.
+
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

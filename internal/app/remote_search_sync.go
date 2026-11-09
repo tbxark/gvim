@@ -180,5 +180,6 @@ func (s *remoteSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Prev
 	for k := first; k < total && k < first+req.Lines; k++ {
 		out.Lines = append(out.Lines, strings.TrimRight(lines[k], "\r"))
 	}
+	out.Spans = s.previewCache.spans(req.Path, text, lines, first, len(out.Lines))
 	return out, nil
 }

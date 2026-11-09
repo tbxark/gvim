@@ -45,6 +45,8 @@ type fakeTerm struct {
 	done      chan struct{}
 
 	// The scrollback, working directory and mouse state the dock reads.
+	exitCode  int                   // the exit status ExitStatus reports
+	exitOK    bool                  // whether the fake reports an exit status
 	history   []string              // the history rows, oldest first
 	cwd       string                // the OSC 7 working directory
 	alt       bool                  // the alternate screen
@@ -86,6 +88,7 @@ func (f *fakeTerm) Screen() terminal.Screen  { return f.screen }
 func (f *fakeTerm) Updates() <-chan struct{} { return f.updates }
 func (f *fakeTerm) Done() <-chan struct{}    { return f.done }
 func (f *fakeTerm) AppCursorKeys() bool      { return f.appCursor }
+func (f *fakeTerm) ExitStatus() (int, bool)  { return f.exitCode, f.exitOK }
 func (f *fakeTerm) Close() error             { f.closed = true; return nil }
 
 // Scrollback returns the history window the dock asks for.

@@ -8,15 +8,18 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/theme"
 )
 
 // shellsStarter hands out a new fake shell for each start, so a test can tell the
 // shell a restart closes from the shell it starts. A start fails with err when it is set.
 type shellsStarter struct {
-	terms []*fakeTerm
-	dirs  []string
-	err   error
+	terms      []*fakeTerm
+	dirs       []string
+	launches   []terminal.Launch
+	launchDirs []string
+	err        error
 }
 
 func (s *shellsStarter) Start(dir string, cols, rows int) (Terminal, error) {
@@ -27,6 +30,13 @@ func (s *shellsStarter) Start(dir string, cols, rows int) (Terminal, error) {
 	t := newFakeTerm()
 	s.terms = append(s.terms, t)
 	return t, nil
+}
+
+// StartLaunch starts a recorded program (the restart/resume path).
+func (s *shellsStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows int) (Terminal, error) {
+	s.launches = append(s.launches, launch)
+	s.launchDirs = append(s.launchDirs, dir)
+	return s.Start(dir, cols, rows)
 }
 
 // rootTree is the fake tree with a root the test can move, as a project switch does.

@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-two plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-three plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer` and `env_manager` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager` and `asm_lsp` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -25,6 +25,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `diagnostics_panel` | on | Show Diagnostics Panel, Toggle Diagnostics Panel | none |
 | `path_complete` | on | Path Completion: Complete Path | none |
 | `lsp_help` | on | none (event driven: an LSP server error puts an install hint on the status row, and the LSP status click opens the help popup) | none |
+| `asm_lsp` | **off** | Assembly: Create .asm-lsp.toml, Assembly: Show LSP Help | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
 | `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
@@ -174,6 +175,32 @@ action in gvim's command table. Fresh has no i18n file for this plugin; the gene
 translated here and the per-server hints stay English. Like Fresh's, the plugin registers no
 commands and no keys.
 
+**asm_lsp** (reduced Fresh port): the helper for the `asm-lsp` assembly language server
+(GAS/NASM/MASM, x86/x86-64/ARM64/RISC-V). asm-lsp needs a per-project `.asm-lsp.toml` to know
+the dialect: without one it assumes GAS syntax on x86/x86-64, so NASM/MASM or ARM/RISC-V files get
+wrong diagnostics, hover docs and definitions. When an assembly file opens (`.asm`, `.nasm`,
+`.s`; already-open buffers are swept once plugins load) and neither the project `.asm-lsp.toml`
+nor a global asm-lsp config exists, the plugin offers to create it, guessing the assembler from the
+language and a bounded sample of the buffer (MASM's `proc`/`endp`/`assume`/`.model` tokens
+versus NASM's default; `gas` for `.s`/`gas`) and the instruction set (ARM64 opcodes, RISC-V
+opcodes, else x86/x86-64). The config is written atomically at the project root with asm-lsp's
+`[default_config]` shape and, for non-GAS dialects, the `default_diagnostics = false` block (its
+built-in diagnostics only assemble GAS), then the native **lsp_restart** action is run so a running
+server picks it up. The offer's other choices create the config for another dialect, dismiss it for
+the session, or record "don't ask again" for that project in `gvim.state`. On an `lsp_server_error`
+that names the assembly server the status row gets an install hint; clicking the LSP status opens
+the help popup with copyable `cargo install asm-lsp` / `cargo binstall asm-lsp` commands, the
+native Start/Restart LSP Server and Show LSP Status actions, and Dismiss. Commands: **Assembly:
+Create .asm-lsp.toml** (re-opens the offer) and **Assembly: Show LSP Help**; it binds no key and
+registers no settings. Reductions (also in porting.md): gvim's `lsp_server_error` payload has no
+language/server/error-type fields, so the error is only claimed on an assembly buffer whose message
+names `asm`/`assembly`; Fresh's "Disable Assembly LSP" popup action is not ported (gvim has no
+plugin call to disable a language's server; the native LSP status menu offers Stop/Disable); Fresh's
+per-language restart is replaced by the native `lsp_restart` action for the active language; the
+global-config check runs through the workspace file system, so a remote workspace checks the remote
+home, not the local one; an overlong project root persists its "don't ask again" choice with a
+truncated state key.
+
 **compare_files** (port of Fresh's own compare plugin; reduced): **Compare Files...** (or **Compare
 Active File With...**) opens the two paths you type and shows them as two editable splits of the
 current tab — changed lines get a background, in-line changes a highlighted span, a gutter glyph and
@@ -227,10 +254,16 @@ rows (including the Git section's branch-log row) publish action line targets ru
 command the dashboard plugin owns, so a mouse click goes through the same dispatcher as the
 keyboard mode while a target still cannot dispatch another plugin's command. The branch-log row
 is only advertised when the git_log plugin's command is registered; without it the row says
-`branch log  unavailable (enable git_log)` and is not clickable. The repository URL stays plain
-text (gvim has no safe URL-open action; opening it through a shell is deliberately avoided).
+`branch log  unavailable (enable git_log)` and is not clickable. A GitHub `origin` (scp-like,
+ssh:// or https form) is normalized to `https://github.com/owner/repo`: the repo and branch lines
+become clickable through dashboard-owned action targets, and keyboard-equivalent **Open
+Repository**/**Open Branch** rows are appended to the Actions section (the branch URL is
+`<repo>/tree/<branch>`). Clicking or activating one calls `gvim.url.open`, which accepts only
+http(s), shows a modal Yes/No confirmation naming the URL, and launches the platform browser
+opener without a shell (see [api-system.md](api-system.md#gvimurl)); a non-GitHub https origin is
+still openable as a repo row but has no branch URL, and unsafe/unopenable origins stay plain text.
 Reductions: no weather/GitHub/network sections, no third-party section API or Utility Dock
-placement, no clickable URL and no sessions section.
+placement and no sessions section.
 
 **code_tour** (reduced Fresh port): loads a Fresh `.fresh-tour.json` or a VS Code Edit CodeTour
 `.tour` (auto-detected; bounded at 1 MiB / 200 steps), shows the steps in a floating widget card (list,

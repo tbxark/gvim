@@ -41,6 +41,7 @@ var installers = []func(*apiEnv){
 	installProc,
 	installTimer,
 	installState,
+	installURL,
 	installData,
 	installWorkspace,
 	installPlugins,

@@ -348,3 +348,119 @@ func TestDashboardBranchLogAvailableWhenGitLogLoads(t *testing.T) {
 		t.Fatalf("branch-log click did not run the git_log command: %v", r.h.NoticeTexts())
 	}
 }
+
+// dashboardRemoteScript answers the dashboard's git reads with one remote URL and the
+// feature/x branch, so the URL-normalizing rows can be tested.
+func dashboardRemoteScript(remote string) func(*plugintest.FakeOS) {
+	return func(o *plugintest.FakeOS) {
+		o.Bin["git"] = "/usr/bin/git"
+		o.Script(gitArgv("rev-parse", "--abbrev-ref", "HEAD"), plugintest.ProcScript{Stdout: "feature/x\n"})
+		o.Script(gitArgv("remote", "get-url", "origin"), plugintest.ProcScript{Stdout: remote + "\n"})
+		o.Script(gitArgv("status", "--porcelain=v1"), plugintest.ProcScript{Stdout: " M a.txt\n"})
+		o.Script(gitArgv("symbolic-ref", "--short", "refs/remotes/origin/HEAD"), plugintest.ProcScript{Code: 1})
+		o.Script(gitArgv("rev-parse", "--verify", "main"), plugintest.ProcScript{Code: 1})
+		o.Script(gitArgv("rev-parse", "--verify", "master"), plugintest.ProcScript{Code: 1})
+		o.Script(gitArgv("rev-list", "--left-right", "--count", "HEAD...@{upstream}"), plugintest.ProcScript{Code: 1})
+	}
+}
+
+// TestDashboardURLRowsClickable: a GitHub origin normalizes to an https repo URL and a
+// branch URL; the Git lines are clickable through dashboard-owned commands (so line
+// targets stay within the plugin), keyboard-equivalent rows exist, and invoking the
+// commands reaches gvim.url.open with the exact URLs.
+func TestDashboardURLRowsClickable(t *testing.T) {
+	t.Parallel()
+	r := startRig(t, rigOpts{
+		plugins: []string{dashboardPlugin},
+		script:  dashboardRemoteScript("git@github.com:me/repo.git"),
+	})
+	dashboardReady(t, r)
+	id := dashboardBuffer(r.host)
+	if id == 0 {
+		t.Fatal("no dashboard")
+	}
+	text := dashboardText(t, r.host)
+	if !strings.Contains(text, "https://github.com/me/repo") {
+		t.Fatalf("normalized repo URL missing:\n%s", text)
+	}
+	if !strings.Contains(text, "Open Repository") || !strings.Contains(text, "Open Branch") {
+		t.Fatalf("keyboard-equivalent URL rows missing:\n%s", text)
+	}
+	lines := strings.Split(text, "\n")
+	var repoLine, branchLine int
+	for _, target := range r.host.LineTargets(id) {
+		if target.Line < 0 || target.Line >= len(lines) {
+			continue
+		}
+		line := lines[target.Line]
+		if target.Action == "dashboard.click_repo_url" && strings.Contains(line, "https://github.com/me/repo") {
+			repoLine = target.Line
+		}
+		if target.Action == "dashboard.click_branch_url" && strings.Contains(line, "feature/x") {
+			branchLine = target.Line
+		}
+	}
+	if repoLine == 0 || branchLine == 0 {
+		t.Fatalf("clickable URL lines not found: repo=%d branch=%d targets=%+v", repoLine, branchLine, r.host.LineTargets(id))
+	}
+	if err := r.h.Run("dashboard.click_repo_url", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("dashboard.click_branch_url", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.Settle()
+	want := []string{"https://github.com/me/repo", "https://github.com/me/repo/tree/feature%2Fx"}
+	if got := r.host.URLs(); !slices.Equal(got, want) {
+		t.Fatalf("opened URLs = %v, want %v", got, want)
+	}
+}
+
+// TestDashboardURLNormalization checks the common remote forms and the unsafe/unopenable
+// ones that must stay plain text (no click target, no URL row).
+func TestDashboardURLNormalization(t *testing.T) {
+	cases := []struct {
+		remote   string
+		wantRepo string
+		branch   bool
+	}{
+		{"git@github.com:me/repo.git", "https://github.com/me/repo", true},
+		{"https://github.com/me/repo.git", "https://github.com/me/repo", true},
+		{"ssh://git@github.com/me/repo.git", "https://github.com/me/repo", true},
+		{"https://example.com/me/repo", "https://example.com/me/repo", false},
+		{"git@example.com:me/repo.git", "", false},
+		{"javascript:alert(1)", "", false},
+		{"/local/path", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.remote, func(t *testing.T) {
+			r := startRig(t, rigOpts{
+				plugins: []string{dashboardPlugin},
+				script:  dashboardRemoteScript(tc.remote),
+			})
+			dashboardReady(t, r)
+			id := dashboardBuffer(r.host)
+			if id == 0 {
+				t.Fatal("no dashboard")
+			}
+			text := dashboardText(t, r.host)
+			var repo, branch bool
+			for _, target := range r.host.LineTargets(id) {
+				repo = repo || target.Action == "dashboard.click_repo_url"
+				branch = branch || target.Action == "dashboard.click_branch_url"
+			}
+			if tc.wantRepo == "" {
+				if repo || branch || strings.Contains(text, "Open Repository") {
+					t.Fatalf("unsafe/unopenable remote advertised a URL: %+v\n%s", r.host.LineTargets(id), text)
+				}
+				return
+			}
+			if !repo || !strings.Contains(text, tc.wantRepo) {
+				t.Fatalf("repo URL %q missing (targets %+v):\n%s", tc.wantRepo, r.host.LineTargets(id), text)
+			}
+			if branch != tc.branch {
+				t.Fatalf("branch target = %v, want %v (targets %+v)", branch, tc.branch, r.host.LineTargets(id))
+			}
+		})
+	}
+}

@@ -1053,6 +1053,11 @@ function gvim.fs.walk(root, opts) end
 ---@return Watcher|nil, string?
 function gvim.fs.watch(path, fn, opts) end
 
+gvim.url = {}
+---@param url string
+---@return true|nil, string?
+function gvim.url.open(url) end
+
 gvim.proc = {}
 ---@param argv string[]
 ---@param opts? {cwd?: string, env?: table<string, string>, stdin?: string, timeout_ms?: integer, max_output?: integer, merge_stderr?: boolean}

@@ -271,6 +271,13 @@ func (a *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 
 // Tabs maps the editor's tabs to the tab strip entries. The path is carried too, so the
 // root can watch the folders of the open tabs and reload the tabs whose files change.
+// ApplyCompletionAtCarets accepts one completion at every caret of the document at path
+// as one atomic edit. See editor.Editor.ApplyCompletionAtCarets; the TUI's multi-cursor
+// completion accept path uses it.
+func (a *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error) {
+	return a.ed.ApplyCompletionAtCarets(path, text, wordChars, expect)
+}
+
 // RecentTabIndices returns the editor's open tabs in MRU order (the active tab first),
 // as editor.Editor.RecentTabIndices does. The TUI's multi-buffer completion reads it;
 // without it completion falls back to tab order.

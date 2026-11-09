@@ -86,6 +86,10 @@ type RootPorts struct {
 	// Nil or a zero interval turns it off.
 	Recovery      RecoveryPort
 	RecoveryEvery time.Duration
+	// OpenURL starts the platform browser/app for a validated http(s) URL. Nil shows a
+	// notice. The root calls it from a tea.Cmd, never on the update loop, and passes the
+	// URL as one argv element (no shell).
+	OpenURL func(url string) error
 	// FullLoadPrompts are the files named at startup that are large and not UTF-8, so
 	// they were not opened. The root asks about each once it runs, as it does for a file
 	// opened from a menu, instead of decoding it whole before the first frame.

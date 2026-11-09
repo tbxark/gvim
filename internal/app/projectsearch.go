@@ -18,7 +18,6 @@ import (
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/search"
-	"github.com/tbxark/gvim/syntax"
 )
 
 // projectSearch is the panel's project-wide searcher and replacer over internal/search.
@@ -29,10 +28,9 @@ type projectSearch struct {
 	// skipFrom is the size in bytes from which a file is skipped: the files the editor
 	// opens in large file mode. Zero skips none beyond the search read cap.
 	skipFrom int64
-	// previewHighlighters caches one syntax highlighter per previewed file (bounded by
-	// previewHighlighterCache), and previewOrder is the LRU order of its paths.
-	previewHighlighters map[string]*previewHighlighter
-	previewOrder        []string
+	// previewCache caches one syntax highlighter per previewed file (bounded by
+	// previewHighlighterCache).
+	previewCache previewHighlighterCache
 }
 
 // newProjectSearch returns the project search for an editor with the options o.
@@ -413,67 +411,8 @@ func (s *projectSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Pre
 	for k := first; k < total && k < first+req.Lines; k++ {
 		out.Lines = append(out.Lines, strings.TrimRight(lines[k], "\r"))
 	}
-	out.Spans = s.previewSpans(req.Path, text, lines, first, len(out.Lines))
+	out.Spans = s.previewCache.spans(req.Path, text, lines, first, len(out.Lines))
 	return out, nil
-}
-
-// Bounds of the syntax-coloured preview: a bigger file is plain text, so the cached
-// highlighter stays small.
-const (
-	previewHighlightBytes   = 256 << 10
-	previewHighlightLines   = 4000
-	previewHighlighterCache = 8
-)
-
-// previewHighlighter is one preview cache entry: a highlighter and the content hash it was
-// built for.
-type previewHighlighter struct {
-	hash uint64
-	h    *syntax.Highlighter
-}
-
-// previewSpans returns the syntax-coloured runs of the preview window. It reuses a cached
-// highlighter per file (keyed by path and content hash), rebuilds it when the file changed,
-// and returns nothing, plain text, for a file over the size or line caps or without a
-// grammar.
-func (s *projectSearch) previewSpans(path, text string, lines []string, first, count int) []searchpanel.PreviewSpan {
-	if count <= 0 || len(text) > previewHighlightBytes || len(lines) > previewHighlightLines {
-		return nil
-	}
-	hash := hashText(text)
-	entry := s.previewHighlighters[path]
-	if entry == nil || entry.hash != hash {
-		entry = &previewHighlighter{hash: hash, h: syntax.NewHighlighter(syntax.Detect(path, []byte(text)))}
-		if s.previewHighlighters == nil {
-			s.previewHighlighters = make(map[string]*previewHighlighter)
-		}
-		s.previewHighlighters[path] = entry
-		s.previewOrder = append(s.previewOrder, path)
-		for len(s.previewOrder) > previewHighlighterCache {
-			oldest := s.previewOrder[0]
-			s.previewOrder = s.previewOrder[1:]
-			if oldest != path {
-				delete(s.previewHighlighters, oldest)
-			}
-		}
-	}
-	all := entry.h.Lines(int(hash), lines)
-	var out []searchpanel.PreviewSpan
-	for i := 0; i < count && first+i < len(all); i++ {
-		abs := first + i
-		line := lines[abs]
-		for _, span := range all[abs] {
-			if span.Kind == syntax.KindPlain {
-				continue
-			}
-			start := utf8.RuneCountInString(line[:min(span.Start, len(line))])
-			end := utf8.RuneCountInString(line[:min(span.End, len(line))])
-			if end > start {
-				out = append(out, searchpanel.PreviewSpan{Line: abs, Start: start, End: end, Kind: span.Kind.String()})
-			}
-		}
-	}
-	return out
 }
 
 // clampInt clamps v into [lo, hi].

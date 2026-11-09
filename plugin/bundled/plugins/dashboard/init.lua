@@ -81,6 +81,61 @@ for i, a in ipairs(ACTIONS) do
   a.target = "dashboard.click_" .. i
 end
 local BRANCH_LOG = "dashboard.click_branch_log"
+local REPO_URL = "dashboard.click_repo_url"
+local BRANCH_URL = "dashboard.click_branch_url"
+
+-- gitURL normalizes a git remote for opening in a browser. https/http URLs are kept
+-- (an http(s) URL on any host is openable); the common scp-like/ssh/HTTPS GitHub
+-- forms become https://github.com/owner/repo. Anything else (local paths, unknown
+-- schemes) yields "" so the dashboard never advertises an unsafe URL.
+local function url_encode(s)
+  return (tostring(s):gsub("([^%w%-%._~])", function(c)
+    return string.format("%%%02X", string.byte(c))
+  end))
+end
+
+local function normalize_repo_url(raw)
+  local text = raw and raw:match("^%s*(.-)%s*$") or ""
+  if text == "" then
+    return ""
+  end
+  local scheme, rest = text:match("^([%a][%w+.-]*)://(.+)$")
+  local host, path
+  if scheme then
+    scheme = string.lower(scheme)
+    rest = rest:gsub("^[^@/]*@", "") -- strip userinfo
+    host, path = rest:match("^([^/:]+)(.*)$")
+  else
+    local user_host, p = text:match("^([%w%._%-]+@[^:]+):(.+)$")
+    if not user_host then
+      return ""
+    end
+    host, path = user_host:gsub("^.*@", ""), p
+  end
+  if not host or not path then
+    return ""
+  end
+  host = string.lower(host:gsub(":.*$", ""))
+  path = path:gsub("^/", ""):gsub("%.git$", "")
+  if host == "github.com" then
+    local owner, repo = path:match("^([^/]+)/([^/]+)$")
+    if not owner or not repo then
+      return ""
+    end
+    return "https://github.com/" .. owner .. "/" .. repo
+  end
+  if scheme == "http" or scheme == "https" then
+    return text
+  end
+  return ""
+end
+
+local function branch_url(repo, branch)
+  if repo == "" or not branch or branch == "" or branch == "HEAD" then
+    return ""
+  end
+  return repo .. "/tree/" .. url_encode(branch)
+end
 
 -- command_available says whether a command the dashboard points at is currently
 -- registered (visible commands only; hidden ones are not another plugin's API). It
@@ -104,7 +159,8 @@ local state = {
   focus = 0,             -- index into rows
   rows = {},             -- { kind = "recent"|"action", label, path?, action? }
   frame = "",            -- last painted frame text (skip identical writes)
-  git = nil,             -- { at, branch, counts, url, ahead, behind, base }
+  git = nil,             -- { at, branch, url, repo_url, branch_url, ... }
+  click_rows = {},       -- non-focusable clickable lines: { index, action }
   disk = nil,            -- { at, rows = { {mount, pct, free} } }
   timer = nil,
 }
@@ -257,8 +313,13 @@ local function fetch_git()
     upstream = true
     track_ahead, track_behind = tonumber(ta), tonumber(tb)
   end
+  local repo_url = normalize_repo_url(url)
   state.git = {
     at = now_ms(), branch = branch, url = url, base = base,
+    repo_url = repo_url,
+    -- Only GitHub URLs have a branch page path; other hosts keep the repo line clickable
+    -- but advertise no branch URL.
+    branch_url = (repo_url:sub(1, 19) == "https://github.com/") and branch_url(repo_url, branch) or "",
     staged = staged, changed = changed, untracked = untracked,
     ahead = ahead, behind = behind,
     upstream = upstream, track_ahead = track_ahead, track_behind = track_behind,
@@ -335,6 +396,8 @@ end
 local function build_rows(inner)
   local lines = {}
   local rows = {}
+  local click_rows = {}
+  state.click_rows = click_rows
   local function plain(text, style)
     lines[#lines + 1] = { segments = { { text = padded(text, inner), style = style } } }
   end
@@ -342,13 +405,16 @@ local function build_rows(inner)
     plain(text, STYLE.heading)
     lines[#lines + 1] = { segments = { { text = string.rep("─", inner), style = STYLE.frame } } }
   end
-  local function kv(label, value, style)
+  local function kv(label, value, style, target)
     local label_w = 12
     local value_room = math.max(inner - label_w - 2, 4)
     lines[#lines + 1] = { segments = {
       { text = padded(" " .. label, label_w + 1), style = STYLE.muted },
       { text = " " .. clip(value, value_room), style = style or STYLE.value },
     } }
+    if target then
+      click_rows[#click_rows + 1] = { index = #lines, action = target }
+    end
   end
   local function action_row(label, detail, row)
     local index = #rows
@@ -369,7 +435,7 @@ local function build_rows(inner)
   local recent = recent_files()
   if state.git and not state.git.missing then
     heading("Git")
-    kv("branch", state.git.branch, STYLE.title)
+    kv("branch", state.git.branch, STYLE.title, state.git.branch_url and state.git.branch_url ~= "" and BRANCH_URL or nil)
     if state.git.base then
       kv("vs " .. state.git.base, string.format("↑%d ↓%d", state.git.ahead, state.git.behind), STYLE.number)
     end
@@ -382,7 +448,9 @@ local function build_rows(inner)
     kv("working tree", string.format("%d changed · %d staged · %d untracked",
       state.git.changed, state.git.staged, state.git.untracked),
       (state.git.changed + state.git.staged + state.git.untracked) > 0 and STYLE.warn or STYLE.ok)
-    if state.git.url ~= "" then
+    if state.git.repo_url ~= "" then
+      kv("repo", state.git.repo_url, STYLE.muted, REPO_URL)
+    elseif state.git.url ~= "" then
       kv("remote", state.git.url, STYLE.muted)
     end
     if command_available("git_log.show_git_log") then
@@ -410,6 +478,14 @@ local function build_rows(inner)
   heading("Actions")
   for i = 1, math.min(#ACTIONS, MAX_ACTIONS) do
     action_row(ACTIONS[i].label, "", { kind = "action", action = ACTIONS[i].action, target = ACTIONS[i].target })
+  end
+  -- Keyboard-equivalent rows for the clickable URL lines (Fresh makes those rows
+  -- clickable; gvim keeps them reachable from the dashboard mode too).
+  if state.git and state.git.repo_url and state.git.repo_url ~= "" then
+    action_row("Open Repository", "", { kind = "action", action = REPO_URL, target = REPO_URL })
+    if state.git.branch_url and state.git.branch_url ~= "" then
+      action_row("Open Branch", "", { kind = "action", action = BRANCH_URL, target = BRANCH_URL })
+    end
   end
   if state.disk and #state.disk.rows > 0 then
     if #lines > 0 then
@@ -455,6 +531,9 @@ local function publish_targets(buf, top_pad)
       targets[#targets + 1] = { line = top_pad + row.line_index + 1, action = row.target }
     end
     ::continue::
+  end
+  for _, row in ipairs(state.click_rows or {}) do
+    targets[#targets + 1] = { line = top_pad + row.index + 1, action = row.action }
   end
   local ok, err = pcall(set, buf, targets)
   if not ok then
@@ -740,6 +819,28 @@ for i, a in ipairs(ACTIONS) do
   register_hidden("click_" .. i, make_click(a.action))
 end
 register_hidden("click_branch_log", make_click("git_log.show_git_log"))
+
+-- URL rows: gvim.url.open validates the scheme, always asks for confirmation, and
+-- launches the platform opener without a shell. state.git holds the normalized URLs.
+local function open_url(url)
+  if not url or url == "" then
+    notify("Dashboard: no repository URL")
+    return
+  end
+  local ok, result, err = pcall(gvim.url.open, url)
+  if not ok then
+    notify("Dashboard: " .. tostring(result))
+  elseif not result then
+    notify("Dashboard: " .. tostring(err))
+  end
+end
+
+register_hidden("click_repo_url", function()
+  open_url(state.git and state.git.repo_url or "")
+end)
+register_hidden("click_branch_url", function()
+  open_url(state.git and state.git.branch_url or "")
+end)
 
 register_hidden("focus_next", function() focus_next(1) end)
 register_hidden("focus_prev", function() focus_next(-1) end)

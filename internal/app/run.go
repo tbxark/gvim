@@ -753,6 +753,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		ProjectReplace: projSearch,
 		GitGrep:        gitGrep{spawnEnv: envProvider.Overlay},
 		Git:            uiadapter.GitStatus{},
+		OpenURL:        openURL,
 		Watch:          events,
 		AutoSave:       interval,
 		Stashes:        uiadapter.StashesFor(opts.SessionDir),

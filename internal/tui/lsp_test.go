@@ -33,6 +33,9 @@ type lspTab struct {
 	size  int64
 	// virtual makes the tab's document report that it is a plugin's virtual buffer.
 	virtual bool
+	// carets are the extra carets the document reports (CaretLister). Empty means
+	// one caret.
+	carets []editor.Caret
 	// texts counts the reads of the whole text: a line count followed by every line, as the
 	// LSP sync reads the text of a document.
 	texts int
@@ -44,10 +47,14 @@ type lspEd struct {
 	tabs   []*lspTab
 	active int
 	// recent is the explicit MRU tab order (active first); nil falls back to tab order.
-	recent  []int
-	opened  []string
-	gotos   [][2]int
-	applied map[string][]editor.LSPEdit
+	recent []int
+	// multiApplies records multi-caret completion accepts; multiErr makes the next
+	// one fail.
+	multiApplies []multiCompletionApply
+	multiErr     error
+	opened       []string
+	gotos        [][2]int
+	applied      map[string][]editor.LSPEdit
 	// version is what DocumentVersion reports, when versionOK is set.
 	version   editor.Version
 	versionOK bool
@@ -217,6 +224,21 @@ func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
 // DocumentVersion reports the version the test set, when it set one.
 func (e *lspEd) DocumentVersion(string) (editor.Version, bool) { return e.version, e.versionOK }
 
+// multiCompletionApply records one multi-caret completion accept.
+type multiCompletionApply struct {
+	path, text, wordChars string
+	expect                *editor.Version
+}
+
+// ApplyCompletionAtCarets records a multi-caret accept, or fails with multiErr.
+func (e *lspEd) ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error) {
+	e.multiApplies = append(e.multiApplies, multiCompletionApply{path: path, text: text, wordChars: wordChars, expect: expect})
+	if e.multiErr != nil {
+		return 0, e.multiErr
+	}
+	return len(e.tabs[e.active].carets) + 1, nil
+}
+
 // ApplyLSPEditsExpect records the expected version and applies like ApplyLSPEdits,
 // or returns applyErr first so a test can simulate a stale document.
 func (e *lspEd) ApplyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error {
@@ -250,11 +272,12 @@ func (d *lspDoc) Version() uint64 {
 	}
 	return h.Sum64()
 }
-func (d *lspDoc) SavedLines() []string { return d.t.lines }
-func (d *lspDoc) Top() int             { return 0 }
-func (d *lspDoc) Encoding() string     { return "UTF-8" }
-func (d *lspDoc) LineEnding() string   { return "LF" }
-func (d *lspDoc) Cursor() buffer.Pos   { return d.t.cursor }
+func (d *lspDoc) SavedLines() []string    { return d.t.lines }
+func (d *lspDoc) Top() int                { return 0 }
+func (d *lspDoc) Encoding() string        { return "UTF-8" }
+func (d *lspDoc) LineEnding() string      { return "LF" }
+func (d *lspDoc) Cursor() buffer.Pos      { return d.t.cursor }
+func (d *lspDoc) Cursors() []editor.Caret { return d.t.carets }
 func (d *lspDoc) Selection() (a, h buffer.Pos, ok bool) {
 	return d.t.cursor, d.t.cursor, false
 }

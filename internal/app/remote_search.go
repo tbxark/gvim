@@ -47,6 +47,9 @@ type remoteSearch struct {
 	root     string               // absolute remote workspace root
 	timeout  time.Duration        // bounds one search run (remoteSearchTimeout unless a test says otherwise)
 	spawnEnv func() []string
+	// previewCache caches the syntax highlighters of preview windows (local and remote
+	// heads); syntax colour is CPU-only, bounded by the shared preview caps.
+	previewCache previewHighlighterCache
 }
 
 // newRemoteProjectSearch returns the remote project search over root.

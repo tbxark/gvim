@@ -3,6 +3,8 @@ package editor
 import (
 	"errors"
 	"fmt"
+
+	"github.com/tbxark/gvim/buffer"
 )
 
 // ErrNotOpen is returned by ApplyLSPEdits for a path that no open document has.
@@ -30,4 +32,44 @@ func (e *Editor) lspDocAt(path string) *Document {
 		}
 	}
 	return nil
+}
+
+// ApplyCompletionAtCarets replaces the identifier prefix before EVERY caret of the open
+// document at path with text, in one atomic edit (one undo step). It is the accept path
+// for a completion with multiple cursors, matching Fresh's insert_completion_text: each
+// caret keeps its own prefix length, so the cursors stay in lock-step, the same candidate
+// is inserted at all of them, and CursorMap puts every caret after its own inserted text.
+// expect, when non-nil, must equal the document version or nothing is written (ErrStale).
+// It returns the number of carets whose prefix was replaced (which is also the number of
+// edits), and ErrNotOpen for a path no open document has. An extra caret with an empty
+// prefix gets the text inserted, as Fresh does.
+func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *Version) (int, error) {
+	d := e.lspDocAt(path)
+	if d == nil {
+		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
+	}
+	positions := make([]buffer.Pos, 0, 1+len(d.Cursors()))
+	positions = append(positions, d.Cursor)
+	for _, c := range d.Cursors() {
+		positions = append(positions, c.Cursor)
+	}
+	edits := make([]LSPEdit, 0, len(positions))
+	for _, p := range positions {
+		p = d.Buffer.Clamp(p)
+		line := []rune(d.Buffer.Line(p.Line))
+		col := min(p.Col, len(line))
+		start := col
+		for start > 0 && IsWordRune(line[start-1], wordChars) {
+			start--
+		}
+		edits = append(edits, LSPEdit{
+			From: buffer.Pos{Line: p.Line, Col: start},
+			To:   p,
+			Text: text,
+		})
+	}
+	if err := d.ApplyEditList(edits, EditOptions{Cursor: CursorMap, Expect: expect}, false); err != nil {
+		return 0, err
+	}
+	return len(edits), nil
 }

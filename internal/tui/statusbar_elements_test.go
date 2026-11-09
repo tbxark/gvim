@@ -127,7 +127,7 @@ func TestTerminalRestartElementRestartsTheDock(t *testing.T) {
 	if !m.dock.Exited() {
 		t.Fatal("precondition: the shell has exited")
 	}
-	if got := m.statusView().TerminalRestart; got != "Restart terminal" {
+	if got := m.statusView().TerminalRestart; got != "⟳ Restart terminal" {
 		t.Fatalf("exited dock: {terminal_restart} = %q", got)
 	}
 	l := m.layout()
