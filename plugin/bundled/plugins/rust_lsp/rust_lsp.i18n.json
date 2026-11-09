@@ -1,0 +1,29 @@
+{
+  "en": {
+    "cmd.copy_rustup": "Rust: Copy rustup Install Command",
+    "cmd.copy_rustup_desc": "Copy the official rustup command that adds rust-analyzer to the clipboard",
+    "cmd.copy_brew": "Rust: Copy brew Install Command",
+    "cmd.copy_brew_desc": "Copy the Homebrew rust-analyzer install command to the clipboard",
+    "cmd.check": "Rust: Check rust-analyzer",
+    "cmd.check_desc": "Look rust-analyzer up on PATH and report its version or a clear reason it is unavailable",
+    "cmd.help": "Rust: Language Server Help",
+    "cmd.help_desc": "Troubleshooting and installation help for the rust-analyzer language server",
+    "status.copied": "Copied: %{value}",
+    "status.copy_failed": "Could not copy the install command: %{error}",
+    "status.not_found": "rust-analyzer not found on PATH. Install it with: %{rustup} (or see Rust: Language Server Help)",
+    "status.found": "rust-analyzer found: %{path} (%{version})",
+    "status.version_error": "rust-analyzer found at %{path}, but could not start it: %{error}",
+    "status.version_failed": "rust-analyzer found at %{path}, but --version failed: %{error}",
+    "status.version_unknown": "version unknown",
+    "status.exit_code": "exit code %{code}",
+    "status.action_failed": "Could not run %{action}: %{error}",
+    "help.title": "Rust Language Server (rust-analyzer)",
+    "help.message": "rust-analyzer is Rust's language server: completion, diagnostics, hover, go-to-definition and refactoring come from it.\n\nInstall it with rustup (official, recommended) or Homebrew:\n  rustup component add rust-analyzer\n  brew install rust-analyzer\n\nIf it is installed but gvim cannot find it:\n  * run `rustup component add rust-analyzer` and then `rust-analyzer --version` in the same shell;\n  * restart gvim (or Start/Restart LSP Server) after installing so PATH is re-read;\n  * use the native Start/Restart LSP Server and Show LSP Status actions below to check the server state and logs;\n  * a mismatched rust-analyzer/rustc toolchain can prevent startup: `rustup update` and check `rustup component list --installed`.\n\nDocs: https://rust-analyzer.github.io/book/installation.html",
+    "actions.copy_rustup": "Copy: %{command}",
+    "actions.copy_brew": "Copy: %{command}",
+    "actions.check": "Check rust-analyzer on PATH",
+    "actions.restart": "Start/Restart LSP Server",
+    "actions.status": "Show LSP Status",
+    "actions.dismiss": "Dismiss (Esc)"
+  }
+}

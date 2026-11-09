@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-seven plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-eight plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome` and `markdown_source` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `markdown_source` and `rust_lsp` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -28,6 +28,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `asm_lsp` | **off** | Assembly: Create .asm-lsp.toml, Assembly: Show LSP Help | none |
 | `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
 | `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
+| `rust_lsp` | **off** | Rust: Copy rustup Install Command, Rust: Copy brew Install Command, Rust: Check rust-analyzer, Rust: Language Server Help | none |
 | `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
 | `markdown_source` | **off** | none (hidden Enter/Tab/Shift+Tab key handlers for Markdown lists) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
@@ -265,6 +266,25 @@ of Fresh's fixed `//`; the greeting/time/comment strings are English-only rather
 locales; and Fresh's debug-only load message is not reproduced (gvim has no equivalent hidden
 status).
 
+
+**rust_lsp** (reduced Fresh port): the Rust language-server helper. Fresh's `rust-lsp.ts` reacts to
+Rust LSP errors with rows contributed to the native LSP-Servers popup, clears them on recovery, offers
+Disable and a full/reduced-memory Configure Mode. gvim's plugin API has no LSP-menu contribution,
+language-disable or register/restart-for-language seam, so the port exposes the user-visible
+install/help half as four palette commands: **Rust: Copy rustup Install Command** copies
+`rustup component add rust-analyzer` and **Rust: Copy brew Install Command** copies
+`brew install rust-analyzer` (status row confirms); **Rust: Check rust-analyzer** looks the binary up
+on PATH (best-effort, the local-machine LookPath) and then runs `rust-analyzer --version` through
+`gvim.proc` (authority-following), reporting the path and first version line, a missing binary, a
+start failure, or a non-zero version exit with stderr; **Rust: Language Server Help** opens a
+troubleshooting popup (install commands, PATH/restart/toolchain notes, upstream docs link) with
+copy-rustup/copy-brew/check actions, the native Start/Restart LSP Server and Show LSP Status actions,
+and Dismiss. No keys and no settings; opt-in (`default_enabled: false`). Reductions (also in
+porting.md): no automatic LSP-error status or contributed LSP-menu rows, no recovery detection, no
+Disable Rust LSP action, no Configure Mode/reduced-memory registration/restart-for-language, and
+the PATH check is local while only the version probe follows a remote workspace. The generic
+`lsp_help` plugin already owns the automatic LSP-error status row/install popup for Rust; `rust_lsp`
+adds the explicit copy/check/help palette commands instead of a second event handler.
 **markdown_source** (port of Fresh's `plugins/markdown_source.ts`): gvim's editor already
 implements Fresh's Markdown source-mode list rules natively (`editor/markdown.go`, called from the
 built-in `insert_newline`/`insert_tab`/`dedent_selection` actions), so this is the explicit Lua

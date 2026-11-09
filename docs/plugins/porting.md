@@ -432,6 +432,39 @@ Enter table (bullets, ordered increment, checkbox, empty-item marker removal, in
 non-list indent copy, cursor), the Tab table (bullet cycles, checkbox state, ordered/content
 fallback, cursor), Shift+Tab (reverse cycle, indent threshold, `dedent_selection` fallback),
 non-Markdown and selection fallbacks, and the read-only failure status.
+### Rust LSP: no LSP-menu, disable or register seam (port residual)
+
+Fresh's `rust-lsp.ts` is mainly an LSP error flow: it detects rust-analyzer failures, contributes
+copy-install/disable rows to the native LSP-Servers popup, clears them when the server recovers, and
+offers a Configure Mode command that registers a full or reduced-memory rust-analyzer and restarts
+the language. gvim's plugin API has no LSP-menu contribution, no language-disable call and no
+register/restart-for-language call, so the bundled port
+(`plugin/bundled/plugins/rust_lsp/`, opt-in) keeps only the install/help surface as explicit
+commands:
+
+* `Rust: Copy rustup Install Command` / `Rust: Copy brew Install Command` use `gvim.clipboard.set`
+  and report on the status row (`rustup component add rust-analyzer` and
+  `brew install rust-analyzer`, the commands Fresh's popup offers);
+* `Rust: Check rust-analyzer` uses `gvim.proc.which` for the PATH check and then
+  `gvim.proc.run {"rust-analyzer", "--version"}` (5 s / 64 KiB bounds) for the version. The LookPath
+  call is the local-machine API by documentation, so a remote workspace's PATH is only checked best
+  effort; the version probe itself goes through the workspace authority. Missing binary, exec
+  failure, non-zero exit (first stderr line) and an empty version line each have their own status;
+* `Rust: Language Server Help` is a `gvim.ui.action_popup` with Fresh's install commands, PATH/restart/
+  toolchain troubleshooting notes and the upstream installation link, plus copy/check rows and the
+  native Start/Restart LSP Server and Show LSP Status actions.
+
+Not ported: automatic status on `lsp_server_error`, contributed "Plugin actions" rows in the
+native LSP-Servers popup, recovery detection via `lsp_status_clicked`, Disable Rust LSP, and
+Configure Mode (registering full/reduced-memory rust-analyzer, process limits, restart). gvim's
+`lsp_help` already puts a Rust install hint on the status row and opens its own help popup on an LSP
+status click, so this plugin deliberately does not add a second `lsp_server_error` handler. The plugin
+is `default_enabled: false`, registers no keys and no settings.
+
+Tests: `plugin/bundled/rust_lsp_test.go` covers the visible command table/no bindings, both copy
+commands (clipboard/status), the missing-PATH status with no process launch, found+version, non-zero
+version exit, exec failure, and the help popup's message/actions plus copy/check/native-restart
+dispatch.
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.
