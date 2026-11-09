@@ -702,12 +702,13 @@ still loads unchanged.
   remote ignore reader, nested-repository/submodule contents appear only through the
   fallback path, non-UTF-8 paths are omitted (Fresh leaves them out too), a truncated git
   listing falls back to the recursive walk rather than keeping a partial one, and the
-  fallback notice's English literal awaits the next i18n extraction. Remote
-  file preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
-  remote workspace instead of silently searching the local project, the palette file
-  preview is cleared, and the local git-status adapter is replaced by an inert one: local
-  git must not look up remote paths), and the remote workspace's plugin/agent project root
-  still comes from the local process root. Project Search and Git Grep now run on the
+  fallback notice's English literal awaits the next i18n extraction. The palette file
+  preview is the authority-backed remote reader, and Live Grep-over-remote is wired
+  (Files reuses this project-search candidate scope; Buffers/Terminals stay in-memory;
+  Ignored uses the widened remote scan; the local Grep port is cleared and replaced), and
+  the local git-status adapter is replaced by an inert one: local git must not look up
+  remote paths. The remote workspace's plugin/agent project root still comes from the
+  local process root. Project Search and Git Grep now run on the
   remote host through the same authority one-shot surface (the spawn/trust gate applies),
   in the session's remote captured environment delta (`env.Remote`; the local overlay is
   never forwarded, and the same delta drives the remote terminal, LSP and git grep):
@@ -780,6 +781,29 @@ still loads unchanged.
   ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
   expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
   not a tilde expansion in sh/bash.
+- **Remote Live Grep (landed).** The remote workspace's Live Grep port is the
+  authority-backed `remoteLiveGrep` installed with the remote project search; the local
+  Grepper is cleared in `remoteRootPorts`, so no remote row can read the local project.
+  Its Files scope calls the remote project-search adapter (the same candidate scope,
+  one-shot trust/spawn gate, remote cwd/env, NUL parser, per-command 8 MiB cap and 20 s
+  deadline; the quick-open snapshot bounds it when present). The Ignored scope runs the
+  same wide scan with `--no-ignore --hidden` because no complete candidate list names
+  untracked ignored files; Buffers and Terminals are the editor's in-memory snapshots
+  and are searched after files with no remote command. The palette's optional
+  ContextGrepper gives the search a cancellable context; superseding the query, toggling
+  a scope, dismissing, choosing a row or exporting cancels the streaming project search
+  and the authority command. Row preview uses the remote previewer's cancellable
+  `ReadRange` window (64 KiB chunks, 8 MiB scan budget, 5 lines before, 12 lines
+  maximum, 16 KiB output) and the local head reader is never used for a remote row; a
+  hit opens the remote absolute path through the existing remote document access. No
+  remote result cache survives Resume: the palette restores controls only and always
+  re-searches, and a reconnect/root change rebuilds the remote index/ports (a
+  disconnected authority reports its error). Residuals: Live Grep has no notice row for
+  the project-search degradation/truncation notices, so a capped remote result is only
+  best-effort; the Ignored wide scan is bounded but can hit the per-command cap; the
+  remote preview window is a bounded line scan (deep hits can be unavailable past the
+  8 MiB prefix budget), not a remote buffer; and Buffers/Terminals are client-side text,
+  not remote host state.
 - **Remote data surfaces: git marks, quick-open preview, finder refresh (landed).**
   The remote explorer's git letters come from a porcelain-v1 NUL-separated git status run
   through the authority one-shot with the remote workspace cwd and the remote captured

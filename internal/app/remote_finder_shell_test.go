@@ -140,13 +140,14 @@ func TestRemoteRootPortsDisableLocalAdapters(t *testing.T) {
 		ProjectSearch:  localSearchSentinel{},
 		ProjectReplace: localReplaceSentinel{},
 		GitGrep:        localGitGrepSentinel{},
+		Grep:           &liveGrep{},
 	}
 	remoteRootPorts(&ports)
 	if ports.Preview != nil {
 		t.Fatal("the local file preview is still wired in a remote workspace")
 	}
-	if ports.ProjectSearch != nil || ports.ProjectReplace != nil || ports.GitGrep != nil {
-		t.Fatalf("local search/replace ports are still wired in a remote workspace: %+v", ports)
+	if ports.ProjectSearch != nil || ports.ProjectReplace != nil || ports.GitGrep != nil || ports.Grep != nil {
+		t.Fatalf("local search/replace/live-grep ports are still wired in a remote workspace: %+v", ports)
 	}
 	if ports.Projects == nil {
 		t.Fatal("the remote project opener is nil")

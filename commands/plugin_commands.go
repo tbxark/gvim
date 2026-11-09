@@ -26,5 +26,5 @@ var gvimRenames = map[string]gvimRename{
 	// Fresh's generated description says "cached results — no re-run" unconditionally.
 	// gvim keeps the cache only while it is current; this text says what happens on
 	// Resume instead of overstating it.
-	"resume_live_grep": {"", "Reopen Live Grep with the prior query, selection and cached matches when the search was files-only and is still current; Buffers/Terminals, a query, file-index, project or config change searches again"},
+	"resume_live_grep": {"", "Reopen Live Grep with the prior query, match modes and scopes and search again; cached matches are never reused because file contents may have changed"},
 }

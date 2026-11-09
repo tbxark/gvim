@@ -905,13 +905,35 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusEditor()
 	case palette.OpenTerminalMsg:
 		// A Live Grep hit in an open dock terminal focuses that tab (showing the dock
-		// when hidden). It starts no shell and touches no PTY: the terminal is already
-		// open, the transcript line is only where the match was found.
+		// when hidden) and, when possible, reveals the matched transcript row in the
+		// read-only pager. It starts no shell and touches no PTY: the terminal is
+		// already open, the transcript line is only where the match was found.
+		if msg.ID != 0 {
+			// Resolve the stable runtime id once; RevealTranscriptLine itself activates
+			// the tab, so this path must not SetActive separately (it would queue the
+			// dive twice).
+			if _, ok := m.dock.IndexForID(msg.ID); !ok {
+				m.notice = uiText("gvim.palette.terminal_tab_gone", "Live Grep: the terminal tab is no longer open")
+				break
+			}
+			cmd = m.showDock()
+			if reveal, located := m.dock.RevealTranscriptLine(msg.ID, msg.Row); located {
+				cmd = tea.Batch(cmd, reveal)
+			} else {
+				// The tab is there and focused, but a restored read-only tab or a
+				// running alternate-screen program has no pager to position.
+				m.notice = uiText("gvim.palette.terminal_line_unavailable", "Live Grep: the terminal transcript line cannot be located")
+			}
+			m.focusDock()
+			break
+		}
+		// A legacy hit without a stable id falls back to the snapshot position (it can
+		// only be right while no other tab closed/moved); it cannot reveal a row.
 		if m.dock.SetActive(msg.Index) {
 			cmd = m.showDock()
 			m.focusDock()
 		} else {
-			m.notice = "Live Grep: the terminal tab is no longer open"
+			m.notice = uiText("gvim.palette.terminal_tab_gone", "Live Grep: the terminal tab is no longer open")
 		}
 	case palette.GotoLineMsg:
 		// The ':' mode jumps at once, as Fresh's does: one Enter reaches the line.
@@ -3484,9 +3506,9 @@ func (m *Model) popOverlay() {
 	if n == 0 {
 		return
 	}
-	// Resume captures Live Grep's state as the overlay closes: the query, modes,
-	// scopes, selected row and cached matches (bounded by the palette). The capture is
-	// in memory, so closing starts no search or I/O.
+	// Resume captures Live Grep's controls as the overlay closes: the query, modes and
+	// scopes. Hits and the selected row are not kept because Resume searches again. The
+	// capture is in memory, so closing starts no search or I/O.
 	if r, ok := m.overlays[n-1].(interface{ LiveResumeState() *palette.LiveResume }); ok {
 		if state := r.LiveResumeState(); state != nil {
 			m.root.lastGrep = state

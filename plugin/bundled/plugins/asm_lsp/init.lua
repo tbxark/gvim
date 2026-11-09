@@ -234,6 +234,26 @@ local function offer_config(buf, force)
   end
 end
 
+-- disable_active_language re-checks the active buffer immediately before dispatching the
+-- native disable action: the popup may still be open after the user switched tabs. The
+-- native command acts on the active language and returns an async completion, so this
+-- function reports only dispatch failures and never claims that the mute succeeded.
+local function disable_active_language()
+  local buf = active_buffer()
+  if not buf or not asm_language_for_path(buf:path()) then
+    gvim.status(t("status.not_assembly"))
+    return
+  end
+  if not gvim.has("lsp") then
+    gvim.status(t("status.no_lsp"))
+    return
+  end
+  local ran, err = gvim.command.run("lsp_disable_language")
+  if not ran then
+    gvim.status(t("status.action_failed", { error = tostring(err) }))
+  end
+end
+
 -- show_help is the install-help popup for a missing/broken asm-lsp server.
 local function show_help()
   local buf = active_buffer()
@@ -253,6 +273,7 @@ local function show_help()
       { id = "copy:binstall", label = t("actions.copy", { value = COPY_BINSTALL }) },
       { id = "act:lsp_restart", label = t("actions.restart") },
       { id = "act:show_lsp_status", label = t("actions.status") },
+      { id = "act:lsp_disable_language", label = t("actions.disable") },
       { id = "dismiss", label = t("actions.dismiss") },
     },
   })
@@ -271,6 +292,10 @@ local function show_help()
     return
   end
   local action = choice:match("^act:(.+)$")
+  if action == "lsp_disable_language" then
+    disable_active_language()
+    return
+  end
   if action then
     local ran, err = gvim.command.run(action)
     if not ran then

@@ -205,6 +205,7 @@ func TestAsmLspInstallHelpAndActions(t *testing.T) {
 	r := asmRig(t, "/work/a.asm", "section .text\n", func(o *plugintest.FakeOS) {
 		o.SetFile("/work/.asm-lsp.toml", "assembler = \"nasm\"\n")
 	})
+	r.host.LSP().Enabled = true
 	r.h.Emit(pluginapi.Event{Name: "lsp_server_error", Data: map[string]any{"error": "asm-lsp: server not found"}})
 	if got := lastNoticeText(r.h); !strings.Contains(got, "Assembly LSP server not found") {
 		t.Fatalf("status = %q", got)
@@ -214,7 +215,7 @@ func TestAsmLspInstallHelpAndActions(t *testing.T) {
 	if ov == nil {
 		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
 	}
-	for _, want := range []string{"copy:cargo", "copy:binstall", "act:lsp_restart", "act:show_lsp_status", "dismiss"} {
+	for _, want := range []string{"copy:cargo", "copy:binstall", "act:lsp_restart", "act:show_lsp_status", "act:lsp_disable_language", "dismiss"} {
 		if !asmHasAction(ov, want) {
 			t.Errorf("help popup lacks %q (actions %v)", want, asmActionIDs(ov))
 		}
@@ -238,6 +239,65 @@ func TestAsmLspInstallHelpAndActions(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("commands = %v, want lsp_restart", r.host.Cmd().Ran())
+	}
+	// The popup's Disable action re-checks that the active buffer is still assembly.
+	// Switch away after the popup opened: the plugin must refuse and not dispatch.
+	r.h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	ov = asmPopup(r.h)
+	notes := r.host.AddBuffer("/work/notes.md", "# notes\n")
+	r.host.SetActive(notes)
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language" {
+			t.Fatalf("disable dispatched for non-assembly active buffer: commands %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "Open an assembly file first (.asm/.nasm/.s)" {
+		t.Fatalf("switched-buffer status = %q", got)
+	}
+
+	// Back on the assembly buffer, the action dispatches the native command; the plugin
+	// makes no success claim because the mute completion is asynchronous.
+	r.host.SetActive(r.ids["/work/a.asm"])
+	r.h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	ov = asmPopup(r.h)
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	found = false
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("commands = %v, want lsp_disable_language", r.host.Cmd().Ran())
+	}
+	if strings.Contains(strings.Join(r.h.NoticeTexts(), "\n"), "Assembly LSP disabled") {
+		t.Fatalf("plugin falsely claimed disable success: %v", r.h.NoticeTexts())
+	}
+}
+
+func TestAsmLspDisableWithoutLSPDoesNotDispatch(t *testing.T) {
+	t.Parallel()
+	r := asmRig(t, "/work/a.asm", "section .text\n", func(o *plugintest.FakeOS) {
+		o.SetFile("/work/.asm-lsp.toml", "assembler = \"nasm\"\n")
+	})
+	// The fake host has no configured language server by default: the popup can still be
+	// opened from a remembered error, but the disable action must not dispatch the native
+	// command into a runtime without an LSP port.
+	r.h.Emit(pluginapi.Event{Name: "lsp_server_error", Data: map[string]any{"error": "asm-lsp: server not found"}})
+	r.h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	ov := asmPopup(r.h)
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language" {
+			t.Fatalf("disable dispatched without an LSP feature: commands %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "No language server is configured" {
+		t.Fatalf("no-LSP status = %q", got)
 	}
 }
 

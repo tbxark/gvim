@@ -205,12 +205,14 @@ func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, 
 			}
 			last = m.Start.Line
 			hits = append(hits, palette.GrepHit{
-				Rel:    label,
-				Line:   m.Start.Line + 1,
-				Col:    m.Start.Col + 1,
-				Text:   strings.TrimRight(b.Line(m.Start.Line), "\r"),
-				Source: palette.GrepTerminals,
-				Index:  src.Index,
+				Rel:             label,
+				Line:            m.Start.Line + 1,
+				Col:             m.Start.Col + 1,
+				Text:            strings.TrimRight(b.Line(m.Start.Line), "\r"),
+				Source:          palette.GrepTerminals,
+				Index:           src.Index,
+				TerminalID:      src.ID,
+				TranscriptFirst: src.First,
 			})
 			if len(hits) >= limit {
 				return hits, nil

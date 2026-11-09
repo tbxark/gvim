@@ -106,10 +106,10 @@ func TestHiddenCommandsAreNotListed(t *testing.T) {
 	}
 }
 
-// TestResumeLiveGrepDescriptionMatchesCacheBehavior: the generated Fresh description
-// promised cached results with no re-run unconditionally. The gvim override must say
-// that the cache is used only while current and that invalidations search again.
-func TestResumeLiveGrepDescriptionMatchesCacheBehavior(t *testing.T) {
+// TestResumeLiveGrepDescriptionMatchesBehavior: the generated Fresh description
+// promised cached results with no re-run. gvim Resume never reuses cached hits (file
+// contents can change), so the override must say it searches again.
+func TestResumeLiveGrepDescriptionMatchesBehavior(t *testing.T) {
 	for _, e := range Commands(nil) {
 		if e.Action != "resume_live_grep" {
 			continue
@@ -117,7 +117,7 @@ func TestResumeLiveGrepDescriptionMatchesCacheBehavior(t *testing.T) {
 		if strings.Contains(e.Description, "no re-run") {
 			t.Fatalf("description still overstates Resume: %q", e.Description)
 		}
-		for _, want := range []string{"cached matches", "files-only", "still current", "searches again", "Buffers/Terminals"} {
+		for _, want := range []string{"prior query", "match modes", "scopes", "search again", "file contents may have changed"} {
 			if !strings.Contains(e.Description, want) {
 				t.Fatalf("description = %q, want %q", e.Description, want)
 			}

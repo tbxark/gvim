@@ -1241,9 +1241,14 @@ func (s *remoteSearch) run(ctx context.Context, cwd string, argv []string) (host
 // replace adapter reads and write each file through the authority file system (atomic
 // remote writes), never through the local disk; gate is the workspace trust gate.
 func installRemoteSearchPorts(ports *tui.RootPorts, one authority.OneShot, files authority.FileSystem, gate func(ctx context.Context, argv []string, cwd string) error, root, label string, spawnEnv func() []string) {
-	ports.ProjectSearch = newRemoteProjectSearch(one, root, spawnEnv).withFiles(files)
+	search := newRemoteProjectSearch(one, root, spawnEnv).withFiles(files)
+	ports.ProjectSearch = search
 	ports.GitGrep = newRemoteGitGrep(one, root, spawnEnv)
 	ports.ProjectReplace = newRemoteProjectReplacer(files, gate, root, label)
+	// Live Grep over the same authority: Files reuses this project-search candidate scope,
+	// Buffers/Terminals stay the in-memory snapshots, and the local Grep port was cleared in
+	// remoteRootPorts so a remote launch can never fall back to the local disk.
+	ports.Grep = newRemoteLiveGrep(search, gate)
 }
 
 // remoteGitGrep runs git grep on the remote host: the repository root is resolved remotely

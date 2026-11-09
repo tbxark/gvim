@@ -244,6 +244,8 @@ type row struct {
 	action   string
 	rel      string
 	index    int
+	termID   uint64
+	termRow  int
 	line     int
 	col      int
 	// A grep row keeps its line text apart from name, so the label can be cut around the
@@ -317,8 +319,6 @@ type Palette struct {
 	// grep is the Live Grep state: the match modes, the scope toggles and the last
 	// result's count.
 	grep grepState
-	// liveResumed says Resume restored a cached result, so Init must not search.
-	liveResumed bool
 }
 
 // New returns an open palette for opts. The query is the input and its rows are
@@ -370,9 +370,6 @@ func (p *Palette) Init() tea.Cmd {
 		return nil
 	}
 	if p.live {
-		if p.liveResumed {
-			return nil
-		}
 		return p.grepCmd(p.seq, p.input.Value())
 	}
 	if !p.inFile {
@@ -672,6 +669,7 @@ func (p *Palette) run(i int) tea.Cmd {
 		return nil
 	}
 	p.cancelProbe()
+	p.cancelGrepSearch()
 	p.preview.reset()
 	p.open = false
 	return r.command(p.opts.Root, p.opts.Remote)
@@ -681,6 +679,7 @@ func (p *Palette) run(i int) tea.Cmd {
 // another cancel path) closes the palette; the palette's own run path calls it too.
 func (p *Palette) Dismiss() {
 	p.cancelProbe()
+	p.cancelGrepSearch()
 	p.preview.reset()
 }
 
@@ -1082,7 +1081,7 @@ func (r row) command(root string, remote bool) tea.Cmd {
 		case GrepTerminals:
 			// A terminal hit focuses the open dock tab; it opens no file and starts no
 			// shell (the transcript line is only the search location).
-			msg = OpenTerminalMsg{Index: r.index}
+			msg = OpenTerminalMsg{ID: r.termID, Row: r.termRow, Index: r.index}
 		default:
 			msg = OpenLineMsg{Path: filePath(root, r.rel, remote), Line: r.line, Col: r.col}
 		}

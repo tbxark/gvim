@@ -127,6 +127,7 @@ func (t *Tabs) startLaunchRecordAt(launch terminal.Launch, name, dir string) (te
 	}
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, name)
+	t.ids = append(t.ids, t.newID())
 	t.active = len(t.tabs) - 1
 	p.open = true
 	p.focus = false

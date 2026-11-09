@@ -337,125 +337,43 @@ func TestLiveGrepHintRowAdvertisesNoPrefixes(t *testing.T) {
 	}
 }
 
-// TestLiveResumeBoundsHitsAndRestoresState: a Resume snapshot is capped at the Live
-// Grep row limit, restores the selected row and the controls, and its own snapshot is
-// bounded too.
-func TestLiveResumeBoundsHitsAndRestoresState(t *testing.T) {
-	hits := make([]GrepHit, grepLimit+25)
-	for i := range hits {
-		hits[i] = GrepHit{Rel: "a.go", Line: i + 1, Col: 1, Text: "todo"}
-	}
-	resume := &LiveResume{
-		Text:     "todo",
-		Done:     true,
-		Hits:     hits,
-		Selected: 5,
-		Options:  SearchOptions{Regex: true},
-		Sources:  GrepSources{Files: true},
-	}
-	p := New(Options{Query: "todo", Live: true, Resume: resume})
-	if len(p.rows) != grepLimit {
-		t.Fatalf("restored rows = %d, want the %d row cap", len(p.rows), grepLimit)
-	}
-	if got := p.nav.Selected(); got != 5 {
-		t.Fatalf("restored selected row = %d, want 5", got)
-	}
-	got := p.LiveResumeState()
-	if got == nil || !got.Done || len(got.Hits) != grepLimit || got.Selected != 5 {
-		t.Fatalf("resume snapshot = %+v, want %d bounded hits and row 5", got, grepLimit)
-	}
-	if !got.Options.Regex || !got.Sources.Files {
-		t.Fatalf("restored controls = %+v %+v", got.Options, got.Sources)
-	}
-}
-
-// TestLiveGrepTerminalScope checks the Terminals scope: a supplied dock snapshot
-// offers it, it starts on with the snapshot copied into the request, Alt+T toggles it
-// (re-running the search), and Enter on a terminal hit focuses its dock tab.
-func TestLiveGrepTerminalScope(t *testing.T) {
+// TestLiveResumeRestoresControlsAndSearchesAgain: Resume restores query, modes and
+// scopes but never cached rows; Init runs a fresh search because file contents may
+// have changed while the palette was closed.
+func TestLiveResumeRestoresControlsAndSearchesAgain(t *testing.T) {
 	t.Parallel()
-	g := &fakeGrepper{hits: []GrepHit{
-		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo output", Source: GrepTerminals, Index: 1},
-	}}
-	opts := liveOptions("todo", &fakeFiles{files: []string{"a.go"}}, g)
-	opts.SourceTerminals = []TerminalSource{
-		{Index: 0, Name: "first", Lines: []string{"nothing"}},
-		{Index: 1, Name: "shell", Lines: []string{"out", "xx todo output"}},
+	g := &fakeGrepper{hits: []GrepHit{{Rel: "fresh.go", Line: 2, Col: 1, Text: "todo fresh"}}}
+	files := &fakeFiles{files: []string{"fresh.go"}}
+	opts := liveOptions("todo", files, g)
+	opts.Resume = &LiveResume{
+		Text:    "todo",
+		Options: SearchOptions{Regex: true, WholeWord: true},
+		Sources: GrepSources{Files: true},
 	}
 	p := New(opts)
-	draw(p, 140, 30)
-	settle(t, p, p.Init(), 8)
-	if len(g.reqs) != 1 || !g.reqs[0].Sources.Terminals || len(g.reqs[0].Terminals) != 2 {
-		t.Fatalf("initial terminal request = %+v", g.reqs)
+	if !p.grep.opts.WholeWord || !p.grep.sources.Files {
+		t.Fatalf("resume controls = %+v %+v", p.grep.opts, p.grep.sources)
 	}
-	if got := g.reqs[0].Terminals; got[0].Index != 0 || got[0].Name != "first" || len(got[1].Lines) != 2 {
-		t.Fatalf("terminal snapshot = %+v", got)
+	if len(p.rows) != 0 {
+		t.Fatalf("resume restored rows before searching: %+v", p.rows)
 	}
-	if !hasRow(draw(p, 140, 30), "shell:2: xx todo output") {
-		t.Fatal("the terminal hit is not shown")
+	cmd := p.Init()
+	if cmd == nil {
+		t.Fatal("resume did not start a search")
 	}
-	// Alt+T turns the scope off and re-runs with no terminal snapshot.
-	g.reqs = nil
-	settle(t, p, p.update(altKey('t')), 8)
-	if len(g.reqs) != 1 || g.reqs[0].Sources.Terminals || len(g.reqs[0].Terminals) != 0 {
-		t.Fatalf("terminal-off request = %+v", g.reqs)
+	if len(g.reqs) != 0 {
+		t.Fatalf("resume searched in New/Init synchronously: %+v", g.reqs)
 	}
-	// Back on; Enter on the hit focuses the dock tab (no file/buffer open message).
-	g.reqs = nil
-	settle(t, p, p.update(altKey('t')), 8)
-	if len(g.reqs) != 1 || !g.reqs[0].Sources.Terminals {
-		t.Fatalf("terminal-on request = %+v", g.reqs)
+	p.update(cmd())
+	if len(g.reqs) != 1 || g.reqs[0].Text != "todo" || !g.reqs[0].Query.WholeWord {
+		t.Fatalf("searches = %+v, want one todo search with Whole Word", g.reqs)
 	}
-	p.update(GrepResultMsg{Seq: p.seq, Text: "todo", Hits: g.hits})
-	if got := runCmd(p.update(key(tea.KeyEnter))); got != (OpenTerminalMsg{Index: 1}) {
-		t.Fatalf("Enter emitted %#v, want the dock tab focus", got)
+	if len(p.rows) == 0 || !strings.Contains(p.rows[0].name, "fresh.go") {
+		t.Fatalf("rows = %+v, want the fresh result", p.rows)
 	}
-}
-
-// TestBoundTerminalSources caps the snapshot a request can copy: tab count, rows and
-// bytes per tab, and total bytes. The tail (newest rows) is kept.
-func TestBoundTerminalSources(t *testing.T) {
-	t.Parallel()
-	longRows := make([]string, 0, 600)
-	for i := 0; i < 600; i++ {
-		longRows = append(longRows, "line")
-	}
-	src := make([]TerminalSource, 0, 20)
-	src = append(src, TerminalSource{Index: 0, Name: "many", Lines: longRows})
-	for i := 1; i < 20; i++ {
-		src = append(src, TerminalSource{Index: i, Name: "t", Lines: []string{"x"}})
-	}
-	got := boundTerminalSources(src)
-	if len(got) != GrepTerminalsMaxTabs {
-		t.Fatalf("tabs = %d, want %d", len(got), GrepTerminalsMaxTabs)
-	}
-	if len(got[0].Lines) != GrepTerminalsMaxRows || got[0].Lines[len(got[0].Lines)-1] != "line" {
-		t.Fatalf("rows = %d, want the newest %d", len(got[0].Lines), GrepTerminalsMaxRows)
-	}
-	// One over-long line cannot enter the per-tab byte budget; the tab keeps no lines
-	// rather than truncating a line's middle.
-	over := boundTerminalSources([]TerminalSource{{Index: 3, Name: "big", Lines: []string{strings.Repeat("x", GrepTerminalsMaxTabBytes+1)}}})
-	if len(over) != 1 || len(over[0].Lines) != 0 {
-		t.Fatalf("over-long line snapshot = %+v", over)
-	}
-	// The total byte cap leaves later tabs out once it is spent.
-	filler := strings.Repeat("x", 1000)
-	rows := make([]string, 0, GrepTerminalsMaxRows)
-	for i := 0; i < GrepTerminalsMaxRows; i++ {
-		rows = append(rows, filler)
-	}
-	big := make([]TerminalSource, 0, 10)
-	for i := 0; i < 10; i++ {
-		big = append(big, TerminalSource{Index: i, Lines: rows})
-	}
-	total := 0
-	for _, term := range boundTerminalSources(big) {
-		for _, line := range term.Lines {
-			total += len(line) + 1
-		}
-	}
-	if total > GrepTerminalsMaxBytes {
-		t.Fatalf("total snapshot bytes = %d, over the %d cap", total, GrepTerminalsMaxBytes)
+	state := p.LiveResumeState()
+	if state == nil || state.Text != "todo" || !state.Options.WholeWord || !state.Sources.Files {
+		t.Fatalf("resume snapshot = %+v", state)
 	}
 }
 
@@ -495,15 +413,10 @@ func TestLiveResumeRerunsWhenBuffersOrTerminalsAreScoped(t *testing.T) {
 			tt.setup(&opts)
 			opts.Resume = &LiveResume{
 				Text:    "todo",
-				Done:    true,
-				Hits:    []GrepHit{{Rel: "stale.go", Line: 9, Col: 1, Text: "todo"}},
 				Sources: tt.sources,
 				Options: SearchOptions{Regex: true},
 			}
 			p := New(opts)
-			if p.liveResumed {
-				t.Fatal("resume restored cached hits for a volatile tab scope")
-			}
 			cmd := p.Init()
 			if cmd == nil {
 				t.Fatal("resume did not start a search")
@@ -516,5 +429,102 @@ func TestLiveResumeRerunsWhenBuffersOrTerminalsAreScoped(t *testing.T) {
 				t.Fatalf("rows = %+v, want the fresh result, not the stale hit", p.rows)
 			}
 		})
+	}
+}
+
+// TestLiveGrepTerminalScope checks the Terminals scope: a supplied dock snapshot
+// offers it, it starts on with the snapshot (stable ids and transcript offsets)
+// copied into the request, Alt+T toggles it, and Enter on a terminal hit reports the
+// stable dock tab id plus the absolute transcript row to reveal.
+func TestLiveGrepTerminalScope(t *testing.T) {
+	t.Parallel()
+	g := &fakeGrepper{hits: []GrepHit{
+		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo output", Source: GrepTerminals, Index: 1, TerminalID: 9, TranscriptFirst: 40},
+	}}
+	opts := liveOptions("todo", &fakeFiles{files: []string{"a.go"}}, g)
+	opts.SourceTerminals = []TerminalSource{
+		{ID: 7, Index: 0, Name: "first", Lines: []string{"nothing"}},
+		{ID: 9, Index: 1, Name: "shell", First: 40, Lines: []string{"out", "xx todo output"}},
+	}
+	p := New(opts)
+	draw(p, 140, 30)
+	settle(t, p, p.Init(), 8)
+	if len(g.reqs) != 1 || !g.reqs[0].Sources.Terminals || len(g.reqs[0].Terminals) != 2 {
+		t.Fatalf("initial terminal request = %+v", g.reqs)
+	}
+	if got := g.reqs[0].Terminals; got[0].ID != 7 || got[0].Index != 0 || got[0].Name != "first" ||
+		got[1].ID != 9 || got[1].First != 40 || len(got[1].Lines) != 2 {
+		t.Fatalf("terminal snapshot = %+v", got)
+	}
+	if !hasRow(draw(p, 140, 30), "shell:2: xx todo output") {
+		t.Fatal("the terminal hit is not shown")
+	}
+	// Alt+T turns the scope off and re-runs with no terminal snapshot.
+	g.reqs = nil
+	settle(t, p, p.update(altKey('t')), 8)
+	if len(g.reqs) != 1 || g.reqs[0].Sources.Terminals || len(g.reqs[0].Terminals) != 0 {
+		t.Fatalf("terminal-off request = %+v", g.reqs)
+	}
+	g.reqs = nil
+	settle(t, p, p.update(altKey('t')), 8)
+	if len(g.reqs) != 1 || !g.reqs[0].Sources.Terminals {
+		t.Fatalf("terminal-on request = %+v", g.reqs)
+	}
+	p.update(GrepResultMsg{Seq: p.seq, Text: "todo", Hits: g.hits})
+	want := OpenTerminalMsg{ID: 9, Row: 41, Index: 1}
+	if got := runCmd(p.update(key(tea.KeyEnter))); got != want {
+		t.Fatalf("Enter emitted %#v, want the stable tab id + transcript row %#v", got, want)
+	}
+}
+
+// TestBoundTerminalSources caps the snapshot a request can copy: tab count, rows and
+// bytes per tab, and total bytes. The newest rows are kept and First advances by the
+// dropped prefix so a hit still maps to its combined scrollback row.
+func TestBoundTerminalSources(t *testing.T) {
+	t.Parallel()
+	longRows := make([]string, 0, 600)
+	for i := 0; i < 600; i++ {
+		longRows = append(longRows, "line")
+	}
+	src := make([]TerminalSource, 0, 20)
+	src = append(src, TerminalSource{ID: 3, Index: 0, Name: "many", First: 7, Lines: longRows})
+	for i := 1; i < 20; i++ {
+		src = append(src, TerminalSource{ID: uint64(i + 1), Index: i, Name: "t", Lines: []string{"x"}})
+	}
+	got := boundTerminalSources(src)
+	if len(got) != GrepTerminalsMaxTabs {
+		t.Fatalf("tabs = %d, want %d", len(got), GrepTerminalsMaxTabs)
+	}
+	if len(got[0].Lines) != GrepTerminalsMaxRows || got[0].Lines[len(got[0].Lines)-1] != "line" {
+		t.Fatalf("rows = %d, want the newest %d", len(got[0].Lines), GrepTerminalsMaxRows)
+	}
+	if want := 7 + len(longRows) - GrepTerminalsMaxRows; got[0].First != want {
+		t.Fatalf("First = %d, want %d after the tail crop", got[0].First, want)
+	}
+	// One over-long line cannot enter the per-tab byte budget; the tab keeps no lines
+	// rather than truncating a line's middle, and its offset stays at its start.
+	over := boundTerminalSources([]TerminalSource{{ID: 4, Index: 3, Name: "big", First: 11,
+		Lines: []string{strings.Repeat("x", GrepTerminalsMaxTabBytes+1)}}})
+	if len(over) != 1 || len(over[0].Lines) != 0 || over[0].First != 12 {
+		t.Fatalf("over-long line snapshot = %+v", over)
+	}
+	// The total byte cap leaves later tabs out once it is spent.
+	filler := strings.Repeat("x", 1000)
+	rows := make([]string, 0, GrepTerminalsMaxRows)
+	for i := 0; i < GrepTerminalsMaxRows; i++ {
+		rows = append(rows, filler)
+	}
+	big := make([]TerminalSource, 0, 10)
+	for i := 0; i < 10; i++ {
+		big = append(big, TerminalSource{ID: uint64(i + 30), Index: i, Lines: rows})
+	}
+	total := 0
+	for _, term := range boundTerminalSources(big) {
+		for _, line := range term.Lines {
+			total += len(line) + 1
+		}
+	}
+	if total > GrepTerminalsMaxBytes {
+		t.Fatalf("total snapshot bytes = %d, over the %d cap", total, GrepTerminalsMaxBytes)
 	}
 }

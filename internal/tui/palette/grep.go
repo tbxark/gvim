@@ -1,6 +1,7 @@
 package palette
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"unicode"
@@ -61,8 +62,15 @@ type BufferSource struct {
 // is capped at GrepTerminalsMaxTabs/GrepTerminalsMaxBytes). Closed terminals have no
 // backing file to search in gvim; only the open dock's window is searched.
 type TerminalSource struct {
-	Name  string   // the dock tab's label, "" falls back to "terminal"
-	Index int      // the dock tab position
+	// ID is the dock tab's stable runtime identity: a hit is opened by it, so closing
+	// or reordering another tab cannot focus the wrong terminal. 0 means an older
+	// caller that only has Index (tests/fallback); a runtime ID is never reused.
+	ID    uint64
+	Name  string // the dock tab's label, "" falls back to "terminal"
+	Index int    // the dock tab position at snapshot time
+	// First is the combined scrollback row of Lines[0] (prior transcript, then
+	// history, then screen), so a matched line can be revealed in the pager.
+	First int
 	Lines []string // the transcript window, oldest first
 }
 
@@ -115,7 +123,7 @@ func boundTerminalSources(src []TerminalSource) []TerminalSource {
 			break
 		}
 		total += bytes
-		out = append(out, TerminalSource{Name: term.Name, Index: term.Index, Lines: lines})
+		out = append(out, TerminalSource{ID: term.ID, Name: term.Name, Index: term.Index, First: term.First + start, Lines: lines})
 	}
 	if len(out) == 0 {
 		return nil
@@ -168,36 +176,31 @@ type GrepHit struct {
 	Text      string
 	Source    GrepSource
 	Index     int
+	// TerminalID is the stable dock tab id of a terminal hit (0 for older callers):
+	// opening the hit uses it so a close/reorder cannot focus another tab.
+	TerminalID uint64
+	// TranscriptFirst is the combined scrollback row of the terminal hit's snapshot
+	// window; Line is relative to it, so Line+First-1 is the absolute pager row.
+	TranscriptFirst int
 }
 
 // GrepResultMsg carries the hits of one Live Grep query. The palette applies it only
 // when Seq is the query it sent last. Text is the query that was searched.
-// FilesGeneration is the file-index generation the search saw, so Resume can tell
-// whether its cached hits still belong to the current index.
 type GrepResultMsg struct {
-	Seq                int
-	Text               string
-	Hits               []GrepHit
-	Err                error
-	FilesGeneration    uint64
-	HasFilesGeneration bool
+	Seq  int
+	Text string
+	Hits []GrepHit
+	Err  error
 }
 
-// LiveResume is the state Resume restores: the query, match modes, scope toggles,
-// selected row and the cached on-screen matches, with the file-index generation they
-// came from. Done false means there is no cached result (the query changed after the
-// last result, or none arrived); the palette then restores the controls and runs the
-// search honestly.
+// LiveResume is the state Resume restores: the previous query, match modes and scope
+// toggles. It deliberately carries no hits or selected row: a hit's file contents may
+// have changed while the palette was closed and there is no low-cost content
+// fingerprint, so Resume always searches again with these controls.
 type LiveResume struct {
-	Text               string
-	Options            SearchOptions
-	Sources            GrepSources
-	Hits               []GrepHit
-	Err                error
-	Selected           int
-	Done               bool
-	FilesGeneration    uint64
-	HasFilesGeneration bool
+	Text    string
+	Options SearchOptions
+	Sources GrepSources
 }
 
 // OpenLineMsg asks the root to open Path at Line and Col, both 1-based. It is sent
@@ -219,6 +222,14 @@ type OpenBufferLineMsg struct {
 // It is sent when a live grep row of a terminal transcript is chosen, after the palette
 // has closed. It only focuses the open tab: no shell is started, no PTY is touched.
 type OpenTerminalMsg struct {
+	// ID is the stable dock tab identity from the snapshot. It wins over Index: the
+	// snapshot position may be stale after another tab closed or moved. 0 falls back
+	// to Index (older tests/callers).
+	ID uint64
+	// Row is the combined transcript row (0-based, prior rows then history then
+	// screen) to reveal in the tab's read-only scrollback. 0 reveals the top when the
+	// caller has no line (legacy).
+	Row   int
 	Index int
 }
 
@@ -231,6 +242,9 @@ type GrepExportMsg struct {
 	Query string
 	Hits  []GrepHit
 	Total int
+	// Remote says Root/Rel are remote slash-separated paths: the root list must join and
+	// open them through the remote document access, never the local filepath/open path.
+	Remote bool
 }
 
 // liveExportCap is the independent bound on rows a Live Grep quickfix export hands to
@@ -279,10 +293,12 @@ type grepState struct {
 	// terminals says the Terminals scope is available: the root supplied a bounded
 	// dock transcript snapshot (the scope starts on, as Fresh's default does).
 	terminals bool
-	hits      []GrepHit
-	// gen is the file-index generation the last result was searched against.
-	gen    uint64
-	genSet bool
+	// hits keeps the raw result for the Alt+Q quickfix export; they are not used by
+	// Resume (which always searches again).
+	hits []GrepHit
+	// cancel stops the in-flight ContextGrepper search when a newer query/scope
+	// supersedes it or the palette closes. Nil for the plain Grepper seam.
+	cancel context.CancelFunc
 }
 
 // newGrepState returns the state of the palette's Live Grep modes and scopes. The match
@@ -380,9 +396,10 @@ func (p *Palette) exportGrep() tea.Cmd {
 	query, root := p.grep.text, p.opts.Root
 	p.open = false
 	p.cancelProbe()
+	p.cancelGrepSearch()
 	p.preview.reset()
 	return func() tea.Msg {
-		return GrepExportMsg{Root: root, Query: query, Hits: hits, Total: total}
+		return GrepExportMsg{Root: root, Query: query, Hits: hits, Total: total, Remote: p.opts.Remote}
 	}
 }
 
@@ -392,7 +409,7 @@ func (p *Palette) exportGrep() tea.Cmd {
 func (p *Palette) refreshGrep() tea.Cmd {
 	p.seq++
 	p.grep.done = false
-	p.grep.hits, p.grep.gen, p.grep.genSet = nil, 0, false
+	p.grep.hits = nil
 	return p.grepCmd(p.seq, p.input.Value())
 }
 
@@ -401,9 +418,10 @@ func (p *Palette) refreshGrep() tea.Cmd {
 // rows on screen stay until then.
 func (p *Palette) liveQuery(seq int, text string) tea.Cmd {
 	if text == "" {
+		p.cancelGrepSearch()
 		p.rows = nil
 		p.grep.done, p.grep.count, p.grep.err, p.grep.text = false, 0, nil, ""
-		p.grep.hits, p.grep.gen, p.grep.genSet = nil, 0, false
+		p.grep.hits = nil
 		p.syncSize()
 		p.nav.Select(0)
 		return nil
@@ -415,13 +433,16 @@ func (p *Palette) liveQuery(seq int, text string) tea.Cmd {
 // The file list and the search run in the command, never in Update or Draw. It returns
 // nil when no Grepper is wired.
 func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
+	// A newer query/scope supersedes the previous search: cancel its context before
+	// starting another (the remote adapter stops the streaming authority command).
+	p.cancelGrepSearch()
 	if p.opts.Grep == nil || text == "" {
 		return nil
 	}
 	g, files, root := p.opts.Grep, p.opts.Files, p.opts.Root
 	buffers, terminals, query, sources := p.opts.SourceBuffers, p.opts.SourceTerminals, p.grep.opts, p.grep.sources
-	gen, hasGen := filesGeneration(files)
-	return func() tea.Msg {
+	contextGrep, cancellable := g.(ContextGrepper)
+	run := func(ctx context.Context) tea.Msg {
 		req := GrepRequest{Root: root, Text: text, Query: query, Sources: sources, Limit: grepLimit}
 		if sources.Files || sources.Ignored {
 			if files != nil {
@@ -434,9 +455,21 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		if sources.Terminals {
 			req.Terminals = boundTerminalSources(terminals)
 		}
-		hits, err := g.Search(req)
-		return GrepResultMsg{Seq: seq, Text: text, Hits: hits, Err: err, FilesGeneration: gen, HasFilesGeneration: hasGen}
+		var hits []GrepHit
+		var err error
+		if cancellable {
+			hits, err = contextGrep.SearchContext(ctx, req)
+		} else {
+			hits, err = g.Search(req)
+		}
+		return GrepResultMsg{Seq: seq, Text: text, Hits: hits, Err: err}
 	}
+	if cancellable {
+		ctx, cancel := context.WithCancel(context.Background())
+		p.grep.cancel = cancel
+		return func() tea.Msg { return run(ctx) }
+	}
+	return func() tea.Msg { return run(context.Background()) }
 }
 
 // applyGrep shows a live grep result when it answers the current query. The highlight
@@ -447,9 +480,11 @@ func (p *Palette) applyGrep(msg GrepResultMsg) tea.Cmd {
 		return nil
 	}
 	p.grep.done, p.grep.text, p.grep.err = true, msg.Text, msg.Err
+	p.grep.cancel = nil
 	p.grep.count = len(msg.Hits)
+	// Keep the hits for the quickfix export (Alt+Q); rows are display-only and lose
+	// the raw positions/identity the export needs.
 	p.grep.hits = append([]GrepHit(nil), msg.Hits...)
-	p.grep.gen, p.grep.genSet = msg.FilesGeneration, msg.HasFilesGeneration
 	p.rows = grepRows(msg)
 	p.syncSize()
 	if msg.Text != p.shown {
@@ -459,86 +494,33 @@ func (p *Palette) applyGrep(msg GrepResultMsg) tea.Cmd {
 	return nil
 }
 
-// restoreLive applies a Resume snapshot. The controls are always restored; cached
-// matches are used only when they still match the query, the previous result was
-// complete, and the file index generation is unchanged. Otherwise the palette starts
-// with the restored query/modes/scopes and Init runs the search honestly.
+// restoreLive applies a Resume snapshot's controls. It never restores cached hits:
+// file contents (and the search's result set) may have changed while the palette was
+// closed, and there is no low-cost content fingerprint in the search port. Init then
+// runs a normal search with the restored query/modes/scopes.
 func (p *Palette) restoreLive(resume LiveResume) {
 	p.grep.opts = resume.Options
 	p.grep.sources = resume.Sources
-	// Buffer and terminal hits index an in-memory tab snapshot that can change while the
-	// palette is closed (a tab can be renamed, reordered or closed), so cached hits for
-	// those volatile scopes are never restored: the query/scopes return and Init runs the
-	// search honestly against the current snapshot.
-	if !p.grep.buffers && p.grep.sources.Buffers {
+	if !p.grep.buffers {
 		p.grep.sources.Buffers = false
-		return
 	}
-	if !p.grep.terminals && p.grep.sources.Terminals {
+	if !p.grep.terminals {
 		p.grep.sources.Terminals = false
-		return
 	}
-	if resume.Sources.Buffers || resume.Sources.Terminals {
-		return
-	}
-	if !resume.Done || resume.Text != p.input.Value() {
-		return
-	}
-	gen, hasGen := filesGeneration(p.opts.Files)
-	if hasGen != resume.HasFilesGeneration || (hasGen && gen != resume.FilesGeneration) {
-		return
-	}
-	hits := resume.Hits
-	if len(hits) > grepLimit {
-		hits = hits[:grepLimit]
-	}
-	p.grep.hits = append([]GrepHit(nil), hits...)
-	p.grep.gen, p.grep.genSet = resume.FilesGeneration, resume.HasFilesGeneration
-	p.grep.done, p.grep.text, p.grep.err = true, resume.Text, resume.Err
-	p.grep.count = len(hits)
-	p.rows = grepRows(GrepResultMsg{Text: resume.Text, Hits: hits, Err: resume.Err})
-	p.syncSize()
-	p.nav.Select(resume.Selected)
-	p.shown = resume.Text
-	p.liveResumed = true
 }
 
-// filesGeneration returns the file index generation when Files exposes one, so a
-// Live Grep result can record which index it was searched against.
-func filesGeneration(files Files) (uint64, bool) {
-	if g, ok := files.(interface{ Generation() uint64 }); ok {
-		return g.Generation(), true
-	}
-	return 0, false
-}
-
-// LiveResumeState snapshots the Live Grep session for the root's Resume command. It
-// returns nil for a non-live palette. The cached hits are copied and bounded to the
-// palette's row cap; Done is true only when the on-screen result still matches the
-// current query (Fresh invalidates the cache on any query keystroke).
+// LiveResumeState snapshots the Live Grep controls for the root's Resume command: the
+// query, match modes and scope toggles. Hits and the selected row are not captured,
+// because Resume always searches again (fresh rows and content).
 func (p *Palette) LiveResumeState() *LiveResume {
 	if p == nil || !p.live {
 		return nil
 	}
-	text := p.input.Value()
-	state := &LiveResume{
-		Text:     text,
-		Options:  p.grep.opts,
-		Sources:  p.grep.sources,
-		Selected: p.nav.Selected(),
+	return &LiveResume{
+		Text:    p.input.Value(),
+		Options: p.grep.opts,
+		Sources: p.grep.sources,
 	}
-	if !p.grep.done || text != p.grep.text {
-		return state
-	}
-	hits := p.grep.hits
-	if len(hits) > grepLimit {
-		hits = hits[:grepLimit]
-	}
-	state.Hits = append([]GrepHit(nil), hits...)
-	state.Err = p.grep.err
-	state.Done = true
-	state.FilesGeneration, state.HasFilesGeneration = p.grep.gen, p.grep.genSet
-	return state
 }
 
 // liveTitle is the top border of Live Grep: the name alone before a result, and the
@@ -651,6 +633,10 @@ func grepRows(msg GrepResultMsg) []row {
 			r.source = "terminal"
 			r.grepSource = GrepTerminals
 			r.index = h.Index
+			r.termID = h.TerminalID
+			if h.Line > 0 {
+				r.termRow = h.TranscriptFirst + h.Line - 1
+			}
 		}
 		rows = append(rows, r)
 	}

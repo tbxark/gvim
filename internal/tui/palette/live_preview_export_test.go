@@ -14,6 +14,7 @@ type liveWindowPreviewer struct {
 	firstLine int
 	truncated bool
 	contexts  []context.Context
+	paths     []string
 	reads     int
 }
 
@@ -21,8 +22,9 @@ func (p *liveWindowPreviewer) ReadHead(string, int) ([]byte, bool, error) {
 	return []byte(p.data), p.truncated, nil
 }
 
-func (p *liveWindowPreviewer) ReadWindow(ctx context.Context, _ string, _ int, _ int) ([]byte, int, bool, error) {
+func (p *liveWindowPreviewer) ReadWindow(ctx context.Context, path string, _ int, _ int) ([]byte, int, bool, error) {
 	p.contexts = append(p.contexts, ctx)
+	p.paths = append(p.paths, path)
 	p.reads++
 	return []byte(p.data), p.firstLine, p.truncated, nil
 }
@@ -201,5 +203,59 @@ func TestLiveGrepExportCap(t *testing.T) {
 	msg := cmd().(GrepExportMsg)
 	if len(msg.Hits) != liveExportCap || msg.Total != liveExportCap+1 {
 		t.Fatalf("export = %d hits total %d, want %d and %d", len(msg.Hits), msg.Total, liveExportCap, liveExportCap+1)
+	}
+}
+
+// TestRemoteLiveGrepPreviewUsesTheRemotePath: a remote palette row preview calls the
+// window reader with the remote joined path (never a local filepath conversion).
+func TestRemoteLiveGrepPreviewUsesTheRemotePath(t *testing.T) {
+	t.Parallel()
+	pv := &liveWindowPreviewer{data: "one\ntwo\n", firstLine: 1}
+	p := New(Options{
+		Live:    true,
+		Root:    "/remote/w",
+		Remote:  true,
+		Files:   &fakeFiles{files: []string{"src/a.go"}},
+		Grep:    &fakeGrepper{},
+		Preview: pv,
+	})
+	draw(p, 120, 30)
+	p.seq = 1
+	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+		{Rel: "src/a.go", Line: 1, Col: 1, Text: "todo remote"},
+	}})
+	cmd := p.previewCmd()
+	if cmd == nil {
+		t.Fatal("remote row preview started no read")
+	}
+	p.applyPreview(cmd().(previewMsg))
+	if len(pv.paths) != 1 || pv.paths[0] != "/remote/w/src/a.go" {
+		t.Fatalf("preview paths = %v, want the remote path", pv.paths)
+	}
+}
+
+// TestRemoteLiveGrepExportCarriesTheRemoteFlag: the quickfix message preserves Root/Remote
+// so the root's list joins remote paths with the remote separator.
+func TestRemoteLiveGrepExportCarriesTheRemoteFlag(t *testing.T) {
+	t.Parallel()
+	p := New(Options{
+		Live:   true,
+		Root:   "/remote/w",
+		Remote: true,
+		Files:  &fakeFiles{files: []string{"src/a.go"}},
+		Grep:   &fakeGrepper{},
+	})
+	draw(p, 120, 30)
+	p.seq = 1
+	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+		{Rel: "src/a.go", Line: 2, Col: 1, Text: "todo remote"},
+	}})
+	cmd := p.key(altKey('q'))
+	if cmd == nil {
+		t.Fatal("remote export produced no message")
+	}
+	msg := cmd().(GrepExportMsg)
+	if !msg.Remote || msg.Root != "/remote/w" || msg.Hits[0].Rel != "src/a.go" {
+		t.Fatalf("remote export = %+v, want Remote true and the remote root", msg)
 	}
 }

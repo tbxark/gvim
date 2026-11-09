@@ -221,13 +221,23 @@ server picks it up. The offer's other choices create the config for another dial
 the session, or record "don't ask again" for that project in `gvim.state`. On an `lsp_server_error`
 that names the assembly server the status row gets an install hint; clicking the LSP status opens
 the help popup with copyable `cargo install asm-lsp` / `cargo binstall asm-lsp` commands, the
-native Start/Restart LSP Server and Show LSP Status actions, and Dismiss. Commands: **Assembly:
-Create .asm-lsp.toml** (re-opens the offer) and **Assembly: Show LSP Help**; it binds no key and
-registers no settings. Reductions (also in porting.md): gvim's `lsp_server_error` payload has no
-language/server/error-type fields, so the error is only claimed on an assembly buffer whose message
-names `asm`/`assembly`; Fresh's "Disable Assembly LSP" popup action is not ported (gvim has no
-plugin call to disable a language's server; the native LSP status menu offers Stop/Disable); Fresh's
-per-language restart is replaced by the native `lsp_restart` action for the active language; the
+native Start/Restart LSP Server, Show LSP Status and **Disable Assembly LSP** actions, and Dismiss.
+The disable action is not a catalog command: it re-checks that the active buffer is still an
+assembly file and that `gvim.has("lsp")` is true, then dispatches gvim's native
+`lsp_disable_language` action. That native action resolves the language of the **current active
+document** and applies a **root-level language mute at the LSP port** (the port's
+`SetLanguageEnabled`), not a per-buffer disable; the plugin's active-buffer check only prevents a
+dispatch when the popup's target tab has changed, it cannot scope the mute to the originating
+buffer or to one root. The native LSP layer owns the asynchronous mute, its no-server notice and
+any success notice, and the plugin never claims the mute completed. There is **no plugin→native
+end-to-end integration test**: plugin tests assert the filtered dispatch with a fake host and TUI
+tests assert the nil-port/no-server behavior directly, but no single test loads asm_lsp into a real
+TUI model and observes the language mute. Commands:
+**Assembly: Create .asm-lsp.toml** (re-opens the offer) and **Assembly: Show LSP Help**; it binds
+no key and registers no settings. Reductions (also in porting.md): gvim's
+`lsp_server_error` payload has no language/server/error-type fields, so the error is only claimed on
+an assembly buffer whose message names `asm`/`assembly`; Fresh's per-language restart is replaced by
+the native `lsp_restart` action for the active language; the
 global-config check runs through the workspace file system, so a remote workspace checks the remote
 home, not the local one; an overlong project root persists its "don't ask again" choice with a
 truncated state key.

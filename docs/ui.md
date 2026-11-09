@@ -187,27 +187,16 @@ Each. In either focused query field, `Ctrl+Delete` deletes the next word and
 these are widget chords, not editor actions, so the field keeps focus and the bar stays
 open.
 
-**Live Grep Resume.** Closing Live Grep captures the session in memory: the query,
-match modes, scope toggles, selected row and the cached matches (bounded to the 100-row
-result cap) together with the file-index generation they came from. Live Grep: Resume
-reopens that exact state without searching only when the search was **files-only** and
-the cached result still matches the current query and index generation; the selected
-row comes back too. Buffers and Terminals hits carry an index into an in-memory tab
-snapshot that can be reordered, renamed, closed or edited while the palette is closed,
-so a session that had either scope enabled always keeps its query/modes/scopes but
-re-runs the search instead of restoring stale tab indices. The capture and restore are
-in-memory, so closing and resuming do no I/O on Update. The cache is invalidated
-honestly: editing the query after the last result keeps the text but re-runs the
-search on resume; a finder Restart/generation change (refresh, reconnect, workspace
-rebuild) also re-runs instead of showing hits from the old index; and a project-root or
-configuration change clears the cache, so Resume opens a fresh session rather than
-replaying the old root/controls. A re-run is the ordinary Live Grep
-`tea.Cmd` with its sequence guard; the controls and cached rows are never mutated by
-the resume itself. A Files-only Resume restores cached hits without re-reading the files:
-the query and file-index generation are checked, but file contents changed since the search
-are not (there is no per-file hash/mtime check), so the displayed file text can be stale
-(Files-only Resume stale-content residual). The Fresh command description is overridden to
-say the cache is used only while current.
+**Live Grep Resume.** Closing Live Grep captures the prior query, match modes and
+scope toggles; it does not keep a reusable result set. Live Grep: Resume restores those
+controls and always searches again. Cached hits are deliberately not restored: a hit's
+file contents can change while the palette is closed and the search port has no
+low-cost content fingerprint (the finder index tracks the file list, not content versions), so
+showing an old hit could open the wrong line or miss a new match. The
+capture and restore are in-memory, Update does no I/O; the re-run is the ordinary Live
+Grep `tea.Cmd` with its sequence guard. A project-root or configuration change clears
+the captured controls, so Resume starts a fresh session instead of carrying the old
+root's query/modes/scopes. The command description says that it searches again.
 
 - **Live Grep toolbar** (one row between the title border and the item rows, in Live
   Grep mode only). The match modes and the scopes are `Alt+<letter> Label:on|off`
@@ -259,9 +248,15 @@ say the cache is used only while current.
   the palette re-applies those caps when it builds a request, so an unbudgeted caller
   cannot grow the search. A terminal hit row is labelled with the tab's name, its OSC
   title or its launch program (`terminal` when none), and Enter shows the dock and
-  focuses that tab; it opens no file and starts no shell. The scope starts on when a
-  dock snapshot exists (Fresh's default) and can be turned off for the session with
-  `Alt+T`.
+  resolves that tab by its **stable runtime id** and reveals the matched line in the
+  read-only scrollback pager (active main-screen terminals and exited live shells;
+  a restored tab without a session or a running alternate-screen program has no
+  pager and gets the honest "line cannot be located" notice). A stale id — the tab
+  closed since the search — leaves the active tab alone and shows "no longer open",
+  so a close/reorder or duplicate labels cannot focus the wrong terminal. It opens
+  no file and starts no shell; the Alt+Q export stores the same id+row and locates
+  the same line while its list stays open. The scope starts on when a dock snapshot
+  exists (Fresh's default) and can be turned off for the session with `Alt+T`.
   **Residual:** only the open dock's newest transcript window is searched. gvim has no
   Fresh-style per-terminal backing files (`<data>/terminals/*.txt`), so a closed
   terminal and scrollback older than the bounded window are not searchable; the

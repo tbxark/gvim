@@ -4,6 +4,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
@@ -177,6 +179,94 @@ func lineFromText(text string) terminal.Line {
 	return terminal.Line{Cells: cells}
 }
 
+// transcriptRows returns the bounded transcript window and the combined scrollback
+// row (prior transcript, then history, then the live screen, then the exit marker) of
+// its first row. SavedState persists these rows; Live Grep searches them and maps a
+// result line back to a scrollback row, so both must use the same construction.
+func (p *Panel) transcriptRows() (rows []string, first int) {
+	add := func(text string, combined int) {
+		if len(rows) == 0 {
+			first = combined
+		}
+		rows = append(rows, cleanSavedText(text))
+	}
+	prior := len(p.prior)
+	for i := range p.prior {
+		add(p.prior[i].Text(), i)
+	}
+	total := 0
+	if p.term != nil {
+		total = p.term.ScrollbackLen()
+	}
+	if total > 0 {
+		from := max(total-maxSavedRows, 0)
+		count := min(total-from, terminal.MaxScrollbackSnapshot)
+		if lines, _ := p.term.Scrollback(from, count); len(lines) > 0 {
+			for i := range lines {
+				add(lines[i].Text(), prior+from+i)
+			}
+		}
+	}
+	screenRows := 0
+	if p.term != nil {
+		sc := p.term.Screen()
+		screenRows = sc.Rows
+		for r := 0; r < sc.Rows; r++ {
+			add(screenRowText(sc, r), prior+total+r)
+		}
+	}
+	// An exited-but-not-restarted shell saves Fresh's marker after its frozen
+	// screen; a restored transcript already carries its marker in the prior rows.
+	if p.exited && p.exitMarker {
+		if n := len(rows); n > 0 && rows[n-1] != terminalExitMarker {
+			add(terminalExitMarker, prior+total+screenRows)
+		}
+	}
+	// Bound to the newest rows and bytes, adjusting First by the dropped prefix.
+	if drop := len(rows) - maxSavedRows; drop > 0 {
+		rows = rows[drop:]
+		first += drop
+	}
+	size := 0
+	drop := 0
+	for i := len(rows) - 1; i >= 0; i-- {
+		size += len(rows[i]) + 1
+		if size > maxSavedBytes {
+			drop = i + 1
+			break
+		}
+	}
+	if drop > 0 {
+		rows = rows[drop:]
+		first += drop
+	}
+	return rows, first
+}
+
+// RevealTranscriptRow opens the read-only scrollback pager and selects combined
+// transcript row (0-based). It reports false when there is no pager to reveal: a
+// restored tab without a live session, a running alternate-screen program, or a dock
+// with no rows. It starts no process; the returned command fetches the pager window.
+func (p *Panel) RevealTranscriptRow(row int) (tea.Cmd, bool) {
+	if p.term == nil {
+		return nil, false
+	}
+	var cmd tea.Cmd
+	if !p.scroll.on {
+		cmd = p.enterScrollback()
+		if !p.scroll.on {
+			return cmd, false
+		}
+	}
+	combined := p.combined()
+	if combined <= 0 {
+		return cmd, false
+	}
+	p.scroll.selected = min(max(row, 0), combined-1)
+	p.revealScroll()
+	return tea.Batch(cmd, p.requestScrollback()), true
+}
+
 // SavedState returns the terminal state the session file keeps: the dock's open
 // flag and directory, the pane width the transcript was captured at, and the
 // newest transcript rows as text. The transcript is the prior rows (if any), then
@@ -195,8 +285,8 @@ func (p *Panel) SavedState() terminal.SavedState {
 	// dead and is saved as dead, so a later restore never starts it automatically.
 	// A restored-but-not-yet-revived tab keeps its saved liveness: saving it again (or
 	// extracting its record into another workspace) must not turn a dormant live tab
-	// into a dead one. A dive clears wasLive, so an attempted revive is recorded as the
-	// resulting state.
+	// into a dead one. A dive clears wasLive, so an attempted revive is recorded as
+	// the resulting state.
 	st.Live = (p.term != nil && !p.exited) || p.wasLive
 	// The terminal title the child set (OSC 0/2), persisted so a restored tab keeps
 	// its name and label; a restored-but-not-revived tab re-saves the recorded one.
@@ -246,52 +336,7 @@ func (p *Panel) SavedState() terminal.SavedState {
 	// The saved cwd is untrusted input too (OSC 7 today, a hand-edited record
 	// tomorrow): clean its controls and bound it like the launch directory.
 	st.Cwd = clipSavedDir(cleanSavedText(st.Cwd))
-	var rows []string
-	add := func(text string) {
-		rows = append(rows, cleanSavedText(text))
-	}
-	for i := range p.prior {
-		add(p.prior[i].Text())
-	}
-	total := 0
-	if p.term != nil {
-		total = p.term.ScrollbackLen()
-	}
-	if total > 0 {
-		from := max(total-maxSavedRows, 0)
-		count := min(total-from, terminal.MaxScrollbackSnapshot)
-		if lines, _ := p.term.Scrollback(from, count); len(lines) > 0 {
-			for i := range lines {
-				add(lines[i].Text())
-			}
-		}
-	}
-	if p.term != nil {
-		sc := p.term.Screen()
-		for r := 0; r < sc.Rows; r++ {
-			add(screenRowText(sc, r))
-		}
-	}
-	// An exited-but-not-restarted shell saves Fresh's marker after its frozen
-	// screen; a restored transcript already carries its marker in the prior rows.
-	if p.exited && p.exitMarker {
-		if n := len(rows); n > 0 && rows[n-1] != terminalExitMarker {
-			rows = append(rows, terminalExitMarker)
-		}
-	}
-	// Bound to the newest rows and bytes.
-	if len(rows) > maxSavedRows {
-		rows = rows[len(rows)-maxSavedRows:]
-	}
-	size := 0
-	for i := len(rows) - 1; i >= 0; i-- {
-		size += len(rows[i]) + 1
-		if size > maxSavedBytes {
-			rows = rows[i+1:]
-			break
-		}
-	}
-	st.Rows = rows
+	st.Rows, _ = p.transcriptRows()
 	if p.exited {
 		st.ExitCode, st.ExitKnown = p.exitCode, p.exitKnown
 	}

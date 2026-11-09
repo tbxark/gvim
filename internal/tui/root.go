@@ -16,8 +16,9 @@ type rootState struct {
 	ports    RootPorts
 	gitMarks map[string]rune // the explorer's status letters, keyed by absolute path
 	macro    macroState
-	// lastGrep is the last Live Grep session's resume state: query, modes, scopes,
-	// selected row and cached matches, captured when the palette closes.
+	// lastGrep is the last Live Grep session's controls: query, modes and scopes,
+	// captured when the palette closes. Resume restores them and searches again;
+	// hits and the selected row are deliberately not kept.
 	lastGrep *palette.LiveResume
 	// reload is the state of the background tree reload. See watch_reload.go.
 	reload treeReload

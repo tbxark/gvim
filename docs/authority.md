@@ -890,6 +890,59 @@ names, the `--null` argv for both tools, and the remote Git Grep NUL parser
 `TestRemoteRelPathRejectsEscapes`, `TestRemoteAllowedFilesNormalizes`,
 `TestRemoteSearchArgvUsesNullFileDelimiter`, `TestParseGitGrepNullOutputRejectsSpoofedPaths`).
 
+### Remote Live Grep
+
+A remote workspace's Live Grep is the same floating palette as the local one, but its
+Files scope is served by the authority-backed Live Grep adapter
+(`remoteLiveGrep` in `internal/app/remote_live_grep.go`), not by the local file reader.
+The local Grep port is cleared in `remoteRootPorts` and replaced in
+`installRemoteSearchPorts`, so a remote launch can never silently search the local
+project: every file command goes through the remote project-search adapter and its
+authority one-shot surface, with the same workspace spawn/trust gate (an untrusted
+workspace is refused before a command runs), remote cwd, captured remote environment,
+tool probe (rg then grep), NUL-delimited parsing, candidate scope, per-command 8 MiB
+output cap and 20 s search deadline. The Files scope passes the remote quick-open
+snapshot as the project-search candidate filter; an empty snapshot falls back to the
+same Fresh project-file candidate scope (`git ls-files --cached --others
+--exclude-standard`) the panel uses. The Ignored scope cannot be expressed by a
+candidate list (untracked ignored files are not listed), so it runs the same adapter's
+widened remote scan (`rg --no-ignore --hidden -g !.git`, or grep with skip
+directories/--exclude-dir) through the same one-shot/caps/parser; `.git` and the skip
+directories are filtered out defensively. Buffers and Terminals are
+searched from the editor's in-memory snapshots after the file hits (no PTY, no
+process, no local file read); they are client-side text, not remote files.
+
+The palette implements the optional `ContextGrepper` seam (`SearchContext(ctx, req)`) and
+cancels the active remote search when the query/scopes are superseded, the palette is
+dismissed/closed, a row is chosen, or an export opens; the Grep result itself keeps no
+cache. The Alt+Q quickfix export carries the palette's `Remote` flag, so its file rows join
+the remote root with `/` and open through the remote document access (never the local
+filepath path).
+
+The palette's optional `ContextGrepper` seam gives one search a cancellable context:
+changing the query, turning a scope, dismissing the palette or choosing a row cancels
+the in-flight remote search, which stops the streaming project search between records
+and closes the authority command's context (the same cancellation the project-search
+panel uses). The search is also bounded by the palette's 100-row result cap and the
+project-search limits; a capped/truncated remote result is not presented with more
+rows than the palette cap (Live Grep has no notice row for the project-search
+degradation notices — recorded residual).
+
+Remote row preview uses `remotePreviewer.ReadWindow`: a cancellable authority
+`ReadRange` scan (64 KiB chunks, 8 MiB scan budget, five lines before the hit, twelve
+lines maximum, 16 KiB display/64 KiB hard cap) returns complete remote lines around
+the match; it never reads the local disk and falls back to a bounded whole-file
+`ReadFile` only when the backend has no windowed primitive. The palette cancels the
+window read on selection change/dismiss. Enter on a file hit emits the remote absolute
+path (root joined with `/`, never the local separator), so the existing remote
+document access opens the real remote file.
+
+Remote Live Grep keeps no result cache of its own. Resume restores the query/modes/
+scopes only (the palette re-runs the search), which is the honest behavior for remote
+file contents, a reconnect or a root change; the remote file index and Grep port are
+rebuilt with the workspace, and a disconnected authority reports its error instead of
+falling back locally.
+
 ### Windowed remote reads (remote large-file mode)
 
 The authority file port has `FileSystem.ReadRange(ctx, path, off, n)`: a bounded window

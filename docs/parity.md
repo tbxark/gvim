@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `4c48060` (the previous round's commit is folded in) plus the
-merged round-51 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `64ab4ec` (the previous round's commit is folded in) plus the
+merged round-52 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-128 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r51-final3.log`). The audit ran build/gofmt/i18n_check plus targeted round-51 tests/diff
+`/tmp/gvim-r52-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-52 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,67 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-52 outcome (2026-11-09, merged working tree on `64ab4ec`).** Four slices landed: terminal
+stable runtime IDs + transcript-row reveal for Live Grep hits/export; remote Live Grep through the
+authority (Files/Ignored widened scope, cancellable context, remote preview/open); controls-only
+Live Grep Resume; and the asm_lsp Disable Assembly LSP action with nil-port guard and popup tab
+revalidation. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77
+packages ok, no FAIL (log `/tmp/gvim-r52-final.log`). The audit read the diff and ran targeted tests;
+the Lead ran the full suite.
+**Terminal stable identity / transcript-row reveal (item 281).** The dock assigns every tab a monotonic
+runtime ID at every append path (NewTab, StartAgent, StartDiscovered, AppendRestoredTab, Restore;
+Restore starts from a clean id list and assigns fresh IDs); IDs follow tab moves, are removed with the
+tab and are never reused. Transcripts carry ID plus the combined scrollback row of the first captured
+line; a Live Grep terminal hit stores TerminalID + TranscriptFirst. Direct Enter and Alt+Q send
+OpenTerminalMsg{ID, Row} (export T encodes id+absolute row), resolve ID→current index, focus the dock,
+and reveal the matched pager row without starting a shell or PTY. A stale ID is refused with a
+"no longer open" notice; a restored/alternate-screen tab focuses but reports the row unavailable.
+Legacy t/index is accepted only for old callers/tests. AUDITED RESIDUALS: IDs are runtime-only and
+not persisted (the export list is not persisted either); the legacy index fallback can still focus
+the wrong tab when no ID is present; a snapshot's combined row can clamp to a different line if the
+terminal keeps writing/scrolling after the search (identity stays correct); real host/transcript
+UNTESTED (R13-15).
+**Remote Live Grep authority/cancel/limits (item 282).** A remote workspace installs the
+authority-backed Grep port beside project search; remoteRootPorts clears the local Grepper first, so
+no local file reader can serve a remote-looking row. Files reuses the remote project-search candidate
+scope, NUL parser, per-command 8 MiB cap and 20 s deadline; Ignored runs one widened tool scan
+(rg --no-ignore --hidden, grep skip dirs) through the same one-shot; Buffers/Terminals remain the
+editor's in-memory snapshots. The explicit workspace gate and the authority's spawn gate run before
+Files/Ignored commands; no local fallback. SearchContext is cancellable and the palette cancels it
+when query/scopes are superseded, on Dismiss, on row open and on Alt+Q export; remote preview reads
+through authority ReadRange chunks (8 MiB scan cap, 16 KiB/12-line window, 6 s, ctx-cancelled, no
+local fallback); remote file hits open and export with a slash-joined remote path. AUDITED RESIDUALS:
+project-search degradation/truncation notices are not forwarded into Live Grep and the Ignored scan
+does not check the command's Truncated flag, so an output-cap cut can be silently incomplete (no
+notice row); the Ignored widened scan is one command/8 MiB and skipped dirs can consume that cap;
+ReadRange previews beyond the 8 MiB prefix are unavailable; the page-count scan is repeated per
+chunk (bounded CPU); remote Buffers/Terminals are client-side snapshot semantics; real
+SSH/rg/grep/ReadRange/trust-revocation/reconnect UNTESTED (R13-11/R13-23/R3-4).
+**Controls-only Live Grep Resume (item 283).** LiveResume now carries only the query, match modes and
+scope toggles; LiveResumeState deliberately keeps no hits or selected row, and restoreLive always
+runs a fresh search (init's normal tea.Cmd with the sequence guard). Project-root/config/keymap
+changes clear the controls; remote Resume uses the remote root/Grep/Preview ports and re-searches
+under the authority. In-memory capture/restore does no IO on Update. The stale comments claiming
+“cached matches/selected row” were corrected in root.go and popOverlay. AUDITED RESIDUALS: selected
+row is not restored (by design); remote state/trust can change between close and Resume, which is why
+the search always re-runs; no cache means no stale-hit mitigation is needed (R13-15).
+**asm_lsp Disable Assembly LSP (item 284).** The help popup now dispatches the native
+`lsp_disable_language` action after re-checking that the active buffer is still an assembly file and
+that LSP is present; the popup's target-tab switch is covered by tests. The native action has a nil
+LSP-port guard (no-server notice instead of a panic on command execution) for enable/disable and the
+status-popup mute path; lspSetLanguage itself also refuses nil. Semantics clarified: the action uses
+the ACTIVE document's language and mutes that language at the LSP port for ALL roots/handles, not
+per buffer/project; the plugin's check only refuses a changed target and cannot scope the mute. The
+plugin reports only immediate dispatch failures and never claims async success. The action is a TUI
+action, not a catalog/palette command. AUDITED RESIDUALS: bundled asm_lsp tests still assert the
+action name against the fake host, with no end-to-end plugin→native fake-LSP execution test (native
+nil-port and direct mute tests exist separately); a plugin check→deferred-native window could still
+observe a later active document; real LSP/hosts UNTESTED (R13-15).
+Metrics: palette 240, settings 69 in 14 sections, bundled 31 (9 on)/22 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; i18n en 1128 / 579 per locale, 575
+KiB text, ≈665 KiB JSON, heap 122-82-205 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r52-
+final.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-51 outcome (2026-11-09, merged working tree on `4c48060`).** Four slices landed: Live Grep
 row preview + Alt+Q export/resume/Terminals-scope hardening; project-search preview cancellation +
@@ -5724,6 +5785,25 @@ for parity status.
      nwo/SHA/no token/no persistence/TTL/rate. Residuals: per-plugin/workspace rate budget, private/no
      token, future Cf table, non-Cf homoglyphs, external provider data by provider privilege; real hosts
      UNTESTED.
+281. **Terminal stable IDs + transcript-row reveal (R13-15).** monotonic runtime ids on every append,
+     move/close/no reuse/fresh Restore; Transcripts ID+First; Live Grep direct/Alt+Q OpenTerminalMsg ID+row;
+     stale ID refused, restored/alt-screen unavailable; legacy t/index fallback. Residuals: runtime-only
+     IDs, legacy index fallback wrong tab, transcript row drift after new output, real host UNTESTED.
+282. **Remote Live Grep authority/cancel/limits (R13-11/R13-23/R3-4).** remote Grep installed, local
+     cleared; Files project-search candidate scope/NUL/8MiB-per-command/20s; Ignored widened one-shot;
+     Buffers/Terminals memory; gate+spawn gate/no fallback; ContextGrepper cancel query/scope/dismiss/open/
+     export; remote ReadRange preview 8MiB/16KiB/12 lines/6s; slash remote open/export; tests. Residuals:
+     dropped project degradation/Truncated notices + unchecked Ignored Truncated => silent incomplete;
+     one-command ignored cap; deep preview unavailable; repeated newline scan; client snapshots; real SSH
+     UNTESTED.
+283. **Controls-only Live Grep Resume (R13-15).** LiveResume Text/Options/Sources only; no hits/selected;
+     always fresh search with seq guard; remote root/Grep/Preview; root/config/keymap clears; stale
+     comments fixed. Residuals: no selected row (intended), remote state may change (re-search), no cache.
+284. **asm_lsp Disable Assembly LSP action (R13-15).** popup re-checks active asm + gvim.has("lsp") then
+     dispatches native lsp_disable_language; nil LSP port guard for enable/disable/status mute; current
+     target-tab switch test; language-wide mute at port for all roots documented; no success claim; action
+     not a catalog command. Residuals: bundled test is fake-host only (no end-to-end plugin→native fakeLSP),
+     check→deferred-native active-doc window, real LSP/host UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7739,29 +7819,37 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-52 verification (2026-11-09, merged tree on `64ab4ec`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 122 KiB / de 82 KiB / both 205 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r52-final.log`). Audit: build/gofmt/i18n_check plus targeted round-52 tests/diff review.
+  Tracks: terminal stable IDs/transcript reveal; remote Live Grep authority/cancel/limits/preview/open;
+  controls-only Resume; asm_lsp Disable action nil guard/popup tab revalidation. Real-host checks
+  remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-51 landed Live Grep preview/export/resume/Terminals, project-search preview cancellation/
-  export cap, shared textsafe display sanitizer, dashboard display hardening; full suite EXIT 0 (77
-  packages, log /tmp/gvim-r51-final3.log); §5.5 is round-52/53 plan; TUI-only scope/genuine-
-  equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–51 had their gate sets
-  run. Round 51 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-52 landed terminal stable IDs/transcript reveal, remote Live Grep authority/cancel/limits,
+  controls-only Resume, asm_lsp Disable/nil guard; full suite EXIT 0 (77 packages, log /tmp/gvim-r52-
+  final.log); §5.5 is round-53/54 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host
+  checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–52 had their gate sets
+  run. Round 52 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  128 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+  122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r51-final3.log`. The audit ran build/gofmt/i18n_check plus targeted round-51 tests and
+  `/tmp/gvim-r52-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-52 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
   UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
   save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
   box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
   switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust
   changes, real slangd/slang-synth, watcher host behavior, dashboard/GitHub network, Live Grep live
-  tabs/preview/export, daemon/mixed-workspace extraction; ~/… expansion against a local real `sh`, not
-  a live host. Treat statuses as pointers, not proof.
+  tabs/preview/export, remote Live Grep SSH/ReadRange/trust revocation, daemon/mixed-workspace extraction;
+  ~/… expansion against a local real `sh`, not a live host. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

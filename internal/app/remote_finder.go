@@ -323,4 +323,8 @@ func remoteRootPorts(ports *tui.RootPorts) {
 	ports.ProjectSearch = nil
 	ports.ProjectReplace = nil
 	ports.GitGrep = nil
+	// Live Grep must not keep the local Grepper either: the remote branch installs the
+	// authority-backed Grep port after this call, so the local file reader can never see a
+	// remote-looking row in the meantime.
+	ports.Grep = nil
 }

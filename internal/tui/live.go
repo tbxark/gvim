@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/dock"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/textsafe"
@@ -44,33 +44,33 @@ func (m *Model) openLiveGrep(query string) tea.Cmd {
 	return m.openLiveGrepResume(query, nil)
 }
 
-// openLiveGrepResume opens Live Grep and, when resume is not nil, hands the palette
-// the previous session's cached state. The palette restores the cached rows only if
-// the file-index generation still matches; otherwise it keeps the query/modes/scopes
-// and runs the search in a tea.Cmd as usual.
+// openLiveGrepResume opens Live Grep and hands the palette the previous controls when
+// resume is not nil. The palette always runs the search again (Resume never restores
+// cached hit text: file contents/remote state may have changed).
 func (m *Model) openLiveGrepResume(query string, resume *palette.LiveResume) tea.Cmd {
-	if m.fileRoot != "" {
-		// A remote launch: the Grep port is the local live grep and the palette root
-		// would be the local process root, so searching here would silently search the
-		// LOCAL project for remote-looking rows. Refuse explicitly until a remote
-		// search through the authority is wired (docs/architecture.md §8.1).
-		m.notice = "Live Grep searches the local workspace; it is not available in a remote workspace yet"
-		return nil
-	}
 	g := m.root.ports.Grep
 	if g == nil {
 		m.notice = "Live Grep is not supported in this port"
 		return nil
+	}
+	// A remote launch keeps the remote root and joins rows with slashes; its Grep port is
+	// the authority-backed adapter, and the preview port is the remote reader. The local
+	// root/slash separator and the local previewer are never used for remote rows.
+	root, remote := m.rootDir(), false
+	if m.fileRoot != "" {
+		root, remote = m.fileRoot, true
 	}
 	// The sheet is modal, so the buffers cannot change while it is open: one snapshot
 	// of them serves every search. Without the port the Buffers scope is not offered.
 	p := palette.New(palette.Options{
 		Query:           query,
 		Resume:          resume,
-		Root:            m.rootDir(),
+		Root:            root,
+		Remote:          remote,
 		Files:           m.files,
 		Live:            true,
 		Grep:            g,
+		Preview:         m.root.ports.Preview,
 		LiveSearch:      m.liveSearchOptions(),
 		SourceBuffers:   m.bufferSources(),
 		SourceTerminals: m.terminalSources(),
@@ -82,25 +82,25 @@ func (m *Model) openLiveGrepResume(query string, resume *palette.LiveResume) tea
 
 // terminalSources snapshots the open dock terminals for Live Grep's Terminals scope.
 // It runs on the UI goroutine and only reads in-memory terminal state (no IO, no PTY,
-// no process is started): Model.TerminalState already bounds each tab's transcript to
-// terminal.SavedState's limits, and this applies Live Grep's smaller total snapshot
-// caps as well (≤GrepTerminalsMaxTabs tabs, the newest ≤GrepTerminalsMaxRows /
-// ≤GrepTerminalsMaxTabBytes per tab, ≤GrepTerminalsMaxBytes overall). A nil result
-// means there is no dock to search; a non-nil (possibly empty) snapshot offers the
-// scope. Only the newest transcript window is available: gvim has no Fresh-style
+// no process is started): the dock supplies the transcript window and its combined-row
+// provenance, and this applies Live Grep's snapshot caps (≤GrepTerminalsMaxTabs tabs,
+// the newest ≤GrepTerminalsMaxRows / ≤GrepTerminalsMaxTabBytes per tab,
+// ≤GrepTerminalsMaxBytes overall) while keeping First in step with the cropped tail. A
+// nil result means there is no dock to search; a non-nil snapshot offers the scope.
+// Only the newest transcript window is available: gvim has no Fresh-style
 // closed-terminal backing file, so closed terminals are not searched.
 func (m *Model) terminalSources() []palette.TerminalSource {
-	st := m.TerminalState()
-	if len(st.Tabs) == 0 {
+	tabs := m.dock.Transcripts()
+	if len(tabs) == 0 {
 		return nil
 	}
-	out := make([]palette.TerminalSource, 0, min(len(st.Tabs), palette.GrepTerminalsMaxTabs))
+	out := make([]palette.TerminalSource, 0, min(len(tabs), palette.GrepTerminalsMaxTabs))
 	total := 0
-	for i, tab := range st.Tabs {
+	for i, tab := range tabs {
 		if len(out) >= palette.GrepTerminalsMaxTabs || total >= palette.GrepTerminalsMaxBytes {
 			break
 		}
-		lines := terminalSourceLines(tab.Rows)
+		lines, first := terminalSourceLines(tab.Lines, tab.First)
 		size := 0
 		for _, line := range lines {
 			size += len(line) + 1
@@ -109,15 +109,18 @@ func (m *Model) terminalSources() []palette.TerminalSource {
 			break
 		}
 		total += size
-		out = append(out, palette.TerminalSource{Name: terminalSourceName(tab), Index: i, Lines: lines})
+		out = append(out, palette.TerminalSource{
+			ID: tab.ID, Name: terminalSourceName(tab), Index: i, First: first, Lines: lines,
+		})
 	}
 	return out
 }
 
 // terminalSourceLines keeps the newest bounded transcript window of one dock tab:
 // at most GrepTerminalsMaxRows rows and GrepTerminalsMaxTabBytes of text (the tail is
-// nearest the live screen).
-func terminalSourceLines(rows []string) []string {
+// nearest the live screen), advancing First by the rows dropped from the front so a
+// matched line still maps to its combined scrollback row.
+func terminalSourceLines(rows []string, first int) ([]string, int) {
 	start, count, size := len(rows), 0, 0
 	for start > 0 && count < palette.GrepTerminalsMaxRows {
 		line := rows[start-1]
@@ -128,27 +131,21 @@ func terminalSourceLines(rows []string) []string {
 		count++
 		start--
 	}
-	return append([]string(nil), rows[start:]...)
+	return append([]string(nil), rows[start:]...), first + start
 }
 
 // terminalSourceName labels a terminal hit row: the tab's explicit name, then its OSC
 // title, then the recorded launch program's basename, then "terminal" (Fresh labels a
 // nameless terminal "terminal" too).
-func terminalSourceName(tab terminal.SavedTab) string {
+func terminalSourceName(tab dock.TranscriptTab) string {
 	if tab.Name != "" {
 		return tab.Name
 	}
 	if tab.Title != "" {
 		return tab.Title
 	}
-	if len(tab.LaunchArgv) > 0 {
-		program := tab.LaunchArgv[0]
-		if i := strings.LastIndexAny(program, "/\\"); i >= 0 {
-			program = program[i+1:]
-		}
-		if program != "" {
-			return program
-		}
+	if tab.Program != "" {
+		return tab.Program
 	}
 	return "terminal"
 }
@@ -216,17 +213,22 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 		switch kind {
 		case "f":
 			m.focusEditor()
-			return m.openFileCmd(filepath.Join(msg.Root, name), false, line, col)
+			return m.openFileCmd(liveGrepExportPath(msg.Root, name, msg.Remote), false, line, col)
 		case "b":
 			index, _ := strconv.Atoi(name)
 			m.activateTab(index)
 			m.gotoLine(line, col)
 			m.focusEditor()
-		case "t":
-			// The four fields are t, dock tab index, label, transcript line: only the
-			// tab index locates the terminal. The list stays open for the next row.
-			index, _ := strconv.Atoi(name)
-			return func() tea.Msg { return palette.OpenTerminalMsg{Index: index} }
+		case "t", "T":
+			// t carries the legacy dock position; T carries the stable tab id and the
+			// absolute transcript row. Prefer the id so a later close/reorder cannot
+			// focus a different terminal, and reveal the matched pager line.
+			n, _ := strconv.ParseUint(name, 10, 64)
+			if kind == "T" {
+				row, _ := strconv.Atoi(lineStr)
+				return func() tea.Msg { return palette.OpenTerminalMsg{ID: n, Row: row} }
+			}
+			return func() tea.Msg { return palette.OpenTerminalMsg{Index: int(n)} }
 		}
 		return nil
 	})
@@ -244,12 +246,29 @@ func liveGrepExportValue(hit palette.GrepHit) string {
 	case palette.GrepBuffers:
 		return fmt.Sprintf("b\t%d\t%d\t%d", hit.Index, hit.Line, hit.Col)
 	case palette.GrepTerminals:
-		// t, dock tab index, terminal label, transcript line. The callback focuses the
-		// existing dock tab; it never opens a file or starts a shell.
+		// T, stable dock tab id, absolute transcript row, terminal label. The callback
+		// focuses and positions the existing dock tab (never a file or a shell); the id
+		// survives closes/reorders. A hit without an id (old caller/test) falls back to
+		// t/index (focus only, no line position).
+		row := hit.TranscriptFirst + hit.Line - 1
+		if hit.TerminalID != 0 {
+			return fmt.Sprintf("T\t%d\t%d\t%s", hit.TerminalID, row, hit.Rel)
+		}
 		return fmt.Sprintf("t\t%d\t%s\t%d", hit.Index, hit.Rel, hit.Line)
 	default:
 		return fmt.Sprintf("f\t%s\t%d\t%d", hit.Rel, hit.Line, hit.Col)
 	}
+}
+
+// liveGrepExportPath joins an exported file hit's relative name to the palette root:
+// remote rows keep the remote '/' separator and are opened through the remote document
+// access; local rows use the platform join. It never resolves a remote name against a
+// local path.
+func liveGrepExportPath(root, name string, remote bool) string {
+	if remote {
+		return strings.TrimSuffix(root, "/") + "/" + strings.TrimPrefix(name, "/")
+	}
+	return filepath.Join(root, name)
 }
 
 // parseLiveGrepExportValue decodes a liveGrepExportValue.

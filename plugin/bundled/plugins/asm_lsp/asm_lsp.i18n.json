@@ -26,6 +26,8 @@
     "help.message": "\"asm-lsp\" provides completion, diagnostics, hover docs for opcodes/registers/directives, and go-to-definition for assembly (GAS, NASM, MASM). It requires Rust's cargo to install.\n\nOptional per-project config: .asm-lsp.toml (choose assembler and instruction set).\nSee: https://github.com/bergercookie/asm-lsp",
     "help.last_error": "Last error: %{error}",
     "status.config_exists": "Not overwriting %{path}: it was created by another process",
-    "status.create_refused": "Could not create %{path} exclusively: %{error}; the file was not written"
+    "status.create_refused": "Could not create %{path} exclusively: %{error}; the file was not written",
+    "actions.disable": "Disable Assembly LSP",
+    "status.no_lsp": "No language server is configured"
   }
 }

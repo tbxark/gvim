@@ -318,15 +318,21 @@ seam).
 
 Fresh's `asm-lsp.ts` helper has three parts: the install-help popup for a missing server, the
 "Disable Assembly LSP" popup action, and the `.asm-lsp.toml` config offer. gvim's port
-(`plugin/bundled/plugins/asm_lsp/`) keeps the config offer and the install help, in Lua over the
-existing API only:
+(`plugin/bundled/plugins/asm_lsp/`) covers the config offer and install help in Lua over the
+existing API; it exposes the disable action only by delegating to gvim's native action (it is not
+reimplemented and is not a catalog command):
 
 * The offer waits in `plugins_loaded`/`after_file_open` like Fresh, but gvim's `lsp_server_error`
   payload is only `{error}` (no language, `error_type` or `server_command`), so the port claims a
   failure only when the active buffer is an assembly file and the message names `asm`/`assembly`;
-* "Disable Assembly LSP" is not ported: the plugin API has no call to disable a language's LSP
-  server. The help popup offers the native Start/Restart, Show LSP Status and copy-install actions
-  instead (the native LSP status menu has Stop and per-buffer toggle);
+* "Disable Assembly LSP" is not a plugin/catalog command: before dispatch the plugin re-checks
+  that the active buffer is still an assembly file and `gvim.has("lsp")`, then runs the native
+  `lsp_disable_language` action. That command mutes the language of the **current active document
+  at the LSP port for all roots** (`SetLanguageEnabled`), not just that buffer; the plugin's check
+  only refuses a dispatch after the popup's target tab changed. gvim has no plugin API to name a
+  language explicitly. The native LSP layer owns the async result and no-server/no-port notice;
+  the plugin reports only immediate dispatch errors and never claims success. The help popup also
+  offers Start/Restart, Show LSP Status and copy-install actions;
 * restarting after the config is written uses the native `lsp_restart` action for the active
   language, not Fresh's `restartLspForLanguage(offer.language)`;
 * the global asm-lsp config check goes through the workspace file system, so a remote/SSH workspace
@@ -344,7 +350,12 @@ existing API only:
 
 Tests: `plugin/bundled/asm_lsp_test.go` covers command registration/no bindings, the offer and
 created TOML for NASM/GAS, MASM + ARM64 detection, the project/XDG-global skip rules, the never-ask
-choice, the install-help popup/clipboard/native restart, and that non-assembly buffers are ignored.
+choice, the install-help popup/clipboard/native restart, the active-tab switch refusal and
+no-LSP/no-dispatch for the native disable action, and that non-assembly buffers are ignored. There
+is **no plugin→native end-to-end integration test**: the plugin side is asserted against the fake
+host's command recorder, while the TUI nil-port/no-server guard is covered separately in
+`internal/tui`; no test loads asm_lsp into a real TUI model and observes the root-level language
+mute.
 The harness does not run the real loader's startup flush, so the tests raise `plugins_loaded`
 explicitly.
 

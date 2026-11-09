@@ -2014,6 +2014,12 @@ func (m *Model) lspServerAction(action, language, name string) tea.Cmd {
 // language-level switch of Fresh's status popup.
 func (m *Model) lspSetLanguage(mute bool, language string) tea.Cmd {
 	port := m.lsp.port
+	if port == nil {
+		// Defensive for the status-popup path: a popup should not exist without a port,
+		// but a nil command is safer than a closure that panics when it runs.
+		m.notice = noServerNotice(language)
+		return nil
+	}
 	enabled := !mute
 	return func() tea.Msg {
 		return lspServerActionMsg{action: map[bool]string{true: "mute", false: "unmute"}[mute], language: language, err: port.SetLanguageEnabled(language, enabled)}
@@ -2029,7 +2035,10 @@ func (m *Model) lspSetLanguageEnabled(enabled bool) tea.Cmd {
 		return nil
 	}
 	lang := m.lspLanguage(doc)
-	if enabled && m.lsp.port == nil {
+	// Enabling and disabling both need the port: with no language-server session there is
+	// no server to mute, and calling a nil port would panic in the command. Report the same
+	// no-server notice the other LSP actions use instead.
+	if m.lsp.port == nil {
 		m.notice = m.lspNoServer(lang)
 		return nil
 	}

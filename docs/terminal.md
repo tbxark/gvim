@@ -525,6 +525,33 @@ the tab; gvim's dock is not restored into an editor split, so the dive is the
 first user action on the dock. A buffer shared across workspaces and extract-tab
 are the #19b policy decisions and remain open.
 
+## Live Grep transcript hits
+
+Live Grep's Terminals scope (docs/ui.md) searches the open dock tabs' newest
+bounded transcript window. A hit does not carry a tab position: the snapshot gives
+every tab a **stable runtime id** (monotonic for the session, never reused, not
+persisted) plus the combined scrollback row of the window's first line (prior
+transcript, then history, then the live screen). Opening the hit (directly, or from
+the Alt+Q quickfix list) resolves the id first and only then acts, so closing or
+reordering another tab — or two tabs sharing a label — can never focus a different
+terminal. A stale id (the tab closed since the search) leaves the active tab alone
+and shows `Live Grep: the terminal tab is no longer open`.
+
+The resolved tab is focused (the dock is shown when hidden) and, for an **active**
+terminal with main-screen history or an **exited** live shell, its read-only
+scrollback pager opens with the matched combined row selected, so the hit lands on
+the line the search found. This only enters the existing pager: it starts no shell,
+touches no PTY, reads no file and starts no process. A tab that has no pager — a
+restored read-only tab without a live session, or a running alternate-screen
+program whose history does not exist — is still focused with the honest notice
+`Live Grep: the terminal transcript line cannot be located`. The same id+row pair
+is what the Alt+Q export stores, so the quickfix list keeps locating the right
+transcript line while it stays open; a legacy `t` row (no id) only focuses the tab,
+and an out-of-range row clamps into the transcript. The searched content remains
+only the open tabs' newest window (no closed-terminal backing-file search), and
+restored transcripts are location-only via their saved rows when a live session is
+absent.
+
 ## Persistence and reflow
 
 The dock's transcript survives an editor restart through the session directory:

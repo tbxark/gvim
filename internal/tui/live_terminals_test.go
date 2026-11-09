@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -41,6 +42,12 @@ func TestTerminalSourcesSnapshotBoundsAndNames(t *testing.T) {
 	if got[0].Name != "shell" || got[0].Index != 0 || len(got[0].Lines) != 2 || got[0].Lines[1] != "todo here" {
 		t.Fatalf("named tab snapshot = %+v", got[0])
 	}
+	if got[0].ID == 0 || got[0].ID != m.dock.TabID(0) || got[0].First != 0 {
+		t.Fatalf("snapshot identity/first = %+v, want id %d first 0", got[0], m.dock.TabID(0))
+	}
+	if got[1].ID != m.dock.TabID(1) {
+		t.Fatalf("second snapshot id = %d, want %d", got[1].ID, m.dock.TabID(1))
+	}
 	if got[1].Name != "vim — x" {
 		t.Fatalf("title fallback = %q", got[1].Name)
 	}
@@ -71,18 +78,21 @@ func TestTerminalSourceLinesKeepsTheNewestRows(t *testing.T) {
 	for i := 0; i < 600; i++ {
 		rows = append(rows, "row")
 	}
-	got := terminalSourceLines(rows)
+	got, first := terminalSourceLines(rows, 10)
 	if len(got) != palette.GrepTerminalsMaxRows {
 		t.Fatalf("rows = %d, want %d", len(got), palette.GrepTerminalsMaxRows)
+	}
+	if first != 10+len(rows)-len(got) {
+		t.Fatalf("first row = %d, want %d after the tail crop", first, 10+len(rows)-len(got))
 	}
 	if got[len(got)-1] != "row" || len(got) == 0 {
 		t.Fatalf("cropped rows = %+v", got)
 	}
 	// A row that alone exceeds the tab byte budget leaves the window empty rather than
 	// storing a truncated line.
-	over := terminalSourceLines([]string{strings.Repeat("x", palette.GrepTerminalsMaxTabBytes+1)})
-	if len(over) != 0 {
-		t.Fatalf("over-long row snapshot = %+v", over)
+	over, first := terminalSourceLines([]string{strings.Repeat("x", palette.GrepTerminalsMaxTabBytes+1)}, 3)
+	if len(over) != 0 || first != 4 {
+		t.Fatalf("over-long row snapshot = %+v first %d", over, first)
 	}
 }
 
@@ -100,16 +110,22 @@ func TestOpenTerminalMsgFocusesTheDockTab(t *testing.T) {
 			{Name: "two", Open: true, Rows: []string{"b"}},
 		},
 	})
-	m.Update(palette.OpenTerminalMsg{Index: 1})
+	second := m.dock.TabID(1)
+	m.Update(palette.OpenTerminalMsg{ID: second, Row: 0})
 	if !m.dock.Open() || m.dock.ActiveIndex() != 1 || !m.dock.Focus() {
 		t.Fatalf("dock after the terminal hit = open %v index %d focus %v", m.dock.Open(), m.dock.ActiveIndex(), m.dock.Focus())
 	}
 	if len(starter.terms) != 0 {
 		t.Fatalf("focusing a terminal hit started %d shells", len(starter.terms))
 	}
-	// A stale index (the tab set changed) leaves the state alone and says so.
+	// The restored tab has no live session, so there is no pager to position: the tab
+	// is focused and the notice says the line could not be located (honest fallback).
+	if !strings.Contains(m.notice, "cannot be located") {
+		t.Fatalf("restored terminal hit notice = %q", m.notice)
+	}
+	// A stale id (the tab closed) leaves the active tab alone and says so.
 	before := m.dock.ActiveIndex()
-	m.Update(palette.OpenTerminalMsg{Index: 9})
+	m.Update(palette.OpenTerminalMsg{ID: 999, Row: 0})
 	if m.dock.ActiveIndex() != before {
 		t.Fatal("a stale terminal hit changed the active dock tab")
 	}
@@ -165,5 +181,136 @@ func TestLiveGrepTerminalExportEncoding(t *testing.T) {
 	got := liveGrepExportValue(palette.GrepHit{Source: palette.GrepTerminals, Index: 2, Rel: "shell", Line: 3})
 	if got != "t\t2\tshell\t3" {
 		t.Fatalf("terminal export value = %q, want t<TAB>2<TAB>shell<TAB>3", got)
+	}
+}
+
+// TestOpenTerminalMsgRevealsTheTranscriptRow checks a terminal hit with a stable id
+// and an absolute transcript row focuses the tab and opens the read-only pager at
+// that line, starting no shell.
+func TestOpenTerminalMsgRevealsTheTranscriptRow(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	openDock(t, m)
+	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+	term := starter.terms[0]
+	term.history = make([]string, 0, 100)
+	for i := 0; i < 100; i++ {
+		term.history = append(term.history, "row")
+	}
+	id := m.dock.TabID(0)
+	m.Update(palette.OpenTerminalMsg{ID: id, Row: 42})
+	if !m.dock.Scrolling() {
+		t.Fatal("the hit did not open the scrollback pager")
+	}
+	if got := m.dock.ScrollSelected(); got != 42 {
+		t.Fatalf("selected transcript row = %d, want 42", got)
+	}
+	if len(starter.terms) != 1 {
+		t.Fatalf("revealing the line started shells: %d", len(starter.terms))
+	}
+}
+
+// TestLiveGrepTerminalExportKeepsStableIDAndRow checks Alt+Q's terminal encoding uses
+// the stable id and absolute transcript row, and Enter on that list row reveals the
+// same place while the list stays open.
+func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	openDock(t, m)
+	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+	term := starter.terms[0]
+	for i := 0; i < 100; i++ {
+		term.history = append(term.history, "row")
+	}
+	id := m.dock.TabID(0)
+	hit := palette.GrepHit{Source: palette.GrepTerminals, TerminalID: id, Index: 0, Rel: "shell",
+		Line: 43, TranscriptFirst: 0, Text: "needle"}
+	if got, want := liveGrepExportValue(hit), fmt.Sprintf("T\t%d\t42\tshell", id); got != want {
+		t.Fatalf("export value = %q, want %q", got, want)
+	}
+	cmd := m.openLiveGrepResultsList(palette.GrepExportMsg{
+		Root: "/ws", Query: "needle", Hits: []palette.GrepHit{hit},
+	})
+	if cmd != nil {
+		t.Fatalf("opening the export returned %v", cmd)
+	}
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if !m.dock.Scrolling() || m.dock.ScrollSelected() != 42 {
+		t.Fatalf("export Enter did not reveal the row: scrolling %v selected %d", m.dock.Scrolling(), m.dock.ScrollSelected())
+	}
+	if len(starter.terms) != 1 {
+		t.Fatalf("export Enter started shells: %d", len(starter.terms))
+	}
+	if len(m.overlays) != 1 {
+		t.Fatal("the quickfix list closed after revealing the terminal row")
+	}
+}
+
+// TestTerminalSourcesAfterStartDiscovered checks the root snapshot path does not rely
+// on array alignment that a discovered-agent tab could break: a discovered launch gets
+// a nonzero stable id and terminalSources returns it without panicking.
+func TestTerminalSourcesAfterStartDiscovered(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{makeTerm: func() *fakeTerm { return newFakeTerm() }}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	cmd, ok := m.dock.StartDiscovered([]string{"/usr/bin/claude", "--x"}, "discovered")
+	if !ok || cmd == nil {
+		t.Fatalf("StartDiscovered = %v, %v", cmd, ok)
+	}
+	// Apply the start message directly: a recursive feed would also run the dock's
+	// blocking output wait for this plain fake shell. The tab state (and its id) is
+	// what this test needs.
+	msgs := collect(cmd)
+	if len(msgs) == 0 {
+		t.Fatal("StartDiscovered produced no start message")
+	}
+	m.Update(msgs[0])
+	got := m.terminalSources()
+	if len(got) != 1 || got[0].ID == 0 || got[0].ID != m.dock.TabID(0) {
+		t.Fatalf("terminalSources after StartDiscovered = %+v, tab id %d", got, m.dock.TabID(0))
+	}
+}
+
+// TestOpenTerminalMsgUsesTheIDAfterAClose checks the original wrong-tab bug: a hit
+// captured for the third tab must still focus that tab after the first tab closes
+// (its snapshot position shifts), not the tab now at the old position; after the
+// target itself closes the id is stale and only a notice is shown.
+func TestOpenTerminalMsgUsesTheIDAfterAClose(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m.RestoreTerminal(terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true,
+		Tabs: []terminal.SavedTab{
+			{Name: "a", Open: true, Rows: []string{"a"}},
+			{Name: "b", Open: true, Rows: []string{"b"}},
+			{Name: "c", Open: true, Rows: []string{"c"}},
+		},
+	})
+	target := m.dock.TabID(2)
+	// Close the first tab; c moves from 2 to 1, b from 1 to 0.
+	m.dock.SetActive(0)
+	m.dock.CloseTab()
+	before := m.dock.ActiveIndex()
+	m.Update(palette.OpenTerminalMsg{ID: target, Row: 0})
+	if got := m.dock.ActiveIndex(); got != 1 || m.dock.Name(got) != "c" {
+		t.Fatalf("stable id focused index %d (%q), want index 1 (c); active before %d", got, m.dock.Name(got), before)
+	}
+	// Closing the target itself makes the id stale: no shifted tab is focused.
+	m.dock.SetActive(1)
+	m.dock.CloseTab()
+	before = m.dock.ActiveIndex()
+	m.Update(palette.OpenTerminalMsg{ID: target, Row: 0})
+	if m.dock.ActiveIndex() != before {
+		t.Fatal("a stale id focused a shifted tab")
+	}
+	if !strings.Contains(m.notice, "no longer open") {
+		t.Fatalf("stale id notice = %q", m.notice)
 	}
 }

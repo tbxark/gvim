@@ -40,6 +40,12 @@ type Tabs struct {
 	ports   Ports
 	effects Effects
 	names   []string // per tab: "" means the default name
+	// ids is the stable identity of each tab (parallel to tabs): a Live Grep hit is
+	// captured by id, so closing/reordering/exiting another tab cannot make Enter focus a
+	// different terminal. IDs are monotonic for the session and never reused (Restore
+	// assigns fresh ids); they are not persisted because the terminal hits are not.
+	ids    []uint64
+	nextID uint64
 	// drag is the in-flight strip drag: the Fresh tab-drag gesture reorders a tab
 	// by pressing its label, moving past the threshold and releasing over the strip.
 	drag tabDrag
@@ -102,6 +108,44 @@ func (t *Tabs) Active() *Panel {
 
 // ActiveIndex returns the active tab's index, or 0 when there is none.
 func (t *Tabs) ActiveIndex() int { return t.active }
+
+// newID allocates one session-stable tab id. IDs are never reused, so a stale hit can
+// never address a later tab merely because the tab positions shifted.
+func (t *Tabs) newID() uint64 {
+	t.nextID++
+	return t.nextID
+}
+
+// TabID returns tab i's stable id, or 0 when the index is invalid.
+func (t *Tabs) TabID(i int) uint64 {
+	if i < 0 || i >= len(t.ids) {
+		return 0
+	}
+	return t.ids[i]
+}
+
+// IndexForID returns the current index of the tab with the stable id.
+func (t *Tabs) IndexForID(id uint64) (int, bool) {
+	if id == 0 {
+		return 0, false
+	}
+	for i, got := range t.ids {
+		if got == id {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// SetActiveID focuses the tab with the stable id. A missing id (the tab closed) is
+// reported without changing the active tab.
+func (t *Tabs) SetActiveID(id uint64) bool {
+	i, ok := t.IndexForID(id)
+	if !ok {
+		return false
+	}
+	return t.SetActive(i)
+}
 
 // Count returns the number of tabs.
 func (t *Tabs) Count() int { return len(t.tabs) }
@@ -295,6 +339,57 @@ type tabDrag struct {
 	active bool
 }
 
+// TranscriptTab is one tab's bounded searchable transcript window with the identity
+// and provenance a Live Grep hit needs: Lines are the same newest transcript rows the
+// saved record keeps (prior rows, newest scrollback window, live screen, exit marker),
+// and First is the combined scrollback row of Lines[0] (prior transcript, then history,
+// then screen), so a result line can be revealed at its exact place in the pager.
+type TranscriptTab struct {
+	ID      uint64
+	Name    string // explicit tab name ("" for the default)
+	Title   string // the child's OSC title
+	Program string // the launch/resume argv basename, for a label fallback
+	Lines   []string
+	First   int
+}
+
+// Transcripts snapshots every open tab's searchable transcript for Live Grep. It only
+// reads in-memory state (no IO, no PTY, no process starts); the caller applies its own
+// tab/row/byte caps. Ids are the stable runtime tab identities, so a hit can be opened
+// even after the tab moved, and fails honestly after it closes.
+func (t *Tabs) Transcripts() []TranscriptTab {
+	out := make([]TranscriptTab, 0, len(t.tabs))
+	for i, p := range t.tabs {
+		lines, first := p.transcriptRows()
+		launch := p.Launch()
+		out = append(out, TranscriptTab{
+			ID:      t.ids[i],
+			Name:    t.names[i],
+			Title:   p.TitleText(),
+			Program: restartProgramName(launch.Argv),
+			Lines:   lines,
+			First:   first,
+		})
+	}
+	return out
+}
+
+// RevealTranscriptLine focuses the tab with the stable id and opens its read-only
+// scrollback at combined transcript row (0-based). It reports false when the tab is
+// gone or has no pager to reveal (a restored tab without a live session, a running
+// alternate-screen program). It never starts a process; a pager row may be fetched by
+// the returned command.
+func (t *Tabs) RevealTranscriptLine(id uint64, row int) (tea.Cmd, bool) {
+	i, ok := t.IndexForID(id)
+	if !ok {
+		return nil, false
+	}
+	if !t.SetActive(i) {
+		return nil, false
+	}
+	return t.tabs[i].RevealTranscriptRow(row)
+}
+
 // NewTab adds a tab at the end, makes it active, and starts its shell. A dock at
 // the tab cap refuses with a notice. The previous tab keeps running.
 func (t *Tabs) NewTab() tea.Cmd {
@@ -316,6 +411,7 @@ func (t *Tabs) NewTab() tea.Cmd {
 	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, "")
+	t.ids = append(t.ids, t.newID())
 	t.active = len(t.tabs) - 1
 	// Hide the tabs the new one replaces from the layout: only the active tab is
 	// drawn, and a background tab keeps its shell and focus flag.
@@ -403,14 +499,19 @@ func (t *Tabs) moveTab(from, to int) {
 	active := t.active
 	tab := t.tabs[from]
 	name := t.names[from]
+	id := t.ids[from]
 	t.tabs = append(t.tabs[:from], t.tabs[from+1:]...)
 	t.names = append(t.names[:from], t.names[from+1:]...)
+	t.ids = append(t.ids[:from], t.ids[from+1:]...)
 	t.tabs = append(t.tabs, nil)
 	copy(t.tabs[to+1:], t.tabs[to:])
 	t.tabs[to] = tab
 	t.names = append(t.names, "")
 	copy(t.names[to+1:], t.names[to:])
 	t.names[to] = name
+	t.ids = append(t.ids, 0)
+	copy(t.ids[to+1:], t.ids[to:])
+	t.ids[to] = id
 	switch {
 	case active == from:
 		t.active = to
@@ -455,6 +556,7 @@ func (t *Tabs) removeAt(i int) {
 	tab.Close()
 	t.tabs = append(t.tabs[:i:i], t.tabs[i+1:]...)
 	t.names = append(t.names[:i:i], t.names[i+1:]...)
+	t.ids = append(t.ids[:i:i], t.ids[i+1:]...)
 	if len(t.tabs) == 0 {
 		t.active = 0
 		return
@@ -490,6 +592,7 @@ func (t *Tabs) Close() {
 	}
 	t.tabs = nil
 	t.names = nil
+	t.ids = nil
 	t.active = 0
 	t.dive = nil
 }
@@ -543,6 +646,7 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, name)
+	t.ids = append(t.ids, t.newID())
 	t.active = len(t.tabs) - 1
 	cmd, ok := p.StartAgent(name)
 	if cmd == nil {
@@ -1220,6 +1324,7 @@ func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
 	})
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, tab.Name)
+	t.ids = append(t.ids, t.newID())
 	if len(t.tabs) == 1 {
 		t.active = 0
 	}
@@ -1264,6 +1369,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		})
 		t.tabs = append(t.tabs, &p)
 		t.names = append(t.names, tab.Name)
+		t.ids = append(t.ids, t.newID())
 	}
 	if len(t.tabs) > 0 {
 		t.active = min(max(st.ActiveTab, 0), len(t.tabs)-1)

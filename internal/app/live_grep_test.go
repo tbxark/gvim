@@ -296,8 +296,8 @@ func TestLiveGrepSearchesTerminalSnapshot(t *testing.T) {
 		Limit:   100,
 		Buffers: []palette.BufferSource{{Index: 4, Name: "notes.md", Text: "todo buffer\n"}},
 		Terminals: []palette.TerminalSource{
-			{Index: 1, Name: "shell", Lines: []string{"first", "xx todo one", "todo two"}},
-			{Index: 3, Name: "", Lines: []string{"todo three"}},
+			{ID: 11, Index: 1, Name: "shell", First: 30, Lines: []string{"first", "xx todo one", "todo two"}},
+			{ID: 12, Index: 3, Name: "", First: 0, Lines: []string{"todo three"}},
 		},
 	}
 	hits, err := (&liveGrep{}).Search(req)
@@ -306,9 +306,9 @@ func TestLiveGrepSearchesTerminalSnapshot(t *testing.T) {
 	}
 	want := []palette.GrepHit{
 		{Rel: "notes.md", Line: 1, Col: 1, Text: "todo buffer", Source: palette.GrepBuffers, Index: 4},
-		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo one", Source: palette.GrepTerminals, Index: 1},
-		{Rel: "shell", Line: 3, Col: 1, Text: "todo two", Source: palette.GrepTerminals, Index: 1},
-		{Rel: "terminal", Line: 1, Col: 1, Text: "todo three", Source: palette.GrepTerminals, Index: 3},
+		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo one", Source: palette.GrepTerminals, Index: 1, TerminalID: 11, TranscriptFirst: 30},
+		{Rel: "shell", Line: 3, Col: 1, Text: "todo two", Source: palette.GrepTerminals, Index: 1, TerminalID: 11, TranscriptFirst: 30},
+		{Rel: "terminal", Line: 1, Col: 1, Text: "todo three", Source: palette.GrepTerminals, Index: 3, TerminalID: 12, TranscriptFirst: 0},
 	}
 	if fmt.Sprint(hits) != fmt.Sprint(want) {
 		t.Fatalf("hits = %v, want %v", hits, want)
