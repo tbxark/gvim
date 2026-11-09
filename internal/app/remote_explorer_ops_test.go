@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,6 +29,7 @@ type remoteOpsFake struct {
 	writes    []string
 	writeOpts []hostos.WriteOptions
 	mkdirs    []string
+	mkdirNews []string
 	dirReads  []string
 	renames   [][2]string
 	removes   []string
@@ -238,6 +240,36 @@ func (f *remoteOpsFake) Mkdir(_ context.Context, p string, _ bool) error {
 	if f.dirs[p] {
 		return &os.PathError{Op: "mkdir", Path: p, Err: fs.ErrExist}
 	}
+	f.mkdirs = append(f.mkdirs, p)
+	f.dirs[p] = true
+	return nil
+}
+
+// MkdirNew is the atomic DirectoryCreator surface: one no-replace create, a missing
+// parent is fs.ErrNotExist, existing files/dirs/symlinks are fs.ErrExist.
+func (f *remoteOpsFake) MkdirNew(ctx context.Context, p string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if f.mkdirErr != nil {
+		return f.mkdirErr
+	}
+	if f.dirs[p] {
+		return &os.PathError{Op: "mkdir", Path: p, Err: fs.ErrExist}
+	}
+	if _, ok := f.files[p]; ok {
+		return &os.PathError{Op: "mkdir", Path: p, Err: fs.ErrExist}
+	}
+	if _, ok := f.symlinks[p]; ok {
+		return &os.PathError{Op: "mkdir", Path: p, Err: fs.ErrExist}
+	}
+	parent := path.Dir(p)
+	if parent != "/remote/w" && !f.dirs[parent] {
+		return &os.PathError{Op: "mkdir", Path: p, Err: fs.ErrNotExist}
+	}
+	f.mkdirNews = append(f.mkdirNews, p)
 	f.mkdirs = append(f.mkdirs, p)
 	f.dirs[p] = true
 	return nil
@@ -596,5 +628,98 @@ func TestRemoteExplorerCreateFileRefusesWithoutExclusiveCreate(t *testing.T) {
 				t.Fatalf("a fallback whole-file write ran: %v", fake.writes)
 			}
 		})
+	}
+}
+
+// noDirectoryCreatorFS hides the atomic DirectoryCreator surface while still forwarding
+// every read/mutation the explorer ops need.
+type noDirectoryCreatorFS struct {
+	authority.FileSystem
+	authority.FileMutations
+}
+
+// TestRemoteExplorerMkdirIsAtomic checks New Directory uses the no-replace creator:
+// existing entries fail with fs.ErrExist without a second mutation, a missing parent
+// reports fs.ErrNotExist, cancellation is surfaced, and no Stat-then-create path runs.
+func TestRemoteExplorerMkdirIsAtomic(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/existing/", "").put("/remote/w/a.go", "a")
+	fake.statErr = errors.New("Stat must not be used by atomic New Directory")
+	ops, _ := fake.ops(true)
+
+	if _, err := ops.Mkdir(context.Background(), "/remote/w", "existing"); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("existing directory error = %v, want fs.ErrExist", err)
+	}
+	if len(fake.mkdirNews) != 0 {
+		t.Fatalf("existing directory reached MkdirNew: %v", fake.mkdirNews)
+	}
+	if _, err := ops.Mkdir(context.Background(), "/remote/w", "sub"); err != nil {
+		t.Fatalf("new directory: %v", err)
+	}
+	if len(fake.mkdirNews) != 1 || !fake.dirs["/remote/w/sub"] {
+		t.Fatalf("atomic creates = %v dirs=%v", fake.mkdirNews, fake.dirs)
+	}
+	if _, err := ops.Mkdir(context.Background(), "/remote/w", "sub"); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("second New Directory error = %v, want fs.ErrExist", err)
+	}
+	if _, err := ops.Mkdir(context.Background(), "/remote/w/a.go", "child"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("parent-is-a-file error = %v, want fs.ErrNotExist", err)
+	}
+
+	canceled := newRemoteOpsFake()
+	canceled.mkdirErr = context.Canceled
+	opsCanceled, _ := canceled.ops(true)
+	if _, err := opsCanceled.Mkdir(context.Background(), "/remote/w", "d"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled New Directory error = %v, want context.Canceled", err)
+	}
+	if len(canceled.dirs) != 0 {
+		t.Fatalf("a canceled create left a directory: %v", canceled.dirs)
+	}
+}
+
+// TestRemoteExplorerMkdirWithoutCapabilityRefuses: no check-then-create fallback. A
+// backend without DirectoryCreator reports the inability and touches nothing.
+func TestRemoteExplorerMkdirWithoutCapabilityRefuses(t *testing.T) {
+	base := newRemoteOpsFake()
+	slot := authoritytest.New()
+	slot.FileSystem = &noDirectoryCreatorFS{FileSystem: base, FileMutations: base}
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	if _, err := ops.Mkdir(context.Background(), "/remote/w", "d"); err == nil || !strings.Contains(err.Error(), "cannot create a directory exclusively") {
+		t.Fatalf("no-capability error = %v", err)
+	}
+	if len(base.mkdirs) != 0 || len(base.mkdirNews) != 0 {
+		t.Fatalf("no-capability path mutated the remote: mkdirs=%v new=%v", base.mkdirs, base.mkdirNews)
+	}
+}
+
+// TestRemoteExplorerMkdirConcurrentSameName: the no-replace create claims a name exactly
+// once under concurrent New Directory requests; the losers report fs.ErrExist and no
+// partial/merged directory is created.
+func TestRemoteExplorerMkdirConcurrentSameName(t *testing.T) {
+	fake := newRemoteOpsFake()
+	ops, _ := fake.ops(true)
+	const n = 8
+	results := make(chan error, n)
+	for range n {
+		go func() {
+			_, err := ops.Mkdir(context.Background(), "/remote/w", "race")
+			results <- err
+		}()
+	}
+	var wins, exists int
+	for range n {
+		switch err := <-results; {
+		case err == nil:
+			wins++
+		case errors.Is(err, fs.ErrExist):
+			exists++
+		default:
+			t.Fatalf("concurrent New Directory error = %v", err)
+		}
+	}
+	if wins != 1 || exists != n-1 {
+		t.Fatalf("concurrent New Directory wins=%d exists=%d, want 1/%d", wins, exists, n-1)
+	}
+	if len(fake.mkdirNews) != 1 || !fake.dirs["/remote/w/race"] {
+		t.Fatalf("atomic creates = %v dirs=%v", fake.mkdirNews, fake.dirs)
 	}
 }

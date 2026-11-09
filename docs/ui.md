@@ -200,8 +200,9 @@ Ctrl+Shift+Left/Right select by word. Typing or pasting replaces the selected ra
 deletes exactly it, and an unshifted arrow cancels the selection while keeping the text. Ctrl+C copies
 the selected text, or the whole prompt when nothing is selected; Ctrl+X cuts the selected range, or the
 whole prompt when nothing is selected, as Fresh's prompt_copy/prompt_cut do. A dialog that opens with
-preselected prefill text still uses the older invisible replacement prefill; Ctrl+A is the path that
-creates the reverse-video selection. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
+preselected prefilled text (LineOptions.SelectAll, e.g. rename/overwrite) starts with the same real
+reverse-video selection, so typing/paste replaces it, Backspace/Delete deletes it, and an arrow
+cancels it while keeping the text. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
 success and Copy failed on an error, while Cut also waits before clearing. The OSC 52 write alone
 is best-effort, so without a native writer the copy is reported as requested (not Copied) and the
 prompt is kept; a failed cut keeps it too. A late result is applied only to the same
@@ -448,6 +449,18 @@ result region:
 | Anchored popup (LSP hover, ...) | menu | `internal/tui/popup` |
 | Sidebar column (File Explorer + Contents) | body, left column | `internal/tui/frame` (geometry and hit map), `internal/tui/sidebar` (section headers and the Contents body), `internal/tui/explorer` (tree body) |
 | Plugin widget panel | card (centred float), body of a virtual-buffer pane, or a sidebar section | `internal/tui/pluginpanel` (layout, paint, hit testing), `internal/tui/plugin_panels.go` (placement, focus, routing); a floating panel is a card with the shared frame, a buffer panel is painted inside the pane's text rectangle, a sidebar section's body is painted by the column |
+
+### File Explorer write dialogs
+
+New File, New Directory, Rename and Delete use the one-line prompt/confirmation surfaces
+(not a new overlay). New Directory is a single atomic create: Enter creates the named
+directory once; an already-existing target, or a missing parent, is reported in the status
+row instead of opening a second dialog or partially creating the path. This is the same
+local and remote: the local adapter calls one `os.Mkdir`, the remote adapter calls the
+authority's no-replace `MkdirNew`, and a backend without that capability reports that it
+cannot create a directory exclusively rather than falling back to a check-then-create. The
+operation runs in the existing file-job command, so the update loop never waits on it and
+the tree refresh follows the same asynchronous reload as the other writes.
 
 ## 4. Rules for a new component
 

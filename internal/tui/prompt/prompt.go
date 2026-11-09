@@ -138,7 +138,7 @@ type Suggestion struct {
 type LineOptions struct {
 	Label     string                  // shown before the input, for example "Go to line:"
 	Input     string                  // the text the field starts with; the caret goes to its end
-	SelectAll bool                    // Input is a prefill: the first printable key replaces it
+	SelectAll bool                    // Input starts selected: typing/paste replaces it, arrows cancel
 	Tag       any                     // returned in Done
 	Validate  func(text string) error // checked on Enter; a rejection keeps the prompt open and shows the error
 	OnChange  func(text string)       // called with the new text after an edit changed it; may be nil
@@ -158,7 +158,6 @@ type Line struct {
 	errText  string
 	styles   styles
 	closed   bool
-	prefill  bool // the text is an untouched prefill that the next typed text replaces
 	// selAnchor is the selection anchor in rune indices, -1 when there is no selection.
 	// The caret (field.Position) is the moving head; a non-empty range is highlighted.
 	selAnchor int
@@ -173,6 +172,14 @@ type Line struct {
 	// paste reads the clipboard for Ctrl+V. It is textinput.Paste in production; a
 	// test can substitute a deterministic result without touching the system clipboard.
 	paste func() tea.Msg
+}
+
+// selectionAnchor is the initial real selection for a LineOptions.SelectAll prompt.
+func selectionAnchor(selectAll bool, input string) int {
+	if selectAll && input != "" {
+		return 0
+	}
+	return -1
 }
 
 // NewLine returns a text prompt with the options of o. The field is focused.
@@ -191,10 +198,9 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		validate: o.Validate,
 		onChange: o.OnChange,
 		styles:   newStyles(st),
-		prefill:  o.SelectAll && o.Input != "",
-		// An initial SelectAll prefill is the old invisible replacement state, not a
-		// visual selection; Ctrl+A creates the real selection model.
-		selAnchor: -1,
+		// LineOptions.SelectAll is a real reverse-video selection from the start, like
+		// Fresh's rename/overwrite dialogs. Typing/paste replaces it and arrows cancel it.
+		selAnchor: selectionAnchor(o.SelectAll, o.Input),
 		history:   o.History,
 		at:        len(o.History),
 		paste:     textinput.Paste,
@@ -252,7 +258,6 @@ func (l *Line) setSelectionHead(head int) {
 	}
 	head = min(max(head, 0), len([]rune(l.field.Value())))
 	l.field.SetCursor(head)
-	l.prefill = false
 	l.errText = ""
 }
 
@@ -260,7 +265,6 @@ func (l *Line) setSelectionHead(head int) {
 func (l *Line) SelectAll() {
 	l.selAnchor = 0
 	l.field.CursorEnd()
-	l.prefill = false
 	l.errText = ""
 }
 
@@ -311,7 +315,6 @@ func (l *Line) deleteSelectionSilent() bool {
 	l.field.SetValue(next)
 	l.field.SetCursor(start)
 	l.clearSelection()
-	l.prefill = false
 	l.errText = ""
 	return true
 }
@@ -341,7 +344,6 @@ func (l *Line) CutValue() string {
 	l.field.SetValue("")
 	l.field.CursorEnd()
 	l.errText = ""
-	l.prefill = false
 	if l.onChange != nil {
 		l.onChange("")
 	}
@@ -364,9 +366,7 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 				// when there is text to insert through the unified edit path below.
 				return l, nil
 			}
-			if !l.deleteSelectionSilent() && l.prefill {
-				l.untouch(true)
-			}
+			l.deleteSelectionSilent()
 			msg = tea.PasteMsg{Content: text}
 		}
 		l.edit(msg)
@@ -440,27 +440,17 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 			l.clearSelection()
 		}
 	}
-	if l.prefill && (ks == "backspace" || ks == "delete") {
-		before := l.field.Value()
-		l.untouch(true)
-		l.errText = ""
-		if before != "" && l.onChange != nil {
-			l.onChange("")
-		}
-		return l, nil
-	}
 	if ks == "ctrl+v" {
-		// Keep the selected prefill while the clipboard read is in flight. Its result
+		// Keep the selection while the clipboard read is in flight. Its result
 		// (textinput's unexported pasteMsg) is handled in the non-key branch, where the
-		// prefill is cleared before the field inserts the pasted text, so a selected
-		// prompt replaces rather than appends.
+		// selected range is cleared before the field inserts the pasted text, so a
+		// selected prompt replaces rather than appends.
 		read := l.paste
 		if read == nil {
 			read = textinput.Paste
 		}
 		return l, func() tea.Msg { return read() }
 	}
-	l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
 	return l, l.edit(kp)
 }
 
@@ -553,7 +543,7 @@ func (l *Line) pageSuggestion(delta int) tea.Cmd {
 	}
 	l.field.SetValue(value)
 	l.field.CursorEnd()
-	l.prefill = false
+	l.clearSelection()
 	if l.onChange != nil {
 		l.onChange(value)
 	}
@@ -585,7 +575,7 @@ func (l *Line) cycleSuggestion(delta int) tea.Cmd {
 	}
 	l.field.SetValue(value)
 	l.field.CursorEnd()
-	l.prefill = false
+	l.clearSelection()
 	if l.onChange != nil {
 		l.onChange(value)
 	}
@@ -595,7 +585,6 @@ func (l *Line) cycleSuggestion(delta int) tea.Cmd {
 // walk shows the previous (back) or the next entry of the history. The text being typed is kept
 // for the way back down.
 func (l *Line) walk(back bool) {
-	l.untouch(false)
 	if l.at == len(l.history) {
 		l.draft = l.field.Value()
 	}
@@ -616,16 +605,6 @@ func (l *Line) walk(back bool) {
 	l.errText = ""
 	if l.onChange != nil {
 		l.onChange(text)
-	}
-}
-
-// untouch ends the prefill. The text it held goes when replaces is set.
-func (l *Line) untouch(replaces bool) {
-	if l.prefill {
-		l.prefill = false
-		if replaces {
-			l.field.SetValue("")
-		}
 	}
 }
 

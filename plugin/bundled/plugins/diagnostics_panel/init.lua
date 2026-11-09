@@ -22,8 +22,9 @@
 -- the shared library's header lists the reductions every user of it inherits):
 --   * prompt mode and search sources (ripgrep, filters, debounce, cancellation): the
 --     diagnostics panel is a panel, not a prompt
---   * the preview pane, syncWithEditor and navigateOnCursorMove: one selectable list, no
---     preview tabs and no editor-cursor tracking
+--   * the preview pane and navigateOnCursorMove: one selectable list, no preview tabs and no
+--     source-split navigation. syncWithEditor is ported: an editor cursor moving onto a
+--     diagnostic's line selects/reveals that diagnostic in the panel
 --   * useUtilityDock: gvim's widget panel v1 has float, buffer and sidebar placements, not a
 --     utility dock; the port mounts a float card
 --   * panelKeys q/a/r: a v1 panel reports widget_events only, so 'a' is the in-panel
@@ -318,6 +319,30 @@ local function refresh()
   return #rows
 end
 
+-- sync_to_editor is Fresh's syncWithEditor handler: when the editor cursor moves onto a
+-- diagnostic's exact file+line, reveal/select that row. It never opens a preview or moves
+-- the editor; the widget mutation only changes the panel selection.
+local function sync_to_editor(ev)
+  if not state.panel or not ev or not ev.pos then
+    return
+  end
+  local buf = ev.buf
+  if not buf or buf:is_virtual() then
+    return
+  end
+  local path = buf:path()
+  if not path or path == "" then
+    return
+  end
+  for i = 1, #state.node_row do
+    local row = state.node_row[i]
+    if row and row.path == path and row.line == ev.pos.line then
+      gvim.ui.widget_mutate(state.panel, { kind = "setSelectedIndex", widget_key = "rows", index = i })
+      return
+    end
+  end
+end
+
 -- close unmounts the panel (if it is mounted) and forgets its rows.
 local function close(notice)
   if state.panel then
@@ -401,6 +426,9 @@ gvim.on("diagnostics_updated", function()
     refresh()
   end
 end)
+
+-- Fresh's syncWithEditor: follow the editor cursor onto a diagnostic line.
+gvim.on("cursor_moved", sync_to_editor)
 
 -- Fresh's buffer_activated handler: the current-file filter follows the active buffer.
 -- Virtual buffers have no path and leave the filter alone, as Fresh's does.

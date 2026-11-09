@@ -20,7 +20,7 @@ func TestLineOnChangeSeesEveryEditedText(t *testing.T) {
 		{"a key that changes nothing", LineOptions{Input: "xy"}, func(l *Line) { l.Update(key("left")) }, nil},
 		{"enter is not a change", LineOptions{Input: "xy"}, func(l *Line) { l.Update(key("enter")) }, nil},
 		{"a paste", LineOptions{}, func(l *Line) { l.Update(tea.PasteMsg{Content: "pasted"}) }, []string{"pasted"}},
-		{"the first key replaces a prefill", LineOptions{Input: "old", SelectAll: true}, func(l *Line) { typeText(l, "n") }, []string{"n"}},
+		{"the first key replaces the selected input", LineOptions{Input: "old", SelectAll: true}, func(l *Line) { typeText(l, "n") }, []string{"n"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

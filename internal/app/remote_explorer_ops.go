@@ -11,9 +11,10 @@ package app
 // Safety: the workspace trust gate runs before every mutation, a disconnected authority is
 // the explicit "activate the window to reconnect" error, names are validated with the same
 // fsops rules as the local adapter and must stay inside the remote workspace root, a create
-// or rename never overwrites an existing entry (checked before the mutation; a race between
-// the check and the write is a recorded residual because FileMutations has no exclusive
-// create), and a remote delete is permanent: Mutations.Remove, no trash. A trash move was
+// (file or directory) uses the authority's exclusive-create surface and is refused when the
+// backend cannot prove it, so a concurrent target can never be overwritten; rename still checks before mv -f (the
+// recorded check-to-write residual, because FileMutations has no exclusive rename), and a
+// remote delete is permanent: Mutations.Remove, no trash. A trash move was
 // evaluated and deferred until the authority can prove an atomic same-filesystem
 // no-replace move and a private trash directory; the audit rejected mv -n/cross-FS
 // assumptions, so delete keeps its explicit permanent semantics rather than claiming an
@@ -46,6 +47,11 @@ var errRemoteExplorerDisconnected = errors.New("remote workspace is disconnected
 // create-new surface: a check-then-write would race a concurrent creator, so refusing is
 // the honest answer (the local explorer already creates with O_EXCL).
 var errRemoteExplorerNoExclusiveCreate = errors.New("this backend cannot create a file exclusively; refusing to race an existing target")
+
+// errRemoteExplorerNoExclusiveDirCreate refuses New Directory when the backend has no
+// atomic create-new directory surface: falling back to a Stat + Mkdir would reopen the
+// check-to-create race, so refusing is the honest answer.
+var errRemoteExplorerNoExclusiveDirCreate = errors.New("this backend cannot create a directory exclusively; refusing to race an existing target")
 
 // remoteExplorerOps implements the TUI's explorerOps over the remote authority.
 type remoteExplorerOps struct {
@@ -207,9 +213,13 @@ func (o *remoteExplorerOps) CreateFile(ctx context.Context, dir, name string) (s
 	return p, nil
 }
 
-// Mkdir creates one remote directory and returns its path.
+// Mkdir creates one remote directory and returns its path. It uses the authority's
+// atomic DirectoryCreator surface so a target created concurrently can never be merged
+// into or overwritten: the backend either creates the directory with one no-replace mkdir
+// or reports fs.ErrExist/fs.ErrNotExist. A backend without that surface is refused
+// explicitly — a Stat + Mkdir fallback would reopen the check-to-create race.
 func (o *remoteExplorerOps) Mkdir(ctx context.Context, dir, name string) (string, error) {
-	if err := o.checkMutations(); err != nil {
+	if err := o.check(); err != nil {
 		return "", err
 	}
 	p, err := o.child(dir, name)
@@ -221,13 +231,19 @@ func (o *remoteExplorerOps) Mkdir(ctx context.Context, dir, name string) (string
 	if err := o.gateOp(opCtx, "mkdir", p); err != nil {
 		return "", err
 	}
-	if ok, _, err := o.exists(opCtx, p); err != nil {
-		return "", fmt.Errorf("remote file operation: stat %s: %w", p, err)
-	} else if ok {
-		return "", fmt.Errorf("remote file operation: %s already exists", p)
+	creator := authority.DirectoryCreators(o.files)
+	if creator == nil {
+		return "", fmt.Errorf("remote file operation: %w: %s", errRemoteExplorerNoExclusiveDirCreate, p)
 	}
-	if err := o.muts.Mkdir(opCtx, p, false); err != nil {
-		return "", fmt.Errorf("remote file operation: mkdir %s: %w", p, err)
+	if err := creator.MkdirNew(opCtx, p); err != nil {
+		switch {
+		case errors.Is(err, fs.ErrExist):
+			return "", fmt.Errorf("remote file operation: %s: %w", p, fs.ErrExist)
+		case errors.Is(err, fs.ErrNotExist):
+			return "", fmt.Errorf("remote file operation: mkdir %s: parent directory is missing: %w", p, fs.ErrNotExist)
+		default:
+			return "", fmt.Errorf("remote file operation: mkdir %s: %w", p, err)
+		}
 	}
 	return p, nil
 }

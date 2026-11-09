@@ -349,6 +349,67 @@ func firstPromptCopyMsg(t *testing.T, cmd tea.Cmd) promptCopyMsg {
 // confirm's question) without mutating it. With a native writer the Copied notice waits
 // for that write's result; a failure says so and a reader-only clipboard is reported as
 // an unconfirmed OSC 52 request, never as Copied.
+// TestPromptInitialSelectAllThroughRoot: a dialog opened with LineOptions.SelectAll
+// starts with the real reverse-video selection, not an invisible prefill. Typing replaces
+// it, an arrow cancels it while keeping text, and Backspace deletes the selected range.
+func TestPromptInitialSelectAllThroughRoot(t *testing.T) {
+	open := func(t *testing.T) (*Model, *prompt.Line, *[]string) {
+		t.Helper()
+		m := overlayModel(t, fakeKeymap{})
+		changed := &[]string{}
+		p := prompt.NewLine(m.styles, prompt.LineOptions{
+			Label: "Rename to:", Input: "old", SelectAll: true,
+			OnChange: func(s string) { *changed = append(*changed, s) },
+		})
+		m.pushOverlay(p)
+		return m, p, changed
+	}
+
+	t.Run("starts selected", func(t *testing.T) {
+		_, p, _ := open(t)
+		if !p.HasSelection() || p.SelectedText() != "old" {
+			t.Fatalf("initial selection = %q, has %v; want old", p.SelectedText(), p.HasSelection())
+		}
+	})
+
+	t.Run("typing replaces", func(t *testing.T) {
+		m, p, changed := open(t)
+		m.Update(typed("n"))
+		if got := p.Value(); got != "n" {
+			t.Fatalf("typing over initial selection = %q, want n", got)
+		}
+		if p.HasSelection() {
+			t.Fatal("initial selection survived replacement")
+		}
+		if len(*changed) != 1 || (*changed)[0] != "n" {
+			t.Fatalf("onChange = %v, want [n]", *changed)
+		}
+	})
+
+	t.Run("arrow cancels keeping text", func(t *testing.T) {
+		m, p, _ := open(t)
+		m.Update(special(tea.KeyLeft))
+		if p.HasSelection() {
+			t.Fatal("arrow did not cancel the initial selection")
+		}
+		m.Update(typed("x"))
+		if got := p.Value(); got != "olxd" {
+			t.Fatalf("arrow + typing = %q, want olxd", got)
+		}
+	})
+
+	t.Run("backspace deletes selection", func(t *testing.T) {
+		m, p, changed := open(t)
+		m.Update(special(tea.KeyBackspace))
+		if got := p.Value(); got != "" {
+			t.Fatalf("Backspace left %q", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "" {
+			t.Fatalf("onChange = %v, want one empty value", *changed)
+		}
+	})
+}
+
 // TestPromptSelectionRootKeys: the real overlay Update path drives Fresh's
 // move-selecting/select-word actions, and Ctrl+C/Ctrl+X act on the selected range while
 // preserving the native-writer single-flight/identity semantics.

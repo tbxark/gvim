@@ -700,7 +700,11 @@ the authority is down. Names are validated with the same `fsops.Validate` rules 
 stay inside the remote workspace root. New File uses the **exclusive-create** surface, so a
 target created concurrently by another process is never overwritten: the backend either
 creates the empty file atomically or reports `fs.ErrExist`; a backend without the surface is
-refused explicitly (no Stat + WriteFile fallback). A rename still refuses an existing target
+refused explicitly (no Stat + WriteFile fallback). New Directory uses the authority's atomic
+`DirectoryCreator.MkdirNew` surface: one no-replace `mkdir`, so an existing entry reports
+`fs.ErrExist`, a missing parent reports `fs.ErrNotExist`, and a backend without the surface
+is refused explicitly (no Stat + Mkdir fallback). The local explorer's New Directory is
+`os.Mkdir` itself, the same atomic no-replace semantics. A rename still refuses an existing target
 with a pre-mutation check, and that check-to-write race remains a recorded residual (the
 mutation surface has no exclusive rename). A remote delete asks first and the question
 says it is permanent (no remote trash). After a successful operation the existing explorer

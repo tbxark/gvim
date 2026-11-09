@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// TestLineSelectAllBackspaceAndDeleteClear: Ctrl+A marks the text prefill-selected; a
+// TestLineSelectAllBackspaceAndDeleteClear: Ctrl+A selects the whole text; a
 // Backspace or Delete immediately clears the whole field and reports one empty onChange.
 func TestLineSelectAllBackspaceAndDeleteClear(t *testing.T) {
 	t.Parallel()
@@ -31,8 +31,8 @@ func TestLineSelectAllBackspaceAndDeleteClear(t *testing.T) {
 			if len(changed) != 1 || changed[0] != "" {
 				t.Fatalf("onChange after %s = %q, want one empty value", tt.name, changed)
 			}
-			if l.prefill {
-				t.Fatalf("prefill still set after %s", tt.name)
+			if l.HasSelection() {
+				t.Fatalf("selection still set after %s", tt.name)
 			}
 		})
 	}
@@ -44,11 +44,11 @@ func TestLineSelectAllBackspaceAndDeleteClear(t *testing.T) {
 // clipboard.
 type pasteMsg string
 
-// TestLineSelectAllCtrlVPasteReplaces: Ctrl+V keeps the prefill selected while the
-// clipboard read command is in flight. Executing that command yields textinput's
-// pasteMsg; feeding it back clears the old text and inserts the pasted text, so
-// Ctrl+A Ctrl+V replaces rather than appends. The prefill is gone afterwards, so a
-// Backspace edits the new text instead of clearing it.
+// TestLineSelectAllCtrlVPasteReplaces: Ctrl+V keeps the selection while the clipboard
+// read command is in flight. Executing that command yields textinput's pasteMsg; feeding
+// it back clears the selected range and inserts the pasted text, so Ctrl+A Ctrl+V replaces
+// rather than appends. The selection is gone afterwards, so a Backspace edits the new text
+// instead of clearing it.
 func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	t.Parallel()
 	var changed []string
@@ -78,7 +78,7 @@ func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	}
 	l.Update(key("backspace"))
 	if got := l.Value(); got != "ne" {
-		t.Fatalf("Backspace after replacement = %q, want ne (not a prefill clear)", got)
+		t.Fatalf("Backspace after replacement = %q, want ne (not a selection clear)", got)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestLineSelectAllEmptyNoOnChange(t *testing.T) {
 			l := NewLine(testStyles(), LineOptions{Label: "Value:", OnChange: func(string) { called = true }})
 			l.SelectAll()
 			l.Update(tt.key)
-			if l.Value() != "" || l.prefill {
-				t.Fatalf("%s left value %q prefill %v", tt.name, l.Value(), l.prefill)
+			if l.Value() != "" || l.HasSelection() {
+				t.Fatalf("%s left value %q selection %v", tt.name, l.Value(), l.HasSelection())
 			}
 			if called {
 				t.Fatalf("%s on an empty selected prompt called onChange", tt.name)
@@ -110,7 +110,7 @@ func TestLineSelectAllEmptyNoOnChange(t *testing.T) {
 	}
 }
 
-// TestLineSelectAllBackspaceClearsValidationError: clearing a selected prefill with
+// TestLineSelectAllBackspaceClearsValidationError: clearing a selected range with
 // Backspace/Delete also clears the rejection message the failed submit left behind.
 func TestLineSelectAllBackspaceClearsValidationError(t *testing.T) {
 	t.Parallel()
@@ -150,7 +150,7 @@ func TestLineSelectAllTypedKeyReplacesAndArrowCancels(t *testing.T) {
 	if got := l.Value(); got != "axb" {
 		t.Fatalf("arrow + typed = %q, want axb", got)
 	}
-	if l.prefill {
-		t.Fatal("prefill stayed set after an arrow cancelled the selection")
+	if l.HasSelection() {
+		t.Fatal("selection stayed set after an arrow cancelled it")
 	}
 }

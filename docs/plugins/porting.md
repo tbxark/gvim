@@ -210,9 +210,11 @@ first build, so the idle default bundle does not pay for it (the 8 MiB gate).
 
 Reduced or omitted from Fresh's Finder: search sources have no cancellation handle (a superseded
 query's `set_items` is discarded by the picker generation guard instead of killing the process), no
-per-query process spawn management, the embedded preview pane and utility-dock routing, `syncWithEditor`,
+per-query process spawn management, the embedded preview pane and utility-dock routing,
 `navigateOnCursorMove`, `panelKeys` and the panel-mode prompt-type events; the panel backend covers
-the grouped/deduped tree use only. `lsp_navigation` and `find_references` add the LSP edges:
+the grouped/deduped tree use only. `diagnostics_panel` implements Fresh's `syncWithEditor` itself
+from the existing cursor_moved event: the exact active-file/line diagnostic is selected/revealed
+through a widget mutation (no preview, no focus change). `lsp_navigation` and `find_references` add the LSP edges:
 `gvim.finder.lsp_locations` normalizes `Location`/`Location[]`/`LocationLink[]` and converts UTF-16
 columns to bytes when the target line is open. Both are command ports because gvim has no
 `lsp_references`/`lsp_implementation` plugin events (the native Find References action has its own

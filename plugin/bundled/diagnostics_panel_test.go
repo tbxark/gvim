@@ -594,3 +594,42 @@ func TestDiagnosticsPanelRowsAreBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnosticsPanelSyncsSelectionToEditorCursor(t *testing.T) {
+	t.Parallel()
+	host, a, _ := diagHost(t)
+	host.LSP().Diags[a] = []pluginapi.DiagnosticInfo{
+		diag(2, 4, "error", "undefined: foo", "gopls"),
+	}
+	h := startDiagPanel(t, host)
+	if err := h.Run(diagPlugin+".show_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	fp := mountedPanel(t, h)
+	tree := mustWidget(t, fp.Panel.Root, "rows")
+	if len(tree.Nodes) != 2 {
+		t.Fatalf("nodes = %+v, want header + diagnostic", tree.Nodes)
+	}
+	// Move the editor cursor onto the diagnostic's exact line. Fresh's syncWithEditor
+	// reveals/selects that panel row without changing focus.
+	if err := host.SetCursor(a, pluginapi.Pos{Line: 2, Col: 4}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	h.Emit(pluginapi.Event{Name: "cursor_moved", Data: map[string]any{
+		"buf": a, "pos": map[string]any{"line": 2, "col": 4},
+	}})
+	if len(fp.Mutations) != 1 {
+		t.Fatalf("mutations = %+v, want one selected-index mutation", fp.Mutations)
+	}
+	mu := fp.Mutations[0]
+	if mu.Kind != "setSelectedIndex" || mu.WidgetKey != "rows" || mu.Index != 1 {
+		t.Fatalf("mutation = %+v, want rows index 1 (the diagnostic node, 0-based)", mu)
+	}
+	// A line with no diagnostic leaves the selection alone.
+	h.Emit(pluginapi.Event{Name: "cursor_moved", Data: map[string]any{
+		"buf": a, "pos": map[string]any{"line": 1, "col": 0},
+	}})
+	if len(fp.Mutations) != 1 {
+		t.Fatalf("mutations after a non-diagnostic line = %+v, want unchanged", fp.Mutations)
+	}
+}

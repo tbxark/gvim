@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/tbxark/gvim/internal/apptest"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -328,5 +329,23 @@ func TestFileOpsHasTheRootPortMethods(t *testing.T) {
 	})
 	if !ok {
 		t.Fatal("fileOps lacks a method the root asserts")
+	}
+}
+
+// TestMkdirRefusesExistingAndMissingParent: local New Directory is one atomic mkdir
+// (there is no check-then-create), so an existing target is a conflict and a missing
+// parent is fs.ErrNotExist.
+func TestMkdirRefusesExistingAndMissingParent(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	ops := newFileOps(&fakePaths{})
+	if _, err := ops.Mkdir(context.Background(), root, "dir"); err != nil {
+		t.Fatalf("first Mkdir: %v", err)
+	}
+	if _, err := ops.Mkdir(context.Background(), root, "dir"); !errors.Is(err, expl.ErrConflict) || !errors.Is(err, fsops.ErrConflict) {
+		t.Fatalf("second Mkdir error = %v, want a conflict", err)
+	}
+	if _, err := ops.Mkdir(context.Background(), filepath.Join(root, "missing"), "child"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing-parent Mkdir error = %v, want fs.ErrNotExist", err)
 	}
 }
