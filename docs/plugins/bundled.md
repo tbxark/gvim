@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-eight plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships thirty plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `markdown_source` and `rust_lsp` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `markdown_source`, `rust_lsp`, `deno_lsp` and `diff_nav` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -17,6 +17,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `goto_with_selection` | on | Go to Line with Selection | none |
 | `tab_actions` | on | Close Other Tabs, Close All Tabs, Close Tabs To Right, Close Tabs To Left, Move Tab To Left, Move Tab To Right | none |
 | `git_gutter` | on | Git Gutter: Refresh, Next Change, Previous Change | `debounce_ms` (300, 50 to 5000, project) |
+| `diff_nav` | **off** | Next Change, Previous Change | none |
 | `git_statusbar` | on | none (a status bar item) | none |
 | `git_find_file` | on | Git Find File, Git Find File: Reload | none |
 | `git_log` | **off** | Git Log, Git Log: Current File, Git Log: Close, Git Log: Refresh | none |
@@ -29,6 +30,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
 | `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
 | `rust_lsp` | **off** | Rust: Copy rustup Install Command, Rust: Copy brew Install Command, Rust: Check rust-analyzer, Rust: Language Server Help | none |
+| `deno_lsp` | **off** | Deno: Check Project, Deno: Copy Install Command, Deno: Language Server Help | none |
 | `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
 | `markdown_source` | **off** | none (hidden Enter/Tab/Shift+Tab key handlers for Markdown lists) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
@@ -62,7 +64,7 @@ caret and the line is selected.
 **tab_actions**: closes the other tabs, the tabs to the right or left, or all tabs; modified tabs are
 skipped and counted in the status message. Moves the active tab left or right.
 
-**git_gutter** (with Fresh's `diff_nav` merged navigation): compares the open buffer with the file at
+**git_gutter** (with its own merged Next/Previous Change; the standalone `diff_nav` plugin is separate): compares the open buffer with the file at
 `HEAD` and draws a bar in the gutter for added and modified lines, a triangle where lines were deleted,
 and marks on the scrollbar. **Next Change** and **Previous Change** are Fresh's merged diff navigation:
 they collect the buffer's `HEAD` changed regions, the active hunks published by **live_diff** when that
@@ -72,10 +74,28 @@ so the marks follow unsaved typing after a short pause. The HEAD text is read on
 `git show` and compared in the host (no line arrays in Lua); a file outside a repository or untracked
 still navigates its saved-diff/live_diff changes, and a buffer in large-file mode keeps its own notice:
 **Next Change** and **Previous Change** say that git changes are not tracked there. Exports `hunks(buf_id)`
-for other plugins (`{type = "added"|"modified"|"deleted", line, count}`). Reduced versus Fresh's separate
-`diff_nav` plugin: the merged navigation lives in git_gutter (no `diff_nav.*` command ids or i18n keys,
-no separate plugin), and the side-by-side Compare view keeps its own **Compare: Next/Previous
+for other plugins (`{type = "added"|"modified"|"deleted", line, count}`). Its own **Next
+Change**/**Previous Change** remain for the pre-diff_nav behavior; the standalone `diff_nav` plugin
+adds Fresh's `diff_nav.*` command namespace and i18n keys over the same three sources (so both sets
+of rows are in the palette). The side-by-side Compare view keeps its own **Compare: Next/Previous
 Difference**.
+
+**diff_nav** (port of Fresh's `plugins/diff_nav.ts`): the unified **Next Change** and **Previous Change**
+commands with Fresh's `diff_nav.next_change`/`diff_nav.prev_change` ids and translated
+`cmd.next_change`/`cmd.prev_change`/`status.*` keys. Each invocation collects the three change sources
+Fresh merges: the hunks exported by **git_gutter** (`gvim.plugins.get("git_gutter").hunks(buf)`), the
+hunks exported by **live_diff**, and `buf:diff_saved()` for unsaved changes. A source that is unloaded,
+does not export `hunks`, raises, or has no git (git_gutter idle) contributes nothing; navigation still
+works from live_diff and the saved diff alone. Targets are sorted by byte position (line fallback when a
+large/no-offset host cannot answer), deduplicated by line, and wrapped; the jump centers the target line
+and the status row says `Change n/total` or `Change n/total [wrapped]` (Fresh's messages). Fresh ships
+this plugin default-enabled; gvim keeps it opt-in (`default_enabled: false`) because adding it to
+the ten-plugin default set measured 8.12 MiB against the 8 MiB idle-heap gate, and the nine
+pre-existing default plugins stay unchanged. The original **git_gutter** Next/Previous Change rows
+remain available in the default set, so default navigation is not lost; enabling this plugin adds
+Fresh's `diff_nav.*` ids and i18n on top. It registers no keys or settings and runs everything in
+plugin tasks/awaits (no blocking IO in Update). Both command sets then appear in the palette
+(documented residual).
 
 **git_statusbar**: the current branch (the first seven digits of the commit for a detached HEAD) on
 the right of the status row. It refreshes when a file opens, a tab is activated, a file is saved and when
@@ -138,7 +158,7 @@ virtual buffer, as Fresh does, so the detail rows are not line targets: a target
 working-tree file at a line, which is wrong for any commit that is not HEAD and cannot point at a
 virtual buffer (see porting.md). It is **off by default** for the idle-heap gate (see Memory).
 
-**live_diff** (feeds Fresh's diff_nav merged navigation; see git_gutter): shows the open buffer against a baseline -- the
+**live_diff** (feeds the merged navigation of git_gutter and the standalone diff_nav plugin): shows the open buffer against a baseline -- the
 file at git HEAD (default), the file currently on disk, or a chosen git branch/ref -- with per-buffer
 mode toggles and Fresh's eight Live Diff commands (no default keys). Added/modified new-side lines get
 a background in the theme's `editor.diff_*_bg` colours and + / ~ gutter glyphs, word-level changes are
@@ -285,6 +305,28 @@ Disable Rust LSP action, no Configure Mode/reduced-memory registration/restart-f
 the PATH check is local while only the version probe follows a remote workspace. The generic
 `lsp_help` plugin already owns the automatic LSP-error status row/install popup for Rust; `rust_lsp`
 adds the explicit copy/check/help palette commands instead of a second event handler.
+**deno_lsp** (reduced Fresh port): the Deno language-server helper. Fresh's
+`deno_lsp.ts` selects `deno lsp` for TypeScript/JavaScript when the active window's root has
+`deno.json`/`deno.jsonc` and the Deno runtime is on PATH, restoring the configured servers
+otherwise. gvim's plugin API has no register/select-language-server call and no active-window list,
+so this port keeps the visible check/install/help surface as three palette commands. **Deno: Check
+Project** checks the workspace root (cwd fallback) for `deno.json` and `deno.jsonc` and looks up
+`deno` with `gvim.proc.which`, reporting ready (config and binary paths), config without the
+runtime, runtime without a Deno project config, or neither; the missing-runtime cases include the
+install command. **Deno: Copy Install Command** copies `brew install deno` when Homebrew is on PATH
+and the official `curl -fsSL https://deno.land/install.sh | sh` otherwise, with a status-row
+confirmation. **Deno: Language Server Help** opens a popup with both install commands, the
+`typescript`/`javascript` `lsp` configuration entry (`deno lsp`, `auto_start: false`,
+`root_markers: ["deno.json", "deno.jsonc"]`, `initialization_options: { enable: true }`), the
+local-LookPath caveat for remote workspaces, the native Start/Restart LSP Server and Show LSP Status
+actions, and the upstream installation link. No keys and no settings; opt-in
+(`default_enabled: false`). Reductions (also in porting.md): no automatic Deno-server selection or
+baseline restore, no active-window root tracking, and no LSP-menu/disable/register seam; Check
+Project's PATH lookup is the local machine's (the config and file checks follow the workspace
+authority). Tests: `plugin/bundled/deno_lsp_test.go` covers the manifest/commands/no bindings, both
+install-command selections, all four Check Project states plus `deno.jsonc` and a custom workspace
+root, and the help popup's message/actions plus copy/check/native-restart dispatch.
+
 **markdown_source** (port of Fresh's `plugins/markdown_source.ts`): gvim's editor already
 implements Fresh's Markdown source-mode list rules natively (`editor/markdown.go`, called from the
 built-in `insert_newline`/`insert_tab`/`dedent_selection` actions), so this is the explicit Lua

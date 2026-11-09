@@ -1,0 +1,25 @@
+{
+  "en": {
+    "cmd.check_project": "Deno: Check Project",
+    "cmd.check_project_desc": "Check whether the project root has deno.json/deno.jsonc and whether deno is on PATH",
+    "cmd.copy_install": "Deno: Copy Install Command",
+    "cmd.copy_install_desc": "Copy the official Deno install command (Homebrew when available, otherwise curl) to the clipboard",
+    "cmd.help": "Deno: Language Server Help",
+    "cmd.help_desc": "How to configure Deno's language server and install the Deno runtime",
+    "status.copied": "Copied: %{value}",
+    "status.copy_failed": "Could not copy the Deno install command: %{error}",
+    "status.ready": "Deno project ready: %{config} in %{root}; deno found at %{path}. Configure deno lsp for TypeScript/JavaScript (Deno: Language Server Help).",
+    "status.config_no_deno": "Found %{config} in %{root}, but deno is not on PATH. Install it with: %{install} (see Deno: Language Server Help).",
+    "status.deno_no_config": "deno found at %{path}, but there is no deno.json or deno.jsonc in %{root}. Deno LSP needs a Deno project config (see Deno: Language Server Help).",
+    "status.no_project_no_deno": "No deno.json/deno.jsonc in %{root}, and deno is not on PATH. Install it with: %{install} (see Deno: Language Server Help).",
+    "status.action_failed": "Could not run %{action}: %{error}",
+    "help.title": "Deno Language Server (deno lsp)",
+    "help.message": "Deno's language server provides completion, diagnostics, hover, navigation and formatting for TypeScript and JavaScript.\n\nInstall the Deno runtime first:\n  curl -fsSL https://deno.land/install.sh | sh\n  brew install deno\n\nA Deno project needs deno.json or deno.jsonc at its root. gvim cannot switch a language server automatically from a plugin, so add deno lsp to the TypeScript and JavaScript entries in config.json (and restart the server after installing):\n\n  \"lsp\": {\n    \"typescript\": {\n      \"command\": \"deno\", \"args\": [\"lsp\"], \"auto_start\": false,\n      \"root_markers\": [\"deno.json\", \"deno.jsonc\"],\n      \"initialization_options\": { \"enable\": true }\n    },\n    \"javascript\": {\n      \"command\": \"deno\", \"args\": [\"lsp\"], \"auto_start\": false,\n      \"root_markers\": [\"deno.json\", \"deno.jsonc\"],\n      \"initialization_options\": { \"enable\": true }\n    }\n  }\n\nNotes:\n  * Deno: Check Project reports the project config and the deno lookup on PATH.\n  * The PATH lookup is local; in a remote workspace the check describes the local machine, while the configuration still applies to the workspace.\n  * Deno LSP is started on demand: open a TypeScript/JavaScript file and use Start/Restart LSP Server.\n\nDocs: https://docs.deno.com/runtime/getting_started/installation/",
+    "actions.copy_curl": "Copy: %{command}",
+    "actions.copy_brew": "Copy: %{command}",
+    "actions.check": "Check project and deno on PATH",
+    "actions.restart": "Start/Restart LSP Server",
+    "actions.status": "Show LSP Status",
+    "actions.dismiss": "Dismiss (Esc)"
+  }
+}

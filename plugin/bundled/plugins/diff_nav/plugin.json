@@ -1,0 +1,7 @@
+{
+  "name": "diff_nav",
+  "version": "1.0.0",
+  "description": "Unified Next/Previous Change navigation over git_gutter hunks, live_diff hunks and the buffer's saved diff",
+  "api": 2,
+  "default_enabled": false
+}

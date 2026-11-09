@@ -1,0 +1,12 @@
+{
+  "en": {
+    "cmd.next_change": "Next Change",
+    "cmd.next_change_desc": "Jump to the next changed region",
+    "cmd.prev_change": "Previous Change",
+    "cmd.prev_change_desc": "Jump to the previous changed region",
+    "status.no_changes": "No changes",
+    "status.change": "Change %{n}/%{total}",
+    "status.change_wrapped": "Change %{n}/%{total} [wrapped]",
+    "status.jump_failed": "Could not jump to the change: %{error}"
+  }
+}

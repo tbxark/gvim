@@ -272,20 +272,41 @@ Four port decisions follow (rounds 11 and 22):
   working-tree file, which is wrong for any commit that is not HEAD. The Enter mapping and hunk
   navigation stay local.
 
-### diff_nav / R13-9: implemented as a native merged surface in git_gutter
+### diff_nav / R13-9: the standalone plugin and the git_gutter surface
 
-**diff_nav / R13-9 — implemented as a native merged surface in git_gutter.** git_gutter's
-Next/Previous Change now collect three sources like Fresh's diff_nav: its HEAD changed regions,
-live_diff's exported hunks (only while live_diff is loaded and exports `hunks`; a
-missing/older/erroring export degrades to the other sources), and `Buffer:diff_saved()` lines of
-unsaved changes. Targets are deduped by line, sorted ascending, and use Fresh's `Change n/total [wrapped]` messages; commands keep git_gutter ids/titles (there are no `diff_nav.*` ids and no
-separate plugin), both plugins stay off/unaffected as before, and everything runs in plugin
-tasks/await yields, so the Bubble Tea Update loop does no blocking IO. Remaining gaps: no separate
-diff_nav plugin/command namespace or its i18n keys; the side-by-side Compare view
-(compare_files/--diff) keeps its own Next/Previous Difference rather than cross-context hunk
-navigation; large-file buffers keep git_gutter's "not tracked" notice; live_diff must be loaded to
+Fresh's `diff_nav.ts` is the unified Next/Previous Change plugin over three sources: the hunks
+`git_gutter` publishes, the `live_diff` hunks, and the saved-text diff. gvim first implemented that
+merged navigation inside `git_gutter` (round 14/15) while the standalone plugin/i18n namespace stayed
+open (R13-9 residual c). `plugin/bundled/plugins/diff_nav/` is now the standalone, opt-in port
+with Fresh's command ids, keys and messages; Fresh ships the plugin default-enabled, gvim does not
+because adding it to the default set measured 8.12 MiB against the 8 MiB idle-heap gate (the nine
+pre-existing defaults stay unchanged, and git_gutter's own merged navigation remains default-on):
+
+* **Next Change**/**Previous Change** (`diff_nav.next_change`/`diff_nav.prev_change`) collect
+  `gvim.plugins.get("git_gutter").hunks(buf)` when git_gutter is loaded and exports it, the same
+  export from `live_diff`, and `buf:diff_saved()`; each source is optional and a missing/older/
+  erroring export, an absent git binary or an unloaded plugin contributes nothing (navigation still
+  works from the remaining sources, including saved diff + live_diff with git_gutter disabled);
+* targets are sorted by byte position, deduplicated by line, and wrapped; the jump calls
+  `buf:set_cursor(..., { center = true })`, and the status row uses Fresh's exact
+  `Change n/total` / `Change n/total [wrapped]` / `No changes` i18n strings; malformed hunk entries
+  and a line outside the buffer are clipped or skipped;
+* it is `default_enabled: false` (Fresh's is default-enabled; recorded difference for the idle-heap
+  gate), registers no keys/settings, and runs all host calls as plugin-task awaits (no blocking IO in
+  Update).
+
+`git_gutter` keeps its own merged Next/Previous Change commands and `hunks` export: they predate this
+plugin, remain the default navigation while diff_nav is opt-in, and when both are enabled cause two
+palette command sets over the same targets (documented residual). Remaining gaps: the side-by-side Compare view (compare_files/--diff)
+keeps its own Next/Previous Difference rather than feeding the cross-context navigation; large-file
+buffers can still only navigate sources that export something (a host that cannot answer offset_of
+falls back to line ordering; git_gutter keeps its own large-file notice); live_diff must be loaded to
 contribute its active-diff hunks.
 
+Tests: `plugin/bundled/diff_nav_test.go` covers the manifest/default, the Fresh command ids/titles,
+merged git+live sorting and wrapping (next/prev, status strings), line deduplication, saved-diff-only
+navigation with no providers, live_diff-only and no-change cases, a raising provider degrading, and
+prev from the end of the buffer.
 ### Assembly LSP: project config offer (port residual)
 
 Fresh's `asm-lsp.ts` helper has three parts: the install-help popup for a missing server, the
@@ -465,6 +486,40 @@ Tests: `plugin/bundled/rust_lsp_test.go` covers the visible command table/no bin
 commands (clipboard/status), the missing-PATH status with no process launch, found+version, non-zero
 version exit, exec failure, and the help popup's message/actions plus copy/check/native-restart
 dispatch.
+### Deno LSP: no language-server selection seam (port residual)
+
+Fresh's `deno_lsp.ts` selects `deno lsp` for TypeScript and JavaScript when the active window's root
+holds `deno.json` or `deno.jsonc` and the Deno runtime is on PATH. It remembers the configured
+entries as a baseline and restores them when the active window is not a Deno project; it also leaves
+a language the user disabled alone. gvim's plugin API has no register/select-language-server call,
+no active-window list and no LSP-menu contribution, so the bundled port
+(`plugin/bundled/plugins/deno_lsp/`, opt-in) keeps the user-visible helper surface instead:
+
+* `Deno: Check Project` reads the workspace root (`gvim.dirs.cwd()` when there is none), checks
+  `deno.json` and `deno.jsonc` through `gvim.fs.exists`/`gvim.path.join` and looks up `deno` with
+  `gvim.proc.which`. It reports four states: ready (both paths), config without the runtime,
+  runtime without a Deno project config, and neither; the missing-runtime states name the selected
+  install command and point at the help popup.
+* `Deno: Copy Install Command` chooses `brew install deno` when `brew` is on PATH, otherwise
+  `curl -fsSL https://deno.land/install.sh | sh`, copies it with `gvim.clipboard.set` and reports
+  the copied value on the status row. The help popup offers explicit copy-both actions, so a user
+  with both package managers can choose.
+* `Deno: Language Server Help` is a `gvim.ui.action_popup` with the install commands, the
+  `typescript`/`javascript` `"lsp"` entries gvim needs (`command: "deno"`, `args: ["lsp"]`,
+  `auto_start: false`, `root_markers: ["deno.json", "deno.jsonc"]`,
+  `initialization_options: {"enable": true}`), the local-LookPath caveat, the native Start/Restart
+  LSP Server and Show LSP Status actions, and the upstream installation link.
+
+Not ported: automatic server selection/baseline restore, the active-window root decision, the
+disabled-language protection and the Fresh debug log. The PATH lookup is the local-machine API, so a
+remote workspace's PATH is only checked best effort; the project-file existence checks and the
+configuration itself are workspace-facing. The plugin is `default_enabled: false`, registers no keys
+and no settings.
+
+Tests: `plugin/bundled/deno_lsp_test.go` covers the manifest/command table/no bindings, the
+Homebrew-versus-curl selection and clipboard/status, the four Check Project states plus `deno.jsonc` and a custom workspace root, and the help popup's message/actions plus
+copy/check/native-restart dispatch.
+
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

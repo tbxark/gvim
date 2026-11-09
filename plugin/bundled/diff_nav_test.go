@@ -1,0 +1,225 @@
+package bundled_test
+
+import (
+	"encoding/json"
+	"io/fs"
+	"testing"
+
+	"github.com/tbxark/gvim/plugin/bundled"
+	"github.com/tbxark/gvim/plugin/plugintest"
+	"github.com/tbxark/gvim/pluginapi"
+)
+
+// diffProvider builds a tiny plugin that exports a hunks function returning src.
+func diffProvider(src string) string {
+	return "local gvim = require \"gvim\"\n" +
+		"gvim.plugins.export {\n" +
+		"  hunks = function(id)\n" +
+		"    return " + src + "\n" +
+		"  end,\n" +
+		"}\n"
+}
+
+// diffRig loads diff_nav with one buffer and optional fake git_gutter/live_diff exports.
+func diffRig(t *testing.T, text string, gitHunks, liveHunks string) *rig {
+	t.Helper()
+	extra := map[string]string{}
+	if gitHunks != "" {
+		extra["git_gutter/init.lua"] = diffProvider(gitHunks)
+	}
+	if liveHunks != "" {
+		extra["live_diff/init.lua"] = diffProvider(liveHunks)
+	}
+	return startRig(t, rigOpts{
+		plugins: []string{"diff_nav"},
+		buffers: []rigBuffer{{"/work/a.txt", text}},
+		extra:   extra,
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+}
+
+func diffCursorLine(t *testing.T, r *rig) int {
+	t.Helper()
+	carets, err := r.host.Cursors(r.ids["/work/a.txt"])
+	if err != nil || len(carets) == 0 {
+		t.Fatalf("cursors = %+v, %v", carets, err)
+	}
+	return carets[0].Pos.Line
+}
+
+func diffRun(t *testing.T, r *rig, command string) string {
+	t.Helper()
+	if err := r.h.Run(command, nil); err != nil {
+		t.Fatal(err)
+	}
+	return lastNoticeText(r.h)
+}
+
+func TestDiffNavManifestAndCommands(t *testing.T) {
+	t.Parallel()
+	data, err := fs.ReadFile(bundled.FS, "plugins/diff_nav/plugin.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := m["name"].(string)
+	version, _ := m["version"].(string)
+	description, _ := m["description"].(string)
+	api, _ := m["api"].(float64)
+	defaultEnabled, _ := m["default_enabled"].(bool)
+	if name != "diff_nav" || version == "" || description == "" || api != 2 {
+		t.Errorf("manifest = %+v", m)
+	}
+	if defaultEnabled {
+		t.Errorf("default_enabled = %v, want false: gvim keeps diff_nav opt-in for the idle-heap gate (Fresh ships it default-enabled)", m["default_enabled"])
+	}
+	r := diffRig(t, "l0\nl1\n", "", "")
+	if info, ok := r.h.Plugin("diff_nav"); !ok || info.Status != "loaded" {
+		t.Fatalf("plugin = %+v (log %v)", info, r.h.LogText(""))
+	}
+	want := map[string]string{
+		"diff_nav.next_change": "Next Change",
+		"diff_nav.prev_change": "Previous Change",
+	}
+	got := map[string]string{}
+	for _, c := range r.host.Commands["diff_nav"] {
+		got[c.ID] = c.Title
+	}
+	for id, title := range want {
+		if got[id] != title {
+			t.Errorf("command %s = %q, want %q", id, got[id], title)
+		}
+	}
+	if bindings := r.host.Bindings["diff_nav"]; len(bindings) != 0 {
+		t.Errorf("bindings = %v, want none", bindings)
+	}
+}
+
+func TestDiffNavMergesSourcesAndWraps(t *testing.T) {
+	t.Parallel()
+	// git_gutter reports line 3, live_diff line 1: navigation must sort by position.
+	r := diffRig(t, "l0\nl1\nl2\nl3\nl4\n",
+		"{{type=\"added\", line=3, count=1}}",
+		"{{kind=\"modified\", newStart=1, newCount=1}}")
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/2" {
+		t.Fatalf("first next status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("first next line = %d, want 1", got)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 2/2" {
+		t.Fatalf("second next status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 3 {
+		t.Fatalf("second next line = %d, want 3", got)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/2 [wrapped]" {
+		t.Fatalf("wrapped next status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("wrapped next line = %d, want 1", got)
+	}
+	if got := diffRun(t, r, "diff_nav.prev_change"); got != "Change 2/2 [wrapped]" {
+		t.Fatalf("wrapped prev status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 3 {
+		t.Fatalf("wrapped prev line = %d, want 3", got)
+	}
+	if got := diffRun(t, r, "diff_nav.prev_change"); got != "Change 1/2" {
+		t.Fatalf("prev status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("prev line = %d, want 1", got)
+	}
+}
+
+func TestDiffNavDeduplicatesTheSameLine(t *testing.T) {
+	t.Parallel()
+	r := diffRig(t, "l0\nl1\nl2\n",
+		"{{type=\"modified\", line=2, count=1}}",
+		"{{kind=\"modified\", newStart=2, newCount=1}}")
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("status = %q, want one deduplicated target", got)
+	}
+	if got := diffCursorLine(t, r); got != 2 {
+		t.Fatalf("line = %d, want 2", got)
+	}
+}
+
+func TestDiffNavSavedDiffWithoutProviders(t *testing.T) {
+	t.Parallel()
+	r := diffRig(t, "one\ntwo\nthree\n", "", "")
+	r.edit("/work/a.txt", "one\nTWO\nthree\n")
+	// The edit leaves the fake caret at the end; navigation starts from the top.
+	if err := r.host.SetCursor(r.ids["/work/a.txt"], pluginapi.Pos{}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("saved-diff status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("saved-diff line = %d, want 1", got)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1 [wrapped]" {
+		t.Fatalf("saved-diff wrapped status = %q", got)
+	}
+}
+
+func TestDiffNavLiveOnlyAndNoChanges(t *testing.T) {
+	t.Parallel()
+	r := diffRig(t, "l0\nl1\nl2\nl3\n", "", "{{kind=\"added\", newStart=2, newCount=1}}")
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("live-only status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 2 {
+		t.Fatalf("live-only line = %d, want 2", got)
+	}
+
+	clean := diffRig(t, "l0\nl1\n", "", "")
+	if got := diffRun(t, clean, "diff_nav.next_change"); got != "No changes" {
+		t.Fatalf("clean status = %q", got)
+	}
+	if got := diffCursorLine(t, clean); got != 0 {
+		t.Fatalf("clean cursor moved to line %d", got)
+	}
+}
+
+func TestDiffNavBrokenProviderDegrades(t *testing.T) {
+	t.Parallel()
+	extra := map[string]string{
+		"git_gutter/init.lua": "local gvim = require \"gvim\"\ngvim.plugins.export { hunks = function(id) error(\"boom\") end }\n",
+	}
+	r := startRig(t, rigOpts{
+		plugins: []string{"diff_nav"},
+		buffers: []rigBuffer{{"/work/a.txt", "one\ntwo\nthree\n"}},
+		extra:   extra,
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	r.edit("/work/a.txt", "one\nTWO\nthree\n")
+	if err := r.host.SetCursor(r.ids["/work/a.txt"], pluginapi.Pos{}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("broken-provider status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("broken-provider line = %d", got)
+	}
+}
+
+func TestDiffNavPreviousFromEnd(t *testing.T) {
+	t.Parallel()
+	r := diffRig(t, "l0\nl1\nl2\nl3\n", "{{type=\"added\", line=1, count=1}}", "")
+	if err := r.host.SetCursor(r.ids["/work/a.txt"], pluginapi.Pos{Line: 3, Col: 0}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := diffRun(t, r, "diff_nav.prev_change"); got != "Change 1/1" {
+		t.Fatalf("status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("line = %d, want 1", got)
+	}
+}
