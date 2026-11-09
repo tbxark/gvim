@@ -86,7 +86,7 @@ func TestFocusNextSidebarSectionVisitsRenderedOrder(t *testing.T) {
 
 // TestSidebarFocusBlursThePluginKeyLayer checks that entering a plugin section takes
 // the keyboard (its keys are swallowed while focused), and that leaving it by the
-// command cycle, by the editor stop or by F6 hands the keyboard back: the old plugin
+// command cycle, by the editor stop or by F7 hands the keyboard back: the old plugin
 // no longer swallows the key.
 func TestSidebarFocusBlursThePluginKeyLayer(t *testing.T) {
 	t.Parallel()
@@ -119,7 +119,7 @@ func TestSidebarFocusBlursThePluginKeyLayer(t *testing.T) {
 		t.Fatal("the editor did not get the key after the plugin section was left")
 	}
 
-	// F6 from a focused plugin section also blurs it (the F6 stage order itself is
+	// F7 from a focused plugin section also blurs it (the F7 stage order itself is
 	// unchanged; only the stale key layer is cleared).
 	if err := m.Run("focus_next_sidebar_section"); err != nil { // editor -> explorer
 		t.Fatal(err)
@@ -132,9 +132,9 @@ func TestSidebarFocusBlursThePluginKeyLayer(t *testing.T) {
 	if m.plug.panels.focus != 3 {
 		t.Fatalf("setup: plugin is not focused: %v", m.plug.panels.focus)
 	}
-	press(m, special(tea.KeyF6))
+	press(m, special(tea.KeyF7))
 	if m.plug.panels.focus != 0 {
-		t.Fatalf("F6 from the plugin section left the plugin key layer focused: %v", m.plug.panels.focus)
+		t.Fatalf("F7 from the plugin section left the plugin key layer focused: %v", m.plug.panels.focus)
 	}
 }
 
@@ -175,4 +175,43 @@ func TestSidebarFocusSkipsClosedNativeSections(t *testing.T) {
 		t.Fatalf("diagnostics focus = %v collapsed %v, want focused and unfolded", other.diag.focus, other.diag.Collapsed())
 	}
 	_ = sidebar.KindDiagnostics // the rendered order is checked through layout above
+}
+
+// TestF7ChromeCycleExcludesPluginSections documents the F7 boundary: gvim's F7
+// chrome cycle is a gvim extension (Fresh binds F7 to the Remote Indicator menu, not
+// a focus cycle) and stays on the native chrome. A mounted plugin section is never an
+// F7 stop even though it is a stop of Fresh's sidebar focus action (Alt+Shift+N/P,
+// the command cycle); F7 from a focused plugin section only clears its key layer and
+// continues the native order.
+func TestF7ChromeCycleExcludesPluginSections(t *testing.T) {
+	t.Parallel()
+	m := newTOCModel(t, newTOCEditor("notes.md", "# One"), nil)
+	m.hideMenuBar = true
+	m.diag.open = true
+	mountFocusSection(m, 21) // a mounted plugin section is in the column
+	if m.stage() != stageEditor {
+		t.Fatalf("setup: stage %v, want the editor", m.stage())
+	}
+	// One full F7 cycle: tabs -> explorer -> Contents -> Diagnostics -> editor. The
+	// plugin section is not one of the stops.
+	want := []focusStage{stageTabs, stageExplorer, stageContents, stageDiagnostics, stageEditor}
+	for i, stage := range want {
+		press(m, special(tea.KeyF7))
+		if m.stage() != stage {
+			t.Fatalf("F7 step %d: stage %v, want %v", i, m.stage(), stage)
+		}
+		if m.plug.panels.focus != 0 {
+			t.Fatalf("F7 step %d entered a plugin section (%v)", i, m.plug.panels.focus)
+		}
+	}
+	// F7 from a focused plugin section blurs it and continues the native order, it
+	// does not treat the plugin as the next/previous stop.
+	m.focusPluginSection(m.plug.panels.byID[21])
+	press(m, special(tea.KeyF7))
+	if m.plug.panels.focus != 0 {
+		t.Fatalf("F7 from the plugin section left its key layer focused: %v", m.plug.panels.focus)
+	}
+	if m.stage() != stageTabs {
+		t.Fatalf("F7 from the plugin section reached stage %v, want the native tab strip", m.stage())
+	}
 }

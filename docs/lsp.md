@@ -692,7 +692,7 @@ diagnostics-panel plugin's rows show those fields. Up
 and Down move the selection, PageUp/PageDown a page, Home and End its ends, Enter opens the
 selected diagnostic's file at its position and gives the keyboard back to the editor, and Escape
 does the same without jumping. A click on a row selects and jumps; a click on the header folds
-the section. F6 reaches the section after the Contents section, matching its place in the column.
+the section. F7 reaches the section after the Contents section, matching its place in the column.
 The section has no close button: the header click folds it and the palette row closes it.
 
 **Diagnostics List** (`open_diagnostics_list`) opens the same diagnostics in the shared filterable

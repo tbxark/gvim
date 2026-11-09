@@ -162,15 +162,15 @@ func TestHiddenMenuBarOpensNoDropdown(t *testing.T) {
 	}
 }
 
-func TestHiddenMenuBarIsSkippedByF6(t *testing.T) {
+func TestHiddenMenuBarIsSkippedByF7(t *testing.T) {
 	m := menuModel(t, true)
-	press(m, special(tea.KeyF6))
+	press(m, special(tea.KeyF7))
 	if m.stage() != stageTabs {
-		t.Fatalf("F6 from the editor reached stage %v, want the tab strip", m.stage())
+		t.Fatalf("F7 from the editor reached stage %v, want the tab strip", m.stage())
 	}
-	press(m, special(tea.KeyF6))
+	press(m, special(tea.KeyF7))
 	if m.stage() != stageEditor {
-		t.Fatalf("F6 from the tab strip reached stage %v, want the editor", m.stage())
+		t.Fatalf("F7 from the tab strip reached stage %v, want the editor", m.stage())
 	}
 }
 

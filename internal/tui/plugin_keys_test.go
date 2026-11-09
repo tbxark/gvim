@@ -1216,13 +1216,13 @@ func TestPluginModeIgnoredWhileExplorerFocused(t *testing.T) {
 	}
 }
 
-func TestF6CyclesFocusInSwallowMode(t *testing.T) {
+func TestF7CyclesFocusInSwallowMode(t *testing.T) {
 	e := newKeyEnv(t)
 	e.mode(t, swallowRight)
 	before := e.m.stage()
-	e.press(special(tea.KeyF6))
+	e.press(special(tea.KeyF7))
 	if e.m.stage() == before {
-		t.Fatalf("F6 did not move the focus out of %v", before)
+		t.Fatalf("F7 did not move the focus out of %v", before)
 	}
 }
 

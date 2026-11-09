@@ -786,6 +786,30 @@ register {
   end,
 }
 
+-- Exports for diff_nav: the comparison's hunks for one side, as line targets. A
+-- deleted-only side has no line at the seam in this buffer, so the jump is the line
+-- before it (the same rule compare's own Next/Previous Difference uses). A comparison
+-- that is not active for this buffer contributes nothing; diff_nav treats it like any
+-- other optional provider and the caller never has to know compare is loaded.
+gvim.plugins.export {
+  hunks = function(buf_id)
+    local c = comparison_of(buf_id)
+    if not c or not c.result then
+      return nil
+    end
+    local side = side_of(c, buf_id)
+    local out = {}
+    for _, h in ipairs(c.result.hunks) do
+      local s = h[side]
+      if s then
+        local line = s.count == 0 and math.max(s.start - 1, 0) or s.start
+        out[#out + 1] = { line = line, count = s.count, jump = s.jump, side = side }
+      end
+    end
+    return out
+  end,
+}
+
 -- Events --------------------------------------------------------------------
 
 -- The context is declared at load so the palette can evaluate the commands'

@@ -366,3 +366,69 @@ func TestDiffNavUsesRealGitGutterDeletedHunk(t *testing.T) {
 		t.Fatalf("real deleted-hunk line = %d, want 0", got)
 	}
 }
+
+// TestDiffNavUsesRealCompareFilesHunks: an open Compare view is a real diff-provider
+// source for diff_nav. The compare plugin exports the active comparison's hunks for each
+// side, so diff_nav Next/Previous Change navigates the same changes as Compare: Next
+// Difference, from the left buffer, without a separate stub source.
+func TestDiffNavUsesRealCompareFilesHunks(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins:  []string{"diff_nav", "compare_files"},
+		services: &plugintest.FakeServices{},
+		buffers: []rigBuffer{
+			{compareLeftPath, "a\nb\nc"},
+			{compareRightPath, "a\nX\nc"},
+		},
+		script: func(o *plugintest.FakeOS) {
+			o.SetFile(compareLeftPath, "a\nb\nc")
+			o.SetFile(compareRightPath, "a\nX\nc")
+		},
+	})
+	if err := r.h.Run("compare_files.compare_files", nil); err != nil {
+		t.Fatalf("Compare Files: %v", err)
+	}
+	for i, value := range []string{compareLeftPath, compareRightPath} {
+		_ = i
+		var prompt *plugintest.FakeOverlay
+		for _, o := range r.host.UI().Opened() {
+			if o.Kind == "input" {
+				prompt = o
+			}
+		}
+		if prompt == nil {
+			t.Fatalf("no Compare Files input prompt (log %v)", r.h.LogText(""))
+		}
+		r.h.Resolve(pluginapi.Completion{Token: prompt.Token, Values: []any{value}})
+		r.h.Settle()
+	}
+	if err := r.host.SetCursor(r.ids[compareLeftPath], pluginapi.Pos{}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	got := diffRun(t, r, "diff_nav.next_change")
+	if got != "Change 1/1" {
+		t.Fatalf("compare-interop status = %q (log %v)", got, r.h.LogText(""))
+	}
+	carets, err := r.host.Cursors(r.ids[compareLeftPath])
+	if err != nil || len(carets) == 0 {
+		t.Fatalf("compare-interop cursors = %+v, %v", carets, err)
+	}
+	if got := carets[0].Pos.Line; got != 1 {
+		t.Fatalf("compare-interop line = %d, want the changed line 1", got)
+	}
+
+	// The right side of the same comparison is a source for its buffer too.
+	r.host.SetActive(r.ids[compareRightPath])
+	if err := r.host.SetCursor(r.ids[compareRightPath], pluginapi.Pos{}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("compare-interop right status = %q (log %v)", got, r.h.LogText(""))
+	}
+	carets, err = r.host.Cursors(r.ids[compareRightPath])
+	if err != nil || len(carets) == 0 {
+		t.Fatalf("compare-interop right cursors = %+v, %v", carets, err)
+	}
+	if got := carets[0].Pos.Line; got != 1 {
+		t.Fatalf("compare-interop right line = %d, want the changed line 1", got)
+	}
+}

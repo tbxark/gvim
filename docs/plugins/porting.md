@@ -426,6 +426,55 @@ header→source switches (single match, picker choice), no-match/unsupported/no-
 the project-setup buffer with a ready project and with missing compile/.clangd pieces (including buffer
 reuse and build-system hints), and open-config found/missing. The tests register openable targets on
 both the fake host and the fake OS.
+### Welcome screen: bounded reduced port with OPEN gaps (port residual)
+
+Fresh's `welcome_screen.ts` is a large startup surface, not a single command: a virtual buffer
+plus a page `WidgetPanel` (wordmark, doors, verbs, onboarding levels), a sidebar `Contents`
+outline, focus-follows-cursor and scroll-to-widget composition, and cards backed by the
+orchestrator and the dashboard. **Capability audit:** gvim's plugin API can create a read-only
+virtual buffer, set styled content and line targets, define a buffer mode/keymap, expose a palette
+command and read dashboard section metadata (`gvim.dashboard.sections()`). It cannot mount Fresh's
+page widget panel with `page`/`focusFollowsCursor`/`scrollToWidget` composition, render the
+onboarding document, contribute a live sidebar `Contents` outline for this page, or consume the
+dashboard's rendered built-ins/orchestrator exports. The gvim port (`plugin/bundled/plugins/welcome_screen/`,
+opt-in) therefore implements one bounded real core rather than claiming the full page:
+
+* wordmark, tagline, three doors (**Open a file**, **New buffer**, **Recent files**) that
+  dispatch the real native actions `open`, `new` and `quick_open_buffers`;
+* verbs (**Find file**, **Command palette**, **Settings**, **File explorer**, **Help**) that
+  dispatch real editor actions, not help text or stubs;
+* recent-file rows from this session's `after_file_open` events, deduplicated and capped at 8
+  (seeded from at most 64 open buffers) with path line targets; activation opens the path. Recent
+  basenames/details and dashboard titles use the dashboard's Cc/Cf/newline/invalid-UTF-8 display
+  sanitizer, and the target line is computed from the cleaned one-line row, so a hostile path
+  cannot inject a line or shift its click target;
+* dashboard rows from the registered external-section metadata only, capped at 8, with
+  `No dashboard sections registered.` when none; selecting a row opens the dashboard through its
+  public command. No dashboard built-in content, provider callback, git/disk/weather copy or
+  orchestrator data is read;
+* j/k or arrows move, Enter activates, q/Esc closes, r refreshes; action rows are line targets
+  registered by this plugin (the API rejects another plugin's action target).
+
+The page is opened automatically as a **background** tab once at startup when `auto_open` is true
+and never steals the foreground; it is not closed when files open and it does not reopen after the
+reader closes it. The plugin stays opt-in (`default_enabled: false`) while Fresh's page is
+enabled by default, so it adds no idle page or default palette row; `auto_open` only matters after
+the plugin is enabled. It starts no process, performs no network access or file writes, does no
+foreground IO and relies only on existing plugin APIs (no new trust path).
+
+**OPEN gaps (not implemented, not claimed):** Fresh's full onboarding ladder and section banners;
+page `WidgetPanel`, widgets/buttons/chips, hover styling and composed page width; sidebar
+`Contents` and focus/scroll interaction; recent-file persistence beyond the current session;
+workspace/agent/orchestrator cards and auto-attach; audit-mode content; dashboard built-in
+snapshots (only provider metadata is available to another plugin); and Fresh's localized long form.
+The docs/bundled table entry and the plugin header carry the same reduced-scope note.
+
+Tests: `plugin/bundled/welcome_screen_test.go` covers manifest/opt-in, page content and real door
+dispatch, action/path line targets, recent-row activation, close stickiness, background
+auto-open/no-focus-steal, `auto_open: false`, and dashboard metadata rows plus the empty fallback.
+It loads the plugin through the real loader; no plugin→host end-to-end UI composition test is
+claimed for the unavailable page widget panel.
+
 ### Welcome: a demo plugin, with localized status only in English (port residual)
 
 Fresh's `welcome.ts` is a plugin-API demo, not a feature: five palette commands, two of which

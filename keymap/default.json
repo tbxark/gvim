@@ -209,6 +209,8 @@
     {"key": "End", "modifiers": [], "action": "prompt_move_end", "when": "prompt"},
     {"key": "Up", "modifiers": [], "action": "prompt_select_prev", "when": "prompt"},
     {"key": "Down", "modifiers": [], "action": "prompt_select_next", "when": "prompt"},
+    {"key": "PageUp", "modifiers": [], "action": "prompt_page_up", "when": "prompt"},
+    {"key": "PageDown", "modifiers": [], "action": "prompt_page_down", "when": "prompt"},
     {"key": "Tab", "modifiers": [], "action": "prompt_accept_suggestion", "when": "prompt"},
     {"key": "Left", "modifiers": ["ctrl"], "action": "prompt_move_word_left", "when": "prompt"},
     {"key": "Right", "modifiers": ["ctrl"], "action": "prompt_move_word_right", "when": "prompt"},

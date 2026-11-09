@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 247 | 245 |
-| `macos` | 60 | 268 |
-| `macos-gui` | 52 | 319 |
-| `emacs` | 98 | 311 |
-| `vscode` | 9 | 250 |
+| `default` | 249 | 247 |
+| `macos` | 60 | 270 |
+| `macos-gui` | 52 | 321 |
+| `emacs` | 98 | 313 |
+| `vscode` | 9 | 252 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
@@ -33,15 +33,16 @@ document moves, multi-cursor (next match, above and below, line ends), marks and
 server (completion, hover, definition, references, implementation, rename, code actions), shell
 commands, case transforms, folding and the view, tabs and splits, the explorer, the terminal
 dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
-Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, word
-deletion and paste; the find bar's match steps and option toggles; list navigation and cancel;
+Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, page keys for
+its suggestion list, word deletion and paste; the find bar's match steps and option toggles; list navigation and cancel;
 the menu bar's walk and close; the settings page's close, activate, reset, slash search and question-mark
 key help; and the dock's focus keys. Each preset keeps its own idiom:
 Emacs has the `C-x` chords and the `M-` keys, VS Code has `Ctrl+K Ctrl+L` and friends, macOS
 keeps its Ctrl and Option keys, `macos-gui` uses Cmd (a terminal that reports Super sends those;
 the Ctrl keys it inherits still work when it does not), and `default` is the cross-platform set.
 
-A few keys are gvim's, where Fresh has none: `Ctrl+Shift+P` (Command Palette), `Ctrl+Shift+S`
+A few keys are gvim's, where Fresh has none: `F7` (chrome focus cycle; `F6` keeps Fresh's
+Remote Indicator menu meaning), `Ctrl+Shift+P` (Command Palette), `Ctrl+Shift+S`
 (Save As), `Ctrl+Shift+K` (Delete Line), `Ctrl+Shift+D` (Duplicate Line), `Alt+Z` (Toggle Fold),
 `Ctrl+\` and `Alt+\` (Split Right and Split Below), `Alt+Shift+W` (Close Split), macOS
 `Alt+Shift+S` (Save As), `macos-gui` `Cmd+Shift+D` (Duplicate Line) and `Cmd+Shift+F` (Live
@@ -199,7 +200,7 @@ contexts Fresh does not name).
 
 ## Differences from Fresh
 
-- Remote workspaces are not implemented, so Fresh's `F6` (the Remote Indicator menu) is not bound.
+- Remote workspaces are implemented over the SSH workspace authority (`docs/authority.md`). Fresh's global `F6` now opens the Remote Indicator menu from whatever chrome region or editor has the keyboard: a local session reports `Workspace: Local` and that this session has no remote authority; a remote session reports `Workspace: Remote` with the SSH authority (`user@host`), its connected/reconnecting/disconnected state and reason, the remote workspace root, and the `Reconnect SSH` action (the existing authority reconnect, run in a command, not on the update goroutine). `F6`/`F7` are built-in root keys handled before the keymap; the gvim chrome focus cycle that used to live on `F6` is now on `F7` (gvim-only), so `F6` keeps Fresh's meaning.
 - The project-wide Search and Replace panel applies replacements to tabs and leaves them unsaved
   (Fresh writes hidden buffers to disk); the notice asks for Save All. Match-tree checkboxes,
   Replace Scoped, the file-glob field and streaming results are not implemented.

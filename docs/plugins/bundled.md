@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships thirty-one plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships thirty-two plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `markdown_source`, `rust_lsp`, `deno_lsp`, `diff_nav` and `slang_lsp` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `welcome_screen`, `markdown_source`, `rust_lsp`, `deno_lsp`, `diff_nav` and `slang_lsp` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -33,6 +33,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `deno_lsp` | **off** | Deno: Check Project, Deno: Copy Install Command, Deno: Language Server Help | none |
 | `slang_lsp` | **off** | Slang: Check slangd / slangc, Slang: Copy Install Command, Slang: Language Server Help | none |
 | `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
+| `welcome_screen` | **off** | Welcome Screen: Show | `auto_open` (true) |
 | `markdown_source` | **off** | none (hidden Enter/Tab/Shift+Tab key handlers for Markdown lists) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
@@ -77,19 +78,25 @@ still navigates its saved-diff/live_diff changes, and a buffer in large-file mod
 **Next Change** and **Previous Change** say that git changes are not tracked there. Exports `hunks(buf_id)`
 for other plugins (`{type = "added"|"modified"|"deleted", line, count}`; `line` is 0-based and a
 deleted run points at the line before the seam). Its own **Next
-Change**/**Previous Change** remain for the pre-diff_nav behavior; the standalone `diff_nav` plugin
-adds Fresh's `diff_nav.*` command namespace and i18n keys over the same three sources (so both sets
-of rows are in the palette). The side-by-side Compare view keeps its own **Compare: Next/Previous
-Difference**.
+Change**/**Previous Change** remain for the pre-diff_nav behavior (they do not include a Compare
+view's hunks); the standalone `diff_nav` plugin adds Fresh's `diff_nav.*` command namespace and
+i18n keys over the three core sources plus an active **compare_files** comparison, so both sets of
+rows are in the palette. The side-by-side Compare view keeps its own **Compare: Next/Previous
+Difference** and diff_nav now consumes the same hunks for its cross-context commands.
 
 **diff_nav** (port of Fresh's `plugins/diff_nav.ts`): the unified **Next Change** and **Previous Change**
 commands with Fresh's `diff_nav.next_change`/`diff_nav.prev_change` ids and translated
-`cmd.next_change`/`cmd.prev_change`/`status.*` keys. Each invocation collects the three change sources
+`cmd.next_change`/`cmd.prev_change`/`status.*` keys. Each invocation collects the change sources
 Fresh merges: the hunks exported by **git_gutter** (`gvim.plugins.get("git_gutter").hunks(buf)`), the
-hunks exported by **live_diff**, and `buf:diff_saved()` for unsaved changes (for a deletion, the saved
-diff targets the line before the seam, matching git_gutter's merged navigation). A source that is unloaded,
-does not export `hunks`, raises, or has no git (git_gutter idle) contributes nothing; navigation still
-works from live_diff and the saved diff alone. Targets are sorted by byte position (line fallback when a
+hunks exported by **live_diff**, the hunks exported by an active **compare_files** comparison for the
+buffer's side (`gvim.plugins.get("compare_files").hunks(buf)`; a deleted-only side targets the line
+before its seam), and `buf:diff_saved()` for unsaved changes (for a deletion, the saved diff targets
+the line before the seam, matching git_gutter's merged navigation). The Compare source makes the two
+navigation entry points agree on the same hunks: while a Compare view is active, diff_nav's Next/Previous
+Change walks the comparison changes instead of ignoring the cross-context view, while **Compare:
+Next/Previous Difference** keeps its compare-side cursor/scroll behavior. A source that is unloaded,
+does not export `hunks`, raises, has no git (git_gutter idle) or has no active comparison contributes
+nothing; navigation still works from the remaining sources alone. Targets are sorted by byte position (line fallback when a
 large/no-offset host cannot answer), deduplicated by line, and wrapped; the jump centers the target line
 and the status row says `Change n/total` or `Change n/total [wrapped]` (Fresh's messages). Fresh ships
 this plugin default-enabled; gvim keeps it opt-in (`default_enabled: false`) because adding it to
@@ -305,6 +312,36 @@ of Fresh's fixed `//`; the greeting/time/comment strings are English-only rather
 locales; and Fresh's debug-only load message is not reproduced (gvim has no equivalent hidden
 status).
 
+**welcome_screen** (bounded, reduced port of Fresh's `plugins/welcome_screen.ts`): an opt-in
+start page in a read-only virtual buffer. It renders an ASCII gvim wordmark, a one-line tagline,
+three real doors (**Open a file** → native `open`, **New buffer** → native `new`, **Recent files** →
+native `quick_open_buffers`), a bounded recent-file list from this session's opens (at most 8 rows,
+seeded from at most 64 open buffers), real verbs (**Find file**, **Command palette**, **Settings**,
+**File explorer**, **Help**) and a dashboard section whose rows come from
+`gvim.dashboard.sections()` (at most 8 registered section titles; with no registrations the page
+shows `No dashboard sections registered.`). Keys are j/k or arrows to move, Enter to activate,
+q/Esc to close and r to refresh; rows are also line targets (actions for the doors/verbs, paths for
+recent files). Recent basenames/details and dashboard section titles are display-sanitized with the
+same Cc/Cf/newline/invalid-UTF-8 cleaning used for dashboard external text before they reach a
+page line, and line targets are computed from the resulting one-line rows; a hostile path cannot
+inject a row or shift a click target. With `auto_open` (default true) the plugin opens the page as
+a **background** tab once at startup and never steals the foreground; closing it is sticky (the
+page does not reopen on file open/close). It starts no processes, performs no network/file writes or foreground IO, and uses only
+existing plugin APIs. OPEN/reduced differences from Fresh (also in porting.md): Fresh's page is a
+virtual buffer plus a page `WidgetPanel` with Contents, focus-follows-cursor and scroll-to-widget
+composition; the current gvim plugin API has no equivalent page/widget-panel combination, so this
+port uses the plain buffer and line targets above rather than claiming those interactions. It has
+no onboarding levels, hover/chip styling, widget buttons, Contents sidebar, orchestrator/workspace/
+agent cards or auto-attach toggle, and it does not call the orchestrator. Dashboard rows are only
+the registered external-section metadata (the dashboard does not expose a rendered snapshot), not
+built-in git/disk/weather content; selecting one asks the dashboard plugin to open via its public
+command (a missing dashboard command reports an error), and with no registered section the page
+shows its empty state.
+The plugin is opt-in (`default_enabled: false`) whereas Fresh's page is part of its default startup
+surface; with it enabled, `auto_open` controls the startup tab. Tests: `welcome_screen_test.go`
+covers manifest/opt-in, page content, real door dispatch, line targets, recent-row activation,
+close stickiness, background auto-open and no-focus-steal, auto_open=false, dashboard metadata
+rows and empty fallback.
 
 **rust_lsp** (reduced Fresh port): the Rust language-server helper. Fresh's `rust-lsp.ts` reacts to
 Rust LSP errors with rows contributed to the native LSP-Servers popup, clears them on recovery, offers
@@ -454,7 +491,10 @@ a scrollbar mark show each change, the panes scroll together anchored at every c
 Change from Other Side** (`do`) merge the hunk under the caret through the host's compare offsets and
 `replace_range`, one edit and one undo step per merge. The diff comes from
 `gvim.diff.compare_buffers`, so no text crosses into Lua; a binary or large-file side is refused with
-a status message. It is opt-in (`default_enabled: false`) for the bundled idle-heap budget and
+a status message. It exports its active-comparison hunks for **diff_nav** (`hunks(buf_id)`:
+`{line, count, jump, side}`; a deleted-only side uses the line before the seam), so the two
+navigation entry points agree on the same changes instead of diff_nav ignoring the Compare view.
+It is opt-in (`default_enabled: false`) for the bundled idle-heap budget and
 registers no default keybindings, matching Fresh; the native **Compare** view stays the default
 surface.
 

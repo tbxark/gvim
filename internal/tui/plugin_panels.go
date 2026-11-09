@@ -671,10 +671,11 @@ func (m *Model) pluginPanelKey(msg tea.Msg) (tea.Cmd, bool) {
 	if !ok || m.plug.panels.focus == 0 {
 		return nil, false
 	}
-	// F6 is the application's chrome cycle, never a panel key: it must reach the
+	// F7 is the application's chrome cycle, never a panel key: it must reach the
 	// root so a focused plugin section cannot swallow the focus move (the root's
-	// stage move then blurs the panel).
-	if kp, _ := translateKey(tea.Key(k)); len(kp.Mods) == 0 && kp.Name == "F6" {
+	// stage move then blurs the panel). F6 (the Remote Indicator menu) is handled
+	// globally in update before this path.
+	if kp, _ := translateKey(tea.Key(k)); len(kp.Mods) == 0 && kp.Name == "F7" {
 		return nil, false
 	}
 	// The root's sidebar focus-cycle keys (Alt+Shift+N/P) move the focus out of the

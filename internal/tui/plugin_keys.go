@@ -17,7 +17,7 @@ import (
 // Plugin key layers (stage S14): the bindings of the plugins in the keymap, input modes,
 // the key wait of gvim.input.next_key, plugin contexts, and the panic chords.
 //
-// The order a key press takes in handleKey (AMENDMENTS C17): the panic chords; the F6 focus
+// The order a key press takes in handleKey (AMENDMENTS C17): the panic chords; the F7 focus
 // cycle, the dock, the tab strip and the welcome screen (all existing); pluginKey, only
 // while the editor has the focus: a pending key wait, then the editor's input mode, then the
 // mode of the active buffer; then the keymap. Overlays are routed before handleKey, so a

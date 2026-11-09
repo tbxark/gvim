@@ -30,7 +30,7 @@ func newInputEdgeModel(t *testing.T) (*Model, *fakeRuntime) {
 	return m, rt
 }
 
-// TestChromeFocusChangedEvent walks the chrome with F6: editor -> tab strip ->
+// TestChromeFocusChangedEvent walks the chrome with F7: editor -> tab strip ->
 // explorer -> editor, and checks one chrome_focus_changed per region change, with
 // gvim's tab strip as the extension region "tabs".
 func TestChromeFocusChangedEvent(t *testing.T) {
@@ -41,10 +41,10 @@ func TestChromeFocusChangedEvent(t *testing.T) {
 		"chrome_focus_changed region=editor",
 	}
 	for i, step := range want {
-		press(m, special(tea.KeyF6))
+		press(m, special(tea.KeyF7))
 		m.pluginPump()
 		if got := evRows(rt.emitted); len(got) != 1 || got[0] != step {
-			t.Fatalf("step %d (F6): events = %v, want [%s]", i, got, step)
+			t.Fatalf("step %d (F7): events = %v, want [%s]", i, got, step)
 		}
 		rt.emitted = nil
 	}
@@ -117,7 +117,7 @@ func TestTranslateKeyLegacyModifiers(t *testing.T) {
 
 var _ = pluginapi.Key{}
 
-// TestChromeFocusRegions covers the mapping chromeFocusOf uses beyond the F6
+// TestChromeFocusRegions covers the mapping chromeFocusOf uses beyond the F7
 // walk: the tab strip extension, the explorer, a native section (Contents,
 // Diagnostics), and a mounted plugin section with its plugin/panel id. The dock
 // branch is the same predicate the dock tests exercise (dock.Focus()).

@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 )
 
 // AuthorityStatus is the workspace-authority snapshot the status row and the
@@ -68,11 +69,13 @@ func (m *Model) authoritySegment() (statusItem, bool) {
 	// catalogue key for the connected/disconnected state with %{userhost}, so a
 	// translated catalogue changes the wording while the English fallback keeps
 	// today's text. A label that is not an SSH authority keeps its own words.
-	text := st.Text
+	// The authority label comes from the remote spec (user input/config): clean it
+	// before the status row paints it, as the preview surfaces do.
+	text := textsafe.Clean(st.Text)
 	if st.Connecting {
 		return statusItem{ID: "authority", Text: text + " · reconnecting", Prio: 1 << 20}, true
 	}
-	if userhost, ok := strings.CutPrefix(st.Text, "SSH:"); ok {
+	if userhost, ok := strings.CutPrefix(text, "SSH:"); ok {
 		key := "gvim.status.remote_ssh"
 		if !st.Connected {
 			key = "gvim.status.remote_ssh_disconnected"

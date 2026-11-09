@@ -414,7 +414,7 @@ func TestClickOnTabCloseButtonClosesCleanTab(t *testing.T) {
 	}
 }
 
-func TestF6CyclesMenuTabsExplorerEditor(t *testing.T) {
+func TestF7CyclesMenuTabsExplorerEditor(t *testing.T) {
 	tf := newTabFake("a.txt")
 	m := shellModel(t, tf, &fakeDialogs{})
 	press(m, ctrl('b'))
@@ -423,9 +423,9 @@ func TestF6CyclesMenuTabsExplorerEditor(t *testing.T) {
 	}
 	want := []focusStage{stageEditor, stageMenu, stageTabs, stageExplorer}
 	for _, w := range want {
-		press(m, special(tea.KeyF6))
+		press(m, special(tea.KeyF7))
 		if m.stage() != w {
-			t.Fatalf("F6 stage = %v, want %v", m.stage(), w)
+			t.Fatalf("F7 stage = %v, want %v", m.stage(), w)
 		}
 	}
 }

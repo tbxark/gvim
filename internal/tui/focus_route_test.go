@@ -26,9 +26,9 @@ func TestTabStripFocusTypesNoText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m := menuModel(t, true)
-			press(m, special(tea.KeyF6))
+			press(m, special(tea.KeyF7))
 			if m.stage() != stageTabs {
-				t.Fatalf("setup: F6 reached stage %v, want the tab strip", m.stage())
+				t.Fatalf("setup: F7 reached stage %v, want the tab strip", m.stage())
 			}
 			ed := m.ed.(*fakeEditor)
 			press(m, tt.key)
@@ -113,7 +113,7 @@ func TestNewTabFocusesTheEditor(t *testing.T) {
 	t.Run("New from the tab strip", func(t *testing.T) {
 		t.Parallel()
 		m := menuModel(t, true)
-		press(m, special(tea.KeyF6))
+		press(m, special(tea.KeyF7))
 		if m.stage() != stageTabs {
 			t.Fatalf("setup: stage %v, want the tab strip", m.stage())
 		}

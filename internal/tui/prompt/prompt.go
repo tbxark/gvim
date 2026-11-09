@@ -222,6 +222,10 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 			return l, l.cycleSuggestion(1)
 		case "shift+tab", "up", "ctrl+p":
 			return l, l.cycleSuggestion(-1)
+		case "pgup":
+			return l, l.pageSuggestion(-1)
+		case "pgdown":
+			return l, l.pageSuggestion(1)
 		}
 	}
 	switch ks {
@@ -262,6 +266,43 @@ func (l *Line) SetSuggestions(items []Suggestion, selected int) {
 		return
 	}
 	l.selSuggestion = selected
+}
+
+// pageSuggestion is Fresh's prompt_page_up/prompt_page_down: move the highlighted
+// suggestion by one visible page (maxSuggestionRows), clamped to the list.
+func (l *Line) pageSuggestion(delta int) tea.Cmd {
+	if len(l.suggestions) == 0 {
+		return nil
+	}
+	n := len(l.suggestions)
+	at := l.selSuggestion
+	if at < 0 {
+		at = 0
+		if delta < 0 {
+			at = n - 1
+		}
+	} else {
+		at = min(max(at+delta*maxSuggestionRows, 0), n-1)
+	}
+	for at >= 0 && at < n && l.suggestions[at].Disabled {
+		at += delta
+	}
+	if at < 0 || at >= n || l.suggestions[at].Disabled {
+		return nil
+	}
+	l.selSuggestion = at
+	s := l.suggestions[at]
+	value := s.Value
+	if value == "" {
+		value = s.Text
+	}
+	l.field.SetValue(value)
+	l.field.CursorEnd()
+	l.prefill = false
+	if l.onChange != nil {
+		l.onChange(value)
+	}
+	return nil
 }
 
 // cycleSuggestion moves the highlighted suggestion by delta, skipping disabled rows, and

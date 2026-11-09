@@ -1,0 +1,28 @@
+{
+  "en": {
+    "wordmark.tagline": "A terminal text editor that opens instantly and grows with you.",
+    "door.open.label": "Open a file",
+    "door.open.detail": "Browse and open anything",
+    "door.new.label": "New buffer",
+    "door.new.detail": "Start from an empty buffer",
+    "door.recent.label": "Recent files",
+    "door.recent.detail": "Jump back into a file you were editing",
+    "verb.find.label": "Find file",
+    "verb.find.detail": "Search the project by name",
+    "verb.palette.label": "Command palette",
+    "verb.palette.detail": "Run any editor command",
+    "verb.settings.label": "Settings",
+    "verb.settings.detail": "Theme, language, plugins",
+    "verb.explorer.label": "File explorer",
+    "verb.explorer.detail": "Show the file tree",
+    "verb.help.label": "Help",
+    "verb.help.detail": "Keys, commands and documentation",
+    "section.dashboard": "DASHBOARD",
+    "section.recent": "RECENT FILES",
+    "section.empty_dashboard": "No dashboard sections registered.",
+    "section.empty_recent": "No recent files yet.",
+    "section.dashboard_detail": "Open the dashboard",
+    "hint": "j/k or arrows move   Enter opens   q closes",
+    "status.action_failed": "Welcome screen: %{error}"
+  }
+}

@@ -190,6 +190,11 @@ Each. In either focused query field, `Ctrl+Delete` deletes the next word and
 these are widget chords, not editor actions, so the field keeps focus and the bar stays
 open.
 
+**One-line prompt keyboard.** Up/Down walk the prompt history; when the prompt shows a plugin
+suggestion list, Up/Down/Tab/Shift+Tab move the highlight and fill the field, and PageUp/PageDown move
+the highlight by the visible suggestion rows and clamp at the ends (Fresh prompt_page_up/prompt_page_down).
+Enter submits (Ctrl+F from the prompt keymap confirms it) and Esc cancels.
+
 **Settings page keyboard.** Typing filters the settings rows; `/` starts Fresh's settings search mode (clear filter, type to search, Enter ends the search keeping the current selection without editing it, Esc cancels the search without closing Settings); Up/Down move, PgUp/PgDn page, Home/End jump, Enter edits, Tab switches layer, Ctrl+S saves and Ctrl+R resets, Delete inherits/resets the row, and Ctrl+E edits the raw JSON. `?` opens Fresh's settings_help panel listing these keys; any key closes it, and Esc then closes the Settings page. The panel uses the existing overlay chrome and does not change focus or the cursor.
 
 **Live Grep Resume.** Closing Live Grep captures the prior query, match modes and

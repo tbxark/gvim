@@ -7,6 +7,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/browser"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 )
 
@@ -54,6 +55,10 @@ func (m *Model) rootInit() tea.Cmd {
 // the rest of the root still see it.
 func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case popup.Chosen:
+		if cmd, ok := m.remoteChosen(msg); ok {
+			return cmd, true
+		}
 	case agentRankMsg:
 		if !msg.ov.p.Active() {
 			return nil, true // the picker closed while the ranking ran

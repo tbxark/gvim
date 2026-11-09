@@ -170,6 +170,8 @@ func testKeys() fakeKeymap {
 		"normal|w|ctrl":        {Action: "close_tab"},
 		"settings|?|":          {Action: "settings_help"},
 		"settings|/|":          {Action: "settings_search"},
+		"prompt|PageUp|":       {Action: "prompt_page_up"},
+		"prompt|PageDown|":     {Action: "prompt_page_down"},
 	}
 }
 

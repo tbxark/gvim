@@ -102,7 +102,7 @@ type Model struct {
 	statusRestartHover bool
 	explorerOpen       bool // the panel is shown
 	explorerFocus      bool // the panel has keyboard focus
-	tabFocus           bool // the tab strip has keyboard focus (F6 cycle)
+	tabFocus           bool // the tab strip has keyboard focus (F7 chrome cycle)
 	// The Contents sidebar section (see markdown_toc.go): contents is its tree
 	// and settings, contentsFocus says it holds the keyboard, and
 	// explorerRows is the explorer section's explicit body height (1..max); 0 means
@@ -661,7 +661,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if now := m.activeFilePath(); now != activePath {
 		cmd = tea.Batch(cmd, m.followActiveBuffer())
 	}
-	// After the root's own focus moves of this update (F6, commands, auto-focus) report
+	// After the root's own focus moves of this update (F7, commands, auto-focus) report
 	// the chrome region change once; the queued event is pumped by a command, never
 	// inline.
 	if cur := m.chromeFocusOf(); cur != prevChrome {
@@ -730,6 +730,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.revealCaret()
 		}
 		return m, cmd
+	}
+	// F6 is Fresh's global Remote Indicator menu: it opens the menu wherever a chrome
+	// region or the editor has the keyboard (an overlay keeps its own keys). The
+	// chrome focus cycle moved to F7, a gvim extension, so F6 keeps Fresh's meaning.
+	if k, ok := msg.(tea.KeyPressMsg); ok {
+		if kp, _ := translateKey(tea.Key(k)); len(kp.Mods) == 0 && kp.Name == "F6" {
+			m.showRemoteMenu()
+			return m, nil
+		}
 	}
 	// A plugin key layer (a mode or a key wait) sees the key before a mounted widget
 	// panel's smart dispatch: the panel is the fallback while a plugin holds the keyboard.
@@ -2259,7 +2268,7 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 		return cmd
 	}
 	kp, text := translateKey(k)
-	if len(kp.Mods) == 0 && kp.Name == "F6" {
+	if len(kp.Mods) == 0 && kp.Name == "F7" {
 		m.cycleFocus()
 		return nil
 	}
@@ -3029,7 +3038,7 @@ func (m *Model) focusEditorChrome() {
 	m.dock.SetFocus(false)
 }
 
-// The places keyboard focus can be, in F6 order. The menu is open while it has
+// The places keyboard focus can be, in F7 chrome-cycle order. The menu is open while it has
 // focus, and the explorer is skipped while it is hidden.
 type focusStage int
 
@@ -3060,7 +3069,7 @@ func (m *Model) stage() focusStage {
 }
 
 // cycleFocus moves keyboard focus to the next stage: menu, tabs, explorer,
-// editor, and back to the menu. F6 sends it. The menu is skipped while the menu
+// editor, and back to the menu. F7 sends it. The menu is skipped while the menu
 // bar is hidden.
 func (m *Model) cycleFocus() {
 	var order []focusStage
@@ -3074,7 +3083,7 @@ func (m *Model) cycleFocus() {
 	if m.contents.Open() {
 		order = append(order, stageContents)
 	}
-	// The Diagnostics section follows Contents in the F6 order, matching its place
+	// The Diagnostics section follows Contents in the F7 order, matching its place
 	// in the column.
 	if m.diag.Open() {
 		order = append(order, stageDiagnostics)
@@ -3097,7 +3106,7 @@ func (m *Model) cycleFocus() {
 // setStage gives keyboard focus to the stage s.
 func (m *Model) setStage(s focusStage) {
 	// Every stage is a non-plugin region: hand the keyboard back from a focused
-	// plugin section first, so the plugin key layer cannot swallow keys after F6.
+	// plugin section first, so the plugin key layer cannot swallow keys after F7.
 	m.blurPluginPanels()
 	m.menu = m.menu.Close()
 	switch s {

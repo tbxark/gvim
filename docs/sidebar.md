@@ -140,7 +140,7 @@ dropped and never reaches the buffer. The command cycle
 folded section is unfolded and takes the keyboard), each mounted plugin section, then
 the editor; backwards walks the same stops. A focused plugin section takes the
 keyboard through the provider's panel (its selected row/highlight is the panel's), and
-leaving it (another stop, the editor, or F6) blurs the panel first, so its widget-panel
+leaving it (another stop, the editor, or F7) blurs the panel first, so its widget-panel
 layer cannot swallow keys meant for the new focus. The default Alt+Shift+N / Alt+Shift+P
 chords reach the keymap even while a plugin section has the keyboard: the panel's key
 path passes the root's sidebar focus-cycle actions through (its Alt/Ctrl drop and a
@@ -151,11 +151,24 @@ provider's `focus_lost`); plugin input modes and `gvim.input.next_key` captures 
 plugin-owned state and are not ended by a focus move (only the plugin's mode API, the
 panic chords or unload end them). They cannot steal keys while a native chrome region
 owns the keyboard — the plugin key layer is gated by editor key ownership — and they
-own the editor again when it regains the keys. **F6 is unchanged**: its chrome cycle is
-menu → tab strip → explorer → Contents → Diagnostics (when open) → editor and does not
-visit plugin sections (a recorded residual); pressing F6 from a focused plugin section
-still clears that panel's widget-panel layer before the stage moves (a plugin mode or
-pending key capture remains plugin-owned and is gated while the new stage owns keys).
+own the editor again when it regains the keys. **F6/F7 (verified against Fresh):**
+Fresh binds `F6` as the global Remote Indicator menu; gvim now does the same — F6 opens
+a modal menu from the editor and every chrome focus scene (tab strip, explorer, Contents,
+Diagnostics, dock, focused plugin section, open menu bar) that reports the **actual
+workspace authority**: a local session says `Workspace: Local` and that this session has
+no remote authority; a remote session says `Workspace: Remote`, shows the SSH authority
+(`user@host`), its connected/reconnecting/disconnected state and reason, the remote
+workspace root, and offers `Reconnect SSH` (the existing authority reconnect, run in a
+command). It is a popup, not a focus move, so it leaves the current focus (a focused
+plugin section stays focused). Fresh's
+sidebar keyboard route is the `focus_next_sidebar_section` /
+`focus_prev_sidebar_section` action (Alt+Shift+N/P), which walks the explorer and every
+plugin section; gvim matches it. gvim's chrome focus cycle is a gvim extension and moved
+to `F7`: native order menu → tab strip → explorer → Contents → Diagnostics (when open)
+→ editor, never a plugin section. Plugin sections are reached with Alt+Shift+N/P; F7
+from a focused plugin section clears its widget-panel layer and continues the native
+order (a plugin mode or pending key capture remains plugin-owned and is gated while the
+new stage owns keys).
 
 **Mouse**: press a header row to focus the section; dragging any section's header
 resizes that section's body (the dragged section and every other open section keep
@@ -372,8 +385,8 @@ widget state and a few painted cells.
    `sidebar.Spec` in `Model.sidebarSpecs`, a paint case in
    `Model.paintSidebar`, and a hit case in `Model.handleClick`.
 4. Add it to `sidebarSections`/`sectionFocused`/`focusSection` if it takes the
-   keyboard (plugin sections enter the command cycle this way; F6 only visits the
-   native stages, so add a `stageContents`-style stage only if F6 should reach it).
+   keyboard (plugin sections enter the command cycle this way; the F7 chrome cycle only
+   visits the native stages, so add a `stageContents`-style stage only if F7 should reach it).
 5. Record it here and in `docs/ui.md`'s component map.
 
 ### Plugin sections (plugin API tier 1a)
@@ -401,11 +414,12 @@ A plugin can mount a declarative widget panel as a section of the column:
   takes the keyboard before the editor keymap and swallows the keys its widgets do not use;
   Escape gives the keyboard back. `focus_next_sidebar_section` /
   `focus_prev_sidebar_section` include each mounted plugin section in rendered order after
-  the native sections; leaving one for another stop, the editor or F6 raises the panel's
+  the native sections; leaving one for another stop, the editor or F7 raises the panel's
   `focus_lost` and clears its widget-panel layer first, so it cannot keep swallowing keys.
   Alt+Shift+N/P (the default focus-cycle chords) are passed through by the panel key
   path and by a plugin input mode/key capture, so the real key always reaches the root
-  and leaves the panel; F6 likewise.
+  and leaves the panel; F7 likewise. F6 (the Remote Indicator menu) is a global popup and
+  deliberately does not move or blur the focus.
   That is the only layer a native focus move clears: plugin input modes and
   `gvim.input.next_key` captures are plugin state. While the explorer, tab strip,
   Contents, Diagnostics, dock or welcome screen owns the keys, the plugin key layer is
@@ -415,9 +429,13 @@ A plugin can mount a declarative widget panel as a section of the column:
 * Lifecycle: the panel host owns the sections. Unmounting a plugin (or reloading it) removes
   its sections. Mounting shows the column when it was hidden.
 
-Residual (v1): plugin sections are not in the F6 focus cycle, and sections cannot be
-reordered (Fresh has no drag-reorder either); their header now drag-resizes like every
-other section, and the mount rows are only the starting height.
+**Design differences, not Fresh gaps:** plugin sections are not in the F7 chrome cycle.
+Fresh's F6 is the Remote Indicator menu and its sidebar focus action is exactly
+Alt+Shift+N/P, which gvim matches and which does include plugin sections; gvim's F7
+cycle is its own native-chrome extension and deliberately never visits plugin sections.
+Sections also cannot be reordered (Fresh has no drag-reorder either, and pins the
+explorer first); their header drag-resizes like every other section, and the mount rows
+are only the starting height.
 
 ## 9. Explorer behaviours
 

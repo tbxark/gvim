@@ -96,7 +96,7 @@ func (m *Model) focusSection(s sidebarSection) {
 // and then the editor, which is the last stop: dir 1 goes forward and -1 goes back.
 // The menu closes, because the focus leaves it. A focus that is not in any section,
 // such as the tab strip or the menu, counts as the editor. Plugin sections are in
-// the cycle like Fresh's focus_next_sidebar_section; the F6 cycle is unchanged.
+// the cycle like Fresh's focus_next_sidebar_section; the F7 chrome cycle is unchanged.
 func (m *Model) cycleSidebar(dir int) {
 	secs := m.sidebarSections()
 	stops := len(secs) + 1 // the sections, then the editor

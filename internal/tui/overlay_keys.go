@@ -39,7 +39,8 @@ var overlayActionNames = []string{
 	"prompt_move_left", "prompt_move_right", "prompt_move_start", "prompt_move_end",
 	"prompt_move_word_left", "prompt_move_word_right",
 	"prompt_delete_word_backward", "prompt_delete_word_forward",
-	"prompt_select_prev", "prompt_select_next", "prompt_accept_suggestion", "prompt_paste",
+	"prompt_select_prev", "prompt_select_next", "prompt_page_up", "prompt_page_down",
+	"prompt_accept_suggestion", "prompt_paste",
 	// searchPrompt: the find bar's match steps and option toggles.
 	"toggle_search_case_sensitive", "toggle_search_whole_word",
 	"toggle_search_regex", "toggle_search_confirm_each",
@@ -195,6 +196,10 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 		return m.deliverOverlay(syntheticKey(tea.KeyUp, 0)), true
 	case "prompt_select_next":
 		return m.deliverOverlay(syntheticKey(tea.KeyDown, 0)), true
+	case "prompt_page_up":
+		return m.deliverOverlay(syntheticKey(tea.KeyPgUp, 0)), true
+	case "prompt_page_down":
+		return m.deliverOverlay(syntheticKey(tea.KeyPgDown, 0)), true
 	case "prompt_accept_suggestion":
 		return m.deliverOverlay(syntheticKey(tea.KeyTab, 0)), true
 	case "prompt_paste":

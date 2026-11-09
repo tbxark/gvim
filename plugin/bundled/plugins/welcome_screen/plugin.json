@@ -1,0 +1,7 @@
+{
+  "name": "welcome_screen",
+  "version": "1.0.0",
+  "description": "Reduced Fresh welcome screen: wordmark, doors, verbs and dashboard-section rows in a background virtual-buffer page",
+  "api": 2,
+  "default_enabled": false
+}

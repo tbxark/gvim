@@ -1,9 +1,10 @@
 -- Diff navigation: a port of Fresh's plugins/diff_nav.ts.
 --
--- One pair of commands merges the three change sources Fresh uses: the hunks exported by
+-- One pair of commands merges the change sources Fresh uses: the hunks exported by
 -- git_gutter (git/HEAD changes), the hunks exported by live_diff (HEAD/disk/branch
--- comparisons) and the line hunks of the buffer's saved text against the current text
--- (unsaved changes, b:diff_saved). Targets are sorted by position, deduplicated by line,
+-- comparisons), the comparison hunks exported by compare_files (when that plugin's
+-- Compare view is active for the buffer) and the line hunks of the buffer's saved text
+-- against the current text (unsaved changes, b:diff_saved). Targets are sorted by position, deduplicated by line,
 -- and wrapped; the status row uses Fresh's Change n/total and [wrapped] messages.
 --
 -- git_gutter is default-on, but this plugin still works when it is disabled, has no git
@@ -77,7 +78,17 @@ local function collect_targets(buf)
     end
   end
 
-  -- Source 3: the saved text against the current text ({kind, new_start, ...}).
+  -- Source 3: compare_files' exported hunks ({line, count, jump, side}) for the
+  -- buffer's side of an active comparison. Its own Next/Previous Difference stays a
+  -- compare-local action; diff_nav treats the hunks as one more optional source, so
+  -- the two user entry points navigate the same changes.
+  for _, h in ipairs(exported_hunks("compare_files", buf)) do
+    if type(h) == "table" then
+      add(h.line)
+    end
+  end
+
+  -- Source 4: the saved text against the current text ({kind, new_start, ...}).
   -- For an empty new side (a deletion) the jump belongs on the line before the seam,
   -- exactly like git_gutter's merged navigation; using new_start would jump past the
   -- deleted region. new_count > 0 uses the first new line.
