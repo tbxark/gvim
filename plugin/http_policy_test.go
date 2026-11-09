@@ -43,6 +43,20 @@ func TestValidateHTTPURLPolicy(t *testing.T) {
 		"https://[::1]/",
 		"https://[fe80::1]/",
 		"https://[fc00::1]/",
+		"https://[fec0::1]/",
+		"https://[64:ff9b::a00:1]/",
+		"https://[64:ff9b::7f00:1]/",
+		"https://[64:ff9b:1::a00:1]/",
+		"https://[2002:7f00:1::]/",
+		"https://[2002:a00:1::]/",
+		"https://[2001:0:7f00:1::]/",
+		"https://[2001:db8::1]/",
+		"https://[2001:2::1]/",
+		"https://[3fff::1]/",
+		"https://[100::1]/",
+		"https://[2001:10::1]/",
+		"https://[2001:20::1]/",
+		"https://[::7f00:1]/",
 		"https://100.64.0.1/",
 		"https://0.0.0.0/",
 	}
@@ -64,7 +78,13 @@ func TestCheckPublicHTTPAddr(t *testing.T) {
 			t.Errorf("%s = %v, want public", raw, err)
 		}
 	}
-	private := []string{"127.0.0.1", "10.1.2.3", "192.168.0.1", "172.16.4.5", "169.254.1.1", "::1", "fe80::1", "fd00::1", "0.0.0.0", "224.0.0.1", "100.64.0.1", "198.18.0.1"}
+	private := []string{
+		"127.0.0.1", "10.1.2.3", "192.168.0.1", "172.16.4.5", "169.254.1.1",
+		"::1", "fe80::1", "fd00::1", "0.0.0.0", "224.0.0.1", "100.64.0.1", "198.18.0.1",
+		"fec0::1", "64:ff9b::a00:1", "64:ff9b::7f00:1", "64:ff9b:1::a00:1",
+		"2002:7f00:1::", "2002:a00:1::", "2001:0:7f00:1::", "2001:db8::1",
+		"2001:2::1", "3fff::1", "100::1", "2001:10::1", "2001:20::1", "::7f00:1",
+	}
 	for _, raw := range private {
 		if err := checkPublicHTTPAddr(netip.MustParseAddr(raw)); err == nil {
 			t.Errorf("%s accepted, want refusal", raw)
@@ -133,13 +153,18 @@ func TestClientRedirectPolicy(t *testing.T) {
 	if err := c.CheckRedirect(req, []*http.Request{req}); err != nil {
 		t.Fatalf("one https redirect = %v", err)
 	}
-	httpReq, _ := http.NewRequest("GET", "http://example.com/next", nil)
-	if err := c.CheckRedirect(httpReq, []*http.Request{httpReq}); err == nil {
-		t.Fatal("an http redirect was followed")
-	}
-	localReq, _ := http.NewRequest("GET", "https://127.0.0.1/x", nil)
-	if err := c.CheckRedirect(localReq, []*http.Request{localReq}); err == nil {
-		t.Fatal("a loopback redirect was followed")
+	for _, raw := range []string{
+		"http://example.com/next",
+		"https://127.0.0.1/x",
+		"https://[fec0::1]/x",
+		"https://[64:ff9b::a00:1]/x",
+		"https://[2002:7f00:1::]/x",
+		"https://user:pass@example.com/x",
+	} {
+		redirectReq, _ := http.NewRequest("GET", raw, nil)
+		if err := c.CheckRedirect(redirectReq, []*http.Request{redirectReq}); err == nil {
+			t.Fatalf("redirect to %q was followed", raw)
+		}
 	}
 	via := make([]*http.Request, maxHTTPRedirects+1)
 	for i := range via {

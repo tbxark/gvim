@@ -189,3 +189,30 @@ func TestHTTPTimeoutAndSizeCaps(t *testing.T) {
 		}
 	})
 }
+
+// TestHTTPRejectsPrivateAddressSyntax: the Lua gate refuses IPv6 addresses that a translator
+// or relay could resolve to a private IPv4 target, before any request reaches the transport.
+func TestHTTPRejectsPrivateAddressSyntax(t *testing.T) {
+	for _, raw := range []string{
+		"https://[fec0::1]/x",
+		"https://[64:ff9b::a00:1]/x",
+		"https://[64:ff9b:1::a00:1]/x",
+		"https://[2002:7f00:1::]/x",
+		"https://[2001:0:7f00:1::]/x",
+		"https://[::7f00:1]/x",
+	} {
+		raw := raw
+		t.Run(raw, func(t *testing.T) {
+			x := newHTTPTest(t, func(w http.ResponseWriter, r *http.Request) {
+				t.Error("a private-address URL reached the transport")
+			}, raw, 1000, map[string]any{"network": true}, nil)
+			notices := x.run(t)
+			if !strings.Contains(notices, "not public") {
+				t.Fatalf("notices = %q, want a policy refusal", notices)
+			}
+			if x.rt.hits.Load() != 0 {
+				t.Fatalf("a private-address URL made %d requests", x.rt.hits.Load())
+			}
+		})
+	}
+}

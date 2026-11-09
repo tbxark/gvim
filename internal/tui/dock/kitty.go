@@ -34,8 +34,9 @@ func kittyDockKey(k tea.Key, flags int) (string, bool) {
 	}
 	bits := kittyModBits(k.Mod)
 	// A legacy-compatible uppercase letter carries Shift; a kitty report can omit
-	// it. Infer it the way Fresh's normalize_key does, unless Ctrl hides the case.
-	if unicode.IsUpper(code) && bits == 0 && k.Mod&tea.ModCtrl == 0 {
+	// it. Infer it the way Fresh's normalize_key does, even next to another
+	// modifier (Alt+Shift+a reaches a legacy host as "A"+Alt without Shift).
+	if unicode.IsUpper(code) && k.Mod&tea.ModShift == 0 {
 		bits |= kittyShift
 	}
 	shifted := rune(0)
@@ -76,6 +77,14 @@ func kittyDockKey(k tea.Key, flags int) (string, bool) {
 			return "", false
 		}
 		return kittyCSI(number, bits, "", text, 'u'), true
+	}
+	// Modifier-only keys are reported only when the child asked for every key as
+	// an escape code; without that flag they have no report.
+	if number, final, ok := kittyModifierKey(code); ok {
+		if !reportAll {
+			return "", false
+		}
+		return kittyCSI(number, bits, "", text, final), true
 	}
 	if number, final, ok := kittyFunctionalKey(code); ok {
 		return kittyCSI(number, bits, alternate, text, final), true
@@ -134,9 +143,10 @@ const (
 	kittyMeta
 )
 
-// kittyModBits maps the host key's modifiers to the protocol's bits. UV keeps Meta
-// and Super apart for XTerm compatibility; the protocol's order is Super, Hyper,
-// Meta, so ModSuper is bit 8 and ModMeta bit 32 here.
+// kittyModBits maps the host key's modifiers to the protocol's bits. UV swaps
+// Meta and Super relative to the protocol to keep XTerm compatibility: its
+// ModMeta (the XTerm meta bit, 8) is the protocol's Super, its ModHyper is Hyper,
+// and its ModSuper (32) is the protocol's Meta.
 func kittyModBits(mod tea.KeyMod) int {
 	bits := 0
 	if mod&tea.ModShift != 0 {
@@ -148,13 +158,13 @@ func kittyModBits(mod tea.KeyMod) int {
 	if mod&tea.ModCtrl != 0 {
 		bits |= kittyCtrl
 	}
-	if mod&tea.ModSuper != 0 {
+	if mod&tea.ModMeta != 0 {
 		bits |= kittySuper
 	}
 	if mod&tea.ModHyper != 0 {
 		bits |= kittyHyper
 	}
-	if mod&tea.ModMeta != 0 {
+	if mod&tea.ModSuper != 0 {
 		bits |= kittyMeta
 	}
 	return bits
@@ -217,9 +227,141 @@ func kittyFunctionalKey(code rune) (int, rune, bool) {
 		return 23, '~', true
 	case tea.KeyF12:
 		return 24, '~', true
+	case tea.KeyCapsLock:
+		return 57358, 'u', true
+	case tea.KeyScrollLock:
+		return 57359, 'u', true
+	case tea.KeyNumLock:
+		return 57360, 'u', true
+	case tea.KeyPrintScreen:
+		return 57361, 'u', true
+	case tea.KeyPause:
+		return 57362, 'u', true
+	case tea.KeyMenu:
+		return 57363, 'u', true
+	case tea.KeyKp0:
+		return 57399, 'u', true
+	case tea.KeyKp1:
+		return 57400, 'u', true
+	case tea.KeyKp2:
+		return 57401, 'u', true
+	case tea.KeyKp3:
+		return 57402, 'u', true
+	case tea.KeyKp4:
+		return 57403, 'u', true
+	case tea.KeyKp5:
+		return 57404, 'u', true
+	case tea.KeyKp6:
+		return 57405, 'u', true
+	case tea.KeyKp7:
+		return 57406, 'u', true
+	case tea.KeyKp8:
+		return 57407, 'u', true
+	case tea.KeyKp9:
+		return 57408, 'u', true
+	case tea.KeyKpDecimal:
+		return 57409, 'u', true
+	case tea.KeyKpDivide:
+		return 57410, 'u', true
+	case tea.KeyKpMultiply:
+		return 57411, 'u', true
+	case tea.KeyKpMinus:
+		return 57412, 'u', true
+	case tea.KeyKpPlus:
+		return 57413, 'u', true
+	case tea.KeyKpEnter:
+		return 57414, 'u', true
+	case tea.KeyKpEqual:
+		return 57415, 'u', true
+	case tea.KeyKpSep:
+		return 57416, 'u', true
+	case tea.KeyKpLeft:
+		return 57417, 'u', true
+	case tea.KeyKpRight:
+		return 57418, 'u', true
+	case tea.KeyKpUp:
+		return 57419, 'u', true
+	case tea.KeyKpDown:
+		return 57420, 'u', true
+	case tea.KeyKpPgUp:
+		return 57421, 'u', true
+	case tea.KeyKpPgDown:
+		return 57422, 'u', true
+	case tea.KeyKpHome:
+		return 57423, 'u', true
+	case tea.KeyKpEnd:
+		return 57424, 'u', true
+	case tea.KeyKpInsert:
+		return 57425, 'u', true
+	case tea.KeyKpDelete:
+		return 57426, 'u', true
+	case tea.KeyKpBegin:
+		return 1, 'E', true
+	case tea.KeyMediaPlay:
+		return 57428, 'u', true
+	case tea.KeyMediaPause:
+		return 57429, 'u', true
+	case tea.KeyMediaPlayPause:
+		return 57430, 'u', true
+	case tea.KeyMediaReverse:
+		return 57431, 'u', true
+	case tea.KeyMediaStop:
+		return 57432, 'u', true
+	case tea.KeyMediaFastForward:
+		return 57433, 'u', true
+	case tea.KeyMediaRewind:
+		return 57434, 'u', true
+	case tea.KeyMediaNext:
+		return 57435, 'u', true
+	case tea.KeyMediaPrev:
+		return 57436, 'u', true
+	case tea.KeyMediaRecord:
+		return 57437, 'u', true
+	case tea.KeyLowerVol:
+		return 57438, 'u', true
+	case tea.KeyRaiseVol:
+		return 57439, 'u', true
+	case tea.KeyMute:
+		return 57440, 'u', true
 	}
 	if code >= tea.KeyF13 && code <= tea.KeyF35 {
 		return 57376 + int(code-tea.KeyF13), 'u', true
+	}
+	return 0, 0, false
+}
+
+// kittyModifierKey returns the protocol code of a modifier-only key. These keys
+// are only reported under report-all-keys, as the protocol specifies.
+func kittyModifierKey(code rune) (int, rune, bool) {
+	switch code {
+	case tea.KeyLeftShift:
+		return 57441, 'u', true
+	case tea.KeyLeftCtrl:
+		return 57442, 'u', true
+	case tea.KeyLeftAlt:
+		return 57443, 'u', true
+	case tea.KeyLeftSuper:
+		return 57444, 'u', true
+	case tea.KeyLeftHyper:
+		return 57445, 'u', true
+	case tea.KeyLeftMeta:
+		return 57446, 'u', true
+	case tea.KeyRightShift:
+		return 57447, 'u', true
+	case tea.KeyRightCtrl:
+		return 57448, 'u', true
+	case tea.KeyRightAlt:
+		return 57449, 'u', true
+	case tea.KeyRightSuper:
+		return 57450, 'u', true
+	case tea.KeyRightHyper:
+		return 57451, 'u', true
+	case tea.KeyRightMeta:
+		return 57452, 'u', true
+	case tea.KeyIsoLevel3Shift:
+		return 57453, 'u', true
+	case tea.KeyIsoLevel5Shift:
+		return 57454, 'u', true
 	}
 	return 0, 0, false
 }

@@ -628,3 +628,160 @@ func TestDashboardGitHubUnavailable(t *testing.T) {
 		t.Fatalf("a failed GitHub fetch raised notices: %v", r.h.NoticeTexts())
 	}
 }
+
+// dashboardPRTargets returns the line targets whose action is a PR click command, in
+// dashboard line order.
+func dashboardPRTargets(host *plugintest.FakeHost, id pluginapi.BufferID) []pluginapi.LineTarget {
+	var targets []pluginapi.LineTarget
+	for _, target := range host.LineTargets(id) {
+		if strings.HasPrefix(target.Action, "dashboard.click_pr_") {
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}
+
+// TestDashboardGitHubPRRowsClickable: PR rows are action rows (so Tab/Enter reaches
+// them), publish dashboard-owned action targets on their lines, and dispatch the same
+// canonical pull URL through gvim.url.open as a click.
+func TestDashboardGitHubPRRowsClickable(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: `[{"number":12,"title":"Fix the thing"},{"number":34,"title":"Add docs","draft":true}]`}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(true),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#12")
+	id := dashboardBuffer(r.host)
+	if id == 0 {
+		t.Fatal("no dashboard")
+	}
+	if !strings.Contains(text, "#12") || !strings.Contains(text, "#34") {
+		t.Fatalf("PR rows missing: %s", text)
+	}
+	targets := dashboardPRTargets(r.host, id)
+	if len(targets) != 2 {
+		t.Fatalf("PR action targets = %+v, want two", targets)
+	}
+	lines := strings.Split(text, "\n")
+	found := map[string]bool{}
+	for _, target := range targets {
+		if target.Line < 0 || target.Line >= len(lines) {
+			continue
+		}
+		line := lines[target.Line]
+		if target.Action == "dashboard.click_pr_1" && strings.Contains(line, "#12") {
+			found["12"] = true
+		}
+		if target.Action == "dashboard.click_pr_2" && strings.Contains(line, "#34") {
+			found["34"] = true
+		}
+	}
+	if !found["12"] || !found["34"] {
+		t.Fatalf("PR action line targets are missing (#12=%v #34=%v targets=%+v): %s", found["12"], found["34"], targets, text)
+	}
+	// The click path and the keyboard row both dispatch the dashboard-owned command.
+	if err := r.h.Run("dashboard.click_pr_1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("dashboard.activate", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.Settle()
+	want := []string{"https://github.com/me/repo/pull/12", "https://github.com/me/repo/pull/12"}
+	if got := r.host.URLs(); !slices.Equal(got, want) {
+		t.Fatalf("opened URLs = %v, want %v", got, want)
+	}
+}
+
+// TestDashboardGitHubPRsIgnoreUntrustedFields: a hostile or malformed REST body cannot
+// inject another host/scheme through html_url, non-numeric/invalid numbers are skipped,
+// and titles lose control characters and overlong tails before painting.
+func TestDashboardGitHubPRsIgnoreUntrustedFields(t *testing.T) {
+	t.Parallel()
+	body := `[
+ {"number":12,"title":"Fix\n<script>alert(1)</script>","html_url":"javascript:alert(1)"},
+ {"number":"13","title":"string number","html_url":"https://evil.example/string"},
+ {"number":13.5,"title":"fraction","html_url":"https://evil.example/fraction"},
+ {"number":-1,"title":"negative","html_url":"https://evil.example/negative"},
+ {"number":9999999999,"title":"huge","html_url":"https://evil.example/huge"},
+ {"number":14,"title":{"nested":"object"},"html_url":"https://evil.example/nested"},
+ {"number":15,"title":"ok one","html_url":"https://evil.example/15"},
+ {"number":16,"title":"control\u0000\u0001title","draft":false}
+]`
+	tr := &githubTransport{body: body}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(true),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#12")
+	if strings.Contains(text, "evil.example") || strings.Contains(text, "javascript:") {
+		t.Fatalf("an API-provided URL reached the dashboard: %s", text)
+	}
+	for _, want := range []string{"#12", "#14", "#15", "#16"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("valid PR %s missing: %s", want, text)
+		}
+	}
+	for _, bad := range []string{"#13", "#-1", "#9999999999"} {
+		if strings.Contains(text, bad) {
+			t.Errorf("invalid PR %s was rendered: %s", bad, text)
+		}
+	}
+	if !strings.Contains(text, "Fix <script>alert(1)</script>") {
+		t.Errorf("title newline was not normalized: %s", text)
+	}
+	if !strings.Contains(text, "control title") {
+		t.Errorf("control characters were not normalized: %s", text)
+	}
+	// The only URLs opened are canonical GitHub pulls, from the slug the dashboard
+	// normalized itself and the validated number.
+	for i := 1; i <= 4; i++ {
+		if err := r.h.Run("dashboard.click_pr_"+strconv.Itoa(i), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.h.Settle()
+	want := []string{
+		"https://github.com/me/repo/pull/12",
+		"https://github.com/me/repo/pull/14",
+		"https://github.com/me/repo/pull/15",
+		"https://github.com/me/repo/pull/16",
+	}
+	if got := r.host.URLs(); !slices.Equal(got, want) {
+		t.Fatalf("opened URLs = %v, want %v", got, want)
+	}
+}
+
+// TestDashboardGitHubPRRowCap: the section renders at most GITHUB_MAX_ROWS valid PRs
+// even when the response is larger.
+func TestDashboardGitHubPRRowCap(t *testing.T) {
+	t.Parallel()
+	var entries []string
+	for i := 1; i <= 40; i++ {
+		entries = append(entries, `{"number":`+strconv.Itoa(i)+`,"title":"pr `+strconv.Itoa(i)+`"}`)
+	}
+	body := "[" + strings.Join(entries, ",") + "]"
+	tr := &githubTransport{body: body}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(true),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	dashboardSettle(t, r, "#1")
+	id := dashboardBuffer(r.host)
+	if id == 0 {
+		t.Fatal("no dashboard")
+	}
+	if targets := dashboardPRTargets(r.host, id); len(targets) != 6 {
+		t.Fatalf("PR targets = %d, want the six-row cap (%+v)", len(targets), targets)
+	}
+}

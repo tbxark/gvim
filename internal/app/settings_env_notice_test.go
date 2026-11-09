@@ -24,4 +24,11 @@ func TestProjectEnvFactsShowsRemoteShellFallback(t *testing.T) {
 	if !found {
 		t.Fatalf("settings env facts = %+v, want the shell fallback notice", facts)
 	}
+	p.SetNotice("")
+	facts = svc.projectEnvFacts()
+	for _, f := range facts {
+		if f.name == "Environment shell" {
+			t.Fatalf("a successful re-probe did not clear the Settings fallback row: %+v", facts)
+		}
+	}
 }

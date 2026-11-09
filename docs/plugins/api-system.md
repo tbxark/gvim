@@ -102,15 +102,20 @@ it), otherwise the call fails with `unsupported` before any DNS or request. The 
 * **Only `https`.** `http://`, `javascript:`, `file:`, `data:`, `ssh:` and every other scheme are
   refused; credentials in the URL (`user:pass@host`) are refused.
 * **SSRF policy.** `localhost`/`.localhost`/`.local` names and loopback, private, link-local,
-  multicast, unspecified, CGNAT, documentation/benchmarking literal addresses are refused. A DNS
-  name is resolved by the host itself and **every** resolved address must be public; a DNS failure
-  is final (no fallback to the hostname or another resolver). The dialer connects to a validated
-  literal address; the proxy from the environment is ignored and TLS 1.2 is the floor.
+  multicast, unspecified, CGNAT, documentation/benchmarking literal addresses are refused. The
+  IPv6 forms are covered too: site-local `fec0::/10` and the IPv4-embedding prefixes
+  (`64:ff9b::/96` and `64:ff9b:1::/48` NAT64, `2002::/16` 6to4, `2001::/32` Teredo, and the
+  deprecated IPv4-compatible `::/96`) are refused as a whole, because a translator or relay can
+  decode a private IPv4 target from them. A DNS name is resolved by the host itself and **every**
+  resolved address must be public; a DNS failure is final (no fallback to the hostname or another
+  resolver). The dialer connects to a validated literal address; the proxy from the environment
+  is ignored and TLS 1.2 is the floor.
 * **Redirects.** At most 3, and every hop is revalidated with the same scheme/SSRF policy; a
   redirect to `http` or a local/private target fails the call.
 * **Limits.** Default timeout 5 s (`timeout_ms` 100 ms..10 s); response body at most 1 MiB
   (pre-checked `Content-Length` plus a limited reader); at most 2 concurrent requests per plugin
-  and 4 globally. The body stays in memory and is never written to disk.
+  and 4 per plugin runtime (the daemon's shared runtime counts as one plugin runtime). The body
+  stays in memory and is never written to disk.
 * **Headers.** Callers cannot set request headers at all — the host sends a fixed
   `User-Agent: gvim-plugin/<version>` and `Accept: application/json`, so no Authorization/Cookie
   can be sent. Only safe response headers are returned: `content-type`, `content-length`, `etag`,

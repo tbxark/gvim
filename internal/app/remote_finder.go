@@ -77,8 +77,9 @@ func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) (
 func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (*finder.Index, string) {
 	expanded := expandRemoteRoot(ctx, slot, root)
 	files := func() authority.FileSystem { return slot.Files() }
-	enum := func(ctx context.Context, emit func(string) bool) error {
-		if candidates, ok := remoteFinderGitCandidates(ctx, slot, expanded); ok {
+	enum := func(ctx context.Context, emit func(string) bool, notify func(string)) error {
+		candidates, ok, notice := remoteFinderGitCandidates(ctx, slot, expanded)
+		if ok {
 			for _, rel := range candidates {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -89,37 +90,55 @@ func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (
 			}
 			return nil
 		}
+		if notice != "" {
+			notify(notice)
+		}
 		return finder.EnumerateRemote(ctx, remoteFinderFS{files: files, ignore: newIgnoreBatch(files, expanded)}, expanded, finder.Options{}, emit)
 	}
-	return finder.StartFunc(ctx, enum), expanded
+	return finder.StartFuncNotify(ctx, enum), expanded
 }
 
 // remoteFinderGitCandidates returns the remote git work tree's candidate files, or ok
 // false when the recursive walk must run instead (not a work tree, git cannot list, the
 // answer was truncated, or the listing contains nested repositories/submodules whose
-// contents git names only). The paths are filtered like the quick-open walk: no .git
-// internals, no hidden segment, no skip directory, no non-UTF-8 name, no invalid path
+// contents git names only). A failed probe/listing carries a non-fatal notice the finder
+// exposes to the palette, so the fallback is not silent; a plain non-git workspace is not
+// a degradation and has no notice. The paths are filtered like the quick-open walk: no
+// .git internals, no hidden segment, no skip directory, no non-UTF-8 name, no invalid path
 // segment and no depth beyond the finder's remote depth bound. The file cap and
 // cancellation stay in the finder Index.
-func remoteFinderGitCandidates(ctx context.Context, slot authority.Slot, root string) ([]string, bool) {
+func remoteFinderGitCandidates(ctx context.Context, slot authority.Slot, root string) ([]string, bool, string) {
+	const (
+		gitUnavailable = "Remote quick-open: git could not run on the remote host; listing the workspace with a directory walk (ignore filtering follows the walk)."
+		gitListFailed  = "Remote quick-open: the remote git file list failed or was truncated; listing the workspace with a directory walk (ignore filtering may differ)."
+	)
 	if slot == nil {
-		return nil, false
+		return nil, false, ""
 	}
 	one := slot.OneShot()
 	if one == nil {
-		return nil, false
+		return nil, false, ""
 	}
 	probeCtx, stop := context.WithTimeout(ctx, remoteFinderGitProbeTimeout)
 	probe, err := one.Run(probeCtx, []string{"git", "rev-parse", "--is-inside-work-tree"}, hostos.ProcOptions{Cwd: root})
 	stop()
-	if err != nil || probe.Code != 0 || strings.TrimSpace(string(probe.Stdout)) != "true" {
-		return nil, false
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ""
+		}
+		return nil, false, gitUnavailable
+	}
+	if probe.Code != 0 || strings.TrimSpace(string(probe.Stdout)) != "true" {
+		return nil, false, "" // not a git work tree: the Fresh-style walk is the scope
 	}
 	listCtx, stop := context.WithTimeout(ctx, remoteFinderGitListTimeout)
 	list, err := one.Run(listCtx, []string{"git", "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--cached", "--others", "--exclude-standard"}, hostos.ProcOptions{Cwd: root, MaxOutput: remoteFinderGitMaxBytes})
 	stop()
 	if err != nil || list.Code != 0 || list.Truncated {
-		return nil, false
+		if ctx.Err() != nil {
+			return nil, false, ""
+		}
+		return nil, false, gitListFailed
 	}
 	var out []string
 	for _, raw := range strings.Split(string(list.Stdout), "\x00") {
@@ -130,14 +149,14 @@ func remoteFinderGitCandidates(ctx context.Context, slot authority.Slot, root st
 		if submodule || (!strings.ContainsRune(raw, '\t') && strings.HasSuffix(rel, "/")) {
 			// A nested repository/submodule is listed by name only: its contents are not
 			// in this output, so the recursive walk must take over rather than silently
-			// dropping them.
-			return nil, false
+			// dropping them. This is not a failure, so it has no degradation notice.
+			return nil, false, ""
 		}
 		if remoteFinderCandidate(rel) {
 			out = append(out, rel)
 		}
 	}
-	return out, true
+	return out, true, ""
 }
 
 // remoteFinderCandidate accepts one slash-relative git listing path in the quick-open

@@ -94,3 +94,44 @@ func TestKittyAssociatedText(t *testing.T) {
 		{name: "letter with text", key: tea.Key{Code: 'a', Text: "a"}, flags: flags, want: "\x1b[97;;97u", ok: true},
 	})
 }
+
+// TestKittySuperHyperMetaBits: UV swaps Meta and Super relative to the protocol,
+// so a host Command/Super modifier goes out as the protocol's Meta bit and XTerm
+// Meta as Super. Hyper is unchanged.
+func TestKittySuperHyperMetaBits(t *testing.T) {
+	flags := ansi.KittyDisambiguateEscapeCodes
+	checkKittyKeys(t, []kittyKeyCase{
+		{name: "Meta is protocol Super", key: tea.Key{Code: 'a', Mod: tea.ModMeta}, flags: flags, want: "\x1b[97;9u", ok: true},
+		{name: "Super is protocol Meta", key: tea.Key{Code: 'a', Mod: tea.ModSuper}, flags: flags, want: "\x1b[97;33u", ok: true},
+		{name: "Hyper", key: tea.Key{Code: 'a', Mod: tea.ModHyper}, flags: flags, want: "\x1b[97;17u", ok: true},
+	})
+}
+
+// TestKittyExtendedKeys: the protocol's lock, media and keypad key numbers are
+// encoded while the child has the protocol on, matching Fresh's table.
+func TestKittyExtendedKeys(t *testing.T) {
+	flags := ansi.KittyDisambiguateEscapeCodes
+	checkKittyKeys(t, []kittyKeyCase{
+		{name: "CapsLock", key: tea.Key{Code: tea.KeyCapsLock}, flags: flags, want: "\x1b[57358u", ok: true},
+		{name: "Menu", key: tea.Key{Code: tea.KeyMenu}, flags: flags, want: "\x1b[57363u", ok: true},
+		{name: "media play", key: tea.Key{Code: tea.KeyMediaPlay}, flags: flags, want: "\x1b[57428u", ok: true},
+		{name: "keypad 0", key: tea.Key{Code: tea.KeyKp0}, flags: flags, want: "\x1b[57399u", ok: true},
+		{name: "keypad plus", key: tea.Key{Code: tea.KeyKpPlus}, flags: flags, want: "\x1b[57413u", ok: true},
+		{name: "keypad begin keeps its CSI E form", key: tea.Key{Code: tea.KeyKpBegin}, flags: flags, want: "\x1b[E", ok: true},
+	})
+}
+
+// TestKittyModifierKeys: modifier-only keys are reported only under report-all-keys,
+// as the protocol specifies.
+func TestKittyModifierKeys(t *testing.T) {
+	checkKittyKeys(t, []kittyKeyCase{
+		{name: "without report-all a modifier has no report", key: tea.Key{Code: tea.KeyLeftShift}, flags: ansi.KittyDisambiguateEscapeCodes, ok: false},
+		{
+			name:  "report-all reports the modifier",
+			key:   tea.Key{Code: tea.KeyLeftShift},
+			flags: ansi.KittyDisambiguateEscapeCodes | ansi.KittyReportAllKeysAsEscapeCodes,
+			want:  "\x1b[57441u",
+			ok:    true,
+		},
+	})
+}

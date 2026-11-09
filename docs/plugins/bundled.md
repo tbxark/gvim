@@ -313,10 +313,19 @@ still openable as a repo row but has no branch URL, and unsafe/unopenable origin
 The GitHub PR section is opt-in: set `plugins.dashboard.settings.github_prs = true` and
 `plugins.dashboard.settings.network = true` (the host network gate; project config never grants
 it), and a GitHub `origin` makes one bounded REST request
-(`https://api.github.com/repos/<owner>/<repo>/pulls`) rendered as up to six open PRs. Without a
-token a private or missing repository returns 404 and the section shows a muted `unavailable`
-line (no notice, the rest of the dashboard is unaffected); failures and the disabled state are
-also one muted line. Weather is not ported (no wttr.in request/formatting), and the third-party
+(`https://api.github.com/repos/<owner>/<repo>/pulls`) rendered as up to six open PRs. Each PR row is
+a dashboard action row: Tab/Down/Up moves the focus onto it and Enter opens it, and the same line is
+an action line target (`dashboard.click_pr_<n>`) so a mouse click runs the identical dashboard-owned
+command. The URL is not taken from the response: the dashboard rebuilds
+`https://github.com/<owner>/<repo>/pull/<number>` from the slug it normalized from the git remote
+and a strictly validated positive integer PR number, then calls `gvim.url.open`, which re-applies
+the http(s)-only scheme policy, rejects credentials/control characters and asks the modal Yes/No
+confirmation (see [api-system.md](api-system.md#gvimurl)). API bodies are untrusted: non-string or
+control/overlong titles are sanitized before painting, entries with a string, fractional, negative
+or out-of-range number (and any `html_url`/other API-provided links) are ignored, and at most six
+valid rows are kept from at most 200 examined entries. Without a token a private or missing
+repository returns 404 and the section shows a muted `unavailable` line (no notice, the rest of the
+dashboard is unaffected); failures and the disabled state are also one muted line. Weather is not ported (no wttr.in request/formatting), and the third-party
 section API is still absent. Reductions: no weather, no third-party section API or Utility Dock
 placement and no sessions section.
 

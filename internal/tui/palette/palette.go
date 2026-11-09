@@ -175,6 +175,10 @@ type FileRankedMsg struct {
 	// Truncated is the index's truncation state: the file rows say the list is
 	// incomplete rather than presenting it as the whole project.
 	Truncated bool
+	// Notice is the index's non-fatal degradation message (for example a remote fallback
+	// from the git file list to a directory walk). It is shown as one informative row; it
+	// never hides or disables the results.
+	Notice string
 }
 
 // fileTickMsg asks the palette to rank the file rows again. It is sent after
@@ -554,8 +558,12 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 		loading := true
 		errText := ""
 		truncated := false
+		notice := ""
 		if files != nil {
 			list, loading = files.Snapshot()
+			if n, ok := files.(interface{ Notice() string }); ok {
+				notice = n.Notice()
+			}
 			if !loading {
 				if e, ok := files.(interface{ Err() error }); ok {
 					if err := e.Err(); err != nil {
@@ -567,7 +575,7 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 				}
 			}
 		}
-		return FileRankedMsg{Seq: seq, Text: text, Matches: rk.Rank(text, list, fileLimit), Loading: loading, ErrText: errText, Truncated: truncated}
+		return FileRankedMsg{Seq: seq, Text: text, Matches: rk.Rank(text, list, fileLimit), Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice}
 	}
 }
 
@@ -579,7 +587,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 	if msg.Seq != p.seq || !p.inFile {
 		return nil
 	}
-	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol, msg.ErrText, msg.Truncated)
+	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol, msg.ErrText, msg.Truncated, msg.Notice)
 	p.syncSize()
 	if msg.Text != p.shown {
 		p.nav.Select(0)
@@ -665,11 +673,11 @@ func (p *Palette) bufferRows(text string) []row {
 // fileRows turns a ranked result into rows. With no match while the index still
 // runs, the loading row shows. line and col are the position the query named, which
 // Enter opens at and the preview highlights; both are 0 when it named none.
-func fileRows(matches []Ranked, loading bool, line, col int, errText string, truncated bool) []row {
+func fileRows(matches []Ranked, loading bool, line, col int, errText string, truncated bool, notice string) []row {
 	if len(matches) == 0 && loading {
 		return loadingRows()
 	}
-	rows := make([]row, 0, len(matches)+2)
+	rows := make([]row, 0, len(matches)+3)
 	for _, m := range matches {
 		rows = append(rows, row{kind: rowFile, name: m.Path, source: "file", rel: m.Path, hl: m.Indexes, line: line, col: col})
 	}
@@ -677,6 +685,11 @@ func fileRows(matches []Ranked, loading bool, line, col int, errText string, tru
 		rows = append(rows, row{kind: rowMessage, name: paletteTextVars("gvim.palette.file_search_failed", "File search failed: %{error}", map[string]any{"error": errText}), disabled: true})
 	} else if truncated {
 		rows = append(rows, row{kind: rowMessage, name: paletteText("gvim.palette.file_list_truncated", "File list truncated: too many files; the list is incomplete"), disabled: true})
+	}
+	if notice != "" {
+		// The notice is already a complete English sentence from the finder port; it is
+		// shown verbatim as one informative row (the next i18n pass can extract it).
+		rows = append(rows, row{kind: rowMessage, name: notice, disabled: true})
 	}
 	return rows
 }

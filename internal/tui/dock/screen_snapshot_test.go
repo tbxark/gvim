@@ -417,10 +417,10 @@ func TestPanelCapturesAndRestoresTitle(t *testing.T) {
 	if got := restored.TabNames()[0]; !strings.Contains(got, "mine") || strings.Contains(got, "vim") {
 		t.Fatalf("renamed label = %q", got)
 	}
-	// A launch record keeps its program name over the OSC title.
+	// A launch record and the OSC title are combined Fresh-style.
 	launch := restore("some title", []string{"/bin/bash"})
-	if got := launch.TabNames()[0]; !strings.Contains(got, "bash") || strings.Contains(got, "some title") {
-		t.Fatalf("launch label = %q", got)
+	if got := launch.TabNames()[0]; !strings.Contains(got, "bash") || !strings.Contains(got, "some title") || !strings.Contains(got, "—") {
+		t.Fatalf("combined label = %q", got)
 	}
 	// Capture cleans controls and bounds the title.
 	bad := newFakeTerm()

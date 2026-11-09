@@ -125,3 +125,44 @@ func TestKittyKeyboardBounds(t *testing.T) {
 		t.Fatalf("an oversized pending sequence answered %v", replies)
 	}
 }
+
+// TestKittyKeyboardPushDefaultsAndEviction covers the protocol's push edge cases:
+// an omitted flags parameter pushes zero, a full stack evicts its oldest entry,
+// and popping past the bottom resets the flags.
+func TestKittyKeyboardPushDefaultsAndEviction(t *testing.T) {
+	var k kittyKeyboard
+	k.scan([]byte("\x1b[>5u"))
+	if got := k.flags(); got != 5 {
+		t.Fatalf("current flags = %d, want 5", got)
+	}
+	k.scan([]byte("\x1b[>u")) // omitted flags default to zero
+	if got := k.flags(); got != 0 {
+		t.Fatalf("flags after an omitted push = %d, want 0", got)
+	}
+	k.scan([]byte("\x1b[<u"))
+	if got := k.flags(); got != 5 {
+		t.Fatalf("flags after popping the default push = %d, want 5", got)
+	}
+
+	// Fill past the bound with an old distinct entry first: the oldest entry is
+	// evicted, so popping the retained entries returns ones, not the old five.
+	var full kittyKeyboard
+	full.scan([]byte("\x1b[>5u"))
+	for range kittyStackMax - 1 {
+		full.scan([]byte("\x1b[>1u"))
+	}
+	if got := len(full.screens[0]); got != kittyStackMax {
+		t.Fatalf("stack depth = %d, want %d", got, kittyStackMax)
+	}
+	full.scan([]byte("\x1b[>2u")) // one more push evicts the oldest (5)
+	for range kittyStackMax - 1 {
+		full.scan([]byte("\x1b[<u"))
+	}
+	if got := full.flags(); got != 1 {
+		t.Fatalf("flags after evicting the oldest entry = %d, want the retained 1", got)
+	}
+	full.scan([]byte("\x1b[<9u"))
+	if got := full.flags(); got != 0 {
+		t.Fatalf("over-popping left flags %d, want 0", got)
+	}
+}

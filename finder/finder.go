@@ -146,7 +146,7 @@ func splitNUL(data []byte, atEOF bool) (advance int, token []byte, err error) {
 // index loads sees a coherent (empty or partial) new list instead of a stale complete one.
 type Index struct {
 	parent context.Context
-	enum   func(context.Context, func(string) bool) error
+	enum   func(context.Context, func(string) bool, func(string)) error
 
 	// lifecycle serializes Start/Close/Restart; mu guards the state readers use.
 	lifecycle sync.Mutex
@@ -159,6 +159,10 @@ type Index struct {
 	files     []string
 	truncated bool
 	err       error
+	// notice is a non-fatal message the enumeration attached to this run (for example
+	// "used a directory walk because the git file list was unavailable"). It is cleared
+	// when a run starts, so a reconnect/refresh does not keep a stale notice.
+	notice string
 }
 
 // Start begins enumerating root in a goroutine and returns at once. The index
@@ -176,12 +180,29 @@ func Start(ctx context.Context, root string) *Index {
 // backend with a flat file list (for example a remote `git ls-files` over the authority)
 // uses to feed the same Index the local walk fills. Start uses StartFunc internally.
 func StartFunc(ctx context.Context, enum func(context.Context, func(string) bool) error) *Index {
-	return startWith(ctx, enum)
+	return startNotifyWith(ctx, func(ctx context.Context, emit func(string) bool, _ func(string)) error {
+		return enum(ctx, emit)
+	})
 }
 
-// startWith is Start over any enumeration. Tests use it to feed a fake list.
-// enum must return when ctx is done and must stop when emit returns false.
+// StartFuncNotify is StartFunc with a non-fatal notice: enum may call notify(text) to
+// attach a message to this run (the last non-empty notice of the current run is kept; an
+// empty text is ignored). Restart clears it, so a reconnect or manual refresh does not
+// show a stale degradation. A run superseded by Restart cannot set its notice.
+func StartFuncNotify(ctx context.Context, enum func(context.Context, func(string) bool, func(string)) error) *Index {
+	return startNotifyWith(ctx, enum)
+}
+
+// startWith is Start over an enumeration without a notice; tests use it to feed a fake
+// list. enum must return when ctx is done and must stop when emit returns false.
 func startWith(ctx context.Context, enum func(context.Context, func(string) bool) error) *Index {
+	return startNotifyWith(ctx, func(ctx context.Context, emit func(string) bool, _ func(string)) error {
+		return enum(ctx, emit)
+	})
+}
+
+// startNotifyWith is the shared constructor of every Index start.
+func startNotifyWith(ctx context.Context, enum func(context.Context, func(string) bool, func(string)) error) *Index {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -200,6 +221,7 @@ func (x *Index) startLocked() {
 	gen := x.gen
 	done := make(chan struct{})
 	x.done = done
+	x.notice = ""
 	x.mu.Unlock()
 	ctx, cancel := context.WithCancel(x.parent)
 	x.cancel = cancel
@@ -210,7 +232,7 @@ func (x *Index) startLocked() {
 // run superseded by Restart cannot overwrite the fresh state; its own done channel is
 // always closed.
 func (x *Index) run(ctx context.Context, gen uint64, done chan struct{}) {
-	err := x.enum(ctx, func(rel string) bool { return x.addFor(gen, rel) })
+	err := x.enum(ctx, func(rel string) bool { return x.addFor(gen, rel) }, func(text string) { x.notifyFor(gen, text) })
 	x.mu.Lock()
 	if x.gen == gen {
 		x.err = err
@@ -239,6 +261,7 @@ func (x *Index) Restart() {
 	x.files = nil
 	x.truncated = false
 	x.err = nil
+	x.notice = ""
 	x.mu.Unlock()
 	if old != nil {
 		old()
@@ -290,6 +313,26 @@ func (x *Index) Loading() bool {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	return !closedDone(x.done)
+}
+
+// Notice returns the non-fatal message the current run attached, or "". It is cleared
+// when a run starts; a superseded run cannot change it.
+func (x *Index) Notice() string {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.notice
+}
+
+// notifyFor records one notice of run gen if it is still current.
+func (x *Index) notifyFor(gen uint64, text string) {
+	if text == "" {
+		return
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.gen == gen {
+		x.notice = text
+	}
 }
 
 // Truncated reports whether enumeration stopped at MaxFiles.

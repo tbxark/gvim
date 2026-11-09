@@ -95,8 +95,12 @@ type remoteEnvShell struct {
 
 	mu       sync.Mutex
 	prepared bool
-	shell    string
-	notice   string
+	// probing/probeWait single-flight the shell probe: Prepare, a capture and a
+	// post-reconnect Reprobes never run two probes or read a half-updated shell.
+	probing   bool
+	probeWait chan struct{}
+	shell     string
+	notice    string
 }
 
 func newRemoteEnvShell(slot func() authority.Slot, root func() string, onNotice func(string)) *remoteEnvShell {
@@ -123,14 +127,58 @@ func (r *remoteEnvShell) Notice() string {
 }
 
 func (r *remoteEnvShell) ensurePrepared(ctx context.Context) {
-	r.mu.Lock()
-	if r.prepared {
+	for {
+		r.mu.Lock()
+		if r.prepared {
+			r.mu.Unlock()
+			return
+		}
+		if r.probing {
+			wait := r.probeWait
+			r.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return
+			}
+		}
+		wait := make(chan struct{})
+		r.probing, r.probeWait = true, wait
 		r.mu.Unlock()
+		shell, notice := r.probe(ctx)
+		r.finishProbe(shell, notice, wait)
 		return
 	}
+}
+
+// Reprobes forces one new interactive-shell probe after a connection recovery and
+// refreshes the fallback state/notice. It is called off the UI update loop; a concurrent
+// capture waits for it through the same single-flight. A cancelled context abandons the
+// wait without claiming a shell (the previous state is kept).
+func (r *remoteEnvShell) Reprobes(ctx context.Context) {
+	r.mu.Lock()
+	r.prepared = false
 	r.mu.Unlock()
-	shell, notice := r.probe(ctx)
-	r.record(shell, notice)
+	for {
+		r.mu.Lock()
+		if !r.probing {
+			wait := make(chan struct{})
+			r.probing, r.probeWait = true, wait
+			r.mu.Unlock()
+			shell, notice := r.probe(ctx)
+			r.finishProbe(shell, notice, wait)
+			return
+		}
+		wait := r.probeWait
+		r.mu.Unlock()
+		select {
+		case <-wait:
+			continue
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (r *remoteEnvShell) probe(ctx context.Context) (shell, notice string) {
@@ -147,12 +195,31 @@ func (r *remoteEnvShell) probe(ctx context.Context) (shell, notice string) {
 	return "sh", "Remote environment: no interactive bash/zsh login shell was found on the host; using sh -c (environment recipes that rely on interactive init may differ from the terminal)"
 }
 
-func (r *remoteEnvShell) record(shell, notice string) {
+// finishProbe publishes one probe result and notifies the observer (an empty notice
+// clears a previous fallback state).
+func (r *remoteEnvShell) finishProbe(shell, notice string, wait chan struct{}) {
 	r.mu.Lock()
 	r.prepared, r.shell, r.notice = true, shell, notice
+	r.probing = false
+	if r.probeWait == wait {
+		r.probeWait = nil
+	}
 	cb := r.onNotice
 	r.mu.Unlock()
-	if cb != nil && notice != "" {
+	close(wait)
+	if cb != nil {
+		cb(notice)
+	}
+}
+
+// setNotice updates only the fallback notice, keeping the chosen shell (a per-capture
+// interactive failure does not discard the shell a later re-probe selected).
+func (r *remoteEnvShell) setNotice(notice string) {
+	r.mu.Lock()
+	r.notice = notice
+	cb := r.onNotice
+	r.mu.Unlock()
+	if cb != nil {
 		cb(notice)
 	}
 }
@@ -185,7 +252,7 @@ func (r *remoteEnvShell) RunCapture(ctx context.Context, command string) (string
 		err = fmt.Errorf("%s -ilc: %s", shell, msg)
 	}
 	notice := fmt.Sprintf("Remote environment: %s -ilc failed (%v); using sh -c for this capture (interactive init may not be available)", shell, err)
-	r.record(shell, notice)
+	r.setNotice(notice)
 	return r.RunDetect(ctx, command)
 }
 

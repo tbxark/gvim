@@ -49,7 +49,13 @@ shell when one is available — `bash -ilc` or `zsh -ilc`, preferring `$SHELL` w
 bash/zsh — so a detector that depends on interactive rc initialization captures the same
 environment the remote terminal gets. If no such shell is found, or the interactive
 invocation fails, the capture falls back to the previous `sh -c` path and records an
-explicit notice (startup notice and the Settings Environment rows). The captured delta is the environment the
+explicit notice (startup notice and the Settings Environment rows). After every successful
+authority reconnect the app re-probes the interactive shell in the background, off the UI
+update loop, and refreshes the fallback state/notice: a probe that failed at startup is no
+longer pinned to `sh -c` for the session, and a later successful probe clears the Settings
+fallback row. The re-probe is the same fixed pass-through command through the authority gate
+(an untrusted workspace refuses remote commands, so the fallback/notice reflects that), and
+the session context bounds it. The captured delta is the environment the
 remote terminal, the shell/formatter runner, remote LSP and remote project search/git grep
 receive. That keeps a local secret (or any local variable) out of every ssh command and
 makes the remote project environment actually take effect (R13-13); Fresh's
@@ -328,7 +334,8 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   remote LSP, remote project search and git grep receive; the local overlay is passed to no
   remote process. Activation is trust-gated exactly like the local path. The provider is
   warmed in the background after the authority connects (the remote root is expanded first);
-  spawn paths read the cached delta and never block the UI update loop on the remote host.
+  the interactive-shell probe is refreshed in the background after a reconnect; spawn paths
+  read the cached delta and never block the UI update loop on the remote host.
   Detection/activation is otherwise explicit (Env: Activate/Reload), matching local.
 - Remote launches (`gvim user@host:/path`, `ssh://...`): `authority.NewSSH` mounts a
   disconnected slot; a startup attempt dials it, and a failure is a status notice
@@ -403,11 +410,15 @@ Residuals of this slice (documented, not bugs):
   stays on `sh -c` (passive, untrusted-safe), so a shell whose rc changes detection semantics
   still differs from the terminal. Shell startup output before the command is discarded via a
   NUL marker; the interactive shell is run once per baseline/recipe capture (two remote
-  commands), so rc-sourcing latency is paid per capture but not per spawn. Changed remote env
-  input files are not watched (Env: Reload or a new activation re-captures), the detection
-  result is cached until Refresh/reconnect, the Settings Environment rows show the remote
-  facts only after the background warm, and there is no status-row indicator of the active
-  remote environment yet (Fresh shows one). Local behavior is unchanged.
+  commands), so rc-sourcing latency is paid per capture but not per spawn. A post-reconnect
+  re-probe updates the shell choice and the Settings fallback row but not the already-shown
+  startup notice, and it does not re-detect the env markers or recapture the overlay (Env:
+  Reload or a new activation re-captures); if the re-probe is cancelled/disconnected it
+  leaves a fallback notice reflecting that attempt. Changed remote env input files are not
+  watched (Env: Reload or a new activation re-captures), the detection result is cached until
+  Refresh/SetRoot, the Settings Environment rows show the remote facts only after the
+  background warm, and there is no status-row indicator of the active remote environment yet
+  (Fresh shows one). Local behavior is unchanged.
 - SSH authentication/connection residuals: ssh-agent forwarding and \`ssh_config\` reading
   (ProxyJump, Host aliases, IdentityAgent, host-key algorithms) are not implemented; the known
   hosts file is the default \`~/.ssh/known_hosts\` only; a supplied password/passphrase/2FA

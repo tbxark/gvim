@@ -168,19 +168,38 @@ func checkPublicHTTPAddr(ip netip.Addr) error {
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || !ip.IsGlobalUnicast() {
 		return httpPolicy("address %s is not public", ip)
 	}
-	for _, p := range []netip.Prefix{
-		netip.MustParsePrefix("100.64.0.0/10"),   // CGNAT
-		netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
-		netip.MustParsePrefix("198.18.0.0/15"),   // benchmarking
-		netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
-		netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
-		netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
-	} {
+	for _, p := range nonPublicHTTPPrefixes {
 		if p.Contains(ip) {
 			return httpPolicy("address %s is not public", ip)
 		}
 	}
 	return nil
+}
+
+// nonPublicHTTPPrefixes are address ranges that are not a public destination even though
+// netip.IsGlobalUnicast can report them as global. The IPv4-embedded IPv6 forms matter
+// for SSRF: a NAT64/6to4/Teredo/IPv4-compatible address can encode 127.0.0.1 or 10.0.0.1
+// and a translator/relay on the host's network may then reach the private IPv4 target,
+// so the whole translation prefix is refused rather than trying to decode every form.
+var nonPublicHTTPPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),   // CGNAT
+	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
+	netip.MustParsePrefix("198.18.0.0/15"),   // benchmarking
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
+	netip.MustParsePrefix("::/96"),           // IPv4-compatible (deprecated), can embed IPv4
+	netip.MustParsePrefix("64:ff9b::/96"),    // NAT64 well-known prefix
+	netip.MustParsePrefix("64:ff9b:1::/48"),  // local-use NAT64
+	netip.MustParsePrefix("2002::/16"),       // 6to4, embeds an IPv4 address
+	netip.MustParsePrefix("2001::/32"),       // Teredo, embeds an IPv4 address
+	netip.MustParsePrefix("fec0::/10"),       // deprecated IPv6 site-local (private)
+	netip.MustParsePrefix("2001:db8::/32"),   // documentation
+	netip.MustParsePrefix("2001:2::/48"),     // benchmarking
+	netip.MustParsePrefix("3fff::/20"),       // documentation (RFC 9637)
+	netip.MustParsePrefix("100::/64"),        // discard-only
+	netip.MustParsePrefix("2001:10::/28"),    // ORCHID overlay (not public)
+	netip.MustParsePrefix("2001:20::/28"),    // ORCHIDv2 overlay (not public)
 }
 
 // safeHTTPDial is the DialContext of the production transport: it resolves the host itself,

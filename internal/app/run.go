@@ -1170,6 +1170,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			// External-change watching restarts on the new carrier too; the generation
 			// bump there drops events from the dead one before they can reach the UI.
 			AfterReconnect: func() (int, error) {
+				// The remote interactive-login-shell probe is connection-scoped: re-probe
+				// after a reconnect off the UI goroutine and refresh the fallback notice
+				// (a probe that failed at startup must not pin the session to sh -c). The
+				// activation capture itself stays trust-gated and the probe is a fixed
+				// pass-through command, never a project snippet.
+				if envShell != nil {
+					go envShell.Reprobes(ctx)
+				}
 				remoteFileWatch.Reconnected()
 				// The remote git markers and the file list were read from the carrier
 				// that just dropped: invalidate the cached status (the TUI re-reads the

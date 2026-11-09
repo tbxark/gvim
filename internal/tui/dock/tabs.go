@@ -137,12 +137,11 @@ func (t *Tabs) tabBaseLabels() []string {
 			name = t.names[i]
 		}
 		if name == "" {
-			name = launchTitle(p.Launch())
-		}
-		if name == "" {
-			// A session/record title (OSC 0/2) names a plain shell's tab, live or
-			// restored; an explicit rename and the launch record still take precedence.
-			name = cleanTabTitle(p.TitleText())
+			// Fresh combines the command with the program's OSC title; gvim's
+			// available "command" is the recorded launch program (no pty foreground
+			// cache is kept — an OPEN residual). The OSC title never wins outright
+			// over a launch record: it becomes context for it.
+			name = combineTabTitle(launchTitle(p.Launch()), p.TitleText())
 		}
 		if name == "" {
 			name = "Terminal " + strconv.Itoa(i+1)
@@ -171,6 +170,27 @@ func commandBase(arg string) string {
 		return arg[i+1:]
 	}
 	return arg
+}
+
+// combineTabTitle is Fresh's combine_terminal_title in gvim's available terms:
+// the command leads and the OSC title follows as context
+// ("python3 — root@host: ~/proj"), except when the OSC title already names the
+// command case-insensitively (vim's "file - VIM"), which is used alone. Either
+// part alone is used as-is; both empty is "" (the caller falls back to
+// "Terminal N"). Both inputs are cleaned again here, so an untrusted OSC title
+// can never carry control characters into the strip or record.
+func combineTabTitle(command, osc string) string {
+	command, osc = cleanTabTitle(command), cleanTabTitle(osc)
+	switch {
+	case command == "":
+		return osc
+	case osc == "":
+		return command
+	}
+	if strings.Contains(strings.ToLower(osc), strings.ToLower(command)) {
+		return osc
+	}
+	return command + " " + "\u2014" + " " + osc
 }
 
 // cleanTabTitle strips control characters a title could carry into the strip and

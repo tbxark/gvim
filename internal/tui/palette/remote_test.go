@@ -3,6 +3,7 @@ package palette
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,11 +13,13 @@ type remoteErrorFiles struct {
 	loading   bool
 	err       error
 	truncated bool
+	notice    string
 }
 
 func (f remoteErrorFiles) Snapshot() ([]string, bool) { return f.files, f.loading }
 func (f remoteErrorFiles) Err() error                 { return f.err }
 func (f remoteErrorFiles) Truncated() bool            { return f.truncated }
+func (f remoteErrorFiles) Notice() string             { return f.notice }
 
 // remoteEmptyRanker returns no matches.
 type remoteEmptyRanker struct{}
@@ -44,16 +47,22 @@ func TestRemoteFileRowJoinsWithSlashes(t *testing.T) {
 // TestFileRowsSurfaceErrorAndTruncation checks the file mode distinguishes an index error
 // and a truncated list from a complete empty result.
 func TestFileRowsSurfaceErrorAndTruncation(t *testing.T) {
-	rows := fileRows(nil, false, 0, 0, "connection down", false)
+	rows := fileRows(nil, false, 0, 0, "connection down", false, "")
 	if len(rows) != 1 || rows[0].kind != rowMessage || rows[0].name != "File search failed: connection down" {
 		t.Fatalf("error rows = %+v", rows)
 	}
-	rows = fileRows([]Ranked{{Path: "a.go"}}, false, 0, 0, "", true)
+	rows = fileRows([]Ranked{{Path: "a.go"}}, false, 0, 0, "", true, "")
 	if len(rows) != 2 || rows[1].kind != rowMessage || rows[1].name == "" {
 		t.Fatalf("truncated rows = %+v", rows)
 	}
-	if rows := fileRows(nil, false, 0, 0, "", false); len(rows) != 0 {
+	if rows := fileRows(nil, false, 0, 0, "", false, ""); len(rows) != 0 {
 		t.Fatalf("complete empty rows = %+v", rows)
+	}
+	// A non-fatal index notice is one informative row after the results; it never
+	// replaces or disables them.
+	rows = fileRows([]Ranked{{Path: "a.go"}}, false, 0, 0, "", false, "Remote quick-open: using a directory walk")
+	if len(rows) != 2 || rows[0].kind != rowFile || rows[1].kind != rowMessage || !strings.Contains(rows[1].name, "using a directory walk") {
+		t.Fatalf("notice rows = %+v", rows)
 	}
 }
 
@@ -74,6 +83,11 @@ func TestRankCmdSurfacesIndexErrorAndTruncation(t *testing.T) {
 	}
 	if msg.Loading || msg.ErrText != "remote gone" || !msg.Truncated {
 		t.Fatalf("file ranked message = %+v", msg)
+	}
+	p = New(Options{Files: remoteErrorFiles{files: []string{"a.go"}, notice: "using a directory walk"}, Ranker: remoteEmptyRanker{}})
+	msg = p.rankCmd(2, "")().(FileRankedMsg)
+	if msg.Notice != "using a directory walk" {
+		t.Fatalf("file ranked notice = %q", msg.Notice)
 	}
 }
 

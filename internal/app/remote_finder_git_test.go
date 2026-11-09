@@ -207,3 +207,90 @@ func TestRemoteFileIndexGitCandidateCancellation(t *testing.T) {
 		t.Fatalf("index error = %v, want context.Canceled", idx.Err())
 	}
 }
+
+func (o *finderGitOneShot) setList(listing []byte, code int, truncated bool) {
+	o.mu.Lock()
+	o.listing = listing
+	o.listCode = code
+	o.truncated = truncated
+	o.mu.Unlock()
+}
+
+// TestRemoteFileIndexFallbackNotice checks the remote finder surfaces a non-blocking notice
+// when the git candidate path cannot be used, while still listing the fallback walk; a plain
+// non-git workspace is not a degradation and has no notice.
+func TestRemoteFileIndexFallbackNotice(t *testing.T) {
+	cases := map[string]struct {
+		makeOne func() *finderGitOneShot
+		want    string // "" means no notice
+	}{
+		"listing failed": {
+			makeOne: func() *finderGitOneShot { return &finderGitOneShot{repo: true, listCode: 128} },
+			want:    "git file list failed",
+		},
+		"listing truncated": {
+			makeOne: func() *finderGitOneShot { return &finderGitOneShot{repo: true, truncated: true} },
+			want:    "git file list failed",
+		},
+		"probe failed": {
+			makeOne: func() *finderGitOneShot { return &finderGitOneShot{failProbe: errors.New("no git")} },
+			want:    "git could not run",
+		},
+		"not a repository": {
+			makeOne: func() *finderGitOneShot { return &finderGitOneShot{repo: false} },
+			want:    "",
+		},
+		"successful git": {
+			makeOne: func() *finderGitOneShot {
+				return &finderGitOneShot{repo: true, listing: []byte(gitLsEntry("100644", "git.go"))}
+			},
+			want: "",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fs := newRemoteFinderFake().dir("/remote/w", "walked.go")
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, tc.makeOne()), "/remote/w")
+			waitRemoteIndex(t, idx)
+			files, _ := idx.Snapshot()
+			if tc.want == "" {
+				if got := idx.Notice(); got != "" {
+					t.Fatalf("notice = %q, want none", got)
+				}
+				return
+			}
+			got := idx.Notice()
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("notice = %q, want %q", got, tc.want)
+			}
+			if len(files) == 0 {
+				t.Fatal("the fallback walk listed no files")
+			}
+		})
+	}
+}
+
+// TestRemoteFileIndexNoticeClearsOnRefresh checks the reconnect/refresh path: a failed git
+// listing's notice is cleared by the next successful Restart, which re-reads the git list.
+func TestRemoteFileIndexNoticeClearsOnRefresh(t *testing.T) {
+	fs := newRemoteFinderFake().dir("/remote/w", "walked.go")
+	one := &finderGitOneShot{repo: true, listCode: 128}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w")
+	waitRemoteIndex(t, idx)
+	if got := idx.Notice(); !strings.Contains(got, "git file list failed") {
+		t.Fatalf("first notice = %q", got)
+	}
+	one.setList([]byte(gitLsEntry("100644", "b.go")), 0, false)
+	idx.Restart()
+	waitRemoteIndex(t, idx)
+	if got := idx.Notice(); got != "" {
+		t.Fatalf("notice after a successful refresh = %q, want cleared", got)
+	}
+	if files, _ := idx.Snapshot(); strings.Join(files, ",") != "b.go" {
+		t.Fatalf("snapshot after refresh = %v, want b.go", files)
+	}
+}

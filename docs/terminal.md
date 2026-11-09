@@ -294,11 +294,17 @@ background tabs' exited markers current.
   The title is additive in the saved record: a `title` per tab and mirrored at the
   top level, so a restored tab keeps its recorded title and re-saves it even
   without a live shell; an old record has no `title` and keeps its derived label.
-  The visible effect is the tab label: an explicit rename wins, then the launch
-  record's program/agent name, then the recorded (or live) OSC title, then
-  `Terminal N`; the strip still disambiguates and truncates it like any other
-  title. The record format stays version 1, old readers ignore the field, and a
-  corrupt/overlong title is cleaned again on load.
+  The visible effect is the tab label, following Fresh's
+  `combine_terminal_title`: an explicit rename wins; otherwise the recorded launch
+  program (argv[0]/agent — Fresh's "command leads" half) and the recorded or live
+  OSC title are combined as `command — title` (em dash), except when the OSC title
+  already names the command case-insensitively (vim's `file - VIM`), which is used
+  alone; either part alone is used as-is and both empty falls back to `Terminal N`.
+  The strip's duplicate disambiguation and cell-budget truncation still apply, and
+  an untrusted title is cleaned again before painting/combining. The record format
+  stays version 1, old readers ignore the field, old records without a title keep
+  exactly their old command/default label, and a corrupt/overlong title is cleaned
+  again on load.
 - **Screen snapshot.** Next to the text rows the record carries an optional
   `screen` object: a bounded, **styled** snapshot of the backing-file remainder —
   the visible screen, a styled history window above it, the cursor and the
@@ -390,9 +396,10 @@ byte-exact (deep history beyond 200 rows is text-only), OSC 1 icon names, OSC 7
 cwd, OSC 52 clipboard and hyperlinks are not replayed, per-cell hyperlinks are not
 representable in the snapshot (the cell encoding has no link field), the cursor
 shape is recorded but the read-only view paints it as a block (the restored shell
-does not inherit the old DECSCUSR mode), the recorded OSC 0/2 title is not
-recombined with a foreground-process name the way Fresh's combine_terminal_title
-does (gvim has no pty foreground cache), and alternate-screen content is restored
+does not inherit the old DECSCUSR mode), the OSC 0/2 title is combined with the
+recorded launch program rather than Fresh's live foreground-process name (gvim
+keeps no pty foreground cache, so a program that later starts a different
+foreground process inside the shell is not reflected — OPEN), and alternate-screen content is restored
 only as the read-only transcript frame: a revived shell starts on its own main
 screen, the main screen's history while the alt screen was active is not captured
 (the alt screen has no scrollback), and the alt frame is bounded by the same
@@ -838,7 +845,9 @@ These are known gaps, not bugs:
   tracks `CSI > flags u` (push), `CSI < n u` (pop) and `CSI = flags ; mode u`
   (set/add/remove) in a separate flags stack for the main and alternate screens, so a TUI that
   switches screens keeps the right mode; stacks and partial sequences are bounded (64 entries,
-  128 bytes). While the flags are non-zero the dock encodes the keys it sends to that child in
+  128 bytes), an omitted push flags value defaults to zero, a full stack evicts its oldest entry,
+  and popping past the bottom resets the flags. While the flags are non-zero the dock encodes the
+  keys it sends to that child in
   CSI-u form following the protocol reference: with disambiguation, Esc, modified printable keys,
   modified Enter/Tab/Backspace and chords such as Ctrl+I / Alt+[ become `CSI ... u` (Ctrl+I
   is no longer the Tab byte), and functional keys use their CSI form even unmodified (arrows
@@ -848,9 +857,12 @@ These are known gaps, not bugs:
   gets exactly the old legacy encoding (the app-cursor SS3/CSI rules apply only there).
   Limits, matching Fresh: the dock forwards key presses only — release events are not sent to the
   child even when report-event-types is set (repeats arrive as presses), so presses carry no
-  event-type field; modifier-only keys, media keys and the protocol's F13+ codes are not encoded;
-  and gvim's own host-terminal kitty negotiation/parsing stays Bubble Tea's job (the editor does
-  not request extra host flags). The flags live in the session, so a restarted shell starts at
+  event-type field; lock, media, keypad and F13-F35 keys use their protocol numbers,
+  modifier-only keys are reported only under report-all-keys, and keys with no protocol number
+  (or beyond F35) stay legacy; the alternate-key field carries the shifted key but not a separate
+  base-layout key; and gvim's own host-terminal kitty negotiation/parsing stays Bubble Tea's job
+  (the editor does not request extra host flags). The flags live in the session, so a restarted
+  shell starts at
   zero and a child that pops all entries (or exits) is back on legacy encoding; a child that pushes
   on the main screen and leaves it gets its main-screen flags back when it returns.
 - **close_on_exit for report-split terminals**: gvim only has the dock.

@@ -355,6 +355,38 @@ local function github_nwo(repo_url)
   return owner .. "/" .. repo
 end
 
+-- PR rows come from an untrusted REST response: never use an API-provided link. The
+-- URL is rebuilt from the repository slug the dashboard itself normalized and a strictly
+-- validated positive integer PR number, so a hostile body cannot introduce another host
+-- or scheme; gvim.url.open still applies its own scheme policy and Yes/No confirmation.
+local function pull_url(nwo, number)
+  return "https://github.com/" .. nwo .. "/pull/" .. number
+end
+
+local function pull_number(value)
+  if type(value) ~= "number" or value ~= math.floor(value) or value < 1 or value > 999999999 then
+    return nil
+  end
+  return string.format("%d", value)
+end
+
+-- pr_title keeps a display string from untrusted JSON: non-strings, control characters
+-- and runaway lengths are replaced/clipped instead of reaching the frame verbatim.
+local function pr_title(value)
+  if type(value) ~= "string" then
+    return "(untitled)"
+  end
+  local text = value:gsub("[%c\127]", " "):gsub("%s+", " ")
+  text = text:match("^%s*(.-)%s*$") or ""
+  if text == "" then
+    return "(untitled)"
+  end
+  if #text > 200 then
+    text = gvim.text.truncate(text, 200, "…")
+  end
+  return text
+end
+
 local function fetch_github()
   if not settings.github_prs then
     state.github = nil
@@ -391,16 +423,22 @@ local function fetch_github()
     return
   end
   local rows = {}
+  local examined = 0
   for _, pr in ipairs(list) do
-    if #rows >= GITHUB_MAX_ROWS then
+    examined = examined + 1
+    if examined > 200 or #rows >= GITHUB_MAX_ROWS then
       break
     end
-    if type(pr) == "table" and pr.number then
-      rows[#rows + 1] = {
-        number = pr.number,
-        title = tostring(pr.title or ""),
-        draft = pr.draft == true,
-      }
+    if type(pr) == "table" then
+      local number = pull_number(pr.number)
+      if number then
+        rows[#rows + 1] = {
+          number = number,
+          title = pr_title(pr.title),
+          draft = pr.draft == true,
+          url = pull_url(nwo, number),
+        }
+      end
     end
   end
   state.github = { at = now, rows = rows }
@@ -554,9 +592,11 @@ local function build_rows(inner)
     elseif not gh.rows or #gh.rows == 0 then
       kv("PRs", "no open PRs", STYLE.muted)
     else
-      for _, pr in ipairs(gh.rows) do
+      for i, pr in ipairs(gh.rows) do
+        local label = "#" .. tostring(pr.number)
         local title = pr.draft and ("draft " .. pr.title) or pr.title
-        kv("#" .. tostring(pr.number), title, STYLE.value)
+        local target = "dashboard.click_pr_" .. i
+        action_row(label, title, { kind = "action", action = target, target = target })
       end
     end
   end
@@ -946,6 +986,21 @@ end)
 register_hidden("click_branch_url", function()
   open_url(state.git and state.git.branch_url or "")
 end)
+
+-- One hidden command per PR row (the API caps the section at GITHUB_MAX_ROWS): a click
+-- on the PR line or Enter on its keyboard row dispatches it through the same command
+-- runner as the other dashboard rows, and it opens the URL gvim.url.open validated and
+-- confirmed.
+for i = 1, GITHUB_MAX_ROWS do
+  register_hidden("click_pr_" .. i, function()
+    local row = state.github and state.github.rows and state.github.rows[i]
+    if not row or not row.url or row.url == "" then
+      notify("Dashboard: no PR URL")
+      return
+    end
+    open_url(row.url)
+  end)
+end
 
 register_hidden("focus_next", function() focus_next(1) end)
 register_hidden("focus_prev", function() focus_next(-1) end)

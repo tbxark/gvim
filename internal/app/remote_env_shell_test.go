@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/authority/authoritytest"
@@ -17,10 +18,14 @@ type shellScript struct {
 	mu        sync.Mutex
 	calls     []oneShotCall
 	probe     string
+	probeErr  error  // when set, the shell probe fails (disconnected/untrusted)
 	failShell string // when set, the interactive <shell> -ilc call fails
 }
 
-func (s *shellScript) Run(_ context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+func (s *shellScript) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	if err := ctx.Err(); err != nil {
+		return hostos.ProcResult{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	call := oneShotCall{argv: append([]string(nil), argv...), cwd: o.Cwd, env: map[string]string{}}
@@ -30,6 +35,9 @@ func (s *shellScript) Run(_ context.Context, argv []string, o hostos.ProcOptions
 	s.calls = append(s.calls, call)
 	switch {
 	case len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" && argv[2] == remoteEnvShellProbe:
+		if s.probeErr != nil {
+			return hostos.ProcResult{}, s.probeErr
+		}
 		return hostos.ProcResult{Stdout: []byte(s.probe)}, nil
 	case len(argv) == 3 && (argv[0] == "bash" || argv[0] == "zsh") && argv[1] == "-ilc":
 		if s.failShell == argv[0] {
@@ -123,7 +131,11 @@ func TestRemoteEnvShellInteractiveFailureFallsBack(t *testing.T) {
 	if !strings.Contains(got, "zsh -ilc failed") || !strings.Contains(got, "using sh -c for this capture") {
 		t.Fatalf("failure notice = %q", got)
 	}
-	if len(notices) == 0 || !strings.Contains(notices[0], "zsh -ilc failed") {
+	lastNotice := ""
+	if len(notices) > 0 {
+		lastNotice = notices[len(notices)-1]
+	}
+	if !strings.Contains(lastNotice, "zsh -ilc failed") {
 		t.Fatalf("notice callback = %v", notices)
 	}
 	script.mu.Lock()
@@ -145,5 +157,96 @@ func TestRemoteEnvShellDetectionStaysOnSh(t *testing.T) {
 	last := script.calls[len(script.calls)-1]
 	if last.argv[0] != "sh" || last.argv[1] != "-c" {
 		t.Fatalf("detection argv = %v, want plain sh -c even with bash available", last.argv)
+	}
+}
+
+func TestRemoteEnvShellReprobesAfterReconnect(t *testing.T) {
+	script := &shellScript{probe: "sh"}
+	var notices []string
+	runner := newShellEnvRunner(t, script, &notices)
+	runner.Prepare(context.Background())
+	if got := runner.Notice(); !strings.Contains(got, "no interactive bash/zsh") {
+		t.Fatalf("initial fallback notice = %q", got)
+	}
+
+	// The reconnect probe now finds bash: the fallback state and notice are refreshed,
+	// and the next capture uses the interactive shell.
+	script.mu.Lock()
+	script.probe = "bash"
+	script.mu.Unlock()
+	runner.Reprobes(context.Background())
+	if got := runner.Notice(); got != "" {
+		t.Fatalf("notice after successful re-probe = %q, want cleared", got)
+	}
+	if len(notices) == 0 || notices[len(notices)-1] != "" {
+		t.Fatalf("notice callback after re-probe = %v, want an empty (clearing) notice", notices)
+	}
+	out, err := runner.RunCapture(context.Background(), "cd /remote/proj && env -0")
+	if err != nil || !strings.Contains(out, "PATH=/venv/bin") {
+		t.Fatalf("capture after re-probe = %q, %v", out, err)
+	}
+	script.mu.Lock()
+	calls := append([]oneShotCall(nil), script.calls...)
+	script.mu.Unlock()
+	if calls[len(calls)-1].argv[0] != "bash" || calls[len(calls)-1].argv[1] != "-ilc" {
+		t.Fatalf("capture after re-probe = %v, want bash -ilc", calls[len(calls)-1].argv)
+	}
+}
+
+func TestRemoteEnvShellReprobeRefreshesAFailedProbe(t *testing.T) {
+	script := &shellScript{probe: "bash", probeErr: errors.New("workspace is not trusted")}
+	var notices []string
+	runner := newShellEnvRunner(t, script, &notices)
+	runner.Prepare(context.Background())
+	if got := runner.Notice(); !strings.Contains(got, "could not detect an interactive login shell") || !strings.Contains(got, "not trusted") {
+		t.Fatalf("failed-probe notice = %q", got)
+	}
+	script.mu.Lock()
+	script.probeErr = nil
+	script.mu.Unlock()
+	runner.Reprobes(context.Background())
+	if got := runner.Notice(); got != "" {
+		t.Fatalf("notice after re-probe = %q, want cleared", got)
+	}
+}
+
+func TestRemoteEnvShellReprobeCancellationIsBounded(t *testing.T) {
+	script := &shellScript{probe: "bash"}
+	runner := newShellEnvRunner(t, script, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		runner.Reprobes(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a cancelled re-probe did not return")
+	}
+	// The cancelled probe cannot upgrade the shell; the runner records the fallback
+	// notice from the cancelled command instead of hanging or claiming bash.
+	if got := runner.Notice(); !strings.Contains(got, "could not detect an interactive login shell") {
+		t.Fatalf("cancelled-reprobe notice = %q", got)
+	}
+}
+
+func TestRemoteEnvShellConcurrentCaptureAndReprobe(t *testing.T) {
+	script := &shellScript{probe: "bash"}
+	runner := newShellEnvRunner(t, script, nil)
+	runner.Prepare(context.Background())
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runner.Reprobes(context.Background())
+			_, _ = runner.RunCapture(context.Background(), "cd /remote/proj && env -0")
+		}()
+	}
+	wg.Wait()
+	if got := runner.Notice(); got != "" {
+		t.Fatalf("notice after concurrent re-probes = %q", got)
 	}
 }

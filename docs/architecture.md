@@ -674,7 +674,7 @@ still loads unchanged.
   disk). In a git work tree it uses Fresh's project-file list: one bounded authority
   one-shot `git rev-parse --is-inside-work-tree`, then one bounded
   `git ls-files -z -s --cached --others --exclude-standard` (8 MiB / 20 s) fed through the
-  additive `finder.StartFunc`. That single listing traversal replaces the recursive
+  additive `finder.StartFuncNotify`. That single listing traversal replaces the recursive
   per-directory ReadDir for the git path and needs no client-side .gitignore reader:
   tracked files (including tracked files that match .gitignore) and untracked non-ignored
   files are emitted. The listing is filtered before emit — no .git internals, hidden path
@@ -685,7 +685,12 @@ still loads unchanged.
   git work tree, git missing/failing, a truncated listing, or a nested repository/submodule
   that git lists by name only — fall back to the previous recursive authority walk (bounded
   directories/depth, skip dirs/hidden, no symlink traversal, remote .gitignore reader)
-  instead of silently dropping files. A root read failure of the fallback walk is the index
+  instead of silently dropping files. A git probe/listing failure that forces this fallback
+  is not silent: the index carries one non-fatal `Notice` (via `StartFuncNotify`) and the
+  Quick Open file mode shows it as one informative row after the results, without hiding or
+  disabling them. A plain non-git workspace and the nested-repository fallback are not
+  degradations and carry no notice; Restart/refresh clears the notice, so a reconnect does
+  not show a stale one. A root read failure of the fallback walk is the index
   error and is shown as a
   `File search failed: ...` row; a truncated list shows an incomplete-list row instead of
   posing as the whole project; subdirectory failures keep the rest (partial list). A `~`
@@ -695,8 +700,9 @@ still loads unchanged.
   the local file preview is never used for a remote file mode (the remote data bullet below wires an authority-backed previewer). Gaps: Quick Open's default hidden filter still leaves hidden tracked files out (the git
   listing is filtered like the walk), the fallback walk paths still use the client-side
   remote ignore reader, nested-repository/submodule contents appear only through the
-  fallback path, non-UTF-8 paths are omitted (Fresh leaves them out too), and a truncated
-  git listing falls back to the recursive walk rather than keeping a partial one. Remote
+  fallback path, non-UTF-8 paths are omitted (Fresh leaves them out too), a truncated git
+  listing falls back to the recursive walk rather than keeping a partial one, and the
+  fallback notice's English literal awaits the next i18n extraction. Remote
   file preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
   remote workspace instead of silently searching the local project, the palette file
   preview is cleared, and the local git-status adapter is replaced by an inert one: local
