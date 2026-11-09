@@ -50,6 +50,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 				Files: []session.FileState{
 					{Path: "/work/project/main.go", Line: 12, Col: 4, Top: 3},
 					{Path: "/work/project/notes.md", Line: 1, Col: 0, Top: 0, StashFile: "stash-123.txt"},
+					{Label: "Untitled-1"},
+				},
+				MRU: []session.MruFile{
+					{Path: "/work/project/notes.md"},
+					{Label: "Untitled-1"},
+					{Path: "/work/project/main.go"},
 				},
 			},
 		},

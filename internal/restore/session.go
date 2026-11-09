@@ -58,6 +58,10 @@ func WriteSessionWithLayout(ed *editor.Editor, dir string, st tui.ExplorerState,
 // and the next start tries to restore it again.
 func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState, layouts ...*session.SplitLayout) error {
 	tabs := ed.Tabs()
+	// The MRU order must be read before the save loop activates every tab; that loop
+	// is what changes the history. The order is mapped to document paths below, never
+	// persisted as runtime identity or tab index.
+	mruTabs := ed.RecentTabIndices()
 	orig := -1
 	for i, t := range tabs {
 		if t.Active {
@@ -70,6 +74,7 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 		}
 	}()
 	var files, failedStashes []session.FileState
+	savedByTab := make(map[int]int, len(tabs))
 	active := 0
 	for i := range tabs {
 		ed.ActivateTab(i)
@@ -127,7 +132,16 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 		if i == orig {
 			active = len(files)
 		}
+		savedByTab[i] = len(files)
 		files = append(files, fs)
+	}
+	var mru []session.MruFile
+	for _, tabIndex := range mruTabs {
+		fileIndex, ok := savedByTab[tabIndex]
+		if !ok {
+			continue // a virtual tab or an empty untitled buffer is not saved
+		}
+		mru = append(mru, session.MruFile{Path: files[fileIndex].Path, Label: files[fileIndex].Label})
 	}
 	files = append(files, failedStashes...)
 	files = append(files, kept...)
@@ -142,6 +156,7 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 		ShowIgnored: st.ShowIgnored,
 		Active:      active,
 		Files:       files,
+		MRU:         mru,
 		Sidebar:     SaveSidebarState(st.Sidebar),
 		Layout:      layout,
 	})
@@ -201,8 +216,18 @@ func restoreHotExitFiles(ed *editor.Editor, dir string, s session.Session, exist
 func restoreFiles(ed *editor.Editor, dir string, s session.Session, replace bool, exists func(path string) bool) []Unrestored {
 	var failed []Unrestored
 	active := -1
+	// restoredByFile maps a saved Files index to the tab it became, or -1 when the
+	// file was skipped (gone, renamed away, or not opened). It is how the saved MRU
+	// finds the new document identities without trusting file order.
+	restoredByFile := make([]int, len(s.Files))
+	for i := range restoredByFile {
+		restoredByFile[i] = -1
+	}
 	for i, f := range s.Files {
 		opened, err := restoreFile(ed, dir, f, replace, exists)
+		if opened {
+			restoredByFile[i] = activeIndex(ed)
+		}
 		if err != nil {
 			if f.StashFile != "" || f.OverlayFile != "" {
 				failed = append(failed, Unrestored{File: f, Err: err, Stash: filepath.Join(dir, cmp.Or(f.OverlayFile, f.StashFile))})
@@ -219,6 +244,7 @@ func restoreFiles(ed *editor.Editor, dir string, s session.Session, replace bool
 	if active >= 0 {
 		ed.ActivateTab(active)
 	}
+	applySessionMru(ed, s, restoredByFile)
 	return failed
 }
 

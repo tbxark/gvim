@@ -1,0 +1,7 @@
+{
+  "name": "welcome",
+  "version": "1.0.0",
+  "description": "Plugin API demo commands (open help, save file, insert a greeting, the current time or a comment) ported from Fresh's welcome plugin",
+  "api": 2,
+  "default_enabled": false
+}

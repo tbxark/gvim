@@ -121,6 +121,9 @@ func TestWorkspaceCaptureMatchesWriteSession(t *testing.T) {
 	if !reflect.DeepEqual(got.Sidebar, ref.Sidebar) {
 		t.Fatalf("sidebar differs:\n got %+v\nref %+v", got.Sidebar, ref.Sidebar)
 	}
+	if !reflect.DeepEqual(got.MRU, ref.MRU) {
+		t.Fatalf("MRU differs:\n got %+v\nref %+v", got.MRU, ref.MRU)
+	}
 	if len(got.Files) != len(ref.Files) {
 		t.Fatalf("files = %d, want %d", len(got.Files), len(ref.Files))
 	}

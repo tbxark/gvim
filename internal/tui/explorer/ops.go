@@ -46,6 +46,14 @@ type (
 	}
 	// PasteMsg pastes the explorer clipboard into Dir (Ctrl+V).
 	PasteMsg struct{ Dir string }
+	// MoveMsg asks the root to move Paths into Dir. The panel sends it when a mouse
+	// drag lifts one or more rows and drops them on a directory (or a file's parent);
+	// the root confirms it before moving anything. It never touches the clipboard: a
+	// drag/lifted row is not a cut.
+	MoveMsg struct {
+		Dir   string
+		Paths []string
+	}
 )
 
 // Conflict is what a copy does when its destination already exists. It mirrors

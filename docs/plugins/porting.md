@@ -378,6 +378,28 @@ header→source switches (single match, picker choice), no-match/unsupported/no-
 the project-setup buffer with a ready project and with missing compile/.clangd pieces (including buffer
 reuse and build-system hints), and open-config found/missing. The tests register openable targets on
 both the fake host and the fake OS.
+### Welcome: a demo plugin, with localized status only in English (port residual)
+
+Fresh's `welcome.ts` is a plugin-API demo, not a feature: five palette commands, two of which
+dispatch built-in actions (`show_help`, `save`) and three of which insert text at the cursor. The
+gvim port (`plugin/bundled/plugins/welcome/`, opt-in) keeps the same five commands and calls the
+same gvim actions/buffer APIs; the differences are:
+
+* `insertAtCursor` maps to `b:insert(b:cursor(), text)`, so it is a plain edit with one undo step
+  and no auto-indent/auto-close; a read-only buffer reports the API's insert error on the status
+  row;
+* the example comment is language-aware (`--`, `#`, or `//`) instead of Fresh's hard-coded `//`, so
+  it is valid in more than C-like files;
+* the clock is `os.date("%H:%M:%S")` (local 24-hour time) rather than the runtime's locale
+  `toLocaleTimeString`, and the status/greeting/comment strings are English-only (the port has one
+  i18n file, `en`);
+* Fresh's only load-time feedback is `debug` output; gvim's port logs the same debug line and
+  deliberately sets no status row.
+
+Tests: `plugin/bundled/welcome_test.go` covers the five command titles/no bindings, the two
+built-in action dispatches, greeting and time insertion into an edited buffer with their status
+lines, the language-aware comment prefix, and the read-only insert failure. The plugin is
+`default_enabled: false` so the default palette and idle heap do not grow with demo rows.
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

@@ -77,6 +77,9 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 	}
 	ed := s.rt.ed
 	tabs := ed.Tabs()
+	// Read the MRU before the capture loop activates every tab (that changes the
+	// history); it is stored as saved paths/labels just like restore.WriteSession.
+	mruTabs := ed.RecentTabIndices()
 	orig := -1
 	for i, t := range tabs {
 		if t.Active {
@@ -89,6 +92,7 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 		}
 	}()
 	var files []session.FileState
+	savedByTab := make(map[int]int, len(tabs))
 	active := 0
 	for i := range tabs {
 		ed.ActivateTab(i)
@@ -136,7 +140,15 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 		if i == orig {
 			active = len(files)
 		}
+		savedByTab[i] = len(files)
 		files = append(files, fs)
+	}
+	for _, tabIndex := range mruTabs {
+		fileIndex, ok := savedByTab[tabIndex]
+		if !ok {
+			continue // a virtual tab or an empty untitled buffer is not saved
+		}
+		snap.layout.MRU = append(snap.layout.MRU, session.MruFile{Path: files[fileIndex].Path, Label: files[fileIndex].Label})
 	}
 	for _, f := range snap.failed {
 		files = append(files, session.FileState{Path: f.path})

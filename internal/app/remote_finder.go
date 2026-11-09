@@ -108,9 +108,9 @@ func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (
 // segment and no depth beyond the finder's remote depth bound. The file cap and
 // cancellation stay in the finder Index.
 func remoteFinderGitCandidates(ctx context.Context, slot authority.Slot, root string) ([]string, bool, string) {
-	const (
-		gitUnavailable = "Remote quick-open: git could not run on the remote host; listing the workspace with a directory walk (ignore filtering follows the walk)."
-		gitListFailed  = "Remote quick-open: the remote git file list failed or was truncated; listing the workspace with a directory walk (ignore filtering may differ)."
+	var (
+		gitUnavailable = appText("gvim.notice.remote_git_unavailable", "Remote quick-open: git could not run on the remote host; listing the workspace with a directory walk (ignore filtering follows the walk).")
+		gitListFailed  = appText("gvim.notice.remote_git_list_failed", "Remote quick-open: the remote git file list failed or was truncated; listing the workspace with a directory walk (ignore filtering may differ).")
 	)
 	if slot == nil {
 		return nil, false, ""

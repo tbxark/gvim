@@ -1,0 +1,23 @@
+{
+  "en": {
+    "cmd.open_help": "Plugin Demo: Open Help",
+    "cmd.open_help_desc": "Open the editor's help page (runs the built-in action)",
+    "cmd.save_file": "Plugin Demo: Save File",
+    "cmd.save_file_desc": "Save the current file (runs the built-in action)",
+    "cmd.say_hello": "Plugin Demo: Say Hello",
+    "cmd.say_hello_desc": "Insert a friendly greeting at the cursor",
+    "cmd.insert_time": "Plugin Demo: Insert Time",
+    "cmd.insert_time_desc": "Insert the current time at the cursor",
+    "cmd.insert_comment": "Plugin Demo: Insert Comment",
+    "cmd.insert_comment_desc": "Insert an example comment at the cursor",
+    "status.greeting_inserted": "Greeting inserted at the cursor",
+    "status.time_inserted": "Current time inserted at the cursor",
+    "status.comment_inserted": "The plugin inserted a comment",
+    "status.no_buffer": "No buffer to insert into",
+    "status.insert_failed": "Could not insert the text: %{error}",
+    "status.action_failed": "%{action} failed: %{error}",
+    "text.greeting": "Hello from a Lua plugin! The plugin system works.",
+    "text.time": "Current time: %{time}",
+    "text.comment": "This comment was inserted by a plugin!"
+  }
+}

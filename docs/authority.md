@@ -42,9 +42,13 @@ local backend applies the same rule as the remote ones.
 An `EnvProvider` is merged into LOCAL children only. A remote launch never sends the
 local overlay: its environment is `env.Remote`, whose marker probe and activation
 recipe run on the REMOTE host through the authority's one-shot surface (a raw exec with no
-env map of its own, so capture cannot recurse). Marker detection stays a passive `sh -c`
-probe (it may run in an untrusted workspace, so it must not source an interactive rc from a
-project cwd); the trusted activation baseline/recipe runs under the user's interactive login
+env map of its own, so capture cannot recurse). Marker detection is trust-gated: only a
+trusted workspace may run the one bounded, cancellable `sh -c` existence probe (it checks
+both the detectors' markers and their require evidence; nothing is executed beyond the fixed
+shell test and rc files are not sourced), and an untrusted workspace runs no remote command,
+reports an explicit Settings notice and shows no detector. A failed probe clears the
+detection and leaves a notice (never a local scan or a stale result); the trusted activation
+baseline/recipe runs under the user's interactive login
 shell when one is available — `bash -ilc` or `zsh -ilc`, preferring `$SHELL` when it is
 bash/zsh — so a detector that depends on interactive rc initialization captures the same
 environment the remote terminal gets. If no such shell is found, or the interactive
@@ -336,8 +340,10 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   `pluginhost.Options.WrapOS` seam): plugin processes receive the remote captured environment
   from the authority, never the local overlay, so a remote-captured variable cannot leak back
   into local children.
-- Remote launches' environment (R13-13): `env.Remote` detects the configured markers on the
-  remote host (one bounded passive `sh -c` probe of the marker files) and activates the recipe
+- Remote launches' environment (R13-13): `env.Remote` detects the configured markers and
+  require evidence on the remote host (one bounded passive `sh -c` existence probe, only in
+  a trusted workspace; untrusted/failed probes produce a Settings notice, never a local
+  scan) and activates the recipe
   through the authority one-shot surface under the remote interactive login shell
   (`bash -ilc`/`zsh -ilc` when detected), diffing the remote activated environment against
   the same interactive-login baseline. Its captured delta is what the remote terminal, shell/formatter runner,
@@ -416,15 +422,20 @@ Residuals of this slice (documented, not bugs):
   terminal is restarted explicitly today.
 - Remote environment residuals: interactive-login capture supports bash and zsh only; other
   shells (fish, csh, ...) keep the `sh -c` fallback, and a bash/zsh whose interactive rc is
-  unavailable or fails falls back per capture with a notice. Marker detection deliberately
-  stays on `sh -c` (passive, untrusted-safe), so a shell whose rc changes detection semantics
-  still differs from the terminal. Shell startup output before the command is discarded via a
-  NUL marker; the interactive shell is run once per baseline/recipe capture (two remote
+  unavailable or fails falls back per capture with a notice. Marker detection is one
+  trust-gated `sh -c` existence command (markers plus require paths, bounded by the config's
+  detector/marker caps, the command timeout/output bound and the caller context); an
+  untrusted workspace runs no probe and shows an explicit Settings detection notice, a
+  failed/cancelled probe clears detection and shows the failure notice and is retried on the
+  next Warm/Overlay rather than cached. Fresh's marker scan is a passive filesystem scan
+  (used while trust is still undecided); gvim's remote probe needs the remote command gate,
+  so before trust the remote detector is simply absent (the rest of the remote trust flow is
+  unchanged). Shell startup output before the command is discarded via a NUL marker; the interactive shell is run once per baseline/recipe capture (two remote
   commands), so rc-sourcing latency is paid per capture but not per spawn. A post-reconnect
   re-probe updates the shell choice and the Settings fallback row but not the already-shown
   startup notice, and it does not re-detect the env markers or recapture the overlay (Env:
   Reload or a new activation re-captures); if the re-probe is cancelled/disconnected it
-  leaves a fallback notice reflecting that attempt. Changed remote env input files are not
+  leaves a fallback notice reflecting that attempt. Changed remote env input files are
   watched through authority polled watches (one bounded directory snapshot per poll for the
   root and each existing nested input dir such as .venv; the polling latency and root
   listing cost are the same limits as remote document watching, and an event burst re-arms
@@ -661,7 +672,26 @@ confirms first on a remote workspace and names the target (copy/cut/duplicate na
 entry or count, paste names the destination and count); a local workspace keeps the old
 no-confirmation behavior. The tree refresh after success is the existing file-job refresh.
 
-Remaining gaps: no drag/move between directories, no undo/history for remote writes, no
+The remote explorer also has a direct drag/move gesture, modeled on Fresh's drag: a left
+press on a row lifts the effective selection (a multi-row selection moves whole), moving
+over a directory row highlights that drop target, and releasing opens a confirmation that
+names the entries (or count) and the destination on the remote host — nothing moves before
+that Move answer. Local workspaces do not enable the drag (the notice points at Cut and
+Paste), and the same keyboard-only flow already exists there and remotely: Cut (Ctrl+X),
+select the destination directory, Paste (Ctrl+V); it uses the same confirmation, conflict
+and job machinery. Drops that would not move anything (the source's own parent, the source
+itself, a directory dropped onto its own descendant) are filtered, a drag never touches the
+clipboard, and only the remote authority is used. After the confirmation every move job
+starts with the cancel conflict policy, so a taken destination goes through the existing
+single/multi conflict dialogs and is overwritten only on an explicit choice; the move is
+`MoveAs`'s copy-then-remove (complete copy first, then `Mutations.Remove`), so a failure or
+cancellation in the copy phase keeps the source and any partial destination, and a failed
+source removal keeps both and reports it. The drop target is only underlined while the drag
+is held; there is no animation/preview beyond that.
+
+Remaining gaps: the drag/move has no cross-window or above-root target and no
+animation/preview beyond the drop-target underline (and is disabled for local
+workspaces), no undo/history for remote writes, no
 whole-subtree transaction or cleanup UI for a partial copy, FileEntry/Mode and mtimes are not
 restored (the port's DirEntry has no mode), hard links/xattrs are not preserved, and a
 copy/rename's existence check still races the write (the FileMutations surface has no
@@ -672,7 +702,10 @@ the re-created file because the user chose overwrite; a directory copy fails at 
 instead of silently replacing it), and an Overwrite All decision applies only to the
 remaining jobs of that one paste (it is not remembered for a later paste), while a later
 Cancel / Skip All cannot undo items already pasted (incremental execution diverges from
-Fresh's resolve-then-run batch).
+Fresh's resolve-then-run batch). A drag/lifted move runs the same incremental job chain,
+so a later Cancel/Skip cannot roll back already-moved entries and its confirmation is
+batch-level (one Move/Cancel for the whole lifted selection); a drag does not change the
+clipboard, so a pending cut is left as it was.
 Real-host manual acceptance remains unautomated (the copy tests use a fake
 authority file system, with a local decoy tree proving no local fallback).
 

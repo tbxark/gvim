@@ -41,6 +41,24 @@ func (e *Editor) replaceRecent(old, new *Document) {
 	e.recent[pos] = new
 }
 
+// SetRecentTabIndices replaces the MRU history with the named tabs, most recent first.
+// Indices outside the open tabs and repeats are ignored. Tabs that are not named keep
+// falling back to tab order after the named ones, as RecentTabIndices does. It is used
+// by session restore, which knows the documents by path and maps them back to the new
+// tab indices; an empty order leaves the history empty.
+func (e *Editor) SetRecentTabIndices(order []int) {
+	e.adoptAll()
+	e.recent = e.recent[:0]
+	seen := make([]bool, len(e.docs))
+	for _, i := range order {
+		if i < 0 || i >= len(e.docs) || seen[i] {
+			continue
+		}
+		seen[i] = true
+		e.recent = append(e.recent, e.docs[i])
+	}
+}
+
 // RecentTabIndices returns the open tabs in most-recently-used order: the active tab
 // first, then the tabs in the order they were last active. Tabs that were never active
 // (or were adopted directly) follow in tab order. It is the order multi-buffer completion

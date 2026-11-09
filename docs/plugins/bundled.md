@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-five plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-six plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support` and `clangd_support` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support` and `welcome` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -28,6 +28,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `asm_lsp` | **off** | Assembly: Create .asm-lsp.toml, Assembly: Show LSP Help | none |
 | `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
 | `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
+| `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
 | `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
@@ -249,6 +250,19 @@ the heuristic does not follow `compile_commands.json` include paths or rename-ca
 `textDocument/clangd.fileStatus`/`$/memoryUsage` custom-notification status line (gvim's plugin API does
 not expose server custom notifications), and the project setup is a virtual buffer rather than Fresh's
 floating panel.
+
+**welcome** (port of Fresh's `plugins/welcome.ts`): a deliberately small plugin-API demo, not a
+feature plugin. It registers the same five palette commands as Fresh: **Plugin Demo: Open Help**
+and **Plugin Demo: Save File** dispatch the built-in `show_help`/`save` actions, while **Plugin
+Demo: Say Hello**, **Plugin Demo: Insert Time** and **Plugin Demo: Insert Comment** insert text at
+the primary caret through `b:insert` (one undo step, no auto-indent) and report on the status row;
+the time is the local `HH:MM:SS` clock. It binds no key and registers no settings, and is opt-in
+(`default_enabled: false`) so it does not add demo rows to the default palette. Reductions (also in
+porting.md): the demo comment chooses its line-comment prefix from the active buffer's language
+(`--` for Lua/SQL, `#` for Python/Ruby/shell/YAML/TOML/Makefile/Dockerfile, `//` otherwise) instead
+of Fresh's fixed `//`; the greeting/time/comment strings are English-only rather than Fresh's 15
+locales; and Fresh's debug-only load message is not reproduced (gvim has no equivalent hidden
+status).
 **compare_files** (port of Fresh's own compare plugin; reduced): **Compare Files...** (or **Compare
 Active File With...**) opens the two paths you type and shows them as two editable splits of the
 current tab — changed lines get a background, in-line changes a highlighted span, a gutter glyph and

@@ -520,3 +520,103 @@ func TestRemotePasteFailureKeepsCompletedCount(t *testing.T) {
 		t.Fatal("a failure left a conflict overlay open")
 	}
 }
+
+// askRemoteDragMove sends the panel's drag/drop message and expects the confirmation
+// overlay; nothing has moved yet.
+func askRemoteDragMove(t *testing.T, m *Model, dir string, paths []string) {
+	t.Helper()
+	_, cmd := m.Update(explorer.MoveMsg{Dir: dir, Paths: paths})
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Fatalf("the drag request acted before confirmation: %#v", msg)
+		}
+	}
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want one move confirmation", len(m.overlays))
+	}
+	if len(m.ops.(*fakeRemoteOps).policies) != 0 {
+		t.Fatal("the drag request ran a move before confirmation")
+	}
+}
+
+// TestRemoteDragMoveAsksThenMoves checks a drop only asks first; Move confirms, then the
+// existing MoveAs job runs, and the clipboard is untouched (a drag is not a cut).
+func TestRemoteDragMoveAsksThenMoves(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r"}
+	m := remotePasteModel(t, ops)
+	m.clip = newClipboard("", []string{"/r/a.go"}, true)
+	askRemoteDragMove(t, m, "/r/dst", []string{"/r/a.go"})
+	_, cmd := m.Update(typed("y"))
+	settle(t, m, cmd)
+	if len(ops.moves) != 1 || ops.moves[0] != "/r/a.go -> /r/dst" {
+		t.Fatalf("moves = %v, want a.go into dst", ops.moves)
+	}
+	if len(ops.policies) != 1 || ops.policies[0] != explorer.ConflictCancel {
+		t.Fatalf("policies = %v, want the no-overwrite first attempt", ops.policies)
+	}
+	if m.clip == nil || !m.clip.cut || len(m.clip.paths) != 1 || m.clip.paths[0] != "/r/a.go" {
+		t.Fatalf("clipboard = %+v, want the cut untouched by a drag", m.clip)
+	}
+}
+
+// TestRemoteDragMoveCancelTouchesNothing checks the confirmation's Cancel answer moves
+// nothing.
+func TestRemoteDragMoveCancelTouchesNothing(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r"}
+	m := remotePasteModel(t, ops)
+	askRemoteDragMove(t, m, "/r/dst", []string{"/r/a.go"})
+	_, cmd := m.Update(typed("n"))
+	settle(t, m, cmd)
+	if len(ops.moves) != 0 || len(ops.policies) != 0 {
+		t.Fatalf("a cancelled move ran: moves=%v policies=%v", ops.moves, ops.policies)
+	}
+	if !strings.Contains(m.notice, "Move cancelled") {
+		t.Fatalf("notice = %q, want the cancel notice", m.notice)
+	}
+}
+
+// TestRemoteDragMoveFailureKeepsCompletedItems checks a later move failure stops the
+// remaining jobs, keeps the completed move and reports the error plus the completed
+// count.
+func TestRemoteDragMoveFailureKeepsCompletedItems(t *testing.T) {
+	ops := &fakeRemoteOps{
+		target: "SSH:u@h:/r",
+		fail:   map[string]error{"/r/b.go": errors.New("write denied")},
+	}
+	m := remotePasteModel(t, ops)
+	askRemoteDragMove(t, m, "/r/dst", []string{"/r/a.go", "/r/b.go", "/r/c.go"})
+	_, cmd := m.Update(typed("y"))
+	settle(t, m, cmd)
+	if len(ops.moves) != 1 || ops.moves[0] != "/r/a.go -> /r/dst" {
+		t.Fatalf("moves = %v, want only a.go", ops.moves)
+	}
+	if len(ops.policies) != 2 {
+		t.Fatalf("policies = %v, want a.go and the failed b.go only", ops.policies)
+	}
+	if !strings.Contains(m.notice, "write denied") || !strings.Contains(m.notice, "1 item(s)") {
+		t.Fatalf("notice = %q, want the failure and completed count", m.notice)
+	}
+	if len(m.overlays) != 0 {
+		t.Fatal("the failure left an overlay open")
+	}
+}
+
+// TestRemoteDragMoveConflictAsksBeforeOverwrite checks a destination clash goes through
+// the existing conflict dialog: the first attempt is cancel policy and reports ErrConflict
+// without moving or overwriting anything.
+func TestRemoteDragMoveConflictAsksBeforeOverwrite(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m := remotePasteModel(t, ops)
+	askRemoteDragMove(t, m, "/r/dst", []string{"/r/a.go"})
+	_, cmd := m.Update(typed("y"))
+	settle(t, m, cmd)
+	if len(ops.moves) != 0 {
+		t.Fatalf("a conflicted drag moved without an explicit choice: %v", ops.moves)
+	}
+	if len(ops.policies) != 1 || ops.policies[0] != explorer.ConflictCancel {
+		t.Fatalf("policies = %v, want only the cancel-policy probe", ops.policies)
+	}
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want the existing conflict prompt", len(m.overlays))
+	}
+}

@@ -35,6 +35,13 @@ type Session struct {
 	ShowIgnored bool        `json:"showIgnored"`
 	Active      int         `json:"active"`
 	Files       []FileState `json:"files"`
+	// MRU is the most-recently-used order of the saved documents, newest first. It
+	// names documents by their saved path (or by label for a pathless buffer), not by
+	// runtime identity or tab index, so a reference cannot point at a different
+	// document after a restart. Optional and additive: a session file without it (or
+	// an entry that no longer matches an open file) restores the old tab-order MRU and
+	// skips the missing reference, keeping the rest of the order.
+	MRU []MruFile `json:"mru,omitempty"`
 	// Sidebar is the sidebar UI state (sections, sizes, scroll, width form). It is
 	// optional: a session file without it keeps the config defaults.
 	Sidebar *SidebarState `json:"sidebar,omitempty"`
@@ -43,6 +50,14 @@ type Session struct {
 	// session file without it restores as one pane exactly as before, and an
 	// invalid or no-longer-resolvable layout is ignored on restore.
 	Layout *SplitLayout `json:"layout,omitempty"`
+}
+
+// MruFile names one document in the most-recently-used order: Path for a named
+// buffer, or Label for a pathless one. Empty values do not match a document of the
+// other kind, so a pathless entry cannot accidentally adopt a named tab.
+type MruFile struct {
+	Path  string `json:"path,omitempty"`
+	Label string `json:"label,omitempty"`
 }
 
 // FileState is the saved state of one open file.

@@ -15,6 +15,7 @@ package explorer
 import (
 	"errors"
 	"image/color"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -189,6 +190,15 @@ type Panel struct {
 	grip   bool       // a grip drag is in progress
 	thumb  bool       // a scrollbar drag is in progress
 	st     *transient // picks, pending cut and search text, shared by the copies of the panel
+
+	// A mouse move drag: the rows a press lifted, where it started and the directory
+	// row under the pointer. Release asks for MoveMsg; nothing moves in the panel.
+	dragRows   []string
+	dragX      int
+	dragY      int
+	dragActive bool
+	dropDir    string
+	dropRow    int
 }
 
 // New returns the panel over t. styles are the chrome styles of the frame, and
@@ -197,7 +207,7 @@ func New(t Tree, styles style.Styles, now func() time.Time) Panel {
 	if now == nil {
 		now = time.Now
 	}
-	return Panel{tree: t, styles: styles, now: now, st: &transient{}}
+	return Panel{tree: t, styles: styles, now: now, st: &transient{}, dropRow: -1}
 }
 
 // Update handles one mouse message in the panel's geometry g. A press, a drag,
@@ -215,6 +225,15 @@ func (p Panel) Update(msg tea.Msg, g Geometry) (Panel, tea.Cmd) {
 		return p.drag(tea.Mouse(msg), g)
 	case tea.MouseReleaseMsg:
 		p.grip, p.thumb = false, false
+		if p.dragActive && p.dropDir != "" {
+			paths, dest := p.dragMovePaths(p.dropDir), p.dropDir
+			p.clearDragMove()
+			if len(paths) > 0 {
+				return p, emit(MoveMsg{Dir: dest, Paths: paths})
+			}
+			return p, nil
+		}
+		p.clearDragMove()
 	case tea.MouseWheelMsg:
 		p.wheel(tea.Mouse(msg), g)
 	}
@@ -398,6 +417,11 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 				}
 			}
 			dst.Fill(g.X+1, right-1, y, st)
+			if p.dragActive && idx == p.dropRow {
+				// A drag drop target is underlined for the whole drag: the release is
+				// asked about, so the highlight is the panel's only preview.
+				st.Underline = true
+			}
 			drawRow(dst, r, y, g.X, g.Width, over, marker, g.Marks[r.Path], g.Icons, st, sep, accent, decor)
 		}
 		if over {
@@ -592,6 +616,7 @@ func (p Panel) press(m tea.Mouse, g Geometry) (Panel, tea.Cmd) {
 	}
 	n := p.clicks.press(p.now(), m.X, m.Y)
 	p.grip, p.thumb = false, false
+	p.clearDragMove()
 	t := p.hitAt(g, m.X, m.Y)
 	switch t.zone {
 	case zoneReload:
@@ -604,7 +629,9 @@ func (p Panel) press(m tea.Mouse, g Geometry) (Panel, tea.Cmd) {
 		p.thumb = true
 		p.scrollTo(t.row, g)
 	case zoneRow:
-		return p.rowPress(t.row, n)
+		next, cmd := p.rowPress(t.row, n)
+		next.startDragMove(t.row, m.X, m.Y)
+		return next, cmd
 	case zoneBody:
 		return p, emit(FocusMsg{})
 	}
@@ -661,8 +688,80 @@ func (p Panel) drag(m tea.Mouse, g Geometry) (Panel, tea.Cmd) {
 		}
 	case p.thumb:
 		p.scrollTo(m.Y-g.Top-1, g)
+	case len(p.dragRows) > 0:
+		if !p.dragActive {
+			dx, dy := m.X-p.dragX, m.Y-p.dragY
+			if dx < 0 {
+				dx = -dx
+			}
+			if dy < 0 {
+				dy = -dy
+			}
+			if dx+dy < 2 {
+				return p, nil
+			}
+			p.dragActive = true
+		}
+		p.dropDir, p.dropRow = "", -1
+		if t := p.hitAt(g, m.X, m.Y); t.zone == zoneRow {
+			if dir := p.dropDirFor(t.row); dir != "" && len(p.dragMovePaths(dir)) > 0 {
+				p.dropDir, p.dropRow = dir, t.row
+			}
+		}
 	}
 	return p, nil
+}
+
+// startDragMove records the effective selection a press on row lifted: a later motion
+// lifts it into a move drag. The tree root is never lifted.
+func (p *Panel) startDragMove(row, x, y int) {
+	rows := p.tree.Rows()
+	if row < 0 || row >= len(rows) {
+		return
+	}
+	paths := slices.DeleteFunc(p.targets(), func(q string) bool { return q == p.tree.Root() })
+	if len(paths) == 0 {
+		return
+	}
+	p.dragRows = paths
+	p.dragX, p.dragY = x, y
+}
+
+// clearDragMove ends a move drag and its drop highlight.
+func (p *Panel) clearDragMove() {
+	p.dragRows = nil
+	p.dragActive = false
+	p.dropDir = ""
+	p.dropRow = -1
+}
+
+// dropDirFor is the directory dropping on row means: a directory itself, or a file's
+// parent. It is empty for the tree root's parent (a drop above the root has no target).
+func (p Panel) dropDirFor(row int) string {
+	rows := p.tree.Rows()
+	if row < 0 || row >= len(rows) {
+		return ""
+	}
+	r := rows[row]
+	if r.IsDir {
+		return r.Path
+	}
+	return filepath.Dir(r.Path)
+}
+
+// dragMovePaths are the lifted paths a drop into dest would really move: a source already
+// in dest, dest itself or a path inside a dragged directory is skipped, exactly the
+// pointless moves Fresh suppresses before asking.
+func (p Panel) dragMovePaths(dest string) []string {
+	var out []string
+	for _, src := range p.dragRows {
+		switch {
+		case src == dest, Within(dest, src), filepath.Dir(src) == dest:
+			continue
+		}
+		out = append(out, src)
+	}
+	return out
 }
 
 // wheel scrolls the tree by wheelRows per notch when the pointer is over the

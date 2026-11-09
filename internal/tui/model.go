@@ -825,6 +825,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.askRemoteClipboard(remoteClipboardCut, msg.Path, msg.Paths, "")
 	case expanel.PasteMsg:
 		cmd = m.askRemoteClipboard(remoteClipboardPaste, "", nil, msg.Dir)
+	case expanel.MoveMsg:
+		cmd = m.askMoveTo(msg.Dir, msg.Paths)
 	case prompt.Done:
 		cmd = m.answer(msg)
 	case mixedExtractSelectionMsg:
@@ -1206,6 +1208,7 @@ type fileJob struct {
 	dstName string           // copy/move destination name after a conflict rename
 	pasted  int              // how many items of the same paste were already completed
 	multi   bool             // this job belongs to a multi-item paste (Fresh's multi dialog)
+	drag    bool             // a drag-move job: never read from or written to the clipboard
 	rest    []fileJob        // the jobs of the same paste after this one
 }
 
@@ -1233,7 +1236,12 @@ type (
 	// remotePasteMultiTag asks the multi-item remote paste conflict dialog (Overwrite,
 	// Overwrite All, Skip, Skip All, Cancel).
 	remotePasteMultiTag struct{ job fileJob }
-	gotoTag             struct{}
+	// moveToTag confirms a drag/lifted move before anything moves.
+	moveToTag struct {
+		dir   string
+		paths []string
+	}
+	gotoTag struct{}
 )
 
 // fileRecorder is the ranker's frecency record. A ranker that has one gets the
@@ -1307,7 +1315,7 @@ func pasteQuestion(count int, dir, target string) string {
 	if count != 1 {
 		noun = "entries"
 	}
-	return fmt.Sprintf("Paste %d %s into %s on %s?", count, noun, dir, target)
+	return uiTextVars("gvim.prompt.paste_many", "Paste %{count} %{noun} into %{dir} on %{target}?", map[string]any{"count": count, "noun": noun, "dir": dir, "target": target})
 }
 
 // askRemoteClipboard runs a local clipboard action directly, or asks first on a remote
@@ -1504,11 +1512,11 @@ const (
 // case (current/all), and so do s/S.
 func remoteMultiPasteOptions() []prompt.ChoiceOption {
 	return []prompt.ChoiceOption{
-		{Label: "Overwrite", Key: "o"},
-		{Label: "Overwrite All", Key: "O"},
-		{Label: "Skip", Key: "s"},
-		{Label: "Skip All", Key: "S"},
-		{Label: "Cancel", Key: "c"},
+		{Label: uiText("gvim.paste.overwrite", "Overwrite"), Key: "o"},
+		{Label: uiText("gvim.paste.overwrite_all", "Overwrite All"), Key: "O"},
+		{Label: uiText("gvim.paste.skip", "Skip"), Key: "s"},
+		{Label: uiText("gvim.paste.skip_all", "Skip All"), Key: "S"},
+		{Label: uiText("gvim.paste.cancel", "Cancel"), Key: "c"},
 	}
 }
 
@@ -1518,7 +1526,7 @@ func (m *Model) askRemoteMultiPasteConflict(job fileJob) {
 	if name == "" {
 		name = filepath.Base(job.path)
 	}
-	q := "Remote destination exists on " + m.remoteExplorerTarget() + ": " + name
+	q := uiTextVars("gvim.notice.remote_destination_exists", "Remote destination exists on %{target}: %{name}", map[string]any{"target": m.remoteExplorerTarget(), "name": name})
 	m.pushOverlay(prompt.NewChoice(m.styles, q, remotePasteMultiTag{job: job}, remoteMultiPasteOptions()))
 }
 
@@ -1546,7 +1554,7 @@ func (m *Model) answerRemoteMultiPaste(job fileJob, choice int) tea.Cmd {
 	case remotePasteSkip:
 		return m.runJobs(job.rest)
 	case remotePasteSkipAll:
-		m.notice = pasteStopNotice("Paste skipped", job.pasted)
+		m.notice = pasteStopNotice(uiText("gvim.notice.paste_skipped", "Paste skipped"), job.pasted)
 		if job.kind == jobMove {
 			m.forgetClipboard(job.path)
 			for _, next := range job.rest {
@@ -1555,7 +1563,7 @@ func (m *Model) answerRemoteMultiPaste(job fileJob, choice int) tea.Cmd {
 		}
 		return nil
 	case remotePasteCancel:
-		m.notice = pasteStopNotice("Paste cancelled", job.pasted)
+		m.notice = pasteStopNotice(uiText("gvim.notice.paste_cancelled", "Paste cancelled"), job.pasted)
 		return nil
 	}
 	return nil
@@ -1565,18 +1573,41 @@ func (m *Model) answerRemoteMultiPaste(job fileJob, choice int) tea.Cmd {
 // or skip-all after some work is never mistaken for nothing having happened.
 func pasteStopNotice(prefix string, completed int) string {
 	if completed > 0 {
-		return fmt.Sprintf("%s; %d item(s) of this paste were already pasted", prefix, completed)
+		return uiTextVars("gvim.notice.paste_stopped", "%{prefix}; %{count} item(s) of this paste were already pasted", map[string]any{"prefix": prefix, "count": completed})
 	}
 	return prefix
+}
+
+// askMoveTo confirms a mouse drag move before any file operation runs. The move is a
+// remote-workspace gesture: local explorer rows keep the keyboard Cut/Paste flow, and no
+// drag ever overwrites a destination without the conflict dialog's explicit choice. The
+// confirmation names the entries (or count) and the destination.
+func (m *Model) askMoveTo(dir string, paths []string) tea.Cmd {
+	if dir == "" || len(paths) == 0 {
+		return nil
+	}
+	if m.remoteExplorerTarget() == "" {
+		m.notice = "Moving by drag is available in a remote workspace; use Cut and Paste for a local move"
+		return nil
+	}
+	var what string
+	if len(paths) == 1 {
+		what = filepath.Base(paths[0])
+	} else {
+		what = fmt.Sprintf("%d entries", len(paths))
+	}
+	q := "Move " + what + " on " + m.remoteExplorerTarget() + " to " + dir + "?"
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, moveToTag{dir: dir, paths: paths}, prompt.ConfirmOptions{Yes: "Move", No: "Cancel"}))
+	return nil
 }
 
 // pasteAsLabel names the conflict rename prompt, including the remote target when there
 // is one.
 func pasteAsLabel(target string) string {
 	if target == "" {
-		return "Paste as:"
+		return uiText("gvim.prompt.paste_as", "Paste as:")
 	}
-	return "Paste as on " + target + ":"
+	return uiTextVars("gvim.prompt.paste_as_on_target", "Paste as on %{target}:", map[string]any{"target": target})
 }
 
 // validateName is the name check of the explorer prompts. It keeps the prompt
@@ -1650,6 +1681,19 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return m.runJob(job)
 	case remotePasteMultiTag:
 		return m.answerRemoteMultiPaste(tag.job, d.Choice)
+	case moveToTag:
+		if d.Outcome != prompt.Yes {
+			m.notice = "Move cancelled"
+			return nil
+		}
+		jobs := make([]fileJob, 0, len(tag.paths))
+		for _, path := range tag.paths {
+			jobs = append(jobs, fileJob{kind: jobMove, path: path, dir: tag.dir, policy: expanel.ConflictCancel, multi: len(tag.paths) > 1, drag: true})
+		}
+		for i := range jobs {
+			jobs[i].rest = jobs[i+1:]
+		}
+		return m.runJobs(jobs)
 	case overwriteSaveTag:
 		return m.overwriteAnswer(tag, d)
 	case fullLoadTag:
@@ -1696,7 +1740,7 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 // be asked about. The jobs run one after another, see runJobs.
 func (m *Model) paste(dir string) tea.Cmd {
 	if m.clip == nil {
-		m.notice = "Nothing to paste"
+		m.notice = uiText("gvim.notice.nothing_to_paste", "Nothing to paste")
 		return nil
 	}
 	c := *m.clip
@@ -1850,11 +1894,14 @@ func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 			if err := m.ops.FollowRename(job.path, r.out); err != nil {
 				m.notice = err.Error()
 			}
-			m.forgetClipboard(job.path)
+			if !job.drag {
+				m.forgetClipboard(job.path)
+			}
 			m.explorerPanel.DropPicked(job.path)
-		} else if job.kind == jobMove {
+		} else if job.kind == jobMove && !job.drag {
 			// A move into the directory the entry is in moves nothing, but it still
 			// cancels a cut, as in Fresh. A rename to the same name keeps the clipboard.
+			// A drag-move never touches the clipboard, so its no-op cannot cancel a cut.
 			m.forgetClipboard(job.path)
 		}
 	case jobTrash:
@@ -1869,8 +1916,8 @@ func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 		reveal = r.out
 	}
 	reload := m.reloadToReveal(reveal)
-	if job.kind == jobMove && len(job.rest) > 0 && !m.cutHolds(job.rest[0].path) {
-		m.notice = "Paste stopped: the cut was cancelled"
+	if job.kind == jobMove && !job.drag && len(job.rest) > 0 && !m.cutHolds(job.rest[0].path) {
+		m.notice = uiText("gvim.notice.paste_cut_cancelled", "Paste stopped: the cut was cancelled")
 		return reload
 	}
 	rest := job.rest

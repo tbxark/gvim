@@ -323,7 +323,13 @@ buffer already has is not duplicated. Other tabs are scanned in Fresh's MRU orde
 keeps its tab-activation history (`editor.Editor.RecentTabIndices`, active tab first), keyed by
 document identity rather than tab index, so closing a tab or moving tabs keeps the surviving
 order and only drops the closed document; an editor without that history falls back to tab
-order. Dabbrev cycling (`dabbrev_expand`, emacs M-/) uses the same multi-buffer view: the first
+order. The order also persists across a restart: the session saves it as document references
+(the saved path, or the label of a pathless buffer) rather than tab indices or runtime
+identities, and restore maps those references back to the new documents before multi-buffer
+completion and dabbrev read them. A reference that is missing, renamed away, closed or no
+longer open is skipped while the remaining references keep their relative order, so a stale
+session cannot add a phantom buffer or reorder the others; an older session without the field
+keeps the restore-derived order. Dabbrev cycling (`dabbrev_expand`, emacs M-/) uses the same multi-buffer view: the first
 press collects the active buffer's earlier words nearest-first and then the other open tabs' words
 in MRU order, from a bounded middle window per buffer (`DabbrevOtherBufferBytes` = 64 KiB, at
 most `DabbrevOtherBufferLimit` = 8 tabs, `DabbrevMaxCandidates` = 30 total). Repeated presses

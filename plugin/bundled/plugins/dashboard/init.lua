@@ -23,6 +23,10 @@
 --     recent-files section covers the same "get back to work" role.
 local gvim = require "gvim"
 
+-- Weather strings are plugin-owned: dashboard.i18n.json holds the en table, and
+-- gvim.i18n.t falls back to en then the key. The editor Go catalogue is not injected.
+local t = gvim.i18n.t
+
 local settings = gvim.settings.define {
   show_on_empty = {
     type = "boolean", default = true,
@@ -662,20 +666,20 @@ local function fetch_weather()
   local res, err = gvim.http.get(url, { timeout_ms = 5000 })
   if not res then
     local text = tostring(err)
-    local reason = "unavailable"
+    local reason = t("weather.unavailable")
     if text:find("network is disabled", 1, true) then
-      reason = "network disabled (set network = true)"
+      reason = t("weather.network_disabled")
     end
     state.weather = { at = now, unavailable = reason }
     return
   end
   if res.status ~= 200 then
-    state.weather = { at = now, unavailable = "unavailable" }
+    state.weather = { at = now, unavailable = t("weather.unavailable") }
     return
   end
   local ok, parsed = pcall(json.decode, res.body)
   if not ok or type(parsed) ~= "table" then
-    state.weather = { at = now, unavailable = "invalid response" }
+    state.weather = { at = now, unavailable = t("weather.invalid_response") }
     return
   end
   local current = type(parsed.current_condition) == "table" and parsed.current_condition[1] or nil
@@ -685,7 +689,7 @@ local function fetch_weather()
   local evening = weather_hour(weather_hourly_at(today_day and today_day.hourly or nil, 17))
   local tomorrow_text = weather_day(tomorrow_day)
   if current_text == "" and evening == "" and tomorrow_text == "" then
-    state.weather = { at = now, unavailable = "invalid response" }
+    state.weather = { at = now, unavailable = t("weather.invalid_response") }
     return
   end
   state.weather = {
@@ -835,19 +839,19 @@ local function build_rows(inner)
     if #lines > 0 then
       lines[#lines + 1] = { text = "" }
     end
-    heading("Weather")
+    heading(t("weather.heading"))
     local w = state.weather
     if not w or w.loading then
-      kv("weather", "loading…", STYLE.muted)
+      kv(t("weather.status_label"), t("weather.loading"), STYLE.muted)
     elseif w.unavailable then
-      kv("weather", w.unavailable, STYLE.muted)
+      kv(t("weather.status_label"), w.unavailable, STYLE.muted)
     else
-      kv("now", w.now_text ~= "" and w.now_text or "–", w.now_text ~= "" and STYLE.accent or STYLE.muted)
+      kv(t("weather.now"), w.now_text ~= "" and w.now_text or "–", w.now_text ~= "" and STYLE.accent or STYLE.muted)
       if w.evening and w.evening ~= "" then
-        kv("5pm", w.evening, STYLE.value)
+        kv(t("weather.evening"), w.evening, STYLE.value)
       end
       if w.tomorrow and w.tomorrow ~= "" then
-        kv("tomorrow", w.tomorrow, STYLE.value)
+        kv(t("weather.tomorrow"), w.tomorrow, STYLE.value)
       end
     end
   end
@@ -1091,7 +1095,7 @@ local function refresh(force)
     local ok, err = pcall(fetch_weather)
     if not ok then
       gvim.log.debug("dashboard: weather: " .. tostring(err))
-      state.weather = { at = at, unavailable = "unavailable" }
+      state.weather = { at = at, unavailable = t("weather.unavailable") }
     end
   end
   if settings.github_prs and (force or not state.github or at - (state.github.at or 0) > GITHUB_TTL_MS) then

@@ -1013,5 +1013,21 @@
   "gvim.status.terminal_restart_signal": "%{label} (signal)",
   "gvim.palette.preview_no_lines": "(empty file)",
   "gvim.palette.preview_binary": "Binary file · not previewed",
-  "gvim.palette.preview_unavailable": "Preview unavailable"
+  "gvim.palette.preview_unavailable": "Preview unavailable",
+  "gvim.notice.remote_git_unavailable": "Remote quick-open: git could not run on the remote host; listing the workspace with a directory walk (ignore filtering follows the walk).",
+  "gvim.notice.remote_git_list_failed": "Remote quick-open: the remote git file list failed or was truncated; listing the workspace with a directory walk (ignore filtering may differ).",
+  "gvim.notice.paste_skipped": "Paste skipped",
+  "gvim.notice.paste_cancelled": "Paste cancelled",
+  "gvim.notice.paste_stopped": "%{prefix}; %{count} item(s) of this paste were already pasted",
+  "gvim.notice.nothing_to_paste": "Nothing to paste",
+  "gvim.notice.paste_cut_cancelled": "Paste stopped: the cut was cancelled",
+  "gvim.prompt.paste_as": "Paste as:",
+  "gvim.prompt.paste_as_on_target": "Paste as on %{target}:",
+  "gvim.prompt.paste_many": "Paste %{count} %{noun} into %{dir} on %{target}?",
+  "gvim.paste.overwrite": "Overwrite",
+  "gvim.paste.overwrite_all": "Overwrite All",
+  "gvim.paste.skip": "Skip",
+  "gvim.paste.skip_all": "Skip All",
+  "gvim.paste.cancel": "Cancel",
+  "gvim.notice.remote_destination_exists": "Remote destination exists on %{target}: %{name}"
 }

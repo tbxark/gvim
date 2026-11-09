@@ -8,6 +8,33 @@ import (
 	"github.com/tbxark/gvim/env"
 )
 
+func TestProjectEnvFactsShowsRemoteDetectionNotice(t *testing.T) {
+	trusted := false
+	p := env.NewRemote("/remote/proj", nil, func() bool { return trusted }, func(context.Context, string) (string, error) {
+		return "", nil
+	})
+	p.Warm(context.Background())
+	svc := &settingsService{env: p}
+	facts := svc.projectEnvFacts()
+	found := false
+	for _, f := range facts {
+		if f.name == "Environment detection" && strings.Contains(f.note, "until this workspace is trusted") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("settings env facts = %+v, want the untrusted detection row", facts)
+	}
+	trusted = true
+	p.Warm(context.Background())
+	facts = svc.projectEnvFacts()
+	for _, f := range facts {
+		if f.name == "Environment detection" {
+			t.Fatalf("trusted detection left a degraded Settings row: %+v", facts)
+		}
+	}
+}
+
 func TestProjectEnvFactsShowsRemoteShellFallback(t *testing.T) {
 	p := env.NewRemote("/remote/proj", nil, func() bool { return true }, func(context.Context, string) (string, error) {
 		return "", nil

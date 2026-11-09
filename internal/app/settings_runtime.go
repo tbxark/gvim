@@ -87,6 +87,11 @@ func (s *settingsService) projectEnvFacts() []envFact {
 			facts = append(facts, envFact{name: "Environment watch", value: "degraded", note: notice})
 		}
 	}
+	if n, ok := s.env.(interface{ DetectionNotice() string }); ok {
+		if notice := n.DetectionNotice(); notice != "" {
+			facts = append(facts, envFact{name: "Environment detection", value: "unavailable", note: notice})
+		}
+	}
 	return facts
 }
 

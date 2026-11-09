@@ -425,6 +425,46 @@ func TestRemoteCopyCancellationKeepsPartialDestination(t *testing.T) {
 	}
 }
 
+// TestRemoteMoveCancellationKeepsSourceAndPartialDestination checks a cut that is
+// cancelled in the write phase: the source tree is not removed (source removal only runs
+// after a complete copy), the files already copied stay as a reported partial destination,
+// and the cancellation is preserved.
+func TestRemoteMoveCancellationKeepsSourceAndPartialDestination(t *testing.T) {
+	fake := newRemoteOpsFake().
+		put("/remote/w/src/", "").
+		put("/remote/w/src/a.txt", "a").
+		put("/remote/w/src/b.txt", "b").
+		put("/remote/w/src/c.txt", "c").
+		put("/remote/w/dst/", "")
+	ops, _ := fake.ops(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fake.onWrite = func() {
+		if len(fake.writes) == 1 {
+			cancel()
+		}
+	}
+	_, err := ops.Move(ctx, "/remote/w/src", "/remote/w/dst")
+	if err == nil || !strings.Contains(err.Error(), "partial destination is kept") {
+		t.Fatalf("cancelled move error = %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancellation was not preserved: %v", err)
+	}
+	if _, ok := fake.files["/remote/w/src/a.txt"]; !ok {
+		t.Fatal("a cancelled move removed a source file")
+	}
+	if _, ok := fake.files["/remote/w/src/c.txt"]; !ok {
+		t.Fatal("a cancelled move removed an uncopied source file")
+	}
+	if len(fake.removes) != 0 {
+		t.Fatalf("a cancelled move removed the source: %v", fake.removes)
+	}
+	if _, ok := fake.files["/remote/w/dst/src/a.txt"]; !ok {
+		t.Fatal("the partial destination written before the cancellation is missing")
+	}
+}
+
 // TestRemoteCopyRefusedWhenDisconnected checks every clipboard operation is refused
 // while the authority is down, touching nothing.
 func TestRemoteCopyRefusedWhenDisconnected(t *testing.T) {

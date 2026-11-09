@@ -1,0 +1,13 @@
+{
+  "en": {
+    "weather.heading": "Weather",
+    "weather.status_label": "weather",
+    "weather.loading": "loading…",
+    "weather.now": "now",
+    "weather.evening": "5pm",
+    "weather.tomorrow": "tomorrow",
+    "weather.unavailable": "unavailable",
+    "weather.invalid_response": "invalid response",
+    "weather.network_disabled": "network disabled (set network = true)"
+  }
+}

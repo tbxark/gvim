@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/trust"
@@ -50,10 +51,15 @@ type Remote struct {
 	// Nil falls back to run.
 	captureRun RemoteRunner
 
-	// Detection state (one bounded remote probe).
-	detected    trust.DetectedEnv
-	found       bool
-	detectedSet bool
+	// Detection state (one bounded remote existence probe). Detection is trust-gated:
+	// the probe only runs in a trusted workspace; an untrusted workspace gets an explicit
+	// notice and no remote command. detectedTrusted records which gate produced the cache
+	// so a later trust change re-probes.
+	detected        trust.DetectedEnv
+	found           bool
+	detectedSet     bool
+	detectedTrusted bool
+	detectionNotice string
 
 	// Activation state: the recipe the plugin activated, and the captured delta.
 	snippet   string
@@ -121,6 +127,14 @@ func (p *Remote) WatchNotice() string {
 	return p.watchNotice
 }
 
+// DetectionNotice returns why remote marker detection is disabled or failed (untrusted
+// workspace, remote probe failure), or "" when detection is healthy/trusted.
+func (p *Remote) DetectionNotice() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.detectionNotice
+}
+
 // Root returns the remote root the probes use.
 func (p *Remote) Root() string {
 	p.mu.Lock()
@@ -136,7 +150,8 @@ func (p *Remote) SetRoot(root string) {
 	if root != "" {
 		p.root = root
 	}
-	p.detected, p.found, p.detectedSet = trust.DetectedEnv{}, false, false
+	p.detected, p.found, p.detectedSet, p.detectedTrusted = trust.DetectedEnv{}, false, false, false
+	p.detectionNotice = ""
 	p.invalidateLocked()
 	p.mu.Unlock()
 }
@@ -248,7 +263,8 @@ func (p *Remote) Clear() {
 // re-captures on the remote host (Env: Reload, a changed .envrc).
 func (p *Remote) Refresh() {
 	p.mu.Lock()
-	p.detected, p.found, p.detectedSet = trust.DetectedEnv{}, false, false
+	p.detected, p.found, p.detectedSet, p.detectedTrusted = trust.DetectedEnv{}, false, false, false
+	p.detectionNotice = ""
 	p.invalidateLocked()
 	p.mu.Unlock()
 }
@@ -258,7 +274,14 @@ func (p *Remote) Refresh() {
 // the remote host (bounded by the supplied Runner); while a capture is in flight another
 // caller gets the last cached delta, so no UI path waits. It returns nil when no recipe is
 // active, the workspace is untrusted, or the capture failed.
+// remoteDetectTimeout bounds a marker probe triggered from a spawn path (Overlay has no
+// caller context); Warm/refresh probes pass their session/watcher context instead.
+const remoteDetectTimeout = 15 * time.Second
+
 func (p *Remote) Overlay() []string {
+	detectCtx, cancel := context.WithTimeout(context.Background(), remoteDetectTimeout)
+	p.ensureDetected(detectCtx)
+	cancel()
 	return p.overlay(context.Background())
 }
 
@@ -323,10 +346,22 @@ func (p *Remote) LastError() error {
 	return p.lastErr
 }
 
-// ensureDetected runs the remote marker probe once.
+// ensureDetected runs the remote marker probe once, and only in a trusted workspace:
+// remote detection executes one bounded existence-checking shell command on the remote
+// host, so it is gated exactly like any other remote command. Untrusted and failed probes
+// leave an explicit notice (Settings Environment rows) and no local scan is ever done; a
+// later trust change or Refresh/SetRoot re-probes.
 func (p *Remote) ensureDetected(ctx context.Context) {
 	p.mu.Lock()
-	if p.detectedSet {
+	trusted := p.trusted != nil && p.trusted()
+	if p.detectedSet && p.detectedTrusted == trusted {
+		p.mu.Unlock()
+		return
+	}
+	if !trusted {
+		p.detected, p.found = trust.DetectedEnv{}, false
+		p.detectedSet, p.detectedTrusted = true, false
+		p.detectionNotice = "Remote environment: marker detection is disabled until this workspace is trusted (activation is trust-gated too)"
 		p.mu.Unlock()
 		return
 	}
@@ -338,10 +373,18 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	det, found, _, err := detectRemote(ctx, root, detectors, run)
 
 	p.mu.Lock()
-	p.detected, p.found = det, found
-	// A failed probe is retried by the next Warm/Overlay (a disconnected authority
-	// reconnects); a successful one is cached until Refresh/SetRoot.
-	p.detectedSet = err == nil
+	p.detectedTrusted = true
+	if err != nil {
+		p.detected, p.found = trust.DetectedEnv{}, false
+		p.detectedSet = false
+		p.detectionNotice = fmt.Sprintf("Remote environment: marker detection failed: %v; no detector is active until Env: Reload/reconnect succeeds", err)
+	} else {
+		p.detected, p.found = det, found
+		// A failed probe is retried by the next Warm/Overlay (a disconnected authority
+		// reconnects); a successful one is cached until Refresh/SetRoot or a trust change.
+		p.detectedSet = true
+		p.detectionNotice = ""
+	}
 	p.mu.Unlock()
 }
 
@@ -404,14 +447,23 @@ func detectRemote(ctx context.Context, root string, detectors []config.EnvDetect
 	}
 	var flat []string
 	seen := map[string]bool{}
+	addPath := func(rel string) {
+		rel = strings.TrimSpace(rel)
+		if rel == "" || filepath.IsAbs(rel) || seen[rel] {
+			return
+		}
+		seen[rel] = true
+		flat = append(flat, rel)
+	}
 	for _, d := range detectors {
 		for _, rel := range d.Markers {
-			rel = strings.TrimSpace(rel)
-			if rel == "" || filepath.IsAbs(rel) || seen[rel] {
-				continue
-			}
-			seen[rel] = true
-			flat = append(flat, rel)
+			addPath(rel)
+		}
+		// Require paths are part of the same existence probe: without them a detector
+		// such as .venv (which needs .venv/bin/python) could never match remotely, and
+		// its marker-only result would disagree with the local trust.DetectEnv scan.
+		for _, rel := range d.Require {
+			addPath(rel)
 		}
 	}
 	var b strings.Builder
