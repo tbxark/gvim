@@ -4,10 +4,16 @@
 -- color_names setting on, colours the names of changed entries. The status comes from
 -- git status --porcelain -z in the workspace root's repository.
 --
--- Differences from Fresh (documented in bundled.md): only the workspace root's repository is
--- decorated (no nested sub-repository discovery); there are no hover tooltips or arbitrary
--- icons (symbols only); a setting change applies on the next refresh; the plugin is off by
--- default to keep the default memory budget.
+-- Nested independent repositories below the workspace root are decorated too (Fresh's
+-- #2592 monorepo behavior): a bounded breadth-first directory scan (one gvim.fs.list per
+-- candidate directory, never one exists call per entry) finds a directory whose .git
+-- entry is present and runs git status from that directory's own root. The scan is capped
+-- at 128 directory listings, depth 3, 32 repos and a 1.5 s wall-clock/status budget; a
+-- partial scan decorates what it found and shows a one-time warning. Root-repo HEAD is
+-- watched; nested repos refresh on the same file/focus events. Differences from Fresh
+-- (documented in bundled.md): no hover tooltips or arbitrary icons (symbols only); nested
+-- HEADs are event-driven rather than watched; a setting change applies on the next refresh;
+-- the plugin is off by default to keep the default memory budget.
 local gvim = require "gvim"
 local git = gvim.git
 
@@ -153,6 +159,148 @@ local function clear_all()
   gvim.explorer.clear_slots(NAMESPACE)
 end
 
+-- Discovery bounds for nested repositories. Fresh walks the monorepo recursively
+-- (MONOREPO_MAX_DEPTH = 3); gvim uses one bounded directory listing per candidate
+-- directory (never a per-entry exists round-trip) and works through the same plugin host
+-- as the editor, so a remote authority sees at most DISCOVERY_MAX_DIRS ReadDir calls. The
+-- time budget and the directory/repo caps stop a slow or huge tree; the result is then
+-- partial and a one-time warning says so. Only root-repository HEAD is watched; nested
+-- repositories are refreshed by the ordinary file/focus/config events.
+local MONOREPO_MAX_DEPTH = 3
+local DISCOVERY_MAX_DIRS = 128
+local DISCOVERY_MAX_REPOS = 32
+local DISCOVERY_BUDGET_MS = 1500
+
+local unloaded = false
+local refresh_generation = 0
+local discovery_notice_root = nil
+
+local function notify_discovery_partial(root)
+  if discovery_notice_root == root then
+    return
+  end
+  discovery_notice_root = root
+  gvim.notify(
+    "git_explorer: nested repository discovery stopped at its directory/time bound; only the repositories found so far are decorated",
+    "warn"
+  )
+end
+
+-- discover_subrepos lists directories breadth-first below root under a hard directory
+-- budget and a wall-clock budget. A directory is an independent repository when its
+-- listing contains .git (a directory for a normal repo, a file for a worktree/linked
+-- checkout). Hidden and node_modules directories are skipped; .git contents are never
+-- listed. It returns repos, complete; complete is false when a bound stopped the scan.
+local function discover_subrepos(root, generation)
+  local repos = {}
+  local started = gvim.time.monotonic_ms()
+  local reads = 0
+  local complete = true
+  local queue = { { path = root, depth = 0 } }
+  local head = 1
+  while head <= #queue do
+    if unloaded or generation ~= refresh_generation then
+      return repos, false
+    end
+    if #repos >= DISCOVERY_MAX_REPOS or reads >= DISCOVERY_MAX_DIRS or
+      gvim.time.monotonic_ms() - started >= DISCOVERY_BUDGET_MS then
+      complete = false
+      break
+    end
+    local item = queue[head]
+    head = head + 1
+    reads = reads + 1
+    local entries = gvim.fs.list(item.path, { hidden = true })
+    if entries then
+      local has_git = false
+      for _, entry in ipairs(entries) do
+        if entry.name == ".git" then
+          has_git = true
+        end
+      end
+      if item.depth > 0 and has_git then
+        repos[#repos + 1] = item.path
+        if #repos >= DISCOVERY_MAX_REPOS then
+          complete = false
+          break
+        end
+      else
+        for _, entry in ipairs(entries) do
+          if entry.kind == "dir" and entry.name ~= ".git" and entry.name ~= "node_modules" and
+            entry.name:sub(1, 1) ~= "." and item.depth < MONOREPO_MAX_DEPTH then
+            queue[#queue + 1] = { path = gvim.path.join(item.path, entry.name), depth = item.depth + 1 }
+          end
+        end
+      end
+    end
+  end
+  if head <= #queue then
+    complete = false
+  end
+  return repos, complete
+end
+
+-- add_group reads one repository's porcelain v1 -z status and keeps its root with the
+-- decorations, so color slots can be built per-repo (a sibling path sharing a string
+-- prefix is not mistaken for the same repository).
+local function add_group(groups, seen, root)
+  if root == "" or root == nil or seen[root] then
+    return
+  end
+  seen[root] = true
+  local r = git.run({ "status", "--porcelain", "-z" }, { cwd = root })
+  if not r or not r.ok then
+    return
+  end
+  local decorations = parse(root, r.stdout)
+  if #decorations > 0 then
+    groups[#groups + 1] = { root = root, decorations = decorations }
+  end
+end
+
+-- merge_decorations combines per-repo badges by absolute path, keeping the highest
+-- priority (the same rule Fresh applies inside one repo), and returns a stable order.
+local function merge_decorations(groups)
+  local by_path, order = {}, {}
+  for _, group in ipairs(groups) do
+    for _, d in ipairs(group.decorations) do
+      local old = by_path[d.path]
+      if not old then
+        order[#order + 1] = d.path
+      end
+      if not old or d.priority >= old.priority then
+        by_path[d.path] = d
+      end
+    end
+  end
+  local out = {}
+  for _, path in ipairs(order) do
+    out[#out + 1] = by_path[path]
+  end
+  return out
+end
+
+-- merge_slots combines the name-color slots of every repo by absolute path.
+local function merge_slots(groups)
+  local by_path, order = {}, {}
+  for _, group in ipairs(groups) do
+    for _, s in ipairs(build_name_slots(group.root, group.decorations)) do
+      local old = by_path[s.path]
+      if not old then
+        order[#order + 1] = s.path
+      end
+      if not old or s.priority >= old.priority then
+        by_path[s.path] = s
+      end
+    end
+  end
+  local out = {}
+  for _, path in ipairs(order) do
+    out[#out + 1] = by_path[path]
+  end
+  return out
+end
+
 local function watch_repo(head)
   local dir = gvim.path.dirname(head)
   if dir == "" or dir == watched_dir then
@@ -174,6 +322,8 @@ function refresh()
     return
   end
   refresh_in_flight = true
+  refresh_generation = refresh_generation + 1
+  local generation = refresh_generation
   local ok, err = pcall(function()
     if not git.available() then
       clear_all()
@@ -184,25 +334,42 @@ function refresh()
       clear_all()
       return
     end
-    local repo = git.repo(cwd)
-    if not repo then
+    local groups, seen = {}, {}
+    local started = gvim.time.monotonic_ms()
+    local root_repo = git.repo(cwd)
+    if root_repo then
+      watch_repo(root_repo.head)
+      add_group(groups, seen, root_repo.root)
+    end
+    local subrepos, complete = discover_subrepos(cwd, generation)
+    if unloaded then
+      return
+    end
+    for _, sub in ipairs(subrepos) do
+      if unloaded or generation ~= refresh_generation then
+        return
+      end
+      if gvim.time.monotonic_ms() - started >= DISCOVERY_BUDGET_MS then
+        complete = false
+        break
+      end
+      add_group(groups, seen, sub)
+    end
+    if not complete then
+      notify_discovery_partial(cwd)
+    end
+    if #groups == 0 then
       clear_all()
       return
     end
-    watch_repo(repo.head)
-    local r = git.run({ "status", "--porcelain", "-z" }, { cwd = repo.root })
-    if not r or not r.ok then
-      clear_all()
-      return
-    end
-    local decorations = parse(repo.root, r.stdout)
+    local decorations = merge_decorations(groups)
     if #decorations == 0 then
       clear_all()
       return
     end
     gvim.explorer.set_decorations(NAMESPACE, decorations)
     if settings.color_names then
-      gvim.explorer.set_slots(NAMESPACE, build_name_slots(repo.root, decorations))
+      gvim.explorer.set_slots(NAMESPACE, merge_slots(groups))
     else
       gvim.explorer.clear_slots(NAMESPACE)
     end
@@ -226,3 +393,15 @@ gvim.on("focus_gained", refresh)
 gvim.on("config_changed", refresh)
 
 refresh()
+
+-- Stop the watcher and make any yielded discovery/status step stop applying its result
+-- once the plugin is unloaded.
+gvim.plugin.on_unload(function()
+  unloaded = true
+  refresh_generation = refresh_generation + 1
+  if watcher then
+    watcher:stop()
+    watcher = nil
+  end
+  clear_all()
+end)

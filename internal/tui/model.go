@@ -806,7 +806,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleClick(msg)
 		m.rebaseFind()
 	case tea.MouseMotionMsg:
-		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
+		if m.divider.active {
+			// An in-flight Contents divider drag owns the pointer: a floating plugin
+			// panel under the pointer must not swallow the motion (leaving divider.active
+			// set would resize the section on a later unrelated move).
+			cmd = m.handleDrag(msg.Mouse())
+		} else if panelCmd, taken := m.pluginPanelMouse(msg); taken {
 			cmd = panelCmd
 		} else if dockCmd, taken := m.dockMouse(msg, msg.Y, 1); taken {
 			cmd = dockCmd
@@ -817,6 +822,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
+		if m.divider.active {
+			// The divider's release ends the drag first, exactly like the motion guard:
+			// no plugin panel, dock or explorer action may consume it.
+			m.drag = drag{}
+			m.releaseDivider()
+			break
+		}
 		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
 			cmd = panelCmd
 			break
@@ -2476,6 +2488,8 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		m.explorerPanel.SearchBackspace(m.explorerGeometry(m.layout()))
 	case "markdown_toc_show":
 		m.markdownTOCShown()
+	case "markdown_toc_toggle":
+		m.markdownTOCToggle()
 	case "markdown_toc_close":
 		m.markdownTOCClosed()
 	case "markdown_toc_toggle_follow":

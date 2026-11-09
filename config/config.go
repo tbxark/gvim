@@ -253,6 +253,12 @@ type Config struct {
 	// no file sets any. Names are kept as written, known or not.
 	Plugins map[string]PluginConfig
 
+	// pluginUserEnabled remembers the plugins.<name>.enabled value from the USER
+	// layer only. Built-in surfaces that were once bundled plugins (the native
+	// Contents section) must ignore a project file's disabled flag, whose merged
+	// value in Plugins.Enabled cannot be attributed to a layer.
+	pluginUserEnabled map[string]bool
+
 	// The fields below are the Fresh "editor" options that gvim added with the
 	// nested config layout. Each default is Fresh's. The doc of the option and its
 	// consumer are in editoropts.go and in the contract. The existing fields above

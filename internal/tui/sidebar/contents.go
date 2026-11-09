@@ -172,6 +172,20 @@ type Contents struct {
 	stale               bool         // the document did not fit the scan bound
 	followed            followKey
 	lastCursor, lastTop int
+	// rowsOverride is a divider drag's (or a restored session's) body height for
+	// this session; 0 means use the configured Rows. The drag wins for the session,
+	// but an explicit live contents.rows edit resets it (the newer instruction).
+	rowsOverride int
+	// followOverride is the "Contents — Follow Cursor/Scroll" command's session
+	// mode; followOverrideSet false defers to the configured Follow (and a live
+	// config change then takes effect).
+	followOverride    Follow
+	followOverrideSet bool
+	// jumpWait/jumpLine suppress the first scroll-mode viewport change after a jump
+	// while the jumped-to heading is still visible: the jump's own scroll must not
+	// move the selection to the heading at the pane top (Fresh's plugin guard).
+	jumpWait bool
+	jumpLine int
 	// FoldHook, when set, is called when a heading's fold changes, with the
 	// heading and whether it is now expanded. The root uses it for
 	// fold_buffer.
@@ -221,43 +235,77 @@ func (c *Contents) SetFocus(v bool) { c.focus = v }
 // Settings returns the section's settings.
 func (c *Contents) Settings() Settings { return c.st }
 
-// SetSettings replaces the settings. The visible tree is rebuilt when the depth
-// limit changes, and the requested rows are taken as the new value.
+// SetSettings replaces the settings. The visible tree is rebuilt, and a live
+// config change is honoured while any session override (a divider drag's rows or
+// the follow command) still wins, as Fresh's section does.
 func (c *Contents) SetSettings(st Settings) {
 	c.st = st
 	c.rebuild()
 }
 
-// Rows is the body rows the section asks for: the configured rows, or the value
-// a divider drag chose for this session.
+// SetConfiguredFollow updates the configured follow mode (contents.follow) without
+// clearing the command's session override.
+func (c *Contents) SetConfiguredFollow(f Follow) {
+	c.st.Follow = f
+	c.followed = followKey{}
+}
+
+// SetConfiguredAutoOpen updates the configured auto_open without touching the
+// section's open state; the root applies the visibility change.
+func (c *Contents) SetConfiguredAutoOpen(on bool) { c.st.AutoOpen = on }
+
+// SetConfiguredRows updates the configured rows (contents.rows). A live config
+// change resets a divider drag's session value: the drag wins for the session, but
+// an explicit config edit is the newer instruction (docs/sidebar.md).
+func (c *Contents) SetConfiguredRows(n int) {
+	c.st.Rows = min(max(n, 1), MaxRows)
+	c.rowsOverride = 0
+}
+
+// Rows is the body rows the section asks for: a divider drag's / restored
+// session's value when it has one, else the configured rows.
 func (c *Contents) Rows() int {
+	if c.rowsOverride > 0 {
+		return c.rowsOverride
+	}
 	if c.st.Rows <= 0 {
 		return DefaultRows
 	}
 	return min(c.st.Rows, MaxRows)
 }
 
-// SetRows asks for n body rows, clamped to 1..MaxRows. A drag on the section's
-// header sets it.
+// RowsOverridden reports whether a drag/session value currently wins over the
+// configured rows.
+func (c *Contents) RowsOverridden() bool { return c.rowsOverride > 0 }
+
+// SetRows asks for n body rows for this session (a divider drag or a restored
+// session value), clamped to 1..MaxRows. It wins over a live contents.rows change.
 func (c *Contents) SetRows(n int) {
-	c.st.Rows = min(max(n, 1), MaxRows)
+	c.rowsOverride = min(max(n, 1), MaxRows)
 }
 
 // AutoOpen reports whether the section opens by itself for a Markdown buffer.
 func (c *Contents) AutoOpen() bool { return c.st.AutoOpen }
 
-// FollowMode returns the effective follow mode.
+// FollowMode returns the effective follow mode: the command's session override
+// when set, else the configured contents.follow (cursor default).
 func (c *Contents) FollowMode() Follow {
+	if c.followOverrideSet {
+		return c.followOverride
+	}
 	if c.st.Follow == FollowScroll {
 		return FollowScroll
 	}
 	return FollowCursor
 }
 
-// SetFollow changes the follow mode for the session and makes the next Follow
+// FollowOverridden reports whether the follow command's session mode is in effect.
+func (c *Contents) FollowOverridden() bool { return c.followOverrideSet }
+
+// SetFollow sets the follow command's session override and makes the next Follow
 // re-derive the selection from its source.
 func (c *Contents) SetFollow(f Follow) {
-	c.st.Follow = f
+	c.followOverride, c.followOverrideSet = f, true
 	c.followed = followKey{}
 }
 
@@ -536,6 +584,13 @@ func (c *Contents) rebuildKeep(pos int) {
 	}
 }
 
+// NoteJump remembers a heading line the section just jumped to, so the next
+// scroll-mode viewport change that still shows it keeps the selection instead of
+// following the pane top. It is the jump-suppression guard.
+func (c *Contents) NoteJump(line int) {
+	c.jumpWait, c.jumpLine = true, line
+}
+
 // Wheel scrolls the window by delta rows without moving the selection.
 func (c *Contents) Wheel(delta int) {
 	if len(c.entries) == 0 {
@@ -555,6 +610,16 @@ func (c *Contents) Follow(cursorLine, topLine int, editorFocused bool) {
 	topMoved := !c.followed.valid || topLine != c.lastTop
 	c.lastCursor, c.lastTop = cursorLine, topLine
 	c.followed = followKey{valid: true}
+	if c.jumpWait && c.FollowMode() == FollowScroll && topMoved {
+		// The viewport changed after our own jump. If the target heading is still on
+		// screen it is the jump's scroll, not the reader scrolling away: keep the
+		// selection. The guard is one-shot either way.
+		visible := c.jumpLine >= topLine && c.jumpLine < topLine+max(c.viewRows, 1)
+		c.jumpWait = false
+		if visible {
+			return
+		}
+	}
 	derive := false
 	line := cursorLine
 	switch {

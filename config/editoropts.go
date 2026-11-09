@@ -809,6 +809,12 @@ func (c *Config) setPluginField(name, key string, raw json.RawMessage, l layer) 
 		if l == layerProject && v {
 			return errors.New("project config cannot enable a plugin")
 		}
+		if l == layerUser {
+			if c.pluginUserEnabled == nil {
+				c.pluginUserEnabled = make(map[string]bool)
+			}
+			c.pluginUserEnabled[name] = v
+		}
 		pc := c.Plugins[name]
 		pc.Enabled = &v
 		c.putPlugin(name, pc)

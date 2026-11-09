@@ -1338,3 +1338,46 @@ func TestPageKeysBeforeLayoutDoNothing(t *testing.T) {
 		t.Fatalf("selection before layout = %d, want 0", got)
 	}
 }
+
+// ctrlF is Fresh's prompt_confirm chord in a palette query.
+func ctrlF() tea.KeyPressMsg { return tea.KeyPressMsg(tea.Key{Code: 'f', Mod: tea.ModCtrl}) }
+
+// TestCtrlFConfirmsLikeEnter checks Fresh's prompt_confirm binding in the file, command
+// and Live Grep modes: Ctrl+F runs/opens the selected row instead of moving the caret.
+func TestCtrlFConfirmsLikeEnter(t *testing.T) {
+	t.Parallel()
+	t.Run("file", func(t *testing.T) {
+		r := &fakeRanker{}
+		p := New(Options{Root: "/work", Files: &fakeFiles{files: []string{"src/a.go", "b.txt"}}, Ranker: r})
+		draw(p, 100, 30)
+		settle(t, p, p.Init(), 4)
+		for _, c := range "b" {
+			settle(t, p, p.update(typed(string(c))), 4)
+		}
+		if got := runCmd(p.update(ctrlF())); got != (OpenFileMsg{Path: "/work/b.txt", Rel: "b.txt"}) {
+			t.Fatalf("Ctrl+F emitted %#v, want the selected file", got)
+		}
+		if p.Active() {
+			t.Fatal("palette stayed open after Ctrl+F")
+		}
+	})
+	t.Run("command", func(t *testing.T) {
+		st := &commands.State{TextBuffer: true, Editable: true, HasPath: true, Modified: true}
+		p := New(commandOptions(">Save File", st))
+		draw(p, 100, 30)
+		if p.rows[0].action != "save" {
+			t.Fatalf("first row action = %q, want save", p.rows[0].action)
+		}
+		if got := runCmd(p.update(ctrlF())); got != (RunCommandMsg{Action: "save"}) {
+			t.Fatalf("Ctrl+F emitted %#v, want save", got)
+		}
+	})
+	t.Run("live grep", func(t *testing.T) {
+		p := New(liveOptions("todo", &fakeFiles{}, &fakeGrepper{}))
+		draw(p, 100, 30)
+		p.update(GrepResultMsg{Seq: p.seq, Text: "todo", Hits: []GrepHit{{Rel: "a.go", Line: 2, Col: 1, Text: "todo"}}})
+		if got := runCmd(p.update(ctrlF())); got != (OpenLineMsg{Path: "/w/a.go", Line: 2, Col: 1}) {
+			t.Fatalf("Ctrl+F emitted %#v, want the selected Live Grep row", got)
+		}
+	})
+}

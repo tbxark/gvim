@@ -399,3 +399,60 @@ func TestContentsHeadingsReturnsTheScan(t *testing.T) {
 		t.Errorf("the getter does not copy: %q", got)
 	}
 }
+
+// TestContentsConfiguredVersusSessionOverrides checks the two session overrides: the
+// follow command wins over a live contents.follow change, while an explicit
+// contents.rows change resets the divider drag's rows (the newer instruction). The
+// configured values still apply when no override is set.
+func TestContentsConfiguredVersusSessionOverrides(t *testing.T) {
+	t.Parallel()
+	c := scanContents(t, DefaultSettings(), "# One\ntext\n# Two")
+	c.SetConfiguredFollow(FollowScroll)
+	if got := c.FollowMode(); got != FollowScroll || c.FollowOverridden() {
+		t.Fatalf("configured follow = %v overridden %v, want scroll/false", got, c.FollowOverridden())
+	}
+	c.SetFollow(FollowCursor)
+	if got := c.FollowMode(); got != FollowCursor || !c.FollowOverridden() {
+		t.Fatalf("session follow = %v overridden %v, want cursor/true", got, c.FollowOverridden())
+	}
+	c.SetConfiguredFollow(FollowScroll)
+	if got := c.FollowMode(); got != FollowCursor {
+		t.Fatalf("a live config change cleared the follow command's session override: %v", got)
+	}
+
+	c.SetConfiguredRows(20)
+	if got := c.Rows(); got != 20 || c.RowsOverridden() {
+		t.Fatalf("configured rows = %d overridden %v, want 20/false", got, c.RowsOverridden())
+	}
+	c.SetRows(5)
+	if got := c.Rows(); got != 5 || !c.RowsOverridden() {
+		t.Fatalf("drag rows = %d overridden %v, want 5/true", got, c.RowsOverridden())
+	}
+	c.SetConfiguredRows(30)
+	if got := c.Rows(); got != 30 || c.RowsOverridden() {
+		t.Fatalf("config rows after a drag = %d overridden %v, want 30/false", got, c.RowsOverridden())
+	}
+}
+
+// TestContentsJumpSuppressionInScrollMode checks that the section's own jump does not
+// let the first viewport change move the selection to the heading at the pane top
+// while the jumped-to heading is still visible; the next viewport change follows the
+// top normally.
+func TestContentsJumpSuppressionInScrollMode(t *testing.T) {
+	t.Parallel()
+	st := DefaultSettings()
+	st.Follow = FollowScroll
+	c := scanContents(t, st, "# One\ntext\n# Two\nmore\n# Three")
+	c.SetViewRows(10)
+	c.SelectPos(4) // Three, the row the jump chose
+	c.NoteJump(4)
+	c.Follow(4, 2, true)
+	if got, _ := c.Selected(); got.Title != "Three" {
+		t.Fatalf("selected = %q after the jump's own viewport change, want Three", got.Title)
+	}
+	// The guard is one-shot: a later top change follows the new top.
+	c.Follow(4, 0, true)
+	if got, _ := c.Selected(); got.Title != "One" {
+		t.Fatalf("selected = %q after a later scroll, want One", got.Title)
+	}
+}

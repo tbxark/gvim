@@ -1522,6 +1522,9 @@ func settingsFor(opts Options, cfg config.Config) tui.Settings {
 		UIIconsFont:         cfg.UIIconsFont,
 		ConfigFile:          opts.Config,
 		FoldBuffer:          cfg.ContentsFoldBuffer(),
+		ContentsFollow:      cfg.ContentsFollow(),
+		ContentsAutoOpen:    cfg.ContentsAutoOpen(),
+		ContentsRows:        cfg.ContentsRows(),
 
 		LineEnding:             cfg.LineEnding,
 		TrimTrailingWhitespace: cfg.TrimTrailingWhitespace,

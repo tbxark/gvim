@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
@@ -42,6 +43,11 @@ type Settings struct {
 	// FoldBuffer is contents.fold_buffer, the Contents section's heading-fold
 	// switch. It is applied live by applyLiveSetting.
 	FoldBuffer bool
+	// ContentsFollow, ContentsAutoOpen and ContentsRows are the other native
+	// contents.* settings, applied live by applyLiveSetting.
+	ContentsFollow   string // "cursor" or "scroll"
+	ContentsAutoOpen bool
+	ContentsRows     int
 
 	// Read by gvim.config.get only; the Settings list does not show them.
 	LineEnding             string // line_ending: "auto", "lf", "crlf" or "cr"
@@ -1055,6 +1061,12 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) {
 		m.view.opts.Explorer.Side = v.Explorer.Side
 	case "contents.fold_buffer":
 		m.setContentsFoldBuffer(change.Settings.FoldBuffer)
+	case "contents.follow":
+		m.setContentsFollow(sidebar.ParseFollow(change.Settings.ContentsFollow))
+	case "contents.auto_open":
+		m.setContentsAutoOpen(change.Settings.ContentsAutoOpen)
+	case "contents.rows":
+		m.setContentsRows(change.Settings.ContentsRows)
 	case "file_explorer.follow_active_buffer":
 		m.view.opts.Explorer.FollowActiveBuffer = v.Explorer.FollowActiveBuffer
 	case "file_explorer.auto_open_on_last_buffer_close":

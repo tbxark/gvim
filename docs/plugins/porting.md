@@ -346,9 +346,10 @@ reimplemented and is not a catalog command):
   overwrite: the offer's existence check can race an external creator (the task-197 audit), so the
   create-new must claim the path or fail without replacing it. The plugin API gained that optional
   capability: the local plugin OS opens with `O_EXCL`, a remote workspace uses the authority's
-  `FileCreator` (`CreateNew`) capability and then writes the data, and a backend without the
-  capability returns `unsupported` — the plugin re-checks existence and reports either "created by
-  another process, not overwritten" or an explicit create refusal, never a silent overwrite.
+  `FileContentCreator` (`CreateNewWithContent`) so the claim and the content write are one
+  operation, and a backend without the capability returns `unsupported` — the plugin re-checks
+  existence and reports either "created by another process, not overwritten" or an explicit create
+  refusal, never a silent overwrite.
 
 Tests: `plugin/bundled/asm_lsp_test.go` covers command registration/no bindings, the offer and
 created TOML for NASM/GAS, MASM + ARM64 detection, the project/XDG-global skip rules, the never-ask

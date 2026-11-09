@@ -1,7 +1,9 @@
 package bundled_test
 
 import (
+	"fmt"
 	"io/fs"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,5 +130,89 @@ func TestGitExplorerColorNames(t *testing.T) {
 	}
 	if got["/work/src"] != "ui.file_status_modified_fg" || got["/work"] != "ui.file_status_modified_fg" {
 		t.Errorf("ancestor slots = %v", got)
+	}
+}
+
+// TestGitExplorerDecoratesNestedSubRepos checks the monorepo behavior Fresh added in
+// #2592: an independent nested repository below the workspace root is decorated from its
+// own status root, not left blank because the outer repo stops at its boundary.
+func TestGitExplorerDecoratesNestedSubRepos(t *testing.T) {
+	r := startRig(t, rigOpts{plugins: []string{"git_explorer"}, script: func(o *plugintest.FakeOS) {
+		explorerOS(" M a.go\x00")(o)
+		o.SetDir("/work/vendor/lib")
+		o.SetDir("/work/vendor/lib/.git")
+		o.SetFile("/work/vendor/lib/.git/HEAD", "ref: refs/heads/main\n")
+	}})
+	r.emit("after_file_open", "", nil)
+	decos := r.host.ExplorerDecorations("git_explorer", "git_explorer")
+	got := map[string]string{}
+	for _, d := range decos {
+		got[d.Path] = d.Symbol
+	}
+	if got["/work/a.go"] != "M" {
+		t.Errorf("root repo decoration = %v", got)
+	}
+	if got["/work/vendor/lib/a.go"] != "M" {
+		t.Errorf("nested repository was not decorated from its own status root: %v", got)
+	}
+}
+
+// TestGitExplorerWorksWithoutRootRepo: when the workspace root is not a repository but a
+// nested repo is, that nested repo is still decorated (Fresh's sole discovery path).
+func TestGitExplorerWorksWithoutRootRepo(t *testing.T) {
+	r := startRig(t, rigOpts{plugins: []string{"git_explorer"}, script: func(o *plugintest.FakeOS) {
+		o.SetDir("/work")
+		o.SetDir("/work/vendor/lib")
+		o.SetDir("/work/vendor/lib/.git")
+		o.SetFile("/work/vendor/lib/.git/HEAD", "ref: refs/heads/main\n")
+		o.Script(explorerRepoArgv, plugintest.ProcScript{Code: 1})
+		o.Script(explorerStatusArgv, plugintest.ProcScript{Stdout: " M a.go\x00"})
+	}})
+	r.emit("after_file_open", "", nil)
+	decos := r.host.ExplorerDecorations("git_explorer", "git_explorer")
+	found := false
+	for _, d := range decos {
+		if d.Path == "/work/vendor/lib/a.go" && d.Symbol == "M" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("nested repo decorations = %+v", decos)
+	}
+}
+
+// TestGitExplorerDiscoveryIsBounded: the nested-repo scan performs one bounded directory
+// listing per candidate directory (no per-entry exists round-trip), stops at its directory
+// budget, still decorates the root repo, and shows a one-time warning instead of silently
+// scanning forever.
+func TestGitExplorerDiscoveryIsBounded(t *testing.T) {
+	r := startRig(t, rigOpts{plugins: []string{"git_explorer"}, script: func(o *plugintest.FakeOS) {
+		explorerOS(" M a.go\x00")(o)
+		for i := 0; i < 200; i++ {
+			o.SetDir("/work/d" + fmt.Sprintf("%03d", i))
+		}
+	}})
+	r.emit("after_file_open", "", nil)
+	if got := len(r.host.ExplorerDecorations("git_explorer", "git_explorer")); got != 1 {
+		t.Fatalf("root decorations = %d, want the root repo still decorated", got)
+	}
+	texts := r.h.NoticeTexts()
+	found := false
+	for _, text := range texts {
+		if strings.Contains(text, "discovery stopped at its") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("notices = %v, want the bounded-discovery warning", texts)
+	}
+	reads := 0
+	for _, call := range r.os.Calls() {
+		if strings.HasPrefix(call, "ReadDir /work") {
+			reads++
+		}
+	}
+	if reads == 0 || reads > 2*128 {
+		t.Fatalf("directory listings = %d, want at most 2 bounded refreshes (2*128)", reads)
 	}
 }

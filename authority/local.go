@@ -142,6 +142,34 @@ func (l *local) CreateNew(ctx context.Context, path string, o hostos.WriteOption
 	return nil
 }
 
+// CreateNewWithContent implements FileContentCreator: one O_EXCL open, then the data is
+// written through that same descriptor. The path is never opened a second time, so a
+// concurrent replacement cannot redirect the write. A write/close failure returns the
+// error and leaves the claimed file (deleting by path could remove a file another process
+// has since replaced).
+func (l *local) CreateNewWithContent(ctx context.Context, path string, data []byte, o hostos.WriteOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateCreateOptions(o); err != nil {
+		return err
+	}
+	if data == nil {
+		data = []byte{}
+	}
+	perm := fs.FileMode(0o644)
+	if o.Mode != 0 {
+		perm = o.Mode.Perm()
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	return errors.Join(werr, cerr)
+}
+
 // WriteStream implements WriteStreamer: a temporary file in the target's directory,
 // chunked writes into it, then the mode and one rename over the target. The target is
 // untouched until Commit; Abort removes the temporary file. It follows a symbolic link to

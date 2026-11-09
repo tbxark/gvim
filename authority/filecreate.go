@@ -29,6 +29,27 @@ func Creators(fs FileSystem) FileCreator {
 	return c
 }
 
+// FileContentCreator is the optional part of a FileSystem that creates a new file with
+// its content in one exclusive operation: the path is claimed and the data is written
+// through that same claim, so no writer can replace the path between the claim and the
+// write. A backend that only has FileCreator (empty create) must not implement this; a
+// caller needing content must refuse exclusive writes on such a backend rather than
+// falling back to CreateNew followed by WriteFile. CreateNewWithContent follows
+// CreateNew's existing-entry rules (file, directory or symlink => fs.ErrExist, untouched),
+// honors only Mode, and refuses Append/Parents. A write failure may leave the claimed
+// file (empty or partial): it is already this caller's create-new, and deleting by path
+// afterwards could delete a file another process replaced it with.
+type FileContentCreator interface {
+	CreateNewWithContent(ctx context.Context, path string, data []byte, o hostos.WriteOptions) error
+}
+
+// ContentCreators returns the exclusive content-create surface of fs, or nil when the
+// backend has none.
+func ContentCreators(fs FileSystem) FileContentCreator {
+	c, _ := fs.(FileContentCreator)
+	return c
+}
+
 // validateCreateOptions rejects the write options a create-new cannot honor.
 func validateCreateOptions(o hostos.WriteOptions) error {
 	if o.Append {

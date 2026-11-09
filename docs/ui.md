@@ -163,8 +163,9 @@ query.
   `docs/parity.md`).
 **Palette keyboard.** Up/Down move the selection, PageUp/PageDown move it one visible
 page and clamp at the first/last row (Fresh's `prompt_page_up`/`prompt_page_down`; there is
-no page before the first layout), Enter runs/opens the selected row and Escape closes
-the palette. Tab accepts the selected
+no page before the first layout), Enter or Ctrl+F runs/opens the selected row (Fresh's
+prompt_confirm; gvim intercepts Ctrl+F before the query widget moves the caret) and
+Escape closes the palette. Tab accepts the selected
 suggestion into the query instead of running it (Fresh's `prompt_accept_suggestion`): in
 the file mode it fills the ranked path together with the `:line[:col]` target the query named,
 so a jump target is not lost; a Windows drive or any other colon in the path is left intact
@@ -178,7 +179,8 @@ command or no selection leaves the query unchanged. In Live Grep's floating over
 is a no-op, as in Fresh (its suggestion values are opaque).
 
 **Find/replace bar keyboard.** F3 and Shift+F3 step through the matches without
-closing the bar; Enter jumps to the current match and closes it; Tab/Shift+Tab show and
+closing the bar; Enter (or Ctrl+F, Fresh's prompt_confirm) jumps to the current match
+and closes it; Tab/Shift+Tab show and
 switch the replacement row; Esc restores the caret and selection from before the bar
 opened. Alt+C/Alt+W/Alt+R/Alt+I toggle Case Sensitive, Whole Word, Regex and Confirm
 Each. In either focused query field, `Ctrl+Delete` deletes the next word and

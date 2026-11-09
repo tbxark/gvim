@@ -152,15 +152,25 @@ declared as project-level, and markdown_toc declared none):
 
 ```jsonc
 {
+  // Native Contents keys: user layer only, applied live. A project file's
+  // contents object (and plugins.markdown_toc.enabled=false) is accepted and
+  // ignored: a repository cannot decide how the user reads an outline.
+  "contents": {
+    "fold_buffer": false,                    // also fold the buffer section on a fold
+    "follow": "cursor",                      // "cursor" | "scroll": what the selection follows
+    "auto_open": true,                       // show for Markdown buffers, hide otherwise
+    "rows": 10                               // integer 1-200: body rows the section asks for
+  },
+  // Fresh's retired plugin path is still read as the fallback (user layer only).
   "plugins": {
     "markdown_toc": {
-      "enabled": true,                       // the section's master switch
+      "enabled": true,                       // the section's master switch (user layer only)
       "settings": {
         "max_depth": 6,                      // integer 1-6: deepest heading level listed
-        "follow": "cursor",                  // "cursor" | "scroll": what the selection follows
-        "fold_buffer": false,                // also fold the buffer section on a fold
-        "rows": 10,                          // integer 1-200: body rows the section asks for
-        "auto_open": true                    // show for Markdown buffers, hide otherwise
+        "follow": "cursor",
+        "foldBuffer": false,                 // Fresh names; fold_buffer also accepted
+        "rows": 10,
+        "autoOpen": true                     // auto_open also accepted
       }
     }
   }
@@ -171,18 +181,20 @@ declared as project-level, and markdown_toc declared none):
 |---|---|---|---|
 | `enabled` | boolean | `true` | the section exists at all; off means no rows and the palette command says it is disabled |
 | `max_depth` | integer 1-6 | `6` | headings deeper than this are not rows of the tree |
-| `follow` | `"cursor"`/`"scroll"` | `"cursor"` | which heading the selected row follows |
+| `follow` | `"cursor"`/`"scroll"` | `"cursor"` | which heading the selected row follows; gvim's native key is `contents.follow` (user layer, applies live; the plugin path is the fallback and the native key wins) |
 | `fold_buffer` | boolean | `false` | folding a heading also folds its section in the buffer, and unfolding opens it (see §6). gvim's native key is `contents.fold_buffer` (user layer, applies live); the Fresh-compatible `plugins.markdown_toc.settings.fold_buffer` still works, and the native key wins when both are set |
-| `rows` | integer 1-200 | `10` | body rows the section asks for; a divider drag overrides it for the session |
-| `auto_open` | boolean | `true` | show the section when a Markdown buffer becomes active, hide it when the buffer is not Markdown |
+| `rows` | integer 1-200 | `10` | body rows the section asks for; a divider drag overrides it for the session, and a later live `contents.rows` edit resets the drag (the newer instruction). Native `contents.rows`, user layer, applies live |
+| `auto_open` | boolean | `true` | show the section when a Markdown buffer becomes active, hide it when the buffer is not Markdown; native `contents.auto_open`, user layer, applies live (turning it on opens for the active Markdown buffer at once; off hides an auto-opened section but leaves a command-opened one) |
 
 `rows`, the divider drag's value, the section's open/folded state and its window
 scroll are saved in the session file (see §4b); without a saved session the
 config value is used. The
-`markdown_toc_toggle_follow` action flips `follow` for the session.
-`contents.fold_buffer` is a native Settings-page row (section Contents,
-user layer, applies live), shown with the effective value; writing it does not
-touch the retired plugin's settings path.
+`markdown_toc_toggle_follow` action flips `follow` for the session (a session
+override that a later live config change does not clear; the configured value applies
+until the command is used). All four native keys are Settings-page rows (section
+Contents, user layer, applies live), shown with the effective value; writing them does
+not touch the retired plugin's settings path. `rows` from a divider drag is saved in
+the session and wins until a live `contents.rows` edit resets it.
 
 ## 4b. Session state and layout limits
 
@@ -234,25 +246,30 @@ The palette rows keep the retired plugin's names, so they are where they were:
 
 | Palette row | Action | Behaviour |
 |---|---|---|
-| Markdown: Show Outline | `markdown_toc_show` | show the section for the active Markdown buffer and give it the keyboard; a text buffer says "Not a Markdown buffer" |
+| Markdown: Show Outline | `markdown_toc_show` | show the section for the active Markdown buffer and give it the keyboard; a text buffer says "Not a Markdown buffer". On an already open section it only reveals/focuses it: the reader's folds, scroll and selection survive |
 | Markdown: Close Outline | `markdown_toc_close` | hide the section for the buffer being read |
-| Markdown: Contents — Follow Cursor/Scroll | `markdown_toc_toggle_follow` | flip `follow` for the session |
+| Markdown: Toggle Table of Contents | `markdown_toc_toggle` | close the section when open, otherwise open it (even with `auto_open` off) without taking the keyboard; a non-Markdown buffer reports "Not a Markdown buffer" |
+| Markdown: Focus Contents | `markdown_toc_focus` | show the section for the active Markdown buffer and move the keyboard into it (the same reveal/focus, also usable when it is already open) |
+| Markdown: Contents — Follow Cursor/Scroll | `markdown_toc_toggle_follow` | flip `follow` for the session (session override; a live config change does not clear it) |
 
 The actions are in `commands/markdown_commands.go`, the hand-written table the
 compare rows also use, because the section is not in the generated Fresh table.
 They are ordinary ui actions, so a keybinding may name them.
 
-There is **no fold command and no menu row**: Fresh's `markdown_toc` registers
-exactly Toggle Table of Contents, Follow Cursor/Scroll and Focus Contents, and
-folding is the section's own disclosure gesture (a click on the row's glyph, or
-Left/Right while the section has the keyboard). gvim adds no row, keeping the
-palette at Fresh's surface.
+Fresh's `markdown_toc` registers exactly Toggle Table of Contents, Follow
+Cursor/Scroll and Focus Contents; gvim now has those three rows (the Toggle/Focus
+names above), plus its own Show/Close Outline rows. There is **no fold command and no
+menu row**: folding is the section's own disclosure gesture (a click on the row's
+glyph, or Left/Right while the section has the keyboard). In scroll mode a jump to a
+heading suppresses the first viewport change that still shows the target, so the
+jump's own scroll does not move the selection to the heading at the pane top.
 
 **Auto-open**: with `auto_open` on, the section appears when a Markdown buffer
 becomes active and hides when the active buffer is not Markdown; closing it hides
 it for the buffer being read, and the next buffer activation brings it back (as
 Fresh remounts its plugin section). With `auto_open` off it appears only through
-Show Outline, and stays available across buffer switches once shown.
+Show Outline / Toggle Table of Contents / Focus Contents, and stays available across
+buffer switches once shown. The setting applies live through the Settings page.
 
 ## 6. Differences from Fresh and residual gaps
 

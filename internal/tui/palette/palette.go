@@ -505,7 +505,9 @@ func (p *Palette) Draw(g *grid.Grid) {
 // toggle key flips its mode or scope, and any other key goes to the query line.
 func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	switch tea.Key(msg).String() {
-	case "enter":
+	case "enter", "ctrl+f":
+		// Fresh's prompt context binds Ctrl+F to prompt_confirm as well as Enter.
+		// Intercept it before the query widget, where plain Ctrl+F would move the caret.
 		return p.run(p.nav.Selected())
 	case "up":
 		p.nav.Select(p.nav.Selected() - 1)

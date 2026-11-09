@@ -254,7 +254,14 @@ deliberately does not take.
   another process could have replaced it, so a helper that deletes on its own failure could
   delete that process's file. Append/Parents are refused with `ErrUnsupportedFileIO`; a
   missing parent is an ordinary error; a backend without the surface makes the caller
-  refuse explicitly instead of racing a check-then-write. Fresh comparison: Fresh's
+  refuse explicitly instead of racing a check-then-write. The optional
+  `FileContentCreator` (`CreateNewWithContent`, reached with `ContentCreators(fs)`) is the
+  content-bearing variant: the SSH helper opens the target with a noclobber descriptor and
+  writes stdin through that same fd, and the local backend writes through its one O_EXCL
+  handle, so the claim and the data write cannot be split by a path replacement. Plugin
+  `fs.write {exclusive=true}` uses it and a backend without it returns `unsupported` (no
+  CreateNew-then-WriteFile fallback); a failed content write leaves the claimed file rather
+  than deleting a path another process may have replaced. Fresh comparison: Fresh's
   `create_new_file` is O_EXCL locally but its remote authority returns Unsupported (the
   agent protocol has no exclusive create); gvim's helper channel can run the noclobber
   create, so the remote explorer gets the guarantee too.

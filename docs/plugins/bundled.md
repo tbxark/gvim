@@ -212,9 +212,10 @@ nor a global asm-lsp config exists, the plugin offers to create it, guessing the
 language and a bounded sample of the buffer (MASM's `proc`/`endp`/`assume`/`.model` tokens
 versus NASM's default; `gas` for `.s`/`gas`) and the instruction set (ARM64 opcodes, RISC-V
 opcodes, else x86/x86-64). The config is created exclusively at the project root (a `gvim.fs.write`
-create-new, mapped to the workspace authority's `FileCreator` capability on a remote workspace: a file
-another process created after the offer is never overwritten; a backend without the capability
-refuses instead of racing a check) with asm-lsp's
+create-new, mapped to the workspace authority's `FileContentCreator` capability on a remote
+workspace: one operation claims the path and writes the TOML, so a file another process created after
+the offer is never overwritten; a backend without the capability refuses instead of racing a
+create-then-write) with asm-lsp's
 `[default_config]` shape and, for non-GAS dialects, the `default_diagnostics = false` block (its
 built-in diagnostics only assemble GAS), then the native **lsp_restart** action is run so a running
 server picks it up. The offer's other choices create the config for another dialect, dismiss it for
@@ -598,17 +599,28 @@ killing the git process.
 **git_explorer** (reduced Fresh port): shows each tracked file's git status in the file explorer —
 `M`/`A`/`D`/`R`/`C`/`U` badges with Fresh's priorities (with `!` for conflicts; a staged modification
 uses the added colour) and, with `color_names`, colors changed names and their ancestor directories —
-from `git status --porcelain -z` in the workspace root's repository. It refreshes on ready,
+from `git status --porcelain -z` in the workspace root's repository and in independent
+nested repositories below it (Fresh's #2592 monorepo behavior): the root repo is decorated first,
+then a bounded breadth-first directory scan finds directories whose `.git` entry is present (a
+directory for a normal repo, a file for a worktree) and each is decorated from its OWN status root,
+so a vendored repo's files are not left blank when the outer repo stops at its boundary. The scan
+issues one `gvim.fs.list` per candidate directory (never a per-entry `exists` round trip, which
+would be one remote authority round trip per file), up to 128 directory listings and 32 nested
+repos with Fresh's depth 3, under a 1.5 s wall-clock budget; the same budget caps the per-repo
+`git status` reads. When a bound is reached the repos found so far are decorated, the result is
+partial, and a one-time warning notice says the discovery stopped instead of scanning without a
+bound; unloading the plugin stops a yielded refresh from applying. It refreshes on ready,
 after-file-open/save/revert, `focus_gained` and config changes plus a debounced watcher of the
-repository's git directory (so commits/checkouts elsewhere update the badges), and clears itself
-outside a repository. It drives the
+root repository's git directory (so commits/checkouts elsewhere update the root badges); nested
+repositories are refreshed by those events because only the root HEAD is watched (bounded watcher
+budget). It clears itself outside any repository. It drives the
 explorer through `gvim.explorer.set_decorations/clear_decorations` and `set_slots/clear_slots` (the
 host surface mirrors Fresh's setFileExplorerDecorations/Slots with per-plugin namespaces, priority
 then namespace resolution, absolute/root-relative path normalization and owner cleanup); colour keys
-reuse the theme's `ui.file_status_*_fg` keys, so a theme can recolour the badges. Reductions: only the
-workspace-root repository is decorated (no nested sub-repo discovery), no hover tooltips, symbols
-only (no arbitrary icons), and a setting change applies on the next refresh. It is opt-in: enabling
-it costs about 1.5 MiB of idle heap, which the default set cannot afford.
+reuse the theme's `ui.file_status_*_fg` keys, so a theme can recolour the badges. Reductions: no
+hover tooltips, symbols only (no arbitrary icons), nested-repository HEAD changes are event-driven
+rather than watched, and a setting change applies on the next refresh. It is opt-in: enabling it
+costs about 1.5 MiB of idle heap, which the default set cannot afford.
 
 **env_manager** (reduced Fresh port): detects and activates the project's environment — virtualenv,
 direnv, mise, pipenv, poetry — so language servers, formatters, terminals, plugin processes and

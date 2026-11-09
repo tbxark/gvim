@@ -15,7 +15,7 @@ Reload command, per-setting reset, and what is deferred.
 ## 1. The schema
 
 `config/settings_schema.go` holds the descriptor table the page is built from:
-69 settings, each a `config.Setting` with
+77 settings rows, each a `config.Setting` with
 
 - `Path`: where the value lives in the file, such as `{"editor", "tab_size"}`;
 - `Kind`: `bool`, `int`, `enum`, `string`, or `page` (a row that opens
@@ -25,7 +25,8 @@ Reload command, per-setting reset, and what is deferred.
   leaf package and must not import them);
 - `Min`/`Max` for an int;
 - `Layers`: `LayerUser` and/or `LayerProject` (the keymap, the terminal
-  shell and its arguments, and `contents.fold_buffer` — the retired
+  shell and its arguments, and the native `contents.fold_buffer`, `contents.follow`,
+  `contents.auto_open` and `contents.rows` — the retired
   markdown_toc plugin's setting — are user-only, because a project must not
   change what keys do, what program gvim executes, or how the reader's outline
   behaves);
@@ -292,7 +293,10 @@ service and the root:
   `T()`-rendered strings and plugin `t()`/`gvim.i18n.locale()` change at once.
   Generated command/palette/menu titles come from Fresh's command names and stay
   English (see [i18n.md](i18n.md));
-- `contents.fold_buffer` applies live through the same path: switching it on
+- The four native `contents.*` keys apply live through the same path
+  (`contents.follow`/`contents.auto_open`/`contents.rows` feed the running section;
+  a live rows edit resets a divider drag's session value). `contents.fold_buffer`
+  switching it on
   publishes the active Markdown buffer's heading ranges at once (the Contents
   section rescans, also while hidden), and switching it off clears the outline
   source and opens the folds the section applied, leaving hand folds alone.
@@ -425,7 +429,7 @@ opens the config file on Enter (the ui_icons row opens the icon preview).
 | `config/patch.go` | `Edit` (set or remove), `PatchBytes` (surgical hujson patch with the reset cascade), `ValidateEdits` |
 | `config/config.go` | `applyObject`, the shared key-application path |
 | `i18n/i18n.go`, `i18n/catalogue.go`, `i18n/locales/*.json` | the translation package and its embedded catalogues: locale resolution, `T`/`TN`, plurals, the Fresh import mapping and catalogue validation for the `locale` row (see [i18n.md](i18n.md)) |
-| `config/contents.go` | the native `contents.fold_buffer` key, its project-layer rule (ignored: the retired markdown_toc plugin's settings are the user's) and `ContentsFoldBuffer`, the effective value with the plugin-key fallback |
+| `config/contents.go` | the native `contents.fold_buffer`/`follow`/`auto_open`/`rows` keys, their project-layer rule (accepted and ignored: the retired markdown_toc plugin's settings are the user's) and the effective getters with the plugin-key fallback (`ContentsEnabled` reads the USER plugin enabled only, so a project `enabled=false` cannot disable the built-in Contents) |
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |
 | `internal/tui/settings_structure.go` | the generic structured sub-page (map, list, fields, languages, dual) |

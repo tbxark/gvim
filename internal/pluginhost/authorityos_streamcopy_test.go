@@ -201,7 +201,7 @@ func TestAuthorityOSCopyStreamsTreeFiles(t *testing.T) {
 }
 
 func TestAuthorityOSCopyWithoutStreamerIsUnsupported(t *testing.T) {
-	// There is no same-handle exclusive create+write primitive and no atomic streamer, so
+	// The copy path does not use the exclusive-content creator and no atomic streamer exists, so
 	// the copy must be refused before it can create or write the destination.
 	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
 	remote.files["/srv/proj/big.bin"] = "source"

@@ -286,6 +286,73 @@ func (m *Model) setContentsFoldBuffer(on bool) {
 	m.rescanContents()
 }
 
+// setContentsFollow applies contents.follow live: the configured mode changes, while
+// the follow command's session override (if the user used it) still wins. The
+// selection is re-derived immediately from the effective mode.
+func (m *Model) setContentsFollow(f sidebar.Follow) {
+	m.contents.SetConfiguredFollow(f)
+	if doc := m.ed.Active(); doc != nil && m.contents.Open() {
+		m.contents.Follow(doc.Cursor().Line, doc.Top(), m.editorFocused())
+	}
+}
+
+// setContentsRows applies contents.rows live. A divider drag's session value wins,
+// as Fresh's section rows do; the layout reads Rows() on its next pass.
+func (m *Model) setContentsRows(n int) {
+	m.contents.SetConfiguredRows(n)
+	m.setContentsViewRows()
+}
+
+// setContentsAutoOpen applies contents.auto_open live: turning it on opens the
+// section for an active Markdown buffer and clears the reader's per-buffer close,
+// so the automatic behavior is visible at once; turning it off hides a section that
+// auto-open is showing but leaves one opened by a command (wanted) alone.
+func (m *Model) setContentsAutoOpen(on bool) {
+	m.contents.SetConfiguredAutoOpen(on)
+	doc := m.ed.Active()
+	if doc == nil || !m.toc.enabled || !isMarkdownName(doc.Name()) {
+		return
+	}
+	if on {
+		m.toc.closed = false
+		if !m.contents.Open() {
+			m.openContents(false)
+		}
+		return
+	}
+	if m.contents.Open() && !m.toc.wanted {
+		m.closeContents()
+	}
+}
+
+// markdownTOCToggle is Fresh's "Markdown: Toggle Table of Contents": close the
+// section when it is open, otherwise open it (even with auto_open off) without
+// taking the keyboard. A non-Markdown buffer reports the same status Fresh's plugin
+// does.
+func (m *Model) markdownTOCToggle() {
+	switch {
+	case m.tree == nil:
+		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
+		return
+	case !m.toc.enabled:
+		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
+		return
+	}
+	doc := m.ed.Active()
+	if doc == nil || !isMarkdownName(doc.Name()) {
+		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
+		return
+	}
+	if m.contents.Open() {
+		m.closeContents()
+		m.notice = uiText("gvim.contents.status.toc_off", "Markdown Contents: OFF")
+		return
+	}
+	m.toc.wanted = true
+	m.openContents(false)
+	m.notice = uiText("gvim.contents.status.toc_on", "Markdown Contents: ON")
+}
+
 // contentsSync notices what changed since the last message: a new active
 // buffer, an edit of the one the rows describe, or a move of the caret, and
 // keeps the section's rows and selection current. It runs after every message
@@ -489,19 +556,26 @@ func (m *Model) tocRescan(msg tocRescanMsg) tea.Cmd {
 func (m *Model) markdownTOCShown() {
 	switch {
 	case m.tree == nil:
-		m.notice = "The Contents section needs the file explorer column"
+		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
 		return
 	case !m.toc.enabled:
-		m.notice = "The markdown_toc section is disabled in the config"
+		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
 		return
 	}
 	doc := m.ed.Active()
 	if doc == nil || !isMarkdownName(doc.Name()) {
-		m.notice = "Not a Markdown buffer"
+		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
 		return
 	}
 	m.toc.wanted = true
 	m.toc.closed = false
+	if m.contents.Open() {
+		// Show Outline on an open section only reveals/focuses it: a reader's folds,
+		// scroll and selection must survive (Fresh's plugin keeps them too).
+		m.contents.SetCollapsed(false)
+		m.takeContentsFocus()
+		return
+	}
 	m.contents.Reset()
 	m.resetOutlineFolds()
 	m.openContents(true)
@@ -521,7 +595,11 @@ func (m *Model) markdownTOCToggleFollow() {
 		next = sidebar.FollowScroll
 	}
 	m.contents.SetFollow(next)
-	m.notice = "Contents follow: " + next.String()
+	if next == sidebar.FollowScroll {
+		m.notice = uiText("gvim.contents.status.follow_scroll", "Contents follow: scroll")
+	} else {
+		m.notice = uiText("gvim.contents.status.follow_cursor", "Contents follow: cursor")
+	}
 	if doc := m.ed.Active(); doc != nil {
 		m.contents.Follow(doc.Cursor().Line, doc.Top(), m.editorFocused())
 	}
@@ -537,6 +615,7 @@ func (m *Model) editorFocused() bool {
 // and a press on one; the two differ in where the keyboard goes afterwards.
 func (m *Model) jumpContents() {
 	if line, ok := m.contents.SelectedLine(); ok {
+		m.contents.NoteJump(line)
 		m.gotoLine(line+1, 1)
 	}
 }
@@ -599,14 +678,20 @@ func (m *Model) takeContentsFocus() {
 // Markdown buffer and unfolding it first: the keyboard does not go to a section
 // with no rows on screen.
 func (m *Model) focusContents() {
-	if m.tree == nil {
+	switch {
+	case m.tree == nil:
+		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
+		return
+	case !m.toc.enabled:
+		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
+		return
+	}
+	doc := m.ed.Active()
+	if doc == nil || !isMarkdownName(doc.Name()) {
+		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
 		return
 	}
 	if !m.contents.Open() {
-		doc := m.ed.Active()
-		if doc == nil || !isMarkdownName(doc.Name()) || !m.toc.enabled {
-			return
-		}
 		m.toc.wanted = true
 		m.openContents(true)
 		return

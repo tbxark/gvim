@@ -292,6 +292,15 @@ var settingsTable = []Setting{
 	{Path: []string{"contents", "fold_buffer"}, Section: SectionContents, Kind: SettingBool,
 		Layers: LayerUser, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ContentsFoldBuffer() }), encode: encodeBool},
+	{Path: []string{"contents", "follow"}, Section: SectionContents, Kind: SettingEnum,
+		Choices: []string{ContentsFollowCursor, ContentsFollowScroll}, Layers: LayerUser, Apply: ApplyLive,
+		value: func(c Config) string { return c.ContentsFollow() }, encode: encodeEnum([]string{ContentsFollowCursor, ContentsFollowScroll})},
+	{Path: []string{"contents", "auto_open"}, Section: SectionContents, Kind: SettingBool,
+		Layers: LayerUser, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.ContentsAutoOpen() }), encode: encodeBool},
+	{Path: []string{"contents", "rows"}, Section: SectionContents, Kind: SettingInt,
+		Min: MinContentsRows, Max: MaxContentsRows, Layers: LayerUser, Apply: ApplyLive,
+		value: func(c Config) string { return strconv.Itoa(c.ContentsRows()) }, encode: encodeInt(MinContentsRows, MaxContentsRows)},
 
 	// Session.
 	{Path: []string{"editor", "hot_exit"}, Section: SectionSession, Kind: SettingBool,
