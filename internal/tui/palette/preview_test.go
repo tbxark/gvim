@@ -154,12 +154,12 @@ func TestPreviewStaleReadIsDropped(t *testing.T) {
 	p.update(key(tea.KeyDown)) // reads b.go, not run yet
 	bSeq, bRel := p.preview.seq, p.preview.rel
 	p.update(key(tea.KeyDown)) // at the end of the list, nothing new to read
-	p.applyPreview(previewMsg{Seq: bSeq, Rel: bRel, Preview: Preview{Lines: []string{"late"}}})
+	p.applyPreview(previewMsg{Token: p.token, Seq: bSeq, Rel: bRel, Preview: Preview{Lines: []string{"late"}}})
 	if !p.preview.ready || p.preview.rel != "b.go" {
 		t.Fatalf("preview state = %+v, want the b.go read", p.preview)
 	}
 	// A message from an older read is dropped.
-	p.applyPreview(previewMsg{Seq: bSeq - 1, Rel: "a.go", Preview: Preview{Lines: []string{"stale"}}})
+	p.applyPreview(previewMsg{Token: p.token, Seq: bSeq - 1, Rel: "a.go", Preview: Preview{Lines: []string{"stale"}}})
 	if strings.Contains(strings.Join(shownPreview(t, p), "\n"), "stale") {
 		t.Fatal("a stale preview replaced the shown one")
 	}

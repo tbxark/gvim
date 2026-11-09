@@ -17,6 +17,7 @@ import (
 
 	"reflect"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -83,7 +84,7 @@ func (e lineError) Error() string {
 
 // styles are the grid styles of the prompt rows.
 type styles struct {
-	bar, label, field, active, warn grid.Style
+	bar, label, field, active, warn, selected grid.Style
 }
 
 // newStyles derives the prompt styles from the overlay palette, so the prompt reads
@@ -93,11 +94,12 @@ type styles struct {
 func newStyles(st style.Styles) styles {
 	ov := st.Overlay
 	return styles{
-		bar:    ov.Box,
-		label:  ov.Muted,
-		field:  ov.Idle,
-		active: ov.Focus,
-		warn:   ov.Error,
+		bar:      ov.Box,
+		label:    ov.Muted,
+		field:    ov.Idle,
+		active:   ov.Focus,
+		warn:     ov.Error,
+		selected: ov.Selected,
 	}
 }
 
@@ -157,6 +159,9 @@ type Line struct {
 	styles   styles
 	closed   bool
 	prefill  bool // the text is an untouched prefill that the next typed text replaces
+	// selAnchor is the selection anchor in rune indices, -1 when there is no selection.
+	// The caret (field.Position) is the moving head; a non-empty range is highlighted.
+	selAnchor int
 
 	history []string // earlier answers, oldest first
 	at      int      // the entry of history shown; len(history) is the text being typed
@@ -187,9 +192,12 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		onChange: o.OnChange,
 		styles:   newStyles(st),
 		prefill:  o.SelectAll && o.Input != "",
-		history:  o.History,
-		at:       len(o.History),
-		paste:    textinput.Paste,
+		// An initial SelectAll prefill is the old invisible replacement state, not a
+		// visual selection; Ctrl+A creates the real selection model.
+		selAnchor: -1,
+		history:   o.History,
+		at:        len(o.History),
+		paste:     textinput.Paste,
 
 		selSuggestion: -1,
 	}
@@ -201,13 +209,126 @@ func (l *Line) Active() bool { return !l.closed }
 // Value returns the current input.
 func (l *Line) Value() string { return l.field.Value() }
 
-// SelectAll is Fresh's prompt_select_all: mark the whole text as a prefill selection and
-// put the caret at its end. The text field has no selection model, so the next printable
-// key or paste replaces the text; Backspace/Delete clear it, and an arrow cancels the
-// selection while keeping the text for editing.
+// selectionRange returns the ordered rune range of the real prompt selection.
+func (l *Line) selectionRange() (start, end int, ok bool) {
+	head := l.field.Position()
+	if l.selAnchor < 0 || l.selAnchor == head {
+		return 0, 0, false
+	}
+	if l.selAnchor < head {
+		return l.selAnchor, head, true
+	}
+	return head, l.selAnchor, true
+}
+
+// HasSelection reports whether the prompt has a non-empty real selection.
+func (l *Line) HasSelection() bool {
+	_, _, ok := l.selectionRange()
+	return ok
+}
+
+// SelectedRange returns the rune range of the real selection, for a cut's identity check.
+func (l *Line) SelectedRange() (start, end int, ok bool) {
+	return l.selectionRange()
+}
+
+// SelectedText returns the selected prompt text, empty when there is no selection.
+func (l *Line) SelectedText() string {
+	start, end, ok := l.selectionRange()
+	if !ok {
+		return ""
+	}
+	return string([]rune(l.field.Value())[start:end])
+}
+
+func (l *Line) clearSelection() {
+	l.selAnchor = -1
+}
+
+// setSelectionHead moves the caret while keeping (or starting) the selection anchor.
+func (l *Line) setSelectionHead(head int) {
+	if l.selAnchor < 0 {
+		l.selAnchor = l.field.Position()
+	}
+	head = min(max(head, 0), len([]rune(l.field.Value())))
+	l.field.SetCursor(head)
+	l.prefill = false
+	l.errText = ""
+}
+
+// SelectAll is Fresh's prompt_select_all with a real, reverse-video selection.
 func (l *Line) SelectAll() {
-	l.prefill = true
+	l.selAnchor = 0
 	l.field.CursorEnd()
+	l.prefill = false
+	l.errText = ""
+}
+
+// SelectLeft and SelectRight extend the selection by one rune.
+func (l *Line) SelectLeft()  { l.setSelectionHead(l.field.Position() - 1) }
+func (l *Line) SelectRight() { l.setSelectionHead(l.field.Position() + 1) }
+
+// SelectHome and SelectEnd extend the selection to the input's ends.
+func (l *Line) SelectHome() { l.setSelectionHead(0) }
+func (l *Line) SelectEnd()  { l.setSelectionHead(len([]rune(l.field.Value()))) }
+
+// SelectWordLeft and SelectWordRight extend the selection by one word, using the same
+// whitespace-delimited word notion as the text field's word movement.
+func (l *Line) SelectWordLeft() {
+	runes := []rune(l.field.Value())
+	i := min(max(l.field.Position(), 0), len(runes))
+	for i > 0 && unicode.IsSpace(runes[i-1]) {
+		i--
+	}
+	for i > 0 && !unicode.IsSpace(runes[i-1]) {
+		i--
+	}
+	l.setSelectionHead(i)
+}
+
+// SelectWordRight is SelectWordLeft in the other direction.
+func (l *Line) SelectWordRight() {
+	runes := []rune(l.field.Value())
+	i := min(max(l.field.Position(), 0), len(runes))
+	for i < len(runes) && unicode.IsSpace(runes[i]) {
+		i++
+	}
+	for i < len(runes) && !unicode.IsSpace(runes[i]) {
+		i++
+	}
+	l.setSelectionHead(i)
+}
+
+// deleteSelectionSilent removes the selected range without reporting onChange; the caller
+// reports the final text after the replacement edit. It reports whether there was a range.
+func (l *Line) deleteSelectionSilent() bool {
+	start, end, ok := l.selectionRange()
+	if !ok {
+		return false
+	}
+	runes := []rune(l.field.Value())
+	next := string(runes[:start]) + string(runes[end:])
+	l.field.SetValue(next)
+	l.field.SetCursor(start)
+	l.clearSelection()
+	l.prefill = false
+	l.errText = ""
+	return true
+}
+
+// DeleteSelection removes the real selection and reports the resulting text through
+// onChange, as Backspace/Delete and a confirmed cut do. It returns the removed text.
+func (l *Line) DeleteSelection() string {
+	start, end, ok := l.selectionRange()
+	if !ok {
+		return ""
+	}
+	removed := string([]rune(l.field.Value())[start:end])
+	l.deleteSelectionSilent()
+	if l.onChange != nil {
+		l.onChange(l.field.Value())
+	}
+	return removed
 }
 
 // CutValue is Fresh's prompt_cut without a selection: copy the whole prompt text and
@@ -236,27 +357,41 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		if text, ok := pasteContent(msg); ok {
-			if l.prefill && text != "" {
+			text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+			if text == "" {
+				// An empty paste (empty clipboard) is not an edit: keep the text and any
+				// selection, and do not report onChange. A selected range is only replaced
+				// when there is text to insert through the unified edit path below.
+				return l, nil
+			}
+			if !l.deleteSelectionSilent() && l.prefill {
 				l.untouch(true)
 			}
-			msg = tea.PasteMsg{Content: strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")}
+			msg = tea.PasteMsg{Content: text}
 		}
 		l.edit(msg)
 		return l, nil
 	}
 	ks := tea.Key(kp).Keystroke()
+	if l.selectionKey(ks) {
+		return l, nil
+	}
 	// A suggestion list takes Tab, Shift+Tab and the arrows while it is shown: Tab and the
 	// arrows move the highlight and fill the choice in; the history keys come back when the
-	// list is empty.
+	// list is empty. Taking a suggestion cancels any text selection.
 	if len(l.suggestions) > 0 {
 		switch ks {
 		case "tab", "down", "ctrl+n":
+			l.clearSelection()
 			return l, l.cycleSuggestion(1)
 		case "shift+tab", "up", "ctrl+p":
+			l.clearSelection()
 			return l, l.cycleSuggestion(-1)
 		case "pgup":
+			l.clearSelection()
 			return l, l.pageSuggestion(-1)
 		case "pgdown":
+			l.clearSelection()
 			return l, l.pageSuggestion(1)
 		}
 	}
@@ -267,9 +402,13 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	case "up", "down", "ctrl+p", "ctrl+n":
 		if len(l.history) > 0 {
 			k := tea.Key(kp).Keystroke()
+			l.clearSelection()
 			l.walk(k == "up" || k == "ctrl+p")
 			return l, nil
 		}
+	case "ctrl+a":
+		l.SelectAll()
+		return l, nil
 	case "enter":
 		text := l.field.Value()
 		if l.validate != nil {
@@ -280,6 +419,26 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		}
 		l.closed = true
 		return l, done(Done{Tag: l.tag, Outcome: Submitted, Text: text})
+	}
+	if l.HasSelection() {
+		switch {
+		case ks == "backspace" || ks == "delete":
+			l.DeleteSelection()
+			return l, nil
+		case ks == "ctrl+v":
+			// The paste result replaces the selection; keep it visible while the
+			// clipboard read is in flight.
+		case selectionMovementKey(ks):
+			l.clearSelection()
+		case kp.Text != "" && kp.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper|tea.ModMeta) == 0:
+			// Only a real printable insertion replaces the selected range. The final
+			// field edit below goes through l.edit, so onChange reports the result once.
+			l.deleteSelectionSilent()
+		default:
+			// Tab/PageUp/PageDown/Shift+Tab, control chords and other named keys have no
+			// insertion semantics here: cancel the selection but never delete silently.
+			l.clearSelection()
+		}
 	}
 	if l.prefill && (ks == "backspace" || ks == "delete") {
 		before := l.field.Value()
@@ -303,6 +462,39 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	}
 	l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
 	return l, l.edit(kp)
+}
+
+// selectionKey handles Fresh's prompt move-selecting/select-word actions, which the root
+// dispatches as methods too; handling the chords here keeps a direct Line.Update correct.
+func (l *Line) selectionKey(ks string) bool {
+	switch ks {
+	case "shift+left":
+		l.SelectLeft()
+	case "shift+right":
+		l.SelectRight()
+	case "shift+home":
+		l.SelectHome()
+	case "shift+end":
+		l.SelectEnd()
+	case "ctrl+shift+left":
+		l.SelectWordLeft()
+	case "ctrl+shift+right":
+		l.SelectWordRight()
+	default:
+		return false
+	}
+	return true
+}
+
+// selectionMovementKey reports whether ks is a non-selecting caret movement; such a key
+// cancels the selection and then moves the caret normally.
+func selectionMovementKey(ks string) bool {
+	switch ks {
+	case "left", "right", "home", "end", "up", "down",
+		"ctrl+p", "ctrl+n", "ctrl+left", "ctrl+right", "ctrl+e", "ctrl+b", "alt+b", "alt+f":
+		return true
+	}
+	return false
 }
 
 // pasteContent recognizes a paste result delivered to the prompt. tea.PasteMsg is the
@@ -468,8 +660,46 @@ func (l *Line) Draw(g *grid.Grid) {
 	}
 	x := space.PadX + g.Put(space.PadX, y, end, l.label+" ", l.styles.label)
 	g.Fill(x, end, y, l.styles.field)
-	shown, _ := space.Window(l.field.Value(), l.field.Position(), end-x)
-	g.Put(x, y, end, shown, l.styles.field)
+	runes := []rune(l.field.Value())
+	start, stop := windowRange(l.field.Value(), l.field.Position(), end-x)
+	selStart, selEnd, hasSel := l.selectionRange()
+	for i := start; i < stop && x < end; i++ {
+		st := l.styles.field
+		if hasSel && i >= selStart && i < selEnd {
+			st = l.styles.selected
+		}
+		x += g.Put(x, y, end, string(runes[i]), st)
+	}
+}
+
+// windowRange is the rune range space.Window keeps visible for a caret position and a
+// cell budget. Keeping the indices (not just the rendered substring) lets Draw paint the
+// selected runes with the reverse-video selection style.
+func windowRange(value string, pos, room int) (start, end int) {
+	runes := []rune(value)
+	pos = min(max(pos, 0), len(runes))
+	if room <= 0 {
+		return 0, 0
+	}
+	cellOf := func(r rune) int { return ansi.StringWidth(string(r)) }
+	total := 0
+	for _, r := range runes {
+		total += cellOf(r)
+	}
+	if total+1 <= room {
+		return 0, len(runes)
+	}
+	right, stop := 0, pos
+	for stop < len(runes) && right+cellOf(runes[stop]) <= (room-1)/4 {
+		right += cellOf(runes[stop])
+		stop++
+	}
+	left, start := 0, pos
+	for start > 0 && left+cellOf(runes[start-1]) <= room-1-right {
+		left += cellOf(runes[start-1])
+		start--
+	}
+	return start, stop
 }
 
 // maxSuggestionRows is the most suggestion rows drawn at once; the rest scroll.

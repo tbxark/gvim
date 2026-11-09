@@ -349,6 +349,86 @@ func firstPromptCopyMsg(t *testing.T, cmd tea.Cmd) promptCopyMsg {
 // confirm's question) without mutating it. With a native writer the Copied notice waits
 // for that write's result; a failure says so and a reader-only clipboard is reported as
 // an unconfirmed OSC 52 request, never as Copied.
+// TestPromptSelectionRootKeys: the real overlay Update path drives Fresh's
+// move-selecting/select-word actions, and Ctrl+C/Ctrl+X act on the selected range while
+// preserving the native-writer single-flight/identity semantics.
+func TestPromptSelectionRootKeys(t *testing.T) {
+	keys := fakeKeymap{
+		"prompt|a|ctrl":          {Action: "prompt_select_all"},
+		"prompt|Left|shift":      {Action: "prompt_move_left_selecting"},
+		"prompt|Left|ctrl+shift": {Action: "prompt_select_word_left"},
+		"prompt|c|ctrl":          {Action: "prompt_copy"},
+		"prompt|x|ctrl":          {Action: "prompt_cut"},
+	}
+	open := func(t *testing.T, cb ClipboardReader) (*Model, *prompt.Line) {
+		t.Helper()
+		m := overlayModel(t, keys)
+		if cb != nil {
+			m.SetDock(DockPorts{Clipboard: cb})
+		}
+		p := pushPrompt(m, "one two")
+		return m, p
+	}
+	shiftLeft := tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift}
+	ctrlShiftLeft := tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl | tea.ModShift}
+
+	t.Run("shift and word selecting", func(t *testing.T) {
+		m, p := open(t, nil)
+		m.Update(ctrl('a'))
+		m.Update(shiftLeft)
+		if got, want := p.SelectedText(), "one tw"; got != want {
+			t.Fatalf("Shift+Left selected %q, want %q", got, want)
+		}
+		m.Update(ctrl('a'))
+		m.Update(ctrlShiftLeft)
+		if got, want := p.SelectedText(), "one "; got != want {
+			t.Fatalf("Ctrl+Shift+Left selected %q, want %q", got, want)
+		}
+		m.Update(special(tea.KeyLeft))
+		if p.HasSelection() {
+			t.Fatal("the unshifted arrow kept the selection")
+		}
+	})
+
+	t.Run("copy selected range", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m, p := open(t, cb)
+		m.Update(ctrl('a'))
+		m.Update(shiftLeft)
+		_, cmd := m.Update(ctrl('c'))
+		msgs := collect(cmd)
+		if len(cb.writes) != 1 || cb.writes[0] != "one tw" {
+			t.Fatalf("selected copy native writes = %q", cb.writes)
+		}
+		if got := p.Value(); got != "one two" {
+			t.Fatalf("copy changed the prompt to %q", got)
+		}
+		m.Update(firstCopyResult(t, msgs))
+	})
+
+	t.Run("cut selected range", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m, p := open(t, cb)
+		m.Update(ctrl('a'))
+		m.Update(shiftLeft)
+		_, cmd := m.Update(ctrl('x'))
+		msgs := collect(cmd)
+		if len(cb.writes) != 1 || cb.writes[0] != "one tw" {
+			t.Fatalf("selected cut native writes = %q", cb.writes)
+		}
+		if got := p.Value(); got != "one two" {
+			t.Fatalf("cut changed the prompt before confirmation: %q", got)
+		}
+		m.Update(firstCutResult(t, msgs))
+		if got := p.Value(); got != "o" {
+			t.Fatalf("selected cut left %q, want o", got)
+		}
+		if p.HasSelection() {
+			t.Fatal("selected cut left the selection set")
+		}
+	})
+}
+
 // TestPromptSelectAllThroughRoot: Ctrl+A in the prompt context marks the whole input for
 // replacement through the real overlay Update path. Typing replaces it, Backspace/Delete
 // clear it, and an arrow cancels the selection while keeping the text.

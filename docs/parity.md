@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `9534cd5` (the round-62 commit; the previous round's commit is
-folded in) plus the merged round-63 work. Static gates PASS (Lead, final pass after all writes stopped; default
+Last verified: 2026-11-10, tree commit `b421de4` (the round-63 commit; the previous round's commit is
+folded in) plus the merged round-64 work. Static gates PASS (Lead, final pass after all writes stopped; default
 GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
-i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check, gofmt clean).
+i18n_check with catalogue heap en 132 KiB / de 83 KiB / both 215 KiB, git diff --check, gofmt clean).
 Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r63-final2.log`). The audit ran targeted round-63 tests/diff review; the Lead ran the full
+`/tmp/gvim-r64-final2.log`). The audit ran targeted round-64 tests/diff review; the Lead ran the full
 suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
 clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
 Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching. Fresh reference: `refs/fresh` same
@@ -1530,6 +1530,37 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-64 outcome (2026-11-10, merged working tree on `b421de4`).** Three slices plus docs:
+the prompt's real single-line selection model; a palette per-instance token on every async result (preview,
+file ranking/tick and Live Grep), and the git_statusbar focus-refresh event allowlist. Static gates PASS;
+final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r64-final2.log`); heap en 132 KiB / de 83 KiB / both 215 KiB. No commit was made.
+**Prompt real selection (item 315).** Ctrl+A now creates a real rune-range selection painted with the overlay
+selection style, not the old invisible prefill. Shift+Left/Right extend by rune, Shift+Home/End extend to the
+ends, Ctrl+Shift+Left/Right select by word (six new keymap actions inherited by every preset; macOS/Emacs keep
+their own Ctrl+A Home binding). Typing, bracketed paste and the executed Ctrl+V result replace the selected
+range; Backspace/Delete delete exactly it; unshifted movement cancels while keeping the text. Ctrl+C copies and
+Ctrl+X cuts the selected range (or the whole prompt when none is selected), with cut range/text identity checked
+after the native write. Tab/Shift+Tab/PageUp/PageDown and other non-editing keys only cancel the selection and
+never delete silently; an empty paste keeps the text and selection and does not call onChange. RESIDUALS: an
+initial LineOptions.SelectAll prefill remains the old invisible replacement state (not a visual selection); there
+is no mouse or multi-line selection; no real system/terminal clipboard test; real terminals UNTESTED.
+**Palette per-instance token (item 317).** Every palette async message now carries the instance token —
+previewMsg, FileRankedMsg, fileTickMsg and GrepResultMsg — and apply/validate includes Token+Owner+Seq (+Text/Rel);
+rank/grep commands capture it, and Dismiss/run/CancelWork/Live export retire it with a preview-seq bump. Tests
+cover foreign preview/tick/live results and a root-level closed-A→reopened-B late rank; the preview cache and
+reconnect invalidation/reset/ReadHead limitation remain as before. RESIDUALS: authorityRetryTick's
+noteAuthorityReconnectAttempt path is not separately tested; ReadHead has no caller context/cancel (bounded
+timeout, token/seq-discarded); real SSH/host UNTESTED.
+**git_statusbar focus refresh (item 319).** window_focused/window_blurred are accepted runtime events; the plugin
+forces a branch refresh on window_focused (and keeps its HEAD watcher), with tests for the event and the refreshed
+label. Remote explorer atomic MkdirNew work was reverted and leaves no behavior diff. RESIDUALS: OS-focus events
+depend on the terminal backend reporting focus; real host untested.
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 259/in effect
+257, macos 60/279, macos-gui 52/330, emacs 98/322, vscode 9/262; i18n en 1184 / 581 per locale,
+575 KiB text, ≈665 KiB JSON, heap 132-83-215 KiB. Full suite EXIT 0 (77 packages, log
+/tmp/gvim-r64-final2.log); real hosts UNTESTED; no full-parity claim.
 **Round-63 outcome (2026-11-10, merged working tree on `9534cd5`).** Three slices plus docs:
 the real Ctrl+V prefill replacement for prompt select-all; remote palette preview-cache invalidation on
 authority carrier changes/reconnect attempts (R13-8); and fresh lsp_navigation enclosing-symbol
@@ -1539,11 +1570,10 @@ preselection. Static gates PASS; final full `go test ./... -p 1 -count=1 -timeou
 **Prompt Ctrl+V replacement (item 315 refinement).** The prompt now recognizes both tea.PasteMsg and
 textinput's unexported Ctrl+V pasteMsg (type name/kind via pasteContent), keeps the prefill pending
 until the paste result, clears it before inserting, and normalizes CRLF; the real Ctrl+V command result
-is fed back in tests. Empty Backspace/Delete no onChange, stale validation error cleared, arrows cancel;
-selection stays intentionally invisible (documented). Intentional scope: the prompt field has no range
-selection model/keys beyond Ctrl+A — no Shift+arrow/word/line selection and no selected-range Copy/Cut;
-copy/cut remain whole-field. RESIDUALS: no real system/terminal clipboard or root-level late paste
-integration; real terminals UNTESTED.
+is fed back in tests. Empty Backspace/Delete no onChange, stale validation error cleared, arrows cancel.
+At this point the Ctrl+A state was still the invisible prefill; Round64 replaced it with the real selection
+model (see Round64). RESIDUALS: no real system/terminal clipboard or root-level late paste integration;
+real terminals UNTESTED.
 **Remote palette preview invalidation (item 317).** Palette.InvalidatePreviews bumps the preview
 generation, resets display/loading and clears cache/order; the root seeds authorityPreviewConnected
 from SetAuthorityHooks, invalidates on disconnect transition, at reconnect-attempt start (credential
@@ -1569,15 +1599,12 @@ the prompt-select-all overlay action and the opt-in Deno/Slang helper Disable ac
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
 `/tmp/gvim-r62-final3.log`); no new heap/static measurement was supplied with this log (last static
 Round61 heap 127-83-210 KiB). No commit was made.
-**Prompt select-all (item 315).** Ctrl+A in the default/VS Code prompt context marks the whole input as
-the invisible prefill selection: printable typing, bracketed paste and Ctrl+V replace it; Backspace/Delete
-clear it once (no onChange on an already-empty field), clear a stale validation error, and no callback
-fires for an empty selection; an arrow cancels the selection while keeping text. The macOS/Emacs presets
-retain their own Ctrl+A prompt Home binding. Keymap counts/docs updated; unit and real root Update tests
-cover typing, Ctrl+V pending prefill, empty/no-onChange, error clearing, Backspace/Delete and arrow.
-RESIDUALS: the selection is deliberately invisible (no reverse-video highlight; documented); the Ctrl+V
-replacement is covered at the prompt unit seam, not a real root/terminal clipboard; real terminal
-clipboards UNTESTED.
+**Prompt select-all (item 315).** Round62 landed Ctrl+A as the invisible whole-input replacement prefill:
+printable typing, bracketed paste and Ctrl+V replaced it; Backspace/Delete cleared it once (no onChange on an
+already-empty field), stale validation errors cleared, and an arrow cancelled while keeping text. macOS/Emacs
+kept their own Ctrl+A prompt Home binding. This was superseded by Round64's real reverse-video selection model
+(see Round64). RESIDUALS at this point: no visual selection, no range Copy/Cut, no real root/terminal clipboard;
+real terminals UNTESTED.
 **Deno/Slang Disable (item 316).** The opt-in deno_lsp and slang_lsp help popups offer controlled
 Disable actions only when the active buffer has an exact recognized language and gvim.has("lsp"); the
 plugin re-checks after the popup, carries path/language, and never claims async success. Deno accepts
@@ -4522,10 +4549,10 @@ for parity status.
 45. **Overlay keymap contexts are narrowed.** The overlay surfaces consult the keymap in Fresh's
     context names before their built-ins with fall-through, but only single-key bindings apply
     there (a sequence is warned+skipped), `unbind` removes the preset row while the built-in
-    handler still runs on the freed chord, a prompt text field has no selection/clipboard/
-    suggestion actions to bind, and the `completion`/`compositeBuffer` contexts, custom
-    settings/theme dialogs and plugin panels are outside the router. Presets carry Fresh's rows
-    only where gvim's surfaces understand them. `docs/keybindings.md`.
+    handler still runs on the freed chord, and the `completion`/`compositeBuffer` contexts, custom
+    settings/theme dialogs and plugin panels are outside the router. The prompt surface now carries
+    Fresh's move-selecting/select-word rows and real selection plus the existing clipboard/suggestion
+    actions. Presets carry Fresh's rows only where gvim's surfaces understand them. `docs/keybindings.md`.
 46. **Settings coverage is complete for the page surface; plugin settings stay file-edited.**
     The Language Servers page edits each language's whole server array as validated JSON (array
     elements are not individually addressable), shows parsed servers read-only and accepts
@@ -6660,16 +6687,17 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      LSP-port mute, and the plugin never claims the async result. Tests cover delegation and refusal
      (non-Rust, no LSP, changed target). Residuals: no real LSP-server/remote e2e; mute is language-wide at
      the port, not a per-buffer/server setting.
-315. **Prompt select-all (R2-4).** Ctrl+A in the default/VS Code prompt context sets an
-     invisible whole-input prefill; typing, bracketed paste and real Ctrl+V replace it, Backspace/Delete
-     clear it once (no onChange on empty, stale validation error cleared), arrows cancel keeping text;
-     macOS/Emacs keep their own Ctrl+A prompt Home. The Ctrl+V command result is recognized through
-     pasteContent (tea.PasteMsg and textinput's unexported pasteMsg by type/kind), prefill is cleared before
-     insertion, and CRLF is normalized. The field intentionally has no range-selection model/keys beyond
-     Ctrl+A: no Shift+arrow/word/line selection and no selected-range Copy/Cut; copy/cut remain whole-field.
-     Keymap counts/docs updated; unit + real root Update tests cover typing, executed Ctrl+V result,
-     empty/no-onChange, error clearing, Backspace/Delete and arrow. Residuals: no visual selection
-     highlight (documented); no real root/system-clipboard/terminal paste test; real terminal UNTESTED.
+315. **Prompt real selection + select-all (R2-4).** Ctrl+A in the default/VS Code prompt context
+     creates a real reverse-video rune-range selection. Shift+Left/Right extend by rune, Shift+Home/End to the
+     ends, and Ctrl+Shift+Left/Right select by word (six new move-selecting/select-word keymap actions
+     inherited by every preset; macOS/Emacs keep their own Ctrl+A prompt Home binding). Typing, bracketed
+     paste and the executed Ctrl+V result replace the selected range; Backspace/Delete delete exactly it;
+     unshifted movement cancels keeping the text. Ctrl+C copies / Ctrl+X cuts the selected range (or the whole
+     prompt when none is selected), with cut range/text identity checked after the native write. Non-editing
+     keys (Tab/Shift+Tab/PageUp/PageDown etc.) only cancel the selection; empty paste keeps text and selection
+     without onChange. Keymap counts/docs/tests cover ranges, replacement/deletion, copy/cut, non-edit keys and
+     empty paste. Residuals: initial LineOptions.SelectAll prefill remains the old invisible replacement state;
+     no mouse or multi-line selection; no real system/terminal clipboard; real terminal UNTESTED.
 316. **Deno/Slang Disable actions (R13-6).** Opt-in deno_lsp/slang_lsp help popups offer controlled
      lsp_disable_language_target only for exact recognized languages + gvim.has("lsp"), re-check after the
      popup, carry path/language and never claim async success. Deno accepts typescript/javascript, maps
@@ -6677,21 +6705,24 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      slang; text/unrecognized (.cjs/.slangh default) never dispatch. i18n/docs/tests cover extensions,
      tab/language changes, missing LSP, refusals and no false success. Residuals: .cjs/.slangh require a
      configured language entry (documented); TUI tsx mapping uses a fake port; no real server/remote e2e.
-317. **Remote palette preview invalidation (R13-8).** Palette.InvalidatePreviews bumps the
-     preview generation before resetting display/loading and clearing cache/order, so an old command cannot
-     paint over cleared state. Root seeds authorityPreviewConnected from SetAuthorityHooks, invalidates on
-     connected→disconnected, reconnect-attempt start (credential prompt/background retry), failed reconnect,
-     and successful reconnect (then marks connected). Tests cover cache/display, old-seq rejection, pre-poll
-     disconnect, reconnect-failure immediate clear and reconnect→pre-poll-disconnect. Windowed reads cancel
-     by context; portable ReadHead has no caller context/cancel (bounded timeout, seq-discarded) documented.
-     Residuals: authorityRetryTick's noteAuthorityReconnectAttempt path is not separately tested; no
-     root-level late-preview-command integration test; palette stays blank until another palette update
-     after invalidation; real SSH/host UNTESTED.
+317. **Palette instance isolation + remote preview invalidation (R13-8).** Each palette instance has
+     a unique token stamped on every async result: previewMsg, FileRankedMsg, fileTickMsg and GrepResultMsg;
+     applyFiles/fileTick/applyGrep/applyPreview validate Token+Owner+Seq (+Text/Rel). rank/grep commands capture
+     the token; Dismiss/run/CancelWork/Live export retire it and bump preview seq. Tests cover foreign
+     preview/tick/live results and a root-level late rank from closed A into reopened B; palette preview/cache
+     is also cleared on authority disconnect/reconnect attempts/reconnect. Windowed reads cancel by context;
+     portable ReadHead has no caller context/cancel (bounded timeout, token/seq-discarded) documented.
+     Residuals: authorityRetryTick's noteAuthorityReconnectAttempt path is not separately tested; palette
+     stays blank until another palette update after authority invalidation; real SSH/host UNTESTED.
 318. **lsp_navigation enclosing-symbol preselection (R13-6/R13-9).** The smallest symbol containing the
      cursor (span/start/name-character tie-break) is moved first for the empty query and previewed/highlighted
      immediately; typed queries return to gvim's line order; cursor and decoration are tested. gvim's picker
      has no initialSelectedIndex API. Residuals: first-row ordering is an approximation; plugin decoration
      not an overlay namespace; real LSP/remote UNTESTED.
+319. **git_statusbar window-focus refresh (R13-24/R13-15).** window_focused/window_blurred are
+     accepted runtime events; git_statusbar forces a branch refresh on window_focused and keeps its HEAD
+     watcher. Tests cover the refreshed label after a focused window and the event allowlist. Residuals: OS
+     focus requires the terminal backend's focus reporting; real host UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -8720,6 +8751,14 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-64 verification (2026-11-10, merged tree on `b421de4`).** STATIC GATES PASS (Lead, final
+  pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 132 KiB / de 83 KiB /
+  both 215 KiB, git diff --check, gofmt clean). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r64-final2.log`). Audit: targeted round-64 tests/diff review. Tracks: prompt real selection
+  model; palette per-instance token (preview/rank/tick/Live Grep); git_statusbar window_focused refresh;
+  remote-explorer MkdirNew reverted. Real-host checks remain UNTESTED. No full-parity claim.
 - **Round-63 verification (2026-11-10, merged tree on `9534cd5`).** STATIC GATES PASS (Lead,
   final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
   golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 127 KiB / de 83 KiB /
@@ -8827,14 +8866,15 @@ Round 13 recorded five open gaps:
   (round-60 landed prompt copy/cut identity/owner/token, welcome startup toggle state, remote
   candidate-listing degradation, native env/LSP withdrawal; round-61 adds remote glob/finder-health and rust_lsp Disable; round-62 adds prompt select-all and
   Deno/Slang Disable; round-63 adds prompt real Ctrl+V, palette preview invalidation and lsp_navigation
-  preselect; full suite EXIT 0 (77 packages, log /tmp/gvim-r63-final2.log); real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–63 had their full-suite gate runs
+  preselect; round-64 adds prompt real selection, palette instance tokens and git_statusbar window-focus
+  refresh; full suite EXIT 0 (77 packages, log /tmp/gvim-r64-final2.log); real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–64 had their full-suite gate runs
   (Rounds 2–61 also recorded static gates; Round 62 supplied a full-suite log without a new static
-  measurement). Round 63 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+  measurement). Round 64 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
   native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check). Final full
+  i18n_check with catalogue heap en 132 KiB / de 83 KiB / both 215 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r63-final2.log`. The audit ran targeted round-63 tests and diff review only; the Lead
+  `/tmp/gvim-r64-final2.log`. The audit ran targeted round-64 tests and diff review only; the Lead
   ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts

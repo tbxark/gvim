@@ -59,8 +59,8 @@ func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Ctrl+V started no clipboard read")
 	}
-	if l.Value() != "old" || !l.prefill {
-		t.Fatalf("Ctrl+V lost the selected prefill: value %q prefill %v", l.Value(), l.prefill)
+	if l.Value() != "old" || !l.HasSelection() || l.SelectedText() != "old" {
+		t.Fatalf("Ctrl+V lost the selection: value %q selected %q", l.Value(), l.SelectedText())
 	}
 	msg := cmd()
 	if msg == nil {
@@ -70,8 +70,8 @@ func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	if got := l.Value(); got != "new" {
 		t.Fatalf("Ctrl+A Ctrl+V paste = %q, want new", got)
 	}
-	if l.prefill {
-		t.Fatal("prefill stayed set after the replacement paste")
+	if l.HasSelection() {
+		t.Fatal("selection stayed set after the replacement paste")
 	}
 	if len(changed) != 1 || changed[0] != "new" {
 		t.Fatalf("onChange = %v, want only the pasted text", changed)
@@ -83,7 +83,7 @@ func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 }
 
 // TestLineSelectAllEmptyNoOnChange: selecting an empty field and pressing Backspace or
-// Delete clears the invisible prefill without reporting a text change.
+// Delete clears the selection without reporting a text change.
 func TestLineSelectAllEmptyNoOnChange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

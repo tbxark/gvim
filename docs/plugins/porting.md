@@ -223,6 +223,19 @@ for the empty query and previewed immediately. gvim's picker API has no initialS
 the selected row is established by first-row ordering rather than an index; typed queries return to
 the normal line sort.
 
+### Git status bar: the OS-focus backstop (port residual)
+
+Fresh's `git_statusbar.ts` rereads the branch on `focus_gained` because a `git checkout` in
+another terminal can happen while the editor is unfocused. gvim's `focus_gained` is the different
+plugin-chrome keyboard hand-back event, so the port subscribes to the documented
+`window_focused` OS-focus event instead (and the runtime's known-event allowlist had to accept
+that documented event; `window_blurred` is accepted for symmetry). The refresh is forced because
+the HEAD watch may have missed a change while unfocused, runs through the same bounded git branch
+read/path, and coalesces with the existing `running`/`again` guard. No new watcher, process,
+trust path or cancellation handle is introduced. Tests: `git_statusbar_test.go` rescripts the
+branch, emits `window_focused`, and asserts exactly one new symbolic-ref read and the new label;
+`events_api_test.go` asserts both window events are subscribable.
+
 ### Git blame: inline parent stepping, no panel (port residual)
 
 Fresh's `git_blame.ts` is a magit-style panel with a scrollable parent-file view, a history stack and

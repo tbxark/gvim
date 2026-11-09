@@ -6,12 +6,18 @@ import (
 	"github.com/tbxark/gvim/keymap"
 )
 
-// TestPromptSelectionBindingsAreDeliberatelyAbsent: Fresh's prompt has a real text
-// selection and binds Shift+Left/Right/Home/End and Ctrl+Shift+Left/Right to extend it.
-// gvim's prompt text field has no selection model, so those move-selecting/select-word
-// actions must not be faked into the keymap. Ctrl+A is the invisible whole-input prefill
-// (default/VS Code); macOS and Emacs keep their Fresh prompt Ctrl+A Home binding.
-func TestPromptSelectionBindingsAreDeliberatelyAbsent(t *testing.T) {
+// TestPromptSelectionBindings: Fresh's prompt has a real text selection. gvim now binds
+// the move-selecting and select-word chords to the prompt's selection model; Ctrl+A is
+// select-all in the presets that do not override it with their Fresh Home binding.
+func TestPromptSelectionBindings(t *testing.T) {
+	moveSelecting := map[string]string{
+		"shift+left":       "prompt_move_left_selecting",
+		"shift+right":      "prompt_move_right_selecting",
+		"shift+home":       "prompt_move_home_selecting",
+		"shift+end":        "prompt_move_end_selecting",
+		"ctrl+shift+left":  "prompt_select_word_left",
+		"ctrl+shift+right": "prompt_select_word_right",
+	}
 	selectAll := map[string]string{
 		"default":   "prompt_select_all",
 		"macos":     "prompt_move_start",
@@ -19,17 +25,14 @@ func TestPromptSelectionBindingsAreDeliberatelyAbsent(t *testing.T) {
 		"emacs":     "prompt_move_start",
 		"vscode":    "prompt_select_all",
 	}
-	for preset, want := range selectAll {
+	for preset, wantCtrlA := range selectAll {
 		m := mustPreset(t, preset)
-		if b, ok := m.ResolveExact("ctrl+a", keymap.ContextPrompt); !ok || b.Action != want {
-			t.Errorf("%s: Ctrl+A prompt binding = %+v, %v; want %s", preset, b, ok, want)
+		if b, ok := m.ResolveExact("ctrl+a", keymap.ContextPrompt); !ok || b.Action != wantCtrlA {
+			t.Errorf("%s: Ctrl+A prompt binding = %+v, %v; want %s", preset, b, ok, wantCtrlA)
 		}
-		for _, chord := range []string{
-			"shift+left", "shift+right", "shift+home", "shift+end",
-			"ctrl+shift+left", "ctrl+shift+right",
-		} {
-			if b, ok := m.ResolveExact(chord, keymap.ContextPrompt); ok {
-				t.Errorf("%s: %s prompt binding = %s, want deliberately unbound (no selection model)", preset, chord, b.Action)
+		for chord, action := range moveSelecting {
+			if b, ok := m.ResolveExact(chord, keymap.ContextPrompt); !ok || b.Action != action {
+				t.Errorf("%s: %s prompt binding = %+v, %v; want %s", preset, chord, b, ok, action)
 			}
 		}
 	}

@@ -960,7 +960,7 @@ func TestFileProbeResultIsDroppedForAChangedQuery(t *testing.T) {
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	// Force a newer query without running the old command.
 	p.update(typed("x"))
-	if cmd := p.update(FileRankedMsg{Seq: p.seq - 1, Text: "a.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
+	if cmd := p.update(FileRankedMsg{Token: p.token, Seq: p.seq - 1, Text: "a.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
 		t.Fatalf("stale probe result returned a command: %v", cmd)
 	}
 	for _, r := range p.rows {
@@ -1019,7 +1019,7 @@ func TestFileProbeIsCachedWhileLoading(t *testing.T) {
 	if files.calls != 1 {
 		t.Fatalf("probe calls after first rank = %d, want 1", files.calls)
 	}
-	tick := p.update(fileTickMsg{Seq: p.seq})
+	tick := p.update(fileTickMsg{Token: p.token, Seq: p.seq})
 	if tick == nil {
 		t.Fatal("a loading tick returned no ranking command")
 	}
@@ -1149,7 +1149,7 @@ func TestPaletteDismissCancelsTheProbe(t *testing.T) {
 func TestFileResultWithTheWrongTextIsDropped(t *testing.T) {
 	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
-	if cmd := p.update(FileRankedMsg{Seq: p.seq, Text: "other.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
+	if cmd := p.update(FileRankedMsg{Token: p.token, Seq: p.seq, Text: "other.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
 		t.Fatalf("wrong-text result returned a command: %v", cmd)
 	}
 	for _, r := range p.rows {
@@ -1195,7 +1195,7 @@ func TestFileProbeCachesANegativeAnswer(t *testing.T) {
 	if files.calls != 1 {
 		t.Fatalf("first negative probe calls = %d, want 1", files.calls)
 	}
-	cmd := p.update(fileTickMsg{Seq: p.seq})
+	cmd := p.update(fileTickMsg{Token: p.token, Seq: p.seq})
 	if cmd == nil {
 		t.Fatal("a rank tick returned no command")
 	}
@@ -1240,7 +1240,7 @@ func TestFileProbeCacheInvalidatesOnIndexGeneration(t *testing.T) {
 		t.Fatalf("rows before refresh = %+v, want none", p.rows)
 	}
 	// A re-rank in the same generation still reuses the negative answer.
-	tick := p.update(fileTickMsg{Seq: p.seq})
+	tick := p.update(fileTickMsg{Token: p.token, Seq: p.seq})
 	if tick == nil {
 		t.Fatal("same-generation rank tick returned no command")
 	}
@@ -1250,7 +1250,7 @@ func TestFileProbeCacheInvalidatesOnIndexGeneration(t *testing.T) {
 	}
 	// Simulate finder.Index.Restart: generation changes and the exact file now exists.
 	files.gen = 2
-	cmd := p.update(fileTickMsg{Seq: p.seq})
+	cmd := p.update(fileTickMsg{Token: p.token, Seq: p.seq})
 	if cmd == nil {
 		t.Fatal("post-refresh rank tick returned no command")
 	}
@@ -1375,7 +1375,7 @@ func TestCtrlFConfirmsLikeEnter(t *testing.T) {
 	t.Run("live grep", func(t *testing.T) {
 		p := New(liveOptions("todo", &fakeFiles{}, &fakeGrepper{}))
 		draw(p, 100, 30)
-		p.update(GrepResultMsg{Seq: p.seq, Text: "todo", Hits: []GrepHit{{Rel: "a.go", Line: 2, Col: 1, Text: "todo"}}})
+		p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "todo", Hits: []GrepHit{{Rel: "a.go", Line: 2, Col: 1, Text: "todo"}}})
 		if got := runCmd(p.update(ctrlF())); got != (OpenLineMsg{Path: "/w/a.go", Line: 2, Col: 1}) {
 			t.Fatalf("Ctrl+F emitted %#v, want the selected Live Grep row", got)
 		}

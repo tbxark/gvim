@@ -108,8 +108,10 @@ plugin tasks/awaits (no blocking IO in Update). Both command sets then appear in
 (documented residual).
 
 **git_statusbar**: the current branch (the first seven digits of the commit for a detached HEAD) on
-the right of the status row. It refreshes when a file opens, a tab is activated, a file is saved and when
-`HEAD` changes (it watches the directory that holds it).
+the right of the status row. It refreshes when a file opens, a tab is activated, a file is saved,
+when `HEAD` changes (it watches the directory that holds it), and when the terminal window regains
+OS focus (`window_focused`, the gvim equivalent of Fresh's `focus_gained`; gvim's own
+`focus_gained` is the different plugin-chrome keyboard hand-back event).
 
 **git_find_file**: a fuzzy picker over the files git tracks (up to 50 000), opened relative to the
 repository root; the list is read again each time.

@@ -13,7 +13,7 @@ func TestLiveGrepShowsCompletenessNotice(t *testing.T) {
 	p := New(Options{Live: true, Root: "/remote/w", Remote: true, Files: &fakeFiles{}, Grep: &fakeGrepper{}})
 	draw(p, 120, 30)
 	p.seq = 2
-	p.applyGrep(GrepResultMsg{Seq: 2, Text: "todo", Hits: []GrepHit{
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 2, Text: "todo", Hits: []GrepHit{
 		{Rel: "a.go", Line: 1, Col: 1, Text: "todo a"},
 	}, Notice: "remote search degraded", Truncated: true})
 	if p.grep.notice != "remote search degraded" || !p.grep.truncated {
@@ -27,7 +27,7 @@ func TestLiveGrepShowsCompletenessNotice(t *testing.T) {
 		t.Fatalf("successful hits were dropped:\n%s", g)
 	}
 	// A late result from the previous query must not overwrite the current notice/rows.
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "old", Hits: []GrepHit{{Rel: "old.go", Line: 1, Col: 1, Text: "old"}}, Notice: "old notice"})
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "old", Hits: []GrepHit{{Rel: "old.go", Line: 1, Col: 1, Text: "old"}}, Notice: "old notice"})
 	if p.grep.notice != "remote search degraded" || p.grep.count != 1 || hasRow(draw(p, 120, 30), "old.go") {
 		t.Fatalf("a stale result replaced the current query's completeness state: %+v", p.grep)
 	}
@@ -40,7 +40,7 @@ func TestLiveGrepQueryChangeClearsCompletenessNotice(t *testing.T) {
 	p := New(Options{Live: true, Root: "/remote/w", Remote: true, Files: &fakeFiles{}, Grep: &fakeGrepper{}})
 	draw(p, 120, 30)
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}, Notice: "degraded", Truncated: true})
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}, Notice: "degraded", Truncated: true})
 	p.update(typed("x"))
 	if p.grep.notice != "" || p.grep.truncated {
 		t.Fatalf("a query change kept the previous completeness notice: notice %q truncated %v", p.grep.notice, p.grep.truncated)

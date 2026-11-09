@@ -963,8 +963,11 @@ remote document access (never the local filepath path), and a degraded/capped re
 marked `· incomplete` in the list title with a leading notice header instead of looking
 complete.
 
-The palette's per-file preview cache and displayed preview are dropped when the authority
-transitions to disconnected or starts any reconnect attempt (including credential prompts,
+Each palette instance carries an instance token stamped on every owned asynchronous
+message (file ranking, file poll tick, Live Grep result and preview result); a result from
+a closed palette is dropped by the token/seq/rel guard even when a newly opened palette
+reuses the same owner, query sequence and path. The per-file preview cache and displayed preview are
+dropped when the authority transitions to disconnected or starts any reconnect attempt (including credential prompts,
 and again on a failed attempt) and on a successful reconnect, and the preview sequence is bumped so a command
 started for the old carrier cannot paint over the cleared state. The windowed `ReadWindow`
 read is cancelled through its context; the portable `ReadHead` path has no caller

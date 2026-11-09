@@ -14,7 +14,7 @@ func TestLiveGrepRowsSanitizeHostileDisplay(t *testing.T) {
 	draw(p, 120, 30)
 	rawRel := "\u202Eevil.go"
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{
 		{Rel: rawRel, Line: 2, Col: 2, Text: "\u202Etodo\u0080 x"},
 		{Rel: "term\u200Binal", Line: 1, Col: 1, Text: "\uFEFFtodo term", Source: GrepTerminals, Index: 1},
 	}})

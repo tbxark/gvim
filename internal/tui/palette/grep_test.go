@@ -151,7 +151,7 @@ func TestLiveGrepStaleResultIsDropped(t *testing.T) {
 	draw(p, 100, 30)
 	p.update(typed("a"))
 	p.update(typed("b"))
-	p.update(GrepResultMsg{Seq: 2, Text: "a", Hits: []GrepHit{{Rel: "old.go", Line: 1, Col: 1, Text: "a"}}})
+	p.update(GrepResultMsg{Token: p.token, Seq: 2, Text: "a", Hits: []GrepHit{{Rel: "old.go", Line: 1, Col: 1, Text: "a"}}})
 	if hasRow(draw(p, 100, 30), "old.go") {
 		t.Fatal("a stale result replaced the rows of the current query")
 	}
@@ -164,7 +164,7 @@ func TestLiveGrepErrorIsShownAsARow(t *testing.T) {
 	p := New(liveOptions("", &fakeFiles{}, &fakeGrepper{}))
 	draw(p, 100, 30)
 	p.update(typed("a"))
-	p.update(GrepResultMsg{Seq: p.seq, Text: "a", Err: errors.New("read failed")})
+	p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "a", Err: errors.New("read failed")})
 	g := draw(p, 100, 30)
 	if !hasRow(g, "Live Grep: read failed") {
 		t.Fatal("the search error is not shown")
@@ -181,7 +181,7 @@ func TestLiveGrepTitleShowsTheCount(t *testing.T) {
 	p := New(liveOptions("", &fakeFiles{}, &fakeGrepper{}))
 	draw(p, 100, 30)
 	p.update(typed("a"))
-	p.update(GrepResultMsg{Seq: p.seq, Text: "a", Hits: []GrepHit{
+	p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "a", Hits: []GrepHit{
 		{Rel: "a.go", Line: 1, Col: 1, Text: "a"},
 		{Rel: "a.go", Line: 2, Col: 1, Text: "a"},
 	}})
@@ -193,11 +193,11 @@ func TestLiveGrepTitleShowsTheCount(t *testing.T) {
 	for i := range full {
 		full[i] = GrepHit{Rel: "a.go", Line: i + 1, Col: 1, Text: "a"}
 	}
-	p.update(GrepResultMsg{Seq: p.seq, Text: "a", Hits: full})
+	p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "a", Hits: full})
 	if g := draw(p, 100, 30); !hasRow(g, "Live Grep · 100+ matches") {
 		t.Fatalf("the capped count is not marked:\n%s", g)
 	}
-	p.update(GrepResultMsg{Seq: p.seq, Text: "a"})
+	p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "a"})
 	g := draw(p, 100, 30)
 	if !hasRow(g, "Live Grep · no matches") || !hasRow(g, "No matches") {
 		t.Fatalf("the no-results state is not shown:\n%s", g)
@@ -258,7 +258,7 @@ func TestLiveGrepToggleKeysChangeTheRequest(t *testing.T) {
 	opts.SourceBuffers = []BufferSource{{Index: 0, Name: "a.go", Text: "t"}}
 	p := New(opts)
 	draw(p, 120, 30)
-	p.update(GrepResultMsg{Seq: p.seq, Text: "t"})
+	p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "t"})
 
 	tests := []struct {
 		name  string
@@ -471,7 +471,7 @@ func TestLiveGrepTerminalScope(t *testing.T) {
 	if len(g.reqs) != 1 || !g.reqs[0].Sources.Terminals {
 		t.Fatalf("terminal-on request = %+v", g.reqs)
 	}
-	p.update(GrepResultMsg{Seq: p.seq, Text: "todo", Hits: g.hits})
+	p.update(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "todo", Hits: g.hits})
 	want := OpenTerminalMsg{ID: 9, Row: 41, Index: 1, Total: 60,
 		Text: "xx todo output", Before: "out", After: "tail"}
 	if got := runCmd(p.update(key(tea.KeyEnter))); got != want {
@@ -558,7 +558,7 @@ func TestLiveGrepRowOpenMessagesCarryPaletteOwner(t *testing.T) {
 				SourceTerminals: []TerminalSource{{Name: "term", Index: 1, Lines: []string{"todo term"}}},
 			})
 			p.seq = 1
-			p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{tt.hit}, Owner: owner})
+			p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{tt.hit}, Owner: owner})
 			if len(p.rows) != 1 {
 				t.Fatalf("rows = %d, want 1", len(p.rows))
 			}

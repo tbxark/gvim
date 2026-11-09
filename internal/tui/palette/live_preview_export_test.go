@@ -48,7 +48,7 @@ func TestLiveGrepRowPreviewReadsWindowAndShowsTarget(t *testing.T) {
 	p := livePreviewPalette(pv)
 	draw(p, 120, 30)
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{
 		{Rel: "a.go", Line: 8, Col: 6, Text: "func todo() {}"},
 		{Rel: "b.go", Line: 2, Col: 1, Text: "todo buffer", Source: GrepBuffers, Index: 1},
 	}})
@@ -97,7 +97,7 @@ func TestLiveGrepPreviewCancelsWhenSelectionMoves(t *testing.T) {
 	pv := &liveWindowPreviewer{data: "a\n", firstLine: 1}
 	p := livePreviewPalette(pv)
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{
 		{Rel: "a.go", Line: 1, Col: 1, Text: "todo a"},
 		{Rel: "b.go", Line: 1, Col: 1, Text: "todo b"},
 	}})
@@ -138,7 +138,7 @@ func TestLiveGrepExportEmitsQuickfixMessage(t *testing.T) {
 		{Rel: "a.go", Line: 2, Col: 3, Text: "todo a"},
 		{Rel: "b.go", Line: 1, Col: 1, Text: "todo b", Source: GrepBuffers, Index: 4},
 	}
-	p.update(GrepResultMsg{Seq: 1, Text: "todo", Hits: hits})
+	p.update(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: hits})
 	cmd := p.key(altKey('q'))
 	if cmd == nil {
 		t.Fatal("Alt+Q produced no export")
@@ -156,7 +156,7 @@ func TestLiveGrepExportEmitsQuickfixMessage(t *testing.T) {
 
 	empty := livePreviewPalette(&liveWindowPreviewer{})
 	empty.seq = 1
-	empty.update(GrepResultMsg{Seq: 1, Text: "todo"})
+	empty.update(GrepResultMsg{Token: empty.token, Seq: 1, Text: "todo"})
 	if cmd := empty.key(altKey('q')); cmd != nil {
 		t.Fatal("an empty result produced an export")
 	}
@@ -195,7 +195,7 @@ func TestLiveGrepExportCap(t *testing.T) {
 	p := livePreviewPalette(&liveWindowPreviewer{})
 	draw(p, 120, 30)
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: hits})
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: hits})
 	cmd := p.key(altKey('q'))
 	if cmd == nil {
 		t.Fatal("capped export produced no message")
@@ -221,7 +221,7 @@ func TestRemoteLiveGrepPreviewUsesTheRemotePath(t *testing.T) {
 	})
 	draw(p, 120, 30)
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{
 		{Rel: "src/a.go", Line: 1, Col: 1, Text: "todo remote"},
 	}})
 	cmd := p.previewCmd()
@@ -247,7 +247,7 @@ func TestRemoteLiveGrepExportCarriesTheRemoteFlag(t *testing.T) {
 	})
 	draw(p, 120, 30)
 	p.seq = 1
-	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{
 		{Rel: "src/a.go", Line: 2, Col: 1, Text: "todo remote"},
 	}, Notice: "ignored scan incomplete", Truncated: true})
 	cmd := p.key(altKey('q'))

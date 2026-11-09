@@ -128,6 +128,10 @@ type Preview struct {
 // previewMsg carries the read of one preview. The palette applies it only when Seq is
 // the read it started last and Rel is still the selected row.
 type previewMsg struct {
+	// Token is the palette instance generation that started the read. A preview result
+	// from a closed palette must never be applied by a newly opened palette that happens
+	// to reuse the same Owner/Seq/Rel.
+	Token   uint64
 	Seq     int
 	Rel     string
 	Preview Preview
@@ -135,6 +139,13 @@ type previewMsg struct {
 }
 
 func (m previewMsg) PaletteOwner() Owner { return m.Owner }
+
+// invalidatePreviewInstance retires this palette's preview generation: results already
+// in flight carry the old token and are dropped by applyPreview.
+func (p *Palette) invalidatePreviewInstance() {
+	p.token = nextPaletteToken.Add(1)
+	p.preview.seq++
+}
 
 // newPreview turns the head of a file into what the preview column paints. A head with
 // a NUL byte or bytes that are not UTF-8 is binary, so it has no lines; text is split
@@ -258,6 +269,7 @@ func (s *previewState) put(rel string, p Preview) {
 // called after every message, so moving the highlight starts the read of the new row.
 func (p *Palette) previewCmd() tea.Cmd {
 	s := &p.preview
+	token := p.token
 	if p.opts.Preview == nil {
 		s.reset()
 		return nil
@@ -309,18 +321,18 @@ func (p *Palette) previewCmd() tea.Cmd {
 			return func() tea.Msg {
 				data, first, truncated, err := window.ReadWindow(ctx, path, target, previewMaxBytes)
 				if err != nil {
-					return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
+					return previewMsg{Token: token, Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
 				}
-				return previewMsg{Seq: seq, Rel: key, Preview: newWindowPreview(data, first, truncated), Owner: owner}
+				return previewMsg{Token: token, Seq: seq, Rel: key, Preview: newWindowPreview(data, first, truncated), Owner: owner}
 			}
 		}
 	}
 	return func() tea.Msg {
 		data, truncated, err := read.ReadHead(path, previewMaxBytes)
 		if err != nil {
-			return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
+			return previewMsg{Token: token, Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
 		}
-		return previewMsg{Seq: seq, Rel: key, Preview: newPreview(data, truncated), Owner: owner}
+		return previewMsg{Token: token, Seq: seq, Rel: key, Preview: newPreview(data, truncated), Owner: owner}
 	}
 }
 
@@ -352,7 +364,7 @@ func (p *Palette) InvalidatePreviews() {
 // applyPreview shows a read that answers the current selection, and caches it.
 func (p *Palette) applyPreview(msg previewMsg) {
 	s := &p.preview
-	if msg.Owner != p.owner || msg.Seq != s.seq || msg.Rel != s.rel {
+	if msg.Token != p.token || msg.Owner != p.owner || msg.Seq != s.seq || msg.Rel != s.rel {
 		return
 	}
 	s.data, s.ready, s.loading = msg.Preview, true, false

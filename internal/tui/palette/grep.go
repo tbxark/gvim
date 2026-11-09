@@ -207,6 +207,7 @@ type GrepHit struct {
 // GrepResultMsg carries the hits of one Live Grep query. The palette applies it only
 // when Seq is the query it sent last. Text is the query that was searched.
 type GrepResultMsg struct {
+	Token     uint64
 	Seq       int
 	Text      string
 	Hits      []GrepHit
@@ -457,6 +458,7 @@ func (p *Palette) exportGrep() tea.Cmd {
 		hits = hits[:liveExportCap]
 	}
 	query, root, owner := p.grep.text, p.opts.Root, p.owner
+	p.invalidatePreviewInstance()
 	p.open = false
 	p.cancelProbe()
 	p.cancelGrepSearch()
@@ -508,6 +510,7 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		return nil
 	}
 	owner := p.owner
+	token := p.token
 	g, files, root := p.opts.Grep, p.opts.Files, p.opts.Root
 	buffers, terminals, query, sources := p.opts.SourceBuffers, p.opts.SourceTerminals, p.grep.opts, p.grep.sources
 	contextGrep, cancellable := g.(ContextGrepper)
@@ -531,7 +534,7 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		} else {
 			result.Hits, err = g.Search(req)
 		}
-		return GrepResultMsg{Seq: seq, Text: text, Hits: result.Hits, Err: err, Notice: result.Notice, Truncated: result.Truncated, Owner: owner}
+		return GrepResultMsg{Token: token, Seq: seq, Text: text, Hits: result.Hits, Err: err, Notice: result.Notice, Truncated: result.Truncated, Owner: owner}
 	}
 	if cancellable {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -545,7 +548,7 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 // goes to the top when the text changed. The result also sets the count the title
 // shows.
 func (p *Palette) applyGrep(msg GrepResultMsg) tea.Cmd {
-	if msg.Owner != p.owner || msg.Seq != p.seq || !p.live {
+	if msg.Token != p.token || msg.Owner != p.owner || msg.Seq != p.seq || !p.live {
 		return nil
 	}
 	p.grep.done, p.grep.text, p.grep.err = true, msg.Text, msg.Err

@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -205,6 +206,7 @@ func (m ActivateBufferMsg) PaletteOwner() Owner { return m.Owner }
 // applies it only when Seq is the query it sent last, so a slow ranking of an
 // old query does not replace the rows of a newer one.
 type FileRankedMsg struct {
+	Token   uint64
 	Seq     int
 	Text    string // the query text that was ranked
 	Matches []Ranked
@@ -236,6 +238,7 @@ func (m FileRankedMsg) PaletteOwner() Owner { return m.Owner }
 // fileTickMsg asks the palette to rank the file rows again. It is sent after
 // pollInterval while the index is loading, and it is ignored once Seq is stale.
 type fileTickMsg struct {
+	Token uint64
 	Seq   int
 	Owner Owner
 }
@@ -300,7 +303,12 @@ type chrome struct {
 }
 
 // Palette is the open command palette. Use New to make one.
+var nextPaletteToken atomic.Uint64
+
 type Palette struct {
+	// token is this palette instance's generation. Preview commands stamp it, and a
+	// closed palette's late result carries a token no newly opened palette has.
+	token  uint64
 	opts   Options
 	state  commands.State
 	input  textinput.Model
@@ -365,6 +373,7 @@ func New(opts Options) *Palette {
 	ss := style.New(opts.Theme)
 	ov := ss.Overlay
 	p := &Palette{
+		token:   nextPaletteToken.Add(1),
 		opts:    opts,
 		state:   st,
 		open:    true,
@@ -441,7 +450,7 @@ func (p *Palette) update(msg tea.Msg) tea.Cmd {
 	case previewMsg:
 		p.applyPreview(msg)
 	case fileTickMsg:
-		if msg.Owner == p.owner && msg.Seq == p.seq && p.inFile {
+		if msg.Token == p.token && msg.Owner == p.owner && msg.Seq == p.seq && p.inFile {
 			cmd = p.rankCmd(p.seq, p.fileText)
 		}
 	case tea.MouseClickMsg:
@@ -692,6 +701,7 @@ func (p *Palette) click(m tea.Mouse) tea.Cmd {
 // closes. A disabled command stays open, so the user can pick another row.
 func (p *Palette) run(i int) tea.Cmd {
 	if len(p.rows) == 0 {
+		p.invalidatePreviewInstance()
 		p.cancelProbe()
 		p.open = false
 		return nil
@@ -703,6 +713,7 @@ func (p *Palette) run(i int) tea.Cmd {
 	if r.disabled {
 		return nil
 	}
+	p.invalidatePreviewInstance()
 	p.cancelProbe()
 	p.cancelGrepSearch()
 	p.preview.reset()
@@ -713,6 +724,7 @@ func (p *Palette) run(i int) tea.Cmd {
 // Dismiss cancels the in-flight literal-path probe. The root calls it when Esc (or
 // another cancel path) closes the palette; the palette's own run path calls it too.
 func (p *Palette) Dismiss() {
+	p.invalidatePreviewInstance()
 	p.cancelProbe()
 	p.cancelGrepSearch()
 	p.preview.reset()
@@ -724,6 +736,7 @@ func (p *Palette) Dismiss() {
 // read, so the model keeps no carried-over loading state. It is O(open overlays) and is
 // called on the UI goroutine, never from Update's I/O path.
 func (p *Palette) CancelWork() {
+	p.invalidatePreviewInstance()
 	p.seq++
 	p.cancelProbe()
 	p.cancelGrepSearch()
@@ -858,6 +871,7 @@ func (p *Palette) requery() tea.Cmd {
 // Ranker is wired, and the file mode then keeps the loading row.
 func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 	owner := p.owner
+	token := p.token
 	if p.opts.Ranker == nil {
 		return nil
 	}
@@ -930,7 +944,7 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 			list = withProbePaths(list, probed)
 		}
 		matches := rk.Rank(text, list, fileLimit)
-		return FileRankedMsg{Seq: seq, Text: text, Matches: matches, Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice, Probed: probed, ProbeDone: probeDone, Owner: owner}
+		return FileRankedMsg{Token: token, Seq: seq, Text: text, Matches: matches, Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice, Probed: probed, ProbeDone: probeDone, Owner: owner}
 	}
 }
 
@@ -965,7 +979,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 	// A ranking/probe result is shown only when it belongs to this workspace-model
 	// generation and is the current query: the seq is the palette's latest and the text
 	// is the path this result ranked.
-	if msg.Owner != p.owner || msg.Seq != p.seq || !p.inFile || msg.Text != p.fileText {
+	if msg.Token != p.token || msg.Owner != p.owner || msg.Seq != p.seq || !p.inFile || msg.Text != p.fileText {
 		return nil
 	}
 	if msg.ProbeDone {
@@ -981,7 +995,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 		return nil
 	}
 	seq := msg.Seq
-	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return fileTickMsg{Seq: seq, Owner: p.owner} })
+	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return fileTickMsg{Token: p.token, Seq: seq, Owner: p.owner} })
 }
 
 // rowsFor returns the rows the query matches in its command, line or buffer

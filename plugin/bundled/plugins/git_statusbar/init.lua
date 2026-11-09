@@ -105,8 +105,10 @@ function refresh(force)
   running = false
 end
 
-for _, name in ipairs { "buffer_activated", "after_file_open", "after_file_save" } do
-  gvim.on(name, function() refresh(name == "after_file_save") end)
+for _, name in ipairs { "buffer_activated", "after_file_open", "after_file_save", "window_focused" } do
+  gvim.on(name, function()
+    refresh(name == "after_file_save" or name == "window_focused")
+  end)
 end
 
 -- Fill the item at load, before any event: a gvim started on a directory has no file open.

@@ -41,6 +41,8 @@ var overlayActionNames = []string{
 	"prompt_delete_word_backward", "prompt_delete_word_forward",
 	"prompt_select_prev", "prompt_select_next", "prompt_page_up", "prompt_page_down",
 	"prompt_accept_suggestion", "prompt_paste", "prompt_copy", "prompt_cut", "prompt_select_all",
+	"prompt_move_left_selecting", "prompt_move_right_selecting", "prompt_move_home_selecting",
+	"prompt_move_end_selecting", "prompt_select_word_left", "prompt_select_word_right",
 	// searchPrompt: the find bar's match steps and option toggles.
 	"toggle_search_case_sensitive", "toggle_search_whole_word",
 	"toggle_search_regex", "toggle_search_confirm_each",
@@ -266,6 +268,18 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 			line.SelectAll()
 		}
 		return nil, true
+	case "prompt_move_left_selecting":
+		return m.promptSelect(func(l *prompt.Line) { l.SelectLeft() }), true
+	case "prompt_move_right_selecting":
+		return m.promptSelect(func(l *prompt.Line) { l.SelectRight() }), true
+	case "prompt_move_home_selecting":
+		return m.promptSelect(func(l *prompt.Line) { l.SelectHome() }), true
+	case "prompt_move_end_selecting":
+		return m.promptSelect(func(l *prompt.Line) { l.SelectEnd() }), true
+	case "prompt_select_word_left":
+		return m.promptSelect(func(l *prompt.Line) { l.SelectWordLeft() }), true
+	case "prompt_select_word_right":
+		return m.promptSelect(func(l *prompt.Line) { l.SelectWordRight() }), true
 	case "prompt_copy":
 		return m.promptClipboard(false), true
 	case "prompt_cut":
@@ -393,6 +407,18 @@ func syntheticKey(code rune, mod tea.KeyMod) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code, Mod: mod}
 }
 
+// promptSelect applies one of Fresh's prompt selection moves to the top text prompt. A
+// confirm has no text selection, so it consumes the action as a no-op.
+func (m *Model) promptSelect(apply func(*prompt.Line)) tea.Cmd {
+	if len(m.overlays) == 0 {
+		return nil
+	}
+	if line, ok := m.overlays[len(m.overlays)-1].(*prompt.Line); ok {
+		apply(line)
+	}
+	return nil
+}
+
 // promptClipboard is Fresh's prompt_copy/prompt_cut when the prompt field has no
 // selection: the whole text prompt is copied, and a cut also clears it, but only after a
 // native clipboard write confirms the copy. A confirm copies its question; cutting a
@@ -407,7 +433,11 @@ func (m *Model) promptClipboard(cut bool) tea.Cmd {
 		if cut {
 			return m.promptCut(line)
 		}
-		return m.promptCopy(promptClipTarget{line: line}, line.Value())
+		text := line.SelectedText()
+		if text == "" {
+			text = line.Value()
+		}
+		return m.promptCopy(promptClipTarget{line: line}, text)
 	}
 	confirm, _ := m.overlays[len(m.overlays)-1].(*prompt.Confirm)
 	if cut || confirm == nil {
@@ -516,6 +546,10 @@ func (m *Model) promptCopy(target promptClipTarget, text string) tea.Cmd {
 // text and reports the error, so neither the field nor onChange changes.
 func (m *Model) promptCut(line *prompt.Line) tea.Cmd {
 	text := line.Value()
+	selStart, selEnd, hasSelection := line.SelectedRange()
+	if hasSelection {
+		text = line.SelectedText()
+	}
 	if text == "" {
 		return nil
 	}
@@ -544,13 +578,13 @@ func (m *Model) promptCut(line *prompt.Line) tea.Cmd {
 			if closed.Load() {
 				promptClipNativeRelease(op)
 			}
-			return promptCutMsg{line: line, text: text, skipped: true, owner: owner, token: token}
+			return promptCutMsg{line: line, text: text, skipped: true, selStart: selStart, selEnd: selEnd, hasSelection: hasSelection, owner: owner, token: token}
 		}
 		err := w.Write(text)
 		op.finished.Store(true)
 		if closed.Load() {
 			promptClipNativeRelease(op)
 		}
-		return promptCutMsg{line: line, text: text, err: err, owner: owner, token: token}
+		return promptCutMsg{line: line, text: text, err: err, selStart: selStart, selEnd: selEnd, hasSelection: hasSelection, owner: owner, token: token}
 	}
 }

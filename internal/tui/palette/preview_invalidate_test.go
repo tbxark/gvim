@@ -19,7 +19,7 @@ func TestInvalidatePreviewsDropsCacheAndDisplay(t *testing.T) {
 	}
 	// Even if the cleared key is reused, a command from the old generation must not paint.
 	p.preview.rel = "a.go"
-	p.applyPreview(previewMsg{Seq: 5, Rel: "a.go", Preview: Preview{Lines: []string{"stale"}}})
+	p.applyPreview(previewMsg{Token: p.token, Seq: 5, Rel: "a.go", Preview: Preview{Lines: []string{"stale"}}})
 	if p.preview.ready || len(p.preview.data.Lines) != 0 {
 		t.Fatalf("stale preview applied after invalidation: %+v", p.preview.data)
 	}

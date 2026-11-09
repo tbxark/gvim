@@ -176,3 +176,21 @@ func TestGitStatusbarUnloadLeavesNothing(t *testing.T) {
 		t.Errorf("resources after unload: %v", got)
 	}
 }
+
+func TestGitStatusbarRefreshesWhenWindowRegainsFocus(t *testing.T) {
+	r := statusbarRig(t, rigOpts{script: func(o *plugintest.FakeOS) {
+		o.Script(repoArgv, plugintest.ProcScript{Stdout: "/w\n.git/HEAD\n"})
+		o.Script(branchArgv, plugintest.ProcScript{Stdout: "main\n"})
+	}})
+	base := r.runs("symbolic-ref")
+	// A checkout in another window while gvim is unfocused can be missed by the HEAD
+	// watcher; regaining OS focus is the backstop Fresh's focus_gained provides.
+	r.os.Rescript(branchArgv, plugintest.ProcScript{Stdout: "after-focus\n"})
+	r.h.Emit(pluginapi.Event{Name: "window_focused", Data: map[string]any{}})
+	if got := r.runs("symbolic-ref"); got != base+1 {
+		t.Fatalf("symbolic-ref after window_focused = %d, want %d", got, base+1)
+	}
+	if text, ok := branchItem(r); !ok || text != "after-focus" {
+		t.Fatalf("item = %q, %v, want after-focus", text, ok)
+	}
+}

@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 253 | 251 |
-| `macos` | 60 | 273 |
-| `macos-gui` | 52 | 324 |
-| `emacs` | 98 | 316 |
-| `vscode` | 9 | 256 |
+| `default` | 259 | 257 |
+| `macos` | 60 | 279 |
+| `macos-gui` | 52 | 330 |
+| `emacs` | 98 | 322 |
+| `vscode` | 9 | 262 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
@@ -34,10 +34,11 @@ server (completion, hover, definition, references, implementation, rename, code 
 commands, case transforms, folding and the view, tabs and splits, the explorer, the terminal
 dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
 Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, page keys for
-its suggestion list, select-all (Ctrl+A marks the whole input for replacement as an invisible prefill
-with no reverse-video highlight; the macOS and Emacs presets keep their own Ctrl+A prompt move-start
-binding), word deletion, paste, and
-copy/cut of the whole prompt text (the field has no selection; copy/cut report only after a native clipboard write confirms them, and a cut keeps the
+its suggestion list, select-all (Ctrl+A paints the real reverse-video selection; the macOS and Emacs
+presets keep their own Ctrl+A prompt move-start binding), move-selecting (Shift+Left/Right/Home/End and
+Ctrl+Shift+Left/Right select by word), word deletion, paste, and
+copy/cut of the selected range (or the whole prompt when nothing is selected; copy/cut report only
+after a native clipboard write confirms them, and a cut keeps the
 prompt on failure or when only OSC 52 is available, where both report requested rather than Copied;
 a late result is dropped unless it belongs to the same active prompt, workspace generation and latest
 copy/cut operation; copy/cut are single-flight, use only the native writer when one exists, and a
@@ -202,10 +203,9 @@ operation; `Esc`, `Enter`, the arrows and the page keys therefore keep their mea
 
 Limits, all deliberate: only single-key bindings apply in the overlay contexts (a sequence there
 is skipped with a warning, since the router resolves one key at a time); `unbind` removes the
-preset's row, but the surface's built-in handler still runs on the freed chord; a prompt's text
-field has no selection model in gvim, so Fresh's Shift+Left/Right/Home/End move-selecting and
-Ctrl+Shift+Left/Right select-word actions are deliberately not bound rather than faked; Ctrl+A is
-only the invisible whole-input prefill and copy/cut use the whole prompt text; the Settings page has type-to-filter, slash search and question-mark key help; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
+preset's row, but the surface's built-in handler still runs on the freed chord; a prompt's selection
+is the single-line field's rune range (no mouse or multi-line selection); copy/cut use that selected
+range, or the whole prompt when nothing is selected; the Settings page has type-to-filter, slash search and question-mark key help; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
 are not keymap surfaces yet (a binding there is skipped with a warning, as are bindings in
 contexts Fresh does not name).
 

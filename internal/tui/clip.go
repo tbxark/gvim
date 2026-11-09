@@ -100,12 +100,15 @@ type promptClipTarget struct {
 // owner and token must still match the live model and the latest prompt clipboard
 // operation; line must still be the active top prompt.
 type promptCutMsg struct {
-	line    *prompt.Line
-	text    string
-	err     error
-	skipped bool
-	owner   palette.Owner
-	token   uint64
+	line         *prompt.Line
+	text         string
+	err          error
+	skipped      bool
+	selStart     int
+	selEnd       int
+	hasSelection bool
+	owner        palette.Owner
+	token        uint64
 }
 
 // promptCopyMsg is the result of the prompt copy's native clipboard write. Copy has no
@@ -306,6 +309,16 @@ func (m *Model) promptCutResult(msg promptCutMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		m.notice = uiTextVars("gvim.notice.clipboard.cut_failed", "Cut failed: %{error}; the prompt was kept", map[string]any{"error": msg.err.Error()})
+		return nil
+	}
+	if msg.hasSelection {
+		start, end, ok := msg.line.SelectedRange()
+		if !ok || start != msg.selStart || end != msg.selEnd || msg.line.SelectedText() != msg.text {
+			m.notice = uiText("gvim.notice.clipboard.cut_changed", "Copied, but the prompt changed before the cut completed; the prompt was kept")
+			return nil
+		}
+		msg.line.DeleteSelection()
+		m.notice = i18n.T("", "clipboard.cut", nil)
 		return nil
 	}
 	if msg.line.Value() != msg.text {
