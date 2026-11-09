@@ -523,6 +523,15 @@ matching text tail, and an old record without it keeps the text-only transcript)
 and an additive `search_history` array: the dock-wide pager search queries, at
 most 100 of at most 512 bytes, cleaned on both write and load; an old record
 without it restores an empty history and history restore never starts a process.
+When a **mixed extraction** carries dock terminal tabs into another workspace,
+the dock-wide search history migrates with them: a new co-tenant's terminal record
+starts with the source queries, and an existing target keeps its own queries first
+and appends the source-only ones (exact duplicates dropped, newest 100, each
+≤512 bytes cleaned; a materialized target merges them into its live dock store and
+captures, a dormant one merges them into its saved record). Both paths are pure
+data — no PTY is started and the target's own private record is the only place the
+copied history lands; a single-terminal-tab extraction (existing target only) and a
+file-only new workspace do not migrate the window history (residual).
 The array is **plaintext** like the rest of `terminal.json` (the session directory
 is created 0700 and the file is written 0600, so the queries are as private as
 that per-workspace session directory — gvim does not encrypt them). A malicious
@@ -542,7 +551,30 @@ at most 256 bytes; history 100×512), and the worst-case bounded state is covere
 by a test that checks it encodes below the 64 MiB cap. As a last resort the exact
 encoded size is measured before writing: if it would exceed the cap,
 `SaveTerminal` returns an error and leaves the previous record byte-identical
-instead of writing a record its own loader would refuse.
+instead of writing a record its own loader would refuse. **After a restore, an
+unusable record is never silently replaced:** the session-restore load
+(`LoadTerminalForRestore`) moves a record it refuses (oversized, undecodable, or
+ignored by the loader as an unknown version/empty shape) to a
+`terminal.json.rejected` sibling (`.rejected.1`, `.2`, … on collisions), keeping
+the original bytes, and reports the explicit warning (stderr and the status row);
+the next normal save then writes a fresh record while the quarantined original
+stays for inspection. The quarantine name search is bounded (100 `.rejected`
+attempts) before the record is protected. If the rename fails, a
+`terminal.json.protected` marker is written and every later `SaveTerminal` refuses
+to write or remove anything (so even a normal exit cannot destroy the original);
+if the directory is unwritable so that the marker write ALSO fails, the loader
+disables saving that record **in memory for the rest of the process**, so the
+next save is refused even without a marker. Extraction paths keep using the pure
+loader and check the marker before any migration: a target with a valid record
+plus `.protected` refuses the whole mixed extraction (files and terminals) before
+any write, and the single-terminal path refuses likewise. History migration rides
+the same rules: the migrated queries are bounded/cleaned like any saved history
+and restoring/merging them starts no process. Durability of the migration differs
+by target state: a dormant target's merged history is written synchronously into
+its terminal record, while a materialized target merges it into the live dock and
+relies on the normal asynchronous workspace capture — a crash before that capture
+completes can lose the migrated history (and the appended restored tab), exactly
+like other live-workspace captures.
 
 The state is only restored on the full session-restore path (not `--no-restore`
 or a hot-exit-only recovery). **A restored terminal is read-only until the user

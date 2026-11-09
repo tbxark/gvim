@@ -260,6 +260,14 @@ func (m *Model) dockMouse(msg tea.Msg, y, count int) (tea.Cmd, bool) {
 // when the dock has no shell and no transcript.
 func (m *Model) TerminalState() terminal.SavedState { return m.dock.SavedState() }
 
+// TerminalSearchHistory returns the dock-wide scrollback-search query history for a
+// workspace-extraction migration. It is a bounded copy; reading it starts nothing.
+func (m *Model) TerminalSearchHistory() []string { return m.dock.SearchHistory() }
+
+// MergeTerminalSearchHistory merges queries carried by a workspace extraction into
+// the dock-wide history. It only touches in-memory data: no process or PTY.
+func (m *Model) MergeTerminalSearchHistory(queries []string) { m.dock.MergeSearchHistory(queries) }
+
 // RestoreTerminal shows a terminal restored from the session file: a read-only
 // transcript, dead until the user restarts it.
 func (m *Model) RestoreTerminal(st terminal.SavedState) {

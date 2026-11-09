@@ -6,6 +6,8 @@ package plugin
 //	gvim.dashboard.register_section(name, refresh, opts?) -> id | nil, err
 //	gvim.dashboard.remove_section(id_or_name) -> boolean
 //	gvim.dashboard.sections() -> { {id, plugin, name, title, key, ttl_ms, timeout_ms, priority}, ... }
+//	gvim.dashboard.set_auto_open(enabled) -> true | nil, err
+//	gvim.dashboard.auto_open() -> boolean | nil  (nil: dashboard plugin setting applies)
 //
 // The refresh callback is retained in the registering plugin's state. The dashboard
 // plugin discovers registered sections through sections(), then calls the exported proxy
@@ -139,6 +141,21 @@ func installDashboard(e *apiEnv) {
 		return 1
 	})
 
+	e.set(area, "set_auto_open", func(L *lua.LState) int {
+		r.setDashboardAutoOpen(L.CheckBool(1))
+		L.Push(lua.LTrue)
+		return 1
+	})
+
+	e.set(area, "auto_open", func(L *lua.LState) int {
+		if enabled, ok := r.dashboardAutoOpenOverride(); ok {
+			L.Push(lua.LBool(enabled))
+			return 1
+		}
+		L.Push(lua.LNil)
+		return 1
+	})
+
 	e.set(area, "sections", func(L *lua.LState) int {
 		rows := r.dashboardSections()
 		out := L.CreateTable(len(rows), 0)
@@ -213,6 +230,34 @@ func validateDashboardResult(v any) error {
 // other than the dashboard.
 func isDashboardConsumer(p *plugin) bool {
 	return p != nil && p.name == "dashboard" && p.kindStr == SourceBundled
+}
+
+// dashboard auto-open override values stored in Runtime.dashboardAutoOpen.
+const (
+	dashboardAutoUnset int8 = iota
+	dashboardAutoOff
+	dashboardAutoOn
+)
+
+// setDashboardAutoOpen stores the session-scoped -- not config-persisted -- auto-open
+// override. The bundled dashboard plugin reads it via gvim.dashboard.auto_open(); the
+// user setting show_on_empty is the fallback when nothing overrides it.
+func (r *Runtime) setDashboardAutoOpen(enabled bool) {
+	if enabled {
+		r.dashboardAutoOpen = dashboardAutoOn
+		return
+	}
+	r.dashboardAutoOpen = dashboardAutoOff
+}
+
+func (r *Runtime) dashboardAutoOpenOverride() (bool, bool) {
+	switch r.dashboardAutoOpen {
+	case dashboardAutoOn:
+		return true, true
+	case dashboardAutoOff:
+		return false, true
+	}
+	return false, false
 }
 
 // dashboardSectionRow is the plain-data metadata list returned to Lua.

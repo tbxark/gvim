@@ -736,7 +736,7 @@ func (m *Manager) RestartServer(language, name string) error {
 	epoch := m.epoch
 	m.mu.Unlock()
 
-	_, err := m.startServer(key, language, cfg, universal, epoch)
+	_, err := m.startServer(key, language, cfg, universal, epoch, false)
 	return err
 }
 
@@ -929,7 +929,7 @@ func (m *Manager) ensureServers(language string) ([]*Handle, []error) {
 		if stopped || (!forced && (!auto || disabled || !cfg.AutoStart)) {
 			continue
 		}
-		h, err := m.startServer(key, language, cfg, false, epoch)
+		h, err := m.startServer(key, language, cfg, false, epoch, !forced)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -964,7 +964,7 @@ func (m *Manager) ensureUniversal() []*Handle {
 		if stopped || !auto || !cfg.AutoStart {
 			continue
 		}
-		h, err := m.startServer(key, "", cfg, true, epoch)
+		h, err := m.startServer(key, "", cfg, true, epoch, true)
 		if err != nil {
 			continue
 		}
@@ -975,7 +975,7 @@ func (m *Manager) ensureUniversal() []*Handle {
 
 // startServer starts one configured server, or returns the running one. A start
 // already in flight for the same key is waited for and its result shared.
-func (m *Manager) startServer(key, language string, cfg ServerConfig, universal bool, epoch uint64) (*Handle, error) {
+func (m *Manager) startServer(key, language string, cfg ServerConfig, universal bool, epoch uint64, automatic bool) (*Handle, error) {
 	m.mu.Lock()
 	if h := m.handleForKeyLocked(key); h != nil {
 		m.mu.Unlock()
@@ -990,7 +990,7 @@ func (m *Manager) startServer(key, language string, cfg ServerConfig, universal 
 	m.starting[key] = s
 	m.mu.Unlock()
 
-	h, err := m.launch(key, language, cfg, universal)
+	h, err := m.launch(key, language, cfg, universal, automatic)
 
 	m.mu.Lock()
 	if m.starting[key] == s {
@@ -1050,9 +1050,20 @@ func (m *Manager) spawnEnvList(configured []string) []string {
 	return out
 }
 
+// automaticStartRefused is the StartError for an automatic start whose live trust gate
+// closed before the process could start. Manual starts do not use it.
+func automaticStartRefused(language string, cfg ServerConfig, command []string) error {
+	return &lsp.StartError{
+		Language: language,
+		Name:     cfg.DisplayName(),
+		Command:  strings.Join(command, " "),
+		Err:      errors.New("workspace trust: automatic language-server start is disabled"),
+	}
+}
+
 // launch starts the process for cfg and runs the initialize handshake. A server
 // that fails a step is closed.
-func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool) (*Handle, error) {
+func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool, automatic bool) (*Handle, error) {
 	command := cfg.CommandLine()
 	serverEnv := m.spawnEnvList(envList(cfg.Env))
 	pathValue := effectivePath(append(os.Environ(), serverEnv...))
@@ -1074,9 +1085,23 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool)
 		gateArgv = append([]string{program}, command[1:]...)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+	// Automatic starts are re-checked live immediately before and after the spawn gate:
+	// a trust revoke that lands between the earlier auto-start-gate check and this launch
+	// must not let an automatic server start merely because Restricted permits a system
+	// binary. The final check and the OS exec are still not atomic (an unavoidable window).
+	if automatic {
+		if !m.autoStartAllowed() {
+			cancel()
+			return nil, automaticStartRefused(language, cfg, command)
+		}
+	}
 	if err := m.gateSpawn(ctx, language, cfg, gateArgv, pathValue); err != nil {
 		cancel()
 		return nil, err
+	}
+	if automatic && !m.autoStartAllowed() {
+		cancel()
+		return nil, automaticStartRefused(language, cfg, command)
 	}
 	c, err := start(ctx, lsp.Config{
 		Command:               command,
@@ -1176,7 +1201,7 @@ func (m *Manager) RestartAfterReconnect(ctx context.Context) (int, error) {
 		if live || starting {
 			continue
 		}
-		if _, err := m.startServer(t.key, t.language, t.cfg, t.universal, epoch); err != nil {
+		if _, err := m.startServer(t.key, t.language, t.cfg, t.universal, epoch, true); err != nil {
 			errs = append(errs, err)
 			continue
 		}

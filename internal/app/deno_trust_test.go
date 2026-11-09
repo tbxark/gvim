@@ -5,12 +5,32 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/trust"
 )
+
+// waitLSPBaseline waits until the serialized baseline worker applied the latest
+// reload/trust state. App tests use it to observe the async worker without sleep loops in
+// production code.
+func waitLSPBaseline(t *testing.T, got built) {
+	t.Helper()
+	s, ok := settingsPort(t, got).(*settingsService)
+	if !ok || s.lspBase == nil {
+		return
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.lspBase.Applied() >= s.lspBase.Seq() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("LSP baseline did not apply: applied %d seq %d", s.lspBase.Applied(), s.lspBase.Seq())
+}
 
 // TestRestrictedReloadDoesNotBypassTrustAutoStart checks the settings-reload hook against
 // live trust: a Restricted/Blocked workspace reloading a user config with lsp_enabled true
@@ -58,6 +78,7 @@ func TestRestrictedReloadDoesNotBypassTrustAutoStart(t *testing.T) {
 			if _, err := settingsPort(t, got).Reload(); err != nil {
 				t.Fatalf("settings reload: %v", err)
 			}
+			waitLSPBaseline(t, got)
 			if port.Supports("go") {
 				t.Fatal("a Restricted/Blocked reload installed an auto-starting go baseline")
 			}
@@ -120,6 +141,7 @@ func TestTrustRevokeRegatesLSPBaseline(t *testing.T) {
 	if _, err := tc.Decide(trust.Blocked); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
+	waitLSPBaseline(t, got)
 	if port.Supports("go") {
 		t.Fatal("the live trust revoke left an auto-starting baseline")
 	}
@@ -180,6 +202,7 @@ func TestRestrictedRevokeStopsNewLanguageAutoStart(t *testing.T) {
 	if _, err := tc.Decide(trust.Restricted); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
+	waitLSPBaseline(t, got)
 	_, _ = port.Open(filepath.Join(root, "a.ts"), "typescript", "const x = 1\n")
 	if spawned != 1 {
 		t.Fatalf("Restricted Open of a never-run language spawned %d server(s)", spawned-1)

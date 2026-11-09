@@ -303,3 +303,38 @@ func TestDockSearchHistoryIsSharedAndPersisted(t *testing.T) {
 		t.Fatalf("legacy restore started a process: %v/%v", legacyStarter.dirs, legacyStarter.launches)
 	}
 }
+
+// TestDockSearchHistoryMergeBoundsAndCleans checks a migrated workspace's queries are
+// cleaned, deduped against the dock's own history and bounded like a saved record,
+// purely in memory (no tab/process is touched).
+func TestDockSearchHistoryMergeBoundsAndCleans(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	starter := &fakeStarter{term: term}
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: starter})
+	applyTabStart(t, &tabs, tabs.NewTab())
+	tabs.MergeSearchHistory([]string{"alpha", "beta", "alpha", "bad\x01query"})
+	if got := tabs.SearchHistory(); len(got) != 3 || got[0] != "alpha" || got[1] != "beta" || got[2] != "badquery" {
+		t.Fatalf("merged history = %v", got)
+	}
+	if len(starter.dirs) != 1 || len(starter.launches) != 0 {
+		t.Fatalf("merging history started a process: dirs %v launches %v", starter.dirs, starter.launches)
+	}
+	if got := tabs.TabNames(); len(got) != 1 {
+		t.Fatalf("merging history changed the tabs: %v", got)
+	}
+	// The merge honors the record cap too.
+	queries := make([]string, 0, terminal.MaxSearchHistoryEntries+10)
+	for i := 0; i < terminal.MaxSearchHistoryEntries+10; i++ {
+		queries = append(queries, fmt.Sprintf("m%d", i))
+	}
+	tabs.MergeSearchHistory(queries)
+	if got := tabs.SearchHistory(); len(got) != terminal.MaxSearchHistoryEntries {
+		t.Fatalf("merged history length = %d, want %d", len(got), terminal.MaxSearchHistoryEntries)
+	}
+	if got := tabs.SearchHistory(); got[len(got)-1] != fmt.Sprintf("m%d", terminal.MaxSearchHistoryEntries+9) {
+		t.Fatalf("merged newest = %q", got[len(got)-1])
+	}
+}

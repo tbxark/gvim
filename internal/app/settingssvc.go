@@ -65,6 +65,9 @@ type settingsService struct {
 	// ioMu serializes the file writes and reloads. The state mutex is not held
 	// while a file is written or loaded, so a Snapshot can run during a Save.
 	ioMu sync.Mutex
+	// lspBase is the serialized trust-gated LSP baseline worker (nil when the port
+	// has no SetConfig seam); tests use it to wait for application.
+	lspBase *lspBaselineUpdater
 }
 
 // currentConfig returns the effective configuration of the last load/reload. Deno

@@ -33,6 +33,10 @@ type mixedExtract struct {
 	// mru is the source editor MRU order restricted to the selected file tabs
 	// (newest first), carried into the target session.
 	mru []session.MruFile
+	// searchHistory is the source dock's search-query history when terminal tabs
+	// are moved: a new target starts with it and an existing target merges it (the
+	// history is dock/window-wide, like Fresh's prompt history).
+	searchHistory []string
 }
 
 // ExtractMixed captures the selected file and dock terminal tabs for a mixed
@@ -78,6 +82,11 @@ func (m *workspaceManager) ExtractMixed(sel tui.ExtractSelection, targetID strin
 	}
 	if len(ext.files) == 0 && len(ext.terms) == 0 {
 		return nil, errors.New("cannot extract: no tabs were selected")
+	}
+	if len(ext.terms) > 0 {
+		// The dock-wide history belongs to the moved terminal context; capture it on
+		// the UI thread with the tab records (no IO).
+		ext.searchHistory = sess.rt.model.TerminalSearchHistory()
 	}
 	if targetID == "" {
 		return tui.WorkspaceCmdOf(func() { m.runMixedExtractNew(ext) }), nil
@@ -131,6 +140,12 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 		m.notify(fmt.Errorf("cannot extract: %w", err))
 		return nil
 	}
+	// A protected target terminal record must refuse the whole mixed migration
+	// before any write (files would be migrated too), not only the terminal half.
+	if marker, protected := restore.TerminalRecordProtected(dir); protected {
+		m.notify(fmt.Errorf("cannot extract: the target workspace's terminal record is protected (%s); inspect it and remove the marker before migrating terminals; nothing was moved", marker))
+		return nil
+	}
 	conflicts, err := m.mixedExtractConflicts(target.File.StableID, dir, ext)
 	if err != nil {
 		m.notify(fmt.Errorf("cannot extract: read the target workspace: %w", err))
@@ -174,8 +189,53 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 		}
 		acceptedTerms++
 	}
+	if acceptedTerms > 0 && len(ext.searchHistory) > 0 {
+		if err := m.migrateMixedSearchHistory(target, dir, ext.searchHistory); err != nil {
+			m.notify(fmt.Errorf("cannot extract: migrate the workspace search history: %v; %d of %d tabs transferred, sources kept", err, acceptedFiles+acceptedTerms, ext.total()))
+			return nil
+		}
+	}
 	m.closeMixedSources(ext, target.File.StableID, target.File.Label)
 	return nil
+}
+
+// migrateMixedSearchHistory moves the source dock's search-query history (captured
+// with the moved terminal tabs) into the target workspace. A materialized target
+// merges it into its dock-wide store and captures it; a dormant one merges it into
+// the saved terminal record. Both paths are data-only: they start no process, touch
+// no PTY and keep the target's own queries first (terminal.MergeSearchHistory
+// dedupes, bounds to the newest MaxSearchHistoryEntries; SaveTerminal cleans/bounds
+// the record again).
+func (m *workspaceManager) migrateMixedSearchHistory(target daemon.Workspace, dir string, history []string) error {
+	m.mu.Lock()
+	open := m.sessions[target.File.StableID]
+	m.mu.Unlock()
+	if open != nil {
+		var serr error
+		if !m.runOnUI(func() {
+			m.mu.Lock()
+			open := m.sessions[target.File.StableID]
+			m.mu.Unlock()
+			if open == nil {
+				serr = errors.New("the target workspace closed while extracting")
+				return
+			}
+			open.rt.model.MergeTerminalSearchHistory(history)
+			m.enqueueCapture(open)
+		}) {
+			return errors.New("the daemon is not ready")
+		}
+		return serr
+	}
+	st, ok, err := restore.LoadTerminal(dir)
+	if err != nil {
+		return fmt.Errorf("read the target workspace's terminal record: %w", err)
+	}
+	if !ok {
+		st = terminal.SavedState{Version: terminal.SavedStateVersion}
+	}
+	st.SearchHistory = terminal.MergeSearchHistory(st.SearchHistory, history)
+	return restore.SaveTerminal(dir, st)
 }
 
 // mixedExtractConflicts lists the target collisions of the selection: file paths
@@ -281,7 +341,13 @@ func (m *workspaceManager) runMixedExtractNew(ext *mixedExtract) {
 	}
 	_, _ = m.reg.UpdateLayout(id, &layout)
 	if len(ext.terms) > 0 {
-		st := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Tabs: append([]terminal.SavedTab(nil), ext.terms...)}
+		st := terminal.SavedState{
+			Version: terminal.SavedStateVersion, Open: true,
+			Tabs: append([]terminal.SavedTab(nil), ext.terms...),
+			// The new workspace's dock inherits the migrated search-query history
+			// (bounded/cleaned by SaveTerminal; no process is involved).
+			SearchHistory: append([]string(nil), ext.searchHistory...),
+		}
 		if err := restore.SaveTerminal(dir, st); err != nil {
 			discard()
 			m.notify(fmt.Errorf("cannot extract: write the new workspace's terminal record: %w", err))

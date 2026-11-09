@@ -434,6 +434,12 @@ func (m *workspaceManager) runExtractTerminalTab(ext *extractTerminalTab) {
 // materialized target appends a dormant restored tab, a dormant one merges it into
 // its terminal record.
 func (m *workspaceManager) acceptExtractTerminalTab(target daemon.Workspace, dir string, tab terminal.SavedTab) error {
+	// A target whose unreadable terminal record could not be quarantined is
+	// protected by a marker: never migrate a terminal into it (pure readers check
+	// this before any write), so the extraction leaves both sides untouched.
+	if marker, protected := restore.TerminalRecordProtected(dir); protected {
+		return fmt.Errorf("the target workspace's terminal record is protected (%s); inspect it and remove the marker before migrating terminals", marker)
+	}
 	m.mu.Lock()
 	open := m.sessions[target.File.StableID]
 	m.mu.Unlock()

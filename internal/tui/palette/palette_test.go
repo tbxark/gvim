@@ -1293,3 +1293,48 @@ func TestPalettePassesTheShowHiddenSetting(t *testing.T) {
 		t.Fatalf("default show-hidden = %v after %d sets, want false", files2.hidden, files2.sets)
 	}
 }
+
+// TestPageKeysMoveOneVisiblePage covers Fresh's prompt_page_up/prompt_page_down: the
+// step is one laid-out page of rows, clamped to the first/last match, and PageUp at the
+// top or PageDown at the end stays put. No command/query work is started.
+func TestPageKeysMoveOneVisiblePage(t *testing.T) {
+	p := New(Options{Query: ">Cmd", Commands: fakeCommands(100)})
+	draw(p, 100, 30)
+	rows := layoutForMode(0, p.height, p.layoutMode()).rows
+	if rows <= 0 || rows >= len(p.rows) {
+		t.Fatalf("page rows = %d of %d, want a full page inside the list", rows, len(p.rows))
+	}
+	if got := p.nav.Selected(); got != 0 {
+		t.Fatalf("initial selection = %d, want 0", got)
+	}
+	if cmd := p.update(key(tea.KeyPgDown)); cmd != nil {
+		t.Fatalf("PageDown started a command: %v", cmd)
+	}
+	if got := p.nav.Selected(); got != rows {
+		t.Fatalf("selection after PageDown = %d, want one page %d", got, rows)
+	}
+	p.update(key(tea.KeyPgUp))
+	if got := p.nav.Selected(); got != 0 {
+		t.Fatalf("selection after PageUp = %d, want 0", got)
+	}
+	p.update(key(tea.KeyPgUp))
+	if got := p.nav.Selected(); got != 0 {
+		t.Fatalf("PageUp at the top moved to %d, want 0", got)
+	}
+	for range 10 {
+		p.update(key(tea.KeyPgDown))
+	}
+	if got, want := p.nav.Selected(), len(p.rows)-1; got != want {
+		t.Fatalf("selection after paging past the end = %d, want last %d", got, want)
+	}
+}
+
+// TestPageKeysBeforeLayoutDoNothing: Fresh's pager has no page until the list was laid
+// out, so the keys are no-ops on a palette that has not been drawn.
+func TestPageKeysBeforeLayoutDoNothing(t *testing.T) {
+	p := New(Options{Query: ">Cmd", Commands: fakeCommands(100)})
+	p.update(key(tea.KeyPgDown))
+	if got := p.nav.Selected(); got != 0 {
+		t.Fatalf("selection before layout = %d, want 0", got)
+	}
+}

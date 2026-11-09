@@ -641,6 +641,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var envWatch envWatchReplanner
 	var envProvider workspaceEnv
 	var localWatchRetry func()
+	var localWatchRetryObj *localEnvWatchRetry
 	var settingsSvc *settingsService
 	if opts.Remote != nil {
 		rootOf := func() string {
@@ -678,12 +679,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				start: func() *localEnvWatch {
 					return startLocalEnvWatch(ctx, localProvider, root)
 				},
-				install: func(lw *localEnvWatch) {
-					if settingsSvc != nil {
-						settingsSvc.setEnvWatch(lw)
-					}
-				},
 			}
+			localWatchRetryObj = retry
 			localWatchRetry = retry.Retry
 		} else {
 			localProvider.SetWatchNotice(appText("gvim.notice.local_env_watch_off", "Local environment: file watching is off; changed detector markers are picked up on Env: Reload"))
@@ -1037,16 +1034,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// The Settings page's live parts: the LSP manager for its Language Servers
 	// page statuses and actions, and the plugin runtime for its Plugins page. They
 	// are built after the page's config snapshot and before the model.
+	var lspBase *lspBaselineUpdater
 	settingsSvc = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
 		lsp:         deps.LSP,
 		localeApply: func(locale string) { pw.Runtime.SetLocale(locale) },
 		lspReload: func(next config.Config) {
-			// The reload must not bypass the live trust gate: a Restricted/Blocked
-			// workspace ignores reloaded project tooling auto-start just as the initial
-			// port build does (manual Start/Restart remains available).
-			gated := lspConfig(next, trust.State{Level: levelOf()})
-			if setter, ok := deps.LSP.(interface{ SetConfig(config.Config) }); ok {
-				setter.SetConfig(gated)
+			// The worker serializes this with live trust changes and always applies the
+			// newest config+trust snapshot under the live gate; it never blocks the caller.
+			if lspBase != nil {
+				lspBase.UpdateConfig(next, trust.State{Level: levelOf()})
 			}
 		},
 		plugins:    pw.Runtime,
@@ -1061,16 +1057,25 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	})
 	settingsSvc.env = envProvider
 	settingsSvc.setEnvWatch(envWatch)
+	if localWatchRetryObj != nil {
+		// Install after the settings service exists; SetInstall synchronizes with a retry
+		// that may already have recovered a watcher while the runtime was being built.
+		localWatchRetryObj.SetInstall(func(lw *localEnvWatch) {
+			settingsSvc.setEnvWatch(lw)
+		})
+	}
 	deps.SettingsPort = settingsSvc
+	lspBase = newLSPBaselineUpdater(ctx, deps.LSP, settingsSvc.currentConfig(), trust.State{Level: levelOf()})
+	settingsSvc.lspBase = lspBase
 
 	// A live trust change (revoke/restore) re-gates the LSP baseline at once, so a
 	// revoke cannot leave an auto-starting configuration behind even without a
-	// Settings reload. Manual Start/Restart remains available through the normal gate.
+	// Settings reload. The updater keeps the latest settings config; a stale reload
+	// snapshot cannot overwrite a newer baseline. Manual Start/Restart remains available.
 	if trustCtl != nil {
 		trustCtl.SetChangeListener(func(state trust.State) {
-			gated := lspConfig(settingsSvc.currentConfig(), state)
-			if setter, ok := deps.LSP.(interface{ SetConfig(config.Config) }); ok {
-				setter.SetConfig(gated)
+			if lspBase != nil {
+				lspBase.UpdateTrust(state)
 			}
 		})
 	}
@@ -1297,8 +1302,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// A restored session brings the terminal transcript back, dead: nothing is
 	// re-run automatically, and Restart starts a shell below the transcript.
 	if plan.load && plan.tabs && opts.SessionDir != "" && !remoteRestoreSkipped {
-		if st, ok, err := restore.LoadTerminal(opts.SessionDir); err != nil {
+		if st, ok, err := restore.LoadTerminalForRestore(opts.SessionDir); err != nil {
+			// An unusable record is quarantined (or protected by a marker) before the
+			// session continues, so the normal-exit save cannot silently replace it.
+			// Warn on both the log stream and the status row.
 			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: terminal:", err)
+			model.Notify(err.Error())
 		} else if ok {
 			model.RestoreTerminal(st)
 		}

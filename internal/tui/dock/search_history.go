@@ -65,6 +65,19 @@ func (h *searchHistoryStore) snapshot() []string {
 	return out
 }
 
+// merge appends migrated queries (a mixed extraction carrying this dock's tabs into
+// another workspace): each source query is cleaned like a stored one, identical
+// queries are deduped, and the store keeps the newest terminal record cap.
+func (h *searchHistoryStore) merge(queries []string) {
+	cleaned := make([]string, 0, len(queries))
+	for _, query := range queries {
+		if query = sanitizeSearchQuery(query); query != "" {
+			cleaned = append(cleaned, query)
+		}
+	}
+	h.queries = terminal.MergeSearchHistory(h.queries, cleaned)
+}
+
 // restore installs a loaded history, cleaning and bounding it again like the
 // restore loader did (defense in depth for callers that construct a state by hand):
 // queries keep their order, empty/invalid entries are dropped and only the newest

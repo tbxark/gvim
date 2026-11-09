@@ -110,3 +110,34 @@ type SavedTab struct {
 	ExitCode  int  `json:"exit_code,omitempty"`
 	ExitKnown bool `json:"exit_known,omitempty"`
 }
+
+// MergeSearchHistory merges a migrated dock's search-query history into a target
+// history: target entries stay first (oldest to newest), then source entries are
+// appended unless an identical query is already present, and only the newest
+// MaxSearchHistoryEntries survive. It keeps the data untrusted: callers clean each
+// query (controls/invalid UTF-8) before/after merging.
+func MergeSearchHistory(target, source []string) []string {
+	if len(target) == 0 && len(source) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(target)+len(source))
+	out := make([]string, 0, len(target)+len(source))
+	for _, query := range target {
+		if query == "" || seen[query] {
+			continue
+		}
+		seen[query] = true
+		out = append(out, query)
+	}
+	for _, query := range source {
+		if query == "" || seen[query] {
+			continue
+		}
+		seen[query] = true
+		out = append(out, query)
+	}
+	if over := len(out) - MaxSearchHistoryEntries; over > 0 {
+		out = append([]string(nil), out[over:]...)
+	}
+	return out
+}

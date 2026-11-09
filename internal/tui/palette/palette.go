@@ -464,6 +464,12 @@ func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "down":
 		p.nav.Select(p.nav.Selected() + 1)
 		return nil
+	case "pgup":
+		p.page(-1)
+		return nil
+	case "pgdown":
+		p.page(1)
+		return nil
 	case "tab":
 		// Fresh's prompt_accept_suggestion: Tab fills the selected suggestion into
 		// the query instead of running it. Enter still opens/runs the row. In Live
@@ -495,6 +501,22 @@ func (p *Palette) edit(msg tea.Msg) tea.Cmd {
 		return read
 	}
 	return tea.Batch(read, p.requery())
+}
+
+// page moves the selection one visible page up (delta -1) or down (delta 1),
+// clamped to the list. It is Fresh's prompt_page_up/prompt_page_down: the step is the
+// number of item rows the last layout recorded, and a palette that has not been laid
+// out yet has no page (Fresh's Pager returns None before layout). The navigation is
+// in-memory only; the ranking command is untouched.
+func (p *Palette) page(delta int) {
+	if p.height <= 0 || len(p.rows) == 0 {
+		return
+	}
+	rows := layoutForMode(0, p.height, p.layoutMode()).rows
+	if rows <= 0 {
+		return
+	}
+	p.nav.Select(p.nav.Selected() + delta*rows)
 }
 
 // acceptSuggestion fills the selected row's value into the query and re-queries,

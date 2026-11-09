@@ -556,6 +556,15 @@ func (t *Tabs) Open() bool { p := t.Active(); return p != nil && p.Open() }
 // Focus reports whether the active tab has the keyboard focus.
 func (t *Tabs) Focus() bool { p := t.Active(); return p != nil && p.Focus() }
 
+// SearchHistory returns the dock-wide scrollback-search queries (oldest first),
+// for a workspace-extraction migration of the terminal state. The slice is a copy
+// bounded like the saved record.
+func (t *Tabs) SearchHistory() []string { return t.history.snapshot() }
+
+// MergeSearchHistory merges queries migrated from another workspace's dock into
+// this dock-wide history; it never starts a process or touches a PTY.
+func (t *Tabs) MergeSearchHistory(queries []string) { t.history.merge(queries) }
+
 // SetHostFocused merges the outer terminal window's focus into every tab: a
 // terminal program is focused only while the window and the dock both have the
 // keyboard. It is kept on the tab container so tabs started later inherit it.

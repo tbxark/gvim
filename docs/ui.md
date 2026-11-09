@@ -161,8 +161,10 @@ query.
   `…`. A narrower frame drops the column and keeps the full-width list. The preview is
   a plain-text head: it has no syntax colours and does not scroll (see §4.5 of
   `docs/parity.md`).
-**Palette keyboard.** Up/Down move the selection, PageUp/PageDown page it, Enter
-runs/opens the selected row and Escape closes the palette. Tab accepts the selected
+**Palette keyboard.** Up/Down move the selection, PageUp/PageDown move it one visible
+page and clamp at the first/last row (Fresh's `prompt_page_up`/`prompt_page_down`; there is
+no page before the first layout), Enter runs/opens the selected row and Escape closes
+the palette. Tab accepts the selected
 suggestion into the query instead of running it (Fresh's `prompt_accept_suggestion`): in
 the file mode it fills the ranked path together with the `:line[:col]` target the query named,
 so a jump target is not lost; a Windows drive or any other colon in the path is left intact

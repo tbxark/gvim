@@ -187,6 +187,23 @@ func (r *localEnvWatchRetry) Current() *localEnvWatch {
 	return r.current
 }
 
+// SetInstall sets the callback that records the recovered watcher (settings service). It
+// may be called after construction, so startup does not need an unsynchronized settings
+// pointer read from the retry goroutine; the callback is installed under the same mutex
+// Retry uses and is applied to an already-recovered watcher.
+func (r *localEnvWatchRetry) SetInstall(install func(*localEnvWatch)) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.install = install
+	cur := r.current
+	r.mu.Unlock()
+	if cur != nil && install != nil {
+		install(cur)
+	}
+}
+
 func (r *localEnvWatchRetry) Retry() {
 	if r == nil {
 		return

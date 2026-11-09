@@ -143,6 +143,9 @@ type Provider struct {
 	// watchRetry is set while a failed/dead local watcher should be retried by an Env:
 	// Reload (the app's env port checks it on detection reads and env actions).
 	watchRetry atomic.Bool
+	// detectionGen invalidates an in-flight RefreshDetection when the detectors change, so
+	// the watcher's passive scan cannot overwrite the newer config's detection.
+	detectionGen uint64
 }
 
 // New builds the provider for root with the configured detectors. It detects the
@@ -174,9 +177,16 @@ func (p *Provider) Detectors() []config.EnvDetector {
 func (p *Provider) RefreshDetection() {
 	p.mu.RLock()
 	detectors := append([]config.EnvDetector(nil), p.detectors...)
+	gen := p.detectionGen
 	p.mu.RUnlock()
 	det, incomplete := trust.DetectEnv(p.root, detectors)
 	p.mu.Lock()
+	if p.detectionGen != gen {
+		// A detector change landed while this passive scan was running; its result is for
+		// the old detector list and must not overwrite the newer detection.
+		p.mu.Unlock()
+		return
+	}
 	p.detected, p.found, p.incomplete = det, det.Name != "", incomplete
 	p.mu.Unlock()
 }
@@ -217,6 +227,7 @@ func (p *Provider) SetDetectors(detectors []config.EnvDetector) {
 	det, incomplete := trust.DetectEnv(p.root, detectors)
 	p.mu.Lock()
 	p.detectors = detectors
+	p.detectionGen++
 	p.detected, p.found, p.incomplete = det, det.Name != "", incomplete
 	p.mu.Unlock()
 }

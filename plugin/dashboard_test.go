@@ -50,3 +50,17 @@ func TestDashboardSectionCallbackKeyIsHiddenFromOtherPlugins(t *testing.T) {
 		t.Fatalf("proxy resolved a dashboard callback for a non-dashboard plugin: %q", got)
 	}
 }
+
+func TestDashboardAutoOpenAPI(t *testing.T) {
+	h := plugintest.New(t, plugintest.Files{"t.lua": "\nlocal gvim = require 'gvim'\ngvim.command.register {\n  name = 'auto',\n  run = function()\n    gvim.notify('unset:' .. tostring(gvim.dashboard.auto_open()))\n    gvim.notify('off_ret:' .. tostring(gvim.dashboard.set_auto_open(false)))\n    gvim.notify('off:' .. tostring(gvim.dashboard.auto_open()))\n    gvim.notify('on_ret:' .. tostring(gvim.dashboard.set_auto_open(true)))\n    gvim.notify('on:' .. tostring(gvim.dashboard.auto_open()))\n    local ok, err = pcall(gvim.dashboard.set_auto_open, 'yes')\n    gvim.notify('bad:' .. tostring(ok) .. ':' .. tostring(err ~= nil))\n  end,\n}\n"}, plugintest.Options{})
+	h.Start()
+	if err := h.Run("t.auto", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(h.NoticeTexts(), "|")
+	for _, want := range []string{"unset:nil", "off_ret:true", "off:false", "on_ret:true", "on:true", "bad:false:true"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("notices = %q, missing %q", got, want)
+		}
+	}
+}

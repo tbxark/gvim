@@ -447,7 +447,10 @@ files, keyboard-navigable quick actions (settings,
 explorer, live grep, theme, Git Log, diagnostics) and best-effort `df` disk rows. Tab/Down/j and
 Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** reopens it. It
 auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file
-opens; a timer refreshes it (`refresh_seconds`). The recent-file rows are line targets
+opens; a timer refreshes it (`refresh_seconds`). A plugin developer can override the auto-open decision
+for the current process with `gvim.dashboard.set_auto_open` (session-scoped, not persisted; the
+dashboard falls back to `show_on_empty` when it is unset), without opening/closing the visible
+dashboard immediately. The recent-file rows are line targets
 (`gvim.buf.set_line_targets`): a single click opens the file, while the command rows stay
 keyboard-only because a target opens a file, not an action — this changed in round 22: action
 rows (including the Git section's branch-log row) publish action line targets running a hidden

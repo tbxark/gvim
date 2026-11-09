@@ -86,6 +86,11 @@ type Runtime struct {
 	heapLimit int64
 	check     bool
 	debug     bool
+
+	// dashboardAutoOpen is the process-scoped dashboard auto-open override set by
+	// gvim.dashboard.set_auto_open: 0 unset, 1 off, 2 on. It is read only from Lua
+	// slices on the runtime goroutine.
+	dashboardAutoOpen int8
 	// workspaceStateFile/workspaceState/workspaceStateReadOnly/workspaceStateNote are the
 	// per-workspace gvim.state target (empty: the editor-wide per-plugin files).
 	workspaceStateFile     string

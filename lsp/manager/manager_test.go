@@ -832,3 +832,87 @@ func TestRestartServerPreflightKeepsRunningServer(t *testing.T) {
 		t.Fatal("refused RestartServer stopped/replaced the running server")
 	}
 }
+
+// TestAutoStartRevokeInsideSpawnGateIsRefused is the controlled synchronous regression for
+// the revoke window: the earlier auto gate allows, then the spawn gate callback revokes trust
+// (as Restricted would only refuse project-contained binaries, so the gate itself would
+// allow a system LSP). The late live re-check must refuse before the spawner runs.
+func TestAutoStartRevokeInsideSpawnGateIsRefused(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	revoked := false
+	m.SetAutoStartGate(func() bool { return !revoked })
+	m.SetGate(func(context.Context, []string, string, string) error {
+		revoked = true
+		return nil
+	})
+	err := m.Open(mgrAPath, "go", "package a\n")
+	if err == nil || !strings.Contains(err.Error(), "automatic") {
+		t.Fatalf("Open error = %v, want the automatic-start trust refusal", err)
+	}
+	if len(log.cfgs) != 0 {
+		t.Fatalf("automatic start reached the spawner despite the late re-check: %d", len(log.cfgs))
+	}
+	// Manual start is not affected by the automatic gate.
+	if err := m.StartLanguage("go"); err != nil {
+		t.Fatalf("manual StartLanguage: %v", err)
+	}
+	if len(log.cfgs) != 1 {
+		t.Fatalf("manual StartLanguage spawned %d server(s), want 1", len(log.cfgs))
+	}
+}
+
+// TestAutoStartRevokeBetweenEarlyCheckAndLaunchIsRefused checks the earlier window as well:
+// the ensure gate says allowed, then the launch's first live re-check sees the revoke.
+func TestAutoStartRevokeBetweenEarlyCheckAndLaunchIsRefused(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	calls := 0
+	m.SetAutoStartGate(func() bool {
+		calls++
+		return calls == 1 // ensureServers sees true; launch sees false
+	})
+	_ = m.Open(mgrAPath, "go", "package a\n")
+	if len(log.cfgs) != 0 {
+		t.Fatalf("automatic start reached the spawner after the launch re-check: %d", len(log.cfgs))
+	}
+}
+
+// TestAutoStartGateRaceBoundary toggles the live gate concurrently with automatic Opens
+// (run with -race). Once the gate is finally closed, another automatic Open must not spawn;
+// any earlier in-flight start is the documented boundary, not a guarantee against the OS
+// window.
+func TestAutoStartGateRaceBoundary(t *testing.T) {
+	var allowed atomic.Bool
+	allowed.Store(true)
+	var spawned atomic.Int64
+	m := NewManager(mgrRoot, map[string][]ServerConfig{
+		"go": {{Command: []string{"gopls"}, AutoStart: true}},
+	}, nil)
+	m.SetAutoStartGate(func() bool { return allowed.Load() })
+	m.start = func(context.Context, lsp.Config) (*lsp.Client, error) {
+		spawned.Add(1)
+		return nil, errStartFailed
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			allowed.Store(i%2 == 0)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			_ = m.Open(mgrAPath, "go", "package a\n")
+		}
+	}()
+	wg.Wait()
+	allowed.Store(false)
+	before := spawned.Load()
+	_ = m.Open(mgrAPath, "go", "package a\n")
+	if got := spawned.Load(); got != before {
+		t.Fatalf("automatic Open spawned %d server(s) after the gate closed", got-before)
+	}
+}

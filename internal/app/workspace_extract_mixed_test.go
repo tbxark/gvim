@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -305,5 +306,216 @@ func TestMixedExtractEmptyTargetRecordJSONIsValid(t *testing.T) {
 	data, err := json.Marshal(st)
 	if err != nil || !strings.Contains(string(data), "tabs") {
 		t.Fatalf("terminal record json = %s, %v", data, err)
+	}
+}
+
+// TestMixedExtractCarriesSearchHistoryToNewWorkspace checks the dock-wide search
+// history is not lost when mixed terminal tabs migrate to a new co-tenant workspace:
+// the target's terminal record starts with the (deduped, bounded) source queries,
+// and nothing starts because a new co-tenant stays dormant.
+func TestMixedExtractCarriesSearchHistoryToNewWorkspace(t *testing.T) {
+	m, sourceID := newWorkspaceManagerTest(t)
+	root := activeRoot(m)
+	path := extractionFile(t, root, "history.txt", "disk\n")
+	openUnsaved(t, m, sourceID, path, "H-")
+	seedDockTerminal(t, m, sourceID, "shell")
+	m.mu.Lock()
+	source := m.sessions[sourceID]
+	m.mu.Unlock()
+	source.rt.model.MergeTerminalSearchHistory([]string{"alpha", "beta", "alpha"})
+	cmd, err := m.ExtractMixed(mixedSelection(t, m, path), "", false)
+	if err != nil || cmd == nil {
+		t.Fatalf("ExtractMixed = %v, %v", cmd, err)
+	}
+	cmd()
+	var destID string
+	for _, e := range m.Entries() {
+		if e.ID != sourceID {
+			destID = e.ID
+		}
+	}
+	dir, err := m.reg.SessionDir(destID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, ok, err := restore.LoadTerminal(dir)
+	if err != nil || !ok {
+		t.Fatalf("target terminal record = %v, %v", ok, err)
+	}
+	if len(st.SearchHistory) != 2 || st.SearchHistory[0] != "alpha" || st.SearchHistory[1] != "beta" {
+		t.Fatalf("migrated search history = %v, want [alpha beta]", st.SearchHistory)
+	}
+	if len(st.Tabs) != 1 || st.Tabs[0].Name != "shell" {
+		t.Fatalf("migrated tabs = %+v", st.Tabs)
+	}
+	// The switch materializes the new co-tenant from the saved record (no PTY): the
+	// extracted tabs are restored read-only and the dock sees the migrated history.
+	m.mu.Lock()
+	dest := m.sessions[destID]
+	m.mu.Unlock()
+	if dest == nil {
+		t.Fatal("the new co-tenant was not materialized by the switch")
+	}
+	if got := dest.rt.model.RunningTerminals(); len(got) != 0 {
+		t.Fatalf("the extraction started a terminal process: %+v", got)
+	}
+	if got := dest.rt.model.TerminalSearchHistory(); len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+		t.Fatalf("materialized new-workspace history = %v", got)
+	}
+}
+
+// TestMixedExtractMergesSearchHistoryIntoDormantTarget checks an existing dormant
+// target keeps its own queries first and gains the migrated source queries (deduped),
+// and the restored target dock sees the merged history without starting a process.
+func TestMixedExtractMergesSearchHistoryIntoDormantTarget(t *testing.T) {
+	m, sourceID := newWorkspaceManagerTest(t)
+	root := activeRoot(m)
+	targetID := coTenantOverRoot(t, m, root)
+	path := extractionFile(t, root, "mergehist.txt", "disk\n")
+	openUnsaved(t, m, sourceID, path, "MH-")
+	seedDockTerminal(t, m, sourceID, "shell")
+	m.mu.Lock()
+	source := m.sessions[sourceID]
+	m.mu.Unlock()
+	source.rt.model.MergeTerminalSearchHistory([]string{"alpha", "target-q"})
+	dir, err := m.reg.SessionDir(targetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restore.SaveTerminal(dir, terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true,
+		Tabs:          []terminal.SavedTab{{Name: "existing", Open: true, Rows: []string{"target"}}},
+		SearchHistory: []string{"target-q", "own"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := m.ExtractMixed(mixedSelection(t, m, path), targetID, false)
+	if err != nil || cmd == nil {
+		t.Fatalf("ExtractMixed = %v, %v", cmd, err)
+	}
+	cmd()
+	// The target record: its own queries first, then the migrated source-only ones.
+	st, ok, err := restore.LoadTerminal(dir)
+	if err != nil || !ok {
+		t.Fatalf("target record = %v, %v", ok, err)
+	}
+	want := []string{"target-q", "own", "alpha"}
+	if len(st.SearchHistory) != len(want) {
+		t.Fatalf("merged target history = %v, want %v", st.SearchHistory, want)
+	}
+	for i := range want {
+		if st.SearchHistory[i] != want[i] {
+			t.Fatalf("merged target history = %v, want %v", st.SearchHistory, want)
+		}
+	}
+	if len(st.Tabs) != 2 {
+		t.Fatalf("target tabs = %+v", st.Tabs)
+	}
+	// The switch materialized the target from that record and no restored tab is
+	// running (history migration and restore start no process).
+	m.mu.Lock()
+	target := m.sessions[targetID]
+	m.mu.Unlock()
+	if target == nil {
+		t.Fatal("the target was not materialized by the switch")
+	}
+	if got := target.rt.model.TerminalSearchHistory(); len(got) != 3 || got[0] != "target-q" || got[2] != "alpha" {
+		t.Fatalf("materialized target history = %v", got)
+	}
+	// A restored tab may be live-at-capture (it revives on the first dive), but
+	// nothing is running now: the tabs are the two saved records and the history
+	// migration/restore spawned no PTY.
+	if got := len(target.rt.model.TerminalState().Tabs); got != 2 {
+		t.Fatalf("materialized target tabs = %d", got)
+	}
+	if got := target.rt.model.RunningTerminals(); len(got) != 0 {
+		t.Fatalf("history migration/restore started a terminal process: %+v", got)
+	}
+}
+
+// TestMixedExtractMergesSearchHistoryIntoMaterializedTarget checks the open-target
+// path merges the source history into the live dock-wide store (not only into the
+// saved record), with no PTY started for the migration.
+func TestMixedExtractMergesSearchHistoryIntoMaterializedTarget(t *testing.T) {
+	m, sourceID := newWorkspaceManagerTest(t)
+	root := activeRoot(m)
+	targetID := coTenantOverRoot(t, m, root)
+	materializeWorkspace(t, m, targetID)
+	materializeWorkspace(t, m, sourceID)
+	m.mu.Lock()
+	target := m.sessions[targetID]
+	source := m.sessions[sourceID]
+	m.mu.Unlock()
+	if target == nil || source == nil {
+		t.Fatal("the workspaces are not materialized")
+	}
+	target.rt.model.MergeTerminalSearchHistory([]string{"target-q"})
+	path := extractionFile(t, root, "livehist.txt", "disk\n")
+	openUnsaved(t, m, sourceID, path, "LH-")
+	seedDockTerminal(t, m, sourceID, "shell")
+	source.rt.model.MergeTerminalSearchHistory([]string{"alpha"})
+	cmd, err := m.ExtractMixed(mixedSelection(t, m, path), targetID, false)
+	if err != nil || cmd == nil {
+		t.Fatalf("ExtractMixed = %v, %v", cmd, err)
+	}
+	cmd()
+	got := target.rt.model.TerminalSearchHistory()
+	want := []string{"target-q", "alpha"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("materialized target history = %v, want %v", got, want)
+	}
+}
+
+// TestMixedExtractRefusesProtectedTargetRecord checks the pure-loader guard: a
+// target with a valid terminal record but a .protected marker must refuse any
+// migration before writing files or terminal tabs, leaving both sides untouched
+// (the mixed and the single-terminal extraction paths).
+func TestMixedExtractRefusesProtectedTargetRecord(t *testing.T) {
+	m, sourceID := newWorkspaceManagerTest(t)
+	root := activeRoot(m)
+	targetID := coTenantOverRoot(t, m, root)
+	path := extractionFile(t, root, "protected.txt", "disk\n")
+	openUnsaved(t, m, sourceID, path, "P-")
+	seedDockTerminal(t, m, sourceID, "shell")
+	dir, err := m.reg.SessionDir(targetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restore.SaveTerminal(dir, terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true,
+		Tabs: []terminal.SavedTab{{Name: "existing", Open: true, Rows: []string{"target"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recordBefore := readFileBytes(t, filepath.Join(dir, "terminal.json"))
+	marker := filepath.Join(dir, "terminal.json.protected")
+	if err := os.WriteFile(marker, []byte("protected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := m.ExtractMixed(mixedSelection(t, m, path), targetID, false)
+	if err != nil || cmd == nil {
+		t.Fatalf("ExtractMixed = %v, %v", cmd, err)
+	}
+	cmd()
+	if !strings.Contains(m.lastNotice, "protected") {
+		t.Fatalf("notice = %q, want the protected-record refusal", m.lastNotice)
+	}
+	if got := readFileBytes(t, filepath.Join(dir, "terminal.json")); !bytes.Equal(got, recordBefore) {
+		t.Fatal("the protected target terminal record changed during extraction")
+	}
+	if !workspaceHasTab(m, sourceID, path) || len(dockTabNames(m, sourceID)) != 1 {
+		t.Fatal("the protected-target refusal moved a source tab")
+	}
+	// The single-terminal extraction uses the same guard.
+	cmd, err = m.ExtractTerminalTabTo(targetID)
+	if err != nil || cmd == nil {
+		t.Fatalf("ExtractTerminalTabTo = %v, %v", cmd, err)
+	}
+	cmd()
+	if !strings.Contains(m.lastNotice, "protected") {
+		t.Fatalf("single extraction notice = %q", m.lastNotice)
+	}
+	if len(dockTabNames(m, sourceID)) != 1 {
+		t.Fatal("the single terminal extraction moved the source tab")
 	}
 }

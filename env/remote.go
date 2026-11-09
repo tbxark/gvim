@@ -75,9 +75,11 @@ type Remote struct {
 	detectedSet     bool
 	detectedTrusted bool
 	detectionNotice string
-	// detectorsGen increments on SetDetectors so an in-flight probe started with an older
-	// detector list cannot overwrite the detection of the newer list.
-	detectorsGen uint64
+	// detectionGen increments whenever the inputs of a detection probe change (detector
+	// list, root, marker prober) or the cached detection is invalidated (Refresh). An
+	// in-flight probe snapshots it and discards its result if it changed, so an older
+	// probe can never overwrite a newer invalidation/config.
+	detectionGen uint64
 
 	// Activation state: the recipe the plugin activated, and the captured delta.
 	snippet   string
@@ -123,6 +125,7 @@ func (p *Remote) SetMarkerProber(probe MarkerProber) {
 	p.mu.Lock()
 	p.markerProbe = probe
 	p.detectedSet = false
+	p.detectionGen++
 	p.mu.Unlock()
 }
 
@@ -180,6 +183,7 @@ func (p *Remote) SetRoot(root string) {
 	}
 	p.detected, p.found, p.detectedSet, p.detectedTrusted = trust.DetectedEnv{}, false, false, false
 	p.detectionNotice = ""
+	p.detectionGen++
 	p.invalidateLocked()
 	p.mu.Unlock()
 }
@@ -207,7 +211,7 @@ func (p *Remote) SetDetectors(detectors []config.EnvDetector) {
 	}
 	p.mu.Lock()
 	p.detectors = append([]config.EnvDetector(nil), detectors...)
-	p.detectorsGen++
+	p.detectionGen++
 	p.detected, p.found = trust.DetectedEnv{}, false
 	p.detectedSet, p.detectedTrusted = false, false
 	p.detectionNotice = ""
@@ -310,6 +314,7 @@ func (p *Remote) Refresh() {
 	p.mu.Lock()
 	p.detected, p.found, p.detectedSet, p.detectedTrusted = trust.DetectedEnv{}, false, false, false
 	p.detectionNotice = ""
+	p.detectionGen++
 	p.invalidateLocked()
 	p.mu.Unlock()
 }
@@ -407,7 +412,7 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	}
 	root := p.root
 	detectors := append([]config.EnvDetector(nil), p.detectors...)
-	gen := p.detectorsGen
+	gen := p.detectionGen
 	run := p.run
 	prober := p.markerProbe
 	p.mu.Unlock()
@@ -420,6 +425,10 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	)
 	if !trusted && prober == nil {
 		p.mu.Lock()
+		if p.detectionGen != gen {
+			p.mu.Unlock()
+			return
+		}
 		p.detected, p.found = trust.DetectedEnv{}, false
 		p.detectedSet, p.detectedTrusted = true, false
 		p.detectionNotice = "Remote environment: marker detection needs a trusted workspace (activation is trust-gated too)"
@@ -434,7 +443,7 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	_ = incomplete
 
 	p.mu.Lock()
-	if p.detectorsGen != gen {
+	if p.detectionGen != gen {
 		// A runtime detector change landed while this probe was in flight: its result is
 		// for the old marker set. Do not cache it; the next Warm/Overlay probes the new set.
 		p.mu.Unlock()

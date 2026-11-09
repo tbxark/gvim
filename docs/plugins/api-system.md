@@ -149,6 +149,8 @@ sections whether or not the dashboard is currently open.
 gvim.dashboard.register_section(name, refresh, opts?) -> id | nil, err
 gvim.dashboard.remove_section(id_or_name) -> boolean
 gvim.dashboard.sections() -> { {id, plugin, name, title, key, ttl_ms, timeout_ms, priority}, ... }
+gvim.dashboard.set_auto_open(enabled) -> true
+gvim.dashboard.auto_open() -> boolean | nil
 ```
 
 `name` is the section's stable name within the registering plugin (1..64 characters, no
@@ -209,12 +211,25 @@ the dashboard continue. A provider that is unloaded/disabled is discovered as un
 the next refresh. The callback's `ttl_ms`/`timeout_ms` are enforced by the dashboard; the
 host registration caps are the hard bound.
 
+### Auto-open override
+
+`gvim.dashboard.set_auto_open(enabled)` stores a **process-scoped** override for the bundled
+dashboard's ambient auto-open behaviour. `gvim.dashboard.auto_open()` returns the override
+(`true`/`false`) or `nil` when unset; the dashboard plugin then uses its user setting
+`plugins.dashboard.settings.show_on_empty`. The last call from any loaded plugin wins; the
+value is not persisted, survives a dashboard-plugin reload, and is reset by the next gvim
+process. It does not open or close a visible dashboard immediately and does not change the
+user configuration; the next automatic-open decision (startup/empty editor/last file closed)
+uses the override. It has no callbacks, IO or bounded resources beyond one boolean, and never
+blocks the UI.
+
 Fresh difference: Fresh passes a `DashboardContext` with `kv`/`text`/`columns`/`newline`/
 `error` drawing functions and a `SectionRefresh` promise. gvim keeps callbacks in the
 provider state and returns plain row data instead, so no function crosses a plugin state and
-the dashboard can bound/validate/sanitize rows before painting. Fresh's `removeSection`
-(global name), `clearAllSections`, `setAutoOpen` and `builtinHandlers` are not exposed; gvim's
-built-in sections are fixed and third-party registration is per plugin. External rows are
+the dashboard can bound/validate/sanitize rows before painting. Fresh's `setAutoOpen` is
+exposed as the session override above. Fresh's global `removeSection` (removing other
+plugins'/built-ins' names), `clearAllSections` and `builtinHandlers` are not exposed; gvim's
+built-in sections are fixed and third-party registration/removal is per plugin. External rows are
 text only (no column layout, click actions or URL targets); section row strings are
 plugin-owned text, while dashboard-generated status strings live in the dashboard plugin's
 `dashboard.i18n.json`. External refreshes run sequentially in the dashboard task: a slow

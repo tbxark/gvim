@@ -921,3 +921,62 @@ func TestDashboardWeatherUnavailable(t *testing.T) {
 		})
 	}
 }
+
+func TestDashboardAutoOpenOverride(t *testing.T) {
+	t.Run("unset override keeps show_on_empty false", func(t *testing.T) {
+		r := startRig(t, rigOpts{
+			plugins:  []string{dashboardPlugin},
+			settings: map[string]plugin.PluginSettings{dashboardPlugin: {User: map[string]any{"show_on_empty": false}}},
+			script:   dashboardRemoteScript("https://github.com/me/repo"),
+		})
+		dashboardReady(t, r)
+		if dashboardBuffer(r.host) != 0 {
+			t.Fatalf("dashboard auto-opened despite show_on_empty=false with no override")
+		}
+	})
+
+	t.Run("override true enables auto-open despite show_on_empty false", func(t *testing.T) {
+		r := startRig(t, rigOpts{
+			plugins:  []string{dashboardPlugin},
+			probe:    "\nlocal gvim = require 'gvim'\ngvim.command.register { name = 'auto_on', run = function() gvim.dashboard.set_auto_open(true) end }\ngvim.command.register { name = 'auto_off', run = function() gvim.dashboard.set_auto_open(false) end }\ngvim.command.register {\n  name = 'auto_read',\n  run = function() gvim.notify('auto=' .. tostring(gvim.dashboard.auto_open())) end,\n}\n",
+			settings: map[string]plugin.PluginSettings{dashboardPlugin: {User: map[string]any{"show_on_empty": false}}},
+			script:   dashboardRemoteScript("https://github.com/me/repo"),
+		})
+		if err := r.h.Run("probe.auto_on", nil); err != nil {
+			t.Fatal(err)
+		}
+		dashboardReady(t, r)
+		if dashboardBuffer(r.host) == 0 {
+			t.Fatalf("dashboard did not auto-open with a true session override (log %v)", r.h.LogText(""))
+		}
+	})
+
+	t.Run("override false disables auto-open and can be re-enabled", func(t *testing.T) {
+		r := startRig(t, rigOpts{
+			plugins: []string{dashboardPlugin},
+			probe:   "\nlocal gvim = require 'gvim'\ngvim.command.register { name = 'auto_on', run = function() gvim.dashboard.set_auto_open(true) end }\ngvim.command.register { name = 'auto_off', run = function() gvim.dashboard.set_auto_open(false) end }\ngvim.command.register {\n  name = 'auto_read',\n  run = function() gvim.notify('auto=' .. tostring(gvim.dashboard.auto_open())) end,\n}\n",
+			script:  dashboardRemoteScript("https://github.com/me/repo"),
+		})
+		if err := r.h.Run("probe.auto_off", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.h.Run("probe.auto_read", nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastNoticeText(r.h); got != "auto=false" {
+			t.Fatalf("auto_open override = %q, want false", got)
+		}
+		dashboardReady(t, r)
+		if dashboardBuffer(r.host) != 0 {
+			t.Fatalf("dashboard auto-opened with a false session override")
+		}
+		if err := r.h.Run("probe.auto_on", nil); err != nil {
+			t.Fatal(err)
+		}
+		r.h.Emit(pluginapi.Event{Name: "ready", Data: map[string]any{}})
+		r.h.Settle()
+		if dashboardBuffer(r.host) == 0 {
+			t.Fatalf("dashboard did not auto-open after re-enabling the override (log %v)", r.h.LogText(""))
+		}
+	})
+}

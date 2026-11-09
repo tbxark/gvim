@@ -526,6 +526,18 @@ re-runs the passive detection and clears the notice; a live watcher is left unto
 ordinary activations do not churn fsnotify. Fresh's env probe never retries its best-effort
 watch registration, so this recovery path is a deliberate gvim improvement.
 
+Reload/teardown concurrency is protected and covered by targeted `go test -race` stress
+tests: the bounded watch plan is an immutable atomic pointer, a replan invalidates the
+provider before waking the watcher, and the watcher/provider state uses its own locks. An
+in-flight passive detection probe started before a detector/root/Refresh change is discarded
+by a generation guard instead of overwriting the newer detection (remote SetDetectors,
+SetRoot, Refresh and SetMarkerProber all bump it; the local watcher's RefreshDetection uses
+the same guard against a concurrent SetDetectors). The local watcher's settings-service
+callback is installed/updated under the retry mutex, so an Env: Reload recovery racing
+startup cannot read an unsynchronized settings pointer. The race tests run replan, event and
+Close concurrently with provider reads; the remote stale-probe guard is also behavior-tested
+with a blocked runner followed by Refresh/SetRoot.
+
 A config Reload that changes `env.detectors` applies immediately without a restart: a local
 provider replaces its detector list and re-runs the passive scan (detection-only; active
 recipe/cache kept), and a remote provider is updated with its bounded authority watcher

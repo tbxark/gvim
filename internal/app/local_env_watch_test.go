@@ -443,3 +443,82 @@ func TestLocalEnvWatchRetryHonoursCancelledContext(t *testing.T) {
 		t.Fatal("Retry started a watcher after the session context was cancelled")
 	}
 }
+
+func TestLocalEnvWatchRetrySetInstallAppliesRecoveredWatcher(t *testing.T) {
+	root := t.TempDir()
+	provider := env.New(root, nil, func() bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fake := newFakeEnvFileWatch()
+	var lw *localEnvWatch
+	retry := &localEnvWatchRetry{
+		ctx: ctx,
+		start: func() *localEnvWatch {
+			lw = startLocalEnvWatchWith(ctx, provider, root, fake, nil)
+			return lw
+		},
+	}
+	// Recover before the settings service exists, then install the callback afterwards:
+	// SetInstall must apply it to the already-recovered watcher.
+	retry.Retry()
+	if retry.Current() == nil {
+		t.Fatal("retry did not recover a watcher")
+	}
+	defer retry.Current().Close()
+	installed := make(chan *localEnvWatch, 1)
+	retry.SetInstall(func(got *localEnvWatch) { installed <- got })
+	select {
+	case got := <-installed:
+		if got != retry.Current() {
+			t.Fatalf("installed %p, want current %p", got, retry.Current())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetInstall did not apply to the already-recovered watcher")
+	}
+}
+
+func TestLocalEnvWatchRetrySetInstallConcurrent(t *testing.T) {
+	root := t.TempDir()
+	provider := env.New(root, nil, func() bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{}, 4)
+	retry := &localEnvWatchRetry{
+		ctx: ctx,
+		start: func() *localEnvWatch {
+			fake := newFakeEnvFileWatch()
+			lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
+			started <- struct{}{}
+			return lw
+		},
+	}
+	installed := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		retry.SetInstall(func(*localEnvWatch) { installed <- struct{}{} })
+	}()
+	go func() {
+		defer wg.Done()
+		retry.Retry()
+	}()
+	wg.Wait()
+	if retry.Current() != nil {
+		retry.Current().Close()
+	}
+	// Both the retry and the late install may produce an install callback; at least one
+	// path must have synchronized without a race/panic (the real oracle is -race).
+	for {
+		select {
+		case <-installed:
+			return
+		default:
+			if retry.Current() == nil {
+				t.Fatal("Retry did not recover a watcher")
+			}
+			// The install callback may have run before Retry completed; Current is enough.
+			return
+		}
+	}
+}

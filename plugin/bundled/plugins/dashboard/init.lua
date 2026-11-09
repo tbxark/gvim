@@ -14,6 +14,8 @@
 --   * third-party plugins register sections through gvim.dashboard; this plugin
 --     discovers them and invokes their proxy callback as a bounded task with a
 --     per-section timeout, keeping failures/stale data isolated to that section.
+--     A developer can also override the ambient auto-open decision for the current
+--     process with gvim.dashboard.set_auto_open; unset falls back to show_on_empty.
 --   * the disk section shells out to df for the workspace mount and $HOME only.
 --   * every row is clickable: recent-file rows are path line targets and the
 --     action rows (including the Git section's branch-log row) are action line
@@ -1379,8 +1381,19 @@ local function open_dashboard(auto)
   refresh(true)
 end
 
+-- auto_open_enabled is the session override set through gvim.dashboard.set_auto_open,
+-- falling back to the user setting. The override only controls future automatic opens;
+-- it never closes or opens an already-visible dashboard by itself.
+local function auto_open_enabled()
+  local override = gvim.dashboard.auto_open()
+  if override ~= nil then
+    return override
+  end
+  return settings.show_on_empty
+end
+
 local function open_if_empty()
-  if not settings.show_on_empty then
+  if not auto_open_enabled() then
     return
   end
   if #file_buffers() > 0 then
@@ -1540,7 +1553,7 @@ gvim.on("buffer_closed", function(ev)
       end
     else
       local has_file = #file_buffers() > 0
-      if not has_file and settings.show_on_empty then
+      if not has_file and auto_open_enabled() then
         open_dashboard(true)
       end
     end

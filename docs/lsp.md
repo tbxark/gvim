@@ -233,33 +233,38 @@ configured TS/JS server but keeps it as the baseline. Two safety rules are delib
   build has the same gate, and an already-in-flight start has the window described below);
   manual Start/Restart remains available. This live gate is also consulted by
   every automatic start of an already-created manager: after a revoke its old `AutoStart`
-  configs no longer start new servers, and the gate never stops an existing process. An
-  explicit Start/Restart that would replace a language's servers first preflights the spawn
+  configs no longer start new servers, and the gate never stops an existing process. Settings
+  reload and live trust changes feed one serialized baseline updater: it applies the newest
+  config+trust snapshot in sequence, so a trust callback that read an older settings snapshot
+  cannot overwrite a newer reloaded baseline, and the apply happens off the UI goroutine so a
+  blocked baseline update never freezes the trust dialog. An explicit Start/Restart that
+  would replace a language's servers first preflights the spawn
   gate: a trust refusal leaves the old running servers and the old config in place instead
   of stopping them and then failing; the same-config **Restart Server** path preflights
   before stopping too. A repeated Start of an already-running server returns the live handle
   without spawning again or consulting the gate. Other start failures (missing binary,
   initialize failure) are not transactional (recorded residual).
 
-**Trust-check windows (precise, no strong atomicity).** An automatic start has two live
-checks: `ensureServers` consults the auto-start gate, then `launch` resolves the executable
-and consults the spawn gate again. A Trust revoke between those checks does **not** by
-itself guarantee refusal: under Restricted the spawn gate allows a system-installed binary
-outside the project (it refuses only project-contained executables), so the start may still
-proceed. It refuses when the spawn gate itself denies — Blocked, a remote workspace that is
-not Trusted, or a project-contained executable. A revoke after the spawn gate has passed but
-before the child is actually started can likewise let that already-in-flight start proceed.
-So “a revoke between the checks refuses the start” is false as a general statement; only
-these cases refuse. No check and no revoke stops an already-running process. Steady state
-after the revoke is safe: later Opens do not start that language's auto servers.
+**Trust-check windows (precise, no strong atomicity).** An automatic start has the early
+`ensureServers` auto-start-gate check, and then `launch` re-checks the same live gate
+immediately before and immediately after the spawn gate. A Trust revoke between the early
+auto check and the launch checks, or while the spawn gate is running, is therefore refused
+for an automatic start even when Restricted would allow the system-installed binary. What
+cannot be eliminated is the OS window after the launch's final live check and before/while
+the child is actually executed: a revoke landing exactly there can still let that already
+in-flight automatic start run; the final check and the OS exec are not atomic. No check and
+no revoke stops an already-running process. Steady state after the revoke is safe: later
+Opens do not start that language's auto servers.
 
-The explicit restart preflight has the same non-transactional shape: after preflight passes,
-the old language servers are stopped and the launch consults the spawn gate again. A revoke
-to Restricted in that preflight→launch window can still let a system binary start after the
+The explicit restart path is manual, so it has no automatic late re-check. Its preflight is
+non-transactional with launch: after preflight passes, the old language servers are stopped
+and the launch consults the spawn gate again. A revoke to Restricted in that
+preflight→launch window still allows a system binary (manual starts stay allowed) after the
 old servers were stopped; if the spawn gate denies (Blocked, remote-untrusted, project
 contained), the old servers are stopped and the new start refused. There is no atomic
-preflight→stop→launch guarantee. A repeated Start of an already-running server returns the
-live handle without spawning or consulting either gate — even at Blocked.
+preflight→stop→launch guarantee, and the same final-check→OS-exec window applies after the
+spawn gate passes. A repeated Start of an already-running server returns the live handle
+without spawning or consulting either gate — even at Blocked.
 
 The selection is installed as a per-root server provider: it applies automatically only to a
 manager created for the exact probed workspace root (other/nested roots keep the configured

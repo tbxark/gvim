@@ -1245,6 +1245,11 @@ function gvim.dashboard.register_section(name, refresh, opts) end
 function gvim.dashboard.remove_section(id_or_name) end
 ---@return {id: integer, plugin: string, name: string, title: string, key: string, ttl_ms: integer, timeout_ms: integer, priority: integer}[] key is non-empty only for the bundled dashboard consumer
 function gvim.dashboard.sections() end
+---@param enabled boolean process-scoped override for the dashboard auto-open behaviour
+---@return true
+function gvim.dashboard.set_auto_open(enabled) end
+---@return boolean|nil override, or nil to use plugins.dashboard.settings.show_on_empty
+function gvim.dashboard.auto_open() end
 
 gvim.plugins = {}
 ---@return {name: string, status: string, version: string, source: string}[]

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -62,6 +63,17 @@ func SaveTerminal(dir string, st terminal.SavedState) error {
 		return nil
 	}
 	path := filepath.Join(dir, terminalFileName)
+	if reason := saveDisabledReason(dir); reason != "" {
+		return fmt.Errorf("terminal: saving %s is disabled for this process: %s", terminalFileName, reason)
+	}
+	// An unreadable record that could not be quarantined leaves a marker: never
+	// write or remove the original in that case, so a later save cannot silently
+	// destroy what the user may still want to recover.
+	if _, err := os.Stat(path + terminalProtectMarkerSuffix); err == nil {
+		return fmt.Errorf("terminal: %s exists (an unreadable record could not be quarantined); refusing to overwrite it — inspect the record and remove the marker to continue", path+terminalProtectMarkerSuffix)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("terminal: check %s: %w", path+terminalProtectMarkerSuffix, err)
+	}
 	// The generic entry point bounds the whole state, not only the dock's own
 	// callers: a direct SaveTerminal cannot write a record larger than LoadTerminal
 	// (or the documented bounds) would accept.
@@ -115,6 +127,151 @@ func readTerminalFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("file exceeds the %d-byte limit", maxTerminalFileBytes)
 	}
 	return data, nil
+}
+
+// terminalProtectMarker is created when an unreadable terminal record cannot be
+// quarantined (for example the directory is not writable). Its presence makes
+// SaveTerminal refuse to write or remove the record, so a later normal exit can
+// never silently destroy the unreadable original; the user is told to inspect it.
+const terminalProtectMarkerSuffix = ".protected"
+
+// maxQuarantineAttempts bounds the .rejected suffix search, so a directory full of
+// colliding names cannot spin the loader; after it the record is protected instead.
+var maxQuarantineAttempts = 100
+
+// saveDisabledDirs remembers directories where an unreadable record could neither
+// be quarantined nor get a protection marker (an unwritable directory). A process
+// must then not write at all for that record: the marker may not exist, so the
+// filesystem cannot be relied on, and the in-memory block keeps a later normal save
+// from silently replacing the original in this process.
+var (
+	saveDisabledMu   sync.Mutex
+	saveDisabledDirs = map[string]string{}
+)
+
+// disableSaveFor blocks SaveTerminal for dir for the rest of this process. The
+// first reason wins.
+func disableSaveFor(dir, reason string) {
+	saveDisabledMu.Lock()
+	defer saveDisabledMu.Unlock()
+	if _, exists := saveDisabledDirs[dir]; !exists {
+		saveDisabledDirs[dir] = reason
+	}
+}
+
+// saveDisabledReason reports why SaveTerminal is blocked for dir ("" when it is not).
+func saveDisabledReason(dir string) string {
+	saveDisabledMu.Lock()
+	defer saveDisabledMu.Unlock()
+	return saveDisabledDirs[dir]
+}
+
+// resetSaveProtectionForTest clears the in-memory block for a test directory.
+func resetSaveProtectionForTest(dir string) {
+	saveDisabledMu.Lock()
+	defer saveDisabledMu.Unlock()
+	delete(saveDisabledDirs, dir)
+}
+
+// TerminalRecordProtected reports the protection marker path when a live save must
+// not touch a record (an unreadable record that could not be quarantined). Pure
+// readers such as workspace extraction check it before migrating anything.
+func TerminalRecordProtected(dir string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	marker := filepath.Join(dir, terminalFileName) + terminalProtectMarkerSuffix
+	if _, err := os.Stat(marker); err == nil {
+		return marker, true
+	}
+	return "", false
+}
+
+// quarantinePath returns a free sibling name for the rejected record:
+// terminal.json.rejected, then terminal.json.rejected.1, .2, ... It stops after
+// maxQuarantineAttempts rather than scanning forever.
+func quarantinePath(path string) (string, error) {
+	for i := 0; i < maxQuarantineAttempts; i++ {
+		candidate := path + ".rejected"
+		if i > 0 {
+			candidate = fmt.Sprintf("%s.rejected.%d", path, i)
+		}
+		if _, err := os.Lstat(candidate); errors.Is(err, fs.ErrNotExist) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no free quarantine name after %d attempts", maxQuarantineAttempts)
+}
+
+// protectUnquarantined handles a record that could not be renamed aside: it writes
+// the persistent .protected marker when possible AND always disables saving for the
+// directory in memory, so even when the marker write also fails (an unwritable
+// directory) this process cannot overwrite the original on a later save.
+func protectUnquarantined(dir, path string, cause error) error {
+	marker := path + terminalProtectMarkerSuffix
+	markerErr := os.WriteFile(marker, []byte("an unreadable terminal record could not be quarantined: "+cause.Error()+"\n"), 0o600)
+	disableSaveFor(dir, cause.Error())
+	if markerErr != nil {
+		return fmt.Errorf("could not quarantine the unreadable terminal record (%v) or write the protection marker (%v); saving the terminal record is disabled for this process", cause, markerErr)
+	}
+	return fmt.Errorf("could not quarantine the unreadable terminal record: %v; wrote %s and disabled saving the terminal record for this process", cause, filepath.Base(marker))
+}
+
+// QuarantineTerminalRecord renames an unusable terminal record to a .rejected
+// sibling so a later session save cannot silently overwrite it; the original bytes
+// are preserved under the returned path. When the rename fails it writes a
+// terminal.json.protected marker (when possible) so every SaveTerminal refuses to
+// touch the record, and returns an error explaining the protection state.
+func QuarantineTerminalRecord(dir string) (string, error) {
+	if dir == "" {
+		return "", nil
+	}
+	path := filepath.Join(dir, terminalFileName)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	rejected, err := quarantinePath(path)
+	if err != nil {
+		return "", protectUnquarantined(dir, path, err)
+	}
+	if err := os.Rename(path, rejected); err != nil {
+		return "", protectUnquarantined(dir, path, err)
+	}
+	return rejected, nil
+}
+
+// LoadTerminalForRestore is LoadTerminal for a session restore: a missing/empty
+// record behaves like LoadTerminal, but an existing record the loader refuses
+// (oversized, undecodable, or ignored by the loader as an unknown version/empty
+// shape) is quarantined before returning, so the normal exit save writes a fresh
+// record instead of silently replacing the unusable one. The returned error is the
+// explicit warning (including the quarantine path) for the caller to show/log.
+func LoadTerminalForRestore(dir string) (terminal.SavedState, bool, error) {
+	st, ok, err := LoadTerminal(dir)
+	if err == nil && ok {
+		return st, true, nil
+	}
+	path := filepath.Join(dir, terminalFileName)
+	if _, statErr := os.Stat(path); statErr != nil {
+		return st, false, err
+	}
+	rejected, qerr := QuarantineTerminalRecord(dir)
+	if qerr != nil {
+		if err == nil {
+			return terminal.SavedState{}, false, fmt.Errorf("terminal: %s was refused by the loader and could not be moved aside: %w", terminalFileName, qerr)
+		}
+		return terminal.SavedState{}, false, fmt.Errorf("terminal: %w; additionally it could not be moved aside: %v", err, qerr)
+	}
+	if rejected == "" {
+		return st, false, err
+	}
+	if err == nil {
+		return terminal.SavedState{}, false, fmt.Errorf("terminal: %s was refused by the loader; the original was kept as %s", terminalFileName, rejected)
+	}
+	return terminal.SavedState{}, false, fmt.Errorf("terminal: %w (the original was kept as %s)", err, rejected)
 }
 
 // LoadTerminal reads dir/terminal.json. A missing file returns false and no

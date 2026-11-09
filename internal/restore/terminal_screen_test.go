@@ -3,7 +3,9 @@ package restore
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -598,5 +600,165 @@ func TestBoundedStateFitsTheReaderCap(t *testing.T) {
 	}
 	if int64(len(data)) >= maxTerminalFileBytes {
 		t.Fatalf("worst-case bounded state = %d bytes, over the %d-byte cap", len(data), maxTerminalFileBytes)
+	}
+}
+
+// TestLoadTerminalForRestoreQuarantinesBeforeSave checks the actual restore->save
+// sequence: an unusable record (oversized, undecodable or ignored by the loader) is
+// moved to a .rejected sibling by the restore load with an explicit warning, so a
+// later normal save writes a fresh record while the original bytes are preserved.
+func TestLoadTerminalForRestoreQuarantinesBeforeSave(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, dir string) []byte
+	}{
+		{
+			name: "oversized",
+			setup: func(t *testing.T, dir string) []byte {
+				old := maxTerminalFileBytes
+				maxTerminalFileBytes = 1024
+				t.Cleanup(func() { maxTerminalFileBytes = old })
+				data := bytes.Repeat([]byte("x"), 2048)
+				if err := os.WriteFile(filepath.Join(dir, terminalFileName), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return data
+			},
+		},
+		{
+			name: "undecodable",
+			setup: func(t *testing.T, dir string) []byte {
+				data := []byte("{not json")
+				if err := os.WriteFile(filepath.Join(dir, terminalFileName), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return data
+			},
+		},
+		{
+			name: "ignored by the loader (unknown version)",
+			setup: func(t *testing.T, dir string) []byte {
+				data := []byte(`{"version":99,"rows":["old record"]}`)
+				if err := os.WriteFile(filepath.Join(dir, terminalFileName), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return data
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			original := tc.setup(t, dir)
+			st, ok, err := LoadTerminalForRestore(dir)
+			if err == nil || ok || len(st.Rows) != 0 {
+				t.Fatalf("LoadTerminalForRestore = %+v, %v, %v; want an explicit warning", st, ok, err)
+			}
+			rejected := filepath.Join(dir, terminalFileName+".rejected")
+			if _, serr := os.Stat(rejected); serr != nil {
+				t.Fatalf("the rejected record was not kept: %v", serr)
+			}
+			if got, _ := os.ReadFile(rejected); !bytes.Equal(got, original) {
+				t.Fatalf("quarantined bytes = %q, want the original %q", got, original)
+			}
+			if _, serr := os.Stat(filepath.Join(dir, terminalFileName)); !errors.Is(serr, fs.ErrNotExist) {
+				t.Fatalf("the unusable record is still at terminal.json: %v", serr)
+			}
+			if !strings.Contains(err.Error(), ".rejected") {
+				t.Fatalf("warning does not name the quarantine path: %v", err)
+			}
+			// The later save writes a fresh record; the quarantined original survives.
+			if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"fresh"}}); err != nil {
+				t.Fatal(err)
+			}
+			fresh, ok, err := LoadTerminal(dir)
+			if err != nil || !ok || len(fresh.Rows) != 1 || fresh.Rows[0] != "fresh" {
+				t.Fatalf("fresh record after save = %+v, %v, %v", fresh, ok, err)
+			}
+			if got, _ := os.ReadFile(rejected); !bytes.Equal(got, original) {
+				t.Fatal("the later save changed the quarantined original")
+			}
+		})
+	}
+}
+
+// TestQuarantineCollisionAndProtectionMarker checks a second unusable record gets a
+// unique .rejected name and that an unquarantinable record's marker makes every
+// later SaveTerminal refuse to write or remove anything.
+func TestQuarantineCollisionAndProtectionMarker(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, terminalFileName)
+	if err := os.WriteFile(filepath.Join(dir, terminalFileName+".rejected"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := LoadTerminalForRestore(dir); err == nil || ok {
+		t.Fatal("an undecodable record was not refused")
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, terminalFileName+".rejected.1")); err != nil || string(got) != "{bad" {
+		t.Fatalf("collision quarantine = %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, terminalFileName+".rejected")); err != nil || string(got) != "first" {
+		t.Fatalf("existing quarantine was changed: %q, %v", got, err)
+	}
+	// Simulate an unquarantinable record: the marker must make any save refuse, so
+	// neither a normal capture nor an empty-dock save can destroy the original.
+	original := []byte(`{"version":1,"rows":["keep me"]}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := path + terminalProtectMarkerSuffix
+	if err := os.WriteFile(marker, []byte("could not quarantine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"new"}}); err == nil {
+		t.Fatal("SaveTerminal wrote while the protection marker existed")
+	}
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion}); err == nil {
+		t.Fatal("SaveTerminal removed the record while the protection marker existed")
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("the protected record changed: %q, %v", got, err)
+	}
+}
+
+// TestQuarantineAttemptLimitProtectsRecord checks the bounded .rejected name search:
+// after the attempt limit a record is protected (marker + in-memory save block)
+// instead of scanning forever, and a later save leaves it untouched.
+func TestQuarantineAttemptLimitProtectsRecord(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, terminalFileName)
+	original := []byte("{still unreadable")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := maxQuarantineAttempts
+	maxQuarantineAttempts = 2
+	t.Cleanup(func() {
+		maxQuarantineAttempts = old
+		resetSaveProtectionForTest(dir)
+	})
+	for _, name := range []string{terminalFileName + ".rejected", terminalFileName + ".rejected.1"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("collision"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := LoadTerminalForRestore(dir); err == nil {
+		t.Fatal("the attempt limit was not reported")
+	}
+	if _, ok := TerminalRecordProtected(dir); !ok {
+		t.Fatal("the attempt limit did not protect the record with a marker")
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("the original record changed after the attempt limit: %q, %v", got, err)
+	}
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"new"}}); err == nil {
+		t.Fatal("a protected record was overwritten after the attempt limit")
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("the protected record changed on save: %q, %v", got, err)
 	}
 }
