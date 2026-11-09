@@ -786,6 +786,42 @@ func TestRemoteSearchPassesCandidatePathsExplicitly(t *testing.T) {
 	}
 }
 
+// TestRemoteSearchAppliesGlobWithoutAGlobbedFileSnapshot checks the panel's glob is not
+// lost when the quick-open snapshot is empty (or its filtered list is empty): AllFiles
+// applies the same glob to candidate paths/results, so a glob can never silently widen
+// the search to files outside it.
+func TestRemoteSearchAppliesGlobWithoutAGlobbedFileSnapshot(t *testing.T) {
+	ls := gitLsEntry("100644", "a.txt") + gitLsEntry("100644", "src/a.go") + gitLsEntry("100644", "src/b.go")
+	one := candidateRgScript(true, []byte(ls), 0, false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		Glob: "src/*.go",
+	}, nil))
+	if got := strings.Join(remoteSearchFileNames(t, batches), ","); got != "src/a.go,src/b.go" {
+		t.Fatalf("files = %q, want only the glob matches", got)
+	}
+	calls := rgCalls(one)
+	if len(calls) != 1 {
+		t.Fatalf("rg calls = %d, want one batch", len(calls))
+	}
+	if got := strings.Join(argvAfterSlashSlash(calls[0]), ","); got != "src/a.go,src/b.go" {
+		t.Fatalf("explicit candidates = %q, want only glob matches", got)
+	}
+
+	// No git candidate listing either: the whole-tree tool output is still filtered by
+	// the glob instead of returning every match.
+	base := rgScopeOneShot(false, nil, "a.txt:1:1:todo a\nsrc/a.go:1:1:todo a\n", false)
+	s = newRemoteProjectSearch(base, "/remote/w").withFiles(newRemoteFS())
+	batches = collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		Glob: "src/*.go",
+	}, nil))
+	if got := strings.Join(remoteSearchFileNames(t, batches), ","); got != "src/a.go" {
+		t.Fatalf("whole-tree files = %q, want only the glob match", got)
+	}
+}
+
 // TestRemoteSearchSplitsLargeCandidateLists checks a candidate list larger than one batch
 // is passed in several bounded tool commands, the results merge, every path is passed
 // exactly once, and a new search limit still caps the merged matches.
@@ -1781,6 +1817,7 @@ func TestRemoteSearchWidenedCapMarkedIncomplete(t *testing.T) {
 		Root:  "/remote/w",
 		Query: "todo",
 		Scope: searchpanel.AllFiles,
+		Glob:  "**/*.go",
 	}, nil))
 	var done *searchpanel.SearchBatch
 	for i := range batches {
@@ -1797,6 +1834,9 @@ func TestRemoteSearchWidenedCapMarkedIncomplete(t *testing.T) {
 	}
 	if !strings.Contains(done.Notice, "incomplete") || !strings.Contains(done.Notice, "output cap") {
 		t.Fatalf("notice = %q, want the explicit cap-incomplete notice", done.Notice)
+	}
+	if !strings.Contains(done.Notice, "cap before the file filter was applied") {
+		t.Fatalf("notice = %q, want the filtered cap notice for a widened scan", done.Notice)
 	}
 }
 
@@ -1820,6 +1860,7 @@ func TestRemoteSearchTooLargeWidenedCapMarkedIncomplete(t *testing.T) {
 		Root:  "/remote/w",
 		Query: "todo",
 		Scope: searchpanel.AllFiles,
+		Glob:  "**/*.go",
 	}, nil))
 	var done *searchpanel.SearchBatch
 	for i := range batches {
@@ -1833,6 +1874,9 @@ func TestRemoteSearchTooLargeWidenedCapMarkedIncomplete(t *testing.T) {
 	}
 	if !strings.Contains(done.Notice, "incomplete") || !strings.Contains(done.Notice, "output cap") || !strings.Contains(done.Notice, "too large") {
 		t.Fatalf("notice = %q, want the too-large reason plus cap-incomplete", done.Notice)
+	}
+	if !strings.Contains(done.Notice, "cap before the file filter was applied") {
+		t.Fatalf("notice = %q, want the filtered cap notice for a widened scan", done.Notice)
 	}
 }
 
@@ -1968,11 +2012,13 @@ func TestRemoteSearchToolUnavailableStillShowsOpenSnapshots(t *testing.T) {
 	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo unsaved\n", Dirty: true}
 	s := newRemoteProjectSearch(one, "/remote/w")
 	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
-		Root:      "/remote/w",
-		Query:     "todo",
-		Scope:     searchpanel.AllFiles,
-		Current:   &cur,
-		OpenFiles: []searchpanel.SourceFile{cur},
+		Root:       "/remote/w",
+		Query:      "todo",
+		Scope:      searchpanel.AllFiles,
+		Current:    &cur,
+		OpenFiles:  []searchpanel.SourceFile{cur},
+		FilesKnown: true,
+		FilesReady: false,
 	}, nil))
 	var files []searchpanel.FileMatches
 	var done *searchpanel.SearchBatch
@@ -2155,12 +2201,14 @@ func TestRemoteSearchSnapshotNoticeSurvivesToolFailure(t *testing.T) {
 	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo open\n", Dirty: true}
 	s := newRemoteProjectSearch(one, "/remote/w")
 	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
-		Root:      "/remote/w",
-		Query:     "todo",
-		Scope:     searchpanel.AllFiles,
-		Files:     []string{"a.go"},
-		Current:   &cur,
-		OpenFiles: []searchpanel.SourceFile{cur},
+		Root:       "/remote/w",
+		Query:      "todo",
+		Scope:      searchpanel.AllFiles,
+		Files:      []string{"a.go"},
+		Current:    &cur,
+		OpenFiles:  []searchpanel.SourceFile{cur},
+		FilesKnown: true,
+		FilesReady: true,
 	}, nil))
 	var files []searchpanel.FileMatches
 	var done *searchpanel.SearchBatch
@@ -2603,5 +2651,162 @@ func TestRemoteLineMatchesSyntheticFallbackBounds(t *testing.T) {
 	runes := []rune(m.Text)
 	if m.Text != "ab" || m.Col < 1 || m.Len < 1 || m.Col-1+m.Len > len(runes) {
 		t.Fatalf("mid-control fallback = %+v outside %q", m, m.Text)
+	}
+}
+
+// TestRemoteSearchReadyEmptySnapshotIsGenuinelyEmpty: a ready file-index snapshot that
+// filters to zero files is a zero-result project search, exactly like the local searcher.
+// It starts no remote tool and does not re-add open buffers (which local search also does
+// not search when its file list is empty).
+func TestRemoteSearchReadyEmptySnapshotIsGenuinelyEmpty(t *testing.T) {
+	one := &fakeOneShot{script: func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
+		return hostos.ProcResult{}, errors.New("ready-empty search must not run a tool")
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	req := searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		FilesKnown: true, FilesReady: true,
+		OpenFiles: []searchpanel.SourceFile{{Path: "/remote/w/open.go", Name: "open.go", Text: "todo"}},
+	}
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(req, nil))
+	if names := remoteSearchFileNames(t, batches); len(names) != 0 {
+		t.Fatalf("ready-empty files = %v, want zero results", names)
+	}
+	if calls := one.recorded(); len(calls) != 0 {
+		t.Fatalf("ready-empty search ran remote commands: %v", calls)
+	}
+	if done := doneBatch(t, batches); done == nil {
+		t.Fatal("ready-empty search did not finish with Done")
+	} else if done.Err != "" || done.Notice != "" || done.Truncated {
+		t.Fatalf("ready-empty Done = %+v, want a plain complete empty result", *done)
+	}
+
+	// Cancellation before the query is superseded still closes without a Done batch.
+	cancel := make(chan struct{})
+	close(cancel)
+	var got []searchpanel.SearchBatch
+	for batch := range s.ProjectSearchBatches(req, cancel) {
+		got = append(got, batch)
+	}
+	if len(got) != 0 {
+		t.Fatalf("cancelled ready-empty batches = %+v, want none", got)
+	}
+}
+
+// TestRemoteSearchLoadingSnapshotUsesBoundedFallback: a loading/unknown snapshot is not an
+// authoritative empty result; its bounded whole-tree fallback keeps results, applies the
+// glob, and still searches matching open-buffer snapshots.
+func TestRemoteSearchLoadingSnapshotUsesBoundedFallback(t *testing.T) {
+	one := rgScopeOneShot(false, nil, "a.txt:1:1:todo a\nsrc/b.go:1:1:todo b\n", false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		Files: []string{"a.txt"}, FilesKnown: true, FilesReady: false,
+		Glob:      "src/*.go",
+		OpenFiles: []searchpanel.SourceFile{{Path: "/remote/w/src/open.go", Name: "src/open.go", Text: "todo open"}},
+	}, nil))
+	names := map[string]bool{}
+	for _, name := range remoteSearchFileNames(t, batches) {
+		names[name] = true
+	}
+	if !names["src/b.go"] || !names["src/open.go"] {
+		t.Fatalf("loading snapshot files = %v, want glob-matched tool result and open buffer", names)
+	}
+	if names["a.txt"] {
+		t.Fatalf("loading fallback kept the out-of-glob result: %v", names)
+	}
+	calls := rgCalls(one)
+	if len(calls) == 0 || strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
+		t.Fatalf("rg calls = %v, want the bounded whole-tree fallback", calls)
+	}
+}
+
+// TestRemoteSearchWholeTreeCapIsExplicitlyPartial: the whole-tree fallback's output cap is
+// applied before the glob/snapshot filter, so the Done batch is Truncated and carries the
+// explicit cap-before-filter notice instead of looking complete.
+func TestRemoteSearchWholeTreeCapIsExplicitlyPartial(t *testing.T) {
+	base := rgScopeOneShot(false, nil, "src/a.go:1:1:todo a\n", false)
+	one := &fakeOneShot{}
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte("src/a.go:1:1:todo a\n"), Truncated: true}, nil
+		}
+		return base.script(ctx, argv, o)
+	}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		FilesKnown: true, FilesReady: false, Glob: "src/*.go",
+	}, nil))
+	done := doneBatch(t, batches)
+	if done == nil || !done.Truncated {
+		t.Fatalf("Done = %+v, want Truncated for a cap-hit whole-tree run", done)
+	}
+	if !strings.Contains(done.Notice, "cap before the file filter was applied") {
+		t.Fatalf("notice = %q, want the explicit cap-before-filter partial notice", done.Notice)
+	}
+	if names := remoteSearchFileNames(t, batches); strings.Join(names, ",") != "src/a.go" {
+		t.Fatalf("files = %v, want the kept partial result", names)
+	}
+}
+
+// doneBatch returns the Done batch of a collected stream, or nil.
+func doneBatch(t *testing.T, batches []searchpanel.SearchBatch) *searchpanel.SearchBatch {
+	t.Helper()
+	for i := range batches {
+		if batches[i].Done {
+			return &batches[i]
+		}
+	}
+	return nil
+}
+
+// TestRemoteSearchNonReadyIndexWithCandidateListUsesNeutralFallbackNotice: a non-ready
+// index does not mean the scan is literally whole-tree; a complete git candidate list is
+// still used explicitly. The index fallback notice must therefore say "bounded fallback
+// scan", and it must still be present when that candidate run finds nothing.
+func TestRemoteSearchNonReadyIndexWithCandidateListUsesNeutralFallbackNotice(t *testing.T) {
+	ls := gitLsEntry("100644", "src/a.go") + gitLsEntry("100644", "src/b.go")
+	one := candidateRgScript(true, []byte(ls), 0, false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		FilesKnown: true, FilesReady: false, Glob: "src/*.go",
+	}, nil))
+	if got := strings.Join(remoteSearchFileNames(t, batches), ","); got != "src/a.go,src/b.go" {
+		t.Fatalf("files = %q, want the explicit candidate results", got)
+	}
+	done := doneBatch(t, batches)
+	if done == nil || !strings.Contains(done.Notice, "bounded fallback scan") {
+		t.Fatalf("Done = %+v, want the neutral bounded-fallback notice", done)
+	}
+	if strings.Contains(done.Notice, "whole-tree") {
+		t.Fatalf("notice = %q, claims whole-tree even though explicit candidates were used", done.Notice)
+	}
+	runs := rgCalls(one)
+	if len(runs) == 0 {
+		t.Fatal("no rg run")
+	}
+	if paths := argvAfterSlashSlash(runs[0]); strings.Join(paths, ",") != "src/a.go,src/b.go" {
+		t.Fatalf("explicit candidates = %v, want the git candidate list", paths)
+	}
+
+	// A zero-match candidate run still carries the same neutral notice.
+	base := candidateRgScript(true, []byte(ls), 0, false)
+	empty := &fakeOneShot{}
+	empty.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte("")}, nil
+		}
+		return base.script(ctx, argv, o)
+	}
+	s = newRemoteProjectSearch(empty, "/remote/w").withFiles(newRemoteFS())
+	batches = collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles,
+		FilesKnown: true, FilesReady: false,
+	}, nil))
+	done = doneBatch(t, batches)
+	if done == nil || !strings.Contains(done.Notice, "bounded fallback scan") || strings.Contains(done.Notice, "whole-tree") {
+		t.Fatalf("zero-match Done = %+v, want the neutral fallback notice", done)
 	}
 }

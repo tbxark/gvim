@@ -628,9 +628,16 @@ commands:
   PATH/restart/toolchain troubleshooting notes and the upstream installation link, plus copy/check
   rows and the native Start/Restart LSP Server and Show LSP Status actions.
 
+**Disable Rust LSP** is available as a help-popup action, not an LSP-menu contribution: it
+re-checks the active `.rs` buffer and `gvim.has("lsp")`, captures that buffer's path/language and
+dispatches the controlled native `lsp_disable_language_target` action. The TUI validates the same
+path/language before the root-level LSP-port mute; a popup/tab switch or missing LSP refuses without
+dispatch, and the plugin never claims the asynchronous result. This is Fresh's disable behavior
+without its contributed LSP-menu row/recovery flow.
+
 Not ported: automatic status on `lsp_server_error`, contributed "Plugin actions" rows in the
-native LSP-Servers popup, recovery detection via `lsp_status_clicked`, Disable Rust LSP, and
-Configure Mode (registering full/reduced-memory rust-analyzer, process limits, restart). gvim's
+native LSP-Servers popup, recovery detection via `lsp_status_clicked`, and Configure Mode
+(registering full/reduced-memory rust-analyzer, process limits, restart). gvim's
 `lsp_help` already puts a Rust install hint on the status row and opens its own help popup on an LSP
 status click, so this plugin deliberately does not add a second `lsp_server_error` handler. The plugin
 is `default_enabled: false`, registers no keys and no settings.
@@ -639,7 +646,8 @@ Tests: `plugin/bundled/rust_lsp_test.go` covers the visible command table/no bin
 commands (clipboard/status), the authority probe finding rust-analyzer despite a local LookPath
 miss, the non-authoritative probe-failure/trust-gate-refusal status (no missing claim), found+version,
 non-zero version exit, timeout/signal failures, exec failure, and the help popup's message/actions
-plus copy/check/native-restart dispatch.
+plus copy/check/native-restart dispatch, and the controlled Disable Rust LSP target/no-LSP/tab-switch
+refusals.
 ### Deno LSP: native auto-selection plus a reduced helper plugin (port updated)
 
 Fresh's `deno_lsp.ts` selects `deno lsp` for TypeScript and JavaScript when the active window's

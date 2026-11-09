@@ -21,15 +21,16 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `baeda15` (the round-59 commit; the previous round's commit is
-folded in) plus the merged round-60 work. Static gates PASS (Lead, final pass after all writes stopped;
+Last verified: 2026-11-10, tree commit `38080d4` (the round-60 commit; the previous round's commit is
+folded in) plus the merged round-61 work. Static gates PASS (Lead, final pass after all writes stopped;
 default GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
-i18n_check with catalogue heap en 131 KiB / de 83 KiB / both 214 KiB, git diff --check, gofmt clean).
+i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check, gofmt clean).
 Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r60-final4.log`). The audit ran build/gofmt/i18n_check plus targeted round-60 tests/diff
-review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY, real-
-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh` same
+`/tmp/gvim-r61-final5.log`). The audit ran build/gofmt/i18n_check plus targeted round-61 tests/diff
+review. Real-host SSH/jump-box/agent-forwarding/
+search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/
+secret-tool, real-tmux, Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching remain
+UNTESTED. Fresh reference: `refs/fresh` same
 date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
@@ -1530,6 +1531,42 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-61 outcome (2026-11-10, merged working tree on `38080d4`).** Two slices plus docs: the
+remote-project-search glob/finder-health closure (R13-11) and the opt-in Rust LSP helper's Disable action
+(R13-6). Static gates PASS; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77
+packages ok, no FAIL line (log `/tmp/gvim-r61-final5.log`); heap en 127 KiB / de 83 KiB / both 210
+KiB. The audit ran targeted finder/app/searchpanel/plugin tests and diff review; the Lead ran the full
+suite. No commit was made.
+**Remote project search glob + finder health (item 313).** The panel now carries the raw glob
+(SearchRequest.Glob) to the remote adapter for AllFiles: candidate paths, whole-tree results and
+open-buffer snapshots are all filtered by the same compiled patterns, and a ready snapshot that filters
+to zero files returns a plain zero result without starting the tool or re-adding open buffers. The
+optional finder capability is read as one locked `finder.IndexSnapshot` observation (files with
+loading/ready/idle/truncated/closed/notice/error from one generation); capability-less Files are
+unknown/non-authoritative, and closed/loading/failed/truncated/Idle/unknown indexes take a bounded
+fallback (complete git candidates, nested-prefix scan, or whole-tree) with the glob applied and a
+neutral, i18n'd reason notice. Dynamic finder error/notice text is textsafe-cleaned, whitespace-collapsed
+and bounded to 160 runes; the fallback output cap is carried once as a filtered-cap partial notice
+(including widened/nested and candidate-list nonready cases), with the old generic cap duplicate
+removed. The Snapshot/state consistency and blocked Restart/Close/callback-reentry cases are tested.
+AUDITED RESIDUALS: an enumeration callback that itself calls `Index.Close`/`Restart` can still
+deadlock (the new IndexSnapshot path is safe and tested); `remote_live_grep.searchFiles` remains a
+legacy caller that passes only Files, so a ready-empty palette index there still takes the old fallback;
+tests do not cover a capability-less/unknown remote notice, truncated/closed plus complete candidates,
+or a non-stream `ProjectSearch` ready/loading/cap path. Real remote SSH tool/permission/timing behavior is
+UNTESTED.
+**Rust LSP Disable action (item 314).** The opt-in rust_lsp helper's help popup adds Disable Rust LSP:
+it re-checks the active .rs buffer and gvim.has("lsp"), then dispatches the native
+`lsp_disable_language_target` action with the captured path/language; the TUI re-validates the same
+active document/language before the root-level LSP-port mute. The plugin never claims the asynchronous
+mute result; tab switch/language mismatch is refused. Tests cover delegation and refusal (non-Rust,
+without LSP, changed target). RESIDUALS: no real LSP-server/remote end-to-end test; the action is a
+language-wide mute at the port, not a per-buffer/server setting.
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 252/in effect
+250, macos 60/273, macos-gui 52/324, emacs 98/316, vscode 9/255; i18n en 1184 / 581 per locale (new
+remote-search notices), 575 KiB text, ≈665 KiB JSON, heap 127-83-210 KiB. Full suite EXIT 0 (77
+packages, log /tmp/gvim-r61-final5.log); real hosts UNTESTED; no full-parity claim.
 **Round-60 outcome (2026-11-10, merged working tree on `baeda15`).** Four slices landed: the
 native-confirmed prompt copy/cut with prompt identity/owner/token; the welcome startup toggle and its
 direct cross-Stop persistence; the R13-11 remote candidate-listing degradation fix; and the documentation/
@@ -1579,7 +1616,7 @@ Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 b
 registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 252/in effect
 250, macos 60/273, macos-gui 52/324, emacs 98/316, vscode 9/255; i18n en 1176 / 581 per locale, 575
 KiB text, ≈665 KiB JSON, heap 131-83-214 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r60-
-final3.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+final4.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-59 outcome (2026-11-10, merged working tree on `a4433fd`).** Five slices landed: the
 F6 modal/overlay exact-unbind-and-legacy-printable fix; the Fresh-compatible welcome_screen fileLaunch
@@ -6543,6 +6580,24 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      widening to ignored files or local/authoritative fallback. Tests cover streaming/one-shot retained
      rows/Stats. Residuals: real SSH tool/permission/timing UNTESTED; nested-repo ignore semantics and
      tool-cap/Limit interactions remain open.
+313. **Remote project-search glob + finder snapshot health (R13-11).** Panel carries raw
+     SearchRequest.Glob; remote AllFiles filters explicit candidates, whole-tree/nested results and open-buffer
+     snapshots by it. Optional FileIndexHealth/finder.IndexSnapshot is one mu-only observation
+     (files/loading/ready/idle/truncated/closed/notice/error) so a Restart cannot mix old empty files with a
+     new ready flag; closed excludes ready. Ready+glob-empty is a plain zero result without tool/open-buffer
+     reads; loading/failed/truncated/Idle/closed/unknown/capability-less snapshots take a bounded fallback with
+     an i18n'd neutral reason, cleaned/bounded dynamic finder text and one filtered-cap partial notice
+     (widen/nested too). Tests cover real finder ready/Idle/fail/loading/restart/closed, hostile text,
+     candidate-list nonready zero-match and cap. Residuals: enumeration callback calling Close/Restart can
+     still deadlock (IndexSnapshot reentry is safe/tested); remote_live_grep.searchFiles remains a Files-only
+     legacy caller; tests lack capability-less/unknown remote notice, truncated/closed plus complete candidates,
+     and non-stream ProjectSearch; real SSH permission/timing UNTESTED.
+314. **Rust LSP Disable action (R13-6).** The opt-in rust_lsp help popup adds Disable Rust LSP: it re-checks
+     the active .rs buffer and gvim.has("lsp"), then dispatches native lsp_disable_language_target with the
+     captured path/language; the TUI re-validates the same active document/language before the root-level
+     LSP-port mute, and the plugin never claims the async result. Tests cover delegation and refusal
+     (non-Rust, no LSP, changed target). Residuals: no real LSP-server/remote e2e; mute is language-wide at
+     the port, not a per-buffer/server setting.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -8568,9 +8623,17 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-61 verification (2026-11-10, merged tree on `38080d4`).** STATIC GATES PASS (Lead,
+  final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 127 KiB / de 83 KiB /
+  both 210 KiB, git diff --check, gofmt clean). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r61-final5.log`). Audit: build/gofmt/i18n_check plus targeted round-61 tests/diff review.
+  Tracks: remote glob/finder-health closure; rust_lsp Disable action; docs. Real-host checks remain
+  UNTESTED. No full-parity claim.
 - **Round-60 verification (2026-11-10, merged tree on `baeda15`).** STATIC GATES PASS (Lead,
   final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
-  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 131 KiB / de 82 KiB /
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 131 KiB / de 83 KiB /
   both 214 KiB, git diff --check, gofmt clean). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
   `/tmp/gvim-r60-final4.log`). Audit: build/gofmt/i18n_check plus targeted round-60 tests/diff review.
@@ -8650,14 +8713,15 @@ Round 13 recorded five open gaps:
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
   (round-60 landed prompt copy/cut identity/owner/token, welcome startup toggle state, remote
-  candidate-listing degradation, native env/LSP withdrawal; full suite EXIT 0 (77 packages, log
-  /tmp/gvim-r60-final4.log); real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–60 had their gate sets
-  run. Round 60 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+  candidate-listing degradation, native env/LSP withdrawal; round-61 adds remote glob/finder-health and
+  rust_lsp Disable; full suite EXIT 0 (77 packages, log /tmp/gvim-r61-final5.log); real-host checks
+  UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–61 had their full gate sets
+  run. Round 61 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
   native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 131 KiB / de 83 KiB / both 214 KiB, git diff --check). Final full
+  i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r60-final4.log`. The audit ran build/gofmt/i18n_check plus targeted round-60 tests and
+  `/tmp/gvim-r61-final5.log`. The audit ran build/gofmt/i18n_check plus targeted round-61 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts

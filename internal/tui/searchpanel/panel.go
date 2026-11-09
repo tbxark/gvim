@@ -1037,6 +1037,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		Current:   p.current,
 		OpenFiles: p.openFiles,
 		Limit:     p.limit,
+		Glob:      p.glob.Value(),
 	}
 	if s == nil {
 		return func() tea.Msg {
@@ -1052,7 +1053,11 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		p.searchCancel = cancel
 		return func() tea.Msg {
 			if files != nil {
-				req.Files, _ = files.Snapshot()
+				var st FileIndexState
+				req.Files, st = SnapshotWithState(files)
+				req.FilesKnown, req.FilesReady = st.Known, st.Ready
+				req.FilesUnknown, req.FilesIdle, req.FilesTruncated, req.FilesClosed = st.Unknown, st.Idle, st.Truncated, st.Closed
+				req.FilesError, req.FilesNotice = st.Error, st.Notice
 			}
 			req.Files = matcher.filter(req.Files)
 			ch := bs.ProjectSearchBatches(req, cancel)
@@ -1062,7 +1067,11 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if files != nil {
-			req.Files, _ = files.Snapshot()
+			var st FileIndexState
+			req.Files, st = SnapshotWithState(files)
+			req.FilesKnown, req.FilesReady = st.Known, st.Ready
+			req.FilesUnknown, req.FilesIdle, req.FilesTruncated, req.FilesClosed = st.Unknown, st.Idle, st.Truncated, st.Closed
+			req.FilesError, req.FilesNotice = st.Error, st.Notice
 		}
 		req.Files = matcher.filter(req.Files)
 		res, err := s.ProjectSearch(req)

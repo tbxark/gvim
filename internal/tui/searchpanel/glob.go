@@ -152,3 +152,15 @@ func (m *globMatcher) filter(rels []string) []string {
 	}
 	return out
 }
+
+// CompileFileGlob compiles a panel glob value (the same comma/space separated patterns
+// the file filter field accepts) into a root-relative path predicate. An empty value
+// keeps every path. The command that runs a search compiles it once, so the remote
+// adapter can apply the glob even when the quick-open index has no usable snapshot.
+func CompileFileGlob(glob string) (func(rel string) bool, error) {
+	m, err := parseGlob(glob)
+	if err != nil {
+		return nil, err
+	}
+	return m.match, nil
+}

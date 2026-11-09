@@ -181,7 +181,7 @@ func TestRustLspHelpPopupActions(t *testing.T) {
 	for _, a := range ov.ActionPopup.Actions {
 		ids[a.ID] = true
 	}
-	for _, want := range []string{"copy:rustup", "copy:brew", "act:check", "act:lsp_restart", "act:show_lsp_status", "dismiss"} {
+	for _, want := range []string{"copy:rustup", "copy:brew", "act:check", "act:lsp_restart", "act:show_lsp_status", "act:lsp_disable_language", "dismiss"} {
 		if !ids[want] {
 			t.Errorf("help popup lacks %q (actions %v)", want, ids)
 		}
@@ -191,9 +191,12 @@ func TestRustLspHelpPopupActions(t *testing.T) {
 		"How gvim starts rust-analyzer",
 		"Cargo.toml",
 		"explicit user configuration always wins",
-		"never changes the native selection",
-		"enable/disable toggle only controls these helper commands",
-		"does not start, stop or select the native Rust LSP server",
+		"helper commands never start, stop or select the native Rust LSP server",
+		"Disable Rust LSP delegates to gvim's controlled native language-disable action",
+		"re-checks the active .rs buffer/language",
+		"mutes that language at the LSP port for all Rust roots",
+		"not a server restart or a per-buffer setting",
+		"asynchronous result is native-owned",
 		"workspace authority",
 		"workspace trust gate may refuse it",
 		"Only a successful check (exit 0, no timeout or signal) counts",
@@ -294,5 +297,95 @@ func TestRustLspCheckTrustGateRefusalIsNotMissing(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("status = %q, want %q", got, want)
 		}
+	}
+}
+
+func rustDisableRig(t *testing.T, lspEnabled bool, extra ...rigBuffer) *rig {
+	t.Helper()
+	buffers := append([]rigBuffer{{"/work/a.rs", "fn main() {}\n"}}, extra...)
+	r := startRig(t, rigOpts{
+		plugins: []string{"rust_lsp"},
+		buffers: buffers,
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	r.host.LSP().Enabled = lspEnabled
+	for _, b := range r.host.Buffers {
+		if strings.HasSuffix(b.Info.Path, ".rs") {
+			b.Info.Language = "rust"
+		}
+	}
+	return r
+}
+
+func TestRustLspDisableDelegatesActiveTarget(t *testing.T) {
+	t.Parallel()
+	r := rustDisableRig(t, true)
+	if err := r.h.Run("rust_lsp.help", nil); err != nil {
+		t.Fatal(err)
+	}
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	found := false
+	for _, call := range r.host.Cmd().Calls {
+		if call.Action == "lsp_disable_language_target" {
+			found = true
+			if call.Args["path"] != "/work/a.rs" || call.Args["language"] != "rust" {
+				t.Fatalf("disable target args = %+v", call.Args)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("commands = %v, want the controlled disable target", r.host.Cmd().Ran())
+	}
+	for _, notice := range r.h.NoticeTexts() {
+		if strings.Contains(strings.ToLower(notice), "disabled") {
+			t.Fatalf("plugin claimed async disable success: %v", r.h.NoticeTexts())
+		}
+	}
+}
+
+func TestRustLspDisableRefusesNonRustActiveBuffer(t *testing.T) {
+	t.Parallel()
+	r := rustDisableRig(t, true, rigBuffer{"/work/notes.md", "# notes\n"})
+	if err := r.h.Run("rust_lsp.help", nil); err != nil {
+		t.Fatal(err)
+	}
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	r.host.SetActive(r.ids["/work/notes.md"])
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched for a non-Rust active buffer: %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "Open a Rust file first (.rs)" {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestRustLspDisableWithoutLSPDoesNotDispatch(t *testing.T) {
+	t.Parallel()
+	r := rustDisableRig(t, false)
+	if err := r.h.Run("rust_lsp.help", nil); err != nil {
+		t.Fatal(err)
+	}
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched without LSP: %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "No language server is configured" {
+		t.Fatalf("status = %q", got)
 	}
 }

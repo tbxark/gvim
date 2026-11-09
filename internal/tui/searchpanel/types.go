@@ -58,8 +58,28 @@ type SearchRequest struct {
 	Options MatchOptions
 	Scope   Scope
 	// Files is the file index snapshot, for AllFiles. The panel fills it in the
-	// command, never in Update.
+	// command, never in Update (already filtered by Glob).
 	Files []string
+	// Glob is the raw file-filter value. The panel uses it to filter Files for the
+	// local searcher and carries it so a port that enumerates files itself (the remote
+	// project search) can apply the same filter when the index snapshot is empty or
+	// stale.
+	Glob string
+	// FilesKnown reports that Files is the panel's file-index snapshot (possibly still
+	// loading) rather than an absent/legacy filter. FilesReady is true when that index is
+	// fully loaded: a ready snapshot that filters to zero files means a genuinely empty
+	// result, while a loading/unknown snapshot permits a bounded whole-tree fallback.
+	FilesKnown bool
+	FilesReady bool
+	// The optional detailed finder state behind Files: an index can be not ready because
+	// it is loading, failed, truncated or is finder.Idle's placeholder; Ready alone is
+	// true only when the caller's capability confirmed a complete, error-free snapshot.
+	FilesUnknown   bool
+	FilesIdle      bool
+	FilesTruncated bool
+	FilesClosed    bool
+	FilesError     string
+	FilesNotice    string
 	// Current is the active buffer, for CurrentFile.
 	Current *SourceFile
 	// OpenFiles are the open buffers' text; a file here is searched from the snapshot
@@ -307,6 +327,52 @@ type ContextPreviewer interface {
 // passed by the root implements it.
 type Files interface {
 	Snapshot() (files []string, loading bool)
+}
+
+// FileIndexState is the optional finder state behind a Files implementation. Known is
+// false only when the caller supplied no Files capability at all; Ready means the
+// snapshot is authoritative (complete, error-free, untruncated, not Idle and not closed).
+type FileIndexState struct {
+	Known     bool
+	Ready     bool
+	Idle      bool
+	Truncated bool
+	Closed    bool
+	Unknown   bool
+	Error     string
+	Notice    string
+}
+
+// FileIndexHealth is the optional capability of a Files implementation that can report
+// the snapshot and all of its state in one consistent observation (the finder locks one
+// generation). The plain Files interface stays unchanged; a Files without this
+// capability is treated as non-authoritative (a bounded fallback may run) rather than
+// assuming that Snapshot's loading=false means complete.
+type FileIndexHealth interface {
+	IndexSnapshot() (files []string, loading, ready, idle, truncated, closed bool, notice string, err error)
+}
+
+// SnapshotWithState reads the caller's file-index snapshot and, when the optional
+// FileIndexHealth capability exists, its completeness state from the same observation.
+// Ready is never inferred from Snapshot's loading flag alone, and a closed index is never
+// ready even if its stored state looked complete.
+func SnapshotWithState(files Files) ([]string, FileIndexState) {
+	if files == nil {
+		return nil, FileIndexState{}
+	}
+	if health, ok := files.(FileIndexHealth); ok {
+		snap, loading, ready, idle, truncated, closed, notice, err := health.IndexSnapshot()
+		state := FileIndexState{
+			Known: true, Closed: closed, Idle: idle, Truncated: truncated, Notice: notice,
+		}
+		state.Ready = ready && !loading && !closed
+		if err != nil {
+			state.Error = err.Error()
+		}
+		return snap, state
+	}
+	snap, _ := files.Snapshot()
+	return snap, FileIndexState{Known: true, Unknown: true}
 }
 
 // ReplaceRequestMsg asks the root to confirm and apply a replacement. The panel sends it

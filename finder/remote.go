@@ -145,7 +145,7 @@ func StartRemote(ctx context.Context, fs RemoteFS, root string) *Index {
 // launch uses it before its authority slot is connected, so no local enumeration ever
 // starts in the meantime.
 func Idle() *Index {
-	x := &Index{cancel: func() {}, done: make(chan struct{})}
+	x := &Index{cancel: func() {}, done: make(chan struct{}), idle: true}
 	close(x.done)
 	return x
 }

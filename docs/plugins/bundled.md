@@ -407,10 +407,14 @@ native selection. **Rust: Language Server Help** opens a
 troubleshooting popup (install commands, the native-selection rules, PATH/restart/toolchain notes,
 upstream docs link) with
 copy-rustup/copy-brew/check actions, the native Start/Restart LSP Server and Show LSP Status actions,
-and Dismiss. No keys and no settings; opt-in (`default_enabled: false`). Reductions (also in
-porting.md): no automatic LSP-error status or contributed LSP-menu rows, no recovery detection, no
-Disable Rust LSP action, no Configure Mode/reduced-memory registration/restart-for-language, and
-the plugin's local LookPath is never used for a presence decision. The generic
+and Dismiss. The help popup also offers **Disable Rust LSP**, which re-checks the active `.rs` buffer
+and `gvim.has("lsp")`, then delegates to the controlled native `lsp_disable_language_target` action
+with the captured path/language; the TUI validates that target before the root-level LSP-port mute,
+and the plugin never claims the async result. No keys and no settings; opt-in
+(`default_enabled: false`). Reductions (also in porting.md): no automatic LSP-error status or
+contributed LSP-menu rows, no recovery detection, no Configure Mode/reduced-memory
+registration/restart-for-language, and the plugin's local LookPath is never used for a presence
+decision. The generic
 `lsp_help` plugin already owns the automatic LSP-error status row/install popup for Rust; `rust_lsp`
 adds the explicit copy/check/help palette commands instead of a second event handler.
 **deno_lsp** (reduced Fresh port): the Deno helper plugin. Fresh's `deno_lsp.ts` selection

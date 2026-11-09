@@ -148,16 +148,20 @@ type Index struct {
 	parent context.Context
 	enum   func(context.Context, func(string) bool, func(string)) error
 
-	// lifecycle serializes Start/Close/Restart; mu guards the state readers use.
+	// lifecycle serializes Close/Restart (they may wait for an enumeration to stop);
+	// mu guards every state field readers observe, including closed and the done
+	// generation. IndexSnapshot takes only mu, never lifecycle, so a reader cannot be
+	// blocked behind a Restart/Close waiting for oldDone.
 	lifecycle sync.Mutex
 	cancel    context.CancelFunc
-	closed    bool
 
 	mu        sync.Mutex
 	done      chan struct{}
 	gen       uint64
+	closed    bool
 	files     []string
 	truncated bool
+	idle      bool
 	err       error
 	// notice is a non-fatal message the enumeration attached to this run (for example
 	// "used a directory walk because the git file list was unavailable"). It is cleared
@@ -307,10 +311,11 @@ func (x *Index) run(ctx context.Context, gen uint64, done chan struct{}) {
 func (x *Index) Restart() {
 	x.lifecycle.Lock()
 	defer x.lifecycle.Unlock()
+	x.mu.Lock()
 	if x.enum == nil || x.closed {
+		x.mu.Unlock()
 		return
 	}
-	x.mu.Lock()
 	oldDone := x.done
 	old := x.cancel
 	x.gen++
@@ -414,6 +419,18 @@ func (x *Index) Truncated() bool {
 	return x.truncated
 }
 
+// IndexSnapshot returns the file list and its complete state under one lock and one
+// generation: the caller never combines a stale empty snapshot with a newer ready flag.
+// closed reports a Close'd index; ready is false there and while loading/errored,
+// truncated or Idle. Snapshot's plain interface remains unchanged for other callers.
+func (x *Index) IndexSnapshot() (files []string, loading, ready, idle, truncated, closed bool, notice string, err error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	loading = !closedDone(x.done)
+	ready = x.enum != nil && !loading && x.err == nil && !x.truncated && !x.idle && !x.closed
+	return x.files, loading, ready, x.idle, x.truncated, x.closed, x.notice, x.err
+}
+
 // Err returns the enumeration error, or nil. It is nil while loading and after
 // a complete run; after ctx is cancelled it is context.Canceled.
 func (x *Index) Err() error {
@@ -436,11 +453,12 @@ func (x *Index) Done() <-chan struct{} {
 func (x *Index) Close() {
 	x.lifecycle.Lock()
 	defer x.lifecycle.Unlock()
+	x.mu.Lock()
 	if x.closed {
+		x.mu.Unlock()
 		return
 	}
 	x.closed = true
-	x.mu.Lock()
 	oldDone := x.done
 	x.mu.Unlock()
 	if x.cancel != nil {

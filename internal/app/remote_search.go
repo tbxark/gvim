@@ -21,6 +21,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/search"
 )
@@ -137,6 +138,19 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	if limit <= 0 {
 		limit = searchpanel.DefaultLimit
 	}
+	// The panel's glob is carried raw so AllFiles can apply it even when its quick-open
+	// index snapshot is empty (the panel then has no file list to filter): a glob must
+	// never silently widen the search to files outside it. The panel validates the
+	// glob before starting a search; a direct caller gets the error instead.
+	globMatch := func(string) bool { return true }
+	if req.Glob != "" {
+		m, err := searchpanel.CompileFileGlob(req.Glob)
+		if err != nil {
+			send(searchpanel.SearchBatch{Done: true, Err: "Bad glob: " + err.Error()})
+			return
+		}
+		globMatch = m
+	}
 	// The current-file and open-buffers scopes search the editor's remote document
 	// snapshots (the authority loaded them; unsaved text included): no local disk is read
 	// and no remote process is started.
@@ -145,9 +159,23 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		return
 	}
 	// The panel hands the file index snapshot (already filtered by its glob), so results
-	// outside it are skipped; an empty snapshot (index not ready) searches the whole remote
-	// tree with the tool's own ignore rules.
+	// outside it are skipped. A READY snapshot that filtered to zero files is a genuine
+	// empty result (local project search is the same), not a reason to fall back to the
+	// whole tree. A loading/unknown snapshot may be partial, so it permits the bounded
+	// whole-tree fallback with the glob still applied; direct/legacy callers that do not
+	// set the snapshot-state fields keep the previous fallback behavior.
 	allowed := remoteAllowedFiles(req.Files)
+	if req.FilesKnown && !req.FilesReady {
+		allowed = nil
+	}
+	if req.FilesKnown && req.FilesReady && allowed == nil {
+		if cancelled() {
+			return
+		}
+		send(searchpanel.SearchBatch{Done: true, Total: 0})
+		return
+	}
+	indexFallbackNotice := remoteFileIndexFallbackNotice(req)
 	ctx, stop := context.WithTimeout(context.Background(), s.timeout)
 	defer stop()
 	done := make(chan struct{})
@@ -170,7 +198,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			errText = "remote search tool probe timed out"
 		}
-		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, cancelled, send, errText) {
+		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, globMatch, indexFallbackNotice, cancelled, send, errText) {
 			return
 		}
 		return
@@ -186,9 +214,20 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		scope = s.newProjectResultScope(ctx)
 	}
 	widen := false
+	wholeTreeFallback := false
 	var res hostos.ProcResult
 	if scope != nil && scope.listed {
-		batches, ok := batchSearchPaths(scope.paths)
+		paths := scope.paths
+		if req.Glob != "" {
+			filtered := make([]string, 0, len(paths))
+			for _, p := range paths {
+				if globMatch(p) {
+					filtered = append(filtered, p)
+				}
+			}
+			paths = filtered
+		}
+		batches, ok := batchSearchPaths(paths)
 		switch {
 		case len(scope.prefixes) > 0:
 			// The nested repositories/submodules that could not be resolved into their own
@@ -198,17 +237,21 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 			// in scope; a cap hit is reported as incomplete below.
 			scope.notice = appText("gvim.notice.remote_search_nested_repos", "remote search scanned the nested repositories/submodules in place because their candidate lists were unavailable; ignored entries may be scanned and results may be capped")
 			widen = true
+			wholeTreeFallback = true
 			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, scope.prefixes))
 		case !ok:
 			scope.notice = appText("gvim.notice.remote_search_ignored_candidates", "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched")
 			widen = true
+			wholeTreeFallback = true
 			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, nil))
-		case len(scope.paths) == 0:
-			// An empty candidate list has no files to search: no tool run and no paths.
+		case len(paths) == 0:
+			// An empty candidate list (after the glob) has no files to search: no tool
+			// run and no paths.
 		default:
 			res, err = s.runBatched(ctx, tool, req, batches)
 		}
 	} else {
+		wholeTreeFallback = true
 		res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, nil))
 	}
 	if err != nil {
@@ -219,7 +262,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			errText = "remote search timed out"
 		}
-		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, cancelled, send, errText) {
+		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, globMatch, indexFallbackNotice, cancelled, send, errText) {
 			return
 		}
 		return
@@ -242,15 +285,21 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		// partial project result even when the widened tool output itself was not capped.
 		truncated = true
 	}
-	if widen && res.Truncated && scope != nil {
-		// A widened run consumed the remote output cap: candidate files beyond the cap
-		// were neither searched nor reported, so the result is explicitly incomplete. The
-		// generic degradation notice is kept, with the cap consequence spelled out.
-		capNotice := appText("gvim.notice.remote_search_cap", "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query")
-		if scope.notice != "" {
-			scope.notice += "; " + capNotice
+	fallbackCapNotice := ""
+	if wholeTreeFallback && res.Truncated {
+		// The tool cap is applied before the candidate/glob/snapshot filter can run, so
+		// matching files beyond the cap may be missing even though some results are shown.
+		// There is no way to widen the remote output without a complete candidate list;
+		// mark the partial result explicitly instead of presenting it as complete.
+		filterCapNotice := appText("gvim.notice.remote_search_cap_filtered", "remote search result is incomplete: the bounded fallback scan hit the remote output cap before the file filter was applied, so matching files beyond the cap may be missing; narrow the scope or refine the query")
+		if scope != nil {
+			if scope.notice != "" {
+				scope.notice += "; " + filterCapNotice
+			} else {
+				scope.notice = filterCapNotice
+			}
 		} else {
-			scope.notice = capNotice
+			fallbackCapNotice = filterCapNotice
 		}
 	}
 	pending := make([]searchpanel.FileMatches, 0, searchBatchFiles)
@@ -264,6 +313,20 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		}
 		if done && scope != nil {
 			batch.Notice = scope.notice
+		}
+		if done && fallbackCapNotice != "" {
+			if batch.Notice != "" {
+				batch.Notice += "; " + fallbackCapNotice
+			} else {
+				batch.Notice = fallbackCapNotice
+			}
+		}
+		if done && indexFallbackNotice != "" {
+			if batch.Notice != "" {
+				batch.Notice += "; " + indexFallbackNotice
+			} else {
+				batch.Notice = indexFallbackNotice
+			}
 		}
 		if done && outsideSnapshot {
 			stale := appText("gvim.notice.remote_search_stale_snapshot", "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index")
@@ -284,7 +347,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	// disk line must not win for a file whose buffer text (possibly unsaved) is already in
 	// hand. The current buffer's snapshot goes first; the other open buffers follow the
 	// tool results. No remote read is added for this path.
-	openSources, openByRel, openOrder := remoteOpenSources(req, s.root, allowed)
+	openSources, openByRel, openOrder := remoteOpenSources(req, s.root, allowed, globMatch)
 	emittedOpen := map[string]bool{}
 	addOpenSource := func(src searchpanel.SourceFile, rel string) bool {
 		emittedOpen[rel] = true
@@ -345,6 +408,9 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if scope != nil && !scope.allows(rel) {
 			continue
 		}
+		if !globMatch(rel) {
+			continue
+		}
 		if allowed != nil && !allowed[rel] {
 			outsideSnapshot = true
 			continue
@@ -389,13 +455,15 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 // original error and a notice that only open buffers were searched: the result is never
 // presented as a complete project search, and no local disk is read. It returns false when
 // the caller cancelled (no Done batch is sent then).
-func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, q search.Query, limit int, allowed map[string]bool, cancelled func() bool, send func(searchpanel.SearchBatch) bool, errText string) bool {
+func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, q search.Query, limit int, allowed map[string]bool, globMatch func(string) bool, indexNotice string, cancelled func() bool, send func(searchpanel.SearchBatch) bool, errText string) bool {
 	if cancelled() {
 		return false
 	}
-	openSources, _, openOrder := remoteOpenSources(req, s.root, allowed)
+	openSources, _, openOrder := remoteOpenSources(req, s.root, allowed, globMatch)
 	if len(openSources) == 0 {
-		send(searchpanel.SearchBatch{Done: true, Err: errText})
+		batch := searchpanel.SearchBatch{Done: true, Err: errText}
+		batch.Notice = indexNotice
+		send(batch)
 		return true
 	}
 	var pending []searchpanel.FileMatches
@@ -405,6 +473,9 @@ func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, 
 		batch := searchpanel.SearchBatch{Files: pending, Truncated: truncated, Done: done, Err: err, Notice: notice}
 		if done && len(pending) > 0 {
 			batch.Notice = "remote search tool unavailable: only open buffers were searched from their editor snapshots; the remote project files were not searched"
+			if indexNotice != "" {
+				batch.Notice += "; " + indexNotice
+			}
 		}
 		if !send(batch) {
 			return false
@@ -463,10 +534,53 @@ func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, 
 	}
 	// The terminal failure batch: the files already streamed above remain visible, while
 	// the error says the project search did not run.
-	if !send(searchpanel.SearchBatch{Done: true, Truncated: truncated, Err: errText, Notice: "remote search tool unavailable: only open buffers were searched from their editor snapshots; the remote project files were not searched"}) {
+	terminal := searchpanel.SearchBatch{Done: true, Truncated: truncated, Err: errText, Notice: "remote search tool unavailable: only open buffers were searched from their editor snapshots; the remote project files were not searched"}
+	if indexNotice != "" {
+		terminal.Notice += "; " + indexNotice
+	}
+	if !send(terminal) {
 		return false
 	}
 	return true
+}
+
+// remoteFileIndexFallbackNotice explains why the bounded fallback scan is being
+// used instead of an authoritative file-index snapshot. A loading/unknown snapshot, an
+// enumeration failure, a truncated list and finder.Idle's placeholder all produce a
+// notice: none of them may masquerade as a complete project scope.
+func remoteFileIndexFallbackNotice(req searchpanel.SearchRequest) string {
+	if !req.FilesKnown || req.FilesReady {
+		return ""
+	}
+	detail := func(text string) string {
+		text = strings.Join(strings.Fields(textsafe.Clean(text)), " ")
+		const max = 160
+		if r := []rune(text); len(r) > max {
+			text = string(r[:max-1]) + "…"
+		}
+		return text
+	}
+	var text string
+	switch {
+	case req.FilesClosed:
+		text = appText("gvim.notice.remote_search_index_closed", "remote search fell back to a bounded fallback scan because the file index was closed; results may be incomplete")
+	case req.FilesError != "":
+		text = appTextVars("gvim.notice.remote_search_index_failed", "remote search fell back to a bounded fallback scan because the file index failed (%{error}); results may be incomplete", map[string]any{"error": detail(req.FilesError)})
+	case req.FilesIdle:
+		text = appText("gvim.notice.remote_search_index_idle", "remote search fell back to a bounded fallback scan because the remote file index is not ready yet; results may be incomplete")
+	case req.FilesTruncated:
+		text = appText("gvim.notice.remote_search_index_truncated", "remote search fell back to a bounded fallback scan because the file index is incomplete (truncated); results may be incomplete")
+	case req.FilesUnknown:
+		text = appText("gvim.notice.remote_search_index_unknown", "remote search fell back to a bounded fallback scan because the file index cannot report whether it is complete; results may be incomplete")
+	default:
+		text = appText("gvim.notice.remote_search_index_loading", "remote search fell back to a bounded fallback scan while the file index is loading; results may be incomplete")
+	}
+	if req.FilesNotice != "" {
+		if notice := detail(req.FilesNotice); notice != "" {
+			text += "; " + appTextVars("gvim.notice.remote_search_index_notice", "file index: %{notice}", map[string]any{"notice": notice})
+		}
+	}
+	return text
 }
 
 // remoteProjectResultScope narrows the whole-tree remote project search to Fresh's
@@ -759,7 +873,7 @@ func remoteRelPath(abs, root string) (string, bool) {
 // an under-root path that the panel's file snapshot (already glob-filtered) contains when
 // there is one, or any under-root open buffer when the file index is not ready. It returns
 // the snapshots by project-relative path, that map, and the display order.
-func remoteOpenSources(req searchpanel.SearchRequest, root string, allowed map[string]bool) (map[string]searchpanel.SourceFile, map[string]searchpanel.SourceFile, []string) {
+func remoteOpenSources(req searchpanel.SearchRequest, root string, allowed map[string]bool, globMatch func(string) bool) (map[string]searchpanel.SourceFile, map[string]searchpanel.SourceFile, []string) {
 	byRel := make(map[string]searchpanel.SourceFile, len(req.OpenFiles))
 	var order []string
 	add := func(src searchpanel.SourceFile) {
@@ -768,6 +882,9 @@ func remoteOpenSources(req searchpanel.SearchRequest, root string, allowed map[s
 			return
 		}
 		if allowed != nil && !allowed[rel] {
+			return
+		}
+		if !globMatch(rel) {
 			return
 		}
 		if _, seen := byRel[rel]; seen {

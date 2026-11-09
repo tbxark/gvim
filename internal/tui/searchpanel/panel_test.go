@@ -51,6 +51,9 @@ func (f *fakeGrepper) GitGrep(req GitRequest) (GitResult, error) {
 type fakeFiles struct{ files []string }
 
 func (f fakeFiles) Snapshot() ([]string, bool) { return f.files, false }
+func (f fakeFiles) IndexSnapshot() ([]string, bool, bool, bool, bool, bool, string, error) {
+	return f.files, false, true, false, false, false, "", nil
+}
 
 // sampleResult is a result with two files and three matches.
 func sampleResult() SearchResult {
@@ -1526,5 +1529,82 @@ func TestPanelRejectsStaleOwnerResult(t *testing.T) {
 	p.Update(searchDoneMsg{seq: 1, result: result("fresh.go"), owner: owner})
 	if p.loading || len(p.rows) == 0 {
 		t.Fatalf("own result did not apply: loading %v rows %d", p.loading, len(p.rows))
+	}
+}
+
+// TestSearchRequestCarriesTheGlob: the raw glob filter travels with the request so a
+// remote port enumerating files itself can apply it when the quick-open snapshot is
+// empty and the panel has no filtered file list to send.
+func TestSearchRequestCarriesTheGlob(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: SearchResult{}}
+	p := New(searchOptions(s))
+	p.glob.SetValue("src/*.go")
+	search(t, p, "foo")
+	if len(s.reqs) == 0 {
+		t.Fatal("no search request")
+	}
+	if got := s.reqs[len(s.reqs)-1].Glob; got != "src/*.go" {
+		t.Fatalf("request Glob = %q, want the panel glob value", got)
+	}
+}
+
+// fakeLoadingFiles is a file index whose first snapshot is still loading.
+type fakeLoadingFiles struct{ files []string }
+
+func (f fakeLoadingFiles) Snapshot() ([]string, bool) { return f.files, true }
+func (f fakeLoadingFiles) IndexSnapshot() ([]string, bool, bool, bool, bool, bool, string, error) {
+	return f.files, true, false, false, false, false, "", nil
+}
+
+// TestSearchRequestCarriesTheSnapshotState: the panel distinguishes a ready (even
+// zero-file) snapshot from an index that is still loading, so the remote searcher can
+// answer a ready-empty search with zero results and only fall back while loading.
+func TestSearchRequestCarriesTheSnapshotState(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: SearchResult{}}
+	p := New(searchOptions(s))
+	search(t, p, "foo")
+	if len(s.reqs) == 0 {
+		t.Fatal("no search request")
+	}
+	req := s.reqs[len(s.reqs)-1]
+	if !req.FilesKnown || !req.FilesReady {
+		t.Fatalf("ready request state = known %v ready %v, want true/true", req.FilesKnown, req.FilesReady)
+	}
+
+	s = &fakeSearcher{result: SearchResult{}}
+	p = New(searchOptions(s))
+	p.files = fakeLoadingFiles{files: []string{"a.go"}}
+	search(t, p, "foo")
+	if len(s.reqs) == 0 {
+		t.Fatal("no loading search request")
+	}
+	req = s.reqs[len(s.reqs)-1]
+	if !req.FilesKnown || req.FilesReady {
+		t.Fatalf("loading request state = known %v ready %v, want true/false", req.FilesKnown, req.FilesReady)
+	}
+}
+
+// unknownFiles is a Files implementation without the optional health capability.
+type unknownFiles struct{ files []string }
+
+func (f unknownFiles) Snapshot() ([]string, bool) { return f.files, false }
+
+// TestSearchRequestTreatsMissingCapabilityAsUnknown: a Files without FileIndexHealth is
+// not assumed ready from loading=false; the request stays non-authoritative so the remote
+// adapter takes the bounded fallback with an explicit notice instead of a false empty.
+func TestSearchRequestTreatsMissingCapabilityAsUnknown(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: SearchResult{}}
+	p := New(searchOptions(s))
+	p.files = unknownFiles{files: []string{"a.go"}}
+	search(t, p, "foo")
+	if len(s.reqs) == 0 {
+		t.Fatal("no search request")
+	}
+	req := s.reqs[len(s.reqs)-1]
+	if !req.FilesKnown || req.FilesReady || !req.FilesUnknown {
+		t.Fatalf("unknown-capability state = known %v ready %v unknown %v, want true/false/true", req.FilesKnown, req.FilesReady, req.FilesUnknown)
 	}
 }

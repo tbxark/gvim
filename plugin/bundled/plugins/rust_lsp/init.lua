@@ -7,8 +7,11 @@
 -- port keeps the user-visible install/help half as explicit commands: copy the official
 -- rustup command, copy the Homebrew alternative, check rust-analyzer on the workspace (its
 -- --version), and a troubleshooting popup that reuses the native Start/Restart and
--- Show LSP Status actions. No automatic LSP error status, contributed menu rows,
--- disable action or reduced-memory registration are ported (see porting.md). The native
+-- Show LSP Status actions. The popup also offers Disable Rust LSP by delegating to gvim's
+-- controlled native language-disable action (the plugin captures the active .rs path and
+-- language; the TUI re-validates the target before its root-level port mute). No automatic
+-- LSP error status, contributed LSP-menu rows, recovery detection or reduced-memory
+-- registration are ported (see porting.md). The native
 -- Rust LSP server is gvim's built-in entry and is not controlled by this plugin: the
 -- enable/disable toggle here only affects these helper commands.
 local gvim = require "gvim"
@@ -22,6 +25,40 @@ local VERSION_MAX_OUTPUT = 64 * 1024
 
 local function first_line(text)
   return (tostring(text or ""):match("^[^\r\n]*")) or ""
+end
+
+local function is_rust_path(path)
+  return type(path) == "string" and path ~= "" and tostring(path):lower():sub(-3) == ".rs"
+end
+
+local function active_rust_buffer()
+  local buf = gvim.buf.current()
+  if buf and is_rust_path(buf:path()) then
+    return buf
+  end
+  return nil
+end
+
+-- disable_rust_lsp is the controlled native disable action. The active Rust buffer's
+-- path/language are carried to the TUI, which re-validates that exact target before the
+-- root-level LSP-port mute; the plugin never claims the async mute succeeded.
+local function disable_rust_lsp()
+  local buf = active_rust_buffer()
+  if not buf then
+    gvim.status(t("status.not_rust"))
+    return
+  end
+  if not gvim.has("lsp") then
+    gvim.status(t("status.no_lsp"))
+    return
+  end
+  local ran, err = gvim.command.run("lsp_disable_language_target", {
+    path = buf:path(),
+    language = tostring(buf:language() or ""),
+  })
+  if not ran then
+    gvim.status(t("status.action_failed", { action = "lsp_disable_language_target", error = tostring(err) }))
+  end
 end
 
 local function copy_command(value)
@@ -84,6 +121,7 @@ local function show_help()
       { id = "act:check", label = t("actions.check") },
       { id = "act:lsp_restart", label = t("actions.restart") },
       { id = "act:show_lsp_status", label = t("actions.status") },
+      { id = "act:lsp_disable_language", label = t("actions.disable") },
       { id = "dismiss", label = t("actions.dismiss") },
     },
   })
@@ -101,6 +139,10 @@ local function show_help()
   local action = choice:match("^act:(.+)$")
   if action == "check" then
     check_server()
+    return
+  end
+  if action == "lsp_disable_language" then
+    disable_rust_lsp()
     return
   end
   if action then

@@ -831,8 +831,31 @@ not reported — never a complete-looking result; a partial nested candidate set
 presented as complete, and a deeper nested repository's own `.gitignore` is not applied in
 that fallback (recorded residual). The explicit-candidate
 half keeps git's exception: a tracked candidate under such a directory is still searched
-because git lists it; only walked/nested content is pruned. The panel's glob-filtered file
-snapshot still bounds AllFiles, but open buffers are searched from the editor's snapshots
+because git lists it; only walked/nested content is pruned. The panel's glob filter is carried as the raw value and applied to candidate paths,
+whole-tree results and open-buffer snapshots even when the quick-open index snapshot is
+unavailable: a glob can never silently widen the search to files outside it. The panel reads the optional finder capability as **one short-mu snapshot** (files,
+loading, error, Idle, truncated and closed from the same generation), not as
+`Snapshot().loading` followed by separate status reads: the read never waits for
+`Restart`/`Close` to finish an old enumeration, and a Restart cannot combine an old empty
+list with a new ready flag. A snapshot is authoritative only when that observation
+says it is complete (not loading, not failed, not truncated, not `finder.Idle`'s
+placeholder and not a closed index). A **ready** snapshot, even when the glob filters it
+to zero files, returns a genuinely empty result without running the tool or re-adding
+open buffers, matching the local searcher. A **loading, failed, truncated, Idle, closed
+or capability-less** snapshot may be partial: it permits a bounded fallback scan (the
+whole-tree path, a complete candidate list or a nested-prefix scan) with the glob still
+applied (open buffers are included) and carries a localized
+non-fatal notice naming the actual reason; a missing capability is treated as unknown,
+never as ready. Dynamic finder error/notice text is cleaned with `textsafe`, bounded, and
+inserted through the i18n catalogue before the panel sees it. That fallback's output cap is applied before the filter, so a
+capped run is marked `Truncated` with an explicit cap-before-filter partial notice instead
+of looking complete. The same filtered-cap notice is added once to a listed-but-widened or
+nested-prefix scan that hits the cap before its filter (the duplicate generic widen-cap
+message was removed). The fallback notice deliberately says “bounded fallback scan”,
+not “whole-tree”: the route can be a complete git candidate list, a nested-prefix scan or
+a whole-tree scan, and the notice is attached before that routing decision. When the snapshot exists it still bounds AllFiles: a
+stale snapshot stays authoritative and the stale-snapshot notice points at File Explorer:
+Refresh. Open buffers are searched from the editor's snapshots
 (the current buffer first, then the other open buffers after the tool results), and that
 file's remote disk line is skipped: unsaved edits are found exactly as Fresh's
 project_files searches open buffers, with no extra remote read. An open file outside the
