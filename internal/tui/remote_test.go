@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/popup"
 )
 
@@ -246,5 +247,44 @@ func TestF6RemoteMenuKeyboardReconnect(t *testing.T) {
 	_, _ = m.Update(cmd())
 	if !reconnected {
 		t.Fatal("the reconnect command did not run the authority reconnect")
+	}
+}
+
+// TestRemoteMenuFromOverlayContexts checks the contextual keymap path: a prompt and a
+// popup resolve their own keymap context first, so a user binding (or Fresh's global
+// fallback in the real map) can run show_remote_indicator_menu there. The menu opens
+// over the overlay and closing it returns to the text/list instead of eating a typed
+// character.
+func TestRemoteMenuFromOverlayContexts(t *testing.T) {
+	t.Parallel()
+	bindings := fakeKeymap{
+		"prompt|F6|": {Action: "show_remote_indicator_menu"},
+		"popup|F6|":  {Action: "show_remote_indicator_menu"},
+	}
+	m := overlayModel(t, bindings)
+	p := pushPrompt(m, "abc")
+	press(m, special(tea.KeyF6))
+	if len(m.overlays) != 2 || !frameHas(m, "Remote") {
+		t.Fatalf("F6 from a prompt did not open the Remote Indicator menu over it (overlays %d)", len(m.overlays))
+	}
+	press(m, special(tea.KeyEscape))
+	if len(m.overlays) != 1 {
+		t.Fatalf("closing the remote menu left %d overlays, want the prompt", len(m.overlays))
+	}
+	// The text field still receives typed characters afterwards.
+	press(m, typed("x"))
+	if got := p.Value(); !strings.Contains(got, "abc") {
+		t.Fatalf("prompt value after the menu = %q, want the text preserved", got)
+	}
+
+	m = overlayModel(t, bindings)
+	m.pushOverlay(list.New("Pick", []list.Row{{Left: "a", Value: "a"}}, m.styles.Overlay, nil))
+	press(m, special(tea.KeyF6))
+	if len(m.overlays) != 2 || !frameHas(m, "Remote") {
+		t.Fatalf("F6 from a popup did not open the Remote Indicator menu over it (overlays %d)", len(m.overlays))
+	}
+	press(m, special(tea.KeyEscape))
+	if len(m.overlays) != 1 {
+		t.Fatalf("closing the remote menu left %d popup overlays", len(m.overlays))
 	}
 }

@@ -28,6 +28,28 @@ func (k adapter) Resolve(key tui.KeyPress, ctx tui.KeyContext) (tui.Command, boo
 	return tui.Command{Action: b.Action, Args: b.Args}, true
 }
 
+// ResolveExact resolves a key in exactly one context, with no global fallback.
+func (k adapter) ResolveExact(key tui.KeyPress, ctx tui.KeyContext) (tui.Command, bool) {
+	chord, err := keymap.Canonical(key.Name, key.Mods)
+	if err != nil {
+		return tui.Command{}, false
+	}
+	b, ok := k.km.ResolveExact(chord, keymapContext(ctx))
+	if !ok {
+		return tui.Command{}, false
+	}
+	return tui.Command{Action: b.Action, Args: b.Args}, true
+}
+
+// UnboundExact reports a user's explicit unbind in exactly ctx.
+func (k adapter) UnboundExact(key tui.KeyPress, ctx tui.KeyContext) bool {
+	chord, err := keymap.Canonical(key.Name, key.Mods)
+	if err != nil {
+		return false
+	}
+	return k.km.UnboundExact(chord, keymapContext(ctx))
+}
+
 // ResolveSequence looks up the key presses typed in order among the multi-key bindings.
 // A press that does not canonicalize ends the sequence.
 func (k adapter) ResolveSequence(steps []tui.KeyPress, ctx tui.KeyContext) (cmd tui.Command, ok, prefix bool) {
@@ -104,6 +126,8 @@ func keyBinding(b keymap.Binding) tui.KeyBinding {
 // keymapContext maps a UI key context to its keymap when-clause.
 func keymapContext(ctx tui.KeyContext) keymap.Context {
 	switch ctx {
+	case tui.KeyContextGlobal:
+		return keymap.ContextGlobal
 	case tui.KeyContextFileExplorer:
 		return keymap.ContextFileExplorer
 	case tui.KeyContextTerminal:

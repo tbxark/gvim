@@ -836,7 +836,9 @@ still loads unchanged.
   known; stopping at the window reports `Window`+`Truncated` with an unknown total
   (`window only`); a match past the scan budget is an explicit error, never a file head or
   local read. The window scan validates NUL/binary and UTF-8 (with a carried partial rune)
-  and returns the explicit binary/not-UTF-8 reason instead of sanitizing a partial excerpt. The preview carries syntax spans from the shared highlighter
+  and returns the explicit binary/not-UTF-8 reason instead of sanitizing a partial excerpt.
+  An exactly-at-cap 256 KiB line is kept as a complete line (window-truncated or whole-file
+  at EOF); a longer line gets the explicit line-cap error, not an empty scanner failure. The preview carries syntax spans from the shared highlighter
   (`internal/app/preview_highlight.go`) only when the total is known and within its 4000-line
   cap, so an unknown-total deep window stays plain; an open-buffer preview is highlighted from
   the panel's text. Remaining remote gaps: an unknown-total window is plain text and the scan

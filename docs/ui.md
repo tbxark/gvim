@@ -346,8 +346,11 @@ result region:
   says `window only` when the window stops before EOF, a known total is shown when EOF
   was reached, and a hit beyond the scan budget is an explicit error (never the file head
   or a local read). The scan rejects NUL/binary content and invalid UTF-8 explicitly (the
-  panel shows the reason/placeholder, never a sanitized partial excerpt). Syntax colour is
-  kept only for a known-small total; the open-buffer path is unchanged. The match's line or lines take the selected style and the matched
+  panel shows the reason/placeholder, never a sanitized partial excerpt). A first line
+  exactly at the 256 KiB cap is shown as a complete line (window-truncated when more lines
+  follow, the whole file when it ends there); a line above the cap is the explicit
+  line-cap error, not an empty window. Syntax colour is kept only for a known-small total;
+  the open-buffer path is unchanged. The match's line or lines take the selected style and the matched
   runes are bold; the rest of a line is syntax-coloured automatically when the port can
   highlight it (the highlighter is cached per file and bounded at 256 KiB or 4000 lines,
   and a grammarless or oversized file stays plain). The window scrolls while the result

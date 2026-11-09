@@ -100,3 +100,32 @@ func TestEnvPortDetectedEnvTriggersNeededWatchRetry(t *testing.T) {
 	}
 	t.Fatalf("detected() read did not recover the watcher: notice=%q retry=%v", provider.WatchNotice(), provider.WatchRetryNeeded())
 }
+
+// TestEnvPortCachedStatusDoesNotTriggerWatchRetry is the regression for the status row's
+// side-effect-free read: CachedEnvStatus must never fire the watcher-retry recovery even
+// when the provider says a retry is needed, while DetectedEnv keeps the old semantics.
+func TestEnvPortCachedStatusDoesNotTriggerWatchRetry(t *testing.T) {
+	provider := env.New(t.TempDir(), nil, func() bool { return true })
+	provider.SetWatchRetryNeeded(true)
+	retried := make(chan struct{}, 2)
+	port := envPort{
+		provider: provider,
+		level:    func() string { return "trusted" },
+		retryWatch: func() {
+			retried <- struct{}{}
+		},
+	}
+	port.CachedEnvStatus()
+	select {
+	case <-retried:
+		t.Fatal("the cached status read triggered the watcher retry hook")
+	case <-time.After(100 * time.Millisecond):
+	}
+	// DetectedEnv (the plugin/Env: Reload path) still recovers the needed watcher.
+	_, _ = port.DetectedEnv()
+	select {
+	case <-retried:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DetectedEnv lost its watcher-retry recovery semantics")
+	}
+}

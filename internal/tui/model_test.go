@@ -151,6 +151,12 @@ func (k fakeKeymap) Resolve(key KeyPress, ctx KeyContext) (Command, bool) {
 	return c, ok
 }
 
+func (k fakeKeymap) ResolveExact(key KeyPress, ctx KeyContext) (Command, bool) {
+	return k.Resolve(key, ctx)
+}
+
+func (k fakeKeymap) UnboundExact(KeyPress, KeyContext) bool { return false }
+
 // testKeys binds the chords the tests press.
 func testKeys() fakeKeymap {
 	return fakeKeymap{
@@ -168,6 +174,7 @@ func testKeys() fakeKeymap {
 		"normal|x|ctrl":        {Action: "close_tab", Args: map[string]any{"force": true}},
 		"normal|n|ctrl":        {Action: "new"},
 		"normal|w|ctrl":        {Action: "close_tab"},
+		"global|F6|":           {Action: "show_remote_indicator_menu"},
 		"settings|?|":          {Action: "settings_help"},
 		"settings|/|":          {Action: "settings_search"},
 		"prompt|PageUp|":       {Action: "prompt_page_up"},

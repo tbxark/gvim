@@ -960,7 +960,12 @@ cap, so a deep unknown-total window stays plain; the open-buffer path is unchang
 window scan validates the bytes it reads (no NUL/binary and strict UTF-8, with a carried
 partial rune at chunk boundaries): a non-UTF-8 or binary remote file returns the explicit
 `not UTF-8 text`/`binary` error (or the palette's binary placeholder) instead of being
-silently sanitized into a plausible partial excerpt.
+silently sanitized into a plausible partial excerpt. A line exactly at the 256 KiB
+output cap is kept as a complete line (the cap counts content, not the virtual
+newline): at EOF that can be the whole file, and with following lines it is reported
+as a `Window`+`Truncated` window. A single line above the cap is the explicit
+`a remote line is longer than the preview line cap` error, never an empty window or a
+generic scanner failure.
 
 Remote Live Grep keeps no result cache of its own. Resume restores the query/modes/
 scopes only (the palette re-runs the search), which is the honest behavior for remote

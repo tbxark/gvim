@@ -67,6 +67,11 @@ type PluginEditor = pluginapi.BufferEditor
 type EnvPort interface {
 	DetectedEnv() (pluginapi.EnvInfo, bool)
 	ActiveEnv() (pluginapi.EnvInfo, bool)
+	// CachedEnvStatus is the side-effect-free status-row read: the cached detected and
+	// active environment names plus the live trust level. Rendering calls only this
+	// method; unlike DetectedEnv it never triggers the watcher-retry recovery, detection,
+	// capture or activation (Env: Reload owns that path).
+	CachedEnvStatus() (active, detected pluginapi.EnvInfo, hasActive, hasDetected bool, trust string)
 	TrustLevel() string
 	SetEnv(snippet, dir, kind string) error
 	ClearEnv() error
@@ -513,6 +518,7 @@ type KeyContext string
 
 // The contexts the root model resolves keys in.
 const (
+	KeyContextGlobal       KeyContext = "global"
 	KeyContextNormal       KeyContext = "normal"
 	KeyContextFileExplorer KeyContext = "file_explorer"
 )
@@ -527,6 +533,20 @@ type Command struct {
 // *keymap.Map. The root model never sees keymap types.
 type Keymap interface {
 	Resolve(key KeyPress, ctx KeyContext) (Command, bool)
+}
+
+// ExactKeymap is the optional part of a Keymap that resolves in exactly one context
+// without the global fallback. Surfaces with their own context precedence (the dock,
+// the remote-menu action) use it so a context binding or unbind is not shadowed by a
+// global one.
+type ExactKeymap interface {
+	ResolveExact(key KeyPress, ctx KeyContext) (Command, bool)
+}
+
+// ExactUnbindKeymap is the exact-context form of UnbindKeymap: it reports a user's
+// explicit unbind in ctx only, with no global fallback.
+type ExactUnbindKeymap interface {
+	UnboundExact(key KeyPress, ctx KeyContext) bool
 }
 
 // UnbindKeymap is the optional part of a Keymap that remembers a user's explicit unbind:

@@ -198,14 +198,19 @@ var _ palette.WindowPreviewer = (*remotePreviewer)(nil)
 const (
 	remotePreviewWindowChunk     = 64 << 10
 	remotePreviewWindowScanBytes = 8 << 20
-	remotePreviewWindowMaxLine   = 256 << 10
 	remotePreviewWindowMaxOutput = remoteSearchPreviewHeadBytes
+	// The scanner cap is a little above the output cap so a line exactly at the
+	// output cap can be read and reported (allowed/truncated), while a genuinely
+	// overlong line is distinguishable and gets an explicit line-cap error instead of
+	// surfacing as an empty scanner-failure window.
+	remotePreviewWindowMaxLine = remotePreviewWindowMaxOutput + remotePreviewWindowChunk
 )
 
 var (
-	errRemotePreviewScanBudget = errors.New("remote preview window is past the scan budget")
-	errRemotePreviewBinary     = errors.New("preview: the remote file is binary")
-	errRemotePreviewNotUTF8    = errors.New("preview: the remote file is not UTF-8 text")
+	errRemotePreviewScanBudget  = errors.New("remote preview window is past the scan budget")
+	errRemotePreviewBinary      = errors.New("preview: the remote file is binary")
+	errRemotePreviewNotUTF8     = errors.New("preview: the remote file is not UTF-8 text")
+	errRemotePreviewLineTooLong = errors.New("preview: a remote line is longer than the preview line cap")
 )
 
 // remotePreviewWindow is a bounded line window: Lines (complete lines), the 1-based file
@@ -339,14 +344,18 @@ func readRemotePreviewWindow(ctx context.Context, files authority.FileSystem, pa
 			return out, nil
 		}
 		line := strings.TrimRight(sc.Text(), "\r")
+		// A single line above the output cap cannot be shown whole. Never return an
+		// empty window for it: the caller gets the explicit line-cap reason. A line
+		// exactly at the cap is allowed (the cap is content, not the virtual newline).
+		if len(line) > remotePreviewWindowMaxOutput {
+			return out, errRemotePreviewLineTooLong
+		}
 		if len(out.lines) == 0 {
 			out.first = lineNo
 		}
-		if len(out.lines) == 0 && len(line) > remotePreviewWindowMaxOutput {
-			line = line[:remotePreviewWindowMaxOutput]
-			out.truncated = true
-		}
-		if bytesOut+len(line)+1 > remotePreviewWindowMaxOutput {
+		if bytesOut+len(line) > remotePreviewWindowMaxOutput {
+			// The remaining lines do not fit the bounded output: keep the complete
+			// lines already collected and mark the window truncated.
 			out.truncated = true
 			return out, nil
 		}
@@ -358,6 +367,9 @@ func readRemotePreviewWindow(ctx context.Context, files authority.FileSystem, pa
 			out.truncated = true
 			out.budget = true
 			return out, errRemotePreviewScanBudget
+		}
+		if errors.Is(err, bufio.ErrTooLong) {
+			return out, errRemotePreviewLineTooLong
 		}
 		return out, err
 	}

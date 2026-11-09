@@ -21,7 +21,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `git_statusbar` | on | none (a status bar item) | none |
 | `git_find_file` | on | Git Find File, Git Find File: Reload | none |
 | `git_log` | **off** | Git Log, Git Log: Current File, Git Log: Close, Git Log: Refresh | none |
-| `git_blame` | on (idle until toggled) | Git: Toggle Blame, Git: Show Commit, Git: Copy Commit Hash | `debounce_ms` (150, 50 to 2000, project), `summary_width` (60, 10 to 200, project) |
+| `git_blame` | on (idle until toggled) | Git: Toggle Blame, Git: Show Commit, Git: Copy Commit Hash, Git: Blame Previous Revision, Git: Blame HEAD | `debounce_ms` (150, 50 to 2000, project), `summary_width` (60, 10 to 200, project) |
 | `merge_conflict` | **off** | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
 | `diagnostics_panel` | on | Show Diagnostics Panel, Toggle Diagnostics Panel | none |
 | `path_complete` | on | Path Completion: Complete Path | none |
@@ -114,11 +114,24 @@ the right of the status row. It refreshes when a file opens, a tab is activated,
 **git_find_file**: a fuzzy picker over the files git tracks (up to 50 000), opened relative to the
 repository root; the list is read again each time.
 
-**git_blame** (reduced; Fresh's panel with history stepping is not ported): **Toggle Blame** shows
-author, age and summary of the commit that last changed the cursor line, after the line; only 40 lines
-around the cursor are blamed (`git blame -L`), an edited buffer is blamed by its text, answers are kept
-for 30 seconds. **Show Commit** opens the commit in a popup, **Copy Commit Hash** puts its hash on the
-clipboard.
+**git_blame** (reduced; Fresh's panel is not ported, but a one-step inline history is): **Toggle Blame**
+shows author, age and summary of the commit that last changed the cursor line, after the line; only 40
+lines around the cursor are blamed (`git blame -L`), an edited buffer is blamed by its text, answers are
+kept for 30 seconds. **Show Commit** opens the commit in a popup, **Copy Commit Hash** puts its hash on
+the clipboard. **Git: Blame Previous Revision** resolves the first parent of the blamed commit and
+re-blames the same cursor line at that revision, so the inline annotation walks one commit back;
+**Git: Blame HEAD** returns to the working-tree revision. The history view is inline-only: it is not
+Fresh's scrollable blame panel with parent-file content/history stack, and it refuses unsaved buffers
+because unsaved lines cannot be mapped to a committed parent. Each step is one bounded parent resolve
+plus one 40-line blame; the same safe git runner/authority path as Toggle Blame is used. History
+commands require blame to be on, and every git await is followed by a capture check of buffer id/path/
+version, cursor line, viewed revision and a generation counter; if the cursor, tab, buffer or blame
+state changed meanwhile, the step is discarded instead of applying the old entry to the new line. An
+update completion likewise skips painting when the viewed revision/generation is stale. A parent view
+is tied to the path it was resolved for: Save As invalidates the old revision and the annotation
+returns to HEAD for the new path. **Show Commit** and **Copy Commit Hash** capture the same
+buffer/path/version/cursor/revision snapshot and discard their result if the target changed after a
+git await (Show Commit also re-checks after reading the commit).
 
 **merge_conflict** (reduced to in-buffer resolution; the three-panel merge view is not ported): marks
 `<<<<<<<` / `|||||||` / `=======` / `>>>>>>>` blocks with highlights, jumps between them, and resolves the
@@ -320,7 +333,9 @@ seeded from at most 64 open buffers), real verbs (**Find file**, **Command palet
 **File explorer**, **Help**) and a dashboard section whose rows come from
 `gvim.dashboard.sections()` (at most 8 registered section titles; with no registrations the page
 shows `No dashboard sections registered.`). Keys are j/k or arrows to move, Enter to activate,
-q/Esc to close and r to refresh; rows are also line targets (actions for the doors/verbs, paths for
+q/Esc to close and r to refresh; when the page is the current buffer, the selected actionable row's
+caret is revealed (set_cursor with reveal=true) so a row outside a small viewport is scrolled in
+before Enter, while a background welcome tab never moves the caret or steals focus. Rows are also line targets (actions for the doors/verbs, paths for
 recent files). Recent basenames/details and dashboard section titles are display-sanitized with the
 same Cc/Cf/newline/invalid-UTF-8 cleaning used for dashboard external text before they reach a
 page line, and line targets are computed from the resulting one-line rows; a hostile path cannot
@@ -330,7 +345,9 @@ page does not reopen on file open/close). It starts no processes, performs no ne
 existing plugin APIs. OPEN/reduced differences from Fresh (also in porting.md): Fresh's page is a
 virtual buffer plus a page `WidgetPanel` with Contents, focus-follows-cursor and scroll-to-widget
 composition; the current gvim plugin API has no equivalent page/widget-panel combination, so this
-port uses the plain buffer and line targets above rather than claiming those interactions. It has
+port uses the plain buffer and line targets above rather than claiming those interactions. It does
+keep the selected row visible through caret reveal when the page is current; that is not Fresh's
+page-level focus-follows-cursor/scroll-to-widget composition. It has
 no onboarding levels, hover/chip styling, widget buttons, Contents sidebar, orchestrator/workspace/
 agent cards or auto-attach toggle, and it does not call the orchestrator. Dashboard rows are only
 the registered external-section metadata (the dashboard does not expose a rendered snapshot), not
@@ -340,8 +357,8 @@ shows its empty state.
 The plugin is opt-in (`default_enabled: false`) whereas Fresh's page is part of its default startup
 surface; with it enabled, `auto_open` controls the startup tab. Tests: `welcome_screen_test.go`
 covers manifest/opt-in, page content, real door dispatch, line targets, recent-row activation,
-close stickiness, background auto-open and no-focus-steal, auto_open=false, dashboard metadata
-rows and empty fallback.
+close stickiness, background auto-open and no-focus-steal, selected-row reveal, auto_open=false,
+dashboard metadata rows and empty fallback.
 
 **rust_lsp** (reduced Fresh port): the Rust language-server helper. Fresh's `rust-lsp.ts` reacts to
 Rust LSP errors with rows contributed to the native LSP-Servers popup, clears them on recovery, offers

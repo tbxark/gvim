@@ -731,13 +731,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
-	// F6 is Fresh's global Remote Indicator menu: it opens the menu wherever a chrome
-	// region or the editor has the keyboard (an overlay keeps its own keys). The
-	// chrome focus cycle moved to F7, a gvim extension, so F6 keeps Fresh's meaning.
+	// Fresh's Remote Indicator menu is a keymap action (the default is the global
+	// F6), so a user can rebind it. Resolve it before the plugin key layer, a widget
+	// panel, the dock or any focused surface so none of them can swallow it; the
+	// chrome focus cycle is the separate built-in F7.
 	if k, ok := msg.(tea.KeyPressMsg); ok {
-		if kp, _ := translateKey(tea.Key(k)); len(kp.Mods) == 0 && kp.Name == "F6" {
-			m.showRemoteMenu()
-			return m, nil
+		if cmd, handled := m.remoteMenuKey(tea.Key(k)); handled {
+			if cmd.Action == "" {
+				// An exact-context unbind: the key is consumed, with no fallback.
+				return m, nil
+			}
+			return m, m.dispatch(cmd)
 		}
 	}
 	// A plugin key layer (a mode or a key wait) sees the key before a mounted widget
@@ -3283,6 +3287,9 @@ func (m *Model) statusView() statusView {
 		s.Extra = append(s.Extra, item)
 	}
 	if item, ok := m.workspaceSegment(); ok {
+		s.Extra = append(s.Extra, item)
+	}
+	if item, ok := m.envStatusSegment(); ok {
 		s.Extra = append(s.Extra, item)
 	}
 	return s

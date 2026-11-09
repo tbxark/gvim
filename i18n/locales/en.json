@@ -1161,5 +1161,9 @@
   "gvim.settings.help.raw": "Ctrl+E edit raw  Delete inherit/reset the row",
   "gvim.settings.help.filter": "Type to filter; / starts search; Esc close help, then Esc close Settings",
   "gvim.settings.search_label": "Search: ",
-  "gvim.settings.search_footer": "Enter end search - Esc cancel search - type to filter"
+  "gvim.settings.search_footer": "Enter end search - Esc cancel search - type to filter",
+  "gvim.status.env_active": "%{name} ✓",
+  "gvim.status.env_active_unknown": "active",
+  "gvim.status.env_detected": "%{name}",
+  "gvim.status.env_locked": "%{name} (locked)"
 }

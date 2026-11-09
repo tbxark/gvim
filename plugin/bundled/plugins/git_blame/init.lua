@@ -5,6 +5,8 @@
 --                           cursor line, shown after the line (off until you ask for it)
 --   Git: Show Commit        the commit behind the cursor line in a popup
 --   Git: Copy Commit Hash   the hash of that commit to the clipboard
+--   Git: Blame Previous Revision  step the inline blame to the parent of the blamed commit
+--   Git: Blame HEAD         return the inline blame to the working-tree revision
 --
 -- Only a window of 40 lines around the cursor is blamed at a time (`git blame -L`), so the
 -- cost does not grow with the file. A buffer with unsaved changes is blamed by its text
@@ -35,6 +37,11 @@ local POPUP_LINES = 200
 local enabled = false
 local subs = {}
 local cache = {} -- buffer id -> { key, at, lines = { [line] = entry }, n }
+local view_rev = {} -- buffer id -> revision currently being blamed (nil means HEAD)
+local view_path = {} -- buffer id -> path that revision belongs to
+-- Every asynchronous git yield carries this generation. A state change (toggle, revision
+-- switch, buffer close) invalidates older completions before they can paint/set state.
+local generation = 0
 
 local function age(t)
   local d = math.floor(gvim.time.now_ms() / 1000) - (t or 0)
@@ -59,14 +66,38 @@ local function label(e)
     gvim.text.truncate(e.summary or "", settings.summary_width, "…"))
 end
 
+-- current_revision returns the parent-revision override only while the buffer still has the
+-- path that revision belongs to. Save As changes a buffer's path in place; keeping the old
+-- parent revision would blame unrelated history, so it is invalidated (and bumping the
+-- generation makes any in-flight result stale).
+local function current_revision(b, info)
+  local stored_path = view_path[b.id]
+  local path = info.path or ""
+  if stored_path == nil then
+    view_rev[b.id] = nil
+    return nil
+  end
+  if stored_path ~= path then
+    view_rev[b.id] = nil
+    view_path[b.id] = nil
+    generation = generation + 1
+    return nil
+  end
+  return view_rev[b.id]
+end
+
 -- entry_for returns the blame entry of a line of buffer b, asking git when the cache does
 -- not have it.
-local function entry_for(b, line)
+local function entry_for(b, line, rev_override)
   local info = b:info()
   if not info or (info.path or "") == "" or info.virtual or info.large then
     return nil, "unsupported: this buffer has no file"
   end
-  local key = info.path .. "@" .. info.version
+  local rev = rev_override or current_revision(b, info)
+  if rev and info.modified then
+    return nil, "unsupported: save the file before stepping through history"
+  end
+  local key = info.path .. "@" .. info.version .. "@" .. (rev or "HEAD")
   local now = gvim.time.monotonic_ms()
   local c = cache[b.id]
   if not c or c.key ~= key or now - c.at > TTL_MS then
@@ -88,7 +119,7 @@ local function entry_for(b, line)
     return nil, "not_found: the caret is below the last line"
   end
   local from = math.max(0, line - math.floor(WINDOW / 2))
-  local opts = { from = from, to = math.min(from + WINDOW, n) }
+  local opts = { from = from, to = math.min(from + WINDOW, n), rev = rev }
   if info.modified then
     -- the editor reports "UTF-8" or "ASCII" for text that git compares byte for byte
     local enc = tostring(info.encoding):lower()
@@ -126,24 +157,72 @@ end
 
 local running, again = false, false
 
+-- snapshot captures everything an async blame result is allowed to depend on.
+local function snapshot(b)
+  local info = b and b:info()
+  if not info then
+    return nil
+  end
+  local cursor = b:cursor()
+  return {
+    buf = b,
+    id = b.id,
+    path = info.path or "",
+    version = b:version(),
+    line = cursor.line,
+    modified = info.modified,
+    rev = current_revision(b, info),
+    generation = generation,
+  }
+end
+
+-- still_holds re-reads the live state after a yield. Any changed buffer, path, cursor,
+-- revision, enable state or generation makes the captured task stale.
+local function still_holds(s, require_enabled)
+  if not s or generation ~= s.generation then
+    return false
+  end
+  if require_enabled and not enabled then
+    return false
+  end
+  local current = gvim.buf.current()
+  if not current or current.id ~= s.id or not s.buf:valid() then
+    return false
+  end
+  local info = s.buf:info()
+  if not info or (info.path or "") ~= s.path or s.buf:version() ~= s.version then
+    return false
+  end
+  if s.buf:cursor().line ~= s.line then
+    return false
+  end
+  return (view_rev[s.id] or "HEAD") == (s.rev or "HEAD")
+end
+
 local function update()
+  if not enabled then
+    return
+  end
   local b = gvim.buf.current()
   if not b then
     return
   end
-  local line = b:cursor().line
-  local e, err = entry_for(b, line)
+  local s = snapshot(b)
+  if not s then
+    return
+  end
+  local e, err = entry_for(b, s.line, s.rev)
   if not e and err then
     gvim.log.debug("git_blame: %s", tostring(err))
   end
-  if not enabled or not b:valid() or b:cursor().line ~= line then
-    return -- turned off, or the caret moved on while git ran: a newer update follows
+  if not still_holds(s, true) then
+    return -- a newer update/revision/toggle owns the state
   end
   if not e then
     ns:clear(b)
     return
   end
-  ns:set(b, { { kind = "eol", line = line, text = label(e), style = { fg = "dim", italic = true }, priority = 0 } })
+  ns:set(b, { { kind = "eol", line = s.line, text = label(e), style = { fg = "dim", italic = true }, priority = 0 } })
 end
 
 -- refresh runs update; a request that arrives meanwhile makes it run once more.
@@ -165,6 +244,8 @@ end
 
 local function enable()
   enabled = true
+  generation = generation + 1
+  view_rev, view_path = {}, {}
   subs = {
     gvim.on("cursor_moved", refresh, { debounce = settings.debounce_ms }),
     gvim.on("buffer_changed", refresh, { debounce = 500 }),
@@ -176,21 +257,32 @@ end
 
 local function disable()
   enabled = false
+  generation = generation + 1
   for _, s in ipairs(subs) do
     s:off()
   end
-  subs, cache = {}, {}
+  subs, cache, view_rev, view_path = {}, {}, {}, {}
   ns:clear()
 end
 
--- current_entry is the blame entry under the caret, or nil after telling the user why not.
+-- current_entry is the blame entry under the caret and its captured snapshot, or nil after
+-- telling the user why not. Callers use the snapshot path (not a later b:path()) so a Save As
+-- or tab/cursor change while git ran cannot retarget the popup/clipboard operation.
 local function current_entry()
   local b = gvim.buf.current()
   if not b then
     gvim.notify("No file open to blame")
     return
   end
-  local e, err = entry_for(b, b:cursor().line)
+  local s = snapshot(b)
+  if not s then
+    gvim.notify("No blame information available (not a git file or error)")
+    return
+  end
+  local e, err = entry_for(b, s.line, s.rev)
+  if not still_holds(s, false) then
+    return
+  end
   if not e then
     gvim.log.debug("git_blame: %s", tostring(err))
     gvim.notify("No blame information available (not a git file or error)")
@@ -200,7 +292,7 @@ local function current_entry()
     gvim.notify("This line is not yet committed")
     return
   end
-  return e, b
+  return e, s
 end
 
 gvim.command.register {
@@ -223,11 +315,14 @@ gvim.command.register {
   title = "Git: Show Commit",
   description = "Show the commit that last changed the cursor line",
   run = function()
-    local e, b = current_entry()
+    local e, s = current_entry()
     if not e then
       return
     end
-    local lines, err = git.commit(gvim.path.dirname(b:path()), e.commit)
+    local lines, err = git.commit(gvim.path.dirname(s.path), e.commit)
+    if not still_holds(s, false) then
+      return
+    end
     if not lines then
       gvim.notify("Git: cannot show " .. e.commit:sub(1, 7) .. ": " .. tostring(err), "warn")
       return
@@ -254,5 +349,117 @@ gvim.command.register {
     end
     gvim.clipboard.set(e.commit)
     gvim.notify(string.format("Copied: %s (%s)", e.commit:sub(1, 7), e.commit))
+  end,
+}
+
+-- parent_revision returns the first parent of commit, using the same neutralized git
+-- runner as the rest of the plugin. A root commit or an unreadable result is an error.
+local function parent_revision(b, commit)
+  if type(commit) ~= "string" or not commit:match("^[0-9a-fA-F]+$") then
+    return nil, "invalid commit"
+  end
+  local r, err = git.run({ "rev-parse", "--verify", commit .. "^" }, {
+    cwd = gvim.path.dirname(b:path()),
+    timeout_ms = 15000,
+  })
+  if not r then
+    return nil, err
+  end
+  if not r.ok then
+    return nil, "no parent"
+  end
+  local parent = gvim.text.trim(r.stdout or "")
+  if parent == "" or not parent:match("^[0-9a-fA-F]+$") then
+    return nil, "no parent"
+  end
+  return parent
+end
+
+gvim.command.register {
+  name = "blame_previous",
+  title = "Git: Blame Previous Revision",
+  description = "Show the inline blame at the parent revision of the cursor line's commit",
+  run = function()
+    if not enabled then
+      gvim.notify("Git blame is off")
+      return
+    end
+    local b = gvim.buf.current()
+    if not b then
+      gvim.notify("No file open to blame")
+      return
+    end
+    local s = snapshot(b)
+    if not s then
+      gvim.notify("No blame information available (not a git file or error)")
+      return
+    end
+    if s.modified then
+      gvim.notify("Save the file before stepping through blame history")
+      return
+    end
+    local e, err = entry_for(b, s.line)
+    if not still_holds(s, true) then
+      return -- cursor/tab/state changed while git ran: never step the new line with the old entry
+    end
+    if not e then
+      gvim.log.debug("git_blame: %s", tostring(err))
+      gvim.notify("No blame information available (not a git file or error)")
+      return
+    end
+    if e.uncommitted then
+      gvim.notify("This line is not yet committed")
+      return
+    end
+    local commit = e.commit
+    if type(commit) ~= "string" or not commit:match("^[0-9a-fA-F]+$") then
+      gvim.notify("No blame information available (not a git file or error)")
+      return
+    end
+    local parent, parent_err = parent_revision(b, commit)
+    if not still_holds(s, true) then
+      return
+    end
+    if not parent then
+      gvim.notify("Git: no parent revision for " .. commit:sub(1, 7) .. " (" .. tostring(parent_err) .. ")", "warn")
+      return
+    end
+    -- Resolve the parent line before switching; a root/merge or a parent file without this
+    -- line must not report a successful step or change the next view.
+    local parent_entry, blame_err = entry_for(b, s.line, parent)
+    if not still_holds(s, true) then
+      return
+    end
+    if not parent_entry then
+      gvim.notify("Git: no blame at parent " .. parent:sub(1, 7) .. " (" .. tostring(blame_err) .. ")", "warn")
+      return
+    end
+    generation = generation + 1
+    view_rev[b.id] = parent
+    view_path[b.id] = s.path
+    refresh()
+    gvim.notify("Blame at parent " .. parent:sub(1, 7))
+  end,
+}
+
+gvim.command.register {
+  name = "blame_head",
+  title = "Git: Blame HEAD",
+  description = "Return the inline blame to the working-tree revision",
+  run = function()
+    if not enabled then
+      gvim.notify("Git blame is off")
+      return
+    end
+    local b = gvim.buf.current()
+    if not b then
+      gvim.notify("No file open to blame")
+      return
+    end
+    generation = generation + 1
+    view_rev[b.id] = nil
+    view_path[b.id] = nil
+    refresh()
+    gvim.notify("Blame at HEAD")
   end,
 }

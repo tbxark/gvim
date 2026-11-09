@@ -11,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/plugin/bundled"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -52,6 +53,9 @@ type rigOpts struct {
 	settings map[string]plugin.PluginSettings
 	// httpClient is the runtime's gvim.http client (nil: the production safe client).
 	httpClient *http.Client
+	// osWrap wraps the fake OS before the harness uses it (race tests add a gated
+	// Run); nil uses the fake OS as-is.
+	osWrap func(*plugintest.FakeOS) hostos.OS
 }
 
 type rig struct {
@@ -102,7 +106,11 @@ func startRig(t *testing.T, o rigOpts) *rig {
 	if timeout == 0 {
 		timeout = 200 * time.Millisecond
 	}
-	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: r.os, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second, HTTPClient: o.httpClient})
+	osImpl := hostos.OS(r.os)
+	if o.osWrap != nil {
+		osImpl = o.osWrap(r.os)
+	}
+	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: osImpl, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second, HTTPClient: o.httpClient})
 	bundledNames := map[string]bool{}
 	for _, name := range o.plugins {
 		bundledNames[name] = true

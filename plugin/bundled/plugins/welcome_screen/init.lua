@@ -305,6 +305,24 @@ local function publish_targets(buf)
   pcall(set, buf, targets)
 end
 
+-- reveal_focus keeps the selected actionable row visible in a small viewport. It uses the
+-- buffer's caret reveal (set_cursor with reveal=true), which only scrolls the pane; it is
+-- skipped while the page is not the current buffer so a background welcome tab never
+-- steals focus or moves the visible workspace.
+local function reveal_focus(buf)
+  local row = state.rows[state.focus]
+  if not row then
+    return
+  end
+  local current = gvim.buf.current()
+  if not current or current ~= buf then
+    return
+  end
+  pcall(function()
+    buf:set_cursor(gvim.pos(row.line, 0), { reveal = true })
+  end)
+end
+
 local function paint()
   local buf = valid_buf()
   if not buf then
@@ -325,6 +343,7 @@ local function paint()
     return
   end
   publish_targets(buf)
+  reveal_focus(buf)
 end
 
 local function refresh()

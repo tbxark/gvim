@@ -189,6 +189,29 @@ func (m *Model) dockKey(k tea.Key, kp KeyPress) tea.Cmd {
 	if !m.dockRunning() {
 		return nil
 	}
+	// Exact-context precedence: a Dock binding, then a Terminal binding, then the global
+	// fallback. A user Terminal binding (or an explicit unbind) must not be shadowed by a
+	// global binding such as F6; this is the same order the root's remote-menu action uses.
+	if m.keys != nil && !m.dock.Capture() {
+		if exact, ok := m.keys.(ExactKeymap); ok {
+			unbind, _ := m.keys.(ExactUnbindKeymap)
+			contexts := []KeyContext{KeyContextDock, KeyContextTerminal, KeyContextGlobal}
+			for i, ctx := range contexts[:2] {
+				if unbind != nil && unbind.UnboundExact(kp, ctx) {
+					// A tombstone only consumes the chord when a weaker context would run
+					// the remote-menu action; other unbound keys keep falling through (and
+					// an unbound printable still reaches the shell).
+					if remoteActionFallback(m.keys, kp, contexts[i+1:]) {
+						return nil
+					}
+					continue
+				}
+				if cmd, found := exact.ResolveExact(kp, ctx); found {
+					return m.dispatch(cmd)
+				}
+			}
+		}
+	}
 	// The dock's own keymap context resolves its UI keys (Fresh's dock context) before the
 	// terminal context and before the key goes to the shell.
 	if m.keys != nil && !m.dock.Capture() {

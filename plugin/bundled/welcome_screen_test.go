@@ -290,3 +290,92 @@ func TestWelcomeScreenSanitizesHostilePathsAndSectionTitles(t *testing.T) {
 		t.Fatalf("dashboard target = %+v, want line %d", dashboardTarget, dashboardLine)
 	}
 }
+
+// TestWelcomeScreenFocusRevealsTheSelectedRow: j/k on a page taller than a small viewport
+// moves the buffer caret to the selected action row with reveal=true, so the editor
+// scrolls that row into view before Enter can activate it.
+func TestWelcomeScreenFocusRevealsTheSelectedRow(t *testing.T) {
+	r := welcomeScreenRig(t, rigOpts{
+		buffers: []rigBuffer{{"/work/a.go", "package a\n"}, {"/work/b.go", "package b\n"}},
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	if err := r.h.Run("welcome_screen.show", nil); err != nil {
+		t.Fatal(err)
+	}
+	id := welcomeScreenBuffer(r.host)
+	entries, _ := r.host.VirtualContent(id)
+	lineText := func(e pluginapi.ContentEntry) string {
+		if len(e.Segments) == 0 {
+			return e.Text
+		}
+		var b strings.Builder
+		for _, seg := range e.Segments {
+			b.WriteString(seg.Text)
+		}
+		return b.String()
+	}
+	recentLine := -1
+	for i, entry := range entries {
+		if strings.Contains(lineText(entry), "b.go") {
+			recentLine = i
+		}
+	}
+	if recentLine < 0 {
+		t.Fatalf("recent b.go row not found:\n%s", welcomeScreenText(t, r.host))
+	}
+	before := len(r.host.Calls())
+	for range 3 {
+		if err := r.h.Run("welcome_screen.focus_next", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var lastSet *plugintest.Call
+	for _, call := range r.host.Calls()[before:] {
+		if call.Method == "SetCursor" {
+			c := call
+			lastSet = &c
+		}
+	}
+	if lastSet == nil {
+		t.Fatal("focus_next did not move the buffer caret to reveal the row")
+	}
+	pos, ok := lastSet.Args[1].(pluginapi.Pos)
+	if !ok || pos.Line != recentLine {
+		t.Fatalf("SetCursor line = %+v, want %d", lastSet.Args[1], recentLine)
+	}
+	if reveal, _ := lastSet.Args[3].(bool); !reveal {
+		t.Fatal("SetCursor did not request reveal")
+	}
+	if center, _ := lastSet.Args[4].(bool); center {
+		t.Fatal("SetCursor unexpectedly centered the row")
+	}
+	if bufID, _ := lastSet.Args[0].(pluginapi.BufferID); bufID != id {
+		t.Fatalf("SetCursor buffer = %d, want the welcome buffer %d", bufID, id)
+	}
+}
+
+// TestWelcomeScreenFocusDoesNotRevealInBackground: the reveal is skipped while another
+// buffer is current, so a background welcome page cannot steal focus or scroll.
+func TestWelcomeScreenFocusDoesNotRevealInBackground(t *testing.T) {
+	r := welcomeScreenRig(t, rigOpts{
+		buffers: []rigBuffer{{"/work/a.go", "package a\n"}},
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	if err := r.h.Run("welcome_screen.show", nil); err != nil {
+		t.Fatal(err)
+	}
+	fileID := r.ids["/work/a.go"]
+	r.host.SetActive(fileID)
+	before := len(r.host.Calls())
+	if err := r.h.Run("welcome_screen.focus_next", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range r.host.Calls()[before:] {
+		if call.Method == "SetCursor" {
+			t.Fatalf("background focus moved a caret: %v", call)
+		}
+	}
+	if got := r.host.ActiveBuffer(); got != fileID {
+		t.Fatalf("active buffer = %d, want the file %d", got, fileID)
+	}
+}

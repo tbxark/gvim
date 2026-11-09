@@ -6,6 +6,7 @@
     {"comment": "Quick Open files - find files in project", "key": "'", "modifiers": ["ctrl"], "action": "quick_open_files", "when": "global"},
     {"comment": "Quick Open buffers - switch between open tabs", "key": ";", "modifiers": ["ctrl"], "action": "quick_open_buffers", "when": "global"},
     {"key": "F10", "modifiers": [], "action": "menu_activate", "when": "global"},
+    {"comment": "Global - Fresh's Remote Indicator menu (Local / SSH authority state; gvim's chrome focus cycle is the separate built-in F7). A user can rebind this action like any other keymap binding.", "key": "F6", "modifiers": [], "action": "show_remote_indicator_menu", "when": "global"},
     {"key": "f", "modifiers": ["alt"], "action": "menu_open", "args": {"name":"File"}, "when": "global"},
     {"key": "e", "modifiers": ["alt"], "action": "menu_open", "args": {"name":"Edit"}, "when": "global"},
     {"comment": "Ctrl+E -> Focus file explorer (switch focus between explorer and editor)", "key": "e", "modifiers": ["ctrl"], "action": "focus_file_explorer", "when": "normal"},

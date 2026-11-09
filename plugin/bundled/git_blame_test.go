@@ -1,12 +1,15 @@
 package bundled_test
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -69,10 +72,65 @@ func blameRig(t *testing.T, o rigOpts) *rig {
 	return startRig(t, o)
 }
 
+// gatedBlameOS's first Run matching target blocks until release: the regression tests use
+// it to switch the cursor/toggle blame while a real git await is in flight.
+type gatedBlameOS struct {
+	*plugintest.FakeOS
+	target  string
+	block   atomic.Bool
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func (g *gatedBlameOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	if slices.Contains(argv, g.target) && g.block.CompareAndSwap(true, false) {
+		select {
+		case g.blocked <- struct{}{}:
+		default:
+		}
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return hostos.ProcResult{}, ctx.Err()
+		}
+	}
+	return g.FakeOS.Run(ctx, argv, o)
+}
+
+func gatedBlameRig(t *testing.T, target string, script func(*plugintest.FakeOS)) (*rig, *gatedBlameOS) {
+	t.Helper()
+	gate := &gatedBlameOS{
+		target:  target,
+		blocked: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	r := blameRig(t, rigOpts{
+		script: script,
+		osWrap: func(o *plugintest.FakeOS) hostos.OS {
+			gate.FakeOS = o
+			return gate
+		},
+	})
+	return r, gate
+}
+
 func blameScript(o *plugintest.FakeOS) {
 	o.Script(blameArgv("-L1,4"), plugintest.ProcScript{Stdout: porcelain(1, blameRows...)})
 	o.Script(gitArgv("show", "--no-ext-diff", "--no-textconv", "--stat", "--format=fuller", shaBob),
 		plugintest.ProcScript{Stdout: "commit " + shaBob + "\nAuthor: Bob B\n\n    fix the parser\n\n a.txt | 2 +-\n"})
+}
+
+var parentBlameRows = []blamed{
+	{shaAnn, "Ann Author", "parent commit", 5 * 24 * time.Hour},
+	{shaAnn, "Ann Author", "parent commit", 5 * 24 * time.Hour},
+	{shaAnn, "Ann Author", "parent commit", 5 * 24 * time.Hour},
+	{shaAnn, "Ann Author", "parent commit", 5 * 24 * time.Hour},
+}
+
+func blameHistoryScript(o *plugintest.FakeOS) {
+	blameScript(o)
+	o.Script(gitArgv("rev-parse", "--verify", shaBob+"^"), plugintest.ProcScript{Stdout: shaAnn + "\n"})
+	o.Script(blameArgv("-L1,4", shaAnn), plugintest.ProcScript{Stdout: porcelain(1, parentBlameRows...)})
 }
 
 // blameText returns the lines that carry blame text, as "line: text".
@@ -226,6 +284,50 @@ func TestGitBlameCaretBelowTheLastLine(t *testing.T) {
 	}
 }
 
+func TestGitBlameStepsToParentRevisionAndBack(t *testing.T) {
+	r := blameRig(t, rigOpts{script: blameHistoryScript})
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "Bob B") {
+		t.Fatalf("HEAD blame = %q, want Bob", got)
+	}
+	if err := r.h.Run("git_blame.blame_previous", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "Ann Author, 5 days ago • parent commit") {
+		t.Fatalf("parent blame = %q, want the parent revision", got)
+	}
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Blame at parent "+shaAnn[:7] {
+		t.Fatalf("notices = %q", got)
+	}
+	if err := r.h.Run("git_blame.blame_head", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "Bob B") {
+		t.Fatalf("HEAD blame after reset = %q, want Bob", got)
+	}
+}
+
+func TestGitBlameHistoryRequiresSavedBuffer(t *testing.T) {
+	r := blameRig(t, rigOpts{script: blameHistoryScript})
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Insert a line so the buffer becomes modified; the parent view cannot map its
+	// unsaved lines to a committed revision.
+	r.edit(blameFile, "zero\none\ntwo\nthree\nfour\n")
+	r.h.Emit(pluginapi.Event{Name: "buffer_changed", Data: map[string]any{"buf": r.ids[blameFile]}})
+	if err := r.h.Run("git_blame.blame_previous", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.h.NoticeTexts(); len(got) == 0 || !strings.Contains(got[len(got)-1], "Save the file") {
+		t.Fatalf("notices = %q, want the saved-buffer refusal", got)
+	}
+}
+
 func TestGitBlameShowCommit(t *testing.T) {
 	r := blameRig(t, rigOpts{script: blameScript})
 	r.moveCaret(2)
@@ -297,5 +399,214 @@ func TestGitBlameUnloadLeavesNothing(t *testing.T) {
 	}
 	if r.h.RT.Wants("cursor_moved") {
 		t.Error("a subscription survived the unload")
+	}
+}
+
+func TestGitBlamePreviousRevisionWithoutParent(t *testing.T) {
+	r := blameRig(t, rigOpts{script: func(o *plugintest.FakeOS) {
+		blameScript(o)
+		o.Script(gitArgv("rev-parse", "--verify", shaBob+"^"), plugintest.ProcScript{Code: 128, Stderr: "fatal: bad revision\n"})
+	}})
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_blame.blame_previous", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := r.h.NoticeTexts()
+	if len(got) == 0 || !strings.Contains(got[len(got)-1], "no parent revision") {
+		t.Fatalf("notices = %q, want the parent-refusal notice", got)
+	}
+	if annot := blameText(r); len(annot) != 1 || !strings.Contains(annot[0], "Bob B") {
+		t.Fatalf("blame changed after a refused parent step: %q", annot)
+	}
+}
+
+func TestGitBlameUpdateDiscardsResultAfterToggleOff(t *testing.T) {
+	r, gate := gatedBlameRig(t, "blame", blameScript)
+	gate.block.Store(true)
+	if err := r.h.RT.Run("git_blame.toggle", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	// Disable while the first update's blame await is still pending, then let the delayed
+	// runner finish. The old completion must not paint over the off state.
+	if err := r.h.RT.Run("git_blame.toggle", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		<-gate.blocked
+		close(gate.release)
+	}()
+	r.h.Settle()
+	if got := blameText(r); len(got) != 0 {
+		t.Fatalf("a stale update painted after blame was turned off: %q", got)
+	}
+	// The next enable starts clean and shows HEAD, not a stale parent/revision view.
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "Ann Author") {
+		t.Fatalf("blame after re-enable = %q", got)
+	}
+}
+
+func TestGitBlamePreviousRevisionAbortsOnCursorChange(t *testing.T) {
+	r, gate := gatedBlameRig(t, "rev-parse", blameHistoryScript)
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	gate.block.Store(true)
+	if err := r.h.RT.Run("git_blame.blame_previous", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	// The parent resolve is inside the delayed runner. Move the live cursor from another
+	// goroutine, then release it: the command must not read the new cursor with the old
+	// entry.commit.
+	changed := make(chan struct{})
+	go func() {
+		defer close(changed)
+		<-gate.blocked
+		if err := r.host.SetCursor(r.ids[blameFile], pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+			t.Errorf("set cursor: %v", err)
+		}
+		close(gate.release)
+	}()
+	r.h.Settle()
+	<-changed
+	for _, notice := range r.h.NoticeTexts() {
+		if strings.Contains(notice, "Blame at parent") {
+			t.Fatalf("stale cursor step reported success: notices %q", r.h.NoticeTexts())
+		}
+	}
+}
+
+func TestGitBlamePreviousRevisionAbortsWhenTurnedOff(t *testing.T) {
+	r, gate := gatedBlameRig(t, "rev-parse", blameHistoryScript)
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	gate.block.Store(true)
+	if err := r.h.RT.Run("git_blame.blame_previous", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	// Turn off while the parent await is pending; release the delayed runner afterwards.
+	if err := r.h.RT.Run("git_blame.toggle", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		<-gate.blocked
+		close(gate.release)
+	}()
+	r.h.Settle()
+	if got := blameText(r); len(got) != 0 {
+		t.Fatalf("blame text after off-race = %q", got)
+	}
+	for _, notice := range r.h.NoticeTexts() {
+		if strings.Contains(notice, "Blame at parent") {
+			t.Fatalf("off-race reported a parent step: notices %q", r.h.NoticeTexts())
+		}
+	}
+}
+
+func TestGitBlameHistoryCommandsWhileOffDoNotSetNextState(t *testing.T) {
+	r := blameRig(t, rigOpts{script: blameHistoryScript})
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{"git_blame.blame_previous", "git_blame.blame_head"} {
+		if err := r.h.Run(cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notices := r.h.NoticeTexts()
+	if len(notices) < 2 || !strings.Contains(strings.Join(notices, "\n"), "Git blame is off") {
+		t.Fatalf("notices = %q, want the off refusal", notices)
+	}
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "Bob B") {
+		t.Fatalf("the off-state commands changed the next view: %q", got)
+	}
+}
+
+func TestGitBlameSaveAsInvalidatesParentRevision(t *testing.T) {
+	r := blameRig(t, rigOpts{script: blameHistoryScript})
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_blame.blame_previous", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "parent commit") {
+		t.Fatalf("parent blame before Save As = %q", got)
+	}
+	// Save As changes the path of the same buffer id. The old parent revision belongs to
+	// the old path and must not be reused for the new one.
+	b := r.host.Buffers[r.index(blameFile)]
+	b.Info.Path = "/w/other/a.txt"
+	b.Info.Name = "a.txt"
+	r.h.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{
+		"buf": r.ids[blameFile], "path": "/w/other/a.txt",
+	}})
+	if got := blameText(r); len(got) != 1 || !strings.Contains(got[0], "Bob B") {
+		t.Fatalf("blame after Save As = %q, want HEAD for the new path", got)
+	}
+}
+
+func TestGitBlameShowCommitDiscardsStaleTargetAfterCommitRead(t *testing.T) {
+	r, gate := gatedBlameRig(t, "show", blameScript)
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.toggle", nil); err != nil {
+		t.Fatal(err)
+	}
+	gate.block.Store(true)
+	if err := r.h.RT.Run("git_blame.show_commit", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-gate.blocked
+		if err := r.host.SetCursor(r.ids[blameFile], pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+			t.Errorf("set cursor: %v", err)
+		}
+		close(gate.release)
+	}()
+	r.h.Settle()
+	<-done
+	if popup := r.host.UI().Last("popup"); popup != nil {
+		t.Fatalf("stale Show Commit popup opened: %+v", popup)
+	}
+}
+
+func TestGitBlameCopyHashDiscardsStaleTargetAfterBlameRead(t *testing.T) {
+	r, gate := gatedBlameRig(t, "blame", blameScript)
+	r.moveCaret(2)
+	gate.block.Store(true)
+	if err := r.h.RT.Run("git_blame.copy_hash", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-gate.blocked
+		if err := r.host.SetCursor(r.ids[blameFile], pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+			t.Errorf("set cursor: %v", err)
+		}
+		close(gate.release)
+	}()
+	r.h.Settle()
+	<-done
+	if r.host.Clipboard != "" {
+		t.Fatalf("stale Copy Commit Hash copied %q", r.host.Clipboard)
 	}
 }

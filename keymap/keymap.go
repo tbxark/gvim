@@ -505,6 +505,23 @@ func (m *Map) Resolve(chord string, ctx Context) (Binding, bool) {
 	return m.lookup(m.index, append([]string{c}, terminalEquivalents(c)...), ctx)
 }
 
+// ResolveExact is Resolve without the global fallback: only a binding whose when-clause
+// is ctx matches. It is for surfaces that apply their own context precedence (the dock
+// checks dock then terminal, and the root's remote-menu action must not let a global
+// binding shadow a user's terminal rebind).
+func (m *Map) ResolveExact(chord string, ctx Context) (Binding, bool) {
+	c, err := Normalize(chord)
+	if err != nil {
+		return Binding{}, false
+	}
+	for _, q := range append([]string{c}, terminalEquivalents(c)...) {
+		if i, ok := m.index[lookupKey{when: ctx, chord: q}]; ok {
+			return m.bindings[i], true
+		}
+	}
+	return Binding{}, false
+}
+
 // ResolveSequence returns the binding for a sequence of chords typed in order,
 // such as []string{"ctrl+x", "ctrl+s"}. Each step is normalized. A one-step
 // sequence resolves like Resolve. ok is false when no binding matches.
@@ -524,6 +541,24 @@ func (m *Map) ResolveSequence(steps []string, ctx Context) (Binding, bool) {
 		return m.lookup(m.index, append([]string{canon[0]}, terminalEquivalents(canon[0])...), ctx)
 	}
 	return m.lookup(m.seq, []string{strings.Join(canon, " ")}, ctx)
+}
+
+// UnboundExact reports whether the user explicitly unbound chord in exactly ctx, with
+// no global fallback. It is the companion of ResolveExact for context-precedence paths.
+func (m *Map) UnboundExact(chord string, ctx Context) bool {
+	if m == nil || len(m.unbound) == 0 {
+		return false
+	}
+	c, err := Normalize(chord)
+	if err != nil {
+		return false
+	}
+	for _, q := range append([]string{c}, terminalEquivalents(c)...) {
+		if m.unbound[lookupKey{when: ctx, chord: q}] {
+			return true
+		}
+	}
+	return false
 }
 
 // Unbound reports whether the user's keybindings explicitly unbound chord in ctx (or in

@@ -152,7 +152,10 @@ plugin-owned state and are not ended by a focus move (only the plugin's mode API
 panic chords or unload end them). They cannot steal keys while a native chrome region
 owns the keyboard — the plugin key layer is gated by editor key ownership — and they
 own the editor again when it regains the keys. **F6/F7 (verified against Fresh):**
-Fresh binds `F6` as the global Remote Indicator menu; gvim now does the same — F6 opens
+Fresh binds `F6` as the global Remote Indicator menu; gvim now does the same through the
+default keymap's global `show_remote_indicator_menu` binding (rebindable like any action;
+resolved with exact context precedence — a Terminal rebind/unbind beats the global default,
+and overlays consult their own context first). F6 opens
 a modal menu from the editor and every chrome focus scene (tab strip, explorer, Contents,
 Diagnostics, dock, focused plugin section, open menu bar) that reports the **actual
 workspace authority**: a local session says `Workspace: Local` and that this session has
@@ -163,8 +166,10 @@ command). It is a popup, not a focus move, so it leaves the current focus (a foc
 plugin section stays focused). Fresh's
 sidebar keyboard route is the `focus_next_sidebar_section` /
 `focus_prev_sidebar_section` action (Alt+Shift+N/P), which walks the explorer and every
-plugin section; gvim matches it. gvim's chrome focus cycle is a gvim extension and moved
-to `F7`: native order menu → tab strip → explorer → Contents → Diagnostics (when open)
+plugin section; gvim matches it.
+
+gvim's chrome focus cycle is a gvim extension and moved to `F7`: native order menu → tab
+strip → explorer → Contents → Diagnostics (when open)
 → editor, never a plugin section. Plugin sections are reached with Alt+Shift+N/P; F7
 from a focused plugin section clears its widget-panel layer and continues the native
 order (a plugin mode or pending key capture remains plugin-owned and is gated while the

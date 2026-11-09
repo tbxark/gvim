@@ -220,6 +220,45 @@ UI); `lsp_navigation` also offers definition/implementation/type-definition list
 gvim additions over Fresh's core direct-jump actions, and the picker has no initial selected index, so
 Fresh's enclosing-symbol preselection is not reproduced.
 
+### Git blame: inline parent stepping, no panel (port residual)
+
+Fresh's `git_blame.ts` is a magit-style panel with a scrollable parent-file view, a history stack and
+b/q navigation. gvim keeps the reduced inline blame described in bundled.md and now adds a one-step
+history slice instead of pretending the panel exists:
+
+* **Git: Blame Previous Revision** resolves the first parent of the blamed commit through the existing
+  safe `gvim.git.run` wrapper (same neutralized git settings/authority as every git read), then
+  re-blames only the current cursor line at that revision using the existing 40-line `git blame -L`
+  path. **Git: Blame HEAD** clears the revision override. The annotation itself is the normal inline
+  EOL decoration; the cache key includes the revision, so HEAD and parent entries do not mix;
+* the history view is inline and one-step at a time, not Fresh's panel: there is no parent-file text
+  view, scrollable blame body, b/q stack or sidebar. An unsaved buffer is refused (its unsaved lines
+  cannot be mapped to a committed parent); a modified buffer that is already showing a parent
+  revision is likewise refused until saved/reverted;
+* no new trust path or blocking work: one bounded `rev-parse --verify <commit>^` plus the normal
+  bounded blame call per step, through the same plugin task/authority path. Root commits or unreadable
+  parent results are a warn notice; no history commands are claimed when git is unavailable;
+* async safety: `blame_previous` captures the buffer id/path/version, cursor line, viewed revision and
+  a generation before the first await, re-validates all of them after every git yield, and only then
+  sets `view_rev`; an off toggle, tab/cursor/buffer change or revision change discards the step
+  silently. The viewed revision is stored with its owning path: Save As invalidates it, bumps the
+  generation and returns the annotation to HEAD for the new path instead of blaming the old parent
+  history. `blame_head` and both history commands refuse while blame is off and never seed the next
+  enable. `update` captures the same state, re-checks the revision/generation after its blame await,
+  and does not paint/clear a stale result. `Show Commit`/`Copy Commit Hash` use the same snapshot and
+  discard their target if the buffer/path/cursor/state changed; Show Commit also re-checks after its
+  commit-read await. Closing a buffer increments the generation and drops its revision/path state.
+
+Tests: `plugin/bundled/git_blame_test.go` covers the HEAD→parent→HEAD inline transitions, the parent
+notice, a missing-parent refusal that leaves the HEAD annotation intact, the unsaved-buffer refusal,
+and the existing Toggle/Show/Copy tests; the parent blame fixture is a real fake-git porcelain
+response, not a stubbed plugin result. Delayed-runner regressions gate a real git `Run` and switch
+state while it is in flight: cursor motion during the parent resolve must abort without a success
+notice, an off toggle during the step/update must not paint or seed parent state, and history commands
+invoked while off must leave the next enable at HEAD. Save As after a parent step must re-blame HEAD
+on the new path; a cursor change during the delayed commit-read of Show Commit and during Copy Commit
+Hash's blame read must drop the popup/clipboard result.
+
 ### Git grep: no prompt toolbar (port residual)
 
 Fresh's `git_grep` uses a prompt **toolbar** (`setPromptToolbar` with a Case toggle widget) and drives
@@ -453,7 +492,11 @@ opt-in) therefore implements one bounded real core rather than claiming the full
   public command. No dashboard built-in content, provider callback, git/disk/weather copy or
   orchestrator data is read;
 * j/k or arrows move, Enter activates, q/Esc closes, r refreshes; action rows are line targets
-  registered by this plugin (the API rejects another plugin's action target).
+  registered by this plugin (the API rejects another plugin's action target). When the page is the
+  current buffer the selected row's caret is moved with reveal=true so j/k cannot activate an
+  off-screen row in a small viewport; a background page does not move the caret or steal focus.
+  This is caret-based row visibility, not Fresh's page focus-follows-cursor/scroll-to-widget
+  composition.
 
 The page is opened automatically as a **background** tab once at startup when `auto_open` is true
 and never steals the foreground; it is not closed when files open and it does not reopen after the

@@ -75,6 +75,103 @@ func remoteLine(s string) string {
 	}, s)
 }
 
+// remoteMenuKey resolves k through the keymap context that owns the keyboard now and
+// reports the show_remote_indicator_menu command. The default is Fresh's global F6
+// binding, but the action is a normal keymap action: a user override can move it to
+// another chord or context, and the check follows the same context precedence as
+// handleKey. It deliberately runs before plugin panels, the terminal and every focus
+// path so those surfaces cannot swallow the root action.
+func (m *Model) remoteMenuKey(k tea.Key) (Command, bool) {
+	if m.keys == nil {
+		return Command{}, false
+	}
+	kp, _ := translateKey(k)
+	contexts := m.keyContexts()
+	exact, exactOK := m.keys.(ExactKeymap)
+	unbind, unbindOK := m.keys.(ExactUnbindKeymap)
+	for i, ctx := range contexts {
+		if unbindOK && unbind.UnboundExact(kp, ctx) {
+			// An unbind is a tombstone only for the remote action: consume the chord
+			// when a weaker context/global would otherwise run show_remote_indicator_menu.
+			// Every other unbound chord stays free for the editor/terminal/plugin path, so
+			// a printable key still types.
+			if remoteActionFallback(m.keys, kp, contexts[i+1:]) {
+				return Command{}, true
+			}
+			return Command{}, false
+		}
+		var (
+			cmd Command
+			ok  bool
+		)
+		if exactOK {
+			cmd, ok = exact.ResolveExact(kp, ctx)
+		} else {
+			// Legacy keymap without exact resolution: Resolve already applies the global
+			// fallback, which this path cannot separate. Real adapters implement
+			// ExactKeymap.
+			cmd, ok = m.keys.Resolve(kp, ctx)
+		}
+		if !ok {
+			continue
+		}
+		if cmd.Action == "show_remote_indicator_menu" {
+			return cmd, true
+		}
+		// A more specific exact binding wins and is left to its own surface.
+		return Command{}, false
+	}
+	return Command{}, false
+}
+
+// remoteActionFallback reports whether one of the weaker exact contexts would run the
+// remote-menu action for kp. An exact unbind in a weaker context stops the fallback
+// there (nothing would run), so the walk stops at it.
+func remoteActionFallback(km Keymap, kp KeyPress, contexts []KeyContext) bool {
+	if km == nil || len(contexts) == 0 {
+		return false
+	}
+	exact, exactOK := km.(ExactKeymap)
+	unbind, unbindOK := km.(ExactUnbindKeymap)
+	for _, ctx := range contexts {
+		if unbindOK && unbind.UnboundExact(kp, ctx) {
+			return false
+		}
+		var (
+			cmd Command
+			ok  bool
+		)
+		if exactOK {
+			cmd, ok = exact.ResolveExact(kp, ctx)
+		} else {
+			cmd, ok = km.Resolve(kp, ctx)
+		}
+		if ok {
+			return cmd.Action == "show_remote_indicator_menu"
+		}
+	}
+	return false
+}
+
+// keyContexts returns the keymap context(s) of the current focus. The editor and the
+// native sections use normal; the explorer has its own context; the tab strip, a
+// focused plugin panel and a focused terminal dock have no section context of their own
+// (dock/terminal) and fall back to global. The list order is precedence.
+func (m *Model) keyContexts() []KeyContext {
+	switch {
+	case m.dockKeyboard():
+		return []KeyContext{KeyContextDock, KeyContextTerminal, KeyContextGlobal}
+	case m.explorerFocus:
+		return []KeyContext{KeyContextFileExplorer, KeyContextGlobal}
+	case m.tabFocus:
+		return []KeyContext{KeyContextGlobal}
+	case m.plug.panels.focus != 0:
+		return []KeyContext{KeyContextGlobal}
+	default:
+		return []KeyContext{KeyContextNormal, KeyContextGlobal}
+	}
+}
+
 // remoteStatus reads the current workspace authority without IO. A remote workspace
 // is an SSH authority label or a remote file root; both are set by the app before the
 // model is built.

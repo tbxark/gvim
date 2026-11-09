@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 249 | 247 |
-| `macos` | 60 | 270 |
-| `macos-gui` | 52 | 321 |
-| `emacs` | 98 | 313 |
-| `vscode` | 9 | 252 |
+| `default` | 250 | 248 |
+| `macos` | 60 | 271 |
+| `macos-gui` | 52 | 322 |
+| `emacs` | 98 | 314 |
+| `vscode` | 9 | 253 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
@@ -41,8 +41,9 @@ Emacs has the `C-x` chords and the `M-` keys, VS Code has `Ctrl+K Ctrl+L` and fr
 keeps its Ctrl and Option keys, `macos-gui` uses Cmd (a terminal that reports Super sends those;
 the Ctrl keys it inherits still work when it does not), and `default` is the cross-platform set.
 
-A few keys are gvim's, where Fresh has none: `F7` (chrome focus cycle; `F6` keeps Fresh's
-Remote Indicator menu meaning), `Ctrl+Shift+P` (Command Palette), `Ctrl+Shift+S`
+A few keys are gvim's, where Fresh has none: `F7` (chrome focus cycle; `F6` is Fresh's
+own global Remote Indicator binding and stays a normal, rebindable keymap row),
+`Ctrl+Shift+P` (Command Palette), `Ctrl+Shift+S`
 (Save As), `Ctrl+Shift+K` (Delete Line), `Ctrl+Shift+D` (Duplicate Line), `Alt+Z` (Toggle Fold),
 `Ctrl+\` and `Alt+\` (Split Right and Split Below), `Alt+Shift+W` (Close Split), macOS
 `Alt+Shift+S` (Save As), `macos-gui` `Cmd+Shift+D` (Duplicate Line) and `Cmd+Shift+F` (Live
@@ -200,7 +201,7 @@ contexts Fresh does not name).
 
 ## Differences from Fresh
 
-- Remote workspaces are implemented over the SSH workspace authority (`docs/authority.md`). Fresh's global `F6` now opens the Remote Indicator menu from whatever chrome region or editor has the keyboard: a local session reports `Workspace: Local` and that this session has no remote authority; a remote session reports `Workspace: Remote` with the SSH authority (`user@host`), its connected/reconnecting/disconnected state and reason, the remote workspace root, and the `Reconnect SSH` action (the existing authority reconnect, run in a command, not on the update goroutine). `F6`/`F7` are built-in root keys handled before the keymap; the gvim chrome focus cycle that used to live on `F6` is now on `F7` (gvim-only), so `F6` keeps Fresh's meaning.
+- Remote workspaces are implemented over the SSH workspace authority (`docs/authority.md`). Fresh's global `F6` now opens the Remote Indicator menu from whatever chrome region or editor has the keyboard: a local session reports `Workspace: Local` and that this session has no remote authority; a remote session reports `Workspace: Remote` with the SSH authority (`user@host`), its connected/reconnecting/disconnected state and reason, the remote workspace root, and the `Reconnect SSH` action (the existing authority reconnect, run in a command, not on the update goroutine). `F6` is Fresh's global `show_remote_indicator_menu` keymap binding (part of the default preset, so a keybinding override can move it to another chord or context like any action); the gvim chrome focus cycle that used to live on `F6` is now on `F7`, a built-in root key handled before the keymap. The action resolves with exact context precedence before plugin panels and the terminal (a focused dock checks its Dock binding, then Terminal, then Global, so a user Terminal F6 rebind or unbind is not shadowed by the global default; other focus paths check Normal then Global), and overlays consult their own context first. An exact-context unbind is a tombstone only where the chord would otherwise fall through to the remote action: F6/a moved remote chord in that focus is consumed instead of reaching the weaker global binding, while any other unbound key (a printable, say) still flows to the editor or terminal.
 - The project-wide Search and Replace panel applies replacements to tabs and leaves them unsaved
   (Fresh writes hidden buffers to disk); the notice asks for Save All. Match-tree checkboxes,
   Replace Scoped, the file-glob field and streaming results are not implemented.

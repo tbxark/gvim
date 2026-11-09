@@ -343,3 +343,129 @@ func TestKeymapDefaultsToPlatformKeymap(t *testing.T) {
 		t.Fatal("Keymap(default) = nil")
 	}
 }
+
+// TestAdapterExactContextPrecedence covers the exact-context API the root uses for the
+// remote-menu action and the dock: a user Terminal F6 rebind or unbind must not be
+// shadowed by the preset's Global F6, while normal Resolve keeps its global fallback.
+func TestAdapterExactContextPrecedence(t *testing.T) {
+	t.Parallel()
+	base, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f6 := tui.KeyPress{Name: "F6"}
+	// The preset binds F6 globally to show_remote_indicator_menu.
+	ad := NewKeymap(base)
+	if cmd, ok := ad.(interface {
+		ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+	}).ResolveExact(f6, tui.KeyContextTerminal); ok {
+		t.Fatalf("ResolveExact(Terminal) = %+v, want no terminal binding", cmd)
+	}
+	if cmd, ok := ad.Resolve(f6, tui.KeyContextDock); !ok || cmd.Action != "show_remote_indicator_menu" {
+		t.Fatalf("Resolve(Dock) = %+v/%v, want the global fallback", cmd, ok)
+	}
+
+	// A user Terminal rebind wins in the exact context; Dock stays on the global fallback.
+	rebound, _ := base.WithUserBindings([]byte(`[{"key":"F6","modifiers":[],"action":"toggle_keyboard_capture","when":"terminal"}]`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ad = NewKeymap(rebound)
+	exact := ad.(interface {
+		ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+	})
+	if cmd, ok := exact.ResolveExact(f6, tui.KeyContextTerminal); !ok || cmd.Action != "toggle_keyboard_capture" {
+		t.Fatalf("ResolveExact(Terminal) after rebind = %+v/%v, want toggle_keyboard_capture", cmd, ok)
+	}
+	if cmd, ok := exact.ResolveExact(f6, tui.KeyContextDock); ok {
+		t.Fatalf("ResolveExact(Dock) after a Terminal rebind = %+v, want none", cmd)
+	}
+	if cmd, ok := ad.Resolve(f6, tui.KeyContextDock); !ok || cmd.Action != "show_remote_indicator_menu" {
+		t.Fatalf("Resolve(Dock) still falls back global after the terminal rebind: %+v/%v", cmd, ok)
+	}
+
+	// A Terminal unbind is exact: it suppresses the remote action there, not in Dock/Global.
+	unbound, _ := base.WithUserBindings([]byte(`[{"key":"F6","modifiers":[],"action":"unbind","when":"terminal"}]`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ad = NewKeymap(unbound)
+	exact = ad.(interface {
+		ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+	})
+	exactUnbind := ad.(interface {
+		UnboundExact(tui.KeyPress, tui.KeyContext) bool
+	})
+	if !exactUnbind.UnboundExact(f6, tui.KeyContextTerminal) {
+		t.Fatal("UnboundExact(Terminal) = false after a terminal noop")
+	}
+	if exactUnbind.UnboundExact(f6, tui.KeyContextDock) {
+		t.Fatal("UnboundExact(Dock) = true after only a terminal noop")
+	}
+	if cmd, ok := exact.ResolveExact(f6, tui.KeyContextTerminal); ok {
+		t.Fatalf("ResolveExact(Terminal) after unbind = %+v, want none", cmd)
+	}
+
+	// Unbinding Global F6 removes the fallback everywhere; it does not erase an explicit
+	// Terminal binding in the exact context.
+	globalOff, _ := rebound.WithUserBindings([]byte(`[{"key":"F6","modifiers":[],"action":"unbind","when":"global"}]`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ad = NewKeymap(globalOff)
+	exact = ad.(interface {
+		ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+	})
+	if cmd, ok := exact.ResolveExact(f6, tui.KeyContextTerminal); !ok || cmd.Action != "toggle_keyboard_capture" {
+		t.Fatalf("global unbind erased the terminal rebind: %+v/%v", cmd, ok)
+	}
+	if cmd, ok := ad.Resolve(f6, tui.KeyContextNormal); ok {
+		t.Fatalf("global unbind left a normal/global binding: %+v", cmd)
+	}
+}
+
+// TestAdapterExactUnbindNormalAndExplorer covers the two focus contexts that resolve
+// before the global fallback: a user unbind in normal or file_explorer is visible as an
+// ExactUnbind tombstone with no exact binding, while the other context stays untouched.
+func TestAdapterExactUnbindNormalAndExplorer(t *testing.T) {
+	t.Parallel()
+	base, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f6 := tui.KeyPress{Name: "F6"}
+	for _, tc := range []struct {
+		name string
+		when string
+		ctx  tui.KeyContext
+	}{
+		{name: "normal", when: "normal", ctx: tui.KeyContextNormal},
+		{name: "file explorer", when: "file_explorer", ctx: tui.KeyContextFileExplorer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := "[{\"key\":\"F6\",\"modifiers\":[],\"action\":\"unbind\",\"when\":\"" + tc.when + "\"}]"
+			layer, _ := base.WithUserBindings([]byte(raw), nil)
+			ad := NewKeymap(layer)
+			exact := ad.(interface {
+				ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+			})
+			unbind := ad.(interface {
+				UnboundExact(tui.KeyPress, tui.KeyContext) bool
+			})
+			if !unbind.UnboundExact(f6, tc.ctx) {
+				t.Fatalf("UnboundExact(%s) = false", tc.name)
+			}
+			if cmd, ok := exact.ResolveExact(f6, tc.ctx); ok {
+				t.Fatalf("ResolveExact(%s) after unbind = %+v, want none", tc.name, cmd)
+			}
+			other := tui.KeyContextNormal
+			if tc.ctx == tui.KeyContextNormal {
+				other = tui.KeyContextFileExplorer
+			}
+			if unbind.UnboundExact(f6, other) {
+				t.Fatalf("the %s unbind leaked into %s", tc.name, other)
+			}
+		})
+	}
+}

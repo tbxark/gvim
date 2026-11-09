@@ -50,6 +50,19 @@ func (e envPort) DetectedEnv() (pluginapi.EnvInfo, bool) {
 	return pluginapi.EnvInfo{Name: det.Name, Kind: string(det.Kind), Snippet: det.Snippet}, true
 }
 
+// CachedEnvStatus is the side-effect-free read for the status row: it never triggers the
+// watcher-retry recovery that DetectedEnv performs, so rendering cannot spawn IO. The
+// snippets are deliberately not carried, only the name/kind a label needs.
+func (e envPort) CachedEnvStatus() (active, detected pluginapi.EnvInfo, hasActive, hasDetected bool, trust string) {
+	if det, ok := e.provider.Detected(); ok {
+		detected, hasDetected = pluginapi.EnvInfo{Name: det.Name, Kind: string(det.Kind)}, true
+	}
+	if info, ok := e.provider.Active(); ok {
+		active, hasActive = pluginapi.EnvInfo{Name: info.Name, Kind: string(info.Kind)}, true
+	}
+	return active, detected, hasActive, hasDetected, e.TrustLevel()
+}
+
 func (e envPort) ActiveEnv() (pluginapi.EnvInfo, bool) {
 	info, ok := e.provider.Active()
 	if !ok {

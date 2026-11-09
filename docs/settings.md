@@ -493,7 +493,13 @@ start/restart/stop actions).
 Settings > Environment shows the process/workspace facts (shell, TERM, root, config
 files) and, when the app wired a project-environment provider, three project rows:
 the detected environment (detector name and kind, or "none"), the active environment
-(the applied name, or "system") and the trust level that gates activation.
+(the applied name, or "system") and the trust level that gates activation. The status row also shows a read-only, cached
+indicator: the active environment as `<name> ✓`, a detected but inactive one as `<name>`
+(or `<name> (locked)` while the workspace is untrusted), hidden when nothing is detected.
+It reads a side-effect-free cached status (no detection, capture, watcher retry, activation
+or trust decision, and no environment variables/snippets are displayed); an already-active
+environment stays shown as active if trust is later revoked (the indicator is informational;
+deactivation/reload is explicit); see docs/parity.md residual R13-18.
 
 In a REMOTE workspace the provider is `env.Remote`: the markers are probed and the
 recipe activated on the remote host through the authority, so these rows describe the remote

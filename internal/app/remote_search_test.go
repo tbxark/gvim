@@ -1164,6 +1164,68 @@ func TestRemoteSearchPreviewWindowStopsBeforeTotal(t *testing.T) {
 	}
 }
 
+// TestRemoteSearchPreviewExactFirstLineCapIsNotSilentlyEmpty: a first line exactly at
+// the 256 KiB output cap is a valid complete line, not a scanner-failure empty window.
+// The window may stop before the following line and reports Window+Truncated honestly.
+func TestRemoteSearchPreviewExactFirstLineCapIsNotSilentlyEmpty(t *testing.T) {
+	fs := newRemoteFS()
+	line := strings.Repeat("x", remoteSearchPreviewHeadBytes)
+	fs.put("/remote/w/edge.md", line+"\nsecond\nthird\n")
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/edge.md", Name: "edge.md", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err != "" {
+		t.Fatalf("exact-cap preview error = %q", res.Err)
+	}
+	if !res.Window || !res.Truncated {
+		t.Fatalf("exact-cap preview flags = window %v truncated %v, want a bounded window", res.Window, res.Truncated)
+	}
+	if len(res.Lines) != 1 || len(res.Lines[0]) != remoteSearchPreviewHeadBytes {
+		t.Fatalf("exact-cap lines = %d first length %d, want the complete cap line", len(res.Lines), len(res.Lines[0]))
+	}
+	if res.Start != 0 {
+		t.Fatalf("exact-cap start = %d, want 0", res.Start)
+	}
+
+	// The same line at EOF is the whole file, with no truncation marker.
+	fs.put("/remote/w/only.md", line)
+	res, err = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/only.md", Name: "only.md", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 3,
+	})
+	if err != nil || res.Err != "" || len(res.Lines) != 1 || res.Lines[0] != line || res.Truncated || res.Total != 1 {
+		t.Fatalf("exact-cap EOF preview = %+v, %v", res, err)
+	}
+}
+
+// TestRemoteSearchPreviewOverlongLineIsExplicitError: one line above the output cap is
+// refused with the explicit preview line-cap error (both when the scanner can read it and
+// when the scanner's own token cap is exceeded), never an empty window with a generic
+// scanner failure.
+func TestRemoteSearchPreviewOverlongLineIsExplicitError(t *testing.T) {
+	fs := newRemoteFS()
+	fs.put("/remote/w/long.md", strings.Repeat("x", remoteSearchPreviewHeadBytes+1)+"\nafter\n")
+	fs.put("/remote/w/huge.md", strings.Repeat("x", remotePreviewWindowMaxLine+1)+"\nafter\n")
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	for _, path := range []string{"/remote/w/long.md", "/remote/w/huge.md"} {
+		res, err := s.Preview(searchpanel.PreviewRequest{
+			Path: path, Name: "long.md", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 2,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if !strings.Contains(res.Err, "longer than the preview line cap") {
+			t.Fatalf("%s preview = %+v, want the explicit line-cap error", path, res)
+		}
+		if len(res.Lines) != 0 {
+			t.Fatalf("%s filled a line-cap-error window with %d lines", path, len(res.Lines))
+		}
+	}
+}
+
 // TestRemoteSearchPreviewWindowRejectsNonText: a window is not sanitized into readable
 // text: invalid UTF-8 and NUL/binary remote files get the explicit reason instead.
 func TestRemoteSearchPreviewWindowRejectsNonText(t *testing.T) {
