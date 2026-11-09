@@ -251,13 +251,19 @@ recipe; a bare `.venv` without an interpreter does not count and first match win
 `gvim.buf.set_line_targets` maps a *buffer line* to a file path and 0-based line: pressing plain
 Enter there (normal mode, count 1, no selection or extra carets) or a single left click opens that
 location, in the split labelled `into` when one is live, else beside the pane holding the targets.
-Targets cannot open commands, virtual buffers or a historical revision, and a widget-panel row is not
-a buffer line. Three port decisions follow (round 11):
+A target can also be an action: `{line=, action="<plugin>.<name>"}` runs a command the setting
+plugin registered (through the normal dispatcher; another plugin's command is rejected), which
+is how the dashboard makes its action rows clickable. Targets still cannot open arbitrary
+commands, virtual buffers or a historical revision, and a widget-panel row is not a buffer line.
+Four port decisions follow (rounds 11 and 22):
 
-* `dashboard` uses targets: its recent-file rows are painted buffer lines, so each paint publishes
-  `{line, path}` targets for them and `clear_line_targets` runs on close/unload. The rows remain
-  keyboard-navigable through the buffer-local mode (its Enter binding runs first), so the visible win
-  is a mouse click on a recent file. Command rows cannot be targets and stay keyboard-only.
+* `dashboard` uses targets for both kinds of row: its recent-file rows publish `{line, path}` and
+  its focusable action rows (and a Git-section branch-log row, when git_log is available) publish
+  `{line, action}` targets naming hidden commands the dashboard itself registers; the action then
+  runs through the normal command dispatcher, exactly like the keyboard mode's Enter, and
+  `clear_line_targets` runs on close/unload. The branch-log row is rendered as an explicit
+  unavailable line (not a target) when the git_log command is not registered. The repository URL
+  stays plain text because there is no safe URL-open action.
 * `code_tour` cannot use targets: its steps are a widget-panel card, not lines of a buffer, and its
   step highlight is decoration anchoring in the source file. It keeps local line anchors.
 * `git_log` should not use targets: its detail rows' Enter opens the commit's historical blob

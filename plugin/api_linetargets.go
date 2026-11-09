@@ -9,6 +9,7 @@ import (
 // Line targets (tier-1c remainder, Fresh's setLineTargets):
 //
 //	gvim.buf.set_line_targets(buf, {{line=, path=, target=?, into=?}, ...}) -> true | nil, err
+//	gvim.buf.set_line_targets(buf, {{line=, action=}, ...}) -> true | nil, err
 //	gvim.buf.clear_line_targets(buf) -> true
 //
 // A target makes a line of the buffer clickable: Enter on it or a single left click opens
@@ -38,12 +39,16 @@ func installLineTargets(e *apiEnv) {
 				Path:   clipText(optString(&o, "path"), pluginapi.MaxLineTargetLen),
 				Target: o.integer("target", 0),
 				Into:   clipText(optString(&o, "into"), pluginapi.MaxLineTargetInto),
+				Action: clipText(optString(&o, "action"), pluginapi.MaxLineTargetAction),
 			}
 			if o.err != "" {
 				return bufRet(L, invalidErr("target %d: %s", i, o.err))
 			}
-			if t.Path == "" {
-				return bufRet(L, invalidErr("target %d: a path is required", i))
+			if t.Path == "" && t.Action == "" {
+				return bufRet(L, invalidErr("target %d: a path or action is required", i))
+			}
+			if t.Path != "" && t.Action != "" {
+				return bufRet(L, invalidErr("target %d: a path and an action are mutually exclusive", i))
 			}
 			targets = append(targets, t)
 		}

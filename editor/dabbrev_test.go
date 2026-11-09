@@ -2,6 +2,8 @@ package editor
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -331,5 +333,77 @@ func TestDabbrevMultiBufferMRUOrder(t *testing.T) {
 		if got := e.Active().Buffer.Line(0); got != w {
 			t.Fatalf("after press %d line = %q, want %q", i+1, got, w)
 		}
+	}
+}
+
+// TestSharedOwnershipHandoffKeepsMRURank: an ownership handoff replaces the document
+// identity of a shared buffer in both editors. The replacement must inherit the old
+// document's MRU rank, or completion/dabbrev other-buffer order silently falls back to
+// tab order after the handoff.
+func TestSharedOwnershipHandoffKeepsMRURank(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shared.txt")
+	if err := os.WriteFile(path, []byte("foop\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	// A: the shared file, then two own tabs. MRU before the handoff: X (active), P, Y.
+	a.addDoc(newDocument("", "aaax\n"))
+	a.addDoc(newDocument("", "aaay\n"))
+	a.switchTo(2)
+	a.switchTo(0)
+	a.switchTo(1)
+	// B: own tabs Z and W, then the same path loaded while B is not focused (the
+	// startup-restore deferral path). MRU before the handoff: W (active), P, Z.
+	b.addDoc(newDocument("", "fooz\n"))
+	b.addDoc(newDocument("", "zz fo\n"))
+	b.switchTo(1)
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	b.switchTo(1)
+	shared.Focus(b) // adopts the deferred copy as a mirror, then takes ownership
+
+	// B's docs are [Z, W, canonical]; W is active and the canonical document inherits
+	// the deferred copy's rank (after W, before Z), not the end of the tab list.
+	if got, want := b.RecentTabIndices(), []int{1, 2, 0}; !slices.Equal(got, want) {
+		t.Fatalf("B RecentTabIndices after handoff = %v, want %v", got, want)
+	}
+	// A's docs are [snapshot, X, Y]; X is active and the snapshot inherits P's rank.
+	if got, want := a.RecentTabIndices(), []int{1, 0, 2}; !slices.Equal(got, want) {
+		t.Fatalf("A RecentTabIndices after handoff = %v, want %v", got, want)
+	}
+	// Observable completion order: dabbrev in B searches the canonical shared tab
+	// before Z, because the handoff kept the MRU rank; a fallback-to-tab-order bug would
+	// put Z first.
+	marksCaret(b, 0, 5) // "zz fo|"
+	want := []string{"zz foop", "zz fooz", "zz fo"}
+	for i, w := range want {
+		if r := b.Do("dabbrev_expand", nil); r.Err != nil {
+			t.Fatalf("dabbrev press %d: %v", i+1, r.Err)
+		}
+		if got := b.Active().Buffer.Line(0); got != w {
+			t.Fatalf("after dabbrev press %d line = %q, want %q", i+1, got, w)
+		}
+	}
+	// Moving the canonical tab keeps document identity and rank; closing Z drops only Z.
+	if err := b.MoveTab(b.DocIDs()[2], -2); err != nil {
+		t.Fatalf("MoveTab: %v", err)
+	}
+	// Docs are now [canonical, Z, W]; W active at index 2; ranks canonical then Z.
+	if got, want := b.RecentTabIndices(), []int{2, 0, 1}; !slices.Equal(got, want) {
+		t.Fatalf("B RecentTabIndices after move = %v, want %v", got, want)
+	}
+	if err := b.CloseTab(1, true); err != nil { // close Z
+		t.Fatalf("CloseTab: %v", err)
+	}
+	if got, want := b.RecentTabIndices(), []int{1, 0}; !slices.Equal(got, want) {
+		t.Fatalf("B RecentTabIndices after close = %v, want %v", got, want)
 	}
 }

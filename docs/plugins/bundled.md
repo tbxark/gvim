@@ -222,9 +222,15 @@ Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** r
 auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file
 opens; a timer refreshes it (`refresh_seconds`). The recent-file rows are line targets
 (`gvim.buf.set_line_targets`): a single click opens the file, while the command rows stay
-keyboard-only because a target opens a file, not an action. Reductions: no weather/GitHub/network
-sections, no third-party section API or Utility Dock placement, no clicks on command rows and no
-sessions section.
+keyboard-only because a target opens a file, not an action — this changed in round 22: action
+rows (including the Git section's branch-log row) publish action line targets running a hidden
+command the dashboard plugin owns, so a mouse click goes through the same dispatcher as the
+keyboard mode while a target still cannot dispatch another plugin's command. The branch-log row
+is only advertised when the git_log plugin's command is registered; without it the row says
+`branch log  unavailable (enable git_log)` and is not clickable. The repository URL stays plain
+text (gvim has no safe URL-open action; opening it through a shell is deliberately avoided).
+Reductions: no weather/GitHub/network sections, no third-party section API or Utility Dock
+placement, no clickable URL and no sessions section.
 
 **code_tour** (reduced Fresh port): loads a Fresh `.fresh-tour.json` or a VS Code Edit CodeTour
 `.tour` (auto-detected; bounded at 1 MiB / 200 steps), shows the steps in a floating widget card (list,

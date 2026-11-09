@@ -133,3 +133,59 @@ func TestPasteAfterCloseFails(t *testing.T) {
 		t.Fatal("Paste after Close error = nil, want an error")
 	}
 }
+
+// TestSessionExitStatus checks the exit status the dock records: 0, a non-zero
+// code and a signal (reported as -1 on Unix); a running session reports ok false.
+func TestSessionExitStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   int
+	}{
+		{name: "clean exit", script: "exit 0", want: 0},
+		{name: "non-zero exit", script: "exit 7", want: 7},
+		{name: "signal", script: "kill -TERM $$", want: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := startSh(t, tt.script)
+			select {
+			case <-s.Done():
+			case <-time.After(pollTimeout):
+				t.Fatalf("the child did not exit within %v", pollTimeout)
+			}
+			code, ok := s.ExitStatus()
+			if !ok || code != tt.want {
+				t.Fatalf("ExitStatus = %d, %v; want %d, true", code, ok, tt.want)
+			}
+		})
+	}
+	// A running child does not report a status: ExitStatus blocks until the exit
+	// is reaped, so run it aside and confirm it stays blocked until Close.
+	s := startSh(t, "sleep 30")
+	result := make(chan struct {
+		code int
+		ok   bool
+	}, 1)
+	go func() {
+		code, ok := s.ExitStatus()
+		result <- struct {
+			code int
+			ok   bool
+		}{code, ok}
+	}()
+	select {
+	case got := <-result:
+		t.Fatalf("a running session reported a status: %+v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_ = s.Close()
+	select {
+	case got := <-result:
+		if !got.ok {
+			t.Fatalf("a killed session reported no status after Close")
+		}
+	case <-time.After(pollTimeout):
+		t.Fatal("ExitStatus did not return after Close")
+	}
+}

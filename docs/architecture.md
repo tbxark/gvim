@@ -633,7 +633,19 @@ still loads unchanged.
   rather than getting an independent copy that could overwrite it. Save As on a SHARED
   OWNER rekeys the buffer: the entry and its mirrors follow the renamed buffer to the new
   path, the old path stops being shared and reloads independently from its untouched file.
-  The conflict tab's label is persisted with the session (`session.FileState.Label` for a
+  A Save As plan holds a revocable EXCLUSIVE reservation on its canonical target from the
+  UI plan step (`SharedBuffers.ReserveSaveAs`) until `ApplySavePlan`: another workspace
+  cannot open, register or Save As the path meanwhile (`Open` reports it is being saved,
+  `PlanSaveAs` refuses a second claim, the same editor gets an in-progress refusal), so the
+  planner's ownership check cannot be overtaken by the asynchronous write that runs off the
+  UI goroutine. `ApplySavePlan` releases the claim on every outcome - success, write failure
+  and cancellation - `SavePlan.Release` is the hook for a caller that drops a plan without
+  applying it, and `DropEditor` releases the claims of a closed/evicted workspace. This
+  extends Fresh's one-buffer-per-file rule (Fresh refuses a Save As onto a path another
+  editor has open) across gvim's plan-to-write window. Tests: the target is refused to the
+  other workspace until apply, a failed write and a cancelled/dropped plan release it, a
+  dropped editor releases it, concurrent plans produce exactly one winner, and the
+  plan-/write-/apply window creates no independent copy of the target.  The conflict tab's label is persisted with the session (`session.FileState.Label` for a
   pathless buffer, written by both session writers and restored by `RestoreSession`), so an
   eviction/rematerialize or daemon restart keeps the preserved copy identifiable as
   `[shared conflict] <name>` instead of a plain `Untitled-N` tab; its text and pathless
@@ -642,7 +654,11 @@ still loads unchanged.
   open in two workspaces, mirror read-only-until-ownership, edit propagation, ownership
   back-and-forth with undo/unsaved state, conflict notice, close-owner promotion, owner-tab
   close promotion, mirror-tab close without a prompt, the last-view prompt, CloseByPath
-  promotion, and a remote launch keeping independent buffers. Residuals: sharing starts on
+  promotion, and a remote launch keeping independent buffers. Residuals: the Save As
+  reservation is in-process (a caller that drops a plan without Release or DropEditor leaks
+  it until the editor goes away) and only guards Open/Register/PlanSaveAs - an
+  OpenLoaded/plugin-created tab for a reserved path is not blocked from loading (only from
+  registering as an owner); disk exists/force semantics are unchanged. Sharing starts on
   `OpenFile` and startup `OpenLoaded` but not on a plugin/API-created tab for a path
   already shared (that still opens an independent copy), and a daemon open-file request
   for an already-owned path switches to the owner rather than opening a mirror;
@@ -688,27 +704,33 @@ still loads unchanged.
   Project search (Live Grep) has an explicit remote scope rather than "whatever the tool
   walks": in a git work tree it reads Fresh's project-file listing once (`git rev-parse
   --is-inside-work-tree`, then one bounded `git ls-files -z -s --cached --others
-  --exclude-standard`) and only results in that listing enter a batch. Tracked files are
-  therefore kept even when they match .gitignore (and tracked dotfiles are listed, as Fresh
-  does), untracked ignored files are absent, nested repositories/submodules are accepted by
-  their listed prefix (their inner ignore rules are not applied by that one git call), and
-  untracked hidden entries are dropped. With a complete listing, the ripgrep path is run
-  with `--no-ignore --hidden -g !.git` and then filtered by the same candidate scope: that
-  is what makes a tracked file which matches .gitignore searchable on the rg path too
-  (rg's own ignore rules omit it, unlike Fresh's git candidate list); the `!.git` glob keeps
-  the repository metadata out of the widened scan. The grep fallback (no rg on the host)
-  runs its ordinary recursive grep and relies on the candidate filter, so its `.gitignore`
-  behaviour comes from git, not from grep. Outside a git work tree the grep fallback filters
-  hidden entries only (Fresh's walk does not consult .gitignore outside a repository) and
-  rg keeps its own defaults. When the probe/listing fails, times out or is truncated, the
-  candidate list is never guessed at (the scope falls back to hidden-only filtering): using
-  the .gitignore rules alone would wrongly drop tracked files that match an ignore pattern.
-  This is bounded and streamed like the search itself. The remote tool's output cap and the
-  panel's Limit still apply before this filter, so an ignored-heavy tree can return fewer
-  than Limit results; in particular the widened rg scan of hidden/ignored trees can consume
-  that cap before candidate-visible results (a recorded limitation). When the panel supplies
-  a finder file snapshot that snapshot (already ignore-filtered) is authoritative. No local
-  file is read anywhere in this path.
+  --exclude-standard`) and passes the candidate FILES explicitly to the tool in bounded
+  batches (400 paths / 48 KiB of paths per command, at most 64 commands). The candidates
+  are tracked files (including tracked files that match .gitignore, and tracked dotfiles)
+  plus untracked non-hidden files; the tool therefore never scans ignored or hidden trees,
+  so ignored matches cannot consume the output cap or the result limit before candidates.
+  Paths follow `--` (a name starting with a dash is a path, not an option), the query stays
+  a single `-e` argument, cancellation and the search timeout stop between batches, and the
+  merged output is capped (8 MiB, truncation flagged). The existing rg/grep regex engine is
+  unchanged: there is no POSIX-ERE prefilter, and every returned line is re-checked by the
+  local search engine as before. The candidate filter still drops anything outside the
+  scope (untracked hidden files, ignored entries). Nested repositories/submodules are listed
+  by name only, so a candidate list containing one cannot be mapped losslessly to explicit
+  files: that search keeps the widened whole-tree scan (which reaches the contents through
+  the prefix rule) and carries the notice that ignored entries were scanned. When the
+  complete list would need more than 64 commands the search keeps the
+  previous whole-tree widened rg scan (`--no-ignore --hidden -g !.git`) filtered by the
+  candidate scope, and the panel receives a non-fatal notice that ignored entries were
+  scanned and results may be capped before every candidate is searched. When the candidate
+  listing itself is unavailable (git cannot run, the listing fails, times out or is
+  truncated), the tool keeps its previous defaults for the workspace (rg's own rules, or
+  the hidden-only grep fallback) and the panel receives the non-fatal notice "remote ignore
+  scope unavailable: ... tracked files that match .gitignore may be omitted". A non-git
+  workspace is not a degradation (Fresh's walk does not consult .gitignore there) and gets
+  no notice. The notice is a `Notice` field on the search batches/result, shown in the
+  panel's hint row and cleared by a new search; it never fails the search. When the panel
+  supplies a finder file snapshot that snapshot (already ignore-filtered) is authoritative
+  and this path is not used. No local file is read anywhere in this path.
   Project Replace now runs
   on the remote host through the authority file system (see the remote-project-replace
   bullet below). The current-file and open-buffers scopes now search the editor's remote
@@ -719,13 +741,14 @@ still loads unchanged.
   the authority's bounded windowed read with an honest truncated marker and stale-request guard
   (the panel's sequence drops superseded answers; a disconnected authority is an error, never a
   local read). Remaining remote gaps: the preview is plain text (no remote syntax spans) and
-  head-only for files over 256 KiB; the whole-tree candidate scope depends on a complete
-  remote git candidate listing (a failed/truncated listing degrades to hidden-only
-  filtering and, on the rg path, keeps rg's defaults - so a tracked file matching
-  .gitignore can still be omitted there; the degradation is not surfaced as a separate
-  notice); nested-repository contents are accepted without applying their inner ignore
-  rules; and the filter runs after the tool's output cap, so the result count can be below
-  Limit. The remote
+  head-only for files over 256 KiB; the explicit-candidate path needs a complete remote
+  git listing (a failed/truncated listing keeps the tool's defaults, can omit tracked files
+  matching .gitignore, and is reported with the non-fatal notice); a candidate list too
+  large for the batched path falls back to the widened whole-tree scan (reported with the
+  notice) so ignored entries can still consume the cap/time; a candidate list containing a
+  nested repository/submodule also forces the widened scan (notified), because its contents
+  cannot be enumerated as explicit candidates; and the match limit is applied after merging
+  the batch output, so the result count can be below Limit. The remote
   ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
   expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
   not a tilde expansion in sh/bash.

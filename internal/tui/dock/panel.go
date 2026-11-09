@@ -47,7 +47,13 @@ type Panel struct {
 	starting  bool   // a start is in flight
 	notice    string // why no shell runs, shown in place of the screen
 	exited    bool   // the shell has exited; its last screen stays on show
-	capture   bool   // keyboard capture: the shell gets every key while the dock has the focus
+	// exitCode/exitKnown describe how the shell ended (captured when its exit was
+	// reaped); exitMarker records that the exit marker line still has to be written
+	// into the transcript (saved or captured for a restart).
+	exitCode   int
+	exitKnown  bool
+	exitMarker bool
+	capture    bool // keyboard capture: the shell gets every key while the dock has the focus
 
 	// effects are the terminal section settings the dock applies itself, and
 	// scroll is the read-only scrollback view. pressed is the button a forwarded
@@ -109,8 +115,13 @@ type outputMsg struct {
 	ended bool
 }
 
-// exitMsg reports that the shell has exited.
-type exitMsg struct{ gen int }
+// exitMsg reports that the shell has exited, with its exit status when the
+// terminal can report one (code is -1 for a signal on Unix).
+type exitMsg struct {
+	gen    int
+	code   int
+	codeOK bool
+}
 
 // wroteMsg reports the end of a batch of input.
 type wroteMsg struct {
@@ -326,6 +337,9 @@ func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ep
 	p.term = nil
 	p.starting = true
 	p.notice = ""
+	// A new shell has its own exit to come: forget the old status/marker (the
+	// marker itself is already in the prior transcript when a restart captured it).
+	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
 	p.dir = dir
 	p.launchDir = dir
 	p.scroll = scrollState{}
@@ -359,6 +373,9 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 	p.term = nil
 	p.starting = true
 	p.notice = ""
+	// A new shell has its own exit to come: forget the old status/marker (the
+	// marker itself is already in the prior transcript when a restart captured it).
+	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
 	p.dir = dir
 	p.launchDir = dir
 	p.scroll = scrollState{}
@@ -457,6 +474,8 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.gen == p.gen {
 			p.armed = false
 			p.exited = true
+			p.exitCode, p.exitKnown = msg.code, msg.codeOK
+			p.exitMarker = true
 			p.focus = false
 			p.queue = nil
 			p.scroll = scrollState{}
@@ -760,7 +779,11 @@ func waitEvent(t Terminal, gen int, live, watchExit bool) tea.Cmd {
 		case _, ok := <-updates:
 			return outputMsg{gen: gen, ended: !ok}
 		case <-done:
-			return exitMsg{gen: gen}
+			msg := exitMsg{gen: gen}
+			if es, ok := t.(interface{ ExitStatus() (int, bool) }); ok {
+				msg.code, msg.codeOK = es.ExitStatus()
+			}
+			return msg
 		}
 	}
 }

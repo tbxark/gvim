@@ -34,6 +34,8 @@ type fakeTerm struct {
 	styledHistory []terminal.Line       // styled history rows, when set
 	cwd           string                // OSC 7 working directory
 	alt           bool                  // the alternate screen
+	exitCode      int                   // the status ExitStatus reports
+	exitOK        bool                  // whether the fake reports an exit status
 	mouse         bool                  // the shell asked for mouse reporting
 	drag          bool                  // the shell asked for drag motion (1002)
 	allMotion     bool                  // the shell asked for all motion (1003)
@@ -118,6 +120,9 @@ func (f *fakeTerm) SearchScrollbackMode(query string, regex, matchCase bool, lim
 	matches, total = f.SearchScrollback(query, limit)
 	return matches, total, nil
 }
+
+// ExitStatus reports the exit status a test armed (the fake is not a real child).
+func (f *fakeTerm) ExitStatus() (int, bool) { return f.exitCode, f.exitOK }
 
 func (f *fakeTerm) WorkingDirectory() string { return f.cwd }
 func (f *fakeTerm) AltScreen() bool          { return f.alt }

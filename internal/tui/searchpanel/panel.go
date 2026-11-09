@@ -196,6 +196,9 @@ type Panel struct {
 	truncated    bool
 	skippedCount int
 	skipped      []string
+	// resultNotice is a non-fatal warning the search port attached (for example a
+	// degraded remote ignore scope); it is shown on the bottom border until a new search.
+	resultNotice string
 	errText      string
 	expanded     []bool
 	// checked holds the match-tree checkboxes, parallel to fileMatches: a match row's
@@ -867,6 +870,7 @@ func (p *Panel) requery() tea.Cmd {
 		p.loading = false
 		p.fileMatches, p.rows, p.checked = nil, nil, nil
 		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.resultNotice = ""
 		p.selected, p.top = 0, 0
 		return nil
 	}
@@ -875,6 +879,7 @@ func (p *Panel) requery() tea.Cmd {
 		p.loading = false
 		p.fileMatches, p.rows = nil, nil
 		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.resultNotice = ""
 		p.selected, p.top = 0, 0
 		return nil
 	}
@@ -998,6 +1003,9 @@ func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
 	if msg.batch.SkippedCount > 0 || len(msg.batch.Skipped) > 0 {
 		p.skippedCount, p.skipped = msg.batch.SkippedCount, msg.batch.Skipped
 	}
+	if msg.batch.Notice != "" {
+		p.resultNotice = msg.batch.Notice
+	}
 	if msg.batch.Done {
 		p.loading = false
 		p.batchCh = nil
@@ -1058,6 +1066,7 @@ func (p *Panel) applySearch(msg searchDoneMsg) {
 		p.errText = msg.err.Error()
 		p.fileMatches, p.rows = nil, nil
 		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.resultNotice = ""
 		p.selected, p.top = 0, 0
 		return
 	}
@@ -1065,6 +1074,7 @@ func (p *Panel) applySearch(msg searchDoneMsg) {
 	p.truncated = msg.result.Truncated
 	p.skippedCount = msg.result.SkippedCount
 	p.skipped = msg.result.Skipped
+	p.resultNotice = msg.result.Notice
 	p.errText = msg.result.Err
 	p.pendingReset = false
 	p.recordHistory(p.query.Value())

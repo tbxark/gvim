@@ -38,6 +38,32 @@ type SharedBuffers struct {
 	// after OpenLoaded, so adoption is deferred to the editor's focus: only then is the
 	// restored unsaved text final and a real conflict can be told from a plain mirror.
 	pending map[*Editor][]*document.Document
+	// reserved holds the in-flight Save As claims, by canonical target path. A Save As
+	// plan acquires its reservation on the UI goroutine before the async write starts and
+	// releases it on apply; other workspaces are refused that target meanwhile, so the
+	// plan's ownership check cannot be beaten by a write that lands later.
+	reserved map[string]*sharedSaveReservation
+}
+
+// sharedSaveReservation is the revocable exclusive claim one Save As holds on its target
+// canonical path until the plan is applied (successfully, with an error, or cancelled).
+// It is unexported: callers carry it inside the SavePlan and release it through
+// SavePlan.Release (ApplySavePlan does that automatically).
+type sharedSaveReservation struct {
+	shared    *SharedBuffers
+	editor    *Editor
+	doc       *document.Document
+	canonical string
+}
+
+// Release ends the reservation. It is idempotent and safe to call from the UI goroutine
+// that owns the editor; ApplySavePlan calls it for every plan, and a caller that drops a
+// plan without applying it must call SavePlan.Release itself.
+func (r *sharedSaveReservation) Release() {
+	if r == nil || r.shared == nil {
+		return
+	}
+	r.shared.releaseSaveReservation(r)
 }
 
 type sharedEntry struct {
@@ -55,7 +81,11 @@ type sharedEntry struct {
 
 // NewSharedBuffers returns an empty cross-workspace registry.
 func NewSharedBuffers() *SharedBuffers {
-	return &SharedBuffers{entries: make(map[string]*sharedEntry), pending: make(map[*Editor][]*document.Document)}
+	return &SharedBuffers{
+		entries:  make(map[string]*sharedEntry),
+		pending:  make(map[*Editor][]*document.Document),
+		reserved: make(map[string]*sharedSaveReservation),
+	}
 }
 
 // sharedCanonical canonicalizes an open path for the registry: absolute and, when it
@@ -90,6 +120,10 @@ func (s *SharedBuffers) Open(e *Editor, path string) (handled bool, err error) {
 	canonical := sharedCanonical(path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if r := s.reserved[canonical]; r != nil {
+		return true, fmt.Errorf("open: %s is being saved by %s; try again when it finishes",
+			filepath.Base(canonical), s.label(r.editor))
+	}
 	entry := s.entries[canonical]
 	if entry == nil || entry.owner == e {
 		return false, nil
@@ -169,6 +203,7 @@ func (s *SharedBuffers) AdoptLoaded(e *Editor, d *document.Document) (open, conf
 			return d, nil, true
 		}
 		conflict = s.conflictCopyLocked(e, d, entry)
+		e.replaceRecent(d, entry.doc)
 		return entry.doc, conflict, true
 	}
 	// Defer the adoption to the editor's focus: the restore pipeline applies the stash
@@ -225,6 +260,12 @@ func (s *SharedBuffers) Register(e *Editor, d *document.Document) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.entries[canonical]; ok {
+		return
+	}
+	if r := s.reserved[canonical]; r != nil {
+		// A Save As in flight owns the path until it applies; do not register a second
+		// owner for it (the Open path already refuses the file, this guards the
+		// OpenLoaded/plugin path).
 		return
 	}
 	entry := &sharedEntry{canonical: canonical, owner: e, doc: d, mirrors: map[*Editor]*document.Document{}}
@@ -312,9 +353,11 @@ func (s *SharedBuffers) transferLocked(entry *sharedEntry, from, to *Editor) err
 	snapshot.SetSharedMirrorStatus("Mirror of " + s.label(to) + ": read-only until focused")
 	from.docs[fromIdx] = snapshot
 	from.adopt(snapshot)
+	from.replaceRecent(canonical, snapshot)
 	to.docs[toIdx] = canonical
 	canonical.MakeSharedOwner()
 	to.adopt(canonical)
+	to.replaceRecent(toMirror, canonical)
 	entry.owner = to
 	entry.doc = canonical
 	entry.mirrors[from] = snapshot
@@ -356,6 +399,7 @@ func (s *SharedBuffers) adoptPendingLocked(e *Editor) {
 				// one and keep a conflicting unsaved copy under the conflict rule.
 				conflict := s.conflictCopyLocked(e, d, entry)
 				e.docs[idx] = entry.doc
+				e.replaceRecent(d, entry.doc)
 				entry.doc.MakeSharedOwner()
 				if conflict == nil {
 					e.releaseDoc(d)
@@ -374,6 +418,7 @@ func (s *SharedBuffers) adoptPendingLocked(e *Editor) {
 		mirror.SetSharedMirrorStatus("Mirror of " + s.label(entry.owner) + ": read-only until focused")
 		e.docs[idx] = mirror
 		e.adopt(mirror)
+		e.replaceRecent(d, mirror)
 		entry.mirrors[e] = mirror
 		if conflict == nil {
 			e.releaseDoc(d)
@@ -498,6 +543,11 @@ func (s *SharedBuffers) DropEditor(e *Editor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.pending, e)
+	for canonical, r := range s.reserved {
+		if r.editor == e {
+			delete(s.reserved, canonical)
+		}
+	}
 	for canonical, entry := range s.entries {
 		delete(entry.mirrors, e)
 		if entry.owner != e {
@@ -529,12 +579,33 @@ func (s *SharedBuffers) DropEditor(e *Editor) {
 	}
 }
 
+// saveAsRefusalLocked returns why e may not Save As d to canonical, or nil. s.mu is held.
+func (s *SharedBuffers) saveAsRefusalLocked(e *Editor, d *document.Document, canonical string) error {
+	if r := s.reserved[canonical]; r != nil {
+		if r.editor == e {
+			return fmt.Errorf("save as: a save to %s is already in progress", filepath.Base(canonical))
+		}
+		return fmt.Errorf("save as: %s is being saved by %s; try again when it finishes",
+			filepath.Base(canonical), s.label(r.editor))
+	}
+	entry := s.entries[canonical]
+	if entry == nil {
+		return nil
+	}
+	if entry.owner == e && entry.doc == d {
+		return nil
+	}
+	return fmt.Errorf("save as: %s is open in %s; save under another name or close it there first",
+		filepath.Base(canonical), s.label(entry.owner))
+}
+
 // CheckSaveAs refuses a Save As target that another workspace owns (or that this
-// workspace owns with a different document). A save-as must never write a file that is
-// live as another workspace's canonical document: the write would silently diverge from
-// the owner's in-memory text, and a later owner save would overwrite the saved copy. A
-// read-only mirror cannot be saved-as either: it is a view of another workspace's
-// buffer, and a copy would fork it without the registry knowing.
+// workspace owns with a different document) or that another Save As is currently writing.
+// A save-as must never write a file that is live as another workspace's canonical
+// document: the write would silently diverge from the owner's in-memory text, and a later
+// owner save would overwrite the saved copy. A read-only mirror cannot be saved-as either:
+// it is a view of another workspace's buffer, and a copy would fork it without the
+// registry knowing.
 func (s *SharedBuffers) CheckSaveAs(e *Editor, d *document.Document, path string) error {
 	if s == nil || e == nil || d == nil || path == "" {
 		return nil
@@ -545,15 +616,45 @@ func (s *SharedBuffers) CheckSaveAs(e *Editor, d *document.Document, path string
 	canonical := sharedCanonical(path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry := s.entries[canonical]
-	if entry == nil {
-		return nil
+	return s.saveAsRefusalLocked(e, d, canonical)
+}
+
+// ReserveSaveAs claims the Save As target for e before its asynchronous write starts. The
+// claim is checked against the registry's owner and against another in-flight reservation;
+// it is revoked by the returned reservation's Release (SavePlan.Release), which
+// ApplySavePlan does automatically on success, failure and cancellation. A caller without
+// a shared registry (a direct launch) gets a nil reservation.
+func (s *SharedBuffers) ReserveSaveAs(e *Editor, d *document.Document, path string) (*sharedSaveReservation, error) {
+	if s == nil || e == nil || d == nil || path == "" {
+		return nil, nil
 	}
-	if entry.owner == e && entry.doc == d {
-		return nil
+	if d.SharedMirror() {
+		return nil, errors.New("save as: the tab is a read-only mirror of another workspace's buffer; focus its workspace to take ownership first")
 	}
-	return fmt.Errorf("save as: %s is open in %s; save under another name or close it there first",
-		filepath.Base(canonical), s.label(entry.owner))
+	canonical := sharedCanonical(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.saveAsRefusalLocked(e, d, canonical); err != nil {
+		return nil, err
+	}
+	if s.reserved == nil {
+		s.reserved = make(map[string]*sharedSaveReservation)
+	}
+	r := &sharedSaveReservation{shared: s, editor: e, doc: d, canonical: canonical}
+	s.reserved[canonical] = r
+	return r, nil
+}
+
+// releaseSaveReservation drops r if it is still the current claim for its path.
+func (s *SharedBuffers) releaseSaveReservation(r *sharedSaveReservation) {
+	if s == nil || r == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reserved[r.canonical] == r {
+		delete(s.reserved, r.canonical)
+	}
 }
 
 // AfterSaveAs updates the registry after a document actually took newPath (Save As

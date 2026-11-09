@@ -193,6 +193,9 @@ func (p *Panel) hint() string {
 	if p.notice != "" {
 		return p.notice
 	}
+	if p.resultNotice != "" {
+		return p.resultNotice
+	}
 	if p.git {
 		return "Tab next · Alt+C case · Enter open · Alt+Q list · Esc close"
 	}

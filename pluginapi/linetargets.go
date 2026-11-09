@@ -15,6 +15,12 @@ type LineTarget struct {
 	// Into names a split by its plugin label (gvim.win.set_split_label). When the label
 	// names no live window the target opens beside the pane holding the targets.
 	Into string
+	// Action, when set, runs a plugin action/command id on Enter/click instead of opening
+	// Path (the two are mutually exclusive). It goes through the editor's normal command
+	// dispatcher, exactly like a keyboard binding: no shell, no URL, no argv is built from
+	// target data, and an unknown action is ignored with the dispatcher's normal behaviour.
+	// Fresh's dashboard uses this shape for its command rows.
+	Action string
 }
 
 // LineTargetHost is the line-target part of the Host API.
@@ -29,7 +35,8 @@ type LineTargetHost interface {
 
 // Caps of one buffer's line targets.
 const (
-	MaxLineTargets    = 10_000
-	MaxLineTargetLen  = 4096 // path bytes
-	MaxLineTargetInto = 64   // split label bytes
+	MaxLineTargets      = 10_000
+	MaxLineTargetLen    = 4096 // path bytes
+	MaxLineTargetInto   = 64   // split label bytes
+	MaxLineTargetAction = 128  // action/command id bytes
 )

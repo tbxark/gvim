@@ -81,6 +81,9 @@ func (s *remoteSearch) ProjectSearch(req searchpanel.SearchRequest) (searchpanel
 		out.Files = append(out.Files, batch.Files...)
 		out.Truncated = out.Truncated || batch.Truncated
 		out.SkippedCount, out.Skipped = batch.SkippedCount, batch.Skipped
+		if batch.Notice != "" {
+			out.Notice = batch.Notice
+		}
 		if batch.Done && batch.Err != "" {
 			return out, errors.New(batch.Err)
 		}
@@ -162,18 +165,41 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
 		return
 	}
-	// The grep fallback has no ignore rules of its own (and grep would descend hidden
-	// directories): narrow its output to Fresh's project-file scope. ripgrep already does
-	// that itself, and an index-backed search arrives already filtered by the finder.
-	// Both tools use Fresh's project-file scope on the whole-tree path: one candidate
-	// listing decides what is searched, which is what makes a tracked file that matches
-	// .gitignore searchable (ripgrep's own ignore rules omit it). An index-backed search
-	// arrives already filtered by the finder.
+	// Fresh's project-file scope is the search scope. When the complete git candidate
+	// list is available, pass its files explicitly to the tool in bounded batches: the
+	// tool never scans ignored or hidden trees (so ignored matches cannot consume the
+	// output cap before candidates) and the existing regex engine is unchanged. When the
+	// list is unavailable, or too large to pass explicitly, fall back to the whole-tree
+	// tool with the candidate filter and carry a non-fatal degradation notice to the panel.
 	var scope *remoteProjectResultScope
 	if allowed == nil {
 		scope = s.newProjectResultScope(ctx)
 	}
-	res, err := s.run(ctx, s.root, remoteSearchArgv(tool, req, scope))
+	widen := false
+	var res hostos.ProcResult
+	if scope != nil && scope.listed {
+		batches, ok := batchSearchPaths(scope.paths)
+		switch {
+		case len(scope.prefixes) > 0:
+			// Nested repositories/submodules are listed only by name, so their contents
+			// cannot be passed as explicit candidate files without silently losing them.
+			// Keep the whole-tree scan (which reaches them through the prefix rule) and
+			// tell the user that ignored entries were scanned.
+			scope.notice = "remote search scanned the whole tree because nested repositories/submodules cannot be passed as explicit candidate paths; ignored entries may be scanned and results may be capped"
+			widen = true
+			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen))
+		case !ok:
+			scope.notice = "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched"
+			widen = true
+			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen))
+		case len(scope.paths) == 0:
+			// An empty candidate list has no files to search: no tool run and no paths.
+		default:
+			res, err = s.runBatched(ctx, tool, req, batches)
+		}
+	} else {
+		res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen))
+	}
 	if err != nil {
 		if cancelled() {
 			return
@@ -198,6 +224,9 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	totalMatches := 0
 	flush := func(done bool) bool {
 		batch := searchpanel.SearchBatch{Files: pending, Truncated: truncated, Done: done}
+		if done && scope != nil {
+			batch.Notice = scope.notice
+		}
 		if !send(batch) {
 			return false
 		}
@@ -273,6 +302,14 @@ type remoteProjectResultScope struct {
 	// are accepted when their own path is not hidden; the inner repository's own ignore
 	// rules are not applied by this single git call.
 	prefixes []string
+	// paths is the ordered candidate file list (tracked files, then untracked non-hidden
+	// files) used to pass explicit paths to the search tool in bounded batches.
+	paths []string
+	// gitRepo reports that the workspace is a git work tree (the candidate list was the
+	// expected scope); notice is the non-fatal degradation when that list is missing or
+	// the batches would be too many.
+	gitRepo bool
+	notice  string
 }
 
 // newProjectResultScope probes the remote workspace and, in a git work tree, reads the same
@@ -286,11 +323,24 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 		return scope
 	}
 	res, err := s.run(ctx, s.root, []string{"git", "rev-parse", "--is-inside-work-tree"})
-	if err != nil || res.Code != 0 || strings.TrimSpace(string(res.Stdout)) != "true" {
+	if err != nil {
+		scope.notice = "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted"
 		return scope
 	}
+	if res.Code != 0 {
+		if strings.Contains(strings.ToLower(string(res.Stderr)), "not a git repository") {
+			return scope // a plain non-git workspace: Fresh's walk applies, no degradation
+		}
+		scope.notice = "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted"
+		return scope
+	}
+	if strings.TrimSpace(string(res.Stdout)) != "true" {
+		return scope
+	}
+	scope.gitRepo = true
 	files, err := s.run(ctx, s.root, []string{"git", "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--cached", "--others", "--exclude-standard"})
 	if err != nil || files.Code != 0 || files.Truncated {
+		scope.notice = "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted"
 		return scope
 	}
 	scope.listed = true
@@ -312,10 +362,14 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 			scope.prefixes = append(scope.prefixes, strings.TrimSuffix(pathPart, "/")+"/")
 		case tracked:
 			scope.tracked[pathPart] = true
+			scope.paths = append(scope.paths, pathPart)
 		case strings.HasSuffix(pathPart, "/"):
 			scope.prefixes = append(scope.prefixes, pathPart)
 		default:
 			scope.untracked[pathPart] = true
+			if !hiddenRemotePath(pathPart) {
+				scope.paths = append(scope.paths, pathPart)
+			}
 		}
 	}
 	return scope
@@ -347,26 +401,28 @@ func (sc *remoteProjectResultScope) allows(rel string) bool {
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
 		return false
 	}
-	hidden := func(p string) bool {
-		for _, seg := range strings.Split(p, "/") {
-			if strings.HasPrefix(seg, ".") {
-				return true
-			}
-		}
-		return false
-	}
 	if !sc.listed {
-		return !hidden(clean)
+		return !hiddenRemotePath(clean)
 	}
 	if sc.tracked[clean] {
 		return true
 	}
 	if sc.untracked[clean] {
-		return !hidden(clean)
+		return !hiddenRemotePath(clean)
 	}
 	for _, prefix := range sc.prefixes {
 		if strings.HasPrefix(clean, prefix) {
-			return !hidden(strings.TrimPrefix(clean, prefix))
+			return !hiddenRemotePath(strings.TrimPrefix(clean, prefix))
+		}
+	}
+	return false
+}
+
+// hiddenRemotePath reports a dot-named path segment (the hidden-file rule).
+func hiddenRemotePath(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
 		}
 	}
 	return false
@@ -407,10 +463,92 @@ func (s *remoteSearch) probeTool(ctx context.Context) (string, error) {
 	}
 }
 
-// remoteSearchArgv builds the remote search command line: no shell, the query is a single
-// -e argument. rg uses its vimgrep output (file:line:byte-column:text); grep falls back to
-// -r -n -I and the column is recovered from the line text.
-func remoteSearchArgv(tool string, req searchpanel.SearchRequest, scope *remoteProjectResultScope) []string {
+const (
+	// searchScopeBatchFiles caps how many candidate paths one tool command receives.
+	searchScopeBatchFiles = 400
+	// searchScopeBatchBytes caps the path bytes of one command, so the argv stays well
+	// under the remote command-size limit even with long paths.
+	searchScopeBatchBytes = 48 << 10
+	// searchScopeMaxBatches bounds the tool commands one search may start. A candidate
+	// list needing more falls back to the whole-tree scan, with a degradation notice.
+	searchScopeMaxBatches = 64
+)
+
+// batchSearchPaths splits the ordered candidate paths into bounded batches. It returns
+// false when the list needs more than searchScopeMaxBatches commands: the caller then keeps
+// the whole-tree fallback and tells the user that ignored entries were scanned.
+func batchSearchPaths(paths []string) ([][]string, bool) {
+	var batches [][]string
+	var current []string
+	bytes := 0
+	seen := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		if len(current) > 0 && (len(current) >= searchScopeBatchFiles || bytes+len(p)+1 > searchScopeBatchBytes) {
+			batches = append(batches, current)
+			current, bytes = nil, 0
+			if len(batches) >= searchScopeMaxBatches {
+				return nil, false
+			}
+		}
+		current = append(current, p)
+		bytes += len(p) + 1
+	}
+	if len(current) > 0 {
+		batches = append(batches, current)
+	}
+	if len(batches) > searchScopeMaxBatches {
+		return nil, false
+	}
+	return batches, true
+}
+
+// runBatched runs the search tool once per candidate batch and merges the output. The
+// tool never scans ignored/hidden trees this way; the caller's context bounds every
+// command (so timeout and cancellation stop between batches too), and the merged output is
+// bounded by remoteSearchMaxOutput with truncation flagged. A batch failure is an error
+// (never a silent partial success).
+func (s *remoteSearch) runBatched(ctx context.Context, tool string, req searchpanel.SearchRequest, batches [][]string) (hostos.ProcResult, error) {
+	var out hostos.ProcResult
+	var stdout []byte
+	for _, batch := range batches {
+		if err := ctx.Err(); err != nil {
+			return hostos.ProcResult{}, err
+		}
+		res, err := s.run(ctx, s.root, remoteSearchArgvWithPaths(tool, req, batch))
+		if err != nil {
+			return hostos.ProcResult{}, err
+		}
+		if res.Code > 1 {
+			return hostos.ProcResult{}, fmt.Errorf("%s failed on the remote host (exit %d)", tool, res.Code)
+		}
+		out.Truncated = out.Truncated || res.Truncated
+		if room := remoteSearchMaxOutput - len(stdout); room > 0 {
+			add := res.Stdout
+			if len(add) > room {
+				add = add[:room]
+				out.Truncated = true
+			}
+			stdout = append(stdout, add...)
+			if len(stdout) > 0 && stdout[len(stdout)-1] != '\n' {
+				stdout = append(stdout, '\n')
+			}
+		} else {
+			out.Truncated = true
+			break
+		}
+	}
+	out.Stdout = stdout
+	return out, nil
+}
+
+// remoteSearchArgvWithPaths builds one tool command over explicit candidate paths. The
+// paths follow a "--" so a name starting with a dash is a path, not an option; the query
+// stays a single -e argument (no shell).
+func remoteSearchArgvWithPaths(tool string, req searchpanel.SearchRequest, paths []string) []string {
 	switch tool {
 	case "rg":
 		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
@@ -423,12 +561,51 @@ func remoteSearchArgv(tool string, req searchpanel.SearchRequest, scope *remoteP
 		if !req.Options.Regex {
 			argv = append(argv, "-F")
 		}
-		if scope != nil && scope.listed {
-			// The complete Fresh candidate list is available: search ignored and hidden
-			// entries too and let the scope decide, so tracked files that match
-			// .gitignore are found (rg's default ignore rules would omit them). .git is
-			// never in the candidate list. Without a complete listing this stays out:
-			// guessing would both miss tracked-ignored files and widen the scope wrongly.
+		argv = append(argv, "-e", req.Query, "--")
+		return append(argv, paths...)
+	default:
+		argv := []string{"grep", "-r", "-n", "-I", "--color=never"}
+		for _, dir := range remoteGrepSkipDirs {
+			argv = append(argv, "--exclude-dir="+dir)
+		}
+		if !req.Options.CaseSensitive {
+			argv = append(argv, "-i")
+		}
+		if req.Options.WholeWord {
+			argv = append(argv, "-w")
+		}
+		if req.Options.Regex {
+			argv = append(argv, "-E")
+		} else {
+			argv = append(argv, "-F")
+		}
+		argv = append(argv, "-e", req.Query, "--")
+		return append(argv, paths...)
+	}
+}
+
+// remoteSearchArgv builds the remote search command line: no shell, the query is a single
+// -e argument.
+// A whole-tree fallback run (widen) scans ignored and hidden entries for the caller's
+// candidate filter; the normal path passes explicit candidate paths instead. rg uses its vimgrep output (file:line:byte-column:text); grep falls back to
+// -r -n -I and the column is recovered from the line text.
+func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool) []string {
+	switch tool {
+	case "rg":
+		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
+		if !req.Options.CaseSensitive {
+			argv = append(argv, "-i")
+		}
+		if req.Options.WholeWord {
+			argv = append(argv, "-w")
+		}
+		if !req.Options.Regex {
+			argv = append(argv, "-F")
+		}
+		if widen {
+			// Fallback only (the candidate list was too large to pass explicitly): scan
+			// the whole tree and let the candidate filter decide. The panel carries a
+			// notice that ignored entries were scanned.
 			argv = append(argv, "--no-ignore", "--hidden", "-g", "!.git")
 		}
 		return append(argv, "-e", req.Query, ".")

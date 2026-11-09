@@ -2390,7 +2390,7 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) te
 		if count == 1 && !m.mx.extend {
 			if t, ok := m.lineTargetAt(m.ed.Active(), hit.Pos.Line); ok {
 				m.drag = drag{}
-				return m.openLineTarget(t, m.ed.Active())
+				return m.runLineTarget(t, m.ed.Active())
 			}
 		}
 		if hit.Below > 0 && count == 1 && !m.mx.extend && m.placeVirtualLine(hit) {

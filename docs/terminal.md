@@ -209,9 +209,33 @@ background tabs' exited markers current.
   is per tab: a tab whose shell exits under it is removed rather than closing the
   whole dock; the last tab exiting hides the dock. A tab whose shell exits with
   close_on_exit off stays as read-only output with the exited marker.
+- **Exit status and the exit marker.** When the child is reaped the dock records
+  its exit status from `terminal.Session.ExitStatus()` (0 for a clean exit, the
+  code for a non-zero one, -1/`signal` when a Unix signal ended it). Fresh appends
+  the exact `[Terminal process exited]` line to the backing/log transcript at exit
+  and shows a clickable restart call-to-action in the status bar with the program
+  name and the code when it is non-zero; gvim's bounded slice puts the same
+  information on the dock's own surfaces: the marker line is written after the
+  frozen screen into the saved/restored/restarted transcript (so a restart or
+  resume continues *below* it, never overwriting output), and the tab title says
+  `Terminal (exited, exit N)` or `Terminal (exited, signal)` for a non-zero/signal
+  exit — a clean exit 0 keeps the plain `Terminal (exited)`, matching Fresh's
+  decision to omit exit 0. A restored read-only tab shows the same suffix on its
+  `Scrollback (restored)` title. The marker is written once per exit (a
+  restore/restart cycle deduplicates it) and is not painted from the styled
+  snapshot (it sits after the visible screen, outside its strict text match).
+  Deliberate divergences: gvim has no status-bar restart indicator yet (the
+  palette/menu Restart remains the only affordance; a status-bar element is an
+  OPEN follow-up), it does not infer a foreground program name for the label, and
+  the marker is appended when the transcript is captured (save or restart) rather
+  than at the exit instant, because the frozen screen stays on show.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
-  launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab)
-  plus the active index; the top-level fields keep mirroring the active tab, so a
+  launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
+  plus the additive `exit_code`/`exit_known` pair for an exited tab and its
+  transcript) plus the active index; an old record without the exit pair restores
+  exactly as before (`exited`, status unknown, and no marker is invented) and the
+  marker line is an ordinary bounded transcript row, so the record format stays
+  version 1; the top-level fields keep mirroring the active tab, so a
   reader that predates tabs restores that one tab exactly as before, and a record
   without `tabs` restores as one terminal. The format version stays 1. `cwd` is the
   terminal's reported directory and `launch_dir` the directory a recorded program
@@ -231,8 +255,9 @@ background tabs' exited markers current.
   cycle can still revive it on the first dive. **Restore itself never starts a process**: every restored tab comes
   back as the read-only transcript the record describes, with its saved name and
   active index. A tab that was **exited at the capture** (`live` false, the old
-  record's meaning) stays that way — read-only/dead with its `(exited)` marker —
-  and only an explicit Restart starts anything. A tab that was **live at the
+  record's meaning) stays that way — read-only/dead with its `(exited)` marker
+  (plus its saved exit status: `exit N`/`signal` when known) — and only an
+  explicit Restart starts anything. A tab that was **live at the
   capture** is dormant rather than exited and shows no `(exited)` marker; the
   first time the user *dives* into it after the restore (switches to the tab,
   focuses the dock on it, or opens the dock on it) the dock revives it with a

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -633,5 +634,216 @@ func TestSharedBuffersMirrorSaveAsRefused(t *testing.T) {
 	}
 	if err := b.SaveAs(filepath.Join(t.TempDir(), "copy.txt")); err == nil || !strings.Contains(err.Error(), "read-only mirror") {
 		t.Fatalf("save-as on a mirror = %v, want a refusal", err)
+	}
+}
+
+// saveAsReservationSetUp returns two workspaces and a, the focused one.
+func saveAsReservationSetUp(t *testing.T) (shared *SharedBuffers, a, b *Editor) {
+	t.Helper()
+	shared = NewSharedBuffers()
+	labels := map[*Editor]string{}
+	shared.Label = func(ed *Editor) string { return labels[ed] }
+	a = New(Options{Empty: true, Shared: shared})
+	b = New(Options{Empty: true, Shared: shared})
+	labels[a], labels[b] = "A", "B"
+	shared.Focus(a)
+	a.Do("new", nil)
+	a.Active().Buffer.Insert(buffer.Pos{}, "A\n")
+	b.Do("new", nil)
+	b.Active().Buffer.Insert(buffer.Pos{}, "B\n")
+	return shared, a, b
+}
+
+// TestSharedBuffersSaveAsReservationBlocksOtherWorkspace: a Save As plan reserves its
+// target before the asynchronous write starts; another workspace cannot open it (no
+// independent copy that could overwrite the pending write) or plan its own Save As to it,
+// the same editor cannot plan twice, and the reservation is gone after ApplySavePlan.
+func TestSharedBuffersSaveAsReservationBlocksOtherWorkspace(t *testing.T) {
+	_, a, b := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "new.txt")
+	plan, err := a.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("PlanSaveAs: %v", err)
+	}
+	if err := b.OpenFile(target); err == nil || !strings.Contains(err.Error(), "being saved by A") {
+		t.Fatalf("opening a reserved target = %v, want the reservation refusal", err)
+	}
+	if len(b.Tabs()) != 1 || b.Active().Path != "" {
+		t.Fatalf("the refused open changed the tabs: %+v", b.Tabs())
+	}
+	if _, err := b.PlanSaveAs(target, false); err == nil || !strings.Contains(err.Error(), "being saved by A") {
+		t.Fatalf("second Save As plan = %v, want the reservation refusal", err)
+	}
+	if _, err := a.PlanSaveAs(target, false); err == nil || !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("same-editor second plan = %v, want the in-progress refusal", err)
+	}
+	if err := a.ApplySavePlan(plan, plan.Run()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if raw, err := os.ReadFile(target); err != nil || string(raw) == "" {
+		t.Fatalf("target after apply = %q, %v", raw, err)
+	}
+	// The target is now owned by a: the refusal changed from "being saved" to ownership.
+	if _, err := b.PlanSaveAs(target, false); err == nil || !strings.Contains(err.Error(), "open in A") {
+		t.Fatalf("plan after apply = %v, want the ownership refusal", err)
+	}
+}
+
+// TestSharedBuffersSaveAsReservationReleasedOnFailure: a failed write (an existing file
+// without force) releases the reservation in ApplySavePlan, so another workspace can save
+// that path afterwards.
+func TestSharedBuffersSaveAsReservationReleasedOnFailure(t *testing.T) {
+	_, a, b := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "exists.txt")
+	if err := os.WriteFile(target, []byte("theirs\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := a.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("PlanSaveAs: %v", err)
+	}
+	results := plan.Run()
+	if err := a.ApplySavePlan(plan, results); err == nil {
+		t.Fatal("the write over an existing file without force succeeded")
+	}
+	if raw, err := os.ReadFile(target); err != nil || string(raw) != "theirs\n" {
+		t.Fatalf("the failed write changed the file: %q, %v", raw, err)
+	}
+	next, err := b.PlanSaveAs(target, true)
+	if err != nil || next.reservation == nil {
+		t.Fatalf("the reservation leaked after a failed apply: %v", err)
+	}
+	next.Release()
+}
+
+// TestSharedBuffersSaveAsReservationReleasedOnCancel: a cancelled write releases the
+// reservation in ApplySavePlan (the caller still applies the cancelled results).
+func TestSharedBuffersSaveAsReservationReleasedOnCancel(t *testing.T) {
+	_, a, b := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "cancelled.txt")
+	plan, err := a.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("PlanSaveAs: %v", err)
+	}
+	// A caller that cancels before the write starts has no results to apply; applying
+	// the plan anyway is the same release path (ApplySavePlan defers it).
+	if err := a.ApplySavePlan(plan, nil); err != nil {
+		t.Fatalf("apply of a cancelled plan: %v", err)
+	}
+	if _, err := b.PlanSaveAs(target, false); err != nil {
+		t.Fatalf("the reservation leaked after a cancelled apply: %v", err)
+	}
+}
+
+// TestSharedBuffersSaveAsReservationExplicitRelease: a caller that drops a plan without
+// applying it can release the claim explicitly; then another workspace may plan it.
+func TestSharedBuffersSaveAsReservationExplicitRelease(t *testing.T) {
+	_, a, b := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "dropped.txt")
+	plan, err := a.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("PlanSaveAs: %v", err)
+	}
+	plan.Release()
+	next, err := b.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("plan after Release: %v", err)
+	}
+	next.Release()
+}
+
+// TestSharedBuffersSaveAsReservationDroppedEditor: closing/evicting the workspace that
+// holds a plan releases its reservations, so the path cannot stay claimed by a gone editor.
+func TestSharedBuffersSaveAsReservationDroppedEditor(t *testing.T) {
+	shared, a, b := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "evicted.txt")
+	plan, err := a.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("PlanSaveAs: %v", err)
+	}
+	_ = plan // never applied: the workspace goes away with the plan in flight
+	shared.DropEditor(a)
+	next, err := b.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("plan after DropEditor: %v", err)
+	}
+	next.Release()
+}
+
+// TestSharedBuffersSaveAsReservationConcurrentSingleWinner: concurrent plans for one path
+// (the controllable race window) produce exactly one claim; the losers get the
+// in-progress refusal and nothing leaks after the winner releases.
+func TestSharedBuffersSaveAsReservationConcurrentSingleWinner(t *testing.T) {
+	shared, a, _ := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "race.txt")
+	doc := a.Active()
+	const n = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make(chan *sharedSaveReservation, n)
+	errsCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			r, err := shared.ReserveSaveAs(a, doc, target)
+			if err != nil {
+				errsCh <- err
+				return
+			}
+			results <- r
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errsCh)
+	var winners []*sharedSaveReservation
+	for r := range results {
+		winners = append(winners, r)
+	}
+	if len(winners) != 1 {
+		t.Fatalf("concurrent reservations produced %d winners, want exactly one", len(winners))
+	}
+	for err := range errsCh {
+		if !strings.Contains(err.Error(), "already in progress") {
+			t.Fatalf("loser error = %v, want the in-progress refusal", err)
+		}
+	}
+	winners[0].Release()
+	if r, err := shared.ReserveSaveAs(a, doc, target); err != nil {
+		t.Fatalf("reserve after release: %v", err)
+	} else {
+		r.Release()
+	}
+}
+
+// TestSharedBuffersSaveAsAsyncWindowNoIndependentCopy: the exact plan→write→apply window:
+// while the write command runs, another workspace's open is refused; after apply the file
+// is the plan's text and no independent copy has been created to overwrite it.
+func TestSharedBuffersSaveAsAsyncWindowNoIndependentCopy(t *testing.T) {
+	_, a, b := saveAsReservationSetUp(t)
+	target := filepath.Join(t.TempDir(), "async.txt")
+	plan, err := a.PlanSaveAs(target, false)
+	if err != nil {
+		t.Fatalf("PlanSaveAs: %v", err)
+	}
+	written := make(chan []SaveResult, 1)
+	go func() { written <- plan.Run() }()
+	// The command is writing off the UI goroutine. A competing open during this window
+	// must not load an independent copy of the file.
+	if err := b.OpenFile(target); err == nil || !strings.Contains(err.Error(), "being saved by A") {
+		t.Fatalf("competing open during the write = %v, want the reservation refusal", err)
+	}
+	results := <-written
+	if err := a.ApplySavePlan(plan, results); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(b.Tabs()) != 1 || b.Active().Path != "" {
+		t.Fatalf("the competing open changed the tabs: %+v", b.Tabs())
+	}
+	if raw, err := os.ReadFile(target); err != nil || string(raw) != "A\n" {
+		t.Fatalf("target = %q, %v, want the planned text", raw, err)
 	}
 }

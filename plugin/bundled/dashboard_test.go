@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -249,12 +250,31 @@ func TestDashboardRecentRowsAreLineTargets(t *testing.T) {
 	if rowLine < 0 {
 		t.Fatalf("no a.txt row:\n%s", dashboardText(t, r.host))
 	}
-	targets := r.host.LineTargets(id)
-	if len(targets) != 1 {
-		t.Fatalf("line targets = %+v, want one for the recent file", targets)
+	var recent, actions []pluginapi.LineTarget
+	for _, t := range r.host.LineTargets(id) {
+		switch {
+		case t.Path != "":
+			recent = append(recent, t)
+		case t.Action != "":
+			actions = append(actions, t)
+		}
 	}
-	if targets[0].Path != "/w/a.txt" || targets[0].Line != rowLine {
-		t.Errorf("target = %+v (row line %d, want path /w/a.txt)", targets[0], rowLine)
+	if len(recent) != 1 || recent[0].Path != "/w/a.txt" || recent[0].Line != rowLine {
+		t.Fatalf("recent target = %+v (row line %d, want path /w/a.txt), all %+v", recent, rowLine, r.host.LineTargets(id))
+	}
+	// Action rows are clickable through commands this plugin owns; git_log is not
+	// loaded here, so the branch-log row is an explicit disabled line instead.
+	if len(actions) != 6 {
+		t.Fatalf("action targets = %+v, want the six action rows", actions)
+	}
+	for i, a := range actions {
+		want := "dashboard.click_" + strconv.Itoa(i+1)
+		if a.Action != want {
+			t.Errorf("action target %d = %q, want %q", i, a.Action, want)
+		}
+	}
+	if text := dashboardText(t, r.host); !strings.Contains(text, "branch log") || !strings.Contains(text, "unavailable") {
+		t.Fatalf("dashboard misses the disabled branch-log notice:\n%s", text)
 	}
 	// Closing the dashboard clears its targets.
 	if err := r.h.Run("dashboard.close", nil); err != nil {
@@ -280,5 +300,51 @@ func TestDashboardGitShowsNoUpstream(t *testing.T) {
 	}
 	if strings.Contains(text, "↑2 ↓4") {
 		t.Fatalf("dashboard invented upstream counts:\n%s", text)
+	}
+}
+
+// TestDashboardBranchLogAvailableWhenGitLogLoads: the branch-log row is only
+// advertised when the git_log command is actually registered, and its click target
+// runs that command through this plugin's own hidden command (a target can never
+// dispatch another plugin directly).
+func TestDashboardBranchLogAvailableWhenGitLogLoads(t *testing.T) {
+	t.Parallel()
+	provider := strings.Join([]string{
+		"local gvim = require 'gvim'",
+		"gvim.command.register{ name = \"show_git_log\", title = \"Git Log\", run = function() gvim.notify(\"branch-log-ran\") end }",
+	}, "\n")
+	r := startRig(t, rigOpts{
+		plugins: []string{dashboardPlugin},
+		script:  dashboardGitScript,
+		extra:   map[string]string{"git_log/init.lua": provider},
+	})
+	dashboardReady(t, r)
+	id := dashboardBuffer(r.host)
+	if id == 0 {
+		t.Fatal("no dashboard")
+	}
+	text := dashboardText(t, r.host)
+	if !strings.Contains(text, "branch log") || strings.Contains(text, "unavailable") {
+		t.Fatalf("branch-log row should be enabled while git_log is loaded:\n%s", text)
+	}
+	var branchTarget pluginapi.LineTarget
+	for _, target := range r.host.LineTargets(id) {
+		if target.Action == "dashboard.click_branch_log" {
+			branchTarget = target
+		}
+	}
+	if branchTarget.Action == "" {
+		t.Fatalf("no branch-log action target: %+v", r.host.LineTargets(id))
+	}
+	if err := r.h.Run("dashboard.click_branch_log", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.Settle()
+	found := false
+	for _, n := range r.h.NoticeTexts() {
+		found = found || strings.Contains(n, "branch-log-ran")
+	}
+	if !found {
+		t.Fatalf("branch-log click did not run the git_log command: %v", r.h.NoticeTexts())
 	}
 }

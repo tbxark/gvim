@@ -16,10 +16,16 @@ const (
 	maxSavedBytes = 256 << 10
 )
 
+// terminalExitMarker is Fresh's transcript line for a terminal whose process
+// quit; a restart/resume continues below it.
+const terminalExitMarker = "[Terminal process exited]"
+
 // capturePrior appends the transcript of the shell the dock holds to the prior
 // rows and trims the prior rows to the newest. A restarted shell keeps its
 // transcript: the old session's history and screen are captured before the
-// session closes and painted above the new shell's output.
+// session closes and painted above the new shell's output. When the old shell had
+// exited, the exit marker is appended after its last output (once), matching
+// Fresh's backing-file order.
 func (p *Panel) capturePrior() {
 	if p.term == nil {
 		return
@@ -32,7 +38,29 @@ func (p *Panel) capturePrior() {
 		p.priorWidth = width
 	}
 	p.prior = append(p.prior, prior...)
+	if p.exitMarker {
+		p.prior = appendExitMarker(p.prior)
+		p.exitMarker = false
+	}
 	p.trimPrior()
+}
+
+// appendExitMarker appends the exit marker line unless the transcript already
+// ends with it, so a restore/restart cycle never writes it twice.
+func appendExitMarker(lines []terminal.Line) []terminal.Line {
+	if n := len(lines); n > 0 && lines[n-1].Text() == terminalExitMarker {
+		return lines
+	}
+	return append(lines, lineFromText(terminalExitMarker))
+}
+
+// exitMarkerRows counts the trailing exit-marker rows of a restored transcript.
+func exitMarkerRows(rows []string) int {
+	n := 0
+	for i := len(rows) - 1; i >= 0 && rows[i] == terminalExitMarker; i-- {
+		n++
+	}
+	return n
 }
 
 // reflowPrior re-wraps the stored transcript when the pane's content width
@@ -208,6 +236,13 @@ func (p *Panel) SavedState() terminal.SavedState {
 			add(screenRowText(sc, r))
 		}
 	}
+	// An exited-but-not-restarted shell saves Fresh's marker after its frozen
+	// screen; a restored transcript already carries its marker in the prior rows.
+	if p.exited && p.exitMarker {
+		if n := len(rows); n > 0 && rows[n-1] != terminalExitMarker {
+			rows = append(rows, terminalExitMarker)
+		}
+	}
 	// Bound to the newest rows and bytes.
 	if len(rows) > maxSavedRows {
 		rows = rows[len(rows)-maxSavedRows:]
@@ -221,6 +256,9 @@ func (p *Panel) SavedState() terminal.SavedState {
 		}
 	}
 	st.Rows = rows
+	if p.exited {
+		st.ExitCode, st.ExitKnown = p.exitCode, p.exitKnown
+	}
 	return st
 }
 
@@ -248,11 +286,21 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	for _, text := range rows {
 		p.prior = append(p.prior, lineFromText(text))
 	}
+	// The exit marker line sits after the frozen screen, so it is not part of the
+	// visible-screen snapshot tail: hold the trailing marker(s) aside while the
+	// styled snapshot is matched against the rows, then put them back after it.
+	markers := exitMarkerRows(rows)
+	p.prior = p.prior[:len(p.prior)-markers]
 	// The styled snapshot (history + visible screen + cursor + alt) replaces the
 	// text tail it was captured from, but only when every row matches exactly; a
 	// mismatched/corrupt snapshot is ignored whole so a restore never paints
 	// different content than the transcript rows.
 	p.applySavedScreen(st.Screen)
+	for range markers {
+		p.prior = append(p.prior, lineFromText(terminalExitMarker))
+	}
+	p.exitCode, p.exitKnown = st.ExitCode, st.ExitKnown
+	p.exitMarker = false
 	p.restored = true
 	p.wasLive = st.Live
 	p.reflowed = false

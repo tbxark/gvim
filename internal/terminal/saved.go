@@ -46,6 +46,11 @@ type SavedState struct {
 	// exited, so it restores exactly as before); a live-at-capture tab may be
 	// revived on the user's first dive into it, an exited one never is.
 	Live bool `json:"live,omitempty"`
+	// ExitCode is the child's exit code when the record was captured from a
+	// terminal whose process had exited (ExitKnown says the code was observed).
+	// It is additive: an old record has none and keeps the plain "(exited)" state.
+	ExitCode  int  `json:"exit_code,omitempty"`
+	ExitKnown bool `json:"exit_known,omitempty"`
 	// Screen is the bounded styled snapshot of the visible screen at the capture.
 	// It is additive and optional (an old record has none and restores the plain
 	// text transcript exactly as before); a restored tab paints the snapshot above
@@ -81,4 +86,7 @@ type SavedTab struct {
 	Live bool `json:"live,omitempty"`
 	// Screen mirrors SavedState.Screen for this tab.
 	Screen *SavedScreen `json:"screen,omitempty"`
+	// ExitCode and ExitKnown mirror SavedState: how this tab's process ended.
+	ExitCode  int  `json:"exit_code,omitempty"`
+	ExitKnown bool `json:"exit_known,omitempty"`
 }

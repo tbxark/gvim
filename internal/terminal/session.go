@@ -213,6 +213,22 @@ func (s *Session) Wait() error {
 	return s.waitErr
 }
 
+// ExitStatus reports the child's exit code after it exited. ok is false while it
+// runs. A code of -1 means a signal ended the child (Unix; Windows reports the
+// termination code). It blocks until the exit is reaped, so a caller that already
+// received the dock's exit message gets the answer immediately.
+func (s *Session) ExitStatus() (code int, ok bool) {
+	<-s.done
+	if s.waitErr == nil {
+		return 0, true
+	}
+	var exiter interface{ ExitCode() int }
+	if errors.As(s.waitErr, &exiter) {
+		return exiter.ExitCode(), true
+	}
+	return -1, true
+}
+
 // Close ends the session. It closes the PTY, kills the child if it is still
 // running, and returns once the child has been reaped and Done is closed.
 // Close is idempotent. The screen stays readable after Close.

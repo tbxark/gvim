@@ -615,7 +615,7 @@ function gvim.buf.focus_split(win) end
 ---@return true|nil, string?
 function gvim.buf.close_split(win) end
 ---@param buf Buffer
----@param targets {line: integer, path: string, target?: integer, into?: string}[]
+---@param targets {line: integer, path?: string, target?: integer, into?: string, action?: string}[]
 ---@return true|nil, string?
 function gvim.buf.set_line_targets(buf, targets) end
 ---@param buf Buffer

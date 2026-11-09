@@ -20,6 +20,27 @@ func (e *Editor) forgetRecent(d *Document) {
 	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == d })
 }
 
+// replaceRecent swaps old for new in place in the MRU history, keeping old's rank. It is
+// used when a shared buffer's document identity is replaced by an ownership handoff or a
+// mirror adoption: without it the new document would not be in the history and
+// RecentTabIndices would fall back to tab order for it, changing completion and dabbrev
+// other-buffer order after a handoff. A fallback (old not tracked) leaves any existing
+// rank of new alone, which is correct for a document that was already in the history.
+func (e *Editor) replaceRecent(old, new *Document) {
+	if new == nil || old == new {
+		return
+	}
+	if slices.Index(e.recent, old) < 0 {
+		return
+	}
+	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == new })
+	pos := slices.Index(e.recent, old)
+	if pos < 0 {
+		return
+	}
+	e.recent[pos] = new
+}
+
 // RecentTabIndices returns the open tabs in most-recently-used order: the active tab
 // first, then the tabs in the order they were last active. Tabs that were never active
 // (or were adopted directly) follow in tab order. It is the order multi-buffer completion

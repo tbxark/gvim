@@ -10,6 +10,9 @@ import (
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
+// terminalExitMarkerForTest mirrors the dock's Fresh marker line.
+const terminalExitMarkerForTest = "[Terminal process exited]"
+
 // TestTerminalScreenSnapshotRoundTrip checks the additive styled snapshot in the
 // terminal record: it round-trips per tab (and the top-level mirror), and an old
 // record without it loads with no snapshot.
@@ -192,5 +195,42 @@ func TestLoadTerminalOldRecordNoRemainder(t *testing.T) {
 	}
 	if got.Screen.Cursor != (terminal.SavedCursor{}) || got.Screen.Alt || len(got.Screen.History) != 0 {
 		t.Fatalf("old record gained remainder: %+v", got.Screen)
+	}
+}
+
+// TestTerminalExitStatusRoundTrip checks the additive exit status survives the
+// record per tab and at the top level, while an old record loads as unknown.
+func TestTerminalExitStatusRoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out", terminalExitMarkerForTest},
+		ExitCode: 3, ExitKnown: true,
+		Tabs: []terminal.SavedTab{
+			{Name: "a", Open: true, Rows: []string{"out", terminalExitMarkerForTest}, ExitCode: 3, ExitKnown: true},
+			{Name: "b", Open: true, Rows: []string{"out"}},
+		},
+	}
+	if err := SaveTerminal(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok {
+		t.Fatalf("LoadTerminal = %v, %v", ok, err)
+	}
+	if !got.ExitKnown || got.ExitCode != 3 {
+		t.Fatalf("top-level exit status = %d/%v", got.ExitCode, got.ExitKnown)
+	}
+	if !got.Tabs[0].ExitKnown || got.Tabs[0].ExitCode != 3 || got.Tabs[1].ExitKnown {
+		t.Fatalf("tab exit statuses = %+v", got.Tabs)
+	}
+	// The old-record direction: no fields means "exited, status unknown".
+	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}}
+	if err := SaveTerminal(dir, legacy); err != nil {
+		t.Fatal(err)
+	}
+	old, ok, err := LoadTerminal(dir)
+	if err != nil || !ok || old.ExitKnown || old.ExitCode != 0 {
+		t.Fatalf("old record = %+v, %v, %v", old, ok, err)
 	}
 }

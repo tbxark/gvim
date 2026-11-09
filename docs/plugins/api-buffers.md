@@ -313,15 +313,24 @@ keeps at most 256 keys per plugin and buffer, keys up to 128 bytes and strings u
 
 ```text
 gvim.buf.set_line_targets(buf, {{line=, path=, target=?, into=?}, ...}) -> true | nil, err
+gvim.buf.set_line_targets(buf, {{line=, action=}, ...}) -> true | nil, err
 gvim.buf.clear_line_targets(buf) -> true
 ```
 
 A target makes a line of the buffer clickable: pressing Enter on it in Normal mode (count 1, no
-selection, no extra carets) or a single left click opens `path` at 0-based line `target` (the
-top when omitted). `into` names a split by its plugin label: a live labelled window takes the
-target; otherwise the target opens beside the pane that holds the targets, so a result list
-never replaces itself. `line` is the 0-based line in this buffer. The call replaces the
-buffer's previous targets; an empty list (or `clear_line_targets`) clears them. Targets are
-dropped when the buffer closes and when the owning plugin unloads; another plugin's later call
-replaces the set. Counts 2/3, extend-selection clicks and multi-caret mode keep their normal
-editing behaviour. Caps: 10 000 targets per buffer, path 4096 bytes, split label 64 bytes.
+selection, no extra carets) or a single left click runs it. A path target opens `path` at
+0-based line `target` (the top when omitted). `into` names a split by its plugin label: a live
+labelled window takes the target; otherwise the target opens beside the pane that holds the
+targets, so a result list never replaces itself. `line` is the 0-based line in this buffer.
+
+An action target has `action` instead of `path` (the two are mutually exclusive): Enter/click
+runs that command id through the same dispatcher as a key or palette row. For safety it must be
+a command the SETTING plugin registered (`<plugin>.<name>`); another plugin's command is
+rejected with an invalid error, so a target can never dispatch someone else's private command.
+Nothing is built from target data into a shell or argv — the id is only looked up in the
+command registry; an action that was unregistered or unloaded makes the click a no-op after the
+owned targets are dropped. The call replaces the buffer's previous targets; an empty list (or
+`clear_line_targets`) clears them. Targets are dropped when the buffer closes and when the
+owning plugin unloads; another plugin's later call replaces the set. Counts 2/3,
+extend-selection clicks and multi-caret mode keep their normal editing behaviour. Caps:
+10 000 targets per buffer, path 4096 bytes, split label 64 bytes, action 128 bytes.

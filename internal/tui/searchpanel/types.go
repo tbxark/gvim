@@ -94,7 +94,10 @@ type SearchResult struct {
 	// groups: for example "12 large files", "3 binary files".
 	SkippedCount int
 	Skipped      []string
-	Err          string // the search failed
+	// Notice is a non-fatal warning about the result (for example a degraded remote
+	// ignore scope). It is shown without failing the search; "" when there is none.
+	Notice string
+	Err    string // the search failed
 }
 
 // ReplaceFile is one file a replacement applies to. Hash is the version the match
@@ -187,6 +190,9 @@ type SearchBatch struct {
 	Truncated      bool     // the match or file cap was hit
 	SkippedCount   int      // files left out so far
 	Skipped        []string // the skip summaries so far
+	// Notice is a non-fatal warning carried with the batches (for example a degraded
+	// remote ignore scope). The last non-empty Notice is shown with the result.
+	Notice string
 	// Done marks the last batch of a completed search. Err, when set, says why the
 	// search stopped instead of returning a result.
 	Done bool

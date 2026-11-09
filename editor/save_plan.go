@@ -17,6 +17,18 @@ type SavePlan struct {
 	untitled int    // Save All: modified tabs with no file name, skipped
 	readOnly int    // Save All: modified read-only tabs, skipped
 	renameTo string // Save As: the path the document takes once it is written
+	// reservation is the Save As target claim acquired on the editor's goroutine before
+	// the write command starts; ApplySavePlan releases it on every outcome. A plan that
+	// is dropped without applying must call Release.
+	reservation *sharedSaveReservation
+}
+
+// Release ends a plan's Save As reservation (if any). ApplySavePlan calls it for every
+// plan; this is the hook for a caller that drops a plan without applying it.
+func (p SavePlan) Release() {
+	if p.reservation != nil {
+		p.reservation.Release()
+	}
 }
 
 // Run writes the planned files one after another and returns their results. It reads
@@ -75,7 +87,11 @@ func (e *Editor) PlanSave() (SavePlan, error) {
 // PlanSaveAs prepares the write of the active document to path, as SaveAs does, and
 // changes no file. It refuses a path that another tab has open, and an empty path. An
 // existing file other than the document's own is refused when the write runs, unless
-// force is set. The document takes path once the write works (see ApplySavePlan).
+// force is set. The document takes path once the write works (see ApplySavePlan). When the
+// editor has a cross-workspace registry, PlanSaveAs also takes a revocable reservation on
+// the target (SharedBuffers.ReserveSaveAs): other workspaces cannot open, register or
+// Save As onto it until this plan applies or is released, so the ownership check cannot
+// be beaten by the asynchronous write that follows.
 func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 	d := e.Active()
 	if d == nil {
@@ -102,17 +118,20 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		e.setError(err)
 		return SavePlan{}, err
 	}
+	var reservation *sharedSaveReservation
 	if e.shared != nil {
-		if err := e.shared.CheckSaveAs(e, d, path); err != nil {
-			e.setError(err)
-			return SavePlan{}, err
+		var rerr error
+		reservation, rerr = e.shared.ReserveSaveAs(e, d, path)
+		if rerr != nil {
+			e.setError(rerr)
+			return SavePlan{}, rerr
 		}
 	}
 	job := d.PlanSave(path, e.opts.documentSettings())
 	job.CheckDisk = false
 	job.RefuseExisting = !force
 	job.OwnPath = d.Path
-	return SavePlan{jobs: []SaveJob{job}, renameTo: path}, nil
+	return SavePlan{jobs: []SaveJob{job}, renameTo: path, reservation: reservation}, nil
 }
 
 // PlanSaveAll prepares the save of every modified tab, as save_all does, and changes
@@ -147,6 +166,9 @@ func (e *Editor) PlanSaveAll() (SavePlan, error) {
 // "Saved", or the failure. Save All sets the active tab's status to its summary. It
 // returns the failure, or nil when every write worked.
 func (e *Editor) ApplySavePlan(p SavePlan, results []SaveResult) error {
+	// Release the Save As target claim on every outcome, including an error or a
+	// cancelled write; the writes have finished by the time this applies.
+	defer p.Release()
 	err := e.ApplySaves(results)
 	if p.all {
 		for _, r := range results {

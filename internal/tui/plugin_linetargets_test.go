@@ -2,11 +2,13 @@ package tui
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -103,4 +105,65 @@ func TestLineTargetsOpenOnEnterAndClick(t *testing.T) {
 		t.Fatal("closing the buffer left a line target")
 	}
 	_ = rt
+}
+
+// TestLineTargetsRunPluginAction checks action targets: Enter and a click run a
+// command the SETTING plugin registered (through the normal dispatcher, no shell), a
+// different plugin's or an unknown command is rejected before the target exists, and a
+// dropped target falls back to the normal editing action.
+func TestLineTargetsRunPluginAction(t *testing.T) {
+	m, ed, _ := targetModel(t)
+	h := m.plug.host
+	h.SetCommands("p", []pluginapi.CommandInfo{{ID: "p.run"}, {ID: "p.other"}})
+	if err := h.SetLineTargets("p", 1, []pluginapi.LineTarget{{Line: 0, Action: "p.run"}}); err != nil {
+		t.Fatal(err)
+	}
+	doc := m.ed.Active()
+	m.ed.SetCursor(buffer.Pos{Line: 0, Col: 0}, false)
+	if cmd := m.dispatch(Command{Action: "insert_newline"}); cmd != nil {
+		cmd()
+	}
+	if !slices.Contains(ed.actions, editor.Action("p.run")) {
+		t.Fatalf("Enter actions = %v, want p.run", ed.actions)
+	}
+	if len(ed.opened) != 0 {
+		t.Fatalf("an action target opened %v", ed.opened)
+	}
+	ed.actions = nil
+	m.pressEditor(editorpane.Pane{Doc: doc}, editorpane.Hit{Kind: editorpane.HitText, Pos: buffer.Pos{Line: 0, Col: 0}}, 1)
+	if !slices.Contains(ed.actions, editor.Action("p.run")) {
+		t.Fatalf("click actions = %v, want p.run", ed.actions)
+	}
+
+	// Injection refusal: another plugin's command, an own unknown command, both a
+	// path and an action, and an action carrying a file line/split label are all
+	// rejected at set time.
+	for _, tc := range []struct {
+		name   string
+		target pluginapi.LineTarget
+	}{
+		{"foreign plugin", pluginapi.LineTarget{Line: 0, Action: "q.run"}},
+		{"unknown own command", pluginapi.LineTarget{Line: 0, Action: "p.nope"}},
+		{"path and action", pluginapi.LineTarget{Line: 0, Path: "a.go", Action: "p.run"}},
+		{"action with target", pluginapi.LineTarget{Line: 0, Action: "p.run", Target: 3}},
+		{"action with split", pluginapi.LineTarget{Line: 0, Action: "p.run", Into: "code"}},
+	} {
+		if err := h.SetLineTargets("p", 1, []pluginapi.LineTarget{tc.target}); pluginapi.CodeOf(err) != pluginapi.CodeInvalid {
+			t.Errorf("%s: err = %v, want CodeInvalid", tc.name, err)
+		}
+	}
+
+	// A dropped target no longer runs its action; Enter keeps the editor action.
+	if err := h.SetLineTargets("p", 1, []pluginapi.LineTarget{{Line: 0, Action: "p.run"}}); err != nil {
+		t.Fatal(err)
+	}
+	m.plugLineTargetsDrop(1)
+	ed.actions = nil
+	m.ed.SetCursor(buffer.Pos{Line: 0, Col: 0}, false)
+	if cmd := m.dispatch(Command{Action: "insert_newline"}); cmd != nil {
+		cmd()
+	}
+	if slices.Contains(ed.actions, editor.Action("p.run")) {
+		t.Fatalf("a dropped target still ran its action: %v", ed.actions)
+	}
 }

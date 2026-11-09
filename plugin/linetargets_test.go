@@ -22,7 +22,23 @@ gvim.command.register{ name = "targets", run = function()
   gvim.notify("set2:" .. tostring(gvim.buf.set_line_targets(buf, {
     { line = 1, path = "a.go", target = 2 },
   })))
+  gvim.notify("action:" .. tostring(gvim.buf.set_line_targets(buf, {
+    { line = 0, action = "lt.run" },
+  })))
+  gvim.notify("both:" .. tostring(gvim.buf.set_line_targets(buf, {
+    { line = 0, path = "a.go", action = "lt.run" },
+  })))
+  gvim.notify("none:" .. tostring(gvim.buf.set_line_targets(buf, {
+    { line = 0 },
+  })))
   gvim.notify("clear:" .. tostring(gvim.buf.clear_line_targets(buf)))
+end }
+
+gvim.command.register{ name = "action_target", run = function()
+  local buf = gvim.buf.current()
+  gvim.notify("actiontarget:" .. tostring(gvim.buf.set_line_targets(buf, {
+    { line = 0, action = "lt.run" },
+  })))
 end }
 `
 
@@ -38,7 +54,7 @@ func TestLineTargetsLuaSurface(t *testing.T) {
 	for _, n := range h.NoticeTexts() {
 		notices += n + "|"
 	}
-	for _, want := range []string{"set:true", "empty:true", "set2:true", "clear:true"} {
+	for _, want := range []string{"set:true", "empty:true", "set2:true", "action:true", "both:nil", "none:nil", "clear:true"} {
 		if !strings.Contains(notices, want) {
 			t.Fatalf("notices = %q, missing %q", notices, want)
 		}
@@ -50,6 +66,14 @@ func TestLineTargetsLuaSurface(t *testing.T) {
 	// The set call kept the targets while they were there (checked through a fresh set).
 	if err := h.Run("lt.targets", nil); err != nil {
 		t.Fatal(err)
+	}
+	// Action targets reach the host with the action and no path.
+	if err := h.Run("lt.action_target", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := h.Host.LineTargets(id)
+	if len(got) != 1 || got[0].Action != "lt.run" || got[0].Path != "" {
+		t.Fatalf("action targets = %+v, want one lt.run action", got)
 	}
 	_ = pluginapi.MaxLineTargets
 }

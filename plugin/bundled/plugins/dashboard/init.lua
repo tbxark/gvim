@@ -11,11 +11,12 @@
 --     fetches from a bundled plugin); the public third-party section API is not
 --     ported either (gvim cannot pass Lua closures between plugin runtimes).
 --   * the disk section shells out to df for the workspace mount and $HOME only.
---   * the recent-file rows are line targets (gvim.buf.set_line_targets): a
---     single click opens the file. The command rows cannot be targets because a
---     target opens a file, not an action, so those stay keyboard-only (the
---     buffer's mode binds Tab/Down/j, Shift-Tab/Up/k and Enter, like Fresh's
---     dashboard mode).
+--   * every row is clickable: recent-file rows are path line targets and the
+--     action rows (including the Git section's branch-log row) are action line
+--     targets running a hidden command this plugin owns, so a click goes through
+--     the same dispatcher as the keyboard mode (Tab/Down/j, Shift-Tab/Up/k and
+--     Enter, like Fresh's dashboard mode). A target can never dispatch another
+--     plugin's commands; URL rows stay plain text (no safe URL opener).
 --   * sessions are not shown (gvim has no plugin-facing session list); the
 --     recent-files section covers the same "get back to work" role.
 local gvim = require "gvim"
@@ -74,6 +75,28 @@ local ACTIONS = {
   { label = "Git Log", action = "git_log.show_git_log" },
   { label = "Diagnostics Panel", action = "diagnostics_panel.toggle_diagnostics_panel" },
 }
+-- Each action row clicks its own hidden command (registered at the bottom), so the
+-- line-target API only ever dispatches commands this plugin owns.
+for i, a in ipairs(ACTIONS) do
+  a.target = "dashboard.click_" .. i
+end
+local BRANCH_LOG = "dashboard.click_branch_log"
+
+-- command_available says whether a command the dashboard points at is currently
+-- registered (visible commands only; hidden ones are not another plugin's API). It
+-- keeps the branch-log row from advertising a click when the git_log plugin is off.
+local function command_available(id)
+  local ok, list = pcall(gvim.command.list, { query = id })
+  if not ok or type(list) ~= "table" then
+    return false
+  end
+  for _, c in ipairs(list) do
+    if c.id == id then
+      return true
+    end
+  end
+  return false
+end
 
 local state = {
   buf = nil,             -- the dashboard Buffer handle
@@ -362,6 +385,11 @@ local function build_rows(inner)
     if state.git.url ~= "" then
       kv("remote", state.git.url, STYLE.muted)
     end
+    if command_available("git_log.show_git_log") then
+      action_row("branch log", state.git.branch or "", { kind = "action", action = "git_log.show_git_log", target = BRANCH_LOG })
+    else
+      kv("branch log", "unavailable (enable git_log)", STYLE.muted)
+    end
   elseif state.git and state.git.missing then
     heading("Git")
     kv("repository", "none in this workspace", STYLE.muted)
@@ -381,7 +409,7 @@ local function build_rows(inner)
   end
   heading("Actions")
   for i = 1, math.min(#ACTIONS, MAX_ACTIONS) do
-    action_row(ACTIONS[i].label, "", { kind = "action", action = ACTIONS[i].action })
+    action_row(ACTIONS[i].label, "", { kind = "action", action = ACTIONS[i].action, target = ACTIONS[i].target })
   end
   if state.disk and #state.disk.rows > 0 then
     if #lines > 0 then
@@ -418,9 +446,15 @@ local function publish_targets(buf, top_pad)
   end
   local targets = {}
   for _, row in ipairs(state.rows) do
-    if row.kind == "recent" and row.path and row.line_index then
-      targets[#targets + 1] = { line = top_pad + row.line_index + 1, path = row.path }
+    if not row.line_index then
+      goto continue
     end
+    if row.kind == "recent" and row.path then
+      targets[#targets + 1] = { line = top_pad + row.line_index + 1, path = row.path }
+    elseif row.kind == "action" and row.target then
+      targets[#targets + 1] = { line = top_pad + row.line_index + 1, action = row.target }
+    end
+    ::continue::
   end
   local ok, err = pcall(set, buf, targets)
   if not ok then
@@ -685,6 +719,27 @@ end
 local function register_hidden(name, run)
   gvim.command.register { name = name, title = name, hidden = true, run = run }
 end
+
+-- Click targets run through hidden commands owned by this plugin. The action itself
+-- still goes through gvim.command.run (the same dispatcher as the keyboard row), so a
+-- stale/unavailable action is reported and nothing else is dispatched.
+local function run_action(action)
+  local ok, result, err = pcall(gvim.command.run, action, nil)
+  if not ok then
+    notify("Dashboard: " .. tostring(result))
+  elseif not result then
+    notify("Dashboard: " .. tostring(err))
+  end
+end
+
+local function make_click(action)
+  return function() run_action(action) end
+end
+
+for i, a in ipairs(ACTIONS) do
+  register_hidden("click_" .. i, make_click(a.action))
+end
+register_hidden("click_branch_log", make_click("git_log.show_git_log"))
 
 register_hidden("focus_next", function() focus_next(1) end)
 register_hidden("focus_prev", function() focus_next(-1) end)

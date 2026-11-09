@@ -147,12 +147,40 @@ func (p *Panel) title() string {
 		return p.scrollbackTitle()
 	}
 	if p.exited {
-		if agent := p.launch.Agent; agent != "" {
-			return "Terminal (exited) — " + agent
-		}
-		return "Terminal (exited)"
+		return p.exitedTitle()
 	}
 	return "Terminal"
+}
+
+// exitedTitle is the dock title of a shell that quit: Fresh shows a restart
+// call-to-action with a non-zero exit code in its status bar; the dock's
+// in-scope surface is the tab title, which shows the non-zero code (or a signal)
+// and keeps "exit 0" implicit exactly like Fresh.
+func (p *Panel) exitedTitle() string {
+	title := "Terminal (exited)"
+	if suffix := p.exitSuffix(); suffix != "" {
+		title = "Terminal (exited, " + suffix + ")"
+	}
+	if agent := p.launch.Agent; agent != "" {
+		title += " — " + agent
+	}
+	return title
+}
+
+// exitSuffix names how a shell ended for the dock titles: "" for a clean/unknown
+// exit (Fresh omits exit 0 too), "exit N" for a non-zero code and "signal" for a
+// signal (Unix reports -1).
+func (p *Panel) exitSuffix() string {
+	if !p.exitKnown {
+		return ""
+	}
+	if p.exitCode < 0 {
+		return "signal"
+	}
+	if p.exitCode == 0 {
+		return ""
+	}
+	return fmt.Sprintf("exit %d", p.exitCode)
 }
 
 // scrollbackTitle is the title of the scrollback view: its visible rows of the
@@ -167,6 +195,13 @@ func (p *Panel) scrollbackTitle() string {
 		name = "Scrollback (restored)"
 		if p.reflowed {
 			name = "Scrollback (restored, rewrapped)"
+		}
+	}
+	if p.exited {
+		// The restored read-only view is the scrollback, so the exit status rides
+		// on this title too (Fresh shows it in its restart status-bar indicator).
+		if suffix := p.exitSuffix(); suffix != "" {
+			name += ", " + suffix
 		}
 	}
 	// The agent name is part of the record a restart rejoins, so it stays visible

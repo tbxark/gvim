@@ -39,8 +39,32 @@ func (h *pluginHost) SetLineTargets(plugin string, id pluginapi.BufferID, target
 		return pluginapi.Errf(pluginapi.CodeLimit, "a buffer takes at most %d line targets", pluginapi.MaxLineTargets)
 	}
 	last := max(info.LineCount-1, 0)
+	m := h.model()
 	set := &lineTargetSet{owner: plugin, byLine: make(map[int]pluginapi.LineTarget, len(targets))}
 	for i, t := range targets {
+		if t.Line < 0 || t.Line > last {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "target %d: line %d is outside the buffer (0..%d)", i+1, t.Line, last)
+		}
+		if t.Path != "" && t.Action != "" {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "target %d: a path and an action are mutually exclusive", i+1)
+		}
+		if t.Action != "" {
+			if t.Target != 0 || t.Into != "" {
+				return pluginapi.Errf(pluginapi.CodeInvalid, "target %d: an action target has no target line or split label", i+1)
+			}
+			if len(t.Action) > pluginapi.MaxLineTargetAction {
+				return pluginapi.Errf(pluginapi.CodeLimit, "target %d: action longer than %d bytes", i+1, pluginapi.MaxLineTargetAction)
+			}
+			// An action target may only run a command the SETTING plugin registered.
+			// That keeps line targets from becoming a way to dispatch another plugin's
+			// private commands: the click path is the same command dispatcher a key or
+			// palette row uses, and ownership is checked here, before the target exists.
+			if !m.pluginCommandOwned(plugin, t.Action) {
+				return pluginapi.Errf(pluginapi.CodeInvalid, "target %d: action %q is not a command of plugin %q", i+1, t.Action, plugin)
+			}
+			set.byLine[t.Line] = t
+			continue
+		}
 		if strings.TrimSpace(t.Path) == "" {
 			return pluginapi.Errf(pluginapi.CodeInvalid, "target %d: an empty path", i+1)
 		}
@@ -50,16 +74,12 @@ func (h *pluginHost) SetLineTargets(plugin string, id pluginapi.BufferID, target
 		if len(t.Into) > pluginapi.MaxLineTargetInto {
 			return pluginapi.Errf(pluginapi.CodeLimit, "target %d: split label longer than %d bytes", i+1, pluginapi.MaxLineTargetInto)
 		}
-		if t.Line < 0 || t.Line > last {
-			return pluginapi.Errf(pluginapi.CodeInvalid, "target %d: line %d is outside the buffer (0..%d)", i+1, t.Line, last)
-		}
 		if t.Target < 0 {
 			t.Target = 0
 		}
 		t.Into = cleanText(t.Into)
 		set.byLine[t.Line] = t
 	}
-	m := h.model()
 	if m.plug.lineTargets == nil {
 		m.plug.lineTargets = map[pluginapi.BufferID]*lineTargetSet{}
 	}
@@ -110,6 +130,27 @@ func (m *Model) plugLineTargetsDropOwner(plugin string) {
 			delete(m.plug.lineTargets, id)
 		}
 	}
+}
+
+// pluginCommandOwned reports whether plugin registered the command id. Line-target
+// actions are restricted to it so a target can never dispatch another plugin's command.
+func (m *Model) pluginCommandOwned(plugin, id string) bool {
+	for _, c := range m.plug.commands[plugin] {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// runLineTarget runs what a line target stands for: a registered action command of the
+// setting plugin through the normal dispatcher (no shell, no target data in the command
+// string), or the file/line it opens. Both Enter and a single left click land here.
+func (m *Model) runLineTarget(t pluginapi.LineTarget, source Document) tea.Cmd {
+	if t.Action != "" {
+		return m.dispatch(Command{Action: t.Action})
+	}
+	return m.openLineTarget(t, source)
 }
 
 // openLineTarget opens what a line target points at: the labelled split when it is live,
@@ -165,5 +206,5 @@ func (m *Model) lineTargetAction(action string, args map[string]any) (tea.Cmd, b
 	if !ok {
 		return nil, false
 	}
-	return m.openLineTarget(t, m.ed.Active()), true
+	return m.runLineTarget(t, m.ed.Active()), true
 }
