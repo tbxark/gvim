@@ -26,3 +26,19 @@ func TestEditorAdapterOpensAFileReadBeforehand(t *testing.T) {
 		t.Fatalf("tabs = %+v, want the one active tab for %s", tabs, path)
 	}
 }
+
+// TestEditorAdapterOpenLoadedReadOnly checks generated content opened by a goto is marked
+// read-only on the active document (the editor refuses edits and saves).
+func TestEditorAdapterOpenLoadedReadOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "core.slang")
+	apptest.Must(t, os.WriteFile(path, []byte("float3 x;\n"), 0o444))
+	ed := editor.New(editor.Options{})
+	a := &Editor{ed: ed}
+	doc, err := a.LoadFunc(path)()
+	apptest.Must(t, err)
+	a.OpenLoadedReadOnly(doc)
+	active := ed.Active()
+	if active == nil || active.Path != path || !active.ReadOnly() {
+		t.Fatalf("active = %+v, want the generated file read-only", active)
+	}
+}

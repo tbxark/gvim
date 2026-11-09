@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -39,6 +40,32 @@ var lspRequestTimeout = 10 * time.Second
 
 // lspStopTimeout bounds the shutdown of the servers, on lsp_stop and at exit.
 const lspStopTimeout = 5 * time.Second
+
+// ExternalLocationRequest describes the server that answered a location request. A
+// provider must use Program/Command and Env as the authoritative launch context instead
+// of hard-coding a PATH program: the same binary and environment that served the LSP
+// request should print synthetic source. Program is the absolute executable the manager
+// passed to lsp.Start; it is empty only when the manager left a bare command to the child's
+// own PATH lookup (a documented residual for exact-binary identity).
+type ExternalLocationRequest struct {
+	URI      string
+	Language string
+	Root     string
+	Program  string
+	Command  []string
+	Env      []string
+}
+
+// ExternalLocationOpener resolves a non-file URI (for example slang-synth://core/
+// core.builtin) to generated local content. It must parse and validate the URI, use the
+// workspace authority/trust gate for any process, bound its own work, and return an
+// absolute regular file path. The app installs it; a port without one reports the
+// external location instead of guessing a filesystem path.
+type ExternalLocationOpener func(ctx context.Context, req ExternalLocationRequest) (path string, err error)
+
+// externalLocationTimeout bounds one external URI resolution (the opener has its own
+// smaller process timeout too).
+const externalLocationTimeout = 10 * time.Second
 
 // New returns the language-server port for the servers of the config, or
 // nil when no server is configured, so that no LSP feature is on. It is the
@@ -116,13 +143,16 @@ type lspPort struct {
 	// spawner, when set, starts the server instead of lsp.Start: a remote workspace
 	// runs the server on the remote host through the authority's LongRunning surface
 	// (docs/authority.md). The manager's spawn gate still runs before it.
-	spawner   func(context.Context, lsp.Config) (*lsp.Client, error)
-	servers   map[string][]manager.ServerConfig // by language ID; read only after construction
-	universal []manager.ServerConfig
-	info      map[string]tui.LSPServerInfo // read only after construction
-	auto      map[string]bool              // languages with a server that starts on its own
-	startable map[string]bool              // languages with any configured server
-	status    []tui.LSPServerStatus        // every configured server, for the popup
+	spawner func(context.Context, lsp.Config) (*lsp.Client, error)
+	// externalOpener resolves non-file LSP locations (slang-synth and similar) to
+	// generated local content; nil means no provider.
+	externalOpener ExternalLocationOpener
+	servers        map[string][]manager.ServerConfig // by language ID; read only after construction
+	universal      []manager.ServerConfig
+	info           map[string]tui.LSPServerInfo // read only after construction
+	auto           map[string]bool              // languages with a server that starts on its own
+	startable      map[string]bool              // languages with any configured server
+	status         []tui.LSPServerStatus        // every configured server, for the popup
 
 	mu sync.Mutex
 	// selectionMu serializes per-root provider updates with an explicit Start/Restart
@@ -1118,28 +1148,82 @@ func (p *lspPort) managerForServer(language, name string) *manager.Manager {
 	return mgr
 }
 
+// locationFile resolves one protocol location URI to a local path. A file URI is
+// converted directly; any other scheme goes through the app's external-location opener,
+// which owns validation, trust/authority checks and generation. The returned readOnly
+// marks generated content that the TUI must open non-editable.
+func (p *lspPort) locationFile(ctx context.Context, raw string, target ExternalLocationRequest) (file string, readOnly bool, err error) {
+	u, err := uri.ParseStrict(raw)
+	if err != nil {
+		return "", false, fmt.Errorf("lsp location %q: %w", raw, err)
+	}
+	if u.IsFile() || u.Scheme() == "" {
+		return u.FsPath(), false, nil
+	}
+	p.mu.Lock()
+	opener := p.externalOpener
+	p.mu.Unlock()
+	if opener == nil {
+		return "", false, fmt.Errorf("external location %q: no URI provider", raw)
+	}
+	ctx, cancel := context.WithTimeout(ctx, externalLocationTimeout)
+	defer cancel()
+	target.URI = raw
+	path, err := opener(ctx, target)
+	if err != nil {
+		return "", false, fmt.Errorf("external location %q: %w", raw, err)
+	}
+	if path == "" || !filepath.IsAbs(path) {
+		return "", false, fmt.Errorf("external location %q: provider returned a non-absolute path %q", raw, path)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", false, fmt.Errorf("external location %q: %w", raw, err)
+	}
+	if !st.Mode().IsRegular() {
+		return "", false, fmt.Errorf("external location %q: %q is not a regular file", raw, path)
+	}
+	return path, true, nil
+}
+
 // locations runs a request that returns locations, and converts the result to rune
 // positions of each file.
 func (p *lspPort) locations(path string, at buffer.Pos, feature manager.Feature, ask func(context.Context, *lsp.Client, string, protocol.Position) ([]protocol.Location, error)) ([]tui.LSPLocation, error) {
-	var locs []protocol.Location
-	err := p.call(path, at, feature, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) error {
-		var err error
-		locs, err = ask(ctx, c, u, pos)
-		return err
-	})
+	hs, rec, err := p.handles(path, feature)
 	if err != nil {
 		return nil, err
+	}
+	if len(hs) == 0 {
+		return nil, fmt.Errorf("lsp: no server serves %s for %s", feature, rec.lang)
+	}
+	h := hs[0]
+	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+	defer cancel()
+	var locs []protocol.Location
+	locs, askErr := ask(ctx, h.Client(), lsp.PathURI(path), rec.lines.toLSP(at))
+	if askErr != nil {
+		return nil, askErr
+	}
+	target := ExternalLocationRequest{
+		Language: rec.lang,
+		Root:     rec.root,
+		Program:  h.Program(),
+		Command:  h.Command(),
+		Env:      h.LaunchEnv(),
 	}
 	texts := make(map[string]textLines)
 	out := make([]tui.LSPLocation, 0, len(locs))
 	for _, l := range locs {
-		file := uri.URI(l.URI).FsPath()
+		file, readOnly, err := p.locationFile(context.Background(), string(l.URI), target)
+		if err != nil {
+			return nil, err
+		}
 		lines, ok := texts[file]
 		if !ok {
 			lines = newTextLines(p.textOf(file))
 			texts[file] = lines
 		}
-		out = append(out, tui.LSPLocation{Path: file, Start: lines.fromLSP(l.Range.Start), End: lines.fromLSP(l.Range.End)})
+		out = append(out, tui.LSPLocation{Path: file, Start: lines.fromLSP(l.Range.Start), End: lines.fromLSP(l.Range.End), ReadOnly: readOnly})
 	}
 	return out, nil
 }
@@ -1255,6 +1339,15 @@ func (p *lspPort) SetConfig(cfg config.Config) {
 	p.auto = plan.auto
 	p.startable = plan.startable
 	p.status = statusList(plan)
+	p.mu.Unlock()
+}
+
+// SetExternalLocationOpener installs the app's resolver for non-file LSP locations.
+// The caller validates the URI/trust/authority and returns generated local content;
+// nil disables external locations.
+func (p *lspPort) SetExternalLocationOpener(fn ExternalLocationOpener) {
+	p.mu.Lock()
+	p.externalOpener = fn
 	p.mu.Unlock()
 }
 

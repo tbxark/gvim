@@ -149,7 +149,19 @@ func TestSlangLspHelpPopup(t *testing.T) {
 		}
 	}
 	msg := ov.ActionPopup.Message
-	for _, want := range []string{"lsp.slang", "slang-synth://core/core.builtin", "slangd --print-builtin-module", "https://shader-slang.org/docs/", "https://github.com/shader-slang/slang/releases"} {
+	for _, want := range []string{
+		"lsp.slang",
+		"slang-synth://core/core.builtin",
+		"slangd --print-builtin-module",
+		"gvim opens those targets natively (no plugin hook)",
+		"5 s / 4 MiB bound",
+		"read-only",
+		"remote/SSH workspace explicitly refuses this native flow",
+		"no local fallback",
+		"independent of it",
+		"https://shader-slang.org/docs/",
+		"https://github.com/shader-slang/slang/releases",
+	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("help message lacks %q:\n%s", want, msg)
 		}

@@ -980,3 +980,102 @@ func TestDashboardAutoOpenOverride(t *testing.T) {
 		}
 	})
 }
+
+func TestDashboardDiskMeter(t *testing.T) {
+	r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
+		o.SetDir("/work")
+		dashboardGitScript(o)
+		o.Script([]string{"df", "-k", "/work"}, plugintest.ProcScript{Stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk1s1 1000000 950000 50000 95% /work\n"})
+	}})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "95%")
+	for _, want := range []string{"Disk", "work", "95%", "928M / 977M", "[", "#", "]"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("disk section lacks %q:\n%s", want, text)
+		}
+	}
+	var diskLine string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "95%") {
+			diskLine = line
+			break
+		}
+	}
+	if diskLine == "" {
+		t.Fatalf("no disk meter line in:\n%s", text)
+	}
+	open, close := strings.Index(diskLine, "["), strings.LastIndex(diskLine, "]")
+	if open < 0 || close <= open || close-open+1 > 20 {
+		t.Fatalf("disk meter is not a bounded bracket cell: %q", diskLine)
+	}
+}
+
+func TestDashboardDiskMalformedFields(t *testing.T) {
+	t.Run("non-numeric cells are unavailable, not zero capacity", func(t *testing.T) {
+		r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
+			o.SetDir("/work")
+			dashboardGitScript(o)
+			o.Script([]string{"df", "-k", "/work"}, plugintest.ProcScript{Stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x ? ? ? ??% /work\n"})
+		}})
+		dashboardReady(t, r)
+		text := dashboardSettle(t, r, "Disk")
+		if !strings.Contains(text, "unavailable") {
+			t.Fatalf("unknown df row is not marked unavailable:\n%s", text)
+		}
+		for _, forbidden := range []string{"0K / 0K", "0K /", "/ 0K", "100%"} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("unknown df row displayed invalid capacity %q:\n%s", forbidden, text)
+			}
+		}
+	})
+
+	t.Run("used above capacity is unavailable", func(t *testing.T) {
+		r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
+			o.SetDir("/work")
+			dashboardGitScript(o)
+			o.Script([]string{"df", "-k", "/work"}, plugintest.ProcScript{Stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 1 2 3 999% /work\n"})
+		}})
+		dashboardReady(t, r)
+		text := dashboardSettle(t, r, "Disk")
+		if !strings.Contains(text, "unavailable") {
+			t.Fatalf("inconsistent df row is not marked unavailable:\n%s", text)
+		}
+		if strings.Contains(text, "100%") || strings.Contains(text, "1K / 2K") {
+			t.Fatalf("inconsistent df row displayed bogus usage:\n%s", text)
+		}
+	})
+
+	t.Run("non-integer or misplaced percentage is unavailable", func(t *testing.T) {
+		for _, pct := range []string{"1.5%", "+95%", "-5%", "95%%", "95 %"} {
+			pct := pct
+			t.Run(pct, func(t *testing.T) {
+				r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
+					o.SetDir("/work")
+					dashboardGitScript(o)
+					o.Script([]string{"df", "-k", "/work"}, plugintest.ProcScript{Stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 100 50 50 " + pct + " /work\n"})
+				}})
+				dashboardReady(t, r)
+				text := dashboardSettle(t, r, "Disk")
+				if !strings.Contains(text, "unavailable") {
+					t.Fatalf("percentage %q was accepted; status:\n%s", pct, text)
+				}
+				if strings.Contains(text, "[") || strings.Contains(text, "100%") || strings.Contains(text, "50K / 100K") {
+					t.Fatalf("invalid percentage %q rendered a meter/usage:\n%s", pct, text)
+				}
+			})
+		}
+	})
+
+	t.Run("numeric out-of-range percentage still clamps", func(t *testing.T) {
+		r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
+			o.SetDir("/work")
+			dashboardGitScript(o)
+			o.Script([]string{"df", "-k", "/work"}, plugintest.ProcScript{Stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 100 95 5 120% /work\n"})
+		}})
+		dashboardReady(t, r)
+		text := dashboardSettle(t, r, "100%")
+		if !strings.Contains(text, "95K / 100K") {
+			t.Fatalf("valid numeric capacity was not retained:\n%s", text)
+		}
+	})
+}

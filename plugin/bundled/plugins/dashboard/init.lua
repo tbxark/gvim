@@ -16,7 +16,10 @@
 --     per-section timeout, keeping failures/stale data isolated to that section.
 --     A developer can also override the ambient auto-open decision for the current
 --     process with gvim.dashboard.set_auto_open; unset falls back to show_on_empty.
---   * the disk section shells out to df for the workspace mount and $HOME only.
+--   * the disk section shells out to df for the workspace mount and $HOME only, and paints
+--     Fresh's bounded ASCII fill meter + percentage + used/capacity cell per mount; cells
+--     that are not finite non-negative integers (or are inconsistent) render unavailable
+--     instead of being treated as real capacity.
 --   * every row is clickable: recent-file rows are path line targets and the
 --     action rows (including the Git section's branch-log row) are action line
 --     targets running a hidden command this plugin owns, so a click goes through
@@ -709,6 +712,33 @@ end
 
 -- disk data --------------------------------------------------------------
 
+-- disk_kb is a strict df -k cell parser: a plain non-negative integer string only.
+-- nil means "unknown", never 0, so a malformed row cannot masquerade as a real volume.
+local function disk_kb(value)
+  if type(value) ~= "string" or not value:match("^%d+$") then
+    return nil
+  end
+  local n = tonumber(value)
+  if not n or n > 1e15 or n ~= math.floor(n) then
+    return nil
+  end
+  return n
+end
+
+-- disk_pct parses df's percentage cell strictly: a non-negative integer with at most one
+-- trailing %, e.g. "95" or "95%". Decimals, signs, whitespace and misplaced % are
+-- unknown (nil); the caller clamps only a valid numeric result.
+local function disk_pct(value)
+  if type(value) ~= "string" or not value:match("^%d+%%?$") then
+    return nil
+  end
+  local n = tonumber((value:gsub("%%$", "")))
+  if not n or n ~= n or n == math.huge or n == -math.huge or n < 0 then
+    return nil
+  end
+  return n
+end
+
 local function fetch_disk()
   local rows = {}
   local seen = {}
@@ -740,12 +770,24 @@ local function fetch_disk()
           local mount = fields[#fields]
           if not seen[mount] then
             seen[mount] = true
-            rows[#rows + 1] = {
-              mount = gvim.path.basename(mount) ~= "" and gvim.path.basename(mount) or mount,
-              pct = fields[#fields - 1],
-              free = fields[#fields - 2],
-              capacity = fields[#fields - 4],
-            }
+            local label = gvim.path.basename(mount) ~= "" and gvim.path.basename(mount) or mount
+            -- Parse strict cells only (plain digits for capacity/used; digits plus an
+            -- optional trailing % for pct). A bad df field is not zero capacity or 100%
+            -- used: it is unavailable and its used/capacity cell is omitted. Valid
+            -- numeric percentages still clamp into 0..100.
+            local capacity = disk_kb(fields[#fields - 4])
+            local used = disk_kb(fields[#fields - 3])
+            local pct = disk_pct(fields[#fields - 1])
+            if not capacity or capacity <= 0 or not used or used > capacity or not pct then
+              rows[#rows + 1] = { mount = label, unavailable = true }
+            else
+              rows[#rows + 1] = {
+                mount = label,
+                pct = math.max(0, math.min(100, pct)),
+                used = used,
+                capacity = capacity,
+              }
+            end
           end
         end
       end
@@ -770,6 +812,27 @@ end
 
 local function clip(s, width)
   return gvim.text.truncate(s, width, "…")
+end
+
+-- disk_bar is Fresh's disk meter in ASCII: the bracket meter is the elastic cell, so a
+-- terminal that gives block/line-drawing glyphs an East-Asian width cannot break the row.
+-- width is clamped by the caller; pct is clamped here so malformed df output stays bounded.
+local function disk_bar(pct, width)
+  local inner = math.max(0, width - 2)
+  local filled = math.max(0, math.min(inner, math.floor(math.max(0, math.min(100, pct)) / 100 * inner + 0.5)))
+  return "[" .. string.rep("#", filled) .. string.rep("-", inner - filled) .. "]"
+end
+
+-- disk_size formats df -k's 1 KiB blocks for the used / capacity cell.
+local function disk_size(kb)
+  kb = tonumber(kb) or 0
+  if kb >= 1024 * 1024 then
+    return string.format("%.1fG", kb / (1024 * 1024))
+  end
+  if kb >= 1024 then
+    return string.format("%.0fM", kb / 1024)
+  end
+  return string.format("%dK", kb)
 end
 
 -- build_rows flattens the sections into display lines and the focusable rows.
@@ -944,7 +1007,29 @@ local function build_rows(inner)
     end
     heading("Disk")
     for _, row in ipairs(state.disk.rows) do
-      kv(row.mount, string.format("%s used · %s free", row.pct, row.free), STYLE.muted)
+      if row.unavailable then
+        lines[#lines + 1] = { segments = {
+          { text = padded(" " .. row.mount, 13), style = STYLE.muted },
+          { text = " " .. t("disk.unavailable"), style = STYLE.muted },
+        } }
+      else
+        local pct = math.max(0, math.min(100, row.pct or 0))
+        -- Keep the percentage visible even at the minimum frame width: the meter may
+        -- shrink to four cells, and the used/capacity cell is appended only when it fits.
+        local meter = math.max(4, math.min(18, inner - 32))
+        local detail = disk_bar(pct, meter) .. string.format(" %d%%", pct)
+        local usage = disk_size(row.used) .. " / " .. disk_size(row.capacity)
+        local value = detail
+        local room = math.max(4, inner - 14)
+        if room > #detail + #usage + 2 then
+          value = detail .. "  " .. usage
+        end
+        local style = pct >= 90 and STYLE.err or pct >= 75 and STYLE.warn or STYLE.ok
+        lines[#lines + 1] = { segments = {
+          { text = padded(" " .. row.mount, 13), style = STYLE.muted },
+          { text = " " .. clip(value, room), style = style },
+        } }
+      end
     end
   end
   return lines, rows

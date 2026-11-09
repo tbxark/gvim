@@ -386,9 +386,14 @@ copy/check/native-restart dispatch.
 **slang_lsp** (reduced Fresh port): the Slang shader language-server helper. Fresh's `slang-lsp.ts`
 is an LSP URI-scheme provider: it claims `slang-synth://` and, when go-to-definition lands on a
 builtin (float3, normalize, ...), dumps the builtin module with `slangd --print-builtin-module` to a
-version-keyed cache and opens it read-only. gvim's plugin API has no LSP URI-scheme claim or
-external-URI hook, so that half is not portable (the editor keeps its external-location fallback);
-the port keeps the install/verification/help surface as three commands. **Slang: Check slangd /
+version-keyed cache and opens it read-only. gvim now handles those builtin external locations
+**natively** (no plugin API): only the `slang-synth` scheme and a bounded module authority are
+accepted; the fixed `slangd --print-builtin-module <module>` runs through the workspace authority
+under the trust gate with a 5 s / 4 MiB bound; timeout, signal, truncation and a non-zero exit are
+errors; the generated cache file is opened read-only at the LSP position. It is **local-authority
+only** — a remote/SSH workspace refuses explicitly with no local fallback. There is still no generic
+plugin URI-scheme/external-URI API. The opt-in helper keeps the install/verification/help surface as
+three commands. **Slang: Check slangd /
 slangc** runs `slangd --version` and `slangc -v` through `gvim.proc` (authority-following), uses
 `result.ok` for the verdict, and reports each tool's first version line — a non-ok result includes
 its exit code and first output line, and a start failure reports the actual error verbatim (a remote
@@ -397,13 +402,14 @@ authority error, sandbox refusal or broken executable is never rewritten as a mi
 official package-manager command; the upstream install page points at binary releases from
 https://github.com/shader-slang/slang/releases, with `slangc`/`slangd` to put on PATH). **Slang:
 Language Server Help** opens a popup covering the `lsp.slang` configuration (and a user
-`languages.slang` entry for `.slang`/`.slangh` when gvim does not detect them), the `slang-synth://`
-builtin-module mechanism and why gvim cannot open those synthetic targets, verification/restart
+`languages.slang` entry for `.slang`/`.slangh` when gvim does not detect them), the native
+`slang-synth://` builtin-module flow (local-only, bounded, read-only cache), verification/restart
 notes, the release link and https://shader-slang.org/docs/, with copy/check and the native
 Start/Restart LSP Server and Show LSP Status actions. No keys/settings; opt-in
-(`default_enabled: false`). Reductions (also in porting.md): no URI-scheme claim/external-URI hook
-so builtin targets keep the native fallback; no `--print-builtin-module` cache; the install command
-is release guidance rather than a package-manager one-liner.
+(`default_enabled: false`). Reductions (also in porting.md): no generic plugin URI-scheme/external-URI API and no
+plugin-provided schemes; the native flow is local-only with no remote generation; no version-keyed
+persistent cache (each request regenerates); the helper itself does not handle synth URIs. The
+install command is release guidance rather than a package-manager one-liner.
 
 **markdown_source** (port of Fresh's `plugins/markdown_source.ts`): gvim's editor already
 implements Fresh's Markdown source-mode list rules natively (`editor/markdown.go`, called from the
@@ -467,7 +473,14 @@ registers none).
 open — a centred frame with the repository state (branch, upstream tracking `↑ahead ↓behind` or
 `no upstream`, ahead/behind the default branch, working-tree counts, origin), recently visited
 files, keyboard-navigable quick actions (settings,
-explorer, live grep, theme, Git Log, diagnostics) and best-effort `df` disk rows. Tab/Down/j and
+explorer, live grep, theme, Git Log, diagnostics) and best-effort `df` disk rows rendered like
+Fresh's disk section: a bounded ASCII `[###---]` meter (at most 18 cells), the percentage, and a
+used / capacity cell; the percentage thresholds map to ok/warn/err. Only strict
+integer cells are displayed: capacity/used must be plain non-negative integer KiB and the percentage
+must be `^%d+%%?$` (digits with at most one trailing `%`), so decimals, signs, whitespace and
+misplaced percent signs are unknown. A bad cell, zero/invalid capacity or `used > capacity` marks
+that mount `unavailable` and omits the meter/used-capacity cell instead of showing bogus 0/0 or
+100%; a valid numeric percentage (including df's odd out-of-range value) is clamped to 0..100. Tab/Down/j and
 Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** reopens it. It
 auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file
 opens; a timer refreshes it (`refresh_seconds`). A plugin developer can override the auto-open decision

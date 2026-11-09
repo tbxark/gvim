@@ -1108,6 +1108,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			denoAuto.Start(ctx)
 		}
 	}
+	// Native external locations: Fresh's slang-lsp slang-synth builtin modules.
+	// The opener validates the URI, refuses remote authorities, runs the fixed slangd
+	// command through authority.OneShot under the trust gate with bounded output, and
+	// returns locally generated read-only source for the TUI to open.
+	if deps.LSP != nil && authSlot != nil {
+		if setter, ok := deps.LSP.(interface {
+			SetExternalLocationOpener(lsphost.ExternalLocationOpener)
+		}); ok {
+			setter.SetExternalLocationOpener(newSlangSynthOpener(opts.Remote != nil, authSlot, authGate, envProvider.Overlay, root))
+		}
+	}
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,
 	// before the alternate screen starts.

@@ -13,6 +13,7 @@
     "external.unavailable": "unavailable",
     "external.invalid": "invalid response",
     "external.stale": "stale",
-    "external.no_data": "no data"
+    "external.no_data": "no data",
+    "disk.unavailable": "unavailable"
   }
 }

@@ -55,6 +55,7 @@ type lspEd struct {
 	multiItemApplies []multiItemApply
 	multiItemErr     error
 	opened           []string
+	readOnlyOpened   []string
 	gotos            [][2]int
 	applied          map[string][]editor.LSPEdit
 	// version is what DocumentVersion reports, when versionOK is set.
@@ -205,6 +206,11 @@ func (e *lspEd) SetExternalFolds(path string, ranges []fold.Range) {
 		e.externalFolds = map[string][]fold.Range{}
 	}
 	e.externalFolds[path] = ranges
+}
+
+func (e *lspEd) OpenLoadedReadOnly(d *editor.Document) {
+	e.readOnlyOpened = append(e.readOnlyOpened, d.Path)
+	e.OpenLoaded(d)
 }
 
 func (e *lspEd) GotoLine(line, col int) error {
@@ -1460,5 +1466,19 @@ func TestLSPCompletionEscForgetsTheList(t *testing.T) {
 	lt.act("completion_accept")
 	if len(lt.ed.applied) != 0 {
 		t.Fatalf("applied = %v after Esc and accept, want none", lt.ed.applied)
+	}
+}
+
+// TestLSPLoadedReadOnlyUsesReadOnlyOpen checks a generated external location asks the
+// editor for its read-only open path instead of an editable tab.
+func TestLSPLoadedReadOnlyUsesReadOnlyOpen(t *testing.T) {
+	lt := newLSPTest(t, nil)
+	doc := &editor.Document{Path: "/cache/core.slang"}
+	lt.m.lspLoaded(lspLoadedMsg{doc: doc, line: 2, col: 3, readOnly: true})
+	if !slices.Equal(lt.ed.readOnlyOpened, []string{"/cache/core.slang"}) {
+		t.Fatalf("read-only opens = %v", lt.ed.readOnlyOpened)
+	}
+	if !slices.Equal(lt.ed.gotos, [][2]int{{2, 3}}) {
+		t.Fatalf("gotos = %v", lt.ed.gotos)
 	}
 }

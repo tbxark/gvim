@@ -66,6 +66,17 @@ func SaveTerminal(dir string, st terminal.SavedState) error {
 	if reason := saveDisabledReason(dir); reason != "" {
 		return fmt.Errorf("terminal: saving %s is disabled for this process: %s", terminalFileName, reason)
 	}
+	// A symlinked record is never followed for a write or replaced/removed: the link
+	// (valid or dangling) is preserved as-is, so an attacker-controlled link cannot
+	// redirect the record outside the session directory and the user's link is not
+	// silently turned into a regular file. Restores quarantine an unusable symlink.
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("terminal: %s is a symlink; refusing to overwrite it (remove the link and use a regular record to enable saving)", terminalFileName)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("terminal: check %s: %w", terminalFileName, err)
+	}
 	// An unreadable record that could not be quarantined leaves a marker: never
 	// write or remove the original in that case, so a later save cannot silently
 	// destroy what the user may still want to recover.
@@ -193,6 +204,27 @@ func TerminalRecordProtected(dir string) (string, bool) {
 	return "", false
 }
 
+// TerminalRecordSymlink reports a symlinked terminal record whose target exists: the
+// loader can read it, but SaveTerminal must refuse to replace the link. Workspace
+// extraction calls this before migrating anything, because a mixed extraction would
+// otherwise transfer the files first and only fail when the terminal accept tries to
+// save — a predictably partial migration. A dangling symlink is reported by the
+// loader itself (it is an unusable record, not this readable-link case).
+func TerminalRecordSymlink(dir string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	path := filepath.Join(dir, terminalFileName)
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return "", false
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
+}
+
 // quarantinePath returns a free sibling name for the rejected record:
 // terminal.json.rejected, then terminal.json.rejected.1, .2, ... It stops after
 // maxQuarantineAttempts rather than scanning forever.
@@ -233,7 +265,9 @@ func QuarantineTerminalRecord(dir string) (string, error) {
 		return "", nil
 	}
 	path := filepath.Join(dir, terminalFileName)
-	if _, err := os.Stat(path); err != nil {
+	// Lstat, not Stat: a dangling symlink is an existing record that must be
+	// preserved/quarantined as the link it is, not treated as a missing file.
+	if _, err := os.Lstat(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
@@ -264,7 +298,7 @@ func LoadTerminalForRestore(dir string) (terminal.SavedState, bool, error) {
 		return st, true, nil
 	}
 	path := filepath.Join(dir, terminalFileName)
-	if _, statErr := os.Stat(path); statErr != nil {
+	if _, statErr := os.Lstat(path); statErr != nil {
 		return st, false, err
 	}
 	rejected, qerr := QuarantineTerminalRecord(dir)
@@ -292,7 +326,21 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	if dir == "" {
 		return terminal.SavedState{}, false, nil
 	}
-	data, err := readTerminalFile(filepath.Join(dir, terminalFileName))
+	path := filepath.Join(dir, terminalFileName)
+	// os.Open follows a symlink, so a dangling one would look like a missing file and
+	// a later save could replace it. Inspect the link itself first: a dangling or
+	// unfollowable symlink is an unusable record (an explicit error), never "no file".
+	if info, lerr := os.Lstat(path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+		if _, serr := os.Stat(path); serr != nil {
+			if errors.Is(serr, fs.ErrNotExist) {
+				return terminal.SavedState{}, false, fmt.Errorf("terminal: %s is a dangling symlink; refusing to treat it as a missing record", terminalFileName)
+			}
+			return terminal.SavedState{}, false, fmt.Errorf("terminal: %s is a symlink that cannot be followed: %w", terminalFileName, serr)
+		}
+	} else if lerr != nil && !errors.Is(lerr, fs.ErrNotExist) {
+		return terminal.SavedState{}, false, fmt.Errorf("terminal: inspect %s: %w", terminalFileName, lerr)
+	}
+	data, err := readTerminalFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return terminal.SavedState{}, false, nil
 	}

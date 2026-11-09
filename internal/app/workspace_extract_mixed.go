@@ -140,6 +140,16 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 		m.notify(fmt.Errorf("cannot extract: %w", err))
 		return nil
 	}
+	// A target terminal record whose save will necessarily fail must refuse the whole
+	// mixed migration before any write (files would be migrated too), not only the
+	// terminal half. A valid symlinked record is readable but SaveTerminal refuses to
+	// replace the link, so migrating would be a predictably partial transfer.
+	if len(ext.terms) > 0 {
+		if link, symlinked := restore.TerminalRecordSymlink(dir); symlinked {
+			m.notify(fmt.Errorf("cannot extract: the target workspace's terminal record is a symlink (%s); saving would refuse to replace it — replace the link with a regular record before migrating terminals; nothing was moved", link))
+			return nil
+		}
+	}
 	// A protected target terminal record must refuse the whole mixed migration
 	// before any write (files would be migrated too), not only the terminal half.
 	if marker, protected := restore.TerminalRecordProtected(dir); protected {

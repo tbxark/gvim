@@ -93,6 +93,12 @@ func key(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt}
 	case "ctrl+f":
 		return tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+	case "ctrl+left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl}
+	case "ctrl+delete":
+		return tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModCtrl}
+	case "ctrl+backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModCtrl}
 	case "ctrl+alt+r":
 		return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl | tea.ModAlt}
 	case "up":
@@ -610,5 +616,42 @@ func TestRowsNeedsRoomForTheWholeCard(t *testing.T) {
 		if got := b.Rows(tt.h); got != tt.want {
 			t.Errorf("Rows(%d) with replace %v = %d, want %d", tt.h, tt.replace, got, tt.want)
 		}
+	}
+}
+
+// TestFindBarDeletesWordForward covers Fresh's prompt_delete_word_forward in the focused
+// query field: the root overlay router delivers it as Ctrl+Delete (and Emacs Alt+D maps
+// to the same action), which the text input does not bind; the bar translates it to the
+// widget's DeleteWordForward chord without moving focus or closing the bar.
+func TestFindBarDeletesWordForward(t *testing.T) {
+	f := newFake("foo bar")
+	f.cursor = pos(0, 0)
+	b := Open(f, testStyles(), false)
+	typeText(b, "foo bar")
+	press(b, "ctrl+left")
+	press(b, "ctrl+delete")
+	if got := b.search.Value(); got != "foo " {
+		t.Fatalf("query after Ctrl+Delete = %q, want %q", got, "foo ")
+	}
+	if t2 := b.search.Value(); t2 == "" {
+		t.Fatal("bar lost its query")
+	}
+	if b.inReplace || !b.search.Focused() {
+		t.Fatalf("Ctrl+Delete moved focus: inReplace=%v searchFocused=%v", b.inReplace, b.search.Focused())
+	}
+	if !b.Active() {
+		t.Fatal("Ctrl+Delete closed the find bar")
+	}
+}
+
+// TestFindBarCtrlBackspaceDeletesWordBackward is the direct-delivery form of Fresh's
+// prompt_delete_word_backward (the router normally sends Ctrl+W).
+func TestFindBarCtrlBackspaceDeletesWordBackward(t *testing.T) {
+	f := newFake("foo bar")
+	b := Open(f, testStyles(), false)
+	typeText(b, "foo bar")
+	press(b, "ctrl+backspace")
+	if got := b.search.Value(); got != "foo " {
+		t.Fatalf("query after Ctrl+Backspace = %q, want %q", got, "foo ")
 	}
 }

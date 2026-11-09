@@ -2,10 +2,11 @@
 --
 -- Fresh's plugin is an LSP URI-scheme provider: it claims slang-synth:// and, on
 -- lsp_open_external_uri, dumps builtin modules with slangd --print-builtin-module so
--- go-to-definition on builtins opens the generated source. gvim's plugin API has no
--- LSP URI-scheme claim or external-URI hook, so that half is not portable here (the
--- editor keeps its external-location fallback; documented in porting.md). This port
--- keeps the install/verification/help surface as three explicit commands.
+-- go-to-definition on builtins opens the generated source. gvim now implements that
+-- external-location flow in native core (internal/app/slang_synth.go); this opt-in
+-- helper keeps only the install/verification/help surface as three explicit commands
+-- and does not handle synth URIs itself. The native flow is local-authority only and
+-- explicitly refuses a remote workspace (no local fallback).
 local gvim = require "gvim"
 
 local t = gvim.i18n.t
@@ -74,8 +75,8 @@ local function copy_install()
   gvim.status(t("status.copied", { value = INSTALL_COMMAND }))
 end
 
--- show_help explains the two slangd-specific pieces Fresh's plugin covers plus the
--- gvim configuration/verification steps this plugin can support.
+-- show_help explains the configuration/verification steps this helper supports, the native
+-- local-only slang-synth flow, and the plugin API gap it does not expose.
 local function show_help()
   local choice = gvim.ui.action_popup({
     title = t("help.title"),

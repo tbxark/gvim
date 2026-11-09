@@ -341,6 +341,9 @@ type Diagnostic struct {
 type LSPLocation struct {
 	Path       string
 	Start, End buffer.Pos
+	// ReadOnly opens generated/read-only content (for example a builtin module
+	// resolved from an external URI provider).
+	ReadOnly bool
 }
 
 // CompletionEdit is one extra edit a completion item asks for together with its

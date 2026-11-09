@@ -409,6 +409,16 @@ func (a *Editor) OpenLoaded(d *editor.Document) {
 	a.ed.OpenLoaded(d)
 }
 
+// OpenLoadedReadOnly opens generated content in a permanent tab and marks the active
+// document read-only, so a builtin-module dump cannot be edited by accident. The active
+// document is used because OpenLoaded may adopt an already-open path instead of d.
+func (a *Editor) OpenLoadedReadOnly(d *editor.Document) {
+	a.ed.OpenLoaded(d)
+	if active := a.ed.Active(); active != nil {
+		active.SetReadOnly(true)
+	}
+}
+
 // GotoLine moves the caret to line and col, both one-based.
 func (a *Editor) GotoLine(line, col int) error {
 	return a.ed.GotoLine(line, col)

@@ -436,6 +436,16 @@ func (b *Bar) keyPress(kp tea.KeyPressMsg) (cmd tea.Cmd) {
 		} else {
 			b.step(true)
 		}
+	case "ctrl+delete":
+		// Fresh's prompt context maps Ctrl+Delete (and Emacs Alt+D) to
+		// prompt_delete_word_forward. The root overlay router forwards that as the
+		// synthetic Ctrl+Delete, which the text input does not bind; translate it to
+		// the widget's own DeleteWordForward chord. The focused field keeps the keys.
+		cmd = b.edit(tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModAlt})
+	case "ctrl+backspace":
+		// A direct Ctrl+Backspace is the same Fresh action; the router normally maps
+		// it to Ctrl+W, but keep the bar correct if a caller delivers it directly.
+		cmd = b.edit(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
 	default:
 		if i, ok := toggleOf(name); ok {
 			b.toggle(i)

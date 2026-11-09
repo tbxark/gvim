@@ -571,9 +571,23 @@ process**, so the next save is refused even without a marker. Extraction paths
 keep using the pure loader and check the protection state — marker **or** the
 in-memory block — before any migration: a target whose record is protected refuses
 the whole mixed extraction (files and terminals) before any write, and the
-single-terminal path refuses likewise. History migration rides the same rules:
-the migrated queries are bounded/cleaned like any saved history and
-restoring/merging them starts no process. Durability of the migration differs
+single-terminal path refuses likewise. **Symlinked records are preserved as-is:** a
+`terminal.json` symlink is never followed for a write or replaced/removed (so a
+link — valid or dangling — cannot redirect the record outside the session or be
+silently turned into a regular file); a dangling symlink is an explicit unusable
+record, not a missing one, so a session restore quarantines the link itself to a
+`.rejected` name (its link target preserved) and the next save writes a fresh
+regular record, while extraction's pure loader gets the explicit error and refuses
+the migration before any write. A valid symlink can still be read, but save is
+refused until the user replaces it with a regular record; because that save would
+necessarily fail, a workspace extraction pre-checks a readable symlinked record
+and refuses the whole migration (files included) before any write — avoiding a
+predictable partial transfer — and the single-terminal path refuses likewise.
+These checks use
+`lstat`/`readlink` and plain renames, so they cover the same cases on each
+platform (a platform that cannot create symlinks simply never has one). History
+migration rides the same rules: the migrated queries are bounded/cleaned like any
+saved history and restoring/merging them starts no process. Durability of the migration differs
 by target state: a dormant target's merged history is written synchronously into
 its terminal record, while a materialized target merges it into the live dock and
 relies on the normal asynchronous workspace capture — a crash before that capture

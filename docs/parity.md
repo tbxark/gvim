@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `0b42168` (the previous round's commit is folded in) plus the
-merged round-48 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `3d2c244` (the previous round's commit is folded in) plus the
+merged round-49 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-127 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+122 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r48-final2.log`). The audit ran build/gofmt/i18n_check plus targeted round-48 tests/diff
+`/tmp/gvim-r49-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-49 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,64 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-49 outcome (2026-11-09, merged working tree on `3d2c244`).** Four slices landed: native
+slang-synth external locations; terminal-record symlink migration/data protection; find-bar
+Ctrl+Delete/Ctrl+Backspace; dashboard df strict-cell rendering. Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL (log
+`/tmp/gvim-r49-final.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**Native slang-synth external locations (lsp/TUI; item 269).** Fresh's slang-lsp URI-provider flow is
+native, not a plugin scheme: only `slang-synth://<module>/<path>` is accepted, the authority is one
+bounded module name ([A-Za-z0-9._-], at most 64 bytes, no leading dot/dash), and userinfo/port/query/
+fragment and . or .. or backslash path segments are refused; the path is never a filesystem path.
+Local authority only: a remote/SSH workspace refuses explicitly with no local fallback; the fixed
+'<program> --print-builtin-module <module>' runs through the workspace authority's OneShot under the
+trust gate, never an os/exec path. The opener uses the answering server's context: Handle.Program
+(absolute executable; configured command spelling is the documented fallback when unresolved),
+Handle.LaunchEnv and the server root as cwd; a custom wrapper's argv is NOT inherited (recorded
+residual). Bounds: 5 s, 4 MiB stdout/stream, bounded stderr; timeout/signal/start/cancel/truncation/
+non-zero exit and empty output are errors. The dump is written atomically under
+<UserCacheDir>/gvim/slang-builtin/<module>-<sha256>.slang; cache dirs are Lstat-checked against
+symlinks and chmod-ed 0700, targets are content-addressed (different outputs cannot overwrite the
+path a goto is about to read), files are 0444, and the TUI opens the path with its generated/read-only
+marker at the LSP position (the file is read in the goto command; if the editor cannot open read-only
+gvim refuses instead of opening an editable tab). Cache cleanup is throttled/background, prunes
+>7-day and >128-entry files with a 1-hour grace; capacity is best-effort, not hard. AUDITED RESIDUALS:
+a reused content-addressed target is not touched before the async cleanup, so an old (>7-day) target
+could be removed between the opener returning it and the TUI read; the cache-dir Lstat/creation
+window and an already-present target's bytes are not re-hashed are same-user local edges; exact
+binary identity is not guaranteed when Handle.Program is empty (bare command), and a custom server
+argv/wrapper is not inherited; real slangd/remote host UNTESTED (R13-8/R13-3).
+**Terminal symlink migration/data protection (sidebar; item 270).** SaveTerminal Lstat-refuses a
+terminal.json that is a symlink (valid or dangling), so a write/removal cannot follow the link or
+replace it with a regular file. LoadTerminal treats a dangling/unfollowable symlink as an explicit
+unusable record, not missing; LoadTerminalForRestore/quarantine use Lstat, so a dangling link is
+moved aside as .rejected (the link itself preserved) before a fresh save. A valid symlink can still
+be read, but save is refused until the user replaces it; mixed/single extraction pre-check
+TerminalRecordSymlink (and the protected marker) before any write, so a migration whose terminal
+half would fail does not move files first. Tests cover dangling/valid links, quarantine, save
+refusal and extraction precheck. AUDITED RESIDUALS: Lstat→atomic rename has a same-user link-swap
+window (session dir 0700); a valid symlink's external target is read (read-only load, no write); no
+explicit restore-time warning that saving is disabled is recorded; real daemon workspace UNTESTED
+(R13-15).
+**Find-bar Ctrl+Delete/Ctrl+Backspace (keymap; item 271).** In either focused query field the bar
+translates the root's synthetic Ctrl+Delete to the text-input DeleteWordForward chord and direct
+Ctrl+Backspace to Ctrl+W (previous word); Alt+D already resolves to the same forward delete. Tests
+assert the query changes, the search field keeps focus, the bar stays open and no editor action runs.
+These are widget chords, not editor actions; no TUI focus regression found (R13-15).
+**Dashboard df strict cells (plugin; item 272).** Disk rows are bounded ASCII meters (<=18 cells),
+percentage and used/capacity cells. Only strict integer cells render: capacity/used are non-negative
+integer KiB and the percentage is `^%d+%%?$`; decimals/signs/whitespace/misplaced % mark that mount
+`unavailable` and omit the meter/usage cell, as do zero capacity, used>capacity and a non-numeric
+field; a numeric out-of-range percentage is clamped 0..100. The df run is bounded (3 s, 8 KiB,
+workspace authority) and only ok rows are parsed. Residual: truncated df output is not explicitly
+rejected (malformed/partial fields fall to unavailable, not bogus capacity); mount paths split by
+spaces parse wrong fields and become unavailable; real remote df UNTESTED (R13-15).
+Metrics: palette 240, settings 69 in 14 sections, bundled 31 (9 on)/22 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; i18n en 1124 / 579 per locale, 575
+KiB text, ≈665 KiB JSON, heap 122-82-210 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r49-
+final.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-48 outcome (2026-11-09, merged working tree on `0b42168`).** Three slices landed: the
 slang_lsp reduced opt-in helper; terminal-record quarantine/protection and extraction boundary
@@ -5468,6 +5526,27 @@ for parity status.
      window (no atomicity/retry; revoke after final check/inside spawner may still run in-flight start),
      revoke never stops existing processes, repeated Start running handle no spawn/gate, preflight→launch
      and missing-binary/initialize non-transactional; real trust UI/remote UNTESTED.
+269. **Native slang-synth external locations (lsp/TUI; R13-8/R13-3).** only slang-synth scheme; bounded
+     module authority; path never filesystem; local-only explicit remote refusal; OneShot under trust gate;
+     answering server Program/LaunchEnv/root context (bare-command exact identity residual; wrapper argv
+     not inherited); 5s/4MiB/bounded stderr, timeout/signal/start/cancel/truncation/nonzero/empty errors.
+     Content-addressed cache <module>-<sha256>.slang; Lstat symlink-dir refusal/chmod0700; atomic 0444;
+     TUI read-only marker + LSP position, refuses if editor cannot read-only. Residuals: old reused target
+     cleanup race before TUI read; cache-dir Lstat/create and existing-target hash same-user edges; custom
+     argv/empty Program identity; real slangd/remote UNTESTED. Docs/plugins/porting.md still describes the
+     pre-content-addressed path/regenerate-each-request wording (docs residual).
+270. **Terminal symlink migration/data protection (sidebar; R13-15).** SaveTerminal Lstat-refuses symlink
+     (valid/dangling), LoadTerminal dangling/unfollowable explicit unusable; ForRestore/quarantine Lstat,
+     dangling link moved as .rejected preserving link; valid link readable but save refused; mixed/single
+     extraction precheck TerminalRecordSymlink/protected before any write. Residuals: Lstat→rename same-user
+     swap window; valid symlink external target read; no explicit restore warning save disabled; daemon
+     workspace UNTESTED.
+271. **Find-bar Ctrl+Delete/Ctrl+Backspace (keymap; R13-15).** widget chord translation in either query
+     field, search stays focused/bar open/no editor action; Alt+D same forward delete; tests.
+272. **Dashboard df strict cells (plugin; R13-15).** <=18-cell ASCII meter; capacity/used strict integer
+     KiB; percentage ^digits%?$; decimals/signs/whitespace/misplaced %/zero capacity/used>capacity
+     unavailable; out-of-range numeric pct clamped; df 3s/8KiB authority. Residual: truncation not explicitly
+     rejected; mount-path spaces become unavailable; real remote df UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7459,27 +7538,35 @@ Round 13 recorded five open gaps:
   `/tmp/gvim-r48-final2.log`). Audit: build/gofmt/i18n_check plus targeted round-48 tests/diff review.
   Tracks: slang_lsp opt-in helper; terminal quarantine/protection/extraction fixes; LSP per-language/
   root-wide forced cleanup. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-49 verification (2026-11-09, merged tree on `3d2c244`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 122 KiB / de 82 KiB / both 210 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r49-final.log`). Audit: build/gofmt/i18n_check plus targeted round-49 tests/diff review.
+  Tracks: native slang-synth external locations; terminal symlink protection/extraction prechecks;
+  find-bar Ctrl+Delete/Ctrl+Backspace; dashboard df strict cells. Real-host checks remain UNTESTED.
+  No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-48 landed slang_lsp opt-in helper, terminal protection/extraction fixes, LSP forced cleanup;
-  full suite EXIT 0 (76 packages, log /tmp/gvim-r48-final2.log); §5.5 is round-49/50 plan; TUI-only
-  scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–48 had their gate sets
-  run. Round 48 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-49 landed native slang-synth flow, terminal symlink data protection, find word-delete chords,
+  dashboard df strict cells; full suite EXIT 0 (76 packages, log /tmp/gvim-r49-final.log); §5.5 is
+  round-50/51 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–49 had their gate sets
+  run. Round 49 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  127 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+  122 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r48-final2.log`. The audit ran build/gofmt/i18n_check plus targeted round-48 tests and
+  `/tmp/gvim-r49-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-49 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
   UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
   save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
   box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
   switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust
-  changes, watcher host behavior, daemon/mixed-workspace extraction; ~/… expansion against a local
-  real `sh`, not a live host. Treat statuses as pointers, not proof.
+  changes, real slangd/slang-synth, watcher host behavior, daemon/mixed-workspace extraction; ~/…
+  expansion against a local real `sh`, not a live host. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

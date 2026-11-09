@@ -55,6 +55,13 @@ type gotoEditor interface {
 	OpenLoaded(d *editor.Document)
 }
 
+// readOnlyGotoEditor is the optional part of a gotoEditor that opens generated
+// content read-only. A goto that needs it refuses rather than opening an editable
+// tab when the editor cannot mark the document.
+type readOnlyGotoEditor interface {
+	OpenLoadedReadOnly(d *editor.Document)
+}
+
 // lspState is the root's language-server state. Its zero value runs no server.
 // The port is set in New, and every other field is filled in as documents open.
 type lspState struct {
@@ -310,6 +317,7 @@ type (
 		doc       *editor.Document
 		err       error
 		line, col int
+		readOnly  bool
 	}
 	// lspStatusMsg is the server list the status popup opens with.
 	lspStatusMsg struct{ servers []LSPServerStatus }
@@ -897,9 +905,10 @@ func (m *Model) lspGoto(loc LSPLocation) tea.Cmd {
 		return nil
 	}
 	load := ge.LoadFunc(loc.Path)
+	readOnly := loc.ReadOnly
 	return func() tea.Msg {
 		doc, err := load()
-		return lspLoadedMsg{doc: doc, err: err, line: line, col: col}
+		return lspLoadedMsg{doc: doc, err: err, line: line, col: col, readOnly: readOnly}
 	}
 }
 
@@ -913,6 +922,17 @@ func (m *Model) lspLoaded(msg lspLoadedMsg) {
 	}
 	if msg.err != nil {
 		m.notice = msg.err.Error()
+	} else if msg.readOnly {
+		ro, ok := m.ed.(readOnlyGotoEditor)
+		if !ok {
+			m.notice = "the editor cannot open generated content read-only"
+		} else {
+			ro.OpenLoadedReadOnly(msg.doc)
+			m.syncViewport()
+			if err := ge.GotoLine(msg.line, msg.col); err != nil {
+				m.notice = err.Error()
+			}
+		}
 	} else {
 		ge.OpenLoaded(msg.doc)
 		m.syncViewport()

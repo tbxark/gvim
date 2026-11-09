@@ -169,6 +169,10 @@ type Handle struct {
 	universal bool
 	cfg       ServerConfig
 	client    *lsp.Client
+	// program is the absolute executable passed to lsp.Start, or "" when a bare
+	// command was left to the child PATH. launchEnv is the extra server environment.
+	program   string
+	launchEnv []string
 	filter    FeatureFilter
 	// docs holds the paths this server has been sent didOpen for.
 	docs map[string]bool
@@ -199,6 +203,14 @@ func (h *Handle) Allows(feature Feature) bool { return h.filter.Allows(feature) 
 
 // Command is the program and arguments the server runs with.
 func (h *Handle) Command() []string { return h.cfg.CommandLine() }
+
+// Program is the absolute executable the manager passed to lsp.Start, or "" when the
+// server's bare command was resolved by the child's own PATH lookup.
+func (h *Handle) Program() string { return h.program }
+
+// LaunchEnv is the extra environment the server was launched with (project overlay plus
+// its configured env), for a resolver that must run the same binary/environment.
+func (h *Handle) LaunchEnv() []string { return slices.Clone(h.launchEnv) }
 
 // Install is how to install the server, when it is missing.
 func (h *Handle) Install() string { return h.cfg.Install }
@@ -1168,6 +1180,8 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool,
 		universal: universal,
 		cfg:       cfg,
 		client:    c,
+		program:   program,
+		launchEnv: slices.Clone(serverEnv),
 		filter:    ParseFeatureFilter(cfg.OnlyFeatures, cfg.ExceptFeatures),
 		docs:      make(map[string]bool),
 	}, nil

@@ -437,6 +437,12 @@ func (m *workspaceManager) acceptExtractTerminalTab(target daemon.Workspace, dir
 	// A target whose unreadable terminal record could not be quarantined is
 	// protected by a marker: never migrate a terminal into it (pure readers check
 	// this before any write), so the extraction leaves both sides untouched.
+	// A readable but symlinked terminal record can never be saved over (the link is
+	// preserved): refuse the terminal migration up front instead of failing after a
+	// partial transfer.
+	if link, symlinked := restore.TerminalRecordSymlink(dir); symlinked {
+		return fmt.Errorf("the target workspace's terminal record is a symlink (%s); saving would refuse to replace it — replace the link with a regular record before migrating terminals", link)
+	}
 	if marker, protected := restore.TerminalRecordProtected(dir); protected {
 		where := marker
 		if where == "" {

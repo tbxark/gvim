@@ -177,6 +177,16 @@ stays open, the rows re-query, and Enter then runs/opens it. A message row, a di
 command or no selection leaves the query unchanged. In Live Grep's floating overlay Tab
 is a no-op, as in Fresh (its suggestion values are opaque).
 
+**Find/replace bar keyboard.** F3 and Shift+F3 step through the matches without
+closing the bar; Enter jumps to the current match and closes it; Tab/Shift+Tab show and
+switch the replacement row; Esc restores the caret and selection from before the bar
+opened. Alt+C/Alt+W/Alt+R/Alt+I toggle Case Sensitive, Whole Word, Regex and Confirm
+Each. In either focused query field, `Ctrl+Delete` deletes the next word and
+`Ctrl+Backspace`/`Ctrl+W` the previous word, as Fresh's `prompt_delete_word_forward`/
+`prompt_delete_word_backward` (the Emacs `Alt+D` route resolves to the same forward delete);
+these are widget chords, not editor actions, so the field keeps focus and the bar stays
+open.
+
 - **Live Grep toolbar** (one row between the title border and the item rows, in Live
   Grep mode only). The match modes and the scopes are `Alt+<letter> Label:on|off`
   segments: `Alt+C` case, `Alt+G` regex, `Alt+O` whole word; `Alt+L` files,
