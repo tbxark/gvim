@@ -242,3 +242,67 @@ func TestSavedCwdIsCleanedAndBounded(t *testing.T) {
 		t.Fatalf("restored cwd = %q, want the cleaned value", got)
 	}
 }
+
+// TestReflowReRunsCommittedSearch checks the restored-transcript search survives a
+// reflow: re-wrapping changes row indexes, so a committed search is re-run over the
+// new rows in Sync (never in Draw) and its matches still point at the query text.
+func TestReflowReRunsCommittedSearch(t *testing.T) {
+	t.Parallel()
+	width := 14
+	var p Panel
+	p.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return width, 4 },
+		Focus:       func() {},
+	})
+	p.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	p.Restore(terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Width: width,
+		Rows: []string{"alpha beta gamma delta", "epsilon beta zeta"},
+	})
+	p.Sync()
+	p.scroll.search = "beta"
+	for _, msg := range messages(p.searchCmd("beta", false, false)) {
+		p.Update(msg)
+	}
+	if len(p.scroll.matches) == 0 {
+		t.Fatalf("initial search matches = %v", p.scroll.matches)
+	}
+	// A narrower pane re-wraps the saved transcript; Sync must rebuild the matches
+	// for the new row indexes.
+	width = 7
+	cmd := p.Sync()
+	rebuilt := false
+	for _, msg := range messages(cmd) {
+		if _, ok := msg.(searchMsg); ok {
+			rebuilt = true
+		}
+		p.Update(msg)
+	}
+	if !rebuilt {
+		t.Fatal("Sync did not rebuild the committed search after the reflow")
+	}
+	if p.scroll.search != "beta" {
+		t.Fatalf("search after reflow = %q", p.scroll.search)
+	}
+	if len(p.scroll.matches) == 0 {
+		t.Fatalf("no matches after the reflow: rows %v", p.prior)
+	}
+	for _, abs := range p.scroll.matches {
+		text, ok := p.combinedText(abs)
+		if !ok || !strings.Contains(text, "beta") {
+			t.Fatalf("match at %d is %q, %v (rows %v)", abs, text, ok, p.prior)
+		}
+	}
+	if !strings.Contains(p.title(), "/beta") {
+		t.Fatalf("title after the rebuilt search = %q", p.title())
+	}
+	// Without a committed search a reflow does not schedule search work.
+	width = 5
+	p.scroll.search = ""
+	p.scroll.matches, p.scroll.match = nil, 0
+	if msgs := messages(p.Sync()); len(msgs) != 0 {
+		t.Fatalf("reflow without a search returned messages %v", msgs)
+	}
+}

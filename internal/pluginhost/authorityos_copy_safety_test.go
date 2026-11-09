@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
@@ -225,5 +226,90 @@ func TestAuthorityOSCopyWithoutStreamerRefusesBeforeWrite(t *testing.T) {
 				t.Fatalf("refused copy touched the local OS: %v", calls)
 			}
 		})
+	}
+}
+
+// fakeFollowerStreamFiles simulates an atomic stream surface that follows a symlink
+// swapped in at the destination: its ordinary WriteStream corrupts the source, while the
+// no-follow surface writes the real destination. A copy must choose the no-follow method.
+type fakeFollowerStreamFiles struct {
+	*fakeStreamFiles
+	corrupt string
+}
+
+type corruptingWriteStream struct {
+	files  *fakeStreamFiles
+	target string
+}
+
+func (s *corruptingWriteStream) Write(context.Context, []byte) error { return nil }
+func (s *corruptingWriteStream) Commit(context.Context) error {
+	s.files.files[s.target] = "WRONG"
+	s.files.commits++
+	return nil
+}
+func (s *corruptingWriteStream) Abort(context.Context) { s.files.aborts++ }
+
+func (f *fakeFollowerStreamFiles) WriteStream(context.Context, string, hostos.WriteOptions) (authority.WriteStream, error) {
+	return &corruptingWriteStream{files: f.fakeStreamFiles, target: f.corrupt}, nil
+}
+
+func (f *fakeFollowerStreamFiles) WriteStreamNoFollow(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return f.fakeStreamFiles.WriteStreamNoFollow(ctx, p, o)
+}
+
+// TestAuthorityOSCopyUsesNoFollowStream: a destination symlink that appears between
+// canonicalization and stream-open would be followed by the ordinary stream and corrupt
+// the source. Copy must use the no-follow surface; the source stays intact and the copy
+// lands at the proven destination.
+func TestAuthorityOSCopyUsesNoFollowStream(t *testing.T) {
+	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
+	remote.files["/srv/proj/a.txt"] = "source data"
+	stream := &fakeStreamFiles{fakeMutableFiles: remote}
+	files := &fakeFollowerStreamFiles{fakeStreamFiles: stream, corrupt: "/srv/proj/a.txt"}
+	slot, _, _ := authorityTestSlot(files)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
+	if err := osys.Copy(context.Background(), "a.txt", "b.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if got := remote.files["/srv/proj/a.txt"]; got != "source data" {
+		t.Fatalf("copy followed a destination symlink and corrupted the source: %q", got)
+	}
+	if got := remote.files["/srv/proj/b.txt"]; got != "source data" {
+		t.Fatalf("no-follow copy destination = %q", got)
+	}
+	if calls := local.Calls(); len(calls) != 0 {
+		t.Fatalf("copy touched the local OS: %v", calls)
+	}
+}
+
+// fakeFollowOnlyStreamFiles has the ordinary WriteStreamer but not the copy-safe
+// no-follow surface. Copy must return unsupported before any destination work.
+type fakeFollowOnlyStreamFiles struct {
+	*fakeMutableFiles
+	stream *fakeStreamFiles
+}
+
+func (f *fakeFollowOnlyStreamFiles) WriteStream(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return f.stream.WriteStream(ctx, p, o)
+}
+
+func TestAuthorityOSCopyRequiresNoFollowStream(t *testing.T) {
+	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
+	remote.files["/srv/proj/a.txt"] = "source data"
+	files := &fakeFollowOnlyStreamFiles{fakeMutableFiles: remote, stream: &fakeStreamFiles{fakeMutableFiles: remote}}
+	slot, _, _ := authorityTestSlot(files)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "a.txt", "b.txt")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("copy without no-follow stream = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if _, ok := remote.files["/srv/proj/b.txt"]; ok {
+		t.Fatal("unsupported copy created the destination")
+	}
+	if calls := local.Calls(); len(calls) != 0 {
+		t.Fatalf("unsupported copy touched the local OS: %v", calls)
 	}
 }

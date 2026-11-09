@@ -8,9 +8,11 @@ package pluginhost
 //     never followed; unreadable subdirectories are skipped; cancellation is checked
 //     throughout. It reads the remote directory entries, never the local filesystem.
 //   - Copy copies a regular file, or a directory tree, entirely remote-to-remote. Every
-//     file is copied through the authority's atomic streamed-write surface; a backend
-//     without it gets a clear unsupported error before reading/creating/writing the
-//     destination (there is no same-handle exclusive create+write fallback). Symlinks in
+//     file is copied through the authority's copy-safe no-follow streamed-write surface;
+//     a backend without it gets a clear unsupported error before reading/creating/writing
+//     the destination (there is no same-handle exclusive create+write fallback, and the
+//     ordinary save stream follows a final symlink, which would break copy safety after
+//     canonicalization). Symlinks in
 //     a tree are refused (there is no remote readlink primitive, so copying them as links
 //     is impossible and silently dropping them would be wrong), and the tree is bounded
 //     by copyTreeMax entries. Copy also requires RealPather to prove source/destination
@@ -271,11 +273,12 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 	if creator == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend cannot atomically claim a copy destination; refusing an unsafe directory copy", displayTo)
 	}
-	// A tree copy writes files below the claimed destination. Without the atomic streamed
-	// write surface a fallback would create/write a target through a separate (non-exclusive)
-	// call; refuse before the claim/walk instead of leaving a partial or racy destination.
-	if authority.WriteStreams(o.files()) == nil {
-		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no atomic streamed-write surface; refusing a copy that could race another writer", displayTo)
+	// A tree copy writes files below the claimed destination. Without the copy-safe
+	// no-follow stream a fallback would follow a swapped destination link or create/write a
+	// target through a separate non-exclusive call; refuse before the claim/walk instead of
+	// leaving a partial or racy destination.
+	if authority.NoFollowWriteStreams(o.files()) == nil {
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no copy-safe (no-follow) atomic streamed-write surface; refusing a copy that could race another writer", displayTo)
 	}
 	// The tree is listed before any write, so a refused symlink cannot leave a partial
 	// copy behind and the entry cap is checked before doing work.
@@ -333,17 +336,20 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 	return nil
 }
 
-// copyFile copies one remote file through the authority's atomic streamed-write surface.
-// The destination is untouched until Commit and a failure/cancellation aborts the temp file.
-// A backend without that surface is refused before reading or writing: FileCreator creates
-// an empty file but gives no exclusive handle for the subsequent data write, so a
-// create-then-WriteFile fallback would let another writer replace the path and then be
-// overwritten by the copy. There is no provable same-handle create+write primitive here, so
-// the only safe behavior is unsupported with no target created or written.
+// copyFile copies one remote file through the authority's copy-safe no-follow
+// streamed-write surface. The destination is untouched until Commit and a
+// failure/cancellation aborts the temp file. No-follow is required because the ordinary
+// save stream follows a final symlink at open; a concurrent writer could put a link to the
+// source at the proven destination between canonicalization and open. A backend without
+// that surface is refused before reading or writing: FileCreator creates an empty file but
+// gives no exclusive handle for the subsequent data write, so a create-then-WriteFile
+// fallback would let another writer replace the path and then be overwritten by the copy.
+// There is no provable same-handle create+write primitive here, so the only safe behavior
+// is unsupported with no target created or written.
 func (o *authorityOS) copyFile(ctx context.Context, src, dst, display string, size int64, mode fs.FileMode) error {
-	streamer := authority.WriteStreams(o.files())
+	streamer := authority.NoFollowWriteStreams(o.files())
 	if streamer == nil {
-		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no atomic streamed-write surface; refusing a copy that could race another writer", display)
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no copy-safe (no-follow) atomic streamed-write surface; refusing a copy that could race another writer", display)
 	}
 	return o.copyStreamedFile(ctx, streamer, src, dst, display, size, mode)
 }
@@ -352,12 +358,12 @@ func (o *authorityOS) copyFile(ctx context.Context, src, dst, display string, si
 // shrank (short ReadRange/EOF) fails, aborting the target temp; growth beyond the initial
 // size is not copied (recorded residual). Cancellation is checked between chunks and the
 // abort uses a background context so the temp file is still removed.
-func (o *authorityOS) copyStreamedFile(ctx context.Context, streamer authority.WriteStreamer, src, dst, display string, size int64, mode fs.FileMode) error {
+func (o *authorityOS) copyStreamedFile(ctx context.Context, streamer authority.NoFollowWriteStreamer, src, dst, display string, size int64, mode fs.FileMode) error {
 	opts := hostos.WriteOptions{Atomic: true}
 	if mode != 0 {
 		opts.Mode = mode
 	}
-	ws, err := streamer.WriteStream(ctx, dst, opts)
+	ws, err := streamer.WriteStreamNoFollow(ctx, dst, opts)
 	if err != nil {
 		return mapErr(err, dst)
 	}

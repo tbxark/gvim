@@ -118,6 +118,13 @@ func (p *Panel) reflowPrior(cols int) {
 		if p.scroll.on {
 			p.scroll.top = max(p.combined()-max(p.bodyRows(), 1), 0)
 			p.scroll.selected = max(p.combined()-1, 0)
+			// The row indexes in a committed search are no longer valid after the
+			// re-wrap; Sync (or cancelling an open search input) re-runs the query
+			// over the new rows.
+			if p.scroll.search != "" {
+				p.scroll.searchStale = true
+				p.scroll.matches, p.scroll.match = nil, 0
+			}
 		}
 	}
 	p.priorWidth = cols

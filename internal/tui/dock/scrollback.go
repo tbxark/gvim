@@ -52,6 +52,11 @@ type scrollState struct {
 	// index into them the view is on.
 	matches []int
 	match   int
+	// searchStale marks a committed search whose match rows no longer hold because
+	// the transcript was re-wrapped at a new width. Sync re-runs it in a command
+	// (never in Update/Draw) so a restored transcript keeps its search after a
+	// resize.
+	searchStale bool
 	// screenRows is the number of live screen rows, from the last snapshot.
 	screenRows int
 }
@@ -348,7 +353,9 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	switch {
 	case k.Code == tea.KeyEscape:
 		p.scroll.typing, p.scroll.searchInput = false, ""
-		return nil
+		// Cancelling the input can reveal that the committed search is stale after a
+		// re-wrap that happened while the input was open.
+		return p.takeStaleSearch()
 	case k.Code == tea.KeyEnter:
 		p.scroll.typing = false
 		p.scroll.search = strings.TrimSpace(p.scroll.searchInput)
@@ -373,6 +380,23 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 		return nil
 	}
 	return nil
+}
+
+// takeStaleSearch rebuilds a committed search after the transcript was re-wrapped.
+// It returns nil when nothing is stale, no query is committed, or the search input
+// is open (the flag is kept for the commit/cancel). It is called from Sync and from
+// cancelling the search input, never from Update's normal path or Draw; the search
+// itself runs in a tea.Cmd.
+func (p *Panel) takeStaleSearch() tea.Cmd {
+	if !p.scroll.searchStale || p.scroll.typing {
+		return nil
+	}
+	p.scroll.searchStale = false
+	if !p.scroll.on || p.scroll.search == "" {
+		return nil
+	}
+	p.scroll.matches, p.scroll.match = nil, 0
+	return p.refreshSearch()
 }
 
 // refreshSearch runs the committed search again after an option toggle, when a

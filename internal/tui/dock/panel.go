@@ -840,17 +840,21 @@ func (p *Panel) Sync() tea.Cmd {
 	if cols, _ := p.contentSize(); cols > 0 {
 		p.reflowPrior(cols)
 	}
+	search := p.takeStaleSearch()
 	if p.term == nil {
 		// A restored transcript has no session to ask for rows; the window only
 		// needs clamping when the layout (and so the body height) changed.
 		if p.scroll.on {
 			p.clampScroll()
 		}
-		return nil
+		return search
 	}
 	p.maybeShowExitScrollback()
 	t, gen := p.term, p.gen
 	var cmds []tea.Cmd
+	if search != nil {
+		cmds = append(cmds, search)
+	}
 	// One wait is in flight at a time. It returns at the next screen change, or at
 	// the exit until the exit is seen. The exit is watched apart from the output, so
 	// a child that exits while a background job still holds the PTY is seen as

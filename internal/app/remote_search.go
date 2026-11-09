@@ -253,8 +253,52 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		pending, pendingMatches = nil, 0
 		return true
 	}
-	var current *searchpanel.FileMatches
+	// Open buffers are searched from the editor's snapshot, exactly as the local AllFiles
+	// scope does and as Fresh's project_files/open-buffer search does: the remote tool's
+	// disk line must not win for a file whose buffer text (possibly unsaved) is already in
+	// hand. The current buffer's snapshot goes first; the other open buffers follow the
+	// tool results. No remote read is added for this path.
+	openSources, openByRel, openOrder := remoteOpenSources(req, s.root, allowed)
+	emittedOpen := map[string]bool{}
+	addOpenSource := func(src searchpanel.SourceFile, rel string) bool {
+		emittedOpen[rel] = true
+		if cancelled() || totalMatches >= limit {
+			return true
+		}
+		matches := remoteSourceMatches(src.Text, q)
+		if len(matches) == 0 {
+			return true
+		}
+		fm := searchpanel.FileMatches{Path: joinRemotePath(s.root, rel), Name: rel, Hash: hashText(src.Text), Dirty: src.Dirty}
+		for _, m := range matches {
+			fm.Matches = append(fm.Matches, m)
+			if totalMatches+len(fm.Matches) >= limit {
+				truncated = true
+				break
+			}
+		}
+		if len(fm.Matches) > 0 {
+			totalMatches += len(fm.Matches)
+			pending = append(pending, fm)
+			pendingMatches += len(fm.Matches)
+		}
+		if len(pending) >= searchBatchFiles || pendingMatches >= searchBatchMatches {
+			return flush(false)
+		}
+		return true
+	}
 	currentRel := ""
+	if req.Current != nil {
+		if rel, ok := remoteRelPath(req.Current.Path, s.root); ok {
+			if src, in := openSources[rel]; in {
+				currentRel = rel
+				if !addOpenSource(src, rel) {
+					return
+				}
+			}
+		}
+	}
+	var current *searchpanel.FileMatches
 	flushCurrent := func() bool {
 		if current == nil {
 			return true
@@ -281,6 +325,11 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if allowed != nil && !allowed[rel] {
 			continue
 		}
+		if _, isOpen := openByRel[rel]; isOpen {
+			// The buffer snapshot above owns this file; the disk line is stale or would
+			// duplicate it.
+			continue
+		}
 		if rel != currentRel {
 			if !flushCurrent() {
 				return
@@ -298,6 +347,14 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	}
 	if !flushCurrent() {
 		return
+	}
+	for _, rel := range openOrder {
+		if emittedOpen[rel] || totalMatches >= limit {
+			continue
+		}
+		if !addOpenSource(openSources[rel], rel) {
+			return
+		}
 	}
 	flush(true)
 }
@@ -554,6 +611,75 @@ func skippedRemotePath(p string) bool {
 // walking (no complete git candidate membership): not hidden and not inside a skip dir.
 func walkedRemotePathAllowed(p string) bool {
 	return !hiddenRemotePath(p) && !skippedRemotePath(p)
+}
+
+// remoteRelPath turns an absolute remote buffer path into a project-relative slash path,
+// rejecting paths outside root and the root itself.
+func remoteRelPath(abs, root string) (string, bool) {
+	clean := path.Clean(abs)
+	cleanRoot := path.Clean(root)
+	if cleanRoot == "/" {
+		if !strings.HasPrefix(clean, "/") || clean == "/" {
+			return "", false
+		}
+		return strings.TrimPrefix(clean, "/"), true
+	}
+	if clean == cleanRoot || !strings.HasPrefix(clean, cleanRoot+"/") {
+		return "", false
+	}
+	return strings.TrimPrefix(clean, cleanRoot+"/"), true
+}
+
+// remoteOpenSources collects the open-buffer snapshots that belong to the AllFiles scope:
+// an under-root path that the panel's file snapshot (already glob-filtered) contains when
+// there is one, or any under-root open buffer when the file index is not ready. It returns
+// the snapshots by project-relative path, that map, and the display order.
+func remoteOpenSources(req searchpanel.SearchRequest, root string, allowed map[string]bool) (map[string]searchpanel.SourceFile, map[string]searchpanel.SourceFile, []string) {
+	byRel := make(map[string]searchpanel.SourceFile, len(req.OpenFiles))
+	var order []string
+	add := func(src searchpanel.SourceFile) {
+		rel, ok := remoteRelPath(src.Path, root)
+		if !ok {
+			return
+		}
+		if allowed != nil && !allowed[rel] {
+			return
+		}
+		if _, seen := byRel[rel]; seen {
+			return
+		}
+		byRel[rel] = src
+		order = append(order, rel)
+	}
+	for _, src := range req.OpenFiles {
+		add(src)
+	}
+	if req.Current != nil {
+		add(*req.Current)
+	}
+	return byRel, byRel, order
+}
+
+// remoteSourceMatches finds a buffer snapshot's matches with the same local search engine as
+// the local project search; it does no IO and does not consult the remote file.
+func remoteSourceMatches(text string, q search.Query) []searchpanel.Match {
+	b := buffer.New(text)
+	found, err := search.Find(b, q)
+	if err != nil {
+		return nil
+	}
+	out := make([]searchpanel.Match, 0, len(found))
+	for _, m := range found {
+		out = append(out, searchpanel.Match{
+			Line:    m.Start.Line + 1,
+			Col:     m.Start.Col + 1,
+			Len:     matchRunes(b, m),
+			Text:    strings.TrimRight(b.Line(m.Start.Line), "\r"),
+			EndLine: m.End.Line + 1,
+			EndCol:  m.End.Col + 1,
+		})
+	}
+	return out
 }
 
 // remoteAllowedFiles turns the panel's project-relative file snapshot into a membership set

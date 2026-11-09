@@ -1517,3 +1517,121 @@ func TestRemoteSearchTooLargeWidenedCapMarkedIncomplete(t *testing.T) {
 		t.Fatalf("notice = %q, want the too-large reason plus cap-incomplete", done.Notice)
 	}
 }
+
+// TestRemoteSearchUsesOpenBufferSnapshotForAllFiles checks a remote AllFiles search
+// substitutes the editor's open-buffer text for that file's remote disk result: unsaved
+// matches are found, the stale disk line is not duplicated, and the file is marked dirty.
+func TestRemoteSearchUsesOpenBufferSnapshotForAllFiles(t *testing.T) {
+	out := "a.go:1:1:todo disk\nb.go:2:1:todo b\n"
+	s := newRemoteProjectSearch(&fakeOneShot{script: toolScript("rg", out)}, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Files:     []string{"a.go", "b.go"},
+		OpenFiles: []searchpanel.SourceFile{{Path: "/remote/w/a.go", Name: "a.go", Text: "todo edited\n", Dirty: true}},
+	}, nil))
+	var files []searchpanel.FileMatches
+	for _, b := range batches {
+		files = append(files, b.Files...)
+	}
+	var a, b *searchpanel.FileMatches
+	for i := range files {
+		switch files[i].Name {
+		case "a.go":
+			a = &files[i]
+		case "b.go":
+			b = &files[i]
+		}
+	}
+	if a == nil || b == nil || len(files) != 2 {
+		t.Fatalf("files = %+v, want exactly a.go and b.go", files)
+	}
+	if !a.Dirty || len(a.Matches) != 1 || a.Matches[0].Text != "todo edited" {
+		t.Fatalf("a.go = %+v, want the dirty buffer snapshot match", *a)
+	}
+	if b.Dirty || len(b.Matches) != 1 || b.Matches[0].Line != 2 {
+		t.Fatalf("b.go = %+v, want the disk match", *b)
+	}
+}
+
+// TestRemoteSearchCurrentOpenBufferComesFirst checks the current buffer's snapshot is
+// emitted before the tool results (Fresh's source-file-ahead rule) and its disk line is
+// skipped.
+func TestRemoteSearchCurrentOpenBufferComesFirst(t *testing.T) {
+	out := "a.go:1:1:todo disk\nb.go:2:1:todo b\n"
+	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo current\n", Dirty: true}
+	s := newRemoteProjectSearch(&fakeOneShot{script: toolScript("rg", out)}, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Files:     []string{"a.go", "b.go"},
+		OpenFiles: []searchpanel.SourceFile{cur},
+		Current:   &cur,
+	}, nil))
+	var names []string
+	var currentText string
+	for _, b := range batches {
+		for _, f := range b.Files {
+			names = append(names, f.Name)
+			if f.Name == "a.go" && len(f.Matches) > 0 {
+				currentText = f.Matches[0].Text
+			}
+		}
+	}
+	if len(names) < 2 || names[0] != "a.go" {
+		t.Fatalf("file order = %v, want the current buffer first", names)
+	}
+	if currentText != "todo current" {
+		t.Fatalf("current buffer match = %q, want the snapshot text", currentText)
+	}
+}
+
+// TestRemoteSearchOpenSnapshotHonorsTheFileIndex checks an open file the panel's
+// glob-filtered file snapshot excludes is not searched in AllFiles (only in the dedicated
+// Open Buffers scope), matching the local panel.
+func TestRemoteSearchOpenSnapshotHonorsTheFileIndex(t *testing.T) {
+	out := "a.go:1:1:todo a\nb.go:2:1:todo b\n"
+	s := newRemoteProjectSearch(&fakeOneShot{script: toolScript("rg", out)}, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Files:     []string{"b.go"},
+		OpenFiles: []searchpanel.SourceFile{{Path: "/remote/w/a.go", Name: "a.go", Text: "todo unsaved\n", Dirty: true}},
+	}, nil))
+	var names []string
+	for _, b := range batches {
+		for _, f := range b.Files {
+			names = append(names, f.Name)
+		}
+	}
+	if got := strings.Join(names, ","); got != "b.go" {
+		t.Fatalf("files = %v, want only the glob-index file b.go", names)
+	}
+}
+
+// TestRemoteSearchOpenSnapshotWithoutFileIndexStillSearched checks the index-not-ready
+// case: an under-root open buffer is still searched from its snapshot even when the remote
+// tool reports no match for it, while an outside-root open buffer is not.
+func TestRemoteSearchOpenSnapshotWithoutFileIndexStillSearched(t *testing.T) {
+	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo open\n", Dirty: true}
+	outside := searchpanel.SourceFile{Path: "/elsewhere/z.go", Name: "z.go", Text: "todo outside\n", Dirty: true}
+	s := newRemoteProjectSearch(&fakeOneShot{script: toolScript("rg", "")}, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		OpenFiles: []searchpanel.SourceFile{cur, outside},
+	}, nil))
+	var names []string
+	for _, b := range batches {
+		for _, f := range b.Files {
+			names = append(names, f.Name)
+		}
+	}
+	if got := strings.Join(names, ","); got != "a.go" {
+		t.Fatalf("files = %v, want only the under-root open snapshot", names)
+	}
+}

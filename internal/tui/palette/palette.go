@@ -20,7 +20,9 @@
 package palette
 
 import (
+	"cmp"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +32,7 @@ import (
 
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/fuzzy"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -773,11 +776,17 @@ func commandRows(entries []commands.Entry) []row {
 	return rows
 }
 
-// bufferRows lists the open tabs whose label contains text, ignoring case. The
-// label is the name, with "*" after a modified buffer.
+// bufferRows lists the open tabs matching text with Fresh's fuzzy matcher. The label
+// is the name, with "*" after a modified buffer. Whitespace splits the query into
+// independent terms (all must match, in any order), and the rows are ordered by score
+// with tab order breaking ties, as Fresh's BufferProvider does.
 func (p *Palette) bufferRows(text string) []row {
-	needle := strings.ToLower(text)
-	var rows []row
+	matcher := fuzzy.NewMatcher(text)
+	type hit struct {
+		row   row
+		score int
+	}
+	var hits []hit
 	for i, b := range p.opts.Buffers {
 		name := b.Name
 		if name == "" {
@@ -787,10 +796,21 @@ func (p *Palette) bufferRows(text string) []row {
 		if b.Modified {
 			label += "*"
 		}
-		if !strings.Contains(strings.ToLower(label), needle) {
+		score, _, ok := matcher.Match(label)
+		if !ok {
 			continue
 		}
-		rows = append(rows, row{kind: rowBuffer, name: name, source: "buffer", index: i})
+		hits = append(hits, hit{
+			row:   row{kind: rowBuffer, name: name, source: "buffer", index: i},
+			score: score,
+		})
+	}
+	slices.SortStableFunc(hits, func(a, b hit) int {
+		return cmp.Compare(b.score, a.score)
+	})
+	rows := make([]row, len(hits))
+	for i, h := range hits {
+		rows[i] = h.row
 	}
 	return rows
 }

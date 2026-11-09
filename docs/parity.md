@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `c0b42a1` plus the merged round-37 work (255–257 plus the
-alt-screen/local-watcher fixes). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `f3ab872` (the previous round's commit is folded in) plus the
+merged round-38 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-126 KiB / de 82 KiB / both 208 KiB, git diff --check). Final full
+120 KiB / de 82 KiB / both 203 KiB, git diff --check). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r37-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-37 tests/diff
+`/tmp/gvim-r38-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-38 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,68 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-38 outcome (2026-11-09, merged working tree on `f3ab872`).** Six unboarded slices landed
+(file multi-word matcher already present; buffer-mode fuzzy multi-word; remote AllFiles open-buffer
+snapshots; local watcher real-fsnotify arm-before-refresh; terminal transcript re-search on resize;
+plugin no-follow local-only with SSH copy unsupported). Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL (log
+`/tmp/gvim-r38-final.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**File multi-word matcher (already present) + buffer-mode fuzzy multi-word.** The file mode splits a
+query on whitespace and every term must match the candidate path in any order, matching Fresh's file
+finder (feat group → features/groups/view.tsx, etc hosts → /etc/hosts, save file → save_file.rs); a
+legal path containing spaces still matches (my file → my file.txt) because whitespace separates terms;
+a path:line[:col] suffix is stripped before matching. Buffer mode (#) now applies the same
+Fresh-FuzzyMatcher behavior to tab labels: #file save → save_file.go and a fuzzy subsequence such as
+#sflg matches without being contiguous; rows are ordered by score with tab order breaking ties. Terms
+are prepared once per query, a reusable matcher is used, and an ASCII candidate that cannot contain a
+term is rejected without rune conversion/allocation. The finder keeps 50,000 indexed files, 100
+file-mode results, background-enumeration cancellation and the palette sequence guard (R13-3).
+**Remote AllFiles search includes current open-buffer snapshots.** The panel's glob-filtered file
+snapshot still bounds AllFiles, but open buffers are now searched from the editor's own snapshots
+(the current buffer first, then the other open buffers after the tool results); that file's remote
+disk line is skipped, so unsaved edits are found exactly as Fresh's project_files searches open
+buffers, with no extra remote read. An open file outside the workspace root, or excluded by the
+panel's file snapshot, is left to the dedicated Open Buffers scope. All commands still run through
+the authority one-shot surface with the remote cwd, stay bounded/cancellable (search context bounds
+every nested listing), never read the local disk, and carry a non-fatal notice on degradation
+(R13-11/R13-23).
+**Local detector watcher real fsnotify + arm-before-refresh (trust).** Event handling now arms the
+nested watch (armDirs) BEFORE re-detection (RefreshDetection), closing the window where a file
+created after a nested marker parent directory appears could be missed between the refresh and the
+late Add. Real-fsnotify integration tests use temporary directories and the production filewatch
+implementation (no fake watcher, no fixed sleeps): marker create/remove, a nested marker parent
+appearing after start (root event must re-arm first), and an unwatchable root degrading to the
+explicit Env: Reload notice. Still detection-only (no recipe re-activation, no capture-cache
+recapture), non-blocking, no self-trigger loop/leak; local-wording notices only (R13-18).
+**Terminal transcript re-search after resize/re-wrap.** When a restored transcript or a restarted
+shell's prior rows are re-wrapped by a width change, the stored match row indexes no longer hold, so
+Sync re-runs a committed query over the new rows asynchronously (Update/Draw never search): the
+query and its regex/case options survive, matches jump to the same text, and n/N and the title stay
+aligned. A copy goes through the same clipboard path the editor's copy uses. Fresh's read-only
+terminal scrollback is a normal buffer, so its search naturally continues over re-wrapped text as
+well; this is the gvim bounded equivalent (R13-15).
+**Plugin no-follow stream: local only, SSH copy unsupported (final safety rollback).**
+NoFollowWriteStreamer is implemented by the LOCAL authority only, using os.CreateTemp + os.Rename:
+the temp file is committed with a rename over the final entry, so a final-component symlink is
+replaced, not followed, and an existing target is atomically replaced (hard-link boundary safe).
+The SSH backend deliberately does NOT advertise the capability: POSIX mv follows a destination
+symlink-to-directory and no portable remote rename was proven to replace a link atomically without
+a check-then-remove helper; the rejected rm-before-mv approach could lose a target on failure or
+race the check. Plugin fs.copy requires the no-follow surface, so on SSH it returns unsupported
+BEFORE reading, creating or writing anything; local copy still requires RealPather, DirectoryCreator
+for trees, and rejects canonical destinations inside the source. Residuals: local parent-path
+replacement TOCTOU (CreateTemp resolves dirname; Commit rename re-resolves; failure cleanup path can
+be redirected), canonicalization is a pre-write proof (concurrent symlink swap after it remains
+TOCTOU), local hard-link identity is protected by rename semantics but no strong no-overwrite/general
+atomicity guarantee is claimed; remote SSH copy is unsupported rather than pretending to be atomic;
+tree root claim/failure-after-claim partial destination, metadata/growth/cancel limits remain
+(R13-19/R13-21).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1117 / 579 per locale, 573 KiB text (under 640 KiB cap), ≈663 KiB JSON,
+heap 120-82-203 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r38-final.log); real hosts
+UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-37 outcome (2026-11-09, merged working tree on `c0b42a1`).** Tasks 255–257 landed plus the
 alternate-screen exit and local-watcher scope/i18n fixes. Static gates pass; final full
@@ -4506,6 +4568,29 @@ for parity status.
      (unavailable/ended/root-failed/root-unwatchable/dirs/limit); omitted/omittedDirs drives limit
      notice; new dock tab-limit/numbered/hover + extract title keys; en1117/de579, 573 KiB text,
      ≈663 KiB JSON, heap126-82-208.
+224. **File multi-word + buffer-mode fuzzy multi-word (keymap; R13-3).** file mode whitespace terms
+     all match path any order (spaces-in-path still match); path:line[:col] stripped first. Buffer mode
+     (#) same Fresh FuzzyMatcher on tab labels: subsequence match, rows score/Tab-order tie; terms
+     prepared once/reusable/ASCII fast reject; finder 50k/100 results/cancel/sequence guard.
+225. **Remote AllFiles open-buffer snapshots (lsp; R13-11/R13-23).** panel glob snapshot bounds
+     AllFiles; open buffers searched from editor snapshots (current first, others after tool results),
+     disk line skipped; unsaved edits found as Fresh project_files; open outside root/snapshot excluded
+     left to Open Buffers; authority-only/bounded/cancel/no local/degradation notice.
+226. **Local watcher real fsnotify + arm-before-refresh (trust; R13-18).** event handling arms nested
+     watch BEFORE re-detection, closing nested-dir refresh→Add gap; real-fsnotify integration tests
+     (marker lifecycle, nested parent appear, unwatchable root notice) no fake/fixed sleeps;
+     detection-only/no recipe or capture recapture/non-blocking/no loop/leak/local wording.
+227. **Terminal transcript re-search on resize/re-wrap (sidebar; R13-15).** committed query re-run
+     asynchronously on Sync when transcript rows re-wrap; query/regex/case survive, matches same text,
+     n/N/title aligned, copy via editor clipboard path; Update/Draw never search; Fresh read-only
+     scrollback normal-buffer equivalent.
+228. **Plugin no-follow local-only; SSH copy unsupported (plugin streamer security; R13-19/R13-21).**
+     local os.CreateTemp+os.Rename final entry replacement (symlink replaced not followed, existing
+     target atomic replacement, hardlink safe); SSH deliberately no capability (POSIX mv follows
+     dir symlink, no portable atomic rename; rm-before-mv rejected); fs.copy requires no-follow and on
+     SSH unsupported BEFORE read/create/write; local requires RealPather/DirectoryCreator/inside-source
+     checks. Residuals local parent-path TOCTOU, canonicalization pre-write proof/symlink swap
+     TOCTOU, no general no-overwrite guarantee; tree failure-after-claim partial, metadata/growth/cancel.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6399,21 +6484,34 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-38 verification (2026-11-09, merged tree on `f3ab872`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 120 KiB / de 82 KiB / both 203 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r38-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-38 tests/diff
+  review only; the Lead ran the full suite. Tracks: file multi-word matcher (already present) +
+  buffer-mode fuzzy multi-word; remote AllFiles open-buffer snapshots; local watcher real fsnotify
+  arm-before-refresh; terminal transcript re-search after resize; plugin no-follow local-only with
+  SSH fs.copy unsupported (final safety rollback).
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-37 landed palette Tab jump target, remote copy atomic-WriteStream requirement, nested-prefix
-  fallback/cap notice, alternate-screen exit transcript, local watcher notices/i18n; full suite EXIT 0
-  (76 packages, log /tmp/gvim-r37-final.log); §5.5 is round-38/39 plan; TUI-only scope/genuine-
-  equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–37 had their gate sets
-  run. Round 37 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-38 landed multi-word file/buffer matching, remote AllFiles open-buffer snapshots, local
+  fsnotify arm-before-refresh, terminal transcript re-search, plugin no-follow local-only/SSH copy
+  unsupported; full suite EXIT 0 (76 packages, log /tmp/gvim-r38-final.log); §5.5 is round-39/40 plan;
+  TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–38 had their gate sets
+  run. Round 38 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  126 KiB / de 82 KiB / both 208 KiB, git diff --check). Final full
+  120 KiB / de 82 KiB / both 203 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r37-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-37 tests and
+  `/tmp/gvim-r38-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-38 tests and
   diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
   recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
   production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling

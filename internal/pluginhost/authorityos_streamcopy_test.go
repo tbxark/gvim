@@ -35,6 +35,12 @@ func (f *fakeStreamFiles) WriteStream(ctx context.Context, path string, _ hostos
 	return &fakeAuthorityWriteStream{parent: f, path: path}, nil
 }
 
+// WriteStreamNoFollow is the copy-safe stream surface; this fake has no links at the
+// destination, so it is the same stream.
+func (f *fakeStreamFiles) WriteStreamNoFollow(ctx context.Context, path string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return f.WriteStream(ctx, path, o)
+}
+
 type fakeAuthorityWriteStream struct {
 	parent *fakeStreamFiles
 	path   string

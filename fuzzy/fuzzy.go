@@ -45,9 +45,12 @@ type fuzzyResult struct {
 	positions []int // rune indices in the target where query runes matched
 }
 
-// queryTerm is one whitespace-separated term of a query, lower-cased.
+// queryTerm is one whitespace-separated term of a query, lower-cased. ascii is the
+// lower-case bytes when the term is ASCII, which lets a matcher reject a non-ASCII
+// target path without converting it to runes.
 type queryTerm struct {
 	lower []rune
+	ascii []byte
 }
 
 // prepareQuery splits a query on whitespace (Rust split_whitespace) and
@@ -56,7 +59,11 @@ func prepareQuery(query string) []queryTerm {
 	fields := strings.Fields(query)
 	terms := make([]queryTerm, len(fields))
 	for i, f := range fields {
-		terms[i] = queryTerm{lower: lowerRunes(f)}
+		lower := lowerRunes(f)
+		terms[i] = queryTerm{lower: lower}
+		if isASCII(lower) {
+			terms[i].ascii = asciiBytes(lower)
+		}
 	}
 	return terms
 }
@@ -79,8 +86,12 @@ func matchTerms(terms []queryTerm, target string) fuzzyResult {
 	if len(terms) == 0 {
 		return fuzzyResult{matched: true}
 	}
-	tc := []rune(target)
-	tl := lowerRunes(target)
+	return matchPrepared(terms, []rune(target), lowerRunes(target))
+}
+
+// matchPrepared is the shared body of one matching pass. A reusable Matcher owns tc
+// and tl and calls it with its scratch buffers; Score and Pattern convert here.
+func matchPrepared(terms []queryTerm, tc, tl []rune) fuzzyResult {
 	// Fast rejection: every term must be a subsequence of the target.
 	for _, t := range terms {
 		if !isSubsequence(t.lower, tl) {
@@ -91,6 +102,35 @@ func matchTerms(terms []queryTerm, target string) fuzzyResult {
 		return scoreMultiTerm(terms, tc, tl)
 	}
 	return scoreSingleTerm(terms[0].lower, tc, tl)
+}
+
+// isASCII reports whether every rune is below 128.
+func isASCII(runes []rune) bool {
+	for _, r := range runes {
+		if r >= 128 {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiBytes returns runes, all below 128, as bytes.
+func asciiBytes(runes []rune) []byte {
+	out := make([]byte, len(runes))
+	for i, r := range runes {
+		out[i] = byte(r)
+	}
+	return out
+}
+
+// isASCIIString reports whether s has no rune at or above 128.
+func isASCIIString(s string) bool {
+	for i := range len(s) {
+		if s[i] >= 128 {
+			return false
+		}
+	}
+	return true
 }
 
 func isSubsequence(q, tl []rune) bool {

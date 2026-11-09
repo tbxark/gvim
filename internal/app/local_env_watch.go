@@ -145,9 +145,11 @@ func (lw *localEnvWatch) run() {
 			if plan == nil || !localEnvChangeRelevant(changed, plan) {
 				continue
 			}
-			lw.provider.RefreshDetection()
-			// A newly created nested marker parent directory needs a new filewatch.Add.
+			// Arm first: a newly created nested marker parent directory must be added before
+			// the re-detection, otherwise a file created in the gap between the refresh and
+			// the Add could be missed by both the root event and the (late) nested watch.
 			lw.armDirs()
+			lw.provider.RefreshDetection()
 		}
 	}
 }

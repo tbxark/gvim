@@ -89,3 +89,44 @@ func TestRankerIsSafeForConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestRankerMultiTermMatchesAcrossWords covers Fresh's independent whitespace terms
+// end to end through the finder: every term must match, order does not matter, and a
+// legal path containing spaces still matches. The finder keeps its result cap.
+func TestRankerMultiTermMatchesAcrossWords(t *testing.T) {
+	files := []string{
+		"features/groups/view.tsx",
+		"/etc/hosts",
+		"save_file.rs",
+		"my file.txt",
+		"my/file.txt",
+		"other.go",
+	}
+	r := NewRanker(nil)
+	tests := []struct {
+		query string
+		want  []string // first match; all non-empty results are checked below
+	}{
+		{"features groups", []string{"features/groups/view.tsx"}},
+		{"groups features", []string{"features/groups/view.tsx"}},
+		{"etc hosts", []string{"/etc/hosts"}},
+		{"save file", []string{"save_file.rs"}},
+		{"file save", []string{"save_file.rs"}},
+		{"my file", []string{"my file.txt", "my/file.txt"}},
+		{"my file.txt", []string{"my file.txt"}},
+	}
+	for _, tt := range tests {
+		got := paths(r.Rank(tt.query, files, 0))
+		for i, want := range tt.want {
+			if i >= len(got) || got[i] != want {
+				t.Errorf("Rank(%q)[%d] = %v, want %q (all: %v)", tt.query, i, got, want, got)
+			}
+		}
+		if len(got) > MaxResults {
+			t.Errorf("Rank(%q) returned %d results, over the cap %d", tt.query, len(got), MaxResults)
+		}
+	}
+	if got := paths(r.Rank("save file", files, 1)); len(got) != 1 || got[0] != "save_file.rs" {
+		t.Fatalf("limited Rank = %v, want save_file.rs", got)
+	}
+}

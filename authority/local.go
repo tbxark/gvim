@@ -148,6 +148,18 @@ func (l *local) CreateNew(ctx context.Context, path string, o hostos.WriteOption
 // its target like the local atomic WriteFile path, and preserves an existing target's
 // permission when WriteOptions.Mode is zero.
 func (l *local) WriteStream(ctx context.Context, path string, o hostos.WriteOptions) (WriteStream, error) {
+	return l.writeStream(ctx, path, o, true)
+}
+
+// WriteStreamNoFollow implements NoFollowWriteStreamer: the same atomic stream, but a
+// symbolic link at the final destination is not resolved. Commit renames over the link
+// itself, so a copy whose canonical destination was proven does not accidentally replace
+// the link's target if another writer swaps a link in.
+func (l *local) WriteStreamNoFollow(ctx context.Context, path string, o hostos.WriteOptions) (WriteStream, error) {
+	return l.writeStream(ctx, path, o, false)
+}
+
+func (l *local) writeStream(ctx context.Context, path string, o hostos.WriteOptions, follow bool) (WriteStream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -155,12 +167,14 @@ func (l *local) WriteStream(ctx context.Context, path string, o hostos.WriteOpti
 		return nil, err
 	}
 	target := path
-	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		resolved, rerr := filepath.EvalSymlinks(path)
-		if rerr != nil {
-			return nil, rerr
+	if follow {
+		if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			resolved, rerr := filepath.EvalSymlinks(path)
+			if rerr != nil {
+				return nil, rerr
+			}
+			target = resolved
 		}
-		target = resolved
 	}
 	mode := fs.FileMode(0o644)
 	if o.Mode != 0 {

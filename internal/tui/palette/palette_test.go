@@ -853,3 +853,39 @@ func TestTabFileRawPathDoesNotLeakAcrossModes(t *testing.T) {
 		t.Fatalf("file parse = %q:%d, want dir/a:12 as path:line without the bypass", p.fileText, p.fileLine)
 	}
 }
+
+// TestBufferModeUsesTheFuzzyMatcher: buffer mode shares Fresh's BufferProvider rules,
+// so whitespace terms match independently in any order and a fuzzy subsequence (not
+// only a contiguous substring) matches. Score orders the rows; tab order breaks ties.
+func TestBufferModeUsesTheFuzzyMatcher(t *testing.T) {
+	buffers := []Buffer{
+		{Name: "other.go"},
+		{Name: "my file.txt"},
+		{Name: "save_file.go"},
+		{Name: "prefix_my_file.log"},
+	}
+	tests := []struct {
+		query string
+		first string
+	}{
+		{"#file save", "save_file.go"},
+		{"#save file", "save_file.go"},
+		{"#my file", "my file.txt"},
+		{"#sflg", "save_file.go"},
+	}
+	for _, tt := range tests {
+		p := New(Options{Query: tt.query, Buffers: buffers})
+		if len(p.rows) == 0 || p.rows[0].name != tt.first {
+			t.Fatalf("%q rows = %+v, want %q first", tt.query, p.rows, tt.first)
+		}
+		for _, r := range p.rows {
+			if r.kind != rowBuffer {
+				t.Fatalf("%q row = %+v, want a buffer row", tt.query, r)
+			}
+		}
+	}
+	// Every term must match: "save my" has no buffer with both terms.
+	if p := New(Options{Query: "#save my", Buffers: buffers}); len(p.rows) != 0 {
+		t.Fatalf("all-term query matched %+v, want no rows", p.rows)
+	}
+}

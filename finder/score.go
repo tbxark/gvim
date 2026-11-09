@@ -121,9 +121,9 @@ func rank(files []string, query string, usage Usage, now time.Time, limit int) [
 		slices.SortStableFunc(out, byScore)
 		return truncate(out, limit)
 	}
-	pat := fuzzy.NewPattern(query)
+	matcher := fuzzy.NewMatcher(query)
 	for _, f := range files {
-		score, pos, ok := pat.Match(f)
+		score, pos, ok := matcher.Match(f)
 		if !ok {
 			continue
 		}

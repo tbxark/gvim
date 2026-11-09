@@ -60,9 +60,15 @@ Scrollback keys:
 
 The search matches the prior transcript, the x/vt history and the live screen
 rows; a bad regular expression is reported as a notice and keeps the previous
-matches. A copy goes through the same clipboard path the editor's copy uses (the
+matches. When the transcript is re-wrapped by a width change (a restored
+transcript or a restarted shell's prior rows), the stored match row indexes no
+longer hold, so Sync re-runs a committed query over the new rows asynchronously
+(Update/Draw never search): the query and its regex/case options survive, the
+matches jump to the same text, and `n`/`N` and the title stay aligned. A copy
+goes through the same clipboard path the editor's copy uses (the
 terminal clipboard command and, when the app has one, the native clipboard
-writer).
+writer). Fresh's read-only terminal scrollback is a normal buffer, so its
+search naturally continues over re-wrapped text as well.
 
 The history snapshot is fetched in a `tea.Cmd`: `Update` never waits for the
 session, and the rows it copies are bounded (`terminal.MaxScrollbackSnapshot`).
@@ -477,6 +483,9 @@ re-wrapped, through `terminal.ReflowLines`:
 - each row keeps its cell styles and wide glyphs (a double-width cell and its
   continuation stay together; a wide glyph is never split), trailing blanks are
   dropped, and every stored row stays a hard row;
+- a committed scrollback search is re-run over the re-wrapped rows on the next
+  Sync (its old match indexes would point at different text); the query/options
+  are kept and the search UI/no-match notice reflects the new transcript;
 - this is a **text re-wrap, not a semantic reflow**: the transcript stores display
   rows, not the soft/hard newline structure that produced them, so a row that was
   itself a soft-wrapped continuation is not rejoined with the row above it when

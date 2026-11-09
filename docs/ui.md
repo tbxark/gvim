@@ -93,6 +93,23 @@ Inside a frame the roles are fixed:
 The command palette keeps the sheet placement, and two optional regions live inside the
 same card, between its borders:
 
+**File-query words.** The file mode splits a query on whitespace and every term must
+match the candidate path, in any order, as Fresh's file finder documents (`feat group`
+finds `features/groups/view.tsx`, `etc hosts` finds `/etc/hosts`, `save file` finds
+`save_file.rs`). A legal path containing spaces still matches: `my file` finds
+`my file.txt`, because whitespace separates terms rather than being a character the
+candidate must contain. A `path:line[:col]` suffix is stripped before the terms are
+matched. Buffer mode (`#`) applies the same matcher to tab labels (Fresh matches
+buffers with its `FuzzyMatcher` too): `#file save` finds `save_file.go`, and a
+fuzzy subsequence such as `#sflg` matches without being a contiguous substring; the
+rows are ordered by score with tab order breaking ties. The terms are prepared once per
+query and matched with a reusable matcher; an ASCII candidate that cannot contain a term
+is rejected without being converted to runes or allocating. The finder keeps its bounded
+behavior: 50,000 indexed files, 100 file-mode results, background enumeration
+cancellation, and the palette's sequence guard that drops a ranking result for a query
+the user already changed.
+
+
 - **File preview column** (the file mode, when a `Preview` reader is wired and the
   card's inner text width is at least 64 cells). The selected row's file head, read in a
   `tea.Cmd` and cached for the palette's lifetime, is painted in a right-hand column

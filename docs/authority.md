@@ -199,6 +199,24 @@ deliberately does not take.
   answer, never the whole file; every chunk and the commit are bounded by their contexts
   (a cancelled chunk is an error, and the abort still removes the temporary file with its
   own short bounded context).
+- Copy-safe no-follow streamed writes: `NoFollowWriteStreamer` (reached with
+  `authority.NoFollowWriteStreams(fs)`) is the optional copy-safe variant of
+  `WriteStreamer`. It uses the same temp-file/`Commit`/`Abort` protocol but does **not**
+  resolve a symbolic link at the final destination: `Commit` renames over the destination
+  path itself, replacing a link instead of following it. The ordinary `WriteStream` keeps
+  the save semantics of following the final link. Only the LOCAL backend implements the
+  copy-safe surface, using `os.Rename` (atomic, no-follow). The SSH backend deliberately
+  does **not** advertise it: POSIX `mv` follows a destination symlink-to-directory, and
+  there is no portable remote rename proven to replace a link atomically without a
+  check-then-remove helper; the old rm-before-mv approach could lose a target on failure or
+  race the check. Plugin `fs.copy` requires the no-follow surface, so on SSH it returns
+  `unsupported` before reading, creating or writing anything; a backend that provides the
+  capability (the local authority) gets the atomic stream. Copy canonicalizes the
+  destination first, so a concurrent symlink to the source cannot redirect the stream: the
+  ordinary stream would follow it at open, which is why the capability gate exists. Tests
+  cover the local no-follow behaviour, the SSH capability refusal, and the plugin-host
+  copy refusal (`authority/write_stream_test.go`,
+  `internal/pluginhost/authorityos_copy_safety_test.go`).
 - Exclusive create: `CreateNew` is the optional `FileCreator` surface (reached with
   `authority.Creators(fs)`) for callers that must not replace an existing entry. The SSH
   backend creates the empty file with one POSIX noclobber redirection (`set -C; : > "$p"`,
@@ -777,10 +795,15 @@ not reported — never a complete-looking result; a partial nested candidate set
 presented as complete, and a deeper nested repository's own `.gitignore` is not applied in
 that fallback (recorded residual). The explicit-candidate
 half keeps git's exception: a tracked candidate under such a directory is still searched
-because git lists it; only walked/nested content is pruned. All commands run through the
-authority one-shot surface with the remote cwd, stay bounded/cancellable (the search context
-bounds every nested listing), and never read the local disk; a degradation is carried as a
-non-fatal panel notice.
+because git lists it; only walked/nested content is pruned. The panel's glob-filtered file
+snapshot still bounds AllFiles, but open buffers are searched from the editor's snapshots
+(the current buffer first, then the other open buffers after the tool results), and that
+file's remote disk line is skipped: unsaved edits are found exactly as Fresh's
+project_files searches open buffers, with no extra remote read. An open file outside the
+workspace root, or excluded by the panel's file snapshot, is left to the dedicated Open
+Buffers scope. All commands run through the authority one-shot surface with the remote cwd,
+stay bounded/cancellable (the search context bounds every nested listing), and never read
+the local disk; a degradation is carried as a non-fatal panel notice.
 
 ### Windowed remote reads (remote large-file mode)
 
