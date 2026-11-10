@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -22,6 +25,51 @@ type multiFake struct {
 	active int
 	rows   int
 	cols   int
+}
+
+
+type fakeFolderDoc struct {
+	*fakeDoc
+	folds []fold.Range
+}
+
+func (d *fakeFolderDoc) Folds(tabWidth int) []fold.Range {
+	return d.folds
+}
+
+func (d *fakeFolderDoc) Folded(line int) bool {
+	return false
+}
+
+func TestStickyScrollPaintsHeader(t *testing.T) {
+	m := New(Deps{})
+	m.width = 80
+	m.height = 24
+	g := grid.New(80, 24)
+	base := &fakeDoc{lines: []string{"func MyFunction() {", "    line 1", "    line 2", "    line 3", "}"}}
+	doc := &fakeFolderDoc{
+		fakeDoc: base,
+		folds: []fold.Range{
+			{Start: 0, End: 4},
+		},
+	}
+	p := splitPane{
+		X: 0, Y: 1, W: 80, H: 20, Top: 2,
+	}
+	m.paintStickyScroll(g, p, doc)
+	row := g.Plain()[1]
+	if !strings.Contains(row, "func MyFunction()") {
+		t.Fatalf("row 1 = %q, want sticky header containing 'func MyFunction()'", row)
+	}
+
+	// When toggled off, sticky scroll paints nothing
+	m.stickyScroll = false
+	g2 := grid.New(80, 24)
+	m.paintStickyScroll(g2, p, doc)
+	row2 := g2.Plain()[1]
+	if strings.Contains(row2, "func MyFunction()") {
+		t.Fatalf("row 1 = %q, want empty when sticky scroll is disabled", row2)
+	}
 }
 
 // newMultiFake returns a fake with n tabs of lines lines each. Line j of tab i is

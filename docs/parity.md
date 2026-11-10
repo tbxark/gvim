@@ -21,11 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `8d5388a` plus the round-96 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); default-enabled bundled plugins idle
-heap costs 7.98 MiB (< 8.00 MiB limit).
-Round 96 implements features 7, 8, and 9: terminal code pager mode (Pager Mode for -R and stdin), diagnostics
-drawer keymap binding (Ctrl+Shift+M), and LSP document outline / breadcrumbs, adding items 358–360.
+Last verified: 2026-11-10, tree commit `fd7276d` plus the round-97 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 88 KiB / both 216 KiB); default-enabled bundled plugins idle
+heap costs 7.99 MiB (< 8.00 MiB limit).
+Round 97 implements features 1, 2, 3, and 4: Sticky Scroll, Peek Definition (Alt+F12), Fold All / Unfold All (Alt+Shift+Z),
+and Git diff hunk navigation (Ctrl+Alt+D), adding items 361–364.
 Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
 markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
@@ -7294,6 +7294,17 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
 360. **LSP document outline and breadcrumbs (document_outline & show_breadcrumbs).** Adds `LSP: Document Outline`
      and `LSP: Show Breadcrumbs` to lsp_navigation, calculating hierarchical enclosing symbol paths (`Class > Method`)
      and displaying them via notification. Tested in plugin/bundled/lsp_navigation_test.go.
+361. **Sticky scroll context header (toggle_sticky_scroll).** Automatically pins the enclosing function or scope
+     header line at the top row of the editor pane when scrolled down into a body. Tested in internal/tui/split_test.go.
+362. **In-place definition peek (lsp_peek_definition).** Queries `textDocument/definition` and displays an in-place
+     preview popup containing the definition snippet without moving the cursor away from the current view. Bound to
+     `Alt+F12` / `Ctrl+Alt+.`. Tested in internal/tui/lsp_test.go.
+363. **Global fold management (fold_all & unfold_all).** Adds core actions to collapse or expand all indentation/LSP
+     folds across the active buffer; bound to `Alt+Shift+Z` in default/macOS and `Ctrl+K Ctrl+0` / `Ctrl+K Ctrl+J`
+     in VS Code. Tested in editor/fold_test.go.
+364. **Git change / hunk navigation shortcuts (git_gutter.next_change & git_gutter.prev_change).** Binds `Ctrl+Alt+D`
+     and `Ctrl+Alt+Shift+D` to step directly through Git modifications across the buffer. Tested across keymap and
+     git_gutter.
 
 ## 5. Ranked backlog for the remaining rounds
 

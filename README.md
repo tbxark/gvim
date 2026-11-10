@@ -116,6 +116,8 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Alt+J` | Flash Jump (2-character on-screen jump motion) |
 | `Ctrl+Shift+M` | Toggle Diagnostics Drawer (problems panel) |
 | `F8` / `Shift+F8` | Next / Previous diagnostic error or warning |
+| `Alt+Z` / `Alt+Shift+Z` | Toggle fold at cursor / Fold all blocks (`Ctrl+K Ctrl+0` / `Ctrl+K Ctrl+J`) |
+| `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D` | Jump to next / previous Git diff change (hunk) |
 | `Ctrl+]` | Jump to matching bracket |
 | `Ctrl+L` | Expand line selection across all carets |
 | `Ctrl+W v` / `Ctrl+W s` | Split window vertically / horizontally |
@@ -135,10 +137,11 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 ### LSP & Semantics
 | Action | Description |
 |---|---|
-| `LSP: Go to Definition` | Jump to symbol definition |
-| `LSP: Find References` | Open references list with preview tabs |
-| `LSP: Go to Implementation` | Jump to implementation |
-| `LSP: Hover` | Show hover documentation popup |
+| `LSP: Go to Definition` | Jump to symbol definition (`F12` / `Ctrl+.`) |
+| `LSP: Peek Definition` | In-place definition preview card without switching tabs (`Alt+F12` / `Ctrl+Alt+.`) |
+| `LSP: Find References` | Open references list with preview tabs (`Shift+F12`) |
+| `LSP: Go to Implementation` | Jump to implementation (`Ctrl+F12`) |
+| `LSP: Hover` | Show hover documentation popup (`Alt+K`) |
 | `Go to LSP Symbol` | Fuzzy-find document symbols with enclosing-symbol preselected |
 | `LSP: Workspace Symbols` | Fuzzy-find symbols across the whole workspace |
 | `LSP: Incoming / Outgoing Calls` | Call Hierarchy: explore callers and callees |
@@ -155,6 +158,9 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
 | `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
 | `Merge: Conflict Resolution` | Jump between conflict markers (`Alt+M` mode or `Ctrl+Alt+C`) |
+
+### Sticky Scroll
+When scrolling down into long functions, classes, or code blocks, the top row of the editor pane automatically pins the enclosing declaration header (e.g. `func (m *Model) paintPanes(...) {`), ensuring you never lose your place while reading code. Can be toggled on or off via the `toggle_sticky_scroll` action.
 
 ### Pager Mode (`gvim -R` / `git diff | gvim`)
 When viewing read-only buffers or piped input, single-key pager shortcuts activate:

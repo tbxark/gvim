@@ -29,3 +29,29 @@ func (e *Editor) toggleFoldAt(d *Document, line int) error {
 	}
 	return ErrNoFold
 }
+
+// foldAll collapses every fold in the active document.
+func foldAll(e *Editor, d *Document, _ map[string]any) error {
+	if d.LargeState() != nil {
+		return &largeError{Msg: "folds are not available in large file mode", Errs: []error{ErrLargeFile}}
+	}
+	folds := d.Folds(e.tabSizeOf(d))
+	if len(folds) == 0 {
+		return nil
+	}
+	m := make(map[int]bool, len(folds))
+	for _, r := range folds {
+		m[r.Start] = true
+	}
+	d.SetFoldedLines(m)
+	return nil
+}
+
+// unfoldAll expands every fold in the active document.
+func unfoldAll(e *Editor, d *Document, _ map[string]any) error {
+	if d.LargeState() != nil {
+		return &largeError{Msg: "folds are not available in large file mode", Errs: []error{ErrLargeFile}}
+	}
+	d.SetFoldedLines(map[int]bool{})
+	return nil
+}

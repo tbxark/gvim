@@ -789,6 +789,25 @@ func TestLSPDefinitionOneLocationOpensTheFile(t *testing.T) {
 	}
 }
 
+
+func TestLSPPeekDefinitionOpensPopupWithoutOpeningFile(t *testing.T) {
+	port := newFakeLSP("go")
+	port.defs = []LSPLocation{lspLoc("/p/a.go", 0, 0)}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a", "func Foo() {}", "line 3"}})
+	lt.open()
+
+	for _, msg := range lt.act("lsp_peek_definition") {
+		lt.feed(msg)
+	}
+	if len(lt.ed.opened) != 0 {
+		t.Fatalf("opened = %v, want none (peek definition does not switch tabs)", lt.ed.opened)
+	}
+	p := lt.popup()
+	if p == nil {
+		t.Fatal("expected popup for peek definition, got nil")
+	}
+}
+
 func TestLSPDefinitionReadErrorNoticesAndOpensNothing(t *testing.T) {
 	port := newFakeLSP("go")
 	port.defs = []LSPLocation{lspLoc("/p/b.go", 3, 4)}

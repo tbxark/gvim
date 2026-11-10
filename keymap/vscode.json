@@ -8,6 +8,8 @@
     {"comment": "VS Code: Ctrl+Shift+F searches the project", "key": "f", "modifiers": ["ctrl","shift"], "action": "open_live_grep", "when": "normal"},
     {"comment": "VS Code: Ctrl+Shift+E focuses the explorer", "key": "e", "modifiers": ["ctrl","shift"], "action": "focus_file_explorer", "when": "normal"},
     {"comment": "VS Code: Ctrl+K Ctrl+L toggles the fold", "keys": [{"key": "k", "modifiers": ["ctrl"]}, {"key": "l", "modifiers": ["ctrl"]}], "action": "toggle_fold", "when": "normal"},
+    {"comment": "VS Code: Ctrl+K Ctrl+0 folds all", "keys": [{"key": "k", "modifiers": ["ctrl"]}, {"key": "0", "modifiers": ["ctrl"]}], "action": "fold_all", "when": "normal"},
+    {"comment": "VS Code: Ctrl+K Ctrl+J unfolds all", "keys": [{"key": "k", "modifiers": ["ctrl"]}, {"key": "j", "modifiers": ["ctrl"]}], "action": "unfold_all", "when": "normal"},
     {"comment": "VS Code: Ctrl+` shows the terminal", "key": "`", "modifiers": ["ctrl"], "action": "toggle_utility_dock", "when": "normal"},
     {"comment": "VS Code: Ctrl+Shift+\\ jumps to the bracket", "key": "\\", "modifiers": ["ctrl","shift"], "action": "goto_matching_bracket", "when": "normal"}
   ]

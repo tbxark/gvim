@@ -26,6 +26,27 @@ func foldedStarts(d *Document, n int) []int {
 	return out
 }
 
+
+func TestFoldAllAndUnfoldAll(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, foldText)
+	r := e.Do("fold_all", nil)
+	if r.Err != nil {
+		t.Fatalf("fold_all err = %v", r.Err)
+	}
+	if len(e.Active().FoldedLines()) == 0 {
+		t.Fatal("fold_all folded no lines")
+	}
+
+	r = e.Do("unfold_all", nil)
+	if r.Err != nil {
+		t.Fatalf("unfold_all err = %v", r.Err)
+	}
+	if len(e.Active().FoldedLines()) != 0 {
+		t.Fatalf("unfold_all left %d folded lines", len(e.Active().FoldedLines()))
+	}
+}
+
 func TestToggleFoldAtCaretLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

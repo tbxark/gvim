@@ -24,6 +24,8 @@ func toggleReadOnly(e *Editor, d *Document, _ map[string]any) error {
 func registerDocumentHandlers(h map[Action]handler) {
 	h["toggle_read_only"] = docAction(toggleReadOnly)
 	h["toggle_fold"] = docAction(toggleFold)
+	h["fold_all"] = docAction(foldAll)
+	h["unfold_all"] = docAction(unfoldAll)
 	h["set_encoding"] = docAction(setEncoding)
 	h["set_line_ending"] = docAction(setLineEnding)
 	h["reload_with_encoding"] = docAction(reloadWithEncoding)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -245,6 +246,8 @@ const (
 	lspAskCodeActions
 	lspAskResolveCodeAction
 )
+
+const lspAskPeekDefinition lspAsk = lspAskResolveCodeAction + 2
 
 // lspPick is the tag of a popup row. Chosen runs what the row stands for. A
 // completion row carries its list, so the choice still inserts after the root has
@@ -866,6 +869,8 @@ func (m *Model) lspReply(r lspReplyMsg) tea.Cmd {
 		return m.applyCodeAction(r.path, r.action)
 	case lspAskSignature:
 		m.lspSignature(r.text)
+	case lspAskPeekDefinition:
+		m.lspPeek(r)
 	}
 	return nil
 }
@@ -958,6 +963,46 @@ func (m *Model) lspLoaded(msg lspLoadedMsg) {
 // first, with their severity and source, so one popup says both what the server knows of the
 // symbol and what it found wrong with it, as Fresh's hover does. Without any text there is a
 // notice.
+
+// lspPeek displays a preview card of the definition at the cursor.
+func (m *Model) lspPeek(r lspReplyMsg) {
+	if len(r.locs) == 0 {
+		m.notice = "No definition found to peek"
+		return
+	}
+	loc := r.locs[0]
+	var lines []string
+	if active := m.ed.Active(); active != nil && docPath(active) == loc.Path {
+		n := active.LineCount()
+		start := max(0, loc.Start.Line-1)
+		end := min(n, loc.Start.Line+12)
+		for i := start; i < end; i++ {
+			lines = append(lines, fmt.Sprintf("%4d │ %s", i+1, active.Line(i)))
+		}
+	} else if data, err := os.ReadFile(loc.Path); err == nil {
+		all := strings.Split(string(data), "\n")
+		n := len(all)
+		start := max(0, loc.Start.Line-1)
+		end := min(n, loc.Start.Line+12)
+		for i := start; i < end; i++ {
+			lines = append(lines, fmt.Sprintf("%4d │ %s", i+1, all[i]))
+		}
+	}
+	if len(lines) == 0 {
+		m.notice = "Unable to read definition preview"
+		return
+	}
+	items := make([]popup.Item, len(lines))
+	for i, l := range lines {
+		items[i] = popup.Item{
+			Label: l,
+			Data:  lspPick{ask: lspAskPeekDefinition, loc: loc},
+		}
+	}
+	title := fmt.Sprintf("Peek: %s:%d (Enter to jump)", m.lspRel(loc.Path), loc.Start.Line+1)
+	m.lspPopup(title, items)
+}
+
 func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 	var items []popup.Item
 	width := popup.TextWidth(m.width)
@@ -1067,7 +1112,7 @@ func (m *Model) lspCodeActions(path string, actions []CodeAction) {
 // the command the choice starts, if there is one.
 func (m *Model) lspChosen(pick lspPick, index int) tea.Cmd {
 	switch pick.ask {
-	case lspAskDefinition, lspAskImplementation, lspAskReferences:
+	case lspAskDefinition, lspAskImplementation, lspAskReferences, lspAskPeekDefinition:
 		return m.lspGoto(pick.loc)
 	case lspAskCompletion:
 		return m.acceptCompletion(pick.comp, pick.item)
@@ -1675,6 +1720,8 @@ func (m *Model) lspAction(action string, args map[string]any) (tea.Cmd, bool) {
 		return m.lspAsked(lspAskCodeActions), true
 	case "lsp_signature_help":
 		return m.lspAsked(lspAskSignature), true
+	case "lsp_peek_definition":
+		return m.lspAsked(lspAskPeekDefinition), true
 	case "lsp_rename":
 		m.askLSPRename()
 	case "jump_to_next_error":
@@ -1768,7 +1815,7 @@ func (m *Model) lspRequest(ask lspAsk, path string, at buffer.Pos, name string) 
 	return func() tea.Msg {
 		r := lspReplyMsg{ask: ask, path: path, at: at}
 		switch ask {
-		case lspAskDefinition:
+		case lspAskDefinition, lspAskPeekDefinition:
 			r.locs, r.err = port.Definition(path, at)
 		case lspAskImplementation:
 			r.locs, r.err = port.Implementation(path, at)

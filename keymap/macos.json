@@ -13,6 +13,7 @@
     {"comment": "Ctrl+] -> Navigate forward (alternative)", "key": "]", "modifiers": ["ctrl"], "action": "navigate_forward", "when": "normal"},
     {"comment": "Ctrl+D -> Add selection to next find match (Mac: Cmd+D)", "key": "d", "modifiers": ["ctrl"], "action": "add_cursor_next_match", "when": "normal"},
     {"comment": "Ctrl+. -> Go to definition (replaces F12)", "key": ".", "modifiers": ["ctrl"], "action": "lsp_goto_definition", "when": "normal"},
+    {"comment": "Ctrl+Alt+. -> Peek definition", "key": ".", "modifiers": ["ctrl","alt"], "action": "lsp_peek_definition", "when": "normal"},
     {"comment": "Ctrl+, -> Find all references (Ctrl+Shift+. doesn't work on Mac)", "key": ",", "modifiers": ["ctrl"], "action": "lsp_references", "when": "normal"},
     {"comment": "Ctrl+Alt+R -> Rename symbol (Ctrl+Shift+R doesn't work on Mac)", "key": "r", "modifiers": ["ctrl","alt"], "action": "lsp_rename", "when": "normal"},
     {"comment": "Ctrl+Alt+Up -> Add cursor above (Mac: Option+Cmd+Up)", "key": "Up", "modifiers": ["ctrl","alt"], "action": "add_cursor_above", "when": "normal"},

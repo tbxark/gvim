@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -503,8 +504,45 @@ func (m *Model) paintPanes(g *grid.Grid, l layout) {
 			continue
 		}
 		editorpane.Blit(g, p.X, p.Y, m.paneFor(p, doc).Render(p.W, p.H))
+		m.paintStickyScroll(g, p, doc)
 	}
 	drawBorders(g, l.Borders, m.splitCell())
+}
+
+// paintStickyScroll displays a sticky header on the top row of the pane showing
+// the enclosing function or scope declaration when scrolled down into a body.
+func (m *Model) paintStickyScroll(g *grid.Grid, p splitPane, doc Document) {
+	if !m.stickyScroll || p.Top <= 0 || p.W <= 10 || p.H <= 2 {
+		return
+	}
+	fl, ok := doc.(editorpane.Folder)
+	if !ok {
+		return
+	}
+	ranges := fl.Folds(m.tabSize)
+	if len(ranges) == 0 {
+		return
+	}
+	bestSpan := 1 << 30
+	stickyLine := -1
+	for _, r := range ranges {
+		if r.Start < p.Top && r.End >= p.Top {
+			span := r.End - r.Start
+			if span < bestSpan {
+				bestSpan = span
+				stickyLine = r.Start
+			}
+		}
+	}
+	if stickyLine < 0 || stickyLine >= doc.LineCount() {
+		return
+	}
+	text := doc.Line(stickyLine)
+	lineNum := fmt.Sprintf("%4d │ ", stickyLine+1)
+	cell := style.Cell(m.styles.TabActive)
+	cell.Italic = true
+	g.Fill(p.X, p.X+p.W, p.Y, cell)
+	g.Put(p.X, p.Y, p.W, lineNum+text, cell)
 }
 
 // splitCell is the style of the lines between panes: the split colour of the theme, on

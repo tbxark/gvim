@@ -133,6 +133,7 @@ type Model struct {
 	// Deps and is flipped by toggle_line_numbers.
 	hideMenuBar     bool
 	hideLineNumbers bool
+	stickyScroll    bool
 	// tabSize is the columns per tab stop from Deps.TabSize. Zero means the pane's default.
 	tabSize int
 	// explorerWidth and explorerSide are file_explorer.width and .side as the
@@ -321,6 +322,7 @@ func New(deps Deps) *Model {
 		fileLaunch:      deps.FileLaunch,
 		hideMenuBar:     deps.HideMenuBar,
 		hideLineNumbers: deps.HideLineNumbers,
+		stickyScroll:    true,
 		tabSize:         deps.TabSize,
 		notice:          deps.Notice,
 		updates:         deps.Updates,
@@ -2619,6 +2621,13 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		m.openMenu(name)
 	case "toggle_line_numbers":
 		m.hideLineNumbers = !m.hideLineNumbers
+	case "toggle_sticky_scroll":
+		m.stickyScroll = !m.stickyScroll
+		if m.stickyScroll {
+			m.notice = "Sticky scroll enabled"
+		} else {
+			m.notice = "Sticky scroll disabled"
+		}
 	case "scroll_tabs_left":
 		m.scrollTabs(-1)
 	case "scroll_tabs_right":
