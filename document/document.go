@@ -200,6 +200,9 @@ func NewStdinDocument(text string) *Document {
 // outnumber the bare LF breaks, so a tie, or a text with no break, is LF. The
 // ending of each break of a mixed file is kept by lineEnds.
 func splitLineEnding(data string) (text, eol string) {
+	if strings.IndexByte(data, '\r') == -1 {
+		return data, eolLF
+	}
 	crlf := strings.Count(data, "\r\n")
 	lf := strings.Count(data, "\n") - crlf
 	eol = eolLF

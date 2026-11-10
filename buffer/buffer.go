@@ -127,11 +127,18 @@ func (b *Buffer) now() time.Time {
 
 // setText replaces the whole content without recording history.
 func (b *Buffer) setText(text string) {
-	parts := strings.Split(text, "\n")
-	b.lines = make([][]rune, len(parts))
-	for i, p := range parts {
-		b.lines[i] = []rune(p)
+	n := strings.Count(text, "\n") + 1
+	b.lines = make([][]rune, n)
+	lineIdx := 0
+	start := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			b.lines[lineIdx] = []rune(text[start:i])
+			lineIdx++
+			start = i + 1
+		}
 	}
+	b.lines[lineIdx] = []rune(text[start:])
 	b.nonASCII = countNonASCII(text)
 }
 

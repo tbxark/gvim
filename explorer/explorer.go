@@ -72,6 +72,9 @@ type Tree struct {
 	showHidden  bool   // rows include dot-entries
 	showIgnored bool   // rows include entries matched by .gitignore
 	compact     bool   // rows fold single-child directory chains
+	cachedRows  []Row
+	dirty       bool
+	ignoreCache map[string]ignoreCacheEntry
 }
 
 // Open returns a tree rooted at dir, expanded, with its first level loaded.
@@ -88,7 +91,7 @@ func Open(dir string) (*Tree, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("explorer: open %q: %w", dir, ErrNotDir)
 	}
-	t := &Tree{byPath: make(map[string]*node)}
+	t := &Tree{byPath: make(map[string]*node), ignoreCache: make(map[string]ignoreCacheEntry), dirty: true}
 	t.root = &node{name: filepath.Base(abs), path: abs, isDir: true, expanded: true}
 	t.byPath[abs] = t.root
 	if err := t.load(t.root); err != nil {
@@ -107,7 +110,12 @@ func (t *Tree) ShowHidden() bool { return t.showHidden }
 // SetShowHidden draws dot-entries when v is true and hides them when false. The
 // tree reads every directory it loads with dot-entries included, so the change
 // needs no disk access.
-func (t *Tree) SetShowHidden(v bool) { t.showHidden = v }
+func (t *Tree) SetShowHidden(v bool) {
+	if t.showHidden != v {
+		t.showHidden = v
+		t.dirty = true
+	}
+}
 
 // ShowIgnored reports whether entries matched by .gitignore are drawn. The
 // default is false.
@@ -115,7 +123,12 @@ func (t *Tree) ShowIgnored() bool { return t.showIgnored }
 
 // SetShowIgnored draws gitignored entries when v is true and hides them when
 // false. Like SetShowHidden it needs no disk access.
-func (t *Tree) SetShowIgnored(v bool) { t.showIgnored = v }
+func (t *Tree) SetShowIgnored(v bool) {
+	if t.showIgnored != v {
+		t.showIgnored = v
+		t.dirty = true
+	}
+}
 
 // CompactDirectories reports whether compact-directory rendering is on: a folder
 // whose expanded, visible content is exactly one folder shares its row with that
@@ -131,6 +144,7 @@ func (t *Tree) SetCompactDirectories(v bool) {
 		return
 	}
 	t.compact = v
+	t.dirty = true
 	if n, ok := t.byPath[t.selected]; ok {
 		t.selected = t.anchor(n).path
 	}
@@ -150,6 +164,9 @@ func (t *Tree) visible(n *node) bool {
 // view/file_tree/view.rs). Row.Depth is the raw depth less the folded ancestors,
 // so a chain does not indent.
 func (t *Tree) Rows() []Row {
+	if !t.dirty && t.cachedRows != nil {
+		return t.cachedRows
+	}
 	rows := make([]Row, 0, 16)
 	// depth is the row's depth on screen: a folded ancestor adds a chain segment
 	// but no indent, so an absorbed node's children are walked at its own depth.
@@ -186,6 +203,8 @@ func (t *Tree) Rows() []Row {
 		}
 	}
 	walk(t.root, 0, -1, nil)
+	t.cachedRows = rows
+	t.dirty = false
 	return rows
 }
 
@@ -422,6 +441,7 @@ func (t *Tree) Collapse(path string) error {
 		return ErrNotDir
 	}
 	n.expanded = false
+	t.dirty = true
 	return nil
 }
 
@@ -438,6 +458,7 @@ func (t *Tree) Toggle(path string) error {
 	}
 	if n.expanded {
 		n.expanded = false
+		t.dirty = true
 		return nil
 	}
 	return t.expandWithChain(n)
@@ -449,6 +470,8 @@ func (t *Tree) Toggle(path string) error {
 // still exists. Entries that vanished are dropped. Errors from directories that
 // cannot be read are joined and returned; the rest of the tree is still reloaded.
 func (t *Tree) Reload() error {
+	t.ignoreCache = make(map[string]ignoreCacheEntry)
+	t.dirty = true
 	return t.reload(t.root)
 }
 
@@ -544,6 +567,7 @@ func (t *Tree) adopt(n *node, children []*node) {
 	}
 	n.children = children
 	n.loaded = true
+	t.dirty = true
 }
 
 // listDir is the directory read behind every scan and Snapshot.Read. Tests swap it
@@ -555,7 +579,7 @@ var listDir = ListDir
 // draw. ListDir is given the tree root, so the ignore rules are the .gitignore
 // files on disk from the root down to n, read at this scan.
 func (t *Tree) scan(n *node) ([]*node, error) {
-	entries, err := listDir(n.path, ListOptions{ShowHidden: true, ShowIgnored: true, IgnoreRoot: t.root.path})
+	entries, err := listDir(n.path, ListOptions{ShowHidden: true, ShowIgnored: true, IgnoreRoot: t.root.path, Fast: true, IgnoreCache: t.ignoreCache})
 	if err != nil {
 		return nil, err
 	}

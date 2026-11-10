@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
@@ -50,6 +52,19 @@ func TestSeparatorsDrawInTheSplitColour(t *testing.T) {
 		})
 	}
 }
+
+func TestSeparatorsDrawCrossAtIntersection(t *testing.T) {
+	g := grid.New(80, 24)
+	borders := []splitBorder{
+		{Rect: space.Rect{X: 40, Y: 2, W: 1, H: 20}, Vertical: true},
+		{Rect: space.Rect{X: 0, Y: 12, W: 80, H: 1}, Vertical: false},
+	}
+	drawBorders(g, borders, grid.Style{})
+	if got := g.At(40, 12).Text; got != splitCross {
+		t.Fatalf("intersection cell (40, 12) = %q, want %q", got, splitCross)
+	}
+}
+
 
 // mustLoadTheme loads the bundled theme name, and fails the test when it is missing.
 func mustLoadTheme(t *testing.T, name string) theme.Theme {

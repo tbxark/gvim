@@ -3,6 +3,7 @@ package explorer
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"slices"
 	"strings"
 
@@ -27,11 +28,9 @@ func readIgnore(fsys billy.Filesystem, dir []string) []gitignore.Pattern {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
-	var data []byte
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		data = append(data, sc.Bytes()...)
-		data = append(data, '\n')
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil
 	}
 	return ParseIgnore(data, dir)
 }

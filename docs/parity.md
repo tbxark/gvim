@@ -7319,6 +7319,14 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
 368. **Scrollbar overview ruler for diagnostics (overviewRulerMarks).** Populates the vertical scrollbar track with
      themed color markers corresponding to LSP errors (red), warnings (yellow), and info/hints (blue) across the whole
      document. Tested in internal/tui/split_test.go.
+369. **Core performance & TUI detail hardening.**
+     - **File open & startup**: Zero-allocation fast path for line ending detection (`strings.IndexByte(data, '\r') == -1`),
+       and direct line scanner in `buffer.setText` eliminating intermediate `strings.Split` slices.
+     - **Folder / tree speed**: Added `Fast: true` in `explorer.ListDir` to skip per-entry `lstat` calls for regular files;
+       memoized `Tree.Rows()` to eliminate recursive tree walks on idle frames; cached `.gitignore` rules with mtime check.
+     - **TUI details**: Split border junction box-drawing (`┼`) connecting intersecting pane borders seamlessly, and
+       warning-accented `[RO]` status pill for read-only / pager modes.
+     Tested across document, buffer, explorer, and internal/tui.
 
 ## 5. Ranked backlog for the remaining rounds
 

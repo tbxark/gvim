@@ -74,6 +74,7 @@ func (s Snapshot) Read() Listing {
 // goroutine that owns t.
 func (t *Tree) Apply(l Listing) error {
 	t.applyListing(t.root, l)
+	t.dirty = true
 	return errors.Join(l.errs...)
 }
 

@@ -8,6 +8,9 @@ import (
 // the file mixes the two. It returns nil for a file that uses one ending, which
 // the document's eol describes.
 func lineEnds(data string) []string {
+	if strings.IndexByte(data, '\r') == -1 {
+		return nil
+	}
 	crlf := strings.Count(data, "\r\n")
 	if crlf == 0 || crlf == strings.Count(data, "\n") {
 		return nil

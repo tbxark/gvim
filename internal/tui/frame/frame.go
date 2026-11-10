@@ -957,7 +957,7 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 		if !s.ReadOnly {
 			return statusSeg{}, false
 		}
-		return statusSeg{text: pad("[RO]")}, true
+		return statusSeg{text: pad("[RO]"), style: StyleWarning}, true
 	case StatusElementLineEnding:
 		if s.EOL == "" {
 			return statusSeg{}, false

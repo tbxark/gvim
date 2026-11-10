@@ -18,6 +18,7 @@ import (
 const (
 	splitVLine = "│" // a column between two side-by-side panes
 	splitHLine = "─" // a row between two stacked panes
+	splitCross = "┼" // junction where a horizontal line and a vertical line meet
 )
 
 // minSplitExtent is the smallest extent, in columns for a side-by-side split and in
@@ -594,12 +595,20 @@ func drawBorders(g *grid.Grid, borders []splitBorder, cell grid.Style) {
 	for _, b := range borders {
 		if b.Vertical {
 			for y := b.Y; y < b.Y+b.H; y++ {
-				g.Put(b.X, y, g.Width(), splitVLine, cell)
+				glyph := splitVLine
+				if cur := g.At(b.X, y).Text; cur == splitHLine || cur == splitCross {
+					glyph = splitCross
+				}
+				g.Put(b.X, y, g.Width(), glyph, cell)
 			}
 			continue
 		}
 		for x := b.X; x < b.X+b.W; x++ {
-			g.Put(x, b.Y, g.Width(), splitHLine, cell)
+			glyph := splitHLine
+			if cur := g.At(x, b.Y).Text; cur == splitVLine || cur == splitCross {
+				glyph = splitCross
+			}
+			g.Put(x, b.Y, g.Width(), glyph, cell)
 		}
 	}
 }

@@ -21,7 +21,9 @@ type ListOptions struct {
 	// directory: the files from IgnoreRoot down to dir, as the tree applies them
 	// from its root. Empty means dir is its own root. It applies whether or not
 	// ShowIgnored is set, since it decides Entry.IsIgnored.
-	IgnoreRoot string
+	IgnoreRoot  string
+	Fast        bool // skip per-entry lstat calls for regular files; only stat symlinks
+	IgnoreCache map[string]ignoreCacheEntry
 }
 
 // Entry is one directory entry returned by ListDir. For a symbolic link, IsDir,
@@ -61,7 +63,7 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
 	}
-	m := gitignore.NewMatcher(ignoreRules(root, rel))
+	m := gitignore.NewMatcher(ignoreRules(root, rel, opts.IgnoreCache))
 
 	out := make([]Entry, 0, len(dirents))
 	for _, d := range dirents {
@@ -70,9 +72,27 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 		if hidden && !opts.ShowHidden {
 			continue
 		}
-		info, isDir, err := entryInfo(filepath.Join(abs, name), d)
-		if err != nil {
-			continue // removed since ReadDir
+		var isDir bool
+		var isSymlink bool
+		var size int64
+		var modTime time.Time
+		if opts.Fast {
+			isDir = d.IsDir()
+			isSymlink = d.Type()&os.ModeSymlink != 0
+			if isSymlink {
+				if target, err := os.Stat(filepath.Join(abs, name)); err == nil {
+					isDir = target.IsDir()
+				}
+			}
+		} else {
+			info, dir, err := entryInfo(filepath.Join(abs, name), d)
+			if err != nil {
+				continue // removed since ReadDir
+			}
+			isDir = dir
+			isSymlink = d.Type()&os.ModeSymlink != 0
+			size = info.Size()
+			modTime = info.ModTime()
 		}
 		ignored := m.Match(append(slices.Clip(rel), name), isDir)
 		if ignored && !opts.ShowIgnored {
@@ -81,11 +101,11 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 		out = append(out, Entry{
 			Name:      name,
 			IsDir:     isDir,
-			IsSymlink: d.Type()&os.ModeSymlink != 0,
+			IsSymlink: isSymlink,
 			IsHidden:  hidden,
 			IsIgnored: ignored,
-			Size:      info.Size(),
-			ModTime:   info.ModTime(),
+			Size:      size,
+			ModTime:   modTime,
 		})
 	}
 	slices.SortFunc(out, func(a, b Entry) int {
@@ -126,11 +146,39 @@ func relSegments(root, dir string) ([]string, error) {
 // ignoreRules returns the patterns that apply to the entries of the directory
 // rel below root: the .gitignore files at root and at each directory on the way
 // down, in that order, so deeper files come later and take precedence.
-func ignoreRules(root string, rel []string) []gitignore.Pattern {
+type ignoreCacheEntry struct {
+	modTime time.Time
+	exists  bool
+	pats    []gitignore.Pattern
+}
+
+func ignoreRules(root string, rel []string, cache map[string]ignoreCacheEntry) []gitignore.Pattern {
 	fsys := osfs.New(root)
 	var rules []gitignore.Pattern
 	for i := 0; i <= len(rel); i++ {
-		rules = append(rules, readIgnore(fsys, rel[:i])...)
+		subDir := filepath.Join(append([]string{root}, rel[:i]...)...)
+		gitPath := filepath.Join(subDir, gitignoreFile)
+		fi, err := os.Stat(gitPath)
+		exists := err == nil
+		var mtime time.Time
+		if exists {
+			mtime = fi.ModTime()
+		}
+		if cache != nil {
+			if c, ok := cache[gitPath]; ok && c.exists == exists && c.modTime.Equal(mtime) {
+				rules = append(rules, c.pats...)
+				continue
+			}
+		}
+		pats := readIgnore(fsys, rel[:i])
+		if cache != nil {
+			cache[gitPath] = ignoreCacheEntry{
+				modTime: mtime,
+				exists:  exists,
+				pats:    pats,
+			}
+		}
+		rules = append(rules, pats...)
 	}
 	return rules
 }
