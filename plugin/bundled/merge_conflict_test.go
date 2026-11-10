@@ -184,6 +184,23 @@ func TestMergeConflictRegistersItsCommands(t *testing.T) {
 }
 
 // TestMergeConflictDetection: which texts are conflicts, and what is decorated.
+
+func TestMergeConflictKeymapBindings(t *testing.T) {
+	t.Parallel()
+	e := newMC(t, "x")
+	bindings := e.h.Host.Bindings["merge_conflict"]
+	chords := map[string]string{}
+	for _, b := range bindings {
+		chords[b.Chord] = b.Action
+	}
+	if chords["alt+m"] != "merge_conflict.start" {
+		t.Errorf("alt+m = %q, want merge_conflict.start", chords["alt+m"])
+	}
+	if chords["ctrl+alt+c"] != "merge_conflict.next" {
+		t.Errorf("ctrl+alt+c = %q, want merge_conflict.next", chords["ctrl+alt+c"])
+	}
+}
+
 func TestMergeConflictDetection(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

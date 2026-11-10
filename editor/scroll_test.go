@@ -120,6 +120,21 @@ func TestRecenterKeepsSelection(t *testing.T) {
 	}
 }
 
+func TestScrollCursorTopAndBottom(t *testing.T) {
+	t.Parallel()
+	e := scrollDoc(20, 0, buffer.Pos{Line: 10, Col: 0})
+	run(t, e, "scroll_cursor_top")
+	d := e.Active()
+	if d.Top != 10 {
+		t.Fatalf("Top after scroll_cursor_top = %d, want 10", d.Top)
+	}
+
+	run(t, e, "scroll_cursor_bottom")
+	if d.Top != 6 {
+		t.Fatalf("Top after scroll_cursor_bottom = %d, want 6", d.Top)
+	}
+}
+
 // Fresh clamps a scroll so that the viewport stays filled, so a document that fits the
 // screen, or one already scrolled to its last page, does not scroll at all and the caret
 // stays where it is.

@@ -118,6 +118,16 @@ func (e *Editor) recenter(d *Document) {
 	d.Top = clampTop(d, d.Cursor.Line-e.rows/2)
 }
 
+// scrollCursorTop sets the viewport so that the caret line is at the top of the viewport.
+func (e *Editor) scrollCursorTop(d *Document) {
+	d.Top = clampTop(d, d.Cursor.Line)
+}
+
+// scrollCursorBottom sets the viewport so that the caret line is at the bottom of the viewport.
+func (e *Editor) scrollCursorBottom(d *Document) {
+	d.Top = clampTop(d, d.Cursor.Line-(e.rows-1))
+}
+
 // ActivateTab makes tab i the active tab. An index outside the open tabs is
 // ignored. Unlike Do, it does not change the status message.
 func (e *Editor) ActivateTab(i int) {

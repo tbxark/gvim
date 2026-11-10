@@ -633,3 +633,6 @@ command { name = "use_ours", title = "Merge: Use Ours", description = "Keep our 
 command { name = "take_theirs", title = "Merge: Take Theirs", description = "Keep their side of the conflict under the caret", when = { "!read_only" }, run = function() resolve "theirs" end }
 command { name = "use_both", title = "Merge: Use Both", description = "Keep both sides of the conflict under the caret", when = { "!read_only" }, run = function() resolve "both" end }
 command { name = "resolve", title = "Merge: Resolve Conflict...", description = "Choose how to resolve the conflict under the caret", when = { "!read_only" }, run = pick }
+
+gvim.keymap.set("alt+m", "merge_conflict.start", { desc = "Merge: Start Resolution" })
+gvim.keymap.set("ctrl+alt+c", "merge_conflict.next", { desc = "Merge: Next Conflict" })

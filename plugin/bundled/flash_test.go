@@ -132,6 +132,22 @@ func TestFlashRegistersItsCommand(t *testing.T) {
 	}
 }
 
+func TestFlashKeymapBinding(t *testing.T) {
+	t.Parallel()
+	env := newFlash(t, "hello world", nil)
+	bindings := env.h.Host.Bindings["flash"]
+	found := false
+	for _, b := range bindings {
+		if b.Chord == "alt+j" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("bindings = %v, want alt+j bound to flash_jump", bindings)
+	}
+}
+
 // TestFlashLabelsForAFixedBuffer: with nothing typed every word start is labelled, nearest
 // first, with the comfortable letters, skipping the letters that start a word (typing one
 // must start a search, not jump).

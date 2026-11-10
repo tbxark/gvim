@@ -113,6 +113,7 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Ctrl+Shift+P` | Open Command Palette directly |
 | `Ctrl+T` / `Ctrl+N` | New tab / buffer |
 | `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
+| `Alt+J` | Flash Jump (2-character on-screen jump motion) |
 | `Ctrl+]` | Jump to matching bracket |
 | `Ctrl+L` | Expand line selection across all carets |
 | `Ctrl+W v` / `Ctrl+W s` | Split window vertically / horizontally |
@@ -137,6 +138,9 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `LSP: Go to Implementation` | Jump to implementation |
 | `LSP: Hover` | Show hover documentation popup |
 | `Go to LSP Symbol` | Fuzzy-find document symbols with enclosing-symbol preselected |
+| `LSP: Workspace Symbols` | Fuzzy-find symbols across the whole workspace |
+| `LSP: Incoming / Outgoing Calls` | Call Hierarchy: explore callers and callees |
+| `List Bookmarks` | Interactive bookmarks picker (jump between slots 0–9) |
 
 ### Git & Review
 | Action | Description |
@@ -146,6 +150,7 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Git: Show Commit` | Show commit details popup for cursor line |
 | `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
 | `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
+| `Merge: Conflict Resolution` | Jump between conflict markers (`Alt+M` mode or `Ctrl+Alt+C`) |
 
 ### Markdown Modes
 | Action | Description |

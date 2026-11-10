@@ -21,11 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `c80ba54` plus the round-94 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 88 KiB / both 216 KiB); default-enabled bundled plugins idle
+Last verified: 2026-11-10, tree commit `eb009db` plus the round-95 working tree. Static gates
+passed (catalogue heap en 133 KiB / de 88 KiB / both 222 KiB); default-enabled bundled plugins idle
 heap costs 7.99 MiB (< 8.00 MiB limit).
-Round 94 implements features 1, 2, and 3: interactive bookmarks picker (list_bookmarks), LSP workspace
-symbols (workspace/symbol), and LSP call hierarchy (incoming and outgoing calls), adding items 352–354.
+Round 95 implements features 4, 5, and 6: viewport repositioning (scroll_cursor_top / scroll_cursor_bottom),
+Flash Jump keymap binding (Alt+J), and merge conflict navigation keymap bindings (Alt+M, Ctrl+Alt+C),
+adding items 355–357.
 Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
 markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
@@ -7275,6 +7276,15 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      cursor with `textDocument/prepareCallHierarchy` and queries `callHierarchy/incomingCalls` or
      `callHierarchy/outgoingCalls`; lists callers or callees with call-site ranges in the location
      finder with preview tabs and direct jump. Tests cover incoming and outgoing call workflows.
+355. **Viewport repositioning (recenter, scroll_cursor_top, scroll_cursor_bottom).** Exposes editor actions
+     to reposition the viewport: `recenter` (center caret line), `scroll_cursor_top` (caret line to top),
+     and `scroll_cursor_bottom` (caret line to bottom); wired into core handlers, unit-tested in editor/scroll_test.go,
+     and available via vi_mode (zz, zt, zb).
+356. **Flash Jump shortcut binding (Alt+J).** Binds `Alt+J` directly to `flash.jump` in the flash plugin,
+     offering two-character on-screen jump motion without collision. Tests cover keymap registration.
+357. **Merge conflict resolution and navigation shortcut bindings (Alt+M, Ctrl+Alt+C).** Binds `Alt+M` to
+     enter modal conflict resolution mode (`merge_conflict.start`) and `Ctrl+Alt+C` to jump to next conflict
+     (`merge_conflict.next`). Tests cover keymap registration.
 
 ## 5. Ranked backlog for the remaining rounds
 

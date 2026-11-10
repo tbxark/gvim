@@ -480,3 +480,5 @@ gvim.command.register {
   description = "Jump to any visible match across every window",
   run = flash_jump,
 }
+
+gvim.keymap.set("alt+j", "flash.jump", { desc = "Flash: Jump" })

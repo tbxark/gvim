@@ -30,11 +30,11 @@ func (e *flashEnv) ended(t *testing.T) {
 	}
 }
 
-// leaked lists the resources of the host other than the registered commands.
+// leaked lists the resources of the host other than the registered commands and bindings.
 func (e *flashEnv) leaked() []string {
 	var out []string
 	for _, r := range e.h.Host.Resources() {
-		if !strings.HasPrefix(r, "command:") {
+		if !strings.HasPrefix(r, "command:") && !strings.HasPrefix(r, "binding:") {
 			out = append(out, r)
 		}
 	}

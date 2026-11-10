@@ -163,6 +163,14 @@ func buildHandlers() map[Action]handler {
 		e.recenter(d)
 		return nil
 	})
+	h["scroll_cursor_top"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		e.scrollCursorTop(d)
+		return nil
+	})
+	h["scroll_cursor_bottom"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		e.scrollCursorBottom(d)
+		return nil
+	})
 	h["delete_backward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
 		e.backspace(d)
 		return nil
