@@ -730,8 +730,9 @@ failed directory copy removes the directory it created, so a retry is not blocke
 partial destination. If the filesystem cannot hard-link, the copy falls back to the
 recorded direct O_EXCL write: `fsops.CopyWithResult` (and the Rename/Move result variants)
 return the warning, the local adapter surfaces it through `TakeCopyWarning` (status notice),
-and the fallback can leave a partial target on a later write failure. Cleanup failures are joined into the returned error, never
-silently ignored. Local Rename and Move publish with that bounded
+and the fallback can leave a partial target on a later write failure. A failed source removal after a successful copy-and-remove
+keeps both copies and reports the source-removal failure. Cleanup failures are joined into
+the returned error, never silently ignored. Local Rename and Move publish with that bounded
 copy-and-remove path (10000 entries / 256 MiB / 64 levels) because `os.Rename` replaces an
 existing target; the source is removed only after the copy succeeds, and a larger tree is
 refused before anything is touched. The explicit Overwrite policy keeps the local

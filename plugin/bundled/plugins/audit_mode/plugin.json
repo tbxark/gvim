@@ -1,0 +1,7 @@
+{
+  "name": "audit_mode",
+  "version": "1.0.0",
+  "description": "Read-only review of staged, unstaged and untracked changes with per-file diffs",
+  "api": 2,
+  "default_enabled": false
+}

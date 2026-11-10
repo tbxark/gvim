@@ -226,6 +226,31 @@ groups, attach/resume/orchestration, vendor CLI polling, and the Settings/Menu t
 `live_sessions_test.go` covers listing, transcript open, unsupported/empty states and polling;
 `agent_sessions_api_test.go` covers the report shape and unsupported service.
 
+### Audit mode: read-only review (port residual)
+
+Fresh's `audit_mode.ts` is a magit-style review session: a buffer-group split with a file
+sidebar, unified and side-by-side diff streams, staging/unstaging/discarding, hunk and line
+comments, comment/note persistence, Markdown/JSON export, commit/range/stash reviews,
+side-by-side composites and an external-change watch. The gvim port only implements the
+read-only core that the existing APIs can make real: `Review Diff` gathers
+`git status --porcelain -z -uall` and staged/unstaged `git diff --numstat` through the hardened
+`gvim.git` gateway, lists the files and stats in a picker, opens one file's unified diff in a
+read-only virtual buffer, and turns new-side diff rows into line targets that open the working
+file at that line. `Review Diff: Refresh` re-reads the list; `Review Diff: Close` drops it;
+untracked files are shown from a bounded working-tree read as a synthetic new-file diff.
+
+All reads are bounded (status/stat/diff byte caps, file/line/target caps), run in plugin-task
+awaits, never in Update, and the trust-gated plugin process gateway applies. A close invalidates
+an in-flight answer by generation (including an untracked file's working-tree read); the process is
+not cancelled. The truncation footer is cleared on every refresh result, and numstat is keyed by
+category+path so a both-sides (MM) path shows distinct staged/unstaged stats and total additions.
+OPEN: stage/unstage/discard
+(index writes), comments/notes and persistence, exports, range/stash modes, side-by-side/BufferGroup
+layout, collapsing/filtering, watch polling, status-bar chrome and the review-mode keymap. Tests:
+`audit_mode_test.go` covers the staged/unstaged/untracked overview with numstat, opening a
+tracked file's diff and its new-side line target, the untracked synthetic diff, the clean and
+not-a-repository states, and the read-only command list.
+
 ### The shared Finder (port residual)
 
 Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `gvim.finder` library

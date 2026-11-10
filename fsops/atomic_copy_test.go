@@ -248,3 +248,72 @@ func TestCopyWithContextCancellationStopsMidFile(t *testing.T) {
 		t.Fatalf("retry after cancellation: %v", err)
 	}
 }
+
+// TestDirectoryCopyCleanupFailureIsReported: a failed child write whose partial
+// destination and temporary file cannot be removed reports both cleanup failures instead
+// of swallowing them.
+func TestDirectoryCopyCleanupFailureIsReported(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only mode this test relies on")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	must(t, os.Mkdir(src, 0o755))
+	writeFile(t, filepath.Join(src, "a.txt"), "a")
+	dst := filepath.Join(root, "dst")
+	copyFileWriteHook = func() error {
+		// Make both the temporary-file removal and the partial-directory removal fail.
+		if err := os.Chmod(dst, 0o500); err != nil {
+			return err
+		}
+		return errors.New("injected child failure")
+	}
+	t.Cleanup(func() {
+		copyFileWriteHook = nil
+		_ = os.Chmod(root, 0o700)
+		_ = os.Chmod(dst, 0o700)
+		_ = os.RemoveAll(dst)
+	})
+	err := Copy(src, dst, Cancel)
+	if err == nil {
+		t.Fatal("copy accepted a failed child write")
+	}
+	if !strings.Contains(err.Error(), "remove temporary file") || !strings.Contains(err.Error(), "remove partial destination") {
+		t.Fatalf("cleanup failures are not reported: %v", err)
+	}
+	if !exists(dst) {
+		t.Fatal("the read-only destination should still exist until cleanup is retried")
+	}
+	if got := readFile(t, filepath.Join(src, "a.txt")); got != "a" {
+		t.Fatalf("source changed: %q", got)
+	}
+}
+
+// TestRenameSourceRemovalFailureIsReported: the copy succeeds but deleting the source
+// fails; both copies stay and the error names the source-removal failure.
+func TestRenameSourceRemovalFailureIsReported(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only mode this test relies on")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	must(t, os.Mkdir(src, 0o755))
+	writeFile(t, filepath.Join(src, "a.txt"), "a")
+	must(t, os.Chmod(src, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(src, 0o700) })
+	t.Cleanup(func() { makeWritable(t, root) })
+	dst := filepath.Join(root, "dst")
+	err := RenameNoReplace(src, dst)
+	if err == nil || !strings.Contains(err.Error(), "could not remove the source") {
+		t.Fatalf("source-removal failure = %v", err)
+	}
+	if got := readFile(t, filepath.Join(dst, "a.txt")); got != "a" {
+		t.Fatalf("completed copy changed: %q", got)
+	}
+	if !exists(filepath.Join(src, "a.txt")) {
+		t.Fatal("failed source removal removed the source")
+	}
+	if got := tempNames(t, root); len(got) != 0 {
+		t.Fatalf("rename left temporary files: %v", got)
+	}
+}

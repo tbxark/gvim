@@ -506,3 +506,42 @@ func TestAuthorityOSCopyNewTargetTreeUnsupportedProbe(t *testing.T) {
 		t.Fatal("unprovable tree wrote a destination file")
 	}
 }
+
+// fakeNoNewTargetStreamFiles has the ordinary and no-follow atomic replacement streams,
+// but not the new-target no-clobber stream required by gvim.fs.copy.
+type fakeNoNewTargetStreamFiles struct {
+	*fakeMutableFiles
+	stream *fakeStreamFiles
+}
+
+func (f *fakeNoNewTargetStreamFiles) WriteStream(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return f.stream.WriteStream(ctx, p, o)
+}
+
+func (f *fakeNoNewTargetStreamFiles) WriteStreamNoFollow(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return f.stream.WriteStreamNoFollow(ctx, p, o)
+}
+
+// TestAuthorityOSCopyRefusesNoFollowOnlyStream: a NoFollow/ordinary WriteStream surface
+// atomically replaces an existing target, so it is not a no-replace copy capability. Copy
+// must return unsupported and touch nothing instead of using that check-then-write fallback.
+func TestAuthorityOSCopyRefusesNoFollowOnlyStream(t *testing.T) {
+	remote := walkFixture()
+	remote.files["/srv/proj/a.txt"] = "source data"
+	files := &fakeNoNewTargetStreamFiles{
+		fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote},
+		stream:           &fakeStreamFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}},
+	}
+	slot, _, _ := authorityTestSlot(files)
+	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "a.txt", "b.txt")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("copy with only NoFollow stream = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if _, ok := remote.files["/srv/proj/b.txt"]; ok {
+		t.Fatal("a NoFollow-only copy created the destination")
+	}
+	if got := remote.files["/srv/proj/a.txt"]; got != "source data" {
+		t.Fatalf("source changed: %q", got)
+	}
+}

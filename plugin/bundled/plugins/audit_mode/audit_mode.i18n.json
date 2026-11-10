@@ -1,0 +1,33 @@
+{
+  "en": {
+    "cmd.review": "Review Diff",
+    "cmd.review_desc": "Read staged, unstaged and untracked changes and open a file's diff",
+    "cmd.refresh": "Review Diff: Refresh",
+    "cmd.refresh_desc": "Re-read git status and diff stats",
+    "cmd.close": "Review Diff: Close",
+    "cmd.close_desc": "Close the review list and the open diff view",
+    "status.loading": "Reading git status…",
+    "status.count": "Review Diff: %{files} files · +%{add} -%{del}",
+    "status.clean": "Working tree clean",
+    "status.not_repo": "Review Diff: not inside a git repository",
+    "status.no_git": "Review Diff: git is not installed",
+    "status.failed": "Review Diff: %{error}",
+    "status.diff_loading": "Reading diff for %{path}…",
+    "status.diff_failed": "Review Diff: cannot read the diff for %{path}: %{error}",
+    "status.diff_empty": "Review Diff: no diff for %{path}",
+    "status.untracked": "Review Diff: untracked file %{path} (shown as new file)",
+    "status.binary": "Review Diff: binary change for %{path}",
+    "status.truncated": "Review Diff: output truncated",
+    "status.opened": "Review Diff: opened %{path}",
+    "status.no_location": "Review Diff: this change has no working-tree location to open",
+    "section.staged": "STAGED (%{count})",
+    "section.unstaged": "UNSTAGED (%{count})",
+    "section.untracked": "UNTRACKED (%{count})",
+    "empty.clean": "Working tree clean — nothing to review",
+    "empty.not_repo": "Not inside a git repository",
+    "row.status": "%{status}  %{path}",
+    "row.stats": "+%{add} -%{del}",
+    "diff.empty": "No diff available for this change.",
+    "diff.truncated": "… diff truncated by Review Diff …"
+  }
+}
