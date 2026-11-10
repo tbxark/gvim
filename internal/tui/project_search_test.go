@@ -145,11 +145,17 @@ func openSearchPanel(t *testing.T, m *Model) *searchpanel.Panel {
 type projSelectionDoc struct {
 	*fakeDoc
 	anchor, head buffer.Pos
+	virtual      bool
+	large        bool
 }
 
 func (d *projSelectionDoc) Selection() (buffer.Pos, buffer.Pos, bool) {
 	return d.anchor, d.head, d.anchor != d.head
 }
+
+func (d *projSelectionDoc) Virtual() bool           { return d.virtual }
+func (d *projSelectionDoc) Large() bool             { return d.large }
+func (d *projSelectionDoc) Index() buffer.IndexInfo { return buffer.IndexInfo{Complete: true} }
 
 // TestProjectSearchPrefillsTheSelectedText: opening Search and Replace from a real
 // selection puts that text into the panel's query; a missing/multi-line/over-long
@@ -167,21 +173,25 @@ func TestProjectSearchPrefillsTheSelectedText(t *testing.T) {
 		lines        []string
 		anchor, head buffer.Pos
 		want         string
+		virtual      bool
+		large        bool
 	}{
-		{"single line", []string{"foo bar"}, buffer.Pos{}, buffer.Pos{Col: 3}, "foo"},
-		{"missing selection", []string{"foo bar"}, buffer.Pos{}, buffer.Pos{}, ""},
-		{"multi line", []string{"foo", "bar"}, buffer.Pos{}, buffer.Pos{Line: 1, Col: 2}, ""},
-		{"199 bytes", []string{bytes199}, buffer.Pos{}, buffer.Pos{Col: 199}, bytes199},
-		{"200 bytes", []string{bytes200}, buffer.Pos{}, buffer.Pos{Col: 200}, ""},
-		{"66 CJK = 198 bytes", []string{cjk66}, buffer.Pos{}, buffer.Pos{Col: 66}, cjk66},
-		{"67 CJK = 201 bytes", []string{cjk67}, buffer.Pos{}, buffer.Pos{Col: 67}, ""},
-		{"49 emoji = 196 bytes", []string{emoji49}, buffer.Pos{}, buffer.Pos{Col: 49}, emoji49},
-		{"50 emoji = 200 bytes", []string{emoji50}, buffer.Pos{}, buffer.Pos{Col: 50}, ""},
+		{"single line", []string{"foo bar"}, buffer.Pos{}, buffer.Pos{Col: 3}, "foo", false, false},
+		{"missing selection", []string{"foo bar"}, buffer.Pos{}, buffer.Pos{}, "", false, false},
+		{"multi line", []string{"foo", "bar"}, buffer.Pos{}, buffer.Pos{Line: 1, Col: 2}, "", false, false},
+		{"199 bytes", []string{bytes199}, buffer.Pos{}, buffer.Pos{Col: 199}, bytes199, false, false},
+		{"200 bytes", []string{bytes200}, buffer.Pos{}, buffer.Pos{Col: 200}, "", false, false},
+		{"66 CJK = 198 bytes", []string{cjk66}, buffer.Pos{}, buffer.Pos{Col: 66}, cjk66, false, false},
+		{"67 CJK = 201 bytes", []string{cjk67}, buffer.Pos{}, buffer.Pos{Col: 67}, "", false, false},
+		{"49 emoji = 196 bytes", []string{emoji49}, buffer.Pos{}, buffer.Pos{Col: 49}, emoji49, false, false},
+		{"50 emoji = 200 bytes", []string{emoji50}, buffer.Pos{}, buffer.Pos{Col: 50}, "", false, false},
+		{"virtual document", []string{"virtual selection"}, buffer.Pos{}, buffer.Pos{Col: 7}, "virtual", true, false},
+		{"large document", []string{"large selection"}, buffer.Pos{}, buffer.Pos{Col: 5}, "large", false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ed := newProjEd(nil, nil)
-			ed.active = &projSelectionDoc{fakeDoc: &fakeDoc{lines: tt.lines}, anchor: tt.anchor, head: tt.head}
+			ed.active = &projSelectionDoc{fakeDoc: &fakeDoc{lines: tt.lines}, anchor: tt.anchor, head: tt.head, virtual: tt.virtual, large: tt.large}
 			m := newProjectPanelModel(t, ed, &fakeProjectSearcher{}, nil, nil)
 			k := testKeys()
 			k["normal|a|alt"] = Command{Action: "start_search_replace"}

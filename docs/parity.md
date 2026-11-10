@@ -21,9 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `d8324f7` plus the round-89 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r89-final.log`).
+Last verified: 2026-11-10, tree commit `cde4169` plus the round-91 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 82 KiB / both 211 KiB); full
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r91-final.log`).
+Round 91 tests virtual and large document selection paths for project-search selected-text prefill
+(closing the item 347 test residual) and optimizes git_gutter to keep default-enabled bundled plugin
+idle heap at 7.98 MiB (within the 8 MiB limit).
 Round 89 adds TestSettingsClosedPageDropsInFlightSnapshot proving a closed Settings page drops in-flight
 snapshot responses without renewing ticks or applying values, closing the item 346 test residual.
 Round 88 localizes git_blame status notices with Fresh's catalogue (German copy notice verified),
@@ -7235,7 +7238,7 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      single-line primary selection shorter than 200 UTF-8 bytes fills the Search row; multi-line/empty/
      200+-byte selections leave it empty. The bounded read and primary-only selection match Fresh's byte
      range and getPrimaryCursor behavior. Tests cover ASCII, CJK and 4-byte emoji byte boundaries through
-     the real Alt+A path. Residuals: virtual/large-document selection tests absent; real terminal UNTESTED.
+     the real Alt+A path. Residuals: virtual and large document selection paths are tested; real terminal UNTESTED.
 348. **Remote LSP/workspace/file-access `~user` expansion.** `expandRemotePath` resolves `~user`/`~user/...` through
      the remote shell after validating the name; shell-special tilde names (`~-`, `~-N`, `~+`, `~+N`,
      `~--`) are rejected before any remote command, normal internal-dash names still expand, and the LSP
