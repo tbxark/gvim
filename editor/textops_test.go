@@ -329,6 +329,31 @@ func TestExpandLineSelection(t *testing.T) {
 	}
 }
 
+// TestExpandLineSelectionAtEveryCaret: Fresh's expand_line_selection grows every
+// caret's line selection, not just the primary one; repeated presses add one line per
+// caret while the selections stay separate.
+func TestExpandLineSelectionAtEveryCaret(t *testing.T) {
+	t.Parallel()
+	e := docWith(Options{}, "a\nb\nc\nd")
+	run(t, e, "add_cursor_below") // primary line 1, extra caret line 0
+	run(t, e, "expand_line_selection")
+	d := e.Active()
+	if d.Sel == nil || d.Sel.Anchor != (buffer.Pos{Line: 1}) || d.Sel.Head != (buffer.Pos{Line: 2}) {
+		t.Fatalf("primary selection = %+v, want 1:0 to 2:0", d.Sel)
+	}
+	extras := d.Cursors()
+	if len(extras) != 1 || extras[0].Sel == nil || extras[0].Sel.Anchor != (buffer.Pos{Line: 0}) || extras[0].Sel.Head != (buffer.Pos{Line: 1}) {
+		t.Fatalf("extra caret = %+v, want line 0 selection", extras)
+	}
+
+	// A repeat grows the same caret's line selection; the single-caret test above covers
+	// the continuous one-line-per-press walk without the adjacent selections meeting.
+	run(t, e, "expand_line_selection")
+	if d := e.Active(); d.Sel == nil {
+		t.Fatal("a repeated multi-caret expand left no primary selection")
+	}
+}
+
 func TestTransposeChars(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

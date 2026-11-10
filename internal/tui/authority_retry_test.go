@@ -153,3 +153,39 @@ func TestAuthorityConnectingStatus(t *testing.T) {
 		t.Fatalf("status row %q has no reconnecting indicator", row)
 	}
 }
+
+// TestAuthorityRetryTickInvalidatesPreviewsBeforeDial: the background retry tick is an
+// attempt boundary like the focus path: it clears cached palette previews and marks the
+// carrier disconnected before the dial command runs.
+func TestAuthorityRetryTickInvalidatesPreviewsBeforeDial(t *testing.T) {
+	m := newTestModel(t, newFakeEditor("x"), nil, 80, 24)
+	o := &invalidateOverlay{fakeOverlay: fakeOverlay{open: true}}
+	m.pushOverlay(o)
+	connected := true
+	dials := 0
+	m.SetAuthorityHooks(AuthorityHooks{
+		Status: func() AuthorityStatus { return AuthorityStatus{Text: "SSH:h", Connected: connected} },
+		Reconnect: func(context.Context, string) error {
+			dials++
+			return errors.New("still down")
+		},
+	})
+	if !m.authorityPreviewConnected {
+		t.Fatal("hooks did not seed the connected preview state")
+	}
+	connected = false
+	cmd := m.authorityRetryTick()
+	if cmd == nil {
+		t.Fatal("the retry tick produced no dial command")
+	}
+	if o.calls != 1 {
+		t.Fatalf("retry tick invalidated previews %d times, want 1 before the dial", o.calls)
+	}
+	if m.authorityPreviewConnected {
+		t.Fatal("retry tick left the preview state connected")
+	}
+	if dials != 0 {
+		t.Fatal("the dial ran inside Update before its command was executed")
+	}
+	_ = cmd() // execute the dial only after the state boundary was checked
+}

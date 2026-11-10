@@ -1,6 +1,7 @@
 package fsops
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -73,12 +74,25 @@ func Copy(src, dst string, policy ConflictPolicy) error {
 
 // CopyWithResult is Copy plus the warning of a non-fatal fallback.
 func CopyWithResult(src, dst string, policy ConflictPolicy) (CopyResult, error) {
+	return CopyWithResultContext(context.Background(), src, dst, policy)
+}
+
+// CopyWithResultContext is CopyWithResult with a cancellable context. The copy checks
+// ctx between entries and during file chunks; a cancelled copy removes its temporary
+// files and any destination directory it created (cleanup errors are joined).
+func CopyWithResultContext(ctx context.Context, src, dst string, policy ConflictPolicy) (CopyResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	report := &copyReport{}
-	err := copyWithReport(src, dst, policy, report)
+	err := copyWithReport(ctx, src, dst, policy, report)
 	return CopyResult{Warning: report.warning}, err
 }
 
-func copyWithReport(src, dst string, policy ConflictPolicy, report *copyReport) error {
+func copyWithReport(ctx context.Context, src, dst string, policy ConflictPolicy, report *copyReport) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if policy < Overwrite || policy > Cancel {
 		return fmt.Errorf("fsops: copy: unknown conflict policy %d", int(policy))
 	}
@@ -119,7 +133,7 @@ func copyWithReport(src, dst string, policy ConflictPolicy, report *copyReport) 
 			return fmt.Errorf("fsops: copy to %s: %w: %w", dst, ErrCanceled, ErrConflict)
 		}
 	}
-	return place(src, srcInfo, dst, replace, report)
+	return place(ctx, src, srcInfo, dst, replace, report)
 }
 
 // linkTargetIsDest reports whether the symbolic link src points at dst, at a
@@ -190,9 +204,9 @@ var renamePath = os.Rename
 // O_EXCL/O_Mkdir/OSymlink, so a concurrent creator cannot be overwritten (a failed
 // copy can leave a partial destination, which the caller reports). An explicit
 // overwrite still uses a staging directory and swapIn.
-func place(src string, srcInfo fs.FileInfo, dst string, replace bool, report *copyReport) error {
+func place(ctx context.Context, src string, srcInfo fs.FileInfo, dst string, replace bool, report *copyReport) error {
 	if !replace {
-		return copyTree(src, srcInfo, dst, report)
+		return copyTree(ctx, src, srcInfo, dst, report)
 	}
 	stage, err := os.MkdirTemp(filepath.Dir(dst), ".fsops-copy-*")
 	if err != nil {
@@ -201,7 +215,7 @@ func place(src string, srcInfo fs.FileInfo, dst string, replace bool, report *co
 	defer func() { _ = os.RemoveAll(stage) }()
 
 	staged := filepath.Join(stage, filepath.Base(dst))
-	if err := copyTree(src, srcInfo, staged, report); err != nil {
+	if err := copyTree(ctx, src, srcInfo, staged, report); err != nil {
 		return err
 	}
 	if replace {
@@ -243,7 +257,10 @@ func swapIn(staged, dst string) error {
 
 // copyTree copies the entry at src, described by info, to dst, which must not
 // exist.
-func copyTree(src string, info fs.FileInfo, dst string, report *copyReport) error {
+func copyTree(ctx context.Context, src string, info fs.FileInfo, dst string, report *copyReport) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	mode := info.Mode()
 	switch {
 	case mode&fs.ModeSymlink != 0:
@@ -276,7 +293,7 @@ func copyTree(src string, info fs.FileInfo, dst string, report *copyReport) erro
 			if err != nil {
 				return cleanup(opError("copy", filepath.Join(src, e.Name()), err))
 			}
-			if err := copyTree(filepath.Join(src, e.Name()), childInfo, filepath.Join(dst, e.Name()), report); err != nil {
+			if err := copyTree(ctx, filepath.Join(src, e.Name()), childInfo, filepath.Join(dst, e.Name()), report); err != nil {
 				return cleanup(err)
 			}
 		}
@@ -285,10 +302,32 @@ func copyTree(src string, info fs.FileInfo, dst string, report *copyReport) erro
 		}
 		return nil
 	case mode.IsRegular():
-		return copyFileAtomic(src, dst, mode.Perm(), report)
+		return copyFileAtomic(ctx, src, dst, mode.Perm(), report)
 	default:
 		return fmt.Errorf("fsops: copy %s: unsupported file type %s", src, mode.Type())
 	}
+}
+
+// copyContextReader makes a chunked copy observe cancellation between reads.
+type copyContextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+// copyReadHook, when set by a test, observes each file chunk after it is read.
+var copyReadHook func() error
+
+func (c *copyContextReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := c.r.Read(p)
+	if hook := copyReadHook; hook != nil {
+		if herr := hook(); herr != nil {
+			return n, herr
+		}
+	}
+	return n, err
 }
 
 // copyReport collects non-fatal copy observations.
@@ -315,7 +354,7 @@ var copyFileWriteHook func() error
 // temporary file and leaves no target, so a retry is not a conflict. If the filesystem
 // cannot hard-link, it records the fallback and uses the older direct O_EXCL write (whose
 // partial-target risk is the recorded warning).
-func copyFileAtomic(src, dst string, perm fs.FileMode, report *copyReport) (err error) {
+func copyFileAtomic(ctx context.Context, src, dst string, perm fs.FileMode, report *copyReport) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return opError("copy", src, err)
@@ -339,7 +378,7 @@ func copyFileAtomic(src, dst string, perm fs.FileMode, report *copyReport) (err 
 		}
 	}()
 
-	if _, err = io.Copy(temp, in); err != nil {
+	if _, err = io.Copy(temp, &copyContextReader{ctx: ctx, r: in}); err != nil {
 		_ = temp.Close()
 		return opError("copy", src, err)
 	}
@@ -368,7 +407,7 @@ func copyFileAtomic(src, dst string, perm fs.FileMode, report *copyReport) (err 
 	if err = cleanup(); err != nil {
 		return err
 	}
-	if err = copyFileDirect(src, dst, perm); err != nil {
+	if err = copyFileDirect(ctx, src, dst, perm); err != nil {
 		return err
 	}
 	return nil
@@ -376,7 +415,7 @@ func copyFileAtomic(src, dst string, perm fs.FileMode, report *copyReport) (err 
 
 // copyFileDirect is the fallback: it creates dst with O_EXCL and writes into that target
 // directly. A failure can leave a partial target; only the no-hard-link fallback uses it.
-func copyFileDirect(src, dst string, perm fs.FileMode) error {
+func copyFileDirect(ctx context.Context, src, dst string, perm fs.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return opError("copy", src, err)
@@ -387,7 +426,7 @@ func copyFileDirect(src, dst string, perm fs.FileMode) error {
 	if err != nil {
 		return opError("copy", dst, err)
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := io.Copy(out, &copyContextReader{ctx: ctx, r: in}); err != nil {
 		_ = out.Close()
 		return opError("copy", src, err)
 	}

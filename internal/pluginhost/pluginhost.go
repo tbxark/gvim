@@ -53,6 +53,10 @@ type Options struct {
 	// name resolves through the child's PATH) and returns a refusal error. Nil
 	// allows every launch.
 	Gate SpawnGate
+	// AgentDiscover is the bounded, read-only local agent-session scan behind
+	// gvim.agent_sessions.discover. Nil means the plugin runtime has no such capability
+	// (for example a shared daemon runtime, whose scanner is workspace-scoped).
+	AgentDiscover func(context.Context) (pluginapi.AgentReport, error)
 	// WorkspaceStateFile is the workspace-scoped gvim.state file of a daemon workspace
 	// (sessions/<stable-id>/plugin-state.json), or "" for the editor-wide per-plugin
 	// files a direct launch uses. The app reads WorkspaceStateData off the update loop.
@@ -97,6 +101,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 	}
 	var osys hostos.OS = newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
 	osys.(*pluginOS).gate = o.Gate
+	osys.(*pluginOS).logSink = o.LogSink
 	if o.WrapOS != nil {
 		if wrapped := o.WrapOS(osys); wrapped != nil {
 			osys = wrapped
@@ -107,7 +112,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 		Runtime: plugin.New(plugin.Options{
 			Timeout:                cfg.PluginTimeout,
 			OS:                     osys,
-			Services:               pluginServices{},
+			Services:               pluginServices{agentDiscover: o.AgentDiscover},
 			Version:                o.Version,
 			LogSink:                o.LogSink,
 			Loader:                 ld,

@@ -23,6 +23,12 @@ type FakeServices struct {
 	GitRoots map[string]string
 	// Branches maps a repository root to its current branch.
 	Branches map[string]string
+	// AgentDiscovery is returned by DiscoverAgents; AgentDiscoveryErr makes it fail.
+	// AgentDiscoveryFn, when set, runs instead (a test can block one scan and inspect a
+	// close/reopen while it is in flight).
+	AgentDiscovery    pluginapi.AgentReport
+	AgentDiscoveryErr error
+	AgentDiscoveryFn  func(context.Context) (pluginapi.AgentReport, error)
 }
 
 var _ pluginapi.Services = (*FakeServices)(nil)
@@ -199,6 +205,14 @@ func (*FakeServices) Decode(encoding string, data []byte) (string, error) {
 		return string(rs), nil
 	}
 	return "", pluginapi.Errf(pluginapi.CodeUnsupported, "unknown encoding %q", encoding)
+}
+
+// DiscoverAgents returns the scripted agent report.
+func (f *FakeServices) DiscoverAgents(ctx context.Context) (pluginapi.AgentReport, error) {
+	if f.AgentDiscoveryFn != nil {
+		return f.AgentDiscoveryFn(ctx)
+	}
+	return f.AgentDiscovery, f.AgentDiscoveryErr
 }
 
 // GitRoot finds dir (or a parent) in GitRoots.

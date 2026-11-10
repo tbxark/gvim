@@ -128,8 +128,8 @@ func TestAuthorityOSCopyWithoutStreamerRefusesExistingDestination(t *testing.T) 
 	local := plugintest.NewFakeOS()
 	osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
 	err := osys.Copy(context.Background(), "a.txt", "b.txt")
-	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
-		t.Fatalf("copy over an existing destination without a streamer = %v, code %q", err, pluginapi.CodeOf(err))
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeConflict {
+		t.Fatalf("copy over an existing destination = %v, code %q", err, pluginapi.CodeOf(err))
 	}
 	if got := remote.files["/srv/proj/b.txt"]; got != "keep me" {
 		t.Fatalf("refused copy changed the destination: %q", got)
@@ -199,9 +199,10 @@ func TestAuthorityOSCopyWithoutStreamerRefusesBeforeWrite(t *testing.T) {
 		name string
 		dst  string
 		pre  string
+		want pluginapi.Code
 	}{
-		{name: "new destination", dst: "new.txt"},
-		{name: "concurrent writer target", dst: "new.txt", pre: "winner"},
+		{name: "new destination", dst: "new.txt", want: pluginapi.CodeUnsupported},
+		{name: "concurrent writer target", dst: "new.txt", pre: "winner", want: pluginapi.CodeConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
@@ -214,8 +215,8 @@ func TestAuthorityOSCopyWithoutStreamerRefusesBeforeWrite(t *testing.T) {
 			local := plugintest.NewFakeOS()
 			osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
 			err := osys.Copy(context.Background(), "a.txt", tc.dst)
-			if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
-				t.Fatalf("copy without a streamer = %v, code %q; want unsupported", err, pluginapi.CodeOf(err))
+			if err == nil || pluginapi.CodeOf(err) != tc.want {
+				t.Fatalf("copy without a streamer = %v, code %q; want %q", err, pluginapi.CodeOf(err), tc.want)
 			}
 			if writes := files.writeCount(); writes != 0 {
 				t.Fatalf("refused copy called WriteFile %d times", writes)
@@ -260,6 +261,12 @@ func (f *fakeFollowerStreamFiles) WriteStream(context.Context, string, hostos.Wr
 func (f *fakeFollowerStreamFiles) WriteStreamNoFollow(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
 	return f.fakeStreamFiles.WriteStreamNoFollow(ctx, p, o)
 }
+
+func (f *fakeFollowerStreamFiles) WriteStreamNewTarget(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return f.fakeStreamFiles.WriteStreamNewTarget(ctx, p, o)
+}
+
+func (f *fakeFollowerStreamFiles) ProveNewTarget(context.Context, string) error { return nil }
 
 // TestAuthorityOSCopyUsesNoFollowStream: a destination symlink that appears between
 // canonicalization and stream-open would be followed by the ordinary stream and corrupt
@@ -413,7 +420,7 @@ func TestAuthorityOSCopyNewTargetCapability(t *testing.T) {
 	}
 }
 
-func TestAuthorityOSCopyNewTargetExistingDestinationUnsupported(t *testing.T) {
+func TestAuthorityOSCopyNewTargetExistingDestinationConflict(t *testing.T) {
 	remote := walkFixture()
 	remote.files["/srv/proj/a.txt"] = "source"
 	remote.files["/srv/proj/b.txt"] = "keep me"
@@ -421,7 +428,7 @@ func TestAuthorityOSCopyNewTargetExistingDestinationUnsupported(t *testing.T) {
 	slot, _, _ := authorityTestSlot(files)
 	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
 	err := osys.Copy(context.Background(), "a.txt", "b.txt")
-	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeConflict {
 		t.Fatalf("new-target copy over existing = %v, code %q", err, pluginapi.CodeOf(err))
 	}
 	if got := remote.files["/srv/proj/b.txt"]; got != "keep me" {

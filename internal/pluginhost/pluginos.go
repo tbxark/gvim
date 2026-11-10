@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tbxark/gvim/fsops"
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -39,6 +40,16 @@ type pluginOS struct {
 	procs   map[*osProc]struct{}
 	watches map[*osWatch]struct{}
 	closed  bool
+	// logSink receives non-fatal warnings (for example the local copy hard-link fallback).
+	// The plugin runtime's log sink is wired in pluginhost.go; nil means only docs record it.
+	logSink func(pluginapi.LogEntry)
+}
+
+func (o *pluginOS) warnCopy(text string) {
+	if o == nil || o.logSink == nil || text == "" {
+		return
+	}
+	o.logSink(pluginapi.LogEntry{Time: time.Now(), Level: "warn", Msg: "gvim.fs.copy: " + text})
 }
 
 var _ hostos.OS = (*pluginOS)(nil)
@@ -62,7 +73,6 @@ func newPluginOS(dirs func() hostos.Dirs, spawnEnv ...func() []string) *pluginOS
 
 const (
 	copyTreeMax   = 100_000 // entries of one fs.copy of a directory
-	copyChunk     = 1 << 20
 	walkCtxEvery  = 256
 	killGraceTime = 2 * time.Second
 )
@@ -492,61 +502,46 @@ func (o *pluginOS) Copy(ctx context.Context, from, to string) error {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file", a)
 	}
 	if !st.IsDir() {
-		return mapErr(copyFile(ctx, srcReal, dstReal, st.Mode().Perm()), a)
+		if err := ctxErr(ctx); err != nil {
+			return err
+		}
+		result, err := fsops.CopyWithResultContext(ctx, srcReal, dstReal, fsops.Cancel)
+		o.warnCopy(result.Warning)
+		if err != nil {
+			if errors.Is(err, fsops.ErrConflict) || errors.Is(err, fsops.ErrCanceled) {
+				return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists", b)
+			}
+			return mapErr(err, a)
+		}
+		return nil
 	}
-	root, err := os.OpenRoot(srcReal)
+	// Preserve fs.copy's entry bound before the copy. Unlike the old streaming walk this
+	// is a preflight: Copy itself uses fsops' no-replace atomic publication, so a
+	// concurrent destination cannot be merged into or overwritten.
+	res, err := o.Walk(ctx, srcReal, hostos.WalkOptions{Hidden: true, MaxEntries: copyTreeMax + 1})
 	if err != nil {
 		return mapErr(err, a)
 	}
-	defer func() { _ = root.Close() }()
-	if err := os.MkdirAll(dstReal, st.Mode().Perm()|0o700); err != nil {
+	if res.Truncated || len(res.Entries) > copyTreeMax {
+		return pluginapi.Errf(pluginapi.CodeLimit, "more than %d entries to copy", copyTreeMax)
+	}
+	if err := ctxErr(ctx); err != nil {
+		return err
+	}
+	// A directory copy may create missing destination ancestors as the old MkdirAll did;
+	// the final component is still claimed atomically by fsops, never merged.
+	if err := os.MkdirAll(filepath.Dir(dstReal), 0o755); err != nil {
 		return mapErr(err, b)
 	}
-	n := 0
-	err = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	result, err := fsops.CopyWithResultContext(ctx, srcReal, dstReal, fsops.Cancel)
+	o.warnCopy(result.Warning)
+	if err != nil {
+		if errors.Is(err, fsops.ErrConflict) || errors.Is(err, fsops.ErrCanceled) {
+			return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists", b)
 		}
-		if n++; n > copyTreeMax {
-			return pluginapi.Errf(pluginapi.CodeLimit, "more than %d entries to copy", copyTreeMax)
-		}
-		if n%walkCtxEvery == 0 {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-		}
-		if rel == "." {
-			return nil
-		}
-		dst := filepath.Join(dstReal, filepath.FromSlash(rel))
-		switch typ := d.Type(); {
-		case typ&fs.ModeSymlink != 0:
-			target, err := fs.ReadLink(root.FS(), rel)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(target, dst)
-		case d.IsDir():
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			return os.MkdirAll(dst, info.Mode().Perm()|0o700)
-		case typ.IsRegular():
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			src, err := root.Open(rel)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = src.Close() }()
-			return writeStream(ctx, src, dst, info.Mode().Perm())
-		}
-		return nil // sockets, devices and the like are not copied
-	})
-	return mapErr(err, a)
+		return mapErr(err, a)
+	}
+	return nil
 }
 
 // refuseCopyInsideSource proves, by file identity, that dst (which may not exist yet) is
@@ -600,32 +595,6 @@ func realCopyDestination(p string) (string, error) {
 		suffix = append(suffix, filepath.Base(cur))
 		cur = parent
 	}
-}
-
-func copyFile(ctx context.Context, from, to string, mode fs.FileMode) error {
-	// O_NONBLOCK: a file swapped for a FIFO after Copy checked it must not park the
-	// goroutine in open (ctx cannot interrupt open).
-	src, err := os.OpenFile(from, os.O_RDONLY|openNoBlock, 0)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = src.Close() }()
-	if st, err := src.Stat(); err != nil {
-		return err
-	} else if !st.Mode().IsRegular() {
-		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file", from)
-	}
-	return writeStream(ctx, src, to, mode)
-}
-
-func writeStream(ctx context.Context, src io.Reader, to string, mode fs.FileMode) error {
-	dst, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode|0o200)
-	if err != nil {
-		return err
-	}
-	buf := make([]byte, copyChunk)
-	_, err = io.CopyBuffer(dst, &ctxReader{ctx: ctx, r: src}, buf)
-	return errors.Join(err, dst.Close())
 }
 
 // Walk implements hostos.OS: a depth-first listing in lexical order below root, not

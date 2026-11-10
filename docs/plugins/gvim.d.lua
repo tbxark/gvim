@@ -1004,6 +1004,29 @@ function gvim.path.to_uri(p) end
 ---@return string|nil, string?
 function gvim.path.from_uri(u) end
 
+gvim.agent_sessions = {}
+---@class AgentSession
+---@field kind "tmux"|"history"
+---@field tool string
+---@field id string
+---@field title string
+---@field path string
+---@field dir string
+---@field agent string
+---@field agents string[]
+---@field attached boolean
+---@field socket_only boolean
+---@field exact boolean
+---@field mod_time integer
+---@class AgentReport
+---@field supported boolean
+---@field installed boolean
+---@field truncated boolean
+---@field sessions AgentSession[]
+---@field problems string[]
+---@return AgentReport
+function gvim.agent_sessions.discover() end
+
 gvim.fs = {}
 ---@param path string
 ---@param opts? {max?: integer}

@@ -357,3 +357,17 @@ func gitIn(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
+
+func TestPluginServicesDiscoverAgents(t *testing.T) {
+	svc := pluginServices{}
+	report, err := svc.DiscoverAgents(t.Context())
+	if err != nil || report.Supported {
+		t.Fatalf("unsupported services = %+v, %v", report, err)
+	}
+	want := pluginapi.AgentReport{Supported: true, Sessions: []pluginapi.AgentSession{{Kind: "history", Path: "/a"}}}
+	svc.agentDiscover = func(ctx context.Context) (pluginapi.AgentReport, error) { return want, nil }
+	got, err := svc.DiscoverAgents(t.Context())
+	if err != nil || !got.Supported || len(got.Sessions) != 1 || got.Sessions[0].Path != "/a" {
+		t.Fatalf("configured services = %+v, %v", got, err)
+	}
+}

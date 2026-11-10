@@ -849,6 +849,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		WorkspaceStateFile: pluginStateFile,
 		WorkspaceStateData: pluginStateData,
 	}
+	// A shared daemon runtime spans workspaces but its plugin services are session-wide;
+	// its per-workspace scanner/trust root cannot be represented safely. A remote launch's
+	// local tmux/transcript stores are not the remote workspace's either. Only a local
+	// direct (non-shared) launch exposes agent discovery to plugins; the plugin reports
+	// its unsupported state in the other cases.
+	if opts.Remote == nil && (opts.Daemon == nil || opts.PluginDaemon == nil) {
+		discoverer := newAgentDiscoverer(func() string { return proj.RootDir() }, spawnGate, cfg.Terminal.Agents)
+		po.AgentDiscover = func(ctx context.Context) (pluginapi.AgentReport, error) {
+			return pluginAgentReport(discoverer.Discover(ctx)), nil
+		}
+	}
 	if opts.Remote != nil {
 		// The plugin runtime receives the authority-backed OS: gvim.fs and gvim.proc
 		// follow the workspace to the remote host (the authority applies its trust gate

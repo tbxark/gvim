@@ -204,6 +204,28 @@ for paths with `gvim.ui.input` instead of Fresh's file picker, and there is no `
 hook or script-facing export (the native Compare view handles `--diff`). Enabling the plugin adds
 palette rows that duplicate the native Compare commands, which is why it is off by default.
 
+### Live agent sessions: native discovery, no orchestrator (port residual)
+
+Fresh's `live_sessions.ts` is an orchestrator-dock feeder: it polls Claude/Codex local and cloud
+listings, merges the answers, and calls the orchestrator's `setExternalSessions`; the orchestrator
+draws the rows and owns opening/attaching. gvim has no orchestrator, cloud sign-in reader, or
+process attach/resume, so the port is a picker over the native agent discovery that already exists
+(`internal/agentdiscover`): tmux sessions and local Claude Code/Codex transcript history. The app
+exposes one bounded, read-only service to plugins (`gvim.agent_sessions.discover`, through
+`pluginapi.Services.DiscoverAgents`); it applies the same spawn trust gate and runs in a Work, never
+on the update loop, and carries no process handle or attach/resume argv. The plugin polls every 60
+seconds while the picker is open, coalesces refreshes, cancels the timer and discards stale answers
+after close, and caps rows at 200 (the native scan's own caps apply). A close/reopen during an
+in-flight scan leaves the old single-flight scan running; the reopened picker marks a refresh
+pending, and the stale completion consumes it and starts the new scan immediately rather than
+leaving the new picker in Scanning until the poll tick. Enter opens a transcript file;
+tmux rows are informational (no attach). Shared daemon runtimes intentionally leave the service nil
+because their scanner/trust root is per workspace, and remote launches are unsupported; the plugin
+shows a real unsupported state instead of an empty scan. Not ported: cloud sessions, orchestrator
+groups, attach/resume/orchestration, vendor CLI polling, and the Settings/Menu toggles. Tests:
+`live_sessions_test.go` covers listing, transcript open, unsupported/empty states and polling;
+`agent_sessions_api_test.go` covers the report shape and unsupported service.
+
 ### The shared Finder (port residual)
 
 Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `gvim.finder` library

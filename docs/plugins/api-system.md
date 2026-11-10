@@ -17,6 +17,25 @@ gvim.path.sep                        -- "/" or "\\"
 `relative` fails with `nil, err` when one path is relative and the other absolute (for example a
 root-relative hit of `workspace.grep` and `workspace.root()`): join the hit to the root first.
 
+## gvim.agent_sessions
+
+```text
+gvim.agent_sessions.discover() ⏳ -> report
+```
+
+The bounded, read-only view of the local agent-session scan behind the native **Discover
+Agent Sessions** picker: tmux sessions and Claude Code/Codex transcript history. A report is
+`{ supported, installed, truncated, sessions, problems }`; each session is
+`{ kind, tool, id, title, path, dir, agent, agents, attached, socket_only, exact, mod_time }`.
+`kind` is `"tmux"` (live; `path`/`dir` is the session's working directory, `agents` its probable
+agent panes) or `"history"` (`path` is the transcript file, `dir` its recorded working
+directory; `exact` says whether a resume would name that exact session). `supported=false`
+means the session has no discovery capability (for example a shared daemon runtime); the
+empty state is then different from a real scan that found nothing. The scan runs in a Work,
+never on the editor loop, and the app applies the same spawn trust gate as native discovery.
+It never attaches to, resumes or kills a process: there is no process handle or
+attach/resume argv in this API.
+
 ## gvim.fs
 
 ```text
@@ -57,6 +76,14 @@ watcher:stop()  watcher:active() -> boolean
   dangling destination symlink is also refused rather than guessed. The local backend compares
   real paths and file identity (`os.SameFile`), so hard links, symlink components and case
   variants cannot bypass the check; a bounded tree walk is never used as a substitute for it.
+  Copy never replaces an existing destination: an existing file or directory is `conflict`.
+  The local file is published from a unique 0600 temporary file with an atomic no-clobber
+  hard link (the O_EXCL fallback warning goes to the plugin log/reported warning log), and a
+  local tree gets one atomic `mkdir` claim; remote copy uses only the new-target `link`-commit
+  stream and atomic directory claim, so a concurrent creator gets `conflict` rather than being
+  overwritten. A backend without those surfaces returns `unsupported` (no check-then-write or
+  NoFollow replacement fallback). Copy observes the plugin `ctx`: cancellation between entries
+  or file chunks returns `cancelled`, aborts the temporary file, and leaves no destination.
 * `remove` refuses `/`, `$HOME`, the workspace root and the gvim config directory, even with
   `recursive = true`.
 * `walk` opts: `skip_dirs = {".git"}`, `hidden = false`, `max_depth`, `max_entries` (default and

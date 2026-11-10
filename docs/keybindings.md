@@ -27,7 +27,11 @@ overrides, one per context and chord. Fresh's `completion` and `compositeBuffer`
 emitted: gvim's completion popup and its compare view are not keymap surfaces (the popup's
 keys are handled in code), so a user binding there is skipped with a warning.
 
-So the coverage is Fresh's: file, edit, selection (block selection too), the word, line, page and
+The editor's `Ctrl+L` (`expand_line_selection`) grows the selection to whole lines: with no
+selection it takes the caret line including its newline, repeated presses walk one line further,
+and an upward selection squares off over the lines it already covers. With multiple carets every
+caret's line selection grows together, as Fresh's action does; a visual block keeps its
+primary-caret behavior. So the coverage is Fresh's: file, edit, selection (block selection too), the word, line, page and
 document moves, multi-cursor (next match, above and below, line ends), marks and bookmark slots
 0 to 9, macros, search and replace (including Query Replace and find-in-selection), the language
 server (completion, hover, definition, references, implementation, rename, code actions), shell

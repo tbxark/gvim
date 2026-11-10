@@ -63,8 +63,23 @@ func (d *Document) SelectLine() {
 // expandLineSelection grows the selection to whole lines. With no selection it
 // selects the caret line. With one, it keeps the lines the selection covers and
 // moves the head to the end of the line it is on, so a repeated press takes one
-// more line. An upward selection is squared off over the same lines.
+// more line. An upward selection is squared off over the same lines. With extra
+// carets, each caret's line selection grows the same way, as Fresh's
+// expand_line_selection does; a visual block keeps its primary-caret behavior.
 func (d *Document) ExpandLineSelection() {
+	if _, block := d.BlockSelection(); !block {
+		if cs := d.AllCarets(); len(cs) > 1 {
+			grown := make([]caret, len(cs))
+			for i, c := range cs {
+				low, high := c.Bounds()
+				start, _ := buffer.LineBounds(d.Buffer, low.Line)
+				_, end := buffer.LineBounds(d.Buffer, high.Line)
+				grown[i] = caret{Anchor: start, Head: end, Primary: c.Primary, Want: c.Want, Pad: c.Pad}
+			}
+			d.SetCarets(grown)
+			return
+		}
+	}
 	low, high := d.Cursor, d.Cursor
 	if d.Sel != nil {
 		low, high = d.Sel.Ordered()

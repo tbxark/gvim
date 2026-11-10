@@ -32,6 +32,12 @@ func (f *fakeAtomicDirFiles) WriteStreamNoFollow(ctx context.Context, p string, 
 	return (&fakeStreamFiles{fakeMutableFiles: f.fakeMutableFiles}).WriteStreamNoFollow(ctx, p, o)
 }
 
+func (f *fakeAtomicDirFiles) WriteStreamNewTarget(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	return (&fakeStreamFiles{fakeMutableFiles: f.fakeMutableFiles}).WriteStreamNewTarget(ctx, p, o)
+}
+
+func (f *fakeAtomicDirFiles) ProveNewTarget(context.Context, string) error { return nil }
+
 func (f *fakeAtomicDirFiles) MkdirNew(ctx context.Context, p string) error {
 	if err := ctx.Err(); err != nil {
 		return err

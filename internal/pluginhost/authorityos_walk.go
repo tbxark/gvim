@@ -197,9 +197,7 @@ func (o *authorityOS) Copy(ctx context.Context, from, to string) error {
 		if d.Kind == "dir" {
 			return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination is a directory", to)
 		}
-		if authority.NewTargetWriteStreams(o.files()) != nil && authority.NoFollowWriteStreams(o.files()) == nil {
-			return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend's copy-safe stream only creates NEW destinations", to)
-		}
+		return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists (copy never replaces it)", to)
 	}
 	opener, err := o.copyOpener()
 	if err != nil {
@@ -277,13 +275,10 @@ func (o *authorityOS) copyDestinationRealPath(ctx context.Context, rp authority.
 // destination with its no-clobber hardlink commit. A backend with neither is refused
 // before any target is touched.
 func (o *authorityOS) copyOpener() (copyStreamOpener, error) {
-	if streamer := authority.NoFollowWriteStreams(o.files()); streamer != nil {
-		return streamer.WriteStreamNoFollow, nil
-	}
 	if streamer := authority.NewTargetWriteStreams(o.files()); streamer != nil {
 		return streamer.WriteStreamNewTarget, nil
 	}
-	return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "copy: the workspace authority has no copy-safe stream (no-follow or new-target)")
+	return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "copy: the workspace authority has no new-target copy stream; refusing a copy that could overwrite a concurrent creator")
 }
 
 // proveNewTargetParent proves the copy-safe new-target capability in the destination
@@ -291,11 +286,8 @@ func (o *authorityOS) copyOpener() (copyStreamOpener, error) {
 // proof. A new-target backend without a pre-write prover, or one whose probe fails, is
 // unsupported before any mkdir/write.
 func (o *authorityOS) proveNewTargetParent(ctx context.Context, dst string) error {
-	if authority.NoFollowWriteStreams(o.files()) != nil {
-		return nil
-	}
 	if authority.NewTargetWriteStreams(o.files()) == nil {
-		return pluginapi.Errf(pluginapi.CodeUnsupported, "copy: the workspace authority has no copy-safe stream (no-follow or new-target)")
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "copy: the workspace authority has no new-target copy stream; refusing a copy that could overwrite a concurrent creator")
 	}
 	prover := authority.NewTargetProvers(o.files())
 	if prover == nil {

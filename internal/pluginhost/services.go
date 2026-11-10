@@ -27,7 +27,11 @@ import (
 // truncation (ansi), line diffs (diff), fuzzy ranking (fuzzy), the workspace grep (finder
 // and search, within the caps of live_grep.go), decoding (encoding) and git root and
 // branch (gitx). The plugin runtime may not import any of them, so the app hands it this.
-type pluginServices struct{}
+type pluginServices struct {
+	// agentDiscover is nil when the session has no agent-discovery capability (for
+	// example a shared daemon runtime, whose scanner is per workspace).
+	agentDiscover func(context.Context) (pluginapi.AgentReport, error)
+}
 
 var _ pluginapi.Services = pluginServices{}
 
@@ -211,6 +215,16 @@ func (pluginServices) Decode(name string, data []byte) (string, error) {
 
 // GitRoot returns the work tree root that holds dir.
 func (pluginServices) GitRoot(dir string) (string, bool) { return gitstate.FindRoot(dir) }
+
+// DiscoverAgents reports the app's bounded, trust-gated local agent session scan. A
+// pluginServices without a callback has no discovery capability rather than a fake empty
+// list, so the plugin can show its unsupported state.
+func (s pluginServices) DiscoverAgents(ctx context.Context) (pluginapi.AgentReport, error) {
+	if s.agentDiscover == nil {
+		return pluginapi.AgentReport{}, nil
+	}
+	return s.agentDiscover(ctx)
+}
 
 // GitBranch returns the checked-out branch of the work tree root.
 func (pluginServices) GitBranch(root string) (string, error) {

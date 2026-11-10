@@ -159,4 +159,5 @@ type Services interface {
 	GitRoot(dir string) (string, bool)                                               // gitx.FindRoot; sync-cheap, called in a Work
 	GitBranch(root string) (string, error)                                           // gitx.Branch;   called in a Work
 	ValidateChord(chord string) error                                                // keymap.ValidateChord; sync, cheap; nil when chord can be bound
+	DiscoverAgents(ctx context.Context) (AgentReport, error)                         // bounded read-only session discovery; inside a Work
 }

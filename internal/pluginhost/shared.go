@@ -173,7 +173,7 @@ func (d *Daemon) Ensure(cfg config.Config, o Options) (*plugin.Runtime, func(str
 		d.runtime = plugin.New(plugin.Options{
 			Timeout:            cfg.PluginTimeout,
 			OS:                 d.mux,
-			Services:           pluginServices{},
+			Services:           pluginServices{agentDiscover: o.AgentDiscover},
 			Version:            o.Version,
 			LogSink:            o.LogSink,
 			Loader:             ld,
@@ -192,6 +192,7 @@ func (d *Daemon) Ensure(cfg config.Config, o Options) (*plugin.Runtime, func(str
 // workspace.
 func NewWorkspace(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document), o Options) *Workspace {
 	osys := newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
+	osys.logSink = o.LogSink
 	osys.gate = o.Gate
 	ws := &Workspace{
 		OS:     osys,

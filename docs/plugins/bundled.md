@@ -44,6 +44,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `code_tour` | **off** | Tour: Load Definition..., Tour: Open Workspace Tour..., Tour: Next Step, Tour: Previous Step, Tour: Exit, Tour: Create from Current Location... | none |
 | `compare_files` | **off** | Compare Files..., Compare Active File With..., Compare: Next Difference, Compare: Previous Difference, Compare: Switch Side, Compare: Copy Change to Other Side, Compare: Take Change from Other Side, Compare: Close | none |
 | `live_diff` | **off** | Live Diff: Toggle (Global), Live Diff: Toggle (Buffer), Live Diff: vs HEAD, Live Diff: vs Disk (unsaved changes), Live Diff: vs Branch..., Live Diff: vs Default Branch, Live Diff: Refresh, Live Diff: Set Default Mode... | `default_mode` (head), `default_branch` (main), `debounce_ms` (75, 10 to 5000, project), `max_virtual_lines` (2000), `max_overlay_lines` (20000) |
+| `live_sessions` | **off** | Live Agent Sessions, Live Agent Sessions: Refresh | none |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -203,6 +204,22 @@ as tier-1c virtual rows above the seam, with the `-` gutter glyph and bold+under
 Fresh's priority order and capped at the host's 64 virtual rows per anchor plus an "… N more deleted
 lines" summary row (the capability is live on the shipped host; an older host falls back to the line
 backgrounds and new-side emphasis). It is opt-in like Fresh's live_diff.
+
+**live_sessions** (reduced Fresh port): Fresh keeps the orchestrator dock's external Claude/Codex
+group current while the dock is open, polling local and cloud listings and handing rows to the
+orchestrator, which owns opening/attaching. gvim has no orchestrator dock, cloud sign-in reader or
+agent-attach/resume surface, so this opt-in plugin exposes the real subset gvim does have: the
+native, bounded, trust-gated agent discovery (tmux sessions plus local Claude Code/Codex transcript
+history) as a picker. **Live Agent Sessions** opens the picker, scans asynchronously and polls every
+60 seconds while it stays open; **Live Agent Sessions: Refresh** re-lists immediately. A close
+while a scan is still in flight discards that answer; reopening immediately also marks a refresh
+pending, and when the old scan returns it starts the new scan at once instead of waiting for the
+poll tick. Rows are capped at 200 and the app's scan caps apply. Enter opens a transcript row's file; live tmux rows are
+informational and say that process attach is not ported, with their working directory. Empty,
+no-store and unsupported states are explicit; a runtime without the discovery capability (a shared
+daemon runtime, or a remote launch) reports unsupported rather than a fake empty list. Not ported:
+cloud Claude/Codex sessions, orchestrator groups, process attach/resume, agent orchestration, vendor
+CLI spawning, and the Settings/Menu toggles. No default keys.
 
 **path_complete** (reduced; Fresh's passive prompt hook has no gvim seam): Fresh's plugin answers the
 editor's built-in Open File / Save File As prompts with directory suggestions. gvim's Open File and

@@ -1,6 +1,7 @@
 package fsops
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -220,5 +221,30 @@ func TestRenameFallbackReportsWarning(t *testing.T) {
 	}
 	if exists(src) || readFile(t, dst) != "content" {
 		t.Fatal("fallback rename did not complete")
+	}
+}
+
+// TestCopyWithContextCancellationStopsMidFile: the context-aware copy observes
+// cancellation between file chunks, removes the temp/destination, and retries cleanly.
+func TestCopyWithContextCancellationStopsMidFile(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "a.txt")
+	dst := filepath.Join(root, "b.txt")
+	writeFile(t, src, strings.Repeat("x", 64<<10))
+	copyReadHook = func() error { return context.Canceled }
+	t.Cleanup(func() { copyReadHook = nil })
+	_, err := CopyWithResultContext(context.Background(), src, dst, Cancel)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled copy error = %v, want context.Canceled", err)
+	}
+	if exists(dst) {
+		t.Fatal("cancelled copy left a destination")
+	}
+	if got := tempNames(t, root); len(got) != 0 {
+		t.Fatalf("cancelled copy left temporary files: %v", got)
+	}
+	copyReadHook = nil
+	if _, err := CopyWithResultContext(context.Background(), src, dst, Cancel); err != nil {
+		t.Fatalf("retry after cancellation: %v", err)
 	}
 }

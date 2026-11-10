@@ -162,13 +162,52 @@ func TestDiscoverStaleReportIsDropped(t *testing.T) {
 		t.Fatal("no picker")
 	}
 	// A report for an older scan must not replace the rows.
-	m.Update(agentDiscoverDoneMsg{seq: o.seq - 1, report: agentdiscover.Report{Sessions: []agentdiscover.Session{{Name: "stale"}}}})
+	m.Update(agentDiscoverDoneMsg{ov: o, seq: o.seq - 1, report: agentdiscover.Report{Sessions: []agentdiscover.Session{{Name: "stale"}}}})
 	if got := o.p.Rows(); got != 0 {
 		t.Fatalf("stale report installed %d rows", got)
 	}
 	runDiscoverDone(t, m, cmd)
 	if got := o.p.Rows(); got != 1 {
 		t.Fatalf("rows = %d after the live report", got)
+	}
+}
+
+// TestDiscoverClosedPickerLateReportIsDropped: picker A starts a scan, closes, picker B opens
+// with its own scan (both start at seq 1), B installs its report, and only then does A's old
+// report arrive. The instance identity must drop A's report instead of letting it replace B's
+// rows; the per-picker sequence alone cannot tell them apart.
+func TestDiscoverClosedPickerLateReportIsDropped(t *testing.T) {
+	stale := &fakeDiscoverer{report: agentdiscover.Report{Installed: true, Sessions: []agentdiscover.Session{{
+		Name: "stale", Server: "s", AttachArgv: []string{"tmux", "attach"},
+	}}}}
+	fresh := &fakeDiscoverer{report: agentdiscover.Report{Installed: true, Sessions: []agentdiscover.Session{{
+		Name: "fresh", Server: "s", AttachArgv: []string{"tmux", "attach"},
+	}}}}
+	m := discoverModel(t, stale)
+	cmdA := rootPaletteRun(m, "discover_agent_sessions")
+	oA, ok := discoverOverlay(m)
+	if !ok || cmdA == nil {
+		t.Fatal("picker A did not open with a scan")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if len(m.overlays) != 0 {
+		t.Fatal("picker A did not close")
+	}
+
+	m.SetAgentDiscoverer(fresh)
+	cmdB := rootPaletteRun(m, "discover_agent_sessions")
+	oB, ok := discoverOverlay(m)
+	if !ok || cmdB == nil || oB == oA {
+		t.Fatal("picker B did not open as a new instance")
+	}
+	runDiscoverDone(t, m, cmdB) // B's own report lands first
+	if len(oB.report.Sessions) != 1 || oB.report.Sessions[0].Name != "fresh" {
+		t.Fatalf("B report = %+v, want fresh", oB.report.Sessions)
+	}
+
+	m.Update(cmdA()) // A's old scan answers after B has its rows
+	if got := oB.p.Rows(); got != 1 || oB.report.Sessions[0].Name != "fresh" {
+		t.Fatalf("late A report replaced B: rows %d report %+v", got, oB.report.Sessions)
 	}
 }
 

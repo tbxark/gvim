@@ -162,6 +162,11 @@ query.
   file; a file longer than the head or the twelve lines kept ends with `…`. A narrower
   frame drops the column and keeps the full-width list. The preview is plain text: it has
   no syntax colours and does not scroll (see §4.5 of `docs/parity.md`).
+**Editor line expansion.** `Ctrl+L` grows the selection to whole lines: with no selection it takes
+the caret line including its newline, repeated presses walk one line further, and an upward
+selection squares off over the lines it covers. With multiple carets every caret's line selection
+grows; a visual block keeps its primary-caret behavior.
+
 **Palette keyboard.** Up/Down move the selection, PageUp/PageDown move it one visible
 page and clamp at the first/last row (Fresh's `prompt_page_up`/`prompt_page_down`; there is
 no page before the first layout), Enter or Ctrl+F runs/opens the selected row (Fresh's

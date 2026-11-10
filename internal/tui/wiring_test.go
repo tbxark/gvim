@@ -165,6 +165,24 @@ func TestTripleClickSelectsTheLine(t *testing.T) {
 	}
 }
 
+// TestExpandLineSelectionKeyAtEveryCaret: the real Ctrl+L key path (keymap ->
+// expand_line_selection) grows every caret's line selection, matching the editor action.
+func TestExpandLineSelectionKeyAtEveryCaret(t *testing.T) {
+	m, ed := viewModel(t, DefaultViewOptions(), "a\nb\nc\nd\n", 60, 15)
+	if r := ed.Do("add_cursor_below", nil); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	m.Update(ctrl('l'))
+	d := ed.Active()
+	if d.Sel == nil || d.Sel.Anchor != (buffer.Pos{Line: 1}) || d.Sel.Head != (buffer.Pos{Line: 2}) {
+		t.Fatalf("primary selection after Ctrl+L = %+v, want 1:0 to 2:0", d.Sel)
+	}
+	cs := d.Cursors()
+	if len(cs) != 1 || cs[0].Sel == nil || cs[0].Sel.Anchor != (buffer.Pos{Line: 0}) || cs[0].Sel.Head != (buffer.Pos{Line: 1}) {
+		t.Fatalf("extra caret after Ctrl+L = %+v, want line 0 selection", cs)
+	}
+}
+
 func TestWheelOverEditorScrollsTheViewportNotTheCaret(t *testing.T) {
 	ed := newFakeEditor(numberedLines(40)...)
 	ed.doc.cursor = buffer.Pos{Line: 0, Col: 0}

@@ -40,3 +40,6 @@ func (noServices) ValidateChord(string) error { return nil }
 func (noServices) GitBranch(string) (string, error) {
 	return "", pluginapi.Errf(pluginapi.CodeUnsupported, "git.branch: no git service")
 }
+func (noServices) DiscoverAgents(context.Context) (pluginapi.AgentReport, error) {
+	return pluginapi.AgentReport{}, pluginapi.Errf(pluginapi.CodeUnsupported, "agent_sessions.discover: no discovery service")
+}

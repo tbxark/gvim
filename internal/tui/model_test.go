@@ -173,6 +173,7 @@ func testKeys() fakeKeymap {
 		"normal|Enter|":        {Action: "insert_newline"},
 		"normal|x|ctrl":        {Action: "close_tab", Args: map[string]any{"force": true}},
 		"normal|n|ctrl":        {Action: "new"},
+		"normal|l|ctrl":        {Action: "expand_line_selection"},
 		"normal|w|ctrl":        {Action: "close_tab"},
 		"global|F6|":           {Action: "show_remote_indicator_menu"},
 		"settings|?|":          {Action: "settings_help"},

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/agentdiscover"
+	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/trust"
 )
 
@@ -78,4 +79,32 @@ func (g gatedScanRunner) Run(ctx context.Context, name string, args ...string) a
 			return trust.ResolveSpawnPath(root, name, os.Getenv("PATH"))
 		},
 	}.Run(ctx, name, args...)
+}
+
+// pluginAgentReport flattens one native discovery report into the plugin API shape. The
+// scan has already run off the update loop, with the same trust gate; this conversion only
+// copies bounded fields and never exposes a resume/attach argv or a process handle.
+func pluginAgentReport(report agentdiscover.Report) pluginapi.AgentReport {
+	out := pluginapi.AgentReport{
+		Supported: true,
+		Installed: report.Installed || report.External.Installed,
+		Truncated: report.Truncated || report.External.Truncated,
+		Problems:  append(append([]string(nil), report.Problems...), report.External.Problems...),
+		Sessions:  make([]pluginapi.AgentSession, 0, len(report.Sessions)+len(report.External.Sessions)),
+	}
+	for _, s := range report.Sessions {
+		out.Sessions = append(out.Sessions, pluginapi.AgentSession{
+			Kind: "tmux", Tool: "tmux", ID: s.ID, Title: s.Name,
+			Path: s.Path, Dir: s.Path, Agents: append([]string(nil), s.Agents...),
+			Attached: s.Attached, SocketOnly: s.SocketOnly,
+		})
+	}
+	for _, s := range report.External.Sessions {
+		out.Sessions = append(out.Sessions, pluginapi.AgentSession{
+			Kind: "history", Tool: s.Tool, ID: s.ID, Title: s.Title,
+			Path: s.Path, Dir: s.CWD, Agent: s.Agent, Exact: s.Exact,
+			ModTime: s.ModTime.Unix(),
+		})
+	}
+	return out
 }

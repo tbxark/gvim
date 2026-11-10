@@ -102,6 +102,7 @@ type discoverRow struct {
 
 // agentDiscoverDoneMsg carries one scan's report back to the update loop.
 type agentDiscoverDoneMsg struct {
+	ov     *agentDiscoverOverlay // the picker instance that started this scan
 	seq    int
 	report agentdiscover.Report
 }
@@ -115,6 +116,9 @@ type agentDiscoverRankMsg struct {
 
 func (o *agentDiscoverOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	if done, ok := msg.(agentDiscoverDoneMsg); ok {
+		if done.ov != o {
+			return o, nil // a scan from a closed/replaced picker instance
+		}
 		if done.seq != o.seq {
 			return o, nil // an older scan answered after a refresh
 		}
@@ -308,7 +312,7 @@ func (o *agentDiscoverOverlay) scan() tea.Cmd {
 	seq := o.seq
 	discover := o.m.discover
 	return func() tea.Msg {
-		return agentDiscoverDoneMsg{seq: seq, report: discover.Discover(context.Background())}
+		return agentDiscoverDoneMsg{ov: o, seq: seq, report: discover.Discover(context.Background())}
 	}
 }
 

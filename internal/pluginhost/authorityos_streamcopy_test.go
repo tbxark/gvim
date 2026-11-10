@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"strings"
 	"sync"
 	"testing"
@@ -41,11 +42,24 @@ func (f *fakeStreamFiles) WriteStreamNoFollow(ctx context.Context, path string, 
 	return f.WriteStream(ctx, path, o)
 }
 
+// WriteStreamNewTarget is the no-clobber copy surface used by gvim.fs.copy.
+func (f *fakeStreamFiles) WriteStreamNewTarget(ctx context.Context, path string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	stream, err := f.WriteStream(ctx, path, o)
+	if err != nil {
+		return nil, err
+	}
+	stream.(*fakeAuthorityWriteStream).newTarget = true
+	return stream, nil
+}
+
+func (f *fakeStreamFiles) ProveNewTarget(context.Context, string) error { return nil }
+
 type fakeAuthorityWriteStream struct {
-	parent *fakeStreamFiles
-	path   string
-	buf    strings.Builder
-	done   bool
+	parent    *fakeStreamFiles
+	path      string
+	buf       strings.Builder
+	done      bool
+	newTarget bool
 }
 
 func (s *fakeAuthorityWriteStream) Write(_ context.Context, p []byte) error {
@@ -75,6 +89,17 @@ func (s *fakeAuthorityWriteStream) Commit(_ context.Context) error {
 	}
 	s.parent.mu.Lock()
 	defer s.parent.mu.Unlock()
+	if s.newTarget {
+		remote := s.parent.fakeRemoteFiles
+		remote.mu.Lock()
+		_, file := remote.files[s.path]
+		_, dir := remote.dirs[s.path]
+		_, link := remote.links[s.path]
+		remote.mu.Unlock()
+		if file || dir || link {
+			return &fs.PathError{Op: "copy", Path: s.path, Err: fs.ErrExist}
+		}
+	}
 	s.parent.mutableFiles().files[s.path] = s.buf.String()
 	s.parent.commits++
 	s.done = true
@@ -102,7 +127,6 @@ func TestAuthorityOSCopyStreamsLargeFile(t *testing.T) {
 	stream := newStreamFiles()
 	data := strings.Repeat("x", (16<<20)+17)
 	stream.files["/srv/proj/big.bin"] = data
-	stream.files["/srv/proj/copy.bin"] = "old target must survive until commit"
 	slot, _, _ := authorityTestSlot(stream)
 	local := plugintest.NewFakeOS()
 	osys := NewAuthorityOS(slot, local, nil)
@@ -120,7 +144,7 @@ func TestAuthorityOSCopyStreamsLargeFile(t *testing.T) {
 	}
 }
 
-func TestAuthorityOSCopyStreamFailureKeepsExistingTarget(t *testing.T) {
+func TestAuthorityOSCopyStreamFailureLeavesNoTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		failErr  error
@@ -132,7 +156,6 @@ func TestAuthorityOSCopyStreamFailureKeepsExistingTarget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stream := newStreamFiles()
 			stream.files["/srv/proj/big.bin"] = strings.Repeat("y", 2*remoteCopyChunk+1)
-			stream.files["/srv/proj/copy.bin"] = "keep me"
 			stream.failChunk, stream.failErr = 2, tc.failErr
 			slot, _, _ := authorityTestSlot(stream)
 			osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil)
@@ -140,8 +163,8 @@ func TestAuthorityOSCopyStreamFailureKeepsExistingTarget(t *testing.T) {
 			if err == nil || pluginapi.CodeOf(err) != tc.wantCode {
 				t.Fatalf("copy error = %v, code %q; want %q", err, pluginapi.CodeOf(err), tc.wantCode)
 			}
-			if got := stream.files["/srv/proj/copy.bin"]; got != "keep me" {
-				t.Fatalf("a failed streamed copy replaced the existing target: %q", got)
+			if _, ok := stream.files["/srv/proj/copy.bin"]; ok {
+				t.Fatal("a failed streamed copy created a target")
 			}
 			stream.mu.Lock()
 			commits, aborts := stream.commits, stream.aborts
@@ -157,15 +180,14 @@ func TestAuthorityOSCopyStreamSourceShrinkIsSafe(t *testing.T) {
 	stream := newStreamFiles()
 	stream.files["/srv/proj/shrink.bin"] = "x"
 	stream.sizes = map[string]int64{"/srv/proj/shrink.bin": 100}
-	stream.files["/srv/proj/copy.bin"] = "keep me"
 	slot, _, _ := authorityTestSlot(stream)
 	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil)
 	err := osys.Copy(context.Background(), "shrink.bin", "copy.bin")
 	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeIO || !strings.Contains(err.Error(), "source changed during copy") {
 		t.Fatalf("shrunken-source copy = %v, code %q", err, pluginapi.CodeOf(err))
 	}
-	if got := stream.files["/srv/proj/copy.bin"]; got != "keep me" {
-		t.Fatalf("a shrunken-source copy replaced the target: %q", got)
+	if _, ok := stream.files["/srv/proj/copy.bin"]; ok {
+		t.Fatal("a shrunken-source copy created a target")
 	}
 	stream.mu.Lock()
 	aborts := stream.aborts

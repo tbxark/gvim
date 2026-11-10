@@ -8,8 +8,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/agentdiscover"
 )
 
 // mkTmuxSocket creates $TMUX_TMPDIR with one socket dir and socket, and points the
@@ -105,5 +107,44 @@ func TestAgentDiscovererIncludesLocalAgentTranscripts(t *testing.T) {
 	}
 	if len(report.External.Tools) != 2 || !report.External.Tools[0].Installed {
 		t.Fatalf("tools = %+v", report.External.Tools)
+	}
+}
+
+// TestPluginAgentReport checks the plugin-facing flattening: tmux rows carry a directory
+// and no attach argv, history rows carry the transcript path/cwd and no resume argv, and
+// bounds/problems/installed are preserved.
+func TestPluginAgentReport(t *testing.T) {
+	in := agentdiscover.Report{
+		Installed: true, Truncated: true, Problems: []string{"tmux problem"},
+		Sessions: []agentdiscover.Session{{
+			ID: "s/work", Name: "work", Path: "/w", Attached: true, Agents: []string{"claude"},
+			AttachArgv: []string{"tmux", "attach"},
+		}},
+		External: agentdiscover.ExternalReport{
+			Installed: true, Truncated: true, Problems: []string{"history problem"},
+			Sessions: []agentdiscover.ExternalSession{{
+				Tool: agentdiscover.ExternalClaude, ID: "abc", Title: "proj", CWD: "/w",
+				Path: "/home/u/.claude/p/a.jsonl", Agent: "claude", Exact: true,
+				ModTime: time.Unix(42, 0), ResumeArgv: []string{"claude", "--resume", "abc"},
+			}},
+		},
+	}
+	out := pluginAgentReport(in)
+	if !out.Supported || !out.Installed || !out.Truncated {
+		t.Fatalf("report flags = %+v", out)
+	}
+	if !slices.Equal(out.Problems, []string{"tmux problem", "history problem"}) {
+		t.Fatalf("problems = %v", out.Problems)
+	}
+	if len(out.Sessions) != 2 {
+		t.Fatalf("sessions = %+v", out.Sessions)
+	}
+	tmux := out.Sessions[0]
+	if tmux.Kind != "tmux" || tmux.Tool != "tmux" || tmux.Path != "/w" || tmux.Dir != "/w" || !tmux.Attached || !slices.Equal(tmux.Agents, []string{"claude"}) {
+		t.Fatalf("tmux row = %+v", tmux)
+	}
+	hist := out.Sessions[1]
+	if hist.Kind != "history" || hist.Tool != agentdiscover.ExternalClaude || hist.Path != "/home/u/.claude/p/a.jsonl" || hist.Dir != "/w" || hist.Agent != "claude" || !hist.Exact || hist.ModTime != 42 {
+		t.Fatalf("history row = %+v", hist)
 	}
 }
