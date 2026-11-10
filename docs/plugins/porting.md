@@ -733,8 +733,8 @@ same gvim actions/buffer APIs; the differences are:
 * the example comment is language-aware (`--`, `#`, or `//`) instead of Fresh's hard-coded `//`, so
   it is valid in more than C-like files;
 * the clock is `os.date("%H:%M:%S")` (local 24-hour time) rather than the runtime's locale
-  `toLocaleTimeString`, and the status/greeting/comment strings are English-only (the port has one
-  i18n file, `en`);
+  `toLocaleTimeString`; Fresh's command and status catalogue is imported into welcome.i18n.json
+  across all 15 locales (round 85);
 * Fresh's only load-time feedback is `debug` output; gvim's port logs the same debug line and
   deliberately sets no status row.
 

@@ -50,6 +50,32 @@ func TestWelcomeManifestAndCommands(t *testing.T) {
 	}
 }
 
+func TestWelcomeGermanCommandsAndNotices(t *testing.T) {
+	t.Parallel()
+	r := startRig(t, rigOpts{
+		locale:  "de",
+		plugins: []string{"welcome"},
+		buffers: []rigBuffer{{"/work/a.go", "package a\n"}},
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	commands := map[string]string{}
+	for _, c := range r.host.Commands["welcome"] {
+		commands[c.ID] = c.Title
+	}
+	if got := commands["welcome.say_hello"]; got != "Plugin-Demo: Hallo sagen" {
+		t.Errorf("German say_hello title = %q, want Plugin-Demo: Hallo sagen", got)
+	}
+	if got := commands["welcome.open_help"]; got != "Plugin-Demo: Hilfe oeffnen" {
+		t.Errorf("German open_help title = %q, want Plugin-Demo: Hilfe oeffnen", got)
+	}
+	if err := r.h.Run("welcome.say_hello", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastNoticeText(r.h); !strings.Contains(got, "Begruessung an der Cursorposition eingefuegt") {
+		t.Errorf("notice = %q, want German greeting notice", got)
+	}
+}
+
 func TestWelcomeBuiltInActions(t *testing.T) {
 	t.Parallel()
 	r := welcomeRig(t, "/work/a.go", "package a\n")
