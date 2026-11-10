@@ -103,7 +103,12 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 	if m.fileRoot != "" {
 		root = m.fileRoot
 	}
+	query := ""
+	if !git {
+		query = m.projectSearchPrefill()
+	}
 	p := searchpanel.New(searchpanel.Options{
+		Query:        query,
 		Root:         root,
 		Owner:        m.workspaceOwner,
 		Files:        m.files,
@@ -131,6 +136,27 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 // opens with the same: the setting lives while the session does.
 func (m *Model) projectPreviewWrap() bool {
 	return m.proj.panel != nil && m.proj.panel.PreviewWrap()
+}
+
+// projectSearchPrefill is Fresh's selected-text prefill for the Search and Replace
+// panel: a non-empty single-line selection shorter than 200 UTF-8 bytes becomes the
+// initial query. A multi-line selection, no selection, or a selection of 200+ bytes
+// leaves the query empty. The byte test matches Fresh's primary-selection end-start
+// offset check.
+func (m *Model) projectSearchPrefill() string {
+	doc := m.ed.Active()
+	if doc == nil {
+		return ""
+	}
+	anchor, head, ok := doc.Selection()
+	if !ok || anchor == head || anchor.Line != head.Line {
+		return ""
+	}
+	text, ok := textBetweenWithin(doc, anchor, head, 800, 1)
+	if !ok || text == "" || len(text) >= 200 {
+		return ""
+	}
+	return text
 }
 
 // projectSearchSettings returns the match options and scope the next project panel opens

@@ -40,6 +40,8 @@ local state = {
   diff_hunks = {},
   diff_file_key = nil,
   diff_generation = 0,
+  data_generation = 0,
+  refresh_seq = 0,
 }
 
 local function notice(msg, level)
@@ -461,10 +463,19 @@ refresh = function()
   if not state.picker then
     return
   end
+  -- A file-list refresh starts a new review-data epoch and invalidates navigation that was
+  -- already reading the old files/repo. The second bump at completion invalidates a
+  -- navigation that starts while this refresh is still loading.
+  state.diff_generation = state.diff_generation + 1
+  state.refresh_seq = state.refresh_seq + 1
+  local refresh_operation = state.refresh_seq
   local generation = state.generation
   state.picker:set_status(t("status.loading"))
   local report, err = load_review()
-  if generation ~= state.generation or not state.picker then
+  -- Overlapping refreshes are independent operations: only the newest may touch the
+  -- picker state or notices. A stale success cannot overwrite newer files/repo and a stale
+  -- error cannot raise a notice.
+  if refresh_operation ~= state.refresh_seq or generation ~= state.generation or not state.picker then
     return
   end
   if not report then
@@ -474,6 +485,8 @@ refresh = function()
     state.picker:set_status(tostring(err))
     return
   end
+  state.data_generation = state.data_generation + 1
+  state.diff_generation = state.diff_generation + 1
   state.repo = report.repo
   state.files = report.files
   fill(report)
@@ -612,6 +625,14 @@ local function navigate_hunk(direction)
   if not buf then
     return
   end
+  -- Every navigation is a new operation. An overlapping/older command therefore cannot
+  -- present its candidate after a newer navigation started. Remember the source diff and
+  -- review-data epoch so refresh or a different diff cannot accept a stale target.
+  state.diff_generation = state.diff_generation + 1
+  local operation = state.diff_generation
+  local data_generation = state.data_generation
+  local source_buf = state.diff_buf
+  local source_key = state.diff_file_key
   local hunks = state.diff_hunks or {}
   if #hunks == 0 then
     notice(t("status.no_hunks"))
@@ -634,14 +655,16 @@ local function navigate_hunk(direction)
     notice(direction > 0 and t("status.last_hunk") or t("status.first_hunk"))
     return
   end
-  local generation = state.diff_generation
-  local found, reason = find_hunk_file(index + direction, direction, generation)
+  local found, reason = find_hunk_file(index + direction, direction, operation)
   if reason and reason.cancelled then
     return
   end
   -- A close/reopen, a file selection or a tab switch while the candidate diff loaded must
   -- discard the navigation rather than opening a stale/background diff view.
-  if state.diff_generation ~= generation or not state.diff_buf or not state.diff_buf:valid() then
+  if state.diff_generation ~= operation or state.data_generation ~= data_generation then
+    return
+  end
+  if not state.diff_buf or not state.diff_buf:valid() or state.diff_buf ~= source_buf or state.diff_file_key ~= source_key then
     return
   end
   local visible = gvim.buf.current()

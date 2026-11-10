@@ -341,7 +341,9 @@ sheets), and for Search and Replace one row of replacement, an option row and a 
 result region:
 
 - **Project-wide Search and Replace** (started by "Search and Replace in Project"; the
-  editor's Alt+A) searches the project files and the open buffers' unsaved text. The card
+  editor's Alt+A) searches the project files and the open buffers' unsaved text. Opening it
+  from a non-empty single-line selection shorter than 200 UTF-8 bytes pre-fills the Search row
+  with that text (Fresh's selected-text prefill); a multi-line selection leaves the row empty. The card
   is title border, result rows (up to clamp(h/2, 4, 18), shrinking only as far as the
   menu and tab rows allow; a frame with no room paints nothing), the Search row, the
   Replace row, the Files row, the options row and the hints. The result rows are a match

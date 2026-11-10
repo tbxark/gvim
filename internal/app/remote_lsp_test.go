@@ -209,3 +209,89 @@ func TestRemoteLSMarkerChecker(t *testing.T) {
 		t.Fatal("disconnected checker did not report an error")
 	}
 }
+
+// TestExpandRemotePathOtherUser: a validated ~user is expanded by the remote shell and
+// its path suffix is appended, all through the authority one-shot; invalid user names
+// never reach the shell.
+func TestExpandRemotePathOtherUser(t *testing.T) {
+	slot := authoritytest.New()
+	var calls int
+	var last []string
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		calls++
+		last = append([]string(nil), argv...)
+		return hostos.ProcResult{Code: 0, Stdout: []byte("/home/alice")}, nil
+	}}
+	slot.OneShotter = one
+	ctx := context.Background()
+	got, err := expandRemotePath(ctx, slot, "~alice/proj/sub")
+	if err != nil || got != "/home/alice/proj/sub" {
+		t.Fatalf("~alice/proj/sub = %q, %v", got, err)
+	}
+	if calls != 1 || len(last) != 5 || last[0] != "sh" || last[1] != "-c" || last[3] != "sh" || last[4] != "alice" {
+		t.Fatalf("authority argv = %v", last)
+	}
+	if _, err := expandRemotePath(ctx, slot, "~bad;user/x"); err == nil || calls != 1 {
+		t.Fatalf("invalid ~user reached the shell: err=%v calls=%d", err, calls)
+	}
+	// A shell that cannot expand the name leaves the literal ~user; report it honestly.
+	one.script = func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
+		return hostos.ProcResult{Code: 0, Stdout: []byte("~nobody")}, nil
+	}
+	if _, err := expandRemotePath(ctx, slot, "~nobody/x"); err == nil {
+		t.Fatal("an unexpanded ~user was accepted")
+	}
+}
+
+// TestRemoteLSPSpawnerExpandsOtherUserRoot: a remote workspace specified as ~user/proj
+// resolves through the remote shell before the server starts; previously the LSP spawner
+// refused it even though the rest of the remote file access accepted the root.
+func TestRemoteLSPSpawnerExpandsOtherUserRoot(t *testing.T) {
+	proc := newFakeLSPProc()
+	runner := &fakeLongRunner{proc: proc}
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) != 5 || argv[4] != "alice" {
+			return hostos.ProcResult{}, fmt.Errorf("unexpected home probe argv %v", argv)
+		}
+		return hostos.ProcResult{Code: 0, Stdout: []byte("/home/alice")}, nil
+	}}
+	slot := authoritytest.New()
+	slot.OneShotter = one
+	slot.LongRunner = runner
+	spawn := remoteLSPSpawner(slot, "~alice/proj")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := spawn(ctx, lsp.Config{Command: []string{"gopls", "serve"}})
+	if err != nil {
+		t.Fatalf("spawner: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	if runner.opts.Cwd != "/home/alice/proj" {
+		t.Fatalf("remote LSP cwd = %q, want the expanded ~user workspace", runner.opts.Cwd)
+	}
+}
+
+// TestExpandRemotePathRejectsShellTildeNames: POSIX ~- (OLDPWD), bash ~-N/~+N stack
+// entries and ~+ (PWD) are shell syntax, not user names; they must be refused before the
+// authority runs a command. Normal names containing an internal dash still expand.
+func TestExpandRemotePathRejectsShellTildeNames(t *testing.T) {
+	slot := authoritytest.New()
+	calls := 0
+	one := &fakeOneShot{script: func(_ context.Context, _ []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		calls++
+		return hostos.ProcResult{Code: 0, Stdout: []byte("/home/normal")}, nil
+	}}
+	slot.OneShotter = one
+	for _, path := range []string{"~-/proj", "~-1/proj", "~+/proj", "~+1/proj", "~--/proj"} {
+		if _, err := expandRemotePath(context.Background(), slot, path); err == nil {
+			t.Fatalf("%s was accepted as a user home", path)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("shell-special tilde names ran %d remote commands", calls)
+	}
+	got, err := expandRemotePath(context.Background(), slot, "~alice-1/proj")
+	if err != nil || got != "/home/normal/proj" {
+		t.Fatalf("normal ~alice-1 = %q, %v", got, err)
+	}
+}

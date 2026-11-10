@@ -22,6 +22,7 @@ type projEd struct {
 	*fakeEditor
 	ptabs   []TabInfo
 	texts   []BufferText
+	active  Document // when set, what Active returns (a selected document)
 	opened  []string
 	applied map[string][]editor.LSPEdit
 }
@@ -30,15 +31,8 @@ func newProjEd(tabs []TabInfo, texts []BufferText) *projEd {
 	return &projEd{fakeEditor: newFakeEditor("x"), ptabs: tabs, texts: texts, applied: map[string][]editor.LSPEdit{}}
 }
 
-func (e *projEd) Tabs() []TabInfo { return e.ptabs }
-func (e *projEd) Active() Document {
-	for _, t := range e.ptabs {
-		if t.Active {
-			return nil
-		}
-	}
-	return nil
-}
+func (e *projEd) Tabs() []TabInfo                    { return e.ptabs }
+func (e *projEd) Active() Document                   { return e.active }
 func (e *projEd) BufferTexts() ([]BufferText, error) { return e.texts, nil }
 
 func (e *projEd) LoadFunc(path string) func() (*editor.Document, error) {
@@ -144,6 +138,70 @@ func openSearchPanel(t *testing.T, m *Model) *searchpanel.Panel {
 	}
 	t.Fatalf("the project search panel did not open")
 	return nil
+}
+
+// projSelectionDoc is a fake document with a selection, for the project-search
+// selected-text prefill.
+type projSelectionDoc struct {
+	*fakeDoc
+	anchor, head buffer.Pos
+}
+
+func (d *projSelectionDoc) Selection() (buffer.Pos, buffer.Pos, bool) {
+	return d.anchor, d.head, d.anchor != d.head
+}
+
+// TestProjectSearchPrefillsTheSelectedText: opening Search and Replace from a real
+// selection puts that text into the panel's query; a missing/multi-line/over-long
+// selection leaves it empty. The bounds are Fresh's: a single line whose primary
+// selection is 1..199 UTF-8 bytes (CJK/emoji count by their encoded bytes). The panel
+// is opened by the real Alt+A chord, not by calling the action.
+func TestProjectSearchPrefillsTheSelectedText(t *testing.T) {
+	t.Parallel()
+	bytes199 := strings.Repeat("a", 199)
+	bytes200 := strings.Repeat("a", 200)
+	cjk66, cjk67 := strings.Repeat("界", 66), strings.Repeat("界", 67)     // 198 / 201 UTF-8 bytes
+	emoji49, emoji50 := strings.Repeat("😀", 49), strings.Repeat("😀", 50) // 196 / 200 UTF-8 bytes
+	tests := []struct {
+		name         string
+		lines        []string
+		anchor, head buffer.Pos
+		want         string
+	}{
+		{"single line", []string{"foo bar"}, buffer.Pos{}, buffer.Pos{Col: 3}, "foo"},
+		{"missing selection", []string{"foo bar"}, buffer.Pos{}, buffer.Pos{}, ""},
+		{"multi line", []string{"foo", "bar"}, buffer.Pos{}, buffer.Pos{Line: 1, Col: 2}, ""},
+		{"199 bytes", []string{bytes199}, buffer.Pos{}, buffer.Pos{Col: 199}, bytes199},
+		{"200 bytes", []string{bytes200}, buffer.Pos{}, buffer.Pos{Col: 200}, ""},
+		{"66 CJK = 198 bytes", []string{cjk66}, buffer.Pos{}, buffer.Pos{Col: 66}, cjk66},
+		{"67 CJK = 201 bytes", []string{cjk67}, buffer.Pos{}, buffer.Pos{Col: 67}, ""},
+		{"49 emoji = 196 bytes", []string{emoji49}, buffer.Pos{}, buffer.Pos{Col: 49}, emoji49},
+		{"50 emoji = 200 bytes", []string{emoji50}, buffer.Pos{}, buffer.Pos{Col: 50}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ed := newProjEd(nil, nil)
+			ed.active = &projSelectionDoc{fakeDoc: &fakeDoc{lines: tt.lines}, anchor: tt.anchor, head: tt.head}
+			m := newProjectPanelModel(t, ed, &fakeProjectSearcher{}, nil, nil)
+			k := testKeys()
+			k["normal|a|alt"] = Command{Action: "start_search_replace"}
+			m.keys = k
+			m.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+			panelIndex := -1
+			for i, o := range m.overlays {
+				if _, ok := o.(*searchpanel.Panel); ok {
+					panelIndex = i
+					break
+				}
+			}
+			if panelIndex < 0 {
+				t.Fatal("Alt+A did not open the project search panel")
+			}
+			if got := m.overlays[panelIndex].(*searchpanel.Panel).Query(); got != tt.want {
+				t.Fatalf("panel query = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestProjectSearchPanelSearchesThroughThePort(t *testing.T) {

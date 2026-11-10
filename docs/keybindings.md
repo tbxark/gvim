@@ -103,7 +103,8 @@ say so instead of opening a dropdown.
 The find bar (`Ctrl+F`), Find and Replace (`Ctrl+R`) and Query Replace (`Ctrl+Alt+R`) work on one
 buffer. Fresh's `Alt+A` opens the
 **project-wide Search and Replace** panel, which searches the project's files and the open buffers'
-unsaved text and replaces across files. The panel's keys are answered by the panel itself, as every
+unsaved text and replaces across files. Opening the panel with a non-empty single-line selection
+shorter than 200 UTF-8 bytes pre-fills its search field with that text. The panel's keys are answered by the panel itself, as every
 overlay's are: `Tab` moves between the search field, the replacement field, the file-glob field and
 the result rows (Git Grep has no replacement row: its `Tab` walks search, files and rows);
 `Alt+A` cycles the scope chip through all files, open buffers and the current file (Open Buffers

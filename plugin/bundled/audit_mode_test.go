@@ -882,3 +882,268 @@ func findAuditDiffMaybe(host *plugintest.FakeHost, name string) pluginapi.Buffer
 	}
 	return 0
 }
+
+// scriptedDiffOS blocks the first b.go diff and returns a different b diff on the second,
+// so two overlapping navigations can be told apart by which result won.
+type scriptedDiffOS struct {
+	*plugintest.FakeOS
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+	first   string
+	second  string
+}
+
+func (s *scriptedDiffOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	if strings.Contains(strings.Join(argv, " "), "-- b.go") {
+		s.mu.Lock()
+		s.calls++
+		call := s.calls
+		s.mu.Unlock()
+		if call == 1 {
+			close(s.started)
+			select {
+			case <-s.release:
+			case <-ctx.Done():
+				return hostos.ProcResult{}, ctx.Err()
+			}
+			return hostos.ProcResult{Stdout: []byte(s.first)}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte(s.second)}, nil
+	}
+	return s.FakeOS.Run(ctx, argv, o)
+}
+
+func TestAuditModeOverlappingNextOnlyAppliesLatest(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.SetFile("/w/b.go", "package b\n")
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	os := &scriptedDiffOS{
+		FakeOS: plain, started: make(chan struct{}), release: make(chan struct{}),
+		first:  "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-old\n+stale\n",
+		second: "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-old\n+fresh\n",
+	}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: os, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// First next starts loading b and blocks. A second next starts while it is in flight and
+	// completes with the fresh result first.
+	if err := h.RT.Run(auditPlugin+".next_hunk", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	firstWork := runnableWork(h)
+	if firstWork == nil {
+		t.Fatal("no first cross-file Work")
+	}
+	firstDone := make(chan pluginapi.Completion, 1)
+	go func() { firstDone <- firstWork.Run(firstWork.Ctx) }()
+	<-os.started
+	if err := h.RT.Run(auditPlugin+".next_hunk", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	secondWork := runnableWork(h)
+	if secondWork == nil {
+		t.Fatal("no second cross-file Work")
+	}
+	secondCompletion := secondWork.Run(secondWork.Ctx)
+	h.RT.Resolve(secondCompletion)
+	drainRuntime(h)
+	close(os.release)
+	h.RT.Resolve(<-firstDone)
+	drainRuntime(h)
+
+	bID := findAuditDiff(t, host, "b.go")
+	var text string
+	for _, b := range host.Buffers {
+		if b.Info.ID == bID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+fresh") || strings.Contains(text, "+stale") {
+		t.Fatalf("overlapping next final diff = %q, want fresh only", text)
+	}
+}
+
+func TestAuditModeRefreshInvalidatesInFlightNavigation(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.SetFile("/w/b.go", "package b\n")
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	plain.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Stdout: "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-old\n+new\n"})
+	slow := &slowDiffOS{FakeOS: plain, started: make(chan struct{}), release: make(chan struct{}), match: "-- b.go"}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: slow, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.RT.Run(auditPlugin+".next_hunk", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	work := runnableWork(h)
+	if work == nil {
+		t.Fatal("no cross-file Work")
+	}
+	done := make(chan pluginapi.Completion, 1)
+	go func() { done <- work.Run(work.Ctx) }()
+	<-slow.started
+	// A refresh while the candidate is in flight replaces files/repo and must invalidate it.
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	if err := h.Run(auditPlugin+".refresh", nil); err != nil {
+		t.Fatal(err)
+	}
+	close(slow.release)
+	h.RT.Resolve(<-done)
+	drainRuntime(h)
+	if b := findAuditDiffMaybe(host, "b.go"); b != 0 {
+		t.Fatalf("refresh allowed stale navigation to open b.go diff %d", b)
+	}
+}
+
+// scriptedStatusOS makes the second status call block (the first refresh) and returns a
+// different status on later calls (the newer refresh). It can make the blocked old refresh
+// fail, to prove a stale error is ignored too.
+type scriptedStatusOS struct {
+	*plugintest.FakeOS
+	mu         sync.Mutex
+	calls      int
+	started    chan struct{}
+	startOnce  sync.Once
+	release    chan struct{}
+	first      []byte
+	old        []byte
+	fresh      []byte
+	oldFailure bool
+}
+
+func (s *scriptedStatusOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "status") && strings.Contains(joined, "--porcelain") {
+		s.mu.Lock()
+		s.calls++
+		call := s.calls
+		s.mu.Unlock()
+		switch call {
+		case 1:
+			return hostos.ProcResult{Stdout: append([]byte(nil), s.first...)}, nil
+		case 2:
+			s.startOnce.Do(func() { close(s.started) })
+			select {
+			case <-s.release:
+			case <-ctx.Done():
+				return hostos.ProcResult{}, ctx.Err()
+			}
+			if s.oldFailure {
+				return hostos.ProcResult{Code: 1, Stderr: []byte("old refresh failed")}, nil
+			}
+			return hostos.ProcResult{Stdout: append([]byte(nil), s.old...)}, nil
+		default:
+			return hostos.ProcResult{Stdout: append([]byte(nil), s.fresh...)}, nil
+		}
+	}
+	return s.FakeOS.Run(ctx, argv, o)
+}
+
+func TestAuditModeOverlappingRefreshOnlyNewestApplies(t *testing.T) {
+	t.Parallel()
+	for _, oldFailure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("old_failure_%v", oldFailure), func(t *testing.T) {
+			host, plain := auditHost(t)
+			os := &scriptedStatusOS{
+				FakeOS: plain, started: make(chan struct{}), release: make(chan struct{}),
+				first:      []byte(" M a.go\x00"),
+				old:        []byte(" M old.go\x00"),
+				fresh:      []byte(" M a.go\x00 M b.go\x00"),
+				oldFailure: oldFailure,
+			}
+			h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: os, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+			h.Start()
+			if err := h.Run(auditPlugin+".review", nil); err != nil {
+				t.Fatal(err)
+			}
+			h.Advance(0)
+			picker := h.Host.UI().Last("picker")
+			if picker == nil {
+				t.Fatal("no initial picker")
+			}
+
+			// First refresh: run its repo-resolution Work and let the status Work block.
+			if err := h.RT.Run(auditPlugin+".refresh", nil, pluginapi.SrcAPI); err != nil {
+				t.Fatal(err)
+			}
+			var firstDone chan pluginapi.Completion
+			for i := 0; i < 10; i++ {
+				w := runnableWork(h)
+				if w == nil {
+					t.Fatal("no first refresh Work")
+				}
+				done := make(chan pluginapi.Completion, 1)
+				go func(w *pluginapi.Work) { done <- w.Run(w.Ctx) }(w)
+				select {
+				case <-os.started:
+					firstDone = done
+				case c := <-done:
+					h.RT.Resolve(c)
+				case <-time.After(2 * time.Second):
+					t.Fatal("first refresh did not finish/block")
+				}
+				if firstDone != nil {
+					break
+				}
+			}
+			if firstDone == nil {
+				t.Fatal("first refresh never reached status")
+			}
+
+			// Second refresh returns the fresh status first.
+			if err := h.RT.Run(auditPlugin+".refresh", nil, pluginapi.SrcAPI); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 10; i++ {
+				w := runnableWork(h)
+				if w == nil {
+					break
+				}
+				h.RT.Resolve(w.Run(w.Ctx))
+			}
+			drainRuntime(h)
+			if !hasPickerRow(t, picker, "b.go") {
+				t.Fatalf("fresh refresh did not apply: %+v", picker.Picker.Items)
+			}
+
+			// Release the old refresh. Whether it succeeds or fails, it must not overwrite the
+			// fresh picker or add an error notice.
+			close(os.release)
+			h.RT.Resolve(<-firstDone)
+			drainRuntime(h)
+			if !hasPickerRow(t, picker, "b.go") || hasPickerRow(t, picker, "old.go") {
+				t.Fatalf("stale refresh changed rows: %+v", picker.Picker.Items)
+			}
+			if oldFailure {
+				if got := strings.Join(h.NoticeTexts(), "|"); strings.Contains(got, "old refresh failed") {
+					t.Fatalf("stale refresh error notice = %q", got)
+				}
+			}
+		})
+	}
+}
+
+func hasPickerRow(t *testing.T, picker *plugintest.FakeOverlay, substr string) bool {
+	t.Helper()
+	for _, it := range picker.Picker.Items {
+		if strings.Contains(it.Text, substr) {
+			return true
+		}
+	}
+	return false
+}

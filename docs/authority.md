@@ -297,8 +297,11 @@ deliberately does not take.
   disconnected open is a notice and stays retryable (it is retried after an authority
   reconnect), never an empty local buffer. Remote path rules: a path is used as written on
   the remote host (absolute or `~`-rooted; a relative path is rejected rather than resolved
-  against the local working directory), `~` expands through the remote shell's `$HOME`
-  (cached), and `~user` is refused (recorded residual).
+  against the local working directory). Remote workspace roots and remote LSP manager roots
+  expand `~` and valid `~user` through the remote shell; the LSP expander validates the user
+  name before its fixed script and refuses shell-special `~-`/`~-N` (OLDPWD/dir-stack) and
+  `~+`/`~+N` (PWD/dir-stack). The editor's remote file access is narrower: it expands only
+  `~`/`~/...` and still rejects `~user` for opening or saving a document.
 - Remote external-change watching (landed): the directories of the open documents are
   watched on the remote host through `authority Files().Watch` (the polled remote watcher)
   and bridged into the root's existing watch pipeline (`RootPorts.Watch`/`WatchDirs`), so
@@ -474,7 +477,7 @@ Residuals of this slice (documented, not bugs):
   merge-and-whole-file write up to remoteLargeSaveMax, and Fresh's host-side patched recipe
   remains the later slice; documented above), remote
   crash recovery and hot-exit (deliberately skipped for a remote launch so remote text is
-  never copied into a local cache), `~user` expansion, special remote files (the helper's
+  never copied into a local cache), special remote files (the helper's
   kind mapping only knows file/dir/symlink; a FIFO read is bounded by the context and fails
   rather than blocking forever), and a remote save interrupted by a carrier drop surfaces
   an error (never a local retry or a second write).

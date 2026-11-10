@@ -266,9 +266,14 @@ line; old-side-only and deleted rows have no working-tree target. **Review Diff:
 hunk in the review's ordered file list and land on its first/last hunk. They say when the whole
 review is at its first/last hunk or no diff is open. They only navigate when the review diff is the
 active buffer; running them from another tab reports that the user must switch back first instead of
-moving a hidden buffer. Cross-file loads are bounded and checked against the diff generation and
-active buffer, so a close/reopen, file selection, tab switch or picker Esc discards a stale
-navigation instead of opening a background diff. A truncated candidate still opens with an explicit
+moving a hidden buffer. Each navigation is a new operation with a fresh diff generation and records
+its source diff buffer/file; only the latest operation may present, so two overlapping next/prev
+commands cannot let an older answer replace a newer one. Cross-file loads are bounded and also check
+the active buffer, so close/reopen, file selection, tab switch, picker Esc or a Review Diff refresh
+(which starts a new review-data epoch and invalidates in-flight navigation) discards a stale
+navigation instead of opening a background diff. Overlapping refreshes are independent operations:
+only the newest refresh may replace the file/repo state or show a notice, so an older success cannot
+overwrite newer rows and an older error cannot appear after the newer result. A truncated candidate still opens with an explicit
 truncation notice; hitting the 200-candidate bound or failing to read a candidate is reported as
 that reason, not as a global first/last hunk. All git calls go through the hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
 and a closed picker/diff invalidates an in-flight answer by generation (an already-issued git

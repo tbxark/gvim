@@ -73,31 +73,54 @@ func remoteLSPSpawner(slot authority.Slot, workspace string, spawnEnv ...func() 
 	}
 }
 
-// expandRemotePath resolves a leading ~ through the remote login shell ($HOME). A path
-// that is not ~-rooted is returned as written; another user's ~user is refused (the
-// command quoting would not expand it either, and guessing is worse).
+// expandRemotePath resolves a leading ~ through the remote login shell. "~" and "~/..."
+// use $HOME; "~user" and "~user/..." use the remote shell's tilde expansion for that user
+// (Fresh's remote expanduser does the same). The user name is validated before the fixed
+// shell script sees it, so project data is never interpolated into shell code.
 func expandRemotePath(ctx context.Context, slot authority.Slot, path string) (string, error) {
 	if path == "" || !strings.HasPrefix(path, "~") {
 		return path, nil
 	}
-	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return "", fmt.Errorf("expanding another user's home (~user) is not supported yet")
-	}
 	if slot == nil {
 		return "", errors.New("no remote authority")
 	}
-	res, err := slot.OneShot().Run(ctx, []string{"sh", "-c", `printf %s "$HOME"`}, hostos.ProcOptions{})
+	user, rest := "", path[1:]
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		user, rest = rest[:i], rest[i:]
+	}
+	if user == "" {
+		res, err := slot.OneShot().Run(ctx, []string{"sh", "-c", "printf %s \"$HOME\""}, hostos.ProcOptions{})
+		if err != nil {
+			return "", fmt.Errorf("remote home: %w", err)
+		}
+		home := strings.TrimSpace(string(res.Stdout))
+		if res.Code != 0 || home == "" {
+			return "", errors.New("remote home: the remote shell gave no $HOME")
+		}
+		return home + rest, nil
+	}
+	// Tilde names are not all usernames: ~- is OLDPWD in POSIX shells and ~-N is a
+	// directory-stack entry in bash; ~+ is PWD/dir-stack. Never let those reach the
+	// shell as a home path. A leading '-' is not accepted for a remote home name.
+	if strings.HasPrefix(user, "-") {
+		return "", fmt.Errorf("expanding remote home ~%s: shell-special tilde names are not user names", user)
+	}
+	for _, r := range user {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return "", fmt.Errorf("expanding remote home ~%s: invalid user name", user)
+	}
+	const script = "case $1 in \"\"|[-+]*|*[!A-Za-z0-9._-]*) exit 2;; esac\neval \"printf %s ~$1\""
+	res, err := slot.OneShot().Run(ctx, []string{"sh", "-c", script, "sh", user}, hostos.ProcOptions{})
 	if err != nil {
-		return "", fmt.Errorf("remote home: %w", err)
+		return "", fmt.Errorf("remote home ~%s: %w", user, err)
 	}
 	home := strings.TrimSpace(string(res.Stdout))
-	if res.Code != 0 || home == "" {
-		return "", errors.New("remote home: the remote shell gave no $HOME")
+	if res.Code != 0 || home == "" || strings.HasPrefix(home, "~") {
+		return "", fmt.Errorf("remote home ~%s: the remote shell could not expand it", user)
 	}
-	if path == "~" {
-		return home, nil
-	}
-	return home + path[1:], nil
+	return home + rest, nil
 }
 
 // remoteLSMarkerChecker returns the authority-backed root_markers probe of a remote

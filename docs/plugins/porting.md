@@ -241,12 +241,18 @@ file at that line. `Review Diff: Next Hunk` / `Previous Hunk` move the diff curs
 previous file last hunk), matching Fresh's global `n`/`p` for the per-file diff views this port
 builds (no default key; palette commands). They require the review diff to be the active buffer, so
 a command run from another tab reports the mismatch rather than moving a hidden diff; closing the
-diff/navigating away clears the hunk table. A cross-file candidate's git/untracked read is bounded
-(200 candidates, normal diff caps) and checked against the diff generation and active buffer before
-it can open, so close/reopen, file selection, tab changes or picker Esc discard it; stale same-file
-diff loads are also generation-discarded. A truncated candidate opens but announces the truncation;
-the 200-file bound and candidate read failures have their own notices and are never reported as a
-global first/last hunk. `Review Diff: Refresh`
+diff/navigating away clears the hunk table. Every navigation begins a new operation generation and
+records the source diff buffer/file key; only the latest operation may present, so overlapping
+next/prev commands cannot apply an older answer. A cross-file candidate's git/untracked read is
+bounded (200 candidates, normal diff caps) and checked against the operation generation, review-data
+epoch, source diff identity and active buffer before it can open, so close/reopen, file selection,
+tab changes, picker Esc or Review Diff refresh discard it; stale same-file diff loads are also
+generation-discarded. Refresh invalidates in-flight navigation both when it starts and when new
+files/repo land, so a navigation racing a refresh cannot use the old list. Overlapping refreshes
+carry their own operation sequence: only the newest may replace files/repo or emit a notice, so a
+stale refresh success cannot overwrite newer rows and a stale error is discarded silently. A truncated candidate
+opens but announces the truncation; the 200-file bound and candidate read failures have their own
+notices and are never reported as a global first/last hunk. `Review Diff: Refresh`
 re-reads the list; `Review Diff: Close` drops it; untracked files are shown from a bounded
 working-tree read as a synthetic new-file diff.
 
@@ -260,8 +266,9 @@ OPEN: stage/unstage/discard
 layout, collapsing/filtering, watch polling, status-bar chrome and the review-mode keymap. Tests:
 `audit_mode_test.go` covers the staged/unstaged/untracked overview with numstat, opening a
 tracked file's diff and its new-side line target, next/previous hunk movement, cross-file hunk navigation, active-tab refusal, close/reopen hunk
-replacement, stale same-file and cross-file diff loads, truncated candidates, the 200-file bound,
-candidate read failures, picker-Esc cancellation, the untracked synthetic diff, the clean and not-a-repository states, and the read-only command list.
+replacement, stale same-file and cross-file diff loads, overlapping navigation, overlapping
+refresh latest-wins, refresh-vs-navigation races, truncated candidates, the 200-file bound, candidate read failures, picker-Esc cancellation,
+the untracked synthetic diff, the clean and not-a-repository states, and the read-only command list.
 
 ### Dev containers: read-only config inspection (port residual)
 
