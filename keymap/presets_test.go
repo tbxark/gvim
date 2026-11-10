@@ -114,7 +114,7 @@ func TestMacosRebindsAreVisibleOnlyInNormalContext(t *testing.T) {
 		{"alt+shift+s", keymap.ContextNormal, "save_as"},
 		{"alt+f", keymap.ContextNormal, "move_word_right"},
 		{"ctrl+u", keymap.ContextNormal, "delete_to_line_start"},
-		{"ctrl+t", keymap.ContextNormal, "command_palette"},
+		{"ctrl+t", keymap.ContextNormal, "new"},
 		{"ctrl+.", keymap.ContextNormal, "lsp_goto_definition"},
 		{"ctrl+,", keymap.ContextNormal, "lsp_references"},
 		{"ctrl+alt+r", keymap.ContextNormal, "lsp_rename"},

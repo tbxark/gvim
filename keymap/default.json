@@ -36,7 +36,7 @@
     {"key": "Delete", "modifiers": [], "action": "delete_forward", "when": "normal"},
     {"key": "Enter", "modifiers": [], "action": "insert_newline", "when": "normal"},
     {"key": "Tab", "modifiers": [], "action": "insert_tab", "when": "normal"},
-    {"comment": "Transpose characters (swap char before cursor with char at cursor)", "key": "t", "modifiers": ["ctrl"], "action": "transpose_chars", "when": "normal"},
+    {"comment": "Ctrl+T -> New tab", "key": "t", "modifiers": ["ctrl"], "action": "new", "when": "normal"},
     {"comment": "Normal context - Document navigation", "key": "Home", "modifiers": ["ctrl"], "action": "move_document_start", "when": "normal"},
     {"key": "End", "modifiers": ["ctrl"], "action": "move_document_end", "when": "normal"},
     {"comment": "Normal context - Word movement", "key": "Left", "modifiers": ["ctrl"], "action": "move_word_left", "when": "normal"},

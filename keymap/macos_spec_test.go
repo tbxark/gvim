@@ -40,7 +40,7 @@ func TestMacosBindings(t *testing.T) {
 		{"ctrl+b", keymap.ContextNormal, "toggle_file_explorer"},
 		{"ctrl+e", keymap.ContextNormal, "move_line_end"},
 		{"ctrl+a", keymap.ContextNormal, "move_line_start"},
-		{"ctrl+t", keymap.ContextNormal, "command_palette"},
+		{"ctrl+t", keymap.ContextNormal, "new"},
 		{"ctrl+-", keymap.ContextNormal, "navigate_back"},
 		{"ctrl+=", keymap.ContextNormal, "navigate_forward"},
 		{"ctrl+]", keymap.ContextNormal, "navigate_forward"},
@@ -97,7 +97,7 @@ func TestMacosPrimaryShortcuts(t *testing.T) {
 	m := mustPreset(t, "macos")
 	tests := map[string]string{
 		"show_help":            "F1",
-		"new":                  "ctrl+n",
+		"new":                  "ctrl+t",
 		"open":                 "ctrl+o",
 		"save":                 "ctrl+s",
 		"save_as":              "alt+shift+s",
@@ -114,7 +114,7 @@ func TestMacosPrimaryShortcuts(t *testing.T) {
 		"delete_line":          "ctrl+alt+k",
 		"delete_to_line_end":   "ctrl+k",
 		"toggle_file_explorer": "ctrl+b",
-		"command_palette":      "ctrl+t",
+		"command_palette":      "ctrl+shift+p",
 		"next_buffer":          "ctrl+pagedown",
 		"prev_buffer":          "ctrl+pageup",
 		"navigate_back":        "ctrl+-",

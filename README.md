@@ -110,6 +110,8 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | Key | Action |
 |---|---|
 | `Ctrl+P` | Quick Open (Files, `>commands`, `:line`, `#buffers`) |
+| `Ctrl+Shift+P` | Open Command Palette directly |
+| `Ctrl+T` / `Ctrl+N` | New tab / buffer |
 | `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
 | `Ctrl+]` | Jump to matching bracket |
 | `Ctrl+L` | Expand line selection across all carets |

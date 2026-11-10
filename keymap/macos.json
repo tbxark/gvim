@@ -7,7 +7,7 @@
     {"comment": "Ctrl+K -> Delete to line end (Unix readline)", "key": "k", "modifiers": ["ctrl"], "action": "delete_to_line_end", "when": "normal"},
     {"comment": "Ctrl+Alt+K -> Delete line (Ctrl+Shift+K doesn't work on Mac)", "key": "k", "modifiers": ["ctrl","alt"], "action": "delete_line", "when": "normal"},
     {"comment": "Ctrl+L -> Go to line (frees Ctrl+G for find next)", "key": "l", "modifiers": ["ctrl"], "action": "goto_line", "when": "normal"},
-    {"comment": "Ctrl+T -> Go to symbol in file (Ctrl+Shift+O doesn't work on Mac)", "key": "t", "modifiers": ["ctrl"], "action": "command_palette", "args": {"filter":"@"}, "when": "normal"},
+    {"comment": "Ctrl+T -> New tab", "key": "t", "modifiers": ["ctrl"], "action": "new", "when": "normal"},
     {"comment": "Ctrl+- -> Navigate back", "key": "-", "modifiers": ["ctrl"], "action": "navigate_back", "when": "normal"},
     {"comment": "Ctrl+= -> Navigate forward (Ctrl+Shift+- doesn't work on Mac)", "key": "=", "modifiers": ["ctrl"], "action": "navigate_forward", "when": "normal"},
     {"comment": "Ctrl+] -> Navigate forward (alternative)", "key": "]", "modifiers": ["ctrl"], "action": "navigate_forward", "when": "normal"},
