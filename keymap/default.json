@@ -199,6 +199,7 @@
     {"comment": "gvim: split right", "key": "\\", "modifiers": ["ctrl"], "action": "split_vertical", "when": "normal"},
     {"comment": "gvim: split below", "key": "\\", "modifiers": ["alt"], "action": "split_horizontal", "when": "normal"},
     {"comment": "gvim: close split", "key": "w", "modifiers": ["alt","shift"], "action": "close_split", "when": "normal"},
+    {"comment": "gvim: toggle diagnostics panel", "key": "m", "modifiers": ["ctrl","shift"], "action": "toggle_diagnostics_panel", "when": "normal"},
     {"comment": "gvim: LSP menu (a gvim-only top-level menu). Alt+L is to_lower_case in the normal context, which shadows this key there, as Fresh shadows some menu keys", "key": "l", "modifiers": ["alt"], "action": "menu_open", "args": {"name":"LSP"}, "when": "global"},
     {"comment": "Prompt context (Fresh's prompt context): submit, cancel, and the editing keys the prompt field supports", "key": "Enter", "modifiers": [], "action": "prompt_confirm", "when": "prompt"},
     {"key": "Escape", "modifiers": [], "action": "prompt_cancel", "when": "prompt"},

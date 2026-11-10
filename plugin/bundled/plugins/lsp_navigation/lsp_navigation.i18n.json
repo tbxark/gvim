@@ -32,7 +32,12 @@
     "panel.workspace_symbols_title": "Workspace symbols (%{count})",
     "panel.filter_symbols": "Filter symbols...",
     "kind.incoming_calls": "incoming calls",
-    "kind.outgoing_calls": "outgoing calls"
+    "kind.outgoing_calls": "outgoing calls",
+    "cmd.document_outline": "LSP: Document Outline",
+    "cmd.document_outline_desc": "List the symbols of the active document in an interactive outline",
+    "cmd.show_breadcrumbs": "LSP: Show Breadcrumbs",
+    "cmd.show_breadcrumbs_desc": "Show the enclosing symbol path for the current cursor position",
+    "status.no_enclosing_symbol": "No enclosing symbol at cursor"
   },
   "zh-CN": {
     "cmd.goto_lsp_symbol": "转到代码符号",
@@ -67,7 +72,12 @@
     "kind.implementation": "实现",
     "kind.type_definition": "类型定义",
     "kind.incoming_calls": "调用方",
-    "kind.outgoing_calls": "被调用方"
+    "kind.outgoing_calls": "被调用方",
+    "cmd.document_outline": "LSP: 代码大纲",
+    "cmd.document_outline_desc": "在交互式大纲中列出当前文件的代码符号",
+    "cmd.show_breadcrumbs": "LSP: 符号面包屑",
+    "cmd.show_breadcrumbs_desc": "显示当前光标位置的代码符号路径",
+    "status.no_enclosing_symbol": "当前光标处无外层符号"
   },
   "zh": {
     "cmd.goto_lsp_symbol": "转到代码符号",
@@ -102,6 +112,11 @@
     "kind.implementation": "实现",
     "kind.type_definition": "类型定义",
     "kind.incoming_calls": "调用方",
-    "kind.outgoing_calls": "被调用方"
+    "kind.outgoing_calls": "被调用方",
+    "cmd.document_outline": "LSP: 代码大纲",
+    "cmd.document_outline_desc": "在交互式大纲中列出当前文件的代码符号",
+    "cmd.show_breadcrumbs": "LSP: 符号面包屑",
+    "cmd.show_breadcrumbs_desc": "显示当前光标位置的代码符号路径",
+    "status.no_enclosing_symbol": "当前光标处无外层符号"
   }
 }

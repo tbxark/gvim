@@ -2448,6 +2448,34 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 		return nil
 	}
 	if text != "" {
+		if doc := m.ed.Active(); doc != nil && isDocReadOnly(doc) && k.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper) == 0 {
+			switch text {
+			case "q":
+				return m.dispatch(Command{Action: "quit"})
+			case " ":
+				return m.dispatch(Command{Action: "move_page_down"})
+			case "b":
+				return m.dispatch(Command{Action: "move_page_up"})
+			case "j":
+				return m.dispatch(Command{Action: "move_down"})
+			case "k":
+				return m.dispatch(Command{Action: "move_up"})
+			case "d":
+				return m.dispatch(Command{Action: "scroll_down"})
+			case "u":
+				return m.dispatch(Command{Action: "scroll_up"})
+			case "/":
+				return m.dispatch(Command{Action: "search"})
+			case "n":
+				return m.dispatch(Command{Action: "find_next"})
+			case "N":
+				return m.dispatch(Command{Action: "find_previous"})
+			case "g":
+				return m.dispatch(Command{Action: "move_document_start"})
+			case "G":
+				return m.dispatch(Command{Action: "move_document_end"})
+			}
+		}
 		insert := m.dispatch(Command{Action: "insert_char", Args: map[string]any{"text": text}})
 		// The character is in the document now; schedule the auto-popup debounce
 		// (or cancel a pending one) and keep whatever command the insert returned.
@@ -4172,6 +4200,13 @@ func singleRune(text string) (rune, bool) {
 }
 
 // lowerIfLetter returns the lower-case letter for r, or r itself as a string.
+func isDocReadOnly(doc Document) bool {
+	if ro, ok := doc.(ReadOnlyDoc); ok {
+		return ro.ReadOnly()
+	}
+	return false
+}
+
 func lowerIfLetter(r rune) string {
 	if unicode.IsLetter(r) {
 		return string(unicode.ToLower(r))

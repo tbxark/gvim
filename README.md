@@ -114,6 +114,8 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Ctrl+T` / `Ctrl+N` | New tab / buffer |
 | `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
 | `Alt+J` | Flash Jump (2-character on-screen jump motion) |
+| `Ctrl+Shift+M` | Toggle Diagnostics Drawer (problems panel) |
+| `F8` / `Shift+F8` | Next / Previous diagnostic error or warning |
 | `Ctrl+]` | Jump to matching bracket |
 | `Ctrl+L` | Expand line selection across all carets |
 | `Ctrl+W v` / `Ctrl+W s` | Split window vertically / horizontally |
@@ -140,6 +142,8 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Go to LSP Symbol` | Fuzzy-find document symbols with enclosing-symbol preselected |
 | `LSP: Workspace Symbols` | Fuzzy-find symbols across the whole workspace |
 | `LSP: Incoming / Outgoing Calls` | Call Hierarchy: explore callers and callees |
+| `LSP: Document Outline` | Interactive code symbol outline for active file |
+| `LSP: Show Breadcrumbs` | Display enclosing symbol scope path (`Class > Method`) |
 | `List Bookmarks` | Interactive bookmarks picker (jump between slots 0–9) |
 
 ### Git & Review
@@ -151,6 +155,18 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
 | `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
 | `Merge: Conflict Resolution` | Jump between conflict markers (`Alt+M` mode or `Ctrl+Alt+C`) |
+
+### Pager Mode (`gvim -R` / `git diff | gvim`)
+When viewing read-only buffers or piped input, single-key pager shortcuts activate:
+| Key | Action |
+|---|---|
+| `Space` / `b` | Page Down / Page Up |
+| `j` / `k` | Scroll Down / Up by line |
+| `d` / `u` | Half-page scroll down / up |
+| `g` / `G` | Jump to start / end of document |
+| `/` | Open in-file search bar |
+| `n` / `N` | Next / Previous search match |
+| `q` | Quit / Close viewer tab |
 
 ### Markdown Modes
 | Action | Description |

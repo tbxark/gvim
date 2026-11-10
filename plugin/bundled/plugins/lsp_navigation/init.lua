@@ -572,4 +572,71 @@ gvim.command.register {
   end,
 }
 
+local function collect_enclosing_symbols(symbols, cursor_line)
+  local matches = {}
+  for _, symbol in ipairs(symbols) do
+    if symbol.start_line <= cursor_line and cursor_line <= symbol.end_line then
+      matches[#matches + 1] = symbol
+    end
+  end
+  table.sort(matches, function(a, b)
+    local span_a = a.end_line - a.start_line
+    local span_b = b.end_line - b.start_line
+    if span_a ~= span_b then
+      return span_a > span_b
+    end
+    return a.start_line < b.start_line
+  end)
+  return matches
+end
+
+local function show_breadcrumbs()
+  local buf, path = buffer_state()
+  if not buf then
+    gvim.notify(t("status.no_file"))
+    return
+  end
+  local language = buf:language()
+  if not language then
+    gvim.notify(t("status.no_language"))
+    return
+  end
+  local result, err = gvim.lsp.request("textDocument/documentSymbol", {
+    textDocument = { uri = gvim.path.to_uri(path) },
+  }, { buf = buf })
+  if result == nil and err then
+    gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
+    return
+  end
+  local symbols = parse_symbols(result, buf)
+  if #symbols == 0 then
+    gvim.notify(t("status.no_symbols"))
+    return
+  end
+  local enclosing = collect_enclosing_symbols(symbols, buf:cursor().line)
+  if #enclosing == 0 then
+    gvim.notify(t("status.no_enclosing_symbol"))
+    return
+  end
+  local parts = {}
+  for _, s in ipairs(enclosing) do
+    parts[#parts + 1] = s.name
+  end
+  gvim.notify(table.concat(parts, " > "))
+end
+
+gvim.command.register {
+  name = "document_outline",
+  title = "%cmd.document_outline",
+  description = "%cmd.document_outline_desc",
+  run = goto_lsp_symbol,
+}
+
+gvim.command.register {
+  name = "show_breadcrumbs",
+  title = "%cmd.show_breadcrumbs",
+  description = "%cmd.show_breadcrumbs_desc",
+  run = show_breadcrumbs,
+}
+
 gvim.log.debug("lsp navigation plugin loaded (shared gvim.finder)")

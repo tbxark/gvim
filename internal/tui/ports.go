@@ -132,6 +132,11 @@ type Document interface {
 	LineEnding() string
 }
 
+// ReadOnlyDoc is the optional view of a Document that reports whether it refuses edits.
+type ReadOnlyDoc interface {
+	ReadOnly() bool
+}
+
 // LargeDoc is the optional view of a Document in large file mode, as *editor.Document
 // has it and the app adapter forwards it. The root asserts it on the active document.
 // Large reports whether the document is in that mode, and Index how much of its line

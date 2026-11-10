@@ -68,13 +68,15 @@ func (f *fakeEditor) ScrollTo(top int) {
 
 // fakeDoc implements Document over a slice of lines.
 type fakeDoc struct {
-	lines  []string
-	cursor buffer.Pos
-	top    int
-	eol    string // the line ending; empty means "LF"
+	lines    []string
+	cursor   buffer.Pos
+	top      int
+	eol      string // the line ending; empty means "LF"
+	readOnly bool
 }
 
 func (d *fakeDoc) Name() string                { return "a.txt" }
+func (d *fakeDoc) ReadOnly() bool              { return d.readOnly }
 func (d *fakeDoc) Modified() bool              { return false }
 func (d *fakeDoc) LineCount() int              { return max(len(d.lines), 1) }
 func (d *fakeDoc) Line(i int) string           { return d.lines[i] }

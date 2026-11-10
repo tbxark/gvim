@@ -21,12 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `eb009db` plus the round-95 working tree. Static gates
-passed (catalogue heap en 133 KiB / de 88 KiB / both 222 KiB); default-enabled bundled plugins idle
-heap costs 7.99 MiB (< 8.00 MiB limit).
-Round 95 implements features 4, 5, and 6: viewport repositioning (scroll_cursor_top / scroll_cursor_bottom),
-Flash Jump keymap binding (Alt+J), and merge conflict navigation keymap bindings (Alt+M, Ctrl+Alt+C),
-adding items 355–357.
+Last verified: 2026-11-10, tree commit `8d5388a` plus the round-96 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); default-enabled bundled plugins idle
+heap costs 7.98 MiB (< 8.00 MiB limit).
+Round 96 implements features 7, 8, and 9: terminal code pager mode (Pager Mode for -R and stdin), diagnostics
+drawer keymap binding (Ctrl+Shift+M), and LSP document outline / breadcrumbs, adding items 358–360.
 Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
 markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
@@ -7285,6 +7284,16 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
 357. **Merge conflict resolution and navigation shortcut bindings (Alt+M, Ctrl+Alt+C).** Binds `Alt+M` to
      enter modal conflict resolution mode (`merge_conflict.start`) and `Ctrl+Alt+C` to jump to next conflict
      (`merge_conflict.next`). Tests cover keymap registration.
+358. **Terminal code pager mode (Pager Mode).** When viewing read-only documents (`gvim -R`, unwritable files,
+     or stdin pipes `git diff | gvim`), single-key pager ergonomics activate: Space/b (page down/up), j/k
+     (line down/up), d/u (half-page scroll), g/G (top/bottom), / (find bar), n/N (next/prev match), and q (quit).
+     Tested in internal/tui/pager_mode_test.go.
+359. **Diagnostics panel toggle and navigation (toggle_diagnostics_panel & jump_to_next_error).** Binds
+     `Ctrl+Shift+M` to toggle the diagnostics panel/drawer, complementing `F8` / `Shift+F8` error jump.
+     Tested across keymap and TUI.
+360. **LSP document outline and breadcrumbs (document_outline & show_breadcrumbs).** Adds `LSP: Document Outline`
+     and `LSP: Show Breadcrumbs` to lsp_navigation, calculating hierarchical enclosing symbol paths (`Class > Method`)
+     and displaying them via notification. Tested in plugin/bundled/lsp_navigation_test.go.
 
 ## 5. Ranked backlog for the remaining rounds
 

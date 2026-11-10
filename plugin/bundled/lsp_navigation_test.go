@@ -107,6 +107,8 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 		lspNavPlugin + ".show_workspace_symbols": "LSP: Workspace Symbols",
 		lspNavPlugin + ".show_incoming_calls":    "LSP: Incoming Calls",
 		lspNavPlugin + ".show_outgoing_calls":    "LSP: Outgoing Calls",
+		lspNavPlugin + ".document_outline":       "LSP: Document Outline",
+		lspNavPlugin + ".show_breadcrumbs":       "LSP: Show Breadcrumbs",
 	}
 	for id, title := range want {
 		if titles[id] != title {
@@ -115,6 +117,50 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 	}
 	if bindings := h.Host.Bindings[lspNavPlugin]; len(bindings) != 0 {
 		t.Errorf("bindings = %v, want none (Fresh binds none)", bindings)
+	}
+}
+
+func TestLSPNavigationBreadcrumbs(t *testing.T) {
+	t.Parallel()
+	host, _ := lspNavHost(t)
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		if c.Method == "textDocument/documentSymbol" {
+			return []any{
+				map[string]any{
+					"name": "Server",
+					"kind": 5.0,
+					"range": map[string]any{
+						"start": map[string]any{"line": 1.0, "character": 0.0},
+						"end":   map[string]any{"line": 10.0, "character": 0.0},
+					},
+					"selectionRange": map[string]any{
+						"start": map[string]any{"line": 1.0, "character": 5.0},
+						"end":   map[string]any{"line": 1.0, "character": 11.0},
+					},
+				},
+				map[string]any{
+					"name": "Start",
+					"kind": 12.0,
+					"range": map[string]any{
+						"start": map[string]any{"line": 2.0, "character": 0.0},
+						"end":   map[string]any{"line": 5.0, "character": 0.0},
+					},
+					"selectionRange": map[string]any{
+						"start": map[string]any{"line": 2.0, "character": 5.0},
+						"end":   map[string]any{"line": 2.0, "character": 10.0},
+					},
+				},
+			}, ""
+		}
+		return nil, "unexpected " + c.Method
+	}
+	h := startLSPNav(t, host)
+	_ = host.SetCursor(host.Buffers[0].Info.ID, pluginapi.Pos{Line: 3, Col: 1}, false, false, false)
+	navRun(t, h, "show_breadcrumbs")
+	h.CompleteLSP()
+	notices := h.NoticeTexts()
+	if len(notices) == 0 || notices[len(notices)-1] != "Server > Start" {
+		t.Fatalf("notices = %v, want 'Server > Start'", notices)
 	}
 }
 
