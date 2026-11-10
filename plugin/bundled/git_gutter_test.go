@@ -541,6 +541,53 @@ gvim.plugins.export { hunks = function(buf_id) return { { line = 2 } } end }`,
 	}
 }
 
+func TestGitGutterNavigationUsesRealCompareFiles(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins:  []string{"git_gutter", "compare_files"},
+		services: &plugintest.FakeServices{},
+		buffers:  []rigBuffer{{compareLeftPath, "a\nb\nc"}, {compareRightPath, "a\nX\nc"}},
+		script: func(o *plugintest.FakeOS) {
+			o.SetFile(compareLeftPath, "a\nb\nc")
+			o.SetFile(compareRightPath, "a\nX\nc")
+		},
+	})
+	if err := r.h.Run("compare_files.compare_files", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{compareLeftPath, compareRightPath} {
+		var prompt *plugintest.FakeOverlay
+		for _, o := range r.host.UI().Opened() {
+			if o.Kind == "input" {
+				prompt = o
+			}
+		}
+		if prompt == nil {
+			t.Fatal("missing Compare Files input")
+		}
+		r.h.Resolve(pluginapi.Completion{Token: prompt.Token, Values: []any{value}})
+		r.h.Settle()
+	}
+	for _, path := range []string{compareLeftPath, compareRightPath} {
+		r.host.SetActive(r.ids[path])
+		if err := r.host.SetCursor(r.ids[path], pluginapi.Pos{}, false, true, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+			t.Fatal(err)
+		}
+		carets, err := r.host.Cursors(r.ids[path])
+		if err != nil || len(carets) == 0 {
+			t.Fatalf("%s: cursors %v, %v", path, carets, err)
+		}
+		if got := carets[0].Pos.Line; got != 1 {
+			t.Errorf("%s: line = %d, want 1", path, got)
+		}
+		if notices := r.h.NoticeTexts(); len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+			t.Fatalf("%s: notices %v", path, notices)
+		}
+	}
+}
+
 // TestGitGutterNavigationDedupesMergedSources: a line present in both the live
 // diff and the saved diff is one jump target.
 func TestGitGutterNavigationDedupesMergedSources(t *testing.T) {
