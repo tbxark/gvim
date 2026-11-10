@@ -1,503 +1,167 @@
-# gvim (agent notes)
+# gvim
 
-> Written for coding agents developing this project, not for end users. It will be
-> replaced by a user-facing README once the project is finished.
+A fast, keyboard-driven terminal code viewer and editor written in pure Go.
 
-## What this is
+Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a custom cell grid renderer, `gvim` is designed for reading code, navigating large projects, inspecting git diffs, and exploring codebases with speed and safety.
 
-gvim is a terminal editor written in Go. It is a port of the Fresh TUI (Rust, reference
-checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
-(`internal/tui/grid`), not bubbles components.
+---
 
-- `CLAUDE.md` holds the behavior rules and an architecture summary.
-- `docs/architecture.md` is the design record for the package layout, package roles and
-  import rules.
-- `docs/ui.md` is the design record for the chrome spacing and the overlay (popup)
-  components: the padding scale, the three placements (sheet, card, menu) and the
-  shared card frame.
-- `docs/sidebar.md` is the design record for the sidebar column and its Contents
-  section: the stacked sections, the row sharing, the header rows and the hit kinds,
-  the Markdown outline's behaviour and its `plugins.markdown_toc` settings.
-- `docs/trust.md` is the design record for workspace trust: the levels, the decision
-  store, Fresh's open-time policy, and which restrictions gvim enforces.
-- `docs/settings.md` is the design record for the editable Settings page: the config
-  schema, the User/Project layers, the JSONC write path, and which settings apply live
-  versus at restart.
-- `docs/themes.md` is the design record for the theme model and theme UI: the
-  bundled/user registry and config forms, extends and fallback chains, named colors,
-  hot reload, inspect-at-cursor, the native theme editor and plugin color overrides.
-- `docs/terminal.md` is the design record for the terminal dock: the live and
-  read-only scrollback views and their keys, text selection and copy, the saved
-  transcript and its no-reflow limitation, restart-into-the-transcript and the
-  deferred agent resume, the `terminal` config section (including the gvim-only
-  `scrollback_lines`), OSC 7 working-directory tracking, Ctrl+Click paths, mouse
-  forwarding, `close_on_exit`, and the deferred list (reflow, OSC 52, agent
-  re-exec, Windows ConPTY, terminal tabs).
-- `docs/markdown.md` is the design record for the Markdown page view (compose)
-  and its dual view: the per-buffer page width resolution and centered margin, the
-  inline compose (concealed emphasis/strong/inline-code/link/strike markers,
-  caret-line reveal, rules and quote bars, list/quote hanging indents, code-fence
-  frames, table box-drawing), the source↔composed mapping for the caret, mouse,
-  selection, search highlights, folds and soft rows, the native source+compose
-  dual split with its derived per-pane override and line-anchored scroll sync,
-  and the large-file fallback and the deferred list.
-- `docs/parity.md` is the live parity record for the "full Fresh feature parity" goal:
-  the by-area matrix with evidence, the deliberate differences, and the ranked backlog of
-  the remaining rounds. It is the map for the next rounds; update the affected row when a
-  round lands.
-- `migration/ARCH-v4.md` is the earlier design record, kept for history; it is superseded.
+## Highlights
 
-## Layout
+- **Fast Code Viewer & Read-Only Protection**
+  - Launch with `gvim -R` / `gvim --view` to lock all buffers in read-only mode, protecting your codebase against accidental keystrokes, pastes, or saves.
+  - Syntax highlighting for 30+ programming languages powered by TextMate and Tree-Sitter grammars.
+  - Code folding based on indentation and syntax (`▼` / `▶`), supporting keyboard and mouse toggles.
+  - Windowed streaming for large files (100+ MiB) without allocating the whole file into memory.
 
-The module has three layers.
+- **Semantic Navigation & LSP**
+  - Go to Definition, Implementation, and Type Definition.
+  - Find References with an interactive preview picker.
+  - Document Symbols (`Go to LSP Symbol`) with automatic enclosing-symbol preselection.
+  - Hover documentation and diagnostics filtering.
+  - Cross-file navigation history stack: jump forward and back across files and locations (`Alt+Left` / `Alt+Right`).
 
-**Entry and executable shell (private):**
+- **Git & Diff Inspection**
+  - **Side-by-side File Comparison**: `gvim --diff fileA fileB` or `Compare Files` palette command with synchronized scrolling and hunk jumping.
+  - **Git Gutter**: live gutter change markers and change navigation (`Next Change` / `Previous Change`).
+  - **Git Blame**: inline commit author, age, and summary on the cursor line, commit details popup, and parent revision blame.
+  - **Git Log**: commit history browser with commit diff previews.
+  - **Review Diff (Audit Mode)**: list staged, unstaged, and untracked changes, view unified diffs, and navigate hunks across files.
 
-- `main.go` (module root) → `internal/cli` (cobra flags and arguments) →
-  `internal/app.Run`. The main package stays at the root so `go install` / `go build .`
-  work without a path; only auxiliary commands live under `cmd/`.
-- `internal/` holds the executable shell. Nothing outside this module can import it, and
-  no top-level package of the module imports it either.
-  - `internal/app`: the composition root (`Options`, `Run`, `buildRuntime` in `run.go`);
-    the only package that imports the host packages and the plugin runtime.
-  - host packages: `internal/uiadapter` (engine → TUI ports), `internal/pluginhost` (the
-    Lua runtime host), `internal/lsphost` (language-server port), `internal/restore`
-    (session + crash recovery), `internal/keybindings` (keymap adapter and user
-    bindings), `internal/highlight` (syntax-span cache); `internal/apptest` is test-only.
-  - `internal/configview`: the backend of `gvim config show` / `config paths`.
-  - `internal/cli`: the cobra command tree; hands `app.Options` to a `Runner`.
-  - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces;
-    `internal/tui/frame` is the geometry source for painting and hit testing). Sub-packages:
-    `overlay`, `list` (the shared overlay contract and list/box kit), `frame`, `split`,
-    `tabstrip` (layout/hit map, split tree, tab strip), `dock` (the terminal dock),
-    `editorpane`, `menubar`, `explorer`, `sidebar` (the column's section stack and the
-    Contents widget), `palette`, `find`, `prompt`, `browser`, `picker`, `pluginpanel`
-    (the plugin API's declarative widget panel), `popup`, `ctxmenu`, `dialog`, `style`,
-    `grid`, `icons`, `space`.
-  - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
-    screen (the dock backend).
-  - `internal/filewatch`: the fsnotify watcher behind the file tree and reloads.
-  - `internal/uitest`: an in-process test harness for the real UI (see Debugging).
-- `cmd/gvimdebug`: the debug page. It runs gvim in a pseudo-terminal and serves its
-  screen over HTTP (see Debugging).
+- **Multi-Modal Fast Search**
+  - **Quick Open (`Ctrl+P`)**: fuzzy file search, line jump (`:line`), relative line jump (`:+N` / `:-N`), buffer list (`#`), and command palette (`>`).
+  - **Live Grep (`Alt+A`)**: project-wide search with scopes for files, open buffers, terminal transcripts, and LSP diagnostics (`Alt+D`), exportable to a quickfix list (`Alt+Q` / `Alt+M`).
+  - **In-File Find & Replace**: case-sensitive (`Alt+C`), whole-word (`Alt+W`), regex (`Alt+R`), and match counter.
+  - **Flash Jump**: two-character on-screen jump motion for instant cursor movement.
 
-**Engine and shared libraries (top level, TUI-free):**
+- **Markdown Composed & Dual View**
+  - Composed rendering: concealed formatting markers, formatted tables, task lists, and styled headings.
+  - **Dual View**: source on the left, rendered view on the right, with synchronized line scrolling.
+  - **Independent Split Views**: switch any individual split pane between rendered and source mode independently.
+  - Outline table of contents in the sidebar.
 
-- Text: `buffer` (text model and its large-file mode), `document` (one open file: text,
-  carets, motions, folds, save planning, large-file mode) and `editor` (the tab/action
-  session over documents), `search`, `syntax`, `fold`, `diff`, `encoding`, `session`,
-  `decorations`, `textlayout`, `outline` (the Markdown heading scan behind the sidebar's
-  Contents section); `atomicfile` (atomic file replace) and `shellcmd` (run one
-  program with a timeout) are the shared leaves.
-- Project and files: `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`.
-- Settings: `config`, `keymap`, `theme`.
-- Trust: `trust` (the per-workspace trust levels, decisions and open-time policy).
-- Services: `lsp` (+`lsp/manager`, `lsp/lsptest`), `pluginapi` (plugin contract), `plugin`
-  (Lua runtime, with `plugin/hostos`, `plugin/bundled`, `plugin/plugintest`,
-  `plugin/pattern`), `commands` (the command
-  registry that feeds the command palette).
-- They must not import `internal/` and must not import bubbletea, bubbles or lipgloss.
-  Engine packages do not import the UI, the app or the plugin runtime.
-- `tools/import_rules_check.sh` (R1–R16) enforces the direction; see
-  `docs/architecture.md`.
+- **Pure Go & Cross-Platform**
+  - Ships as a single static binary (`CGO_ENABLED=0`) with zero runtime dependencies.
+  - Cross-platform support for macOS, Linux, and Windows.
+  - Keymap presets: `default`, `vscode`, `emacs`, `macos`, `macos-gui`.
 
-**Data and tools:**
+---
 
-- `tools/`: `purity_check.sh` and `import_rules_check.sh` are the architectural gates;
-  `gen_menus.py` regenerates the menu bar; `lint_version.txt` pins the linter.
+## Installation & Build
 
-- `docs/plugins/`: the plugin author documentation and the `gvim.d.lua` type stubs.
-- `refs/`: read-only reference checkouts. Do not edit or import them. `_attic/` is the
-  retired TUI and is ignored by `./...`.
-- No Makefile, no `.sphere/`, no proto or ent generation.
+### Requirements
+- Go 1.23 or later
 
-## Build and run
-
-Requirements: the Go toolchain named in `go.mod`, `golangci-lint` v2 for lint, and
-Python 3 for two generators. Google Chrome and `playwright-core` are only needed for
-scripted screenshots of the debug page.
-
+### Install via Go
 ```sh
-go build ./...                              # compile all packages
-go build -o /tmp/gvim .                     # build the binary outside the repo
-go run . [DIR] [FILE[:LINE[:COL]]]...       # run the TUI
-go run . --help                             # full flag list
-go run ./cmd/gvimdebug -- "$PWD" main.go    # run the TUI behind the debug page
+go install github.com/tbxark/gvim@latest
 ```
 
-Build the binary outside the repo root. A `gvim` binary there is not in `.gitignore`.
-
-The shipped binary must stay pure Go:
-
+### Build from Source
 ```sh
-CGO_ENABLED=0 go build ./...
-bash tools/purity_check.sh        # prints PURE_GO_OK
-bash tools/import_rules_check.sh  # prints IMPORT_RULES_OK
+git clone https://github.com/tbxark/gvim.git
+cd gvim
+go build -o gvim .
 ```
 
-Gates to pass before calling work done:
-
+To build a pure-Go static binary with no CGO dependencies:
 ```sh
-go vet ./...
-golangci-lint run ./...                     # 0 issues at the time of writing
-go test ./...                               # all pass at the time of writing
-go test ./internal/tui -run TestName         # one test while iterating
-go test -race ./...                         # test-only; needs cgo
+CGO_ENABLED=0 go build -o gvim .
 ```
 
-Generated files. Do not edit them by hand:
+---
 
-- `commands/commands_gen.go`: `python3 commands/gen/generate.py refs/fresh`
-- `internal/tui/menubar/menu_table_gen.go`: `python3 tools/gen_menus.py`
-  (`--check` reports drift)
+## Usage
 
-## Sessions, quitting and the command line
+### Common Invocations
 
-gvim has two launch kinds, following Fresh. A **session launch** — a bare `gvim` or
-`gvim DIR` — restores the session saved by an earlier run (the open tabs, their cursors
-and their unsaved text) and saves it again when the editor quits. A **file launch** —
-`gvim FILE…` — opens only the named files and neither restores nor saves the project's
-session; it is what `git commit` and `gvim --diff` use, and a stdin launch (`gvim -` /
-`--stdin`) is one too. Crash recovery and the find history work in every launch.
+```sh
+gvim .                          # Open current directory
+gvim -R .                       # Open in read-only code-viewer mode (edits & saves disabled)
+gvim -R main.go:42:10           # Open file at line 42, column 10 in viewer mode
+gvim --diff fileA.go fileB.go   # Compare two files side by side
+gvim --simple                   # Open a clean session without restoring previous tabs
+git show HEAD | gvim -          # View piped stdin in a scratch buffer
+```
 
-| Flag | Effect |
+### Command-Line Options
+
+| Flag | Description |
 |---|---|
-| `--restore` | Force the session restore for this run, even when `editor.restore_previous_session` is off. It also makes a launch with files a session launch. Cannot be combined with `--no-restore`, `--simple` or `--diff` (a compare launch is always a file launch). |
-| `--no-restore` (alias `--no-session`) | Skip the saved tabs for this run, as `editor.restore_previous_session = false` does. The session's unsaved text still comes back, and the session is still saved at quit. |
-| `--simple` | Open just what is named (the welcome screen when nothing is): no session restored or saved, no file explorer, and unsaved buffers are not kept across the quit. |
-| `--stdin` (or a `-` argument) | Read standard input into a scratch `[stdin]` buffer (bounded at 32 MiB), then read keys from the terminal. A launch with no files reads piped stdin even without the flag, as Fresh does; the buffer has no path (Save runs Save As), is unmodified on open, and the session is neither restored nor saved. Cannot be combined with `--diff` or `--restore`. |
-| `--stdin-name NAME` | Name the `[stdin]` buffer: the extension picks the language and Save As suggests it. gvim-only (Fresh has no such flag). |
+| `-R`, `--read-only`, `--view` | Open in read-only / code-viewer mode (edits and writes disabled) |
+| `--diff` | Compare two files side by side |
+| `--keymap NAME` | Keymap profile: `default`, `vscode`, `emacs`, `macos`, `macos-gui` |
+| `--theme NAME` | Theme name (e.g. `dark`, `light`) |
+| `--config PATH` | Path to custom config file (default: `~/.config/gvim/config.json`) |
+| `--log-file PATH` | Append status notices and plugin log to file |
+| `--simple` | Open without restoring or saving session, and without file explorer |
+| `--restore` | Force restoring previous session |
+| `--no-restore` | Skip restoring previous tabs |
+| `--stdin` (or `-`) | Read standard input into a scratch buffer |
+| `--no-plugins` | Skip discovering or loading plugins |
 
-`echo X | gvim -` (or `gvim --stdin`) is Fresh's stdin-as-a-buffer: the pipe fills an untitled
-`[stdin]` tab before the TUI starts and the keyboard then comes from the terminal (/dev/tty, or
-CONIN$ on Windows through bubbletea's OpenTTY). Unlike Fresh's streaming spool the read is a
-bounded 32 MiB snapshot, so very large pipes are refused instead of paged; `--stdin-name` (a gvim
-addition) names the buffer for language detection and Save As. With files named as well, the stdin
-buffer opens first and the files follow.
+---
 
-The three `editor.*` keys behind them:
+## Keybinding Cheat Sheet
 
-```json
-{
-  "editor": {
-    "hot_exit": true,
-    "restore_previous_session": true,
-    "skip_session_restore_when_files_passed": true
-  }
-}
-```
+*(Based on the `default` profile. Press `Ctrl+P` then type `>` for the full command palette.)*
 
-- `hot_exit` (default true): keep unsaved buffers — unnamed ones included — across a quit
-  and restore them on the next start. The text goes into the session's stash file at
-  quit, so a session launch quits without asking about each modified tab. Set it to
-  false to be asked to save or discard every unsaved buffer at quit; only a crash or a
-  forced exit then leaves unsaved work (as the crash-recovery copy).
-- `restore_previous_session` (default true): restore the tabs and layout. When false,
-  only the unsaved text comes back — the dirty files and unnamed buffers — and the
-  session is still saved at quit.
-- `skip_session_restore_when_files_passed` (default true): a launch with files opens only
-  those files. Set it to false to restore the session even when files are given: the saved
-  tabs open first and the given files follow them in new tabs (a given file the session
-  already has open is activated at the requested line instead of opening a second tab).
-  `--restore` does this for one run.
+### Navigation & Code Reading
+| Key | Action |
+|---|---|
+| `Ctrl+P` | Quick Open (Files, `>commands`, `:line`, `#buffers`) |
+| `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
+| `Ctrl+]` | Jump to matching bracket |
+| `Ctrl+L` | Expand line selection across all carets |
+| `Ctrl+W v` / `Ctrl+W s` | Split window vertically / horizontally |
+| `Ctrl+W w` / `Ctrl+W h/j/k/l` | Switch active split pane |
+| `Ctrl+W c` / `Ctrl+W q` | Close current split pane |
+| `Alt+` `` | Toggle terminal dock |
 
-Three differences from Fresh, from gvim keeping one session file and no per-buffer
-hot-exit store: a file launch (and `--simple`) cannot keep unsaved buffers, because it
-saves no session — it asks save/discard at quit even when `hot_exit` is on, where Fresh
-would bring the launched files' own unsaved changes back; `--no-restore` still saves the
-session at quit (it skips the restore only), where Fresh's `--no-session` also stops the
-workspace write, because gvim's session file is also its hot-exit store and skipping the
-save would lose in-progress work; and gvim has no dock to leave closed, so `--simple`'s
-"no dock" has nothing to do.
+### Code Search & Inspection
+| Key | Action |
+|---|---|
+| `Ctrl+F` | In-file find bar (`Alt+C` case, `Alt+W` word, `Alt+R` regex) |
+| `F3` / `Shift+F3` | Next / Previous search match |
+| `Alt+A` | Project Search & Replace (auto-prefilled from selection) |
+| `Alt+Q` / `Alt+M` | In Live Grep: export results to quickfix list |
+| `Alt+D` | In Live Grep: toggle searching LSP diagnostics |
 
-## Debugging the TUI
+### LSP & Semantics
+| Action | Description |
+|---|---|
+| `LSP: Go to Definition` | Jump to symbol definition |
+| `LSP: Find References` | Open references list with preview tabs |
+| `LSP: Go to Implementation` | Jump to implementation |
+| `LSP: Hover` | Show hover documentation popup |
+| `Go to LSP Symbol` | Fuzzy-find document symbols with enclosing-symbol preselected |
 
-Use the lowest layer that shows the bug.
+### Git & Review
+| Action | Description |
+|---|---|
+| `Git Gutter: Next/Prev Change` | Jump between modified regions |
+| `Git: Toggle Blame` | Show/hide inline blame on the cursor line |
+| `Git: Show Commit` | Show commit details popup for cursor line |
+| `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
+| `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
 
-### 1. Unit tests that drive `Update`
+### Markdown Modes
+| Action | Description |
+|---|---|
+| `Markdown: Cycle Mode` | Cycle active pane: Source → Rendered → Dual → Source |
+| `Markdown: Dual` | Side-by-side synchronized source and rendered split |
+| `Markdown: Rendered` | Switch focused pane to composed page view |
+| `Markdown: Source` | Switch focused pane to raw source view |
 
-Most UI logic can be tested without a terminal. Build the model, send messages, and
-assert on the model state, the emitted `tea.Cmd`s, layout rectangles and hit-map results.
-Examples: `internal/tui/footer_test.go`, `internal/tui/hit_test.go`. To check rendering,
-assert a few specific cells of the grid, not the whole frame.
+---
 
-### 2. `uitest`: the real program in memory
+## Documentation
 
-`uitest.Start(t, model, width, height)` runs the program in memory. It parses the output
-with the `charmbracelet/x/vt` emulator and returns a session.
-
-```go
-s := uitest.Start(t, m, 100, 30)
-s.Key("ctrl+p")                  // also s.Type("abc"), s.Click(x, y), s.Wheel(x, y, true)
-s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Palette") })
-sc := s.Screen()                 // sc.Cell(x, y), sc.Row(y), sc.Find(text)
-s.Screenshot("/tmp/frame.png")
-```
-
-Key and mouse calls only queue messages. Call `WaitFor` or `Settle` before reading the
-screen, or you may read a stale frame.
-
-Key spec: a single character is that key. Otherwise, join the modifiers `ctrl`, `alt`
-and `shift` to a key name with `+`, for example `ctrl+s` or `shift+down`. Key names:
-`enter esc tab backspace delete space up down left right home end pgup pgdown f1`–`f12`.
-
-Read `internal/uitest/session.go` before writing a new harness.
-
-### 3. Screenshot sweep
-
-```sh
-GVIM_SHOTS=/tmp/gvim-shots go test -run TestWriteScreenshots -count=1 ./internal/app/
-```
-
-This writes 10 PNG frames from `internal/app/screenshots_test.go`: welcome, one file,
-explorer, menu, palette, command palette, find, save-as, unsaved changes, and twelve tabs.
-Open them with an image-capable read tool. They are for looking at, not for assertions.
-The test skips without `GVIM_SHOTS`.
-
-### 4. Debug page: `cmd/gvimdebug`
-
-This command runs gvim in a pseudo-terminal, using `internal/terminal`, and serves its screen
-on a local web page. It is a debug view, not a copy of your terminal (see Fidelity below).
-The arguments after the flags go to gvim unchanged, so `--` ends the
-debug flags:
-
-```sh
-go run ./cmd/gvimdebug -- "$PWD" main.go
-go run ./cmd/gvimdebug -addr 127.0.0.1:9000 -- --diff old.go new.go
-```
-
-Flags:
-
-- `-addr`: where the page listens. Default `127.0.0.1:8765`.
-- `-cols`, `-rows`: the terminal size. Default 140×40.
-- `-bin`: a prebuilt gvim binary to run. By default each start builds this module into a
-  temp directory, so it must be run from inside the module.
-- `-real-home`: keep the user's HOME and config. By default gvim gets a temp HOME, so a
-  debug run does not read or write the user's session, recent files or config.
-- `-font PATH`: a font file for the screen. The server serves it at `/font`, and the page
-  loads it with `FontFace`. Use it when the browser cannot find the installed font by name.
-  Safari did not find JetBrains Mono Nerd Font by name, and showed boxes for the icons.
-  Example: `-font ~/Library/Fonts/JetBrainsMonoNerdFontMono-Regular.ttf`.
-
-The page at `/` shows the screen. The cursor cell is inverted. Keys typed while the focus
-is outside a field go to gvim. The page is split into `index.html` (layout), `app.css`
-(styles) and `app.js` (behaviour), all embedded in the binary. The layout has:
-
-- A top bar with the connection (`live`, `reconnecting`), gvim's status and a Restart
-  button. The status is one of `running`, `exited: …`, `building`, `build failed`,
-  `start failed` or `stopped`. A failed build keeps the page up. The build output goes to
-  the terminal that runs the command, not to the page.
-- The screen on the left, and a panel on the right with a Size card, a key field,
-  quick-key buttons, a text area and mouse help. The Size card sets gvim's columns and
-  rows, has a "Fit to window" switch, and changes the font size with A− and A+. The screen
-  uses JetBrainsMono NFM, the family name written in the font file, then JetBrainsMono
-  Nerd Font Mono, Symbols Nerd Font Mono and Menlo. These are looked up by name, and each
-  browser matches names in its own way. With `-font`, the page loads the file instead. A
-  terminal's font setting needs the family name `JetBrainsMono NFM` for this font file.
-- A bottom bar with the terminal size, the cursor position and the last error.
-
-Mouse input on the screen: click, right-click and scroll send a mouse event to the cell
-under the pointer. The page updates as soon as gvim draws, because the server pushes each
-change over `/events`.
-
-The HTTP API:
-
-| Method | Path       | Body                                                  | Response |
-|--------|------------|-------------------------------------------------------|----------|
-| GET    | `/`        |                                                       | the page; `/app.css` and `/app.js` are served beside it |
-| GET    | `/events`  |                                                       | server-sent events, one JSON state on connect and after every change: `{"status","frame","cols","rows","cursor":{"row","col","visible"}}` |
-| GET    | `/frame`   |                                                       | the screen as HTML spans; empty when gvim is not running |
-| GET    | `/status`  |                                                       | the status line |
-| POST   | `/key`     | one key spec, as in `uitest` above                     | 204; 400 for an unknown key; 409 when gvim is not running |
-| POST   | `/text`    | text; each character is typed, `\n` sends Enter        | 204 |
-| POST   | `/mouse`   | `{"action":"click","button":"left","x":3,"y":7}`      | 204; 400 for a bad action or button |
-| POST   | `/restart` |                                                       | 204; 500 with the build error |
-| POST   | `/resize`  | `{"cols":120,"rows":30}`                              | 204; 400 outside 10–400 columns or 4–200 rows. A running gvim is resized at once, and the next start keeps the size |
-
-Mouse actions are `click`, `press`, `release`, `move`, `wheel-up` and `wheel-down`. Buttons
-are `left`, `middle` and `right`. Coordinates are zero-based screen cells.
-
-```sh
-curl -d 'ctrl+e' 127.0.0.1:8765/key        # focus the file explorer
-curl -d 'down' 127.0.0.1:8765/key
-curl -d '{"action":"click","button":"left","x":3,"y":7}' \
-     -H 'Content-Type: application/json' 127.0.0.1:8765/mouse
-curl -X POST 127.0.0.1:8765/restart
-curl 127.0.0.1:8765/frame > /tmp/frame.html
-```
-
-### Automating the page
-
-Use the page from Playwright rather than from curl when you need to wait for the result of
-an action. Every control has a `data-testid`, and each quick-key button has a `data-key`:
-
-| Selector | What it is |
-|----------|------------|
-| `[data-testid=screen]` | the screen; its text is `innerText` |
-| `[data-testid=status]` | the status chip; `data-state` is `running`, `building`, `stopped`, `exited` or `failed` |
-| `[data-testid=connection]` | the stream chip; `data-state` is `connecting`, `live` or `reconnecting` |
-| `[data-testid=size]`, `[data-testid=cursor]` | the terminal size and the cursor position |
-| `[data-testid=message]` | the last input error; empty when the last input was accepted |
-| `[data-testid=key-input]`, `[data-testid=key-send]` | the key field and its button |
-| `[data-testid=text-input]`, `[data-testid=text-send]` | the text area and its button |
-| `[data-testid=restart]` | the Restart button |
-| `[data-testid=cols-input]`, `[data-testid=rows-input]`, `[data-testid=resize-apply]` | the size fields and their Apply button |
-| `[data-testid=fit-toggle]` | the "Fit to window" checkbox |
-| `[data-testid=font-smaller]`, `[data-testid=font-larger]`, `[data-testid=font-size]` | the font size buttons and the current size |
-| `[data-testid=screen-card]` | the box around the screen, which the fit measures |
-| `[data-key="ctrl+e"]` | a quick-key button; the attribute is the key spec |
-
-`window.gvimdebug` drives the page from script:
-
-- `key(spec)`, `text(s)`, `mouse({action, button, x, y})`, `resize(cols, rows)` and
-  `restart()` each return a promise. It resolves when the server accepts the input, and
-  rejects with the server's message when it does not.
-- `frames` is the number of states drawn so far. Read it before an action, then call
-  `waitForFrame(before)` to wait for the next state that gvim pushed.
-- `screenText()` returns the screen as plain text.
-
-```js
-const before = await page.evaluate(() => window.gvimdebug.frames);
-await page.evaluate(() => window.gvimdebug.key('ctrl+e'));
-await page.evaluate(n => window.gvimdebug.waitForFrame(n), before);
-const text = await page.evaluate(() => window.gvimdebug.screenText());
-```
-
-To screenshot the page, use Playwright. `playwright-core` with
-`chromium.launch({ channel: 'chrome' })` drives the installed Chrome, so no browser download
-is needed. Load the URL, wait for `[data-testid=status][data-state=running]`, then call
-`page.screenshot`. The script used so far lives outside the repo at
-`/tmp/gvim-shot/tools/`. Recreate it if it is gone.
-
-The key and mouse encodings are in `cmd/gvimdebug/keys.go`, with table-driven tests in
-`keys_test.go`.
-
-### Fidelity: what the page is and is not
-
-The page is a debug view, not a copy of the terminal you use. gvim's output goes through a
-terminal emulator (`charmbracelet/x/vt`, via `internal/terminal`), and each cell is drawn as
-text in the browser. Use the page to check layout, colours and input behaviour. Check the
-final look in a real terminal.
-
-Differences to keep in mind:
-
-- **Emulator.** The screen is what `x/vt` makes of gvim's output, not what your terminal
-  app would show. An escape sequence the emulator does not handle is shown differently,
-  or not at all.
-- **Font and metrics.** Glyphs come from the font the page loads (`-font`, or the installed
-  font names), not from your terminal's font. Line height is 1.25 em, and the cell width is
-  the font's advance. So the same `-cols` can fit a different width in the browser.
-  Nerd Font icons take the width the font gives them.
-- **Attributes.** Only foreground, background, bold, underline and reverse are drawn.
-  Italic, faint, strikethrough, blink and styled underlines are not drawn.
-- **Default colours.** A cell without a colour uses fixed dark defaults (`#d0d0d0` on
-  `#101012`), not your terminal theme.
-- **Cursor.** The cursor is drawn as an inverted cell while it is visible. Its shape (block,
-  bar, underline) and blinking are not shown.
-- **Keys and mouse.** Keys are encoded by a fixed table (`cmd/gvimdebug/keys.go`), so a key
-  combination outside it is rejected or sent differently. The page sends a left click, a
-  right click and the wheel. Middle clicks, modifier-clicks and drags are not sent from the
-  page. The API also takes `press`, `release` and `move`.
-- **Not shown.** Selection and copy, scrollback, the bell, the window title and image
-  protocols. The page has none of them.
-
-Known limits:
-
-- The screen is the only output. Model internals are not exposed.
-- Wide characters are not aligned. The second cell of a wide character is drawn as a space.
-- The size starts at `-cols` and `-rows`. The Size card changes it while gvim runs, and
-  "Fit to window" follows the browser window. Turning fit off keeps the last size. The
-  next restart keeps the size too.
-- Icons need gvim's config to ask for them. The debug run uses a temp config, so gvim
-  shows plain text. Use `-real-home` to read your own `ui_icons` setting.
-- The browser takes some shortcuts (Ctrl+T, Ctrl+W, Cmd+*). Use the quick-key buttons or
-  `curl` for those.
-- Every code change needs a restart, which rebuilds gvim and resets the editor state. There
-  is no hot reload.
-- The page listens on loopback only and has no authentication.
-
-## Language servers
-
-gvim starts a language server by itself, as Fresh does: it has a built-in table of servers, and a
-file of a language opens its server when the program is on `PATH` (`gopls`, `rust-analyzer`,
-`pylsp`, `typescript-language-server`, `clangd` and about fifty more). When the program is missing
-the status row says which one and how to install it, once per language. Override or turn off a
-server per language, or all of them, in `~/.config/gvim/config.json` or the project's
-`.gvim/config.json`:
-
-```json
-{ "lsp": { "python": { "command": "pyright-langserver", "args": ["--stdio"] }, "rust": { "enabled": false } } }
-```
-
-`"lsp_enabled": false` turns every server off. See `docs/lsp.md` for the table, the messages and what
-the servers add (diagnostics, Format Buffer through the server, and the rest).
-
-Rename (F2) edits every file the server returns. Files that are not open are opened in new tabs, edited
-and left unsaved, like the open ones. Save them with Save All.
-
-## Lua plugins
-
-gvim runs plugins written in Lua 5.1 on `github.com/yuin/gopher-lua` (pure Go). The old
-JavaScript system (goja, esbuild) is gone. Users and plugin authors read `docs/plugins/README.md`;
-the design record is `migration/ARCH-v4.md` (package graph and the plugin files by package).
-
-- `pluginapi`: the contract. Plain types, the `Host` and `Runtime` interfaces, error
-  codes, `Unsupported`; `widgetapi.go` holds the declarative widget spec types of the
-  plugin API tier 1a. Stdlib only.
-- `plugin`: the runtime (sandbox, tasks and the yield protocol, budgets, strikes, the
-  loader, every `gvim.*` area in `api_*.go`). It imports no ui, editor or buffer package.
-  `plugin/bundled` embeds the bundled plugins (`plugins/`) and Lua modules (`lib/`);
-  `plugin/plugintest` is the fake host, fake OS, manual clock and `Harness` that plugin tests use.
-- `plugin/pattern`: the Lua pattern matcher with a step budget that replaces `string.find`,
-  `match`, `gmatch` and `gsub`. `decorations`: the decoration store.
-- `internal/tui/plugin_*.go` is the host side (pump, events, prompts, keys, status, decorations,
-  windows, virtual buffers, manager, init.lua, LSP; tier 1a adds `plugin_panels.go` widget
-  panels and sidebar sections, `plugin_menus.go` menu rows and `plugin_actionpopup.go` action
-  popups). `internal/app/plugin*.go` wires the runtime to the real editor
-  (`pluginedit.go`, `pluginos*.go`, `pluginservices.go`, `plugins.go`). Update does no IO: plugin
-  work runs in `tea.Cmd`s as `pluginapi.Work`.
-- All Lua runs on the Bubble Tea update goroutine. A host method runs inside a Lua call and must
-  never call into the runtime; it validates and defers (`m.plug.later`).
-
-Plugin gates, besides the usual ones:
-
-```sh
-go test ./plugin/... ./plugin/pattern ./pluginapi ./decorations
-go test -run 'TestStubsMatchRuntime|TestDocs' ./plugin   # docs/plugins vs the runtime
-go test -run TestBundledPluginsIdleHeap -v ./internal/app          # memory gate, prints the numbers
-go test -race ./plugin/... ./plugin/pattern ./internal/tui/... ./internal/app
-```
-
-- `docs/plugins/gvim.d.lua` must declare exactly the functions a live plugin state has, and every
-  function must appear in the Markdown (`TestStubsMatchRuntime`, `TestDocsCoverTheAPI`). Adding
-  an API function means adding it to `gvim.d.lua` and to the right page of `docs/plugins/`.
-  Every file in `docs/plugins/examples/` is loaded and run by `TestDocsExamples`.
-- The default-enabled bundled plugins may keep at most 8 MiB of heap while idle
-  (`TestBundledPluginsIdleHeap`; about 6.6 MiB today). When a new bundled plugin breaks it, set
-  `default_enabled: false` in its `plugin.json` (largest first) and update `docs/plugins/bundled.md`.
-- Tests that depend on time budgets assert on step counts or budget errors, with at most one
-  generous wall-clock sanity bound. Do not add a tight wall-clock threshold.
-- gopher-lua v1.1.2 miscompiles `a, b = b, a` on two local variables. Do not write it in Lua
-  plugins (bundled or tests).
-- `.js` and `.ts` plugins are never run.
-
-## Testing rules
-
-From `CLAUDE.md`:
-
-- Plain Go unit tests: table-driven, asserting values and behavior.
-- No golden or snapshot tests for the TUI, no full-frame string comparisons, and no new
-  golden-screen scenarios.
-- Fix a bug with a regression test that fails first.
-- Keep the existing `testdata` fixtures. Do not regenerate them to make a test pass.
-- `TestWriteScreenshots` is a debugging aid. It is gated by an environment variable, skips
-  by default, and asserts nothing, so `go test ./...` stays green.
-
-## Working rules for agents
-
-- Keep diffs surgical. Match the surrounding style, and do not refactor adjacent code.
-- Do not commit or push unless asked. Do not run commands with outside side effects
-  (publishing, tagging, deploying).
-- Do not edit or import `refs/` or `_attic/`.
-- Before finishing, run `go vet ./...`, `golangci-lint run ./...`, both purity and import
-  gates, and `go test ./...`.
+For architecture records, design documentation, and internal specifications, see:
+- [`docs/architecture.md`](docs/architecture.md) — Module architecture, package boundaries, and import rules
+- [`docs/ui.md`](docs/ui.md) — UI styling, component geometry, overlays, and prompt interaction
+- [`docs/markdown.md`](docs/markdown.md) — Markdown page view, dual scroll synchronization, and parser mapping
+- [`docs/settings.md`](docs/settings.md) — Configuration schema, JSONC persistence, and live settings
+- [`docs/themes.md`](docs/themes.md) — Theme specification, color roles, and customization
+- [`docs/terminal.md`](docs/terminal.md) — Pseudo-terminal dock and scrollback model
+- [`docs/parity.md`](docs/parity.md) — Live Fresh parity audit matrix and objective record

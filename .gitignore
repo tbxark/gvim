@@ -25,6 +25,7 @@ go.work
 /.claude/skills
 /.grok/skills
 /.zcode/skills
+/.commandcode/
 skills-lock.json
 
 # Reference checkouts used for research (other projects); not part of the module.
