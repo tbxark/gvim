@@ -1147,3 +1147,522 @@ func hasPickerRow(t *testing.T, picker *plugintest.FakeOverlay, substr string) b
 	}
 	return false
 }
+
+func TestAuditModeSaveRefreshesOpenPicker(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.SetFile("/w/b.go", "package b\n")
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	h := startAudit(t, host, os)
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	picker := h.Host.UI().Last("picker")
+	if picker == nil {
+		t.Fatal("no review picker")
+	}
+	if hasPickerRow(t, picker, "b.go") {
+		t.Fatal("b.go present before save")
+	}
+
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	h.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	if !hasPickerRow(t, picker, "b.go") {
+		t.Fatalf("save did not refresh picker: %+v", picker.Picker.Items)
+	}
+
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	h.Emit(pluginapi.Event{Name: "after_file_revert", Data: map[string]any{"path": "/w/a.go"}})
+	if hasPickerRow(t, picker, "b.go") {
+		t.Fatalf("revert did not refresh picker: %+v", picker.Picker.Items)
+	}
+}
+
+func TestAuditModeSaveReloadsOpenDiffInPlace(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	h := startAudit(t, host, os)
+	diffID := openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := auditDiffLine(t, host, diffID); got != 3 {
+		t.Fatalf("pre-save cursor = %d, want 3", got)
+	}
+
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+newer\n@@ -10 +10 @@\n-old2\n+newer2\n"})
+	h.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	if got := host.ActiveBuffer(); got != diffID {
+		t.Fatalf("save refresh moved focus to %d, want diff %d", got, diffID)
+	}
+	if got := auditDiffLine(t, host, diffID); got != 3 {
+		t.Fatalf("post-save cursor = %d, want hunk row 3", got)
+	}
+	var text string
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+newer2") {
+		t.Fatalf("diff was not reloaded in place: %q", text)
+	}
+	if targets := host.LineTargets(diffID); len(targets) == 0 {
+		t.Fatal("reloaded diff lost line targets")
+	}
+}
+
+// blockingReloadOS blocks only the second a.go diff (the save-triggered reload), leaving
+// the initial picker-open diff unblocked.
+type blockingReloadOS struct {
+	*plugintest.FakeOS
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingReloadOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "-- a.go") && strings.Contains(joined, "--unified=3") {
+		s.mu.Lock()
+		s.calls++
+		call := s.calls
+		s.mu.Unlock()
+		if call == 2 {
+			close(s.started)
+			select {
+			case <-s.release:
+			case <-ctx.Done():
+				return hostos.ProcResult{}, ctx.Err()
+			}
+		}
+	}
+	return s.FakeOS.Run(ctx, argv, o)
+}
+
+func TestAuditModeSaveReloadDiscardedAfterClose(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	slow := &blockingReloadOS{FakeOS: plain, started: make(chan struct{}), release: make(chan struct{})}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: slow, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	work := runnableWork(h)
+	if work == nil {
+		t.Fatal("no save-triggered reload Work")
+	}
+	done := make(chan pluginapi.Completion, 1)
+	go func() { done <- work.Run(work.Ctx) }()
+	<-slow.started
+	if err := h.RT.Run(auditPlugin+".close", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	drainRuntime(h)
+	close(slow.release)
+	h.RT.Resolve(<-done)
+	drainRuntime(h)
+	if b := findAuditDiffMaybe(host, "a.go"); b != 0 {
+		t.Fatalf("late save reload recreated closed diff %d", b)
+	}
+}
+
+// scriptedReloadOS blocks the second a.go diff and returns firstDiff; later reload calls
+// return secondDiff, so two overlapping save refreshes can be told apart.
+type scriptedReloadOS struct {
+	*plugintest.FakeOS
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+	first   string
+	second  string
+}
+
+func (s *scriptedReloadOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "-- a.go") && strings.Contains(joined, "--unified=3") {
+		s.mu.Lock()
+		s.calls++
+		call := s.calls
+		s.mu.Unlock()
+		switch call {
+		case 1:
+			break
+		case 2:
+			close(s.started)
+			select {
+			case <-s.release:
+			case <-ctx.Done():
+				return hostos.ProcResult{}, ctx.Err()
+			}
+			return hostos.ProcResult{Stdout: []byte(s.first)}, nil
+		default:
+			return hostos.ProcResult{Stdout: []byte(s.second)}, nil
+		}
+	}
+	return s.FakeOS.Run(ctx, argv, o)
+}
+
+func TestAuditModeOverlappingSaveReloadOnlyNewestApplies(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	os := &scriptedReloadOS{
+		FakeOS: plain, started: make(chan struct{}), release: make(chan struct{}),
+		first:  "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+stale\n",
+		second: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+fresh\n",
+	}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: os, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	diffID := openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	firstWork := runnableWork(h)
+	if firstWork == nil {
+		t.Fatal("no first save reload Work")
+	}
+	firstDone := make(chan pluginapi.Completion, 1)
+	go func() { firstDone <- firstWork.Run(firstWork.Ctx) }()
+	<-os.started
+
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	secondWork := runnableWork(h)
+	if secondWork == nil {
+		t.Fatal("no second save reload Work")
+	}
+	h.RT.Resolve(secondWork.Run(secondWork.Ctx))
+	drainRuntime(h)
+	close(os.release)
+	h.RT.Resolve(<-firstDone)
+	drainRuntime(h)
+
+	var text string
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+fresh") || strings.Contains(text, "+stale") {
+		t.Fatalf("overlapping save reload final diff = %q, want fresh only", text)
+	}
+}
+
+func TestAuditModeSaveRefreshesPickerAndOpenDiff(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.SetFile("/w/b.go", "package b\n")
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	h := startAudit(t, host, os)
+	diffID := openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Reopen the review picker while the diff stays open.
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	picker := h.Host.UI().Last("picker")
+	if picker == nil || !hasPickerRow(t, picker, "a.go") {
+		t.Fatalf("picker not open over diff: %+v", picker)
+	}
+
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+saved\n"})
+	h.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	if !hasPickerRow(t, picker, "b.go") {
+		t.Fatalf("save did not refresh picker over diff: %+v", picker.Picker.Items)
+	}
+	if got := auditDiffLine(t, host, diffID); got != 3 {
+		t.Fatalf("save reload cursor = %d, want 3", got)
+	}
+	var text string
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+saved") {
+		t.Fatalf("open diff stayed stale while picker refreshed: %q", text)
+	}
+
+	// Revert clears both the new list row and the diff content.
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+reverted\n"})
+	h.Emit(pluginapi.Event{Name: "after_file_revert", Data: map[string]any{"path": "/w/a.go"}})
+	if hasPickerRow(t, picker, "b.go") {
+		t.Fatalf("revert did not refresh picker over diff: %+v", picker.Picker.Items)
+	}
+	text = ""
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+reverted") {
+		t.Fatalf("revert did not reload open diff: %q", text)
+	}
+}
+
+func TestAuditModeSaveReloadSurvivesUnrelatedRefresh(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	slow := &blockingReloadOS{FakeOS: plain, started: make(chan struct{}), release: make(chan struct{})}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: slow, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	diffID := openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	picker := h.Host.UI().Last("picker")
+	if picker == nil {
+		t.Fatal("no picker over diff")
+	}
+
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+saved\n"})
+
+	// a's save starts a blocked reload and a list refresh.
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	pending := drainRunnableWorks(t, h)
+	var aDone chan pluginapi.Completion
+	for aDone == nil {
+		if len(pending) == 0 {
+			pending = drainRunnableWorks(t, h)
+		}
+		w := pending[0]
+		pending = pending[1:]
+		done := make(chan pluginapi.Completion, 1)
+		go func(w *pluginapi.Work) { done <- w.Run(w.Ctx) }(w)
+		select {
+		case <-slow.started:
+			aDone = done
+		case c := <-done:
+			h.RT.Resolve(c)
+		case <-time.After(2 * time.Second):
+			t.Fatal("a reload did not block")
+		}
+	}
+
+	// b's save makes a new refresh win, while a's independent reload is still blocked.
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/b.go"}})
+	for len(pending) > 0 {
+		w := pending[0]
+		pending = pending[1:]
+		h.RT.Resolve(w.Run(w.Ctx))
+	}
+	runAllWork(h)
+	if !hasPickerRow(t, picker, "b.go") {
+		t.Fatalf("winning b refresh did not apply: %+v", picker.Picker.Items)
+	}
+
+	close(slow.release)
+	h.RT.Resolve(<-aDone)
+	drainRuntime(h)
+	var text string
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+saved") {
+		t.Fatalf("a reload was lost when b refresh won: %q", text)
+	}
+}
+
+// blockingSaveOS blocks the third status call (the save-event list refresh) and the second
+// a.go diff call (the save-event reload), leaving initial review setup unblocked.
+type blockingSaveOS struct {
+	*plugintest.FakeOS
+	mu            sync.Mutex
+	statusCalls   int
+	diffCalls     int
+	statusStarted chan struct{}
+	diffStarted   chan struct{}
+	statusRelease chan struct{}
+	diffRelease   chan struct{}
+}
+
+func (s *blockingSaveOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "status") && strings.Contains(joined, "--porcelain") {
+		s.mu.Lock()
+		s.statusCalls++
+		call := s.statusCalls
+		s.mu.Unlock()
+		if call == 3 {
+			close(s.statusStarted)
+			select {
+			case <-s.statusRelease:
+			case <-ctx.Done():
+				return hostos.ProcResult{}, ctx.Err()
+			}
+		}
+	}
+	if strings.Contains(joined, "-- a.go") && strings.Contains(joined, "--unified=3") {
+		s.mu.Lock()
+		s.diffCalls++
+		call := s.diffCalls
+		s.mu.Unlock()
+		if call == 2 {
+			close(s.diffStarted)
+			select {
+			case <-s.diffRelease:
+			case <-ctx.Done():
+				return hostos.ProcResult{}, ctx.Err()
+			}
+		}
+	}
+	return s.FakeOS.Run(ctx, argv, o)
+}
+
+func TestAuditModeSaveReloadSurvivesPickerCloseDuringRefresh(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	os := &blockingSaveOS{
+		FakeOS: plain, statusStarted: make(chan struct{}), diffStarted: make(chan struct{}),
+		statusRelease: make(chan struct{}), diffRelease: make(chan struct{}),
+	}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: os, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	diffID := openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	picker := h.Host.UI().Last("picker")
+	if picker == nil {
+		t.Fatal("no picker over diff")
+	}
+
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+saved\n"})
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+
+	pending := drainRunnableWorks(t, h)
+	var diffDone, statusDone chan pluginapi.Completion
+	for diffDone == nil || statusDone == nil {
+		if len(pending) == 0 {
+			pending = drainRunnableWorks(t, h)
+		}
+		w := pending[0]
+		pending = pending[1:]
+		done := make(chan pluginapi.Completion, 1)
+		go func(w *pluginapi.Work) { done <- w.Run(w.Ctx) }(w)
+		var diffCh, statusCh <-chan struct{}
+		if diffDone == nil {
+			diffCh = os.diffStarted
+		}
+		if statusDone == nil {
+			statusCh = os.statusStarted
+		}
+		select {
+		case <-diffCh:
+			diffDone = done
+		case <-statusCh:
+			statusDone = done
+		case c := <-done:
+			h.RT.Resolve(c)
+		case <-time.After(2 * time.Second):
+			t.Fatal("save reload and refresh did not both block")
+		}
+	}
+
+	// Esc closes the picker while its refresh is still blocked; the independent reload must
+	// still complete and update the open diff.
+	h.RT.Resolve(pluginapi.Completion{Token: picker.Token})
+	drainRuntime(h)
+	close(os.statusRelease)
+	close(os.diffRelease)
+	h.RT.Resolve(<-statusDone)
+	h.RT.Resolve(<-diffDone)
+	drainRuntime(h)
+
+	var text string
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID {
+			text = strings.Join(b.Lines, "\n")
+		}
+	}
+	if !strings.Contains(text, "+saved") {
+		t.Fatalf("open diff stayed stale after picker closed during refresh: %q", text)
+	}
+}
+
+func drainRunnableWorks(t *testing.T, h *plugintest.Harness) []*pluginapi.Work {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		work, _ := h.RT.Drain(50 * time.Millisecond)
+		var out []*pluginapi.Work
+		for j := range work {
+			if work[j].Run != nil {
+				out = append(out, &work[j])
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	t.Fatal("no runnable Work after pumping turns")
+	return nil
+}
+
+func runAllWork(h *plugintest.Harness) {
+	idle := 0
+	for i := 0; i < 100; i++ {
+		work, more := h.RT.Drain(50 * time.Millisecond)
+		ran := false
+		for j := range work {
+			if work[j].Run != nil {
+				h.RT.Resolve(work[j].Run(work[j].Ctx))
+				ran = true
+			}
+		}
+		if ran {
+			idle = 0
+			continue
+		}
+		idle++
+		if !more && idle >= 5 {
+			return
+		}
+	}
+}
+
+func TestAuditModeSaveReloadSetContentErrorVisible(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	h := startAudit(t, host, os)
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	host.SetContentErr = pluginapi.Errf(pluginapi.CodeIO, "setcontent boom")
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+newer\n"})
+	h.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	got := strings.Join(h.NoticeTexts(), "|")
+	if !strings.Contains(got, "could not update the diff for a.go") || !strings.Contains(got, "setcontent boom") {
+		t.Fatalf("set_content failure notice = %q", got)
+	}
+}

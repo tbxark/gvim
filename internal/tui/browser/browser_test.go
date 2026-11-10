@@ -248,6 +248,31 @@ func TestTypedLocationIgnoresDirectory(t *testing.T) {
 	}
 }
 
+// TestDetectEncodingToggle: Alt+E turns encoding auto-detection off and the next file
+// choice asks the root for an encoding; Alt+E again restores the default.
+func TestDetectEncodingToggle(t *testing.T) {
+	t.Parallel()
+	dir, home := fixture(t)
+	b := New(Options{Dir: dir, Home: home})
+	selectName(t, b, "a.go")
+	msg, ok := send(t, b, key(tea.KeyEnter)).(Open)
+	if !ok || msg.AskEncoding {
+		t.Fatalf("default file choice = %#v, want auto-detect", msg)
+	}
+
+	dir, home = fixture(t)
+	b = New(Options{Dir: dir, Home: home})
+	send(t, b, altKey('e'))
+	if b.Notice() != "Encoding auto-detection disabled - will prompt for encoding" {
+		t.Fatalf("off notice = %q", b.Notice())
+	}
+	selectName(t, b, "a.go")
+	msg, ok = send(t, b, key(tea.KeyEnter)).(Open)
+	if !ok || !msg.AskEncoding {
+		t.Fatalf("disabled file choice = %#v, want AskEncoding", msg)
+	}
+}
+
 func TestHiddenToggle(t *testing.T) {
 	t.Parallel()
 	dir, home := fixture(t)

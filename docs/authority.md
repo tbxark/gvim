@@ -300,8 +300,10 @@ deliberately does not take.
   against the local working directory). Remote workspace roots and remote LSP manager roots
   expand `~` and valid `~user` through the remote shell; the LSP expander validates the user
   name before its fixed script and refuses shell-special `~-`/`~-N` (OLDPWD/dir-stack) and
-  `~+`/`~+N` (PWD/dir-stack). The editor's remote file access is narrower: it expands only
-  `~`/`~/...` and still rejects `~user` for opening or saving a document.
+  `~+`/`~+N` (PWD/dir-stack). The editor's remote file access now uses the same validated
+  expansion: `~`/`~/...` use the cached `$HOME`, valid `~user`/`~user/...` expand remotely for
+  opening, saving and Save As, and the rejected shell-special names are refused before any
+  remote command.
 - Remote external-change watching (landed): the directories of the open documents are
   watched on the remote host through `authority Files().Watch` (the polled remote watcher)
   and bridged into the root's existing watch pipeline (`RootPorts.Watch`/`WatchDirs`), so

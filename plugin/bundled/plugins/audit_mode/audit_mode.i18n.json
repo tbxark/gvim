@@ -32,6 +32,7 @@
     "status.hunk": "Review Diff: hunk %{current}/%{total}",
     "status.file_hunk": "Review Diff: %{file} hunk %{current}/%{total}",
     "status.diff_truncated_file": "Review Diff: diff for %{path} was truncated",
+    "status.diff_reload_failed": "Review Diff: could not update the diff for %{path}: %{error}",
     "status.nav_limit": "Review Diff: stopped after %{count} files while searching for a hunk",
     "status.nav_failed": "Review Diff: could not read a candidate diff for %{path}: %{error}",
     "section.staged": "STAGED (%{count})",

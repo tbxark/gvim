@@ -982,6 +982,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.comparePicked(msg.Path)
 			break
 		}
+		if msg.AskEncoding {
+			m.askOpenWithEncoding(msg.Path, msg.Line, msg.Col)
+			break
+		}
 		cmd = m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
 		m.focusEditor()
 	case palette.RunCommandMsg:

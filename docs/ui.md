@@ -478,6 +478,17 @@ result region:
 | Sidebar column (File Explorer + Contents) | body, left column | `internal/tui/frame` (geometry and hit map), `internal/tui/sidebar` (section headers and the Contents body), `internal/tui/explorer` (tree body) |
 | Plugin widget panel | card (centred float), body of a virtual-buffer pane, or a sidebar section | `internal/tui/pluginpanel` (layout, paint, hit testing), `internal/tui/plugin_panels.go` (placement, focus, routing); a floating panel is a card with the shared frame, a buffer panel is painted inside the pane's text rectangle, a sidebar section's body is painted by the column |
 
+**File browser.** Alt+. toggles hidden entries and Alt+S cycles the sort order, as
+before. Alt+E toggles Fresh's file_browser_toggle_detect_encoding: while auto-detection
+is on (the default) a chosen file opens normally; while it is off the browser opens an
+"Open with Encoding" list first, and choosing an encoding opens the file and reloads it
+with that codec before the caret moves to the chosen `:line:col`. The setting is per
+browser opening; the list uses the same encoding catalogue as Set Encoding. If the chosen
+file is already open with unsaved edits, its tab is activated but the reload is refused:
+the buffer and edits are kept and the unsaved-changes error is shown in the status row
+(no Reloaded success). A large file keeps the normal windowed auto-detect open and says
+so instead of loading it whole.
+
 ### File Explorer write dialogs
 
 New File, New Directory, Rename and Delete use the one-line prompt/confirmation surfaces

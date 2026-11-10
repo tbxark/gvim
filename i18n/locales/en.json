@@ -1186,5 +1186,7 @@
   "gvim.notice.lsp.remote_root_timeout": "Remote LSP root_markers scan timed out; using the workspace root",
   "gvim.notice.lsp.remote_root_failed": "Remote LSP root_markers scan failed: %{error}; using the workspace root",
   "gvim.notice.lsp.remote_root_depth": "Remote LSP root_markers scan stopped after %{depth} levels; using the workspace root",
-  "gvim.notice.lsp.remote_root_changed": "Remote LSP root_markers scan abandoned after the workspace changed; using the workspace root"
+  "gvim.notice.lsp.remote_root_changed": "Remote LSP root_markers scan abandoned after the workspace changed; using the workspace root",
+  "gvim.browser.detect_encoding_on": "Encoding auto-detection enabled",
+  "gvim.browser.detect_encoding_off": "Encoding auto-detection disabled - will prompt for encoding"
 }

@@ -57,6 +57,9 @@ type FakeHost struct {
 	// LinesDelay makes Lines sleep, to model a slow editor (heavy host call).
 	LinesDelay time.Duration
 
+	// SetContentErr, when non-nil, makes every SetContent call fail.
+	SetContentErr error
+
 	// Notices are the Notify calls in order.
 	Notices []Notice
 	// Gone are the OwnerGone calls in order.

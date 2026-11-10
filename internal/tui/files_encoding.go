@@ -57,6 +57,38 @@ func (m *Model) openEncodings(action, title string) {
 	m.pushOverlay(v)
 }
 
+// askOpenWithEncoding is the browser's Detect-Encoding-off path: it asks which
+// encoding the chosen file should be read with, opens the file, then reloads it with
+// that encoding so the tab's codec and label are the chosen one. A large file falls
+// back to the normal auto-detect open: its read is windowed and the encoding chooser
+// would require loading it whole first.
+func (m *Model) askOpenWithEncoding(path string, line, col int) {
+	rows := []list.Row{}
+	for _, c := range editor.EncodingChoices() {
+		rows = append(rows, list.Row{Left: c.Label, Value: c.Name})
+	}
+	v := list.New("Open with Encoding", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		if pc, ok := m.ed.(pathClassifier); ok && pc.IsLargePath(path) {
+			cmd := m.openFileCmd(path, false, line, col)
+			m.notice = "Encoding selection is not available for a large file; opened with auto-detection"
+			m.focusEditor()
+			return cmd
+		}
+		if err := m.openFileErr(path, false); err != nil {
+			m.notice = err.Error()
+			return nil
+		}
+		cmd := m.dispatch(Command{Action: "reload_with_encoding", Args: map[string]any{"name": r.Value}})
+		if line > 0 {
+			m.gotoLine(line, col)
+		}
+		m.focusEditor()
+		return cmd
+	})
+	m.pushOverlay(v)
+}
+
 // openLineEndings lists the two line endings. The ending of the active document is
 // marked, and choosing a row runs set_line_ending.
 func (m *Model) openLineEndings() {

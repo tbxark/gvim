@@ -39,9 +39,11 @@ local state = {
   diff_buf = nil,
   diff_hunks = {},
   diff_file_key = nil,
+  diff_file = nil,
   diff_generation = 0,
   data_generation = 0,
   refresh_seq = 0,
+  diff_reload_seq = 0,
 }
 
 local function notice(msg, level)
@@ -262,6 +264,7 @@ local function close_previous_diff()
   state.diff_buf = nil
   state.diff_hunks = {}
   state.diff_file_key = nil
+  state.diff_file = nil
 end
 
 local function open_virtual_diff(name, text, language)
@@ -287,11 +290,17 @@ end
 -- fetch_diff reads one file's bounded unified diff without notifying. It returns
 -- text, abs_path, truncated, err. A missing/empty diff is text=nil, err=nil; a read or git
 -- failure is returned in err; "cancelled" means a close/reopen changed the generation.
-local function fetch_diff(file, repo, generation)
+local function fetch_diff(file, repo, generation, cancel_check)
   local abs_path = gvim.path.join(repo.root, file.path)
+  local function cancelled()
+    if generation ~= nil and generation ~= state.diff_generation then
+      return true
+    end
+    return cancel_check ~= nil and cancel_check() or false
+  end
   if file.category == "untracked" then
     local data, err = gvim.fs.read(abs_path, { max = MAX_DIFF_BYTES })
-    if generation ~= state.diff_generation then
+    if cancelled() then
       return nil, abs_path, false, "cancelled"
     end
     if not data then
@@ -316,7 +325,7 @@ local function fetch_diff(file, repo, generation)
     args = { "diff", "--no-color", "--unified=3", "--", file.path }
   end
   local result, err = git_run(repo, args, MAX_DIFF_BYTES)
-  if generation ~= state.diff_generation then
+  if cancelled() then
     return nil, abs_path, false, "cancelled"
   end
   if not result then
@@ -349,6 +358,7 @@ local function present_diff(file, text, abs_path, hunk_index, quiet_open, trunca
   local hunks = diff_hunk_rows(text)
   state.diff_hunks = hunks
   state.diff_file_key = file_key(file)
+  state.diff_file = file
   if hunk_index and hunks[hunk_index] then
     buf:set_cursor(gvim.pos(hunks[hunk_index], 0), { center = true })
     notice(t("status.file_hunk", { file = file.path, current = hunk_index, total = #hunks }))
@@ -380,6 +390,91 @@ local function show_diff(file, repo, generation)
     return
   end
   present_diff(file, text, abs_path, nil, false, truncated)
+end
+
+-- diff_path_matches reports whether an editor save/revert event path names the file of the
+-- open review diff. The diff keeps repo-relative paths; the event carries the working path.
+local function diff_path_matches(path, file, repo)
+  if not path or not file or not repo then
+    return false
+  end
+  return path == gvim.path.join(repo.root, file.path)
+end
+
+-- reload_open_diff updates the open read-only diff after its own file was saved/reverted.
+-- It is the event-channel half of Fresh's review watch (no poll/W toggle here). The content
+-- is replaced in place so the page is not focused or reopened; cursor position within the
+-- current hunk and line targets are preserved. A close/reopen, selection, newer reload or
+-- navigation generation change discards a late result.
+local function reload_open_diff(path)
+  local repo = state.repo
+  local file = state.diff_file
+  if not state.diff_buf or not state.diff_buf:valid() or not file or not repo then
+    return
+  end
+  if file.category == "staged" or not diff_path_matches(path, file, repo) then
+    return
+  end
+  local source_buf = state.diff_buf
+  local source_key = state.diff_file_key
+
+  state.diff_reload_seq = state.diff_reload_seq + 1
+  local operation = state.diff_reload_seq
+  -- Cancel navigation but do not tie this reload to diff_generation: a list refresh (and its
+  -- generation bumps) must not cancel the matching diff reload. Only a newer reload, a
+  -- replaced/closed diff or a replaced file selection cancels it.
+  state.diff_generation = state.diff_generation + 1
+  local function still_current()
+    return operation == state.diff_reload_seq and
+      source_buf:valid() and state.diff_buf == source_buf and state.diff_file_key == source_key
+  end
+  local text, abs_path, truncated, err = fetch_diff(file, repo, nil, function() return not still_current() end)
+  if err == "cancelled" or not still_current() then
+    return
+  end
+  if not text then
+    if err then
+      notice(t("status.diff_failed", { path = file.path, error = err }), "warn")
+      return
+    end
+    close_previous_diff()
+    notice(t("status.diff_empty", { path = file.path }))
+    return
+  end
+  local old_hunks = state.diff_hunks or {}
+  local old_line = source_buf:cursor().line
+  local old_index, old_header = 0, 0
+  for i, row in ipairs(old_hunks) do
+    if row <= old_line then
+      old_index, old_header = i, row
+    else
+      break
+    end
+  end
+  local old_offset = old_index > 0 and old_line - old_header or 0
+  local ok, seterr = source_buf:set_content { { text = text } }
+  if not ok then
+    notice(t("status.diff_reload_failed", { path = file.path, error = tostring(seterr) }), "warn")
+    return
+  end
+  if file.status ~= "D" and gvim.fs.exists(abs_path) then
+    local targets = parse_diff_targets(text, abs_path)
+    if #targets > 0 then
+      local tok, terr = gvim.buf.set_line_targets(source_buf, targets)
+      if not tok then
+        notice("Review Diff: could not update line targets: " .. tostring(terr), "warn")
+      end
+    end
+  end
+  local hunks = diff_hunk_rows(text)
+  state.diff_hunks = hunks
+  if old_index > 0 and #hunks > 0 then
+    local index = math.min(old_index, #hunks)
+    source_buf:set_cursor(gvim.pos(hunks[index] + old_offset, 0))
+  end
+  if truncated then
+    notice(t("status.diff_truncated_file", { path = file.path }))
+  end
 end
 
 local function close_state()
@@ -712,6 +807,23 @@ gvim.command.register {
     close_previous_diff()
   end,
 }
+
+local function on_file_changed(ev)
+  -- The matching open-diff reload is an independent task: an unrelated save's list refresh,
+  -- a refresh losing its picker, or a newer refresh must not cancel it. The list refresh is
+  -- independent too; reload_open_diff ignores refresh's diff_generation bumps and only a
+  -- newer matching reload/close/selection cancels it.
+  local path = ev and ev.path
+  if type(path) == "string" and state.diff_buf then
+    gvim.async.spawn(function() reload_open_diff(path) end)
+  end
+  if state.picker then
+    gvim.async.spawn(refresh)
+  end
+end
+
+gvim.on("after_file_save", on_file_changed)
+gvim.on("after_file_revert", on_file_changed)
 
 gvim.plugin.on_unload(function()
   close_state()

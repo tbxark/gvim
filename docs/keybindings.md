@@ -211,7 +211,8 @@ file browser (`popup`), the menu bar's dropdown and the context menu (`menu`), t
 (`settings`), and the dock (`dock`). The top overlay looks the key up before its own handler:
 a bound action runs the surface's operation (or, for a real model action, the same dispatch a
 preset or plugin binding runs), and an unbound key falls through to the built-in handler exactly
-as before. Rebind a cancel action and the surface's default chord still falls through to the same
+as before. The file browser's built-in keys include `Alt+.` hidden entries, `Alt+E` encoding
+auto-detection (off opens an encoding list before the file), and `Alt+S` sort order. Rebind a cancel action and the surface's default chord still falls through to the same
 operation; `Esc`, `Enter`, the arrows and the page keys therefore keep their meanings.
 
 Limits, all deliberate: only single-key bindings apply in the overlay contexts (a sequence there

@@ -273,7 +273,18 @@ the active buffer, so close/reopen, file selection, tab switch, picker Esc or a 
 (which starts a new review-data epoch and invalidates in-flight navigation) discards a stale
 navigation instead of opening a background diff. Overlapping refreshes are independent operations:
 only the newest refresh may replace the file/repo state or show a notice, so an older success cannot
-overwrite newer rows and an older error cannot appear after the newer result. A truncated candidate still opens with an explicit
+overwrite newer rows and an older error cannot appear after the newer result. It also follows the editor's own
+`after_file_save`/`after_file_revert` events, the save/revert half of Fresh's review watch: with
+the picker open it re-reads the list, and with a matching unstaged/untracked diff open it reloads
+that read-only diff in place, preserving the current hunk/cursor and line targets without focusing
+the buffer. When the review picker and a diff are open together, the list refresh and the matching
+diff reload run as independent tasks: an unrelated save's winning list refresh cannot cancel the
+open file's reload, and closing the picker mid-refresh does not cancel it either. Only a newer
+matching reload, a closed/replaced diff or a different selection discards the reload. A failed
+in-place reload reports a visible error. A staged diff is not reloaded by a working-tree save. Reload completions carry their own
+operation sequence and diff generation, so a newer save, close/reopen, file selection or refresh
+discards a stale reload. This is not Fresh's full watch: there is no background poll or `W` toggle,
+so changes made outside gvim wait for the explicit **Review Diff: Refresh**. A truncated candidate still opens with an explicit
 truncation notice; hitting the 200-candidate bound or failing to read a candidate is reported as
 that reason, not as a global first/last hunk. All git calls go through the hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
 and a closed picker/diff invalidates an in-flight answer by generation (an already-issued git
@@ -283,7 +294,7 @@ reset on every refresh, including a clean or error result, and a path changed on
 its staged and unstaged diffstats separate (totals add each category once). The port is read-only:
 it does **not** stage,
 unstage, discard, add comments or notes, export, review a commit range/stash, show side-by-side or
-watch for external changes; those need index writes, comment persistence or the orchestrator/range
+provide Fresh's background poll/`W` watch for changes made outside the editor; those need index writes, comment persistence or the orchestrator/range
 machinery and are OPEN. Binary changes show git's message without line targets; very large output is
 truncated and footered as such. No default keys; opt-in.
 

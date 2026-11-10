@@ -225,6 +225,9 @@ func (p fakePos) after(s string) fakePos {
 // styles and props that go with them.
 func (f *FakeHost) SetContent(id pluginapi.BufferID, entries []pluginapi.ContentEntry) error {
 	f.rec("SetContent", id, len(entries))
+	if f.SetContentErr != nil {
+		return f.SetContentErr
+	}
 	b, s, err := f.virtual(id)
 	if err != nil {
 		return err

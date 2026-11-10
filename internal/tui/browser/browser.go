@@ -75,6 +75,9 @@ func (r Row) dirLike() bool {
 type Open struct {
 	Path      string
 	Line, Col int
+	// AskEncoding is set when the browser's encoding auto-detection is off: the
+	// root must ask for an encoding before opening the file.
+	AskEncoding bool
 }
 
 // Choose is the message a folder pick sends. Path is the chosen directory.
@@ -138,16 +141,17 @@ type Options struct {
 // Browser is the overlay. It is a pointer because Draw records the box it drew,
 // which the mouse uses to find rows.
 type Browser struct {
-	dir        string
-	folderOnly bool
-	title      string
-	home       string
-	showHidden bool
-	input      string
-	styles     style.Styles
-	now        func() time.Time
-	list       func(string, explorer.ListOptions) ([]explorer.Entry, error)
-	clicks     clickCounter
+	dir            string
+	folderOnly     bool
+	title          string
+	home           string
+	showHidden     bool
+	detectEncoding bool
+	input          string
+	styles         style.Styles
+	now            func() time.Time
+	list           func(string, explorer.ListOptions) ([]explorer.Entry, error)
+	clicks         clickCounter
 
 	loaded       bool // entries were read for loadedDir with loadedHidden
 	loadedDir    string
@@ -187,14 +191,15 @@ func New(opts Options) *Browser {
 		}
 	}
 	b := &Browser{
-		dir:        dir,
-		folderOnly: opts.FolderOnly,
-		title:      opts.Title,
-		home:       home,
-		styles:     opts.Styles,
-		now:        opts.Now,
-		list:       opts.List,
-		vis:        defaultPage,
+		dir:            dir,
+		folderOnly:     opts.FolderOnly,
+		title:          opts.Title,
+		home:           home,
+		styles:         opts.Styles,
+		now:            opts.Now,
+		list:           opts.List,
+		vis:            defaultPage,
+		detectEncoding: true,
 	}
 	if b.now == nil {
 		b.now = time.Now
@@ -249,13 +254,17 @@ func (b *Browser) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	return b, cmd
 }
 
-// key handles one key press. Alt+. toggles hidden entries, Alt+S cycles the sort
-// order, and printable text extends the filter. Enter, Backspace, the arrows, the page keys, Home, End,
-// Right and Tab move through the list. Esc closes the browser; the root does not
-// normally forward it.
+// key handles one key press. Alt+. toggles hidden entries, Alt+E toggles encoding
+// auto-detection, Alt+S cycles the sort order, and printable text extends the filter.
+// Enter, Backspace, the arrows, the page keys, Home, End, Right and Tab move through
+// the list. Esc closes the browser; the root does not normally forward it.
 func (b *Browser) key(k tea.Key) tea.Cmd {
 	if k.Mod&tea.ModAlt != 0 && k.Code == '.' {
 		b.toggleHidden()
+		return nil
+	}
+	if k.Mod&tea.ModAlt != 0 && k.Code == 'e' {
+		b.toggleDetectEncoding()
 		return nil
 	}
 	if k.Mod&tea.ModAlt != 0 && k.Code == 's' {
@@ -343,6 +352,7 @@ func (b *Browser) wheel(m tea.Mouse) {
 func (b *Browser) enter() tea.Cmd {
 	if !b.folderOnly {
 		if msg, ok := b.typedLocation(); ok {
+			msg.AskEncoding = !b.detectEncoding
 			return b.finish(msg)
 		}
 	}
@@ -358,7 +368,7 @@ func (b *Browser) enter() tea.Cmd {
 	case r.dirLike():
 		b.enterDir(r.Path)
 	default:
-		return b.finish(Open{Path: r.Path})
+		return b.finish(Open{Path: r.Path, AskEncoding: !b.detectEncoding})
 	}
 	return nil
 }
@@ -421,6 +431,17 @@ func (b *Browser) setInput(s string) {
 	b.input = s
 	b.sel, b.top = 0, 0
 	b.refresh()
+}
+
+// toggleDetectEncoding flips whether a chosen file opens with auto-detected encoding
+// (on, Fresh's default) or through the encoding chooser first.
+func (b *Browser) toggleDetectEncoding() {
+	b.detectEncoding = !b.detectEncoding
+	if b.detectEncoding {
+		b.notice = browserText("gvim.browser.detect_encoding_on", "Encoding auto-detection enabled")
+	} else {
+		b.notice = browserText("gvim.browser.detect_encoding_off", "Encoding auto-detection disabled - will prompt for encoding")
+	}
 }
 
 // toggleHidden flips Show Hidden and says so on the border.

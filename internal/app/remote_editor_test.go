@@ -314,3 +314,37 @@ func TestRemoteEditingNoticeDescribesLSP(t *testing.T) {
 		}
 	}
 }
+
+// TestRemoteFileAccessExpandsOtherUser: opening or saving a remote document under a
+// validated ~user now resolves that user's home through the authority one-shot, while
+// shell-special tilde names remain refused before any remote command runs.
+func TestRemoteFileAccessExpandsOtherUser(t *testing.T) {
+	slot := authoritytest.New()
+	var calls int
+	slot.OneShotter = &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		calls++
+		if len(argv) >= 3 && strings.Contains(argv[2], "$HOME") {
+			return hostos.ProcResult{Code: 0, Stdout: []byte("/home/me")}, nil
+		}
+		if len(argv) != 5 || argv[4] != "alice" {
+			return hostos.ProcResult{}, nil
+		}
+		return hostos.ProcResult{Code: 0, Stdout: []byte("/home/alice")}, nil
+	}}
+	access := newRemoteFileAccess(slot)
+	got, err := access.expand("~alice/proj/file.go")
+	if err != nil || got != "/home/alice/proj/file.go" {
+		t.Fatalf("~alice path = %q, %v", got, err)
+	}
+	got, err = access.expand("~/proj/file.go")
+	if err != nil || got != "/home/me/proj/file.go" {
+		t.Fatalf("~/ path = %q, %v", got, err)
+	}
+	before := calls
+	if _, err := access.expand("~-/proj/file.go"); err == nil {
+		t.Fatal("~- was accepted as a user home")
+	}
+	if calls != before {
+		t.Fatalf("shell-special ~- ran %d remote commands", calls-before)
+	}
+}

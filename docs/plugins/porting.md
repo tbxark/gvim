@@ -250,8 +250,18 @@ tab changes, picker Esc or Review Diff refresh discard it; stale same-file diff 
 generation-discarded. Refresh invalidates in-flight navigation both when it starts and when new
 files/repo land, so a navigation racing a refresh cannot use the old list. Overlapping refreshes
 carry their own operation sequence: only the newest may replace files/repo or emit a notice, so a
-stale refresh success cannot overwrite newer rows and a stale error is discarded silently. A truncated candidate
-opens but announces the truncation; the 200-file bound and candidate read failures have their own
+stale refresh success cannot overwrite newer rows and a stale error is discarded silently. The port
+also consumes the editor's `after_file_save`/`after_file_revert` events, Fresh's low-latency watch
+channel: an open picker re-reads its list, and a matching unstaged/untracked diff is reloaded in
+place with its hunk/cursor and line targets preserved and no focus change. When both a picker and
+a diff are open, the list refresh and the matching diff reload are independent tasks: a different
+save winning the list refresh cannot cancel the diff reload, and closing the picker mid-refresh
+does not cancel it. Only a newer matching reload, close/reopen, replacement or different selection
+discards the reload; a failed reload reports a visible error. Staged diffs are not reloaded by worktree
+saves. Reloads are bounded and carry an operation sequence plus diff
+generation, so close/reopen, a newer save, selection or refresh discards a late result. There is no
+background poll or `W` toggle (the external-change half of Fresh's watch is not ported), so outside
+changes use the explicit refresh. A truncated candidate opens but announces the truncation; the 200-file bound and candidate read failures have their own
 notices and are never reported as a global first/last hunk. `Review Diff: Refresh`
 re-reads the list; `Review Diff: Close` drops it; untracked files are shown from a bounded
 working-tree read as a synthetic new-file diff.
@@ -267,7 +277,10 @@ layout, collapsing/filtering, watch polling, status-bar chrome and the review-mo
 `audit_mode_test.go` covers the staged/unstaged/untracked overview with numstat, opening a
 tracked file's diff and its new-side line target, next/previous hunk movement, cross-file hunk navigation, active-tab refusal, close/reopen hunk
 replacement, stale same-file and cross-file diff loads, overlapping navigation, overlapping
-refresh latest-wins, refresh-vs-navigation races, truncated candidates, the 200-file bound, candidate read failures, picker-Esc cancellation,
+refresh latest-wins, refresh-vs-navigation races, truncated candidates, the 200-file bound, candidate read failures, picker-Esc cancellation, save/revert picker refresh, in-place open-diff
+reload with cursor/line-target preservation and no focus steal, picker+diff saves/reverts,
+unrelated-refresh and picker-close interleavings, visible set_content failure, overlapping/stale
+reload discard,
 the untracked synthetic diff, the clean and not-a-repository states, and the read-only command list.
 
 ### Dev containers: read-only config inspection (port residual)

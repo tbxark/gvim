@@ -84,15 +84,21 @@ func (r *remoteFileAccess) opCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), r.timeout)
 }
 
-// expand resolves a leading ~ through the remote login shell's $HOME (cached after the
-// first success). Another user's ~user is not expanded: the helper command quotes its
-// arguments, so the remote shell would not expand it either, and guessing is worse.
+// expand resolves a leading ~ through the remote login shell: "~" and "~/..." use the
+// cached $HOME, while a validated "~user"/"~user/..." uses the same bounded remote-shell
+// expansion as the remote LSP spawner. Shell-special tilde names are refused there.
 func (r *remoteFileAccess) expand(path string) (string, error) {
 	if !strings.HasPrefix(path, "~") {
 		return path, nil
 	}
 	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return "", fmt.Errorf("remote path %q: expanding another user's home (~user) is not supported yet", path)
+		ctx, cancel := r.opCtx()
+		defer cancel()
+		expanded, err := expandRemotePath(ctx, r.slot, path)
+		if err != nil {
+			return "", fmt.Errorf("remote path %q: %w", path, err)
+		}
+		return expanded, nil
 	}
 	home, err := r.remoteHome()
 	if err != nil {
