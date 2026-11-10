@@ -660,3 +660,40 @@ func TestSettingsStaleSnapshotAfterSaveIsDropped(t *testing.T) {
 		t.Fatalf("stale snapshot overwrote the saved value: %q", got)
 	}
 }
+
+// TestSettingsClosedPageDropsInFlightSnapshot: closing the Settings page while a
+// snapshot read is in flight must drop the completed snapshot message: the page
+// stays closed, no refresh tick is scheduled, and no closed-overlay update runs.
+func TestSettingsClosedPageDropsInFlightSnapshot(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m, page := openSettingsPage(t, port)
+	if page.refreshSeq == 0 {
+		page.refreshSeq = 1
+	}
+	_, tickCmd := m.Update(settingsRefreshTickMsg{page: page, seq: page.refreshSeq})
+	if tickCmd == nil {
+		t.Fatal("no snapshot command for tick")
+	}
+	snapshotMsg := tickCmd()
+
+	updated := settingsSnapshot()
+	updated.Sections[0].Items[0].Value = "dark-custom"
+	port.snap = updated
+
+	m.popOverlay()
+	page.Close()
+	if page.Active() {
+		t.Fatal("page is still active after Close")
+	}
+
+	_, cmd := m.Update(snapshotMsg)
+	if cmd != nil {
+		t.Fatalf("in-flight snapshot on closed page returned a command: %v", cmd)
+	}
+	if got := page.snap.Sections[0].Items[0].Value; got == "dark-custom" {
+		t.Fatal("closed page applied the in-flight snapshot")
+	}
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays = %v, want empty after pop", m.overlays)
+	}
+}
