@@ -933,6 +933,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			}); ok {
 				setter.SetSpawner(remoteLSPSpawner(authSlot, opts.Remote.Workspace(), envProvider.Overlay))
 			}
+			if setter, ok := deps.LSP.(interface {
+				SetRemoteMarkerChecker(func(ctx context.Context, dir string, markers []string) (bool, error))
+			}); ok {
+				setter.SetRemoteMarkerChecker(remoteLSMarkerChecker(authSlot))
+			}
 		}
 		// The quick-open file list comes from the remote workspace through the
 		// authority file system (streaming, bounded, no local fallback); the palette

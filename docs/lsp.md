@@ -210,9 +210,13 @@ no markers. An `lsp` entry may set `root_markers` for its language. With several
 language the first server's markers pick the root. Each manager keeps its own root: the status
 popup's **Restart Server**/**Stop Server** acts on the active document's manager root when the
 same language/name exists under nested roots, and without an active document it targets the
-current workspace root deterministically (never an arbitrary map-order manager). On a remote
-workspace the server process cwd/initialize root is the manager's root too, not always the
-outer workspace.
+current workspace root deterministically (never an arbitrary map-order manager). On a remote workspace the server process cwd/initialize root is the manager's root too, not
+always the outer workspace. Remote markers are probed through the workspace authority's
+`ReadDir` (never the local disk): one call per directory, at most 32 levels up to the
+workspace root, 2 s timeout, bounded 30 s marker cache invalidated by `SetRoot`/config
+changes. A disconnected, unsupported, timed-out or over-depth probe degrades to the
+workspace root and reports a status-row notice; a concurrent workspace change abandons the
+old scan.
 
 ### External locations: slang-synth builtin modules
 

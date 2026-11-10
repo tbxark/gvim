@@ -1,0 +1,7 @@
+{
+  "name": "k8s_workspace",
+  "version": "1.0.0",
+  "description": "Read-only inspection of .fresh/k8s.json Kubernetes workspace targets",
+  "api": 2,
+  "default_enabled": false
+}

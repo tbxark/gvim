@@ -169,3 +169,43 @@ func TestRemoteLSPSpawnerUsesTheManagersRoot(t *testing.T) {
 		t.Fatalf("remote cwd = %q, want the manager's nested root", runner.opts.Cwd)
 	}
 }
+
+// markerFS answers one ReadDir per directory for the remote root_markers probe.
+type markerFS struct {
+	authority.UnsupportedFiles
+	dirs map[string][]hostos.DirEntry
+}
+
+func (f *markerFS) ReadDir(_ context.Context, dir string, _ bool) ([]hostos.DirEntry, error) {
+	entries, ok := f.dirs[dir]
+	if !ok {
+		return nil, fmt.Errorf("missing directory %s", dir)
+	}
+	return entries, nil
+}
+
+// TestRemoteLSMarkerChecker: the authority probe matches exact markers and globs with one
+// ReadDir, and reports a disconnected authority instead of falling back to local paths.
+func TestRemoteLSMarkerChecker(t *testing.T) {
+	slot := authoritytest.New()
+	slot.FileSystem = &markerFS{dirs: map[string][]hostos.DirEntry{
+		"/remote/ws":     {{Name: "README.md", Kind: "file"}},
+		"/remote/ws/sub": {{Name: "go.mod", Kind: "file"}, {Name: "proj.csproj", Kind: "file"}},
+	}}
+	check := remoteLSMarkerChecker(slot)
+	ok, err := check(context.Background(), "/remote/ws/sub", []string{"go.mod"})
+	if err != nil || !ok {
+		t.Fatalf("exact marker = %v, %v", ok, err)
+	}
+	ok, err = check(context.Background(), "/remote/ws/sub", []string{"*.csproj"})
+	if err != nil || !ok {
+		t.Fatalf("glob marker = %v, %v", ok, err)
+	}
+	if _, err := check(context.Background(), "/remote/ws", []string{"go.mod"}); err != nil {
+		t.Fatalf("read-only negative check failed: %v", err)
+	}
+	slot.Disconnect("carrier down")
+	if _, err := check(context.Background(), "/remote/ws/sub", []string{"go.mod"}); err == nil {
+		t.Fatal("disconnected checker did not report an error")
+	}
+}

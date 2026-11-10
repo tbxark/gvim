@@ -265,6 +265,20 @@ type LSPSession interface {
 	SetLanguageEnabled(language string, enabled bool) error
 }
 
+// LSPNotice is a non-fatal LSP notice as a catalogue key plus its English fallback and
+// variables. The TUI renders it with uiTextVars, so the port stays free of locale state.
+type LSPNotice struct {
+	Key     string
+	English string
+	Vars    map[string]any
+}
+
+// LSPNoticeSource is the optional port surface for a non-fatal LSP notice (for example a
+// remote root_markers scan that degraded to the workspace root).
+type LSPNoticeSource interface {
+	TakeLSPNotice() LSPNotice
+}
+
 // LSPServerPathActions is the optional path-aware server-action surface: the
 // status popup passes the active document's path so a language/name pair that exists in
 // several workspace roots restarts/stops the manager of the file the user is looking at,

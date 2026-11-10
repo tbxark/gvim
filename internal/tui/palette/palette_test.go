@@ -429,6 +429,27 @@ func TestLineModeGoesToLineAndColumn(t *testing.T) {
 	}
 }
 
+// TestLineModeRelativeJump: Fresh's ':' quick-open accepts +N/-N as a jump relative
+// to the current line; Enter carries the signed delta to the root.
+func TestLineModeRelativeJump(t *testing.T) {
+	tests := []struct {
+		query string
+		want  GotoLineMsg
+	}{
+		{":+3", GotoLineMsg{Delta: 3, Relative: true, Col: 1}},
+		{":-2", GotoLineMsg{Delta: -2, Relative: true, Col: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			p := New(Options{Query: tt.query})
+			hasRow(draw(p, 100, 30), "Go to line ")
+			if got := runCmd(p.update(key(tea.KeyEnter))); got != tt.want {
+				t.Fatalf("Enter emitted %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBufferModeActivatesTheMatchingTab(t *testing.T) {
 	buffers := []Buffer{{Name: "a.txt"}, {Name: "b.txt", Modified: true}, {Name: ""}}
 	p := New(Options{Query: "#b", Buffers: buffers})

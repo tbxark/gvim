@@ -360,7 +360,12 @@ deliberately does not take.
   manager's own root (the nearest `root_markers` project when one was resolved) is the
   remote cwd and initialize root URI, falling back to the remote workspace path; this keeps
   managers that share a language/name on their own roots instead of starting every server in
-  the workspace root (`~` is expanded through the remote shell's `$HOME`), clears the locally resolved Program
+  the workspace root (`~` is expanded through the remote shell's `$HOME`). Root markers on a
+  remote workspace are checked through the authority's `ReadDir` (hidden entries included),
+  one bounded call per directory: at most 32 directories upward to the workspace root, a 2 s
+  scan timeout, and a 256-entry/30 s marker cache cleared by a workspace or config change.
+  Disconnected/unsupported/timed-out probes fall back to the remote workspace root and leave
+  a status-row notice; the local filesystem is never consulted for a remote root., clears the locally resolved Program
   (the remote shell resolves a bare command in the remote PATH), starts it in the session's
   REMOTE captured project environment delta (`env.Remote`) on top of the remote login
   environment - the local env overlay never applies remotely - and feeds the remote child's

@@ -944,7 +944,7 @@
   "gvim.palette.no_lines": "No matching lines",
   "gvim.palette.no_buffers": "No matching buffers",
   "gvim.palette.no_files": "No matching files",
-  "gvim.palette.line_number_example": "Type a line number, for example 120 or 120:5",
+  "gvim.palette.line_number_example": "Type a line number, for example 120 or 120:5, or +N / -N for a relative jump",
   "gvim.palette.line_numbers_start": "Line numbers start at 1",
   "gvim.lsp.no_definition": "No definition found",
   "gvim.lsp.no_implementation": "No implementation found",
@@ -1182,5 +1182,9 @@
   "gvim.notice.clipboard.cut_changed": "Copied, but the prompt changed before the cut completed; the prompt was kept",
   "gvim.notice.clipboard.copy_unconfirmed": "OSC 52 clipboard write requested; no native clipboard can confirm the copy",
   "gvim.notice.clipboard.copy_failed": "Copy failed: %{error}",
-  "gvim.notice.clipboard.busy": "A clipboard write is still in progress; try again"
+  "gvim.notice.clipboard.busy": "A clipboard write is still in progress; try again",
+  "gvim.notice.lsp.remote_root_timeout": "Remote LSP root_markers scan timed out; using the workspace root",
+  "gvim.notice.lsp.remote_root_failed": "Remote LSP root_markers scan failed: %{error}; using the workspace root",
+  "gvim.notice.lsp.remote_root_depth": "Remote LSP root_markers scan stopped after %{depth} levels; using the workspace root",
+  "gvim.notice.lsp.remote_root_changed": "Remote LSP root_markers scan abandoned after the workspace changed; using the workspace root"
 }

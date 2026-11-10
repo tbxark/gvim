@@ -1032,7 +1032,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case palette.GotoLineMsg:
 		// The ':' mode jumps at once, as Fresh's does: one Enter reaches the line.
-		m.gotoLine(msg.Line, msg.Col)
+		if msg.Relative {
+			m.gotoRelativeLine(msg.Delta, msg.Col)
+		} else {
+			m.gotoLine(msg.Line, msg.Col)
+		}
 		m.focusEditor()
 	case palette.ActivateBufferMsg:
 		m.activateTab(msg.Index)
@@ -2312,6 +2316,24 @@ func (m *Model) gotoLine(line, col int) {
 		m.notice = err.Error()
 	}
 	m.syncViewport()
+}
+
+// gotoRelativeLine jumps delta lines from the current 1-based line, clamped to line 1
+// at the top (Fresh's resolve_goto_line_target) and to the end by GotoLine. The quick-
+// open relative jump lands in the first column, as Fresh's goto_line_col does.
+func (m *Model) gotoRelativeLine(delta, col int) {
+	doc := m.ed.Active()
+	if doc == nil {
+		return
+	}
+	line := doc.Cursor().Line + 1 + delta
+	if line < 1 {
+		line = 1
+	}
+	if col < 1 {
+		col = 1
+	}
+	m.gotoLine(line, col)
 }
 
 // activateTab makes the tab at index i active. The editor steps through its tabs

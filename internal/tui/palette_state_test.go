@@ -147,6 +147,42 @@ func TestMenuCommandEntersPaletteHistory(t *testing.T) {
 	}
 }
 
+// realFileEditor is realEditor plus the file-opening surface, so root goto paths
+// can move a real *editor.Editor while the view model still paints it.
+type realFileEditor struct{ realEditor }
+
+func (e realFileEditor) OpenFile(path string) error    { return e.ed.OpenFile(path) }
+func (e realFileEditor) OpenPreview(path string) error { return e.ed.OpenPreview(path) }
+func (e realFileEditor) GotoLine(line, col int) error  { return e.ed.GotoLine(line, col) }
+
+// TestRelativeQuickOpenJumpsFromTheCurrentLine drives the real ':' palette path:
+// +2 moves down two lines and -99 clamps at line 1, as Fresh's relative goto does.
+func TestRelativeQuickOpenJumpsFromTheCurrentLine(t *testing.T) {
+	m, ed := viewModel(t, DefaultViewOptions(), "a\nb\nc\nd\ne\nf\n", 80, 24)
+	m.ed = realFileEditor{realEditor{ed}}
+	if err := ed.GotoLine(5, 1); err != nil {
+		t.Fatal(err)
+	}
+	m.openPalette(":+2")
+	for _, msg := range deliver(press(m, special(tea.KeyEnter))) {
+		m.Update(msg)
+	}
+	if got := ed.Active().Cursor.Line; got != 6 {
+		t.Fatalf("+2 from 1-based line 5 moved to 0-based line %d, want 6", got)
+	}
+
+	if err := ed.GotoLine(2, 1); err != nil {
+		t.Fatal(err)
+	}
+	m.openPalette(":-99")
+	for _, msg := range deliver(press(m, special(tea.KeyEnter))) {
+		m.Update(msg)
+	}
+	if got := ed.Active().Cursor.Line; got != 0 {
+		t.Fatalf("-99 from line 2 clamped to 0-based line %d, want 0", got)
+	}
+}
+
 // TestPaletteTabAcceptsSuggestionWithoutRunningTheCommand drives Tab through the root:
 // it must reach the palette overlay (not the editor), leave the palette open and run no
 // command; Enter still runs the selected row.

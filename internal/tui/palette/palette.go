@@ -176,10 +176,13 @@ type RunCommandMsg struct {
 
 func (m RunCommandMsg) PaletteOwner() Owner { return m.Owner }
 
-// GotoLineMsg asks the root to move the caret to a line and a column. Both are
-// 1-based, as the user typed them.
+// GotoLineMsg asks the root to move the caret to a line and a column. Absolute Line
+// and Col are 1-based; with Relative set, Delta is a signed offset from the current
+// line and Line is unused (Fresh's +N / -N quick-open jump).
 type GotoLineMsg struct {
 	Line, Col int
+	Delta     int
+	Relative  bool
 	Owner     Owner
 }
 
@@ -284,6 +287,8 @@ type row struct {
 	termAfterKnown  bool
 	line            int
 	col             int
+	relative        bool // a :+N/: -N line jump
+	delta           int
 	// A grep row keeps its line text apart from name, so the label can be cut around the
 	// match: text is the trimmed line, mcol the match's rune offset in it and qlen the
 	// match's length in runes.
@@ -1010,10 +1015,17 @@ func (p *Palette) rowsFor(query string) []row {
 		return commandRows(commands.SearchInHistory(p.opts.Commands, query, p.state, p.opts.History))
 	case commands.ModeLine:
 		line, col, ok := editor.ParseLineCol(text)
-		if !ok {
-			return []row{{kind: rowMessage, name: notLineText(text), disabled: true}}
+		if ok {
+			return []row{{kind: rowLine, name: "Go to line " + strconv.Itoa(line), line: line, col: col}}
 		}
-		return []row{{kind: rowLine, name: "Go to line " + strconv.Itoa(line), line: line, col: col}}
+		if delta, ok := relativeLine(text); ok {
+			label := "+" + strconv.Itoa(delta)
+			if delta < 0 {
+				label = strconv.Itoa(delta)
+			}
+			return []row{{kind: rowLine, name: "Go to line " + label, relative: true, delta: delta, col: 1}}
+		}
+		return []row{{kind: rowMessage, name: notLineText(text), disabled: true}}
 	case commands.ModeBuffer:
 		return p.bufferRows(text)
 	}
@@ -1025,11 +1037,32 @@ func notLineText(text string) string {
 	text = strings.TrimSpace(text)
 	switch {
 	case text == "":
-		return paletteText("gvim.palette.line_number_example", "Type a line number, for example 120 or 120:5")
+		return paletteText("gvim.palette.line_number_example", "Type a line number, for example 120 or 120:5, or +N / -N for a relative jump")
 	case strings.Trim(text, "0") == "":
 		return paletteText("gvim.palette.line_numbers_start", "Line numbers start at 1")
 	}
 	return paletteTextVars("gvim.prompt.not_a_line", "Not a line number: %{line}", map[string]any{"line": text})
+}
+
+// relativeLine parses Fresh's +N / -N relative line jump. Whitespace around the input
+// is ignored; zero, bare signs and extra signs are not relative jumps.
+func relativeLine(text string) (int, bool) {
+	text = strings.TrimSpace(text)
+	if len(text) < 2 || (text[0] != '+' && text[0] != '-') {
+		return 0, false
+	}
+	rest := text[1:]
+	if strings.ContainsAny(rest, "+-") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n == 0 {
+		return 0, false
+	}
+	if text[0] == '-' {
+		return -n, true
+	}
+	return n, true
 }
 
 // commandRows turns the matched command entries into rows.
@@ -1140,7 +1173,7 @@ func (r row) command(root string, remote bool, owner Owner) tea.Cmd {
 	case rowBuffer:
 		msg = ActivateBufferMsg{Index: r.index, Owner: owner}
 	case rowLine:
-		msg = GotoLineMsg{Line: r.line, Col: r.col, Owner: owner}
+		msg = GotoLineMsg{Line: r.line, Col: r.col, Delta: r.delta, Relative: r.relative, Owner: owner}
 	case rowGrep:
 		switch r.grepSource {
 		case GrepBuffers:

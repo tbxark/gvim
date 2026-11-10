@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -104,6 +105,7 @@ func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 		auto:             make(map[string]bool, len(plan.auto)),
 		startable:        make(map[string]bool, len(plan.startable)),
 		managers:         make(map[string]*manager.Manager),
+		rootCache:        make(map[string]remoteRootCacheEntry),
 		rootProviders:    make(map[string]func(language string) (manager.ServerConfig, bool)),
 		docs:             make(map[string]lspDocRec),
 		muted:            make(map[string]bool),
@@ -144,6 +146,10 @@ type lspPort struct {
 	// runs the server on the remote host through the authority's LongRunning surface
 	// (docs/authority.md). The manager's spawn gate still runs before it.
 	spawner func(context.Context, lsp.Config) (*lsp.Client, error)
+	// remoteMarkers, when set, checks root markers through the workspace authority instead
+	// of the local filesystem. It is used only for a remote workspace; nil keeps the local
+	// serverRoot walk.
+	remoteMarkers func(ctx context.Context, dir string, markers []string) (bool, error)
 	// externalOpener resolves non-file LSP locations (slang-synth and similar) to
 	// generated local content; nil means no provider.
 	externalOpener ExternalLocationOpener
@@ -204,7 +210,28 @@ type lspPort struct {
 	// stop/restart of the servers, cancels the old ones (their $/cancelRequest goes
 	// out through the client) instead of letting them answer into the cache.
 	wsPulls pullSet
+	// rootCache bounds repeated remote marker ReadDirs; keys are dir+markers and entries
+	// expire after remoteRootCacheTTL. SetRoot/SetConfig clear it.
+	rootCache      map[string]remoteRootCacheEntry
+	rootCacheOrder []string
+	// rootGen increments on SetRoot so an in-flight remote scan can abandon and fall
+	// back after the workspace changed.
+	rootGen uint64
+	// notice carries a non-fatal remote root-marker degradation for the TUI status row.
+	notice tui.LSPNotice
 }
+
+type remoteRootCacheEntry struct {
+	ok bool
+	at time.Time
+}
+
+const (
+	remoteRootMaxDepth  = 32
+	remoteRootScanTime  = 2 * time.Second
+	remoteRootCacheTTL  = 30 * time.Second
+	remoteRootCacheSize = 256
+)
 
 // completionResolve remembers what completionItem/resolve must send back: the
 // document path, the server that offered the item and the item as it arrived.
@@ -265,6 +292,9 @@ func statusList(plan lspPlan) []tui.LSPServerStatus {
 func (p *lspPort) SetRoot(root string) {
 	p.mu.Lock()
 	p.root = root
+	p.rootGen++
+	p.rootCache = make(map[string]remoteRootCacheEntry)
+	p.rootCacheOrder = nil
 	changed := p.rootChanged
 	p.mu.Unlock()
 	if changed != nil {
@@ -286,14 +316,125 @@ func (p *lspPort) Supports(lang string) bool {
 	return p.auto[lang]
 }
 
+// SetRemoteMarkerChecker installs the authority-backed marker checker of a remote
+// workspace. nil restores the local filesystem serverRoot walk.
+func (p *lspPort) SetRemoteMarkerChecker(fn func(ctx context.Context, dir string, markers []string) (bool, error)) {
+	p.mu.Lock()
+	p.remoteMarkers = fn
+	p.rootCache = make(map[string]remoteRootCacheEntry)
+	p.rootCacheOrder = nil
+	p.mu.Unlock()
+}
+
+// TakeLSPNotice returns and clears the pending non-fatal root-marker notice.
+func (p *lspPort) TakeLSPNotice() tui.LSPNotice {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	notice := p.notice
+	p.notice = tui.LSPNotice{}
+	return notice
+}
+
+// resolveServerRoot uses the remote authority marker walk when a checker is installed,
+// otherwise the local filesystem walk. The remote walk is bounded and cached; a failed
+// or unsupported remote probe degrades to the workspace root with a notice.
+func (p *lspPort) resolveServerRoot(filePath, language, workspace string, checker func(context.Context, string, []string) (bool, error)) string {
+	markers := p.rootMarkers(language)
+	if checker == nil {
+		return serverRoot(filePath, markers, workspace)
+	}
+	if len(markers) == 0 || filePath == "" || workspace == "" {
+		return workspace
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remoteRootScanTime)
+	defer cancel()
+	key := strings.Join(markers, "\x00")
+	dir := path.Dir(filePath)
+	startGen := p.generation()
+	for steps := 0; steps < remoteRootMaxDepth; steps++ {
+		if p.generation() != startGen {
+			p.setNotice(tui.LSPNotice{
+				Key: "gvim.notice.lsp.remote_root_changed", English: "Remote LSP root_markers scan abandoned after the workspace changed; using the workspace root",
+			})
+			return workspace
+		}
+		if ok, err := p.markerAt(ctx, checker, dir, markers, key); err != nil {
+			if ctx.Err() != nil {
+				p.setNotice(tui.LSPNotice{
+					Key: "gvim.notice.lsp.remote_root_timeout", English: "Remote LSP root_markers scan timed out; using the workspace root",
+				})
+			} else {
+				p.setNotice(tui.LSPNotice{
+					Key: "gvim.notice.lsp.remote_root_failed", English: "Remote LSP root_markers scan failed: %{error}; using the workspace root",
+					Vars: map[string]any{"error": err.Error()},
+				})
+			}
+			return workspace
+		} else if ok {
+			return dir
+		}
+		if dir == workspace || dir == "." || dir == "/" {
+			return workspace
+		}
+		parent := path.Dir(dir)
+		if parent == dir {
+			return workspace
+		}
+		dir = parent
+	}
+	p.setNotice(tui.LSPNotice{
+		Key: "gvim.notice.lsp.remote_root_depth", English: "Remote LSP root_markers scan stopped after %{depth} levels; using the workspace root",
+		Vars: map[string]any{"depth": remoteRootMaxDepth},
+	})
+	return workspace
+}
+
+func (p *lspPort) generation() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.rootGen
+}
+
+func (p *lspPort) setNotice(notice tui.LSPNotice) {
+	p.mu.Lock()
+	p.notice = notice
+	p.mu.Unlock()
+}
+
+// markerAt checks one directory, caching the answer for a bounded time.
+func (p *lspPort) markerAt(ctx context.Context, checker func(context.Context, string, []string) (bool, error), dir string, markers []string, markerKey string) (bool, error) {
+	cacheKey := dir + "\x00" + markerKey
+	p.mu.Lock()
+	if entry, ok := p.rootCache[cacheKey]; ok && time.Since(entry.at) < remoteRootCacheTTL {
+		p.mu.Unlock()
+		return entry.ok, nil
+	}
+	p.mu.Unlock()
+	ok, err := checker(ctx, dir, markers)
+	if err != nil {
+		return false, err
+	}
+	p.mu.Lock()
+	if len(p.rootCacheOrder) >= remoteRootCacheSize {
+		old := p.rootCacheOrder[0]
+		p.rootCacheOrder = p.rootCacheOrder[1:]
+		delete(p.rootCache, old)
+	}
+	p.rootCache[cacheKey] = remoteRootCacheEntry{ok: ok, at: time.Now()}
+	p.rootCacheOrder = append(p.rootCacheOrder, cacheKey)
+	p.mu.Unlock()
+	return ok, nil
+}
+
 // Open sends the text of the document at path, starting its servers if needed. A
 // document that fails to open is not kept.
 func (p *lspPort) Open(path, lang, text string) (int32, error) {
 	lang = openLanguage(path, lang)
 	p.mu.Lock()
-	root := p.root
+	workspace := p.root
+	checker := p.remoteMarkers
 	p.mu.Unlock()
-	root = serverRoot(path, p.rootMarkers(lang), root)
+	root := p.resolveServerRoot(path, lang, workspace, checker)
 	mgr := p.managerFor(root)
 	p.setDoc(path, lspDocRec{root: root, lang: lang, text: text, lines: newTextLines(text)})
 	if err := mgr.Open(path, lang, text); err != nil {
@@ -1343,6 +1484,8 @@ func (p *lspPort) SetConfig(cfg config.Config) {
 	p.auto = plan.auto
 	p.startable = plan.startable
 	p.status = statusList(plan)
+	p.rootCache = make(map[string]remoteRootCacheEntry)
+	p.rootCacheOrder = nil
 	p.mu.Unlock()
 }
 

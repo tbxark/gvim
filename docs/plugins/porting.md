@@ -270,6 +270,25 @@ container state, status bar, attach/rebuild/logs/ports, prompts/scaffold, and Fr
 Tests: `devcontainer_test.go` covers JSONC + info sections, priority order, Open Config (with no
 process spawned), missing/invalid config, and the read-only command set.
 
+### Kubernetes workspace: config inspection only (port residual)
+
+Fresh's `k8s-workspace.ts` loads `.fresh/k8s.json`, resolves a target through one of four providers
+(`attach-existing`, `manifest`, `run`, `command`) by spawning kubectl or the user's command, checks
+`create pods/exec` RBAC, probes the in-pod environment and calls `attachRemoteAgent`; Disconnect
+runs the provider teardown. gvim has no kubectl/attachRemoteAgent/orchestrator integration, so the
+port is read-only configuration inspection only: JSONC parsing through the host parser, validation
+of `targets`/`defaultTarget`/provider shapes, and a virtual panel showing cluster context,
+namespace, manifest/run/command settings, workspace, vars and `confirmCreate`, plus an Open Config
+command and Refresh. It never executes kubectl or a provider command, creates pods, probes RBAC, or
+claims a connection. Reads use `gvim.fs` (workspace authority on remote workspaces), cap the config
+at 1 MiB and target/vars/error counts, and run in plugin-task awaits, never Update. Invalid JSON,
+read failures and shape errors are surfaced in notices and the panel. OPEN: connect/disconnect,
+all four provider resolutions, RBAC/env probes, pod/container selection, attachRemoteAgent and
+teardown. Tests: `k8s_workspace_test.go` covers valid JSONC targets/providers, validation errors and
+invalid JSON, Open Config with zero process runs, missing config, the read-only command set, and
+the inclusive 100/101 vars and 100/101 targets boundaries (the 101st entry is the error; exactly
+100 is accepted).
+
 ### The shared Finder (port residual)
 
 Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `gvim.finder` library

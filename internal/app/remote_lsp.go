@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,39 @@ func expandRemotePath(ctx context.Context, slot authority.Slot, path string) (st
 		return home, nil
 	}
 	return home + path[1:], nil
+}
+
+// remoteLSMarkerChecker returns the authority-backed root_markers probe of a remote
+// workspace. One bounded ReadDir per directory checks every marker (exact names or globs)
+// without touching the local filesystem; the caller (lsphost) bounds depth/calls, times
+// out and caches the answers.
+func remoteLSMarkerChecker(slot authority.Slot) func(ctx context.Context, dir string, markers []string) (bool, error) {
+	return func(ctx context.Context, dir string, markers []string) (bool, error) {
+		if slot == nil || !slot.Connected() {
+			return false, errors.New("remote workspace is disconnected")
+		}
+		files := slot.Files()
+		if files == nil {
+			return false, errors.New("remote workspace has no file system")
+		}
+		entries, err := files.ReadDir(ctx, dir, true)
+		if err != nil {
+			return false, fmt.Errorf("read remote root_markers directory %s: %w", dir, err)
+		}
+		for _, marker := range markers {
+			for _, entry := range entries {
+				if marker == entry.Name {
+					return true, nil
+				}
+				if strings.ContainsAny(marker, "*?[") {
+					if ok, _ := path.Match(marker, entry.Name); ok {
+						return true, nil
+					}
+				}
+			}
+		}
+		return false, nil
+	}
 }
 
 // procConn adapts the authority's chunk-based long-running process to the io.ReadWriteCloser

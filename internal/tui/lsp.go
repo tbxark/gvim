@@ -338,6 +338,11 @@ func (m *Model) lspUpdate(msg tea.Msg) tea.Cmd {
 	if s.port == nil {
 		return nil
 	}
+	if source, ok := s.port.(LSPNoticeSource); ok {
+		if notice := source.TakeLSPNotice(); notice.Key != "" {
+			m.notice = lspNoticeText(notice)
+		}
+	}
 	if root := m.rootDir(); root != s.root {
 		s.root = root
 		s.port.SetRoot(root)
@@ -512,6 +517,11 @@ func (m *Model) lspSendFor(tr *lspTrack) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// lspNoticeText renders a structured port notice through the catalogue.
+func lspNoticeText(n LSPNotice) string {
+	return uiTextVars(n.Key, n.English, n.Vars)
 }
 
 // lspOpenCmd sends didOpen for path with text.

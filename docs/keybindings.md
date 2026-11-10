@@ -29,6 +29,9 @@ keys are handled in code), so a user binding there is skipped with a warning.
 
 The command palette keeps Fresh's command usage history (most recent first, 50 commands) and
 uses it to rank equal matches and the empty `>` query, with never-used commands alphabetical.
+Its `:` quick-open mode takes an absolute line (`120` or `120:5`) or a signed relative jump
+(`+3`, `-2`), as Fresh's goto-line provider does; the row names the relative target and Enter
+clamps it into the document.
 
 The editor's `Ctrl+L` (`expand_line_selection`) grows the selection to whole lines: with no
 selection it takes the caret line including its newline, repeated presses walk one line further,

@@ -187,7 +187,9 @@ in file mode (the ranker strips that escape). In command/buffer/line modes Tab f
 command name, buffer name or line target, preserving the `>`, `#` or `:` mode prefix; the palette
 stays open, the rows re-query, and Enter then runs/opens it. A message row, a disabled
 command or no selection leaves the query unchanged. In Live Grep's floating overlay Tab
-is a no-op, as in Fresh (its suggestion values are opaque).
+is a no-op, as in Fresh (its suggestion values are opaque). The `:` mode takes an absolute
+`LINE[:COL]` or Fresh's signed `+N`/`-N` relative jump from the current line; the relative target
+is clamped to line 1 and the document end, and the empty query hints at both forms.
 
 **Find/replace bar keyboard.** F3 and Shift+F3 step through the matches without
 closing the bar; Enter (or Ctrl+F, Fresh's prompt_confirm) jumps to the current match

@@ -47,6 +47,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `live_sessions` | **off** | Live Agent Sessions, Live Agent Sessions: Refresh | none |
 | `audit_mode` | **off** | Review Diff, Review Diff: Refresh, Review Diff: Close | none |
 | `devcontainer` | **off** | Dev Container: Show Info, Dev Container: Open Config, Dev Container: Refresh | none |
+| `k8s_workspace` | **off** | K8s: Show Workspace Config, K8s: Open Config, K8s: Refresh Workspace Config | none |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -206,6 +207,20 @@ as tier-1c virtual rows above the seam, with the `-` gutter glyph and bold+under
 Fresh's priority order and capped at the host's 64 virtual rows per anchor plus an "… N more deleted
 lines" summary row (the capability is live on the shipped host; an older host falls back to the line
 backgrounds and new-side emphasis). It is opt-in like Fresh's live_diff.
+
+**k8s_workspace** (reduced, read-only Fresh port): **K8s: Show Workspace Config** reads and
+validates `.fresh/k8s.json` as JSONC and opens a read-only virtual panel listing the default target
+and every target's provider (`attach-existing`, `manifest`, `run` or `command`), cluster context,
+namespace, manifest template, run name/image/timeout, command argv/cwd/down/status, workspace, vars
+and `confirmCreate`. Configuration shape errors (missing required provider fields, unknown
+`provider.kind`, an invalid `defaultTarget`, malformed vars/args) are listed in the panel and
+reported in a notice; invalid JSON/read failures are reported too. **K8s: Open Config** opens the
+file and **K8s: Refresh Workspace Config** re-reads/re-validates (refreshing an open panel). This
+port never runs kubectl or a provider command, never creates a pod, probes RBAC/container env,
+attaches, disconnects, or claims a cluster is connected: those need the devcontainer/kubectl and
+`attachRemoteAgent` surfaces gvim does not have and are OPEN. Reads use `gvim.fs` (workspace
+authority on a remote workspace), are bounded by a 1 MiB config/100 targets/100 vars/100 errors and
+run as plugin-task awaits, never Update. No default keys; opt-in.
 
 **devcontainer** (reduced, read-only Fresh port): **Dev Container: Show Info** discovers and parses
 `.devcontainer/devcontainer.json`, `.devcontainer.json` or `.devcontainer/<subfolder>/devcontainer.json`
