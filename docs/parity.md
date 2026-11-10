@@ -21,9 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `cde4169` plus the round-91 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 82 KiB / both 211 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r91-final.log`).
+Last verified: 2026-11-10, tree commit `7295f6c` plus the round-92 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r92-final.log`).
+Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
+markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
 (closing the item 347 test residual) and optimizes git_gutter to keep default-enabled bundled plugin
 idle heap at 7.98 MiB (within the 8 MiB limit).
@@ -7843,7 +7845,7 @@ Round 13 recorded five open gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 12 | Markdown residual: free per-pane view mode, native Markdown menu row; dual-split persistence landed; exact byte dual anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded primary-row-only decision. Round 9–11 landed the renderer core/fences/tables/wrapped cells/borders/dual/heading marks/container fences/setext/task-image conceal/page-view persistence/mapped-decisions/overlay ordering; sidebar per-section heights landed in R10-2 (rows-or-percent and per-section widths/drag order remain documented differences: Fresh has no section widths or drag reorder) | P1 | L | `editor`, `syntax`, `internal/tui/editorpane`, `internal/tui`, `session` | R10-2 |
+| 12 | Markdown residual: free per-pane view mode landed r92 (independent source/rendered/cycle per split pane); native Markdown menu row; dual-split persistence landed; exact byte dual anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded primary-row-only decision. Round 9–11 landed the renderer core/fences/tables/wrapped cells/borders/dual/heading marks/container fences/setext/task-image conceal/page-view persistence/mapped-decisions/overlay ordering; sidebar per-section heights landed in R10-2 (rows-or-percent and per-section widths/drag order remain documented differences: Fresh has no section widths or drag reorder) | P1 | L | `editor`, `syntax`, `internal/tui/editorpane`, `internal/tui`, `session` | R10-2 |
 
 ### 5.2 Plugin-API breadth (unblocks Fresh's plugin-era features)
 

@@ -210,6 +210,11 @@ plugin contributions are not hand-edited), more than one dual view of a document
 and free per-split width settings remain residuals. The dual split itself and its
 per-leaf source/rendered modes persist in the session (see Persistence).
 
+When an ordinary split contains multiple panes (vertical or horizontal split), each pane
+can independently toggle or cycle its view mode (`markdown_mode_rendered`,
+`markdown_mode_source`, `markdown_cycle_mode`) without altering the view modes of other
+split panes (landed round 92).
+
 [^cmd]: The palette rows are the same five actions in `commands/markdown_commands.go`;
 the native palette therefore lists 229 commands.
 

@@ -373,6 +373,57 @@ func TestDualRefusesLargeDocuments(t *testing.T) {
 	}
 }
 
+// TestSplitPanesIndependentMarkdownViewModes: when multiple split panes view the same
+// Markdown document, each pane can switch its view mode independently (source vs rendered).
+func TestSplitPanesIndependentMarkdownViewModes(t *testing.T) {
+	t.Parallel()
+	m, _ := dualModel(t)
+	m.splitFocused(sideBySide)
+	leaves := m.splits.Root.Leaves()
+	if len(leaves) != 2 {
+		t.Fatalf("panes = %d, want 2", len(leaves))
+	}
+	pane1, pane2 := leaves[0], leaves[1]
+
+	// Pane 1 starts focused; switch it to rendered mode.
+	m.splits.Focus = pane1
+	runAction(t, m, "markdown_mode_rendered")
+	if got := m.markdownMode(); got != markdownModeRendered {
+		t.Fatalf("pane 1 mode = %q, want rendered", got)
+	}
+	if pane1.ViewMode != "rendered" {
+		t.Fatalf("pane 1 ViewMode = %q, want rendered", pane1.ViewMode)
+	}
+
+	// Focus pane 2 and switch it to source mode.
+	m.splits.Focus = pane2
+	runAction(t, m, "markdown_mode_source")
+	if got := m.markdownMode(); got != markdownModeSource {
+		t.Fatalf("pane 2 mode = %q, want source", got)
+	}
+	if pane2.ViewMode != "source" {
+		t.Fatalf("pane 2 ViewMode = %q, want source", pane2.ViewMode)
+	}
+
+	// Verify pane 1 retained rendered view while pane 2 is source.
+	if pane1.ViewMode != "rendered" {
+		t.Fatalf("pane 1 ViewMode changed to %q, want rendered retained", pane1.ViewMode)
+	}
+
+	// In pane 2, cycle mode should cycle between source and rendered without opening dual (since multi-pane).
+	runAction(t, m, "markdown_cycle_mode")
+	if got := m.markdownMode(); got != markdownModeRendered {
+		t.Fatalf("pane 2 cycled to %q, want rendered", got)
+	}
+	if m.validDual() != nil {
+		t.Fatal("cycle mode opened dual in multi-pane split")
+	}
+	runAction(t, m, "markdown_cycle_mode")
+	if got := m.markdownMode(); got != markdownModeSource {
+		t.Fatalf("pane 2 cycled back to %q, want source", got)
+	}
+}
+
 // TestDualStateCaptureAndRestore: a saved Markdown dual split round-trips through the
 // session split format: marker, per-leaf source/rendered modes, focus on the source, and
 // restored panes derive the right page-view override; closing it returns the document's

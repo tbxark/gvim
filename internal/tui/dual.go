@@ -80,6 +80,9 @@ func (m *Model) markdownMode() string {
 	if m.validDual() != nil {
 		return markdownModeDual
 	}
+	if !m.splits.Root.Leaf() && m.splits.Focus != nil && m.splits.Focus.ViewMode != "" {
+		return m.splits.Focus.ViewMode
+	}
 	if doc := m.ed.Active(); doc != nil && m.pageViewFor(doc).On {
 		return markdownModeRendered
 	}
@@ -298,6 +301,9 @@ func (m *Model) markdownModeSource() {
 		return
 	}
 	m.leaveDual()
+	if !m.splits.Root.Leaf() && m.splits.Focus != nil {
+		m.splits.Focus.ViewMode = "source"
+	}
 	m.setMarkdownPageView(false)
 	m.notice = "Markdown: " + markdownModeSource + " view"
 }
@@ -308,6 +314,9 @@ func (m *Model) markdownModeRendered() {
 		return
 	}
 	m.leaveDual()
+	if !m.splits.Root.Leaf() && m.splits.Focus != nil {
+		m.splits.Focus.ViewMode = "rendered"
+	}
 	m.setMarkdownPageView(true)
 	m.notice = "Markdown: " + markdownModeRendered + " view"
 }
@@ -336,7 +345,11 @@ func (m *Model) markdownCycleMode() {
 	case markdownModeSource:
 		m.markdownModeRendered()
 	case markdownModeRendered:
-		m.openMarkdownDual()
+		if m.splits.Root.Leaf() {
+			m.openMarkdownDual()
+		} else {
+			m.markdownModeSource()
+		}
 	default:
 		m.markdownModeSource()
 	}
