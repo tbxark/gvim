@@ -73,6 +73,10 @@ type Model struct {
 	// The palette's sources. The commands always have a table, and files and
 	// ranker are nil when Deps leaves them out.
 	commands []commands.Entry
+	// commandHistory is the palette's usage history, most recent action first (max 50),
+	// as Fresh's command registry keeps it; it ranks equal command matches and the
+	// empty command query.
+	commandHistory []string
 	// updateCommands are the Fresh updater rows (Update fresh / Show update output),
 	// offered in the palette only when UpdateHooks.Command is configured.
 	updateCommands []commands.Entry
@@ -1133,7 +1137,22 @@ func failedNotice(f menubar.Failed) string {
 // root, and every other action goes to the editor. An action the editor does not
 // know is reported as menubar.ErrUnsupported. A quit is sent after the menu
 // closes, through quitting.
+// Run is the menubar port's action entry: a menu row records usage for the command
+// palette's recency history before it runs. Internal callers (the palette's own
+// runCommand, macro replay) use runAction or dispatch, so they do not record twice or
+// count replay as user usage.
 func (m *Model) Run(action string) error {
+	record := action
+	if _, ok := strings.CutPrefix(action, menubar.CopyThemePrefix); ok {
+		record = "copy_with_theme"
+	}
+	m.rememberCommand(record)
+	return m.runAction(action)
+}
+
+// runAction executes one action without recording palette usage; Run (menu) and
+// runCommand (palette) record their own entry points.
+func (m *Model) runAction(action string) error {
 	args := map[string]any(nil)
 	if name, ok := strings.CutPrefix(action, menubar.CopyThemePrefix); ok {
 		action, args = "copy_with_theme", map[string]any{"theme": name}
@@ -2181,6 +2200,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 		ShowHidden: m.tree != nil && m.tree.ShowHidden(),
 		Commands:   translateCommands(m.allCommands()),
 		State:      &st,
+		History:    append([]string(nil), m.commandHistory...),
 		Buffers:    m.paletteBuffers(),
 		Files:      m.files,
 		Ranker:     m.ranker,
@@ -2247,8 +2267,9 @@ func (a rankerAdapter) Rank(query string, files []string, limit int) []palette.R
 // runCommand runs the action of a palette row. It returns the command the action
 // started, and tea.Quit when the action quit the editor.
 func (m *Model) runCommand(action string) tea.Cmd {
+	m.rememberCommand(action)
 	defer m.plugSource(srcPalette)()
-	if err := m.Run(action); err != nil {
+	if err := m.runAction(action); err != nil {
 		m.notice = failedNotice(menubar.Failed{Label: action, Err: err})
 	}
 	cmd := m.pending
@@ -2258,6 +2279,22 @@ func (m *Model) runCommand(action string) tea.Cmd {
 		return tea.Batch(cmd, m.quit())
 	}
 	return cmd
+}
+
+// rememberCommand moves action to the front of the palette's usage history, keeping
+// Fresh's cap of 50 distinct commands. Only a palette/menu command run reaches it.
+func (m *Model) rememberCommand(action string) {
+	if action == "" {
+		return
+	}
+	next := []string{action}
+	for _, prior := range m.commandHistory {
+		if prior == action || len(next) >= 50 {
+			continue
+		}
+		next = append(next, prior)
+	}
+	m.commandHistory = next
 }
 
 // gotoLine moves the caret to line and col, both one-based, in the active file.

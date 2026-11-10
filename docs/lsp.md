@@ -207,7 +207,12 @@ nearest directory above the file that has one of them (the name, or a glob such 
 a crate in a subdirectory of the folder you opened gets its own server root. The walk stops at the
 folder you opened, and a file with no marker above it uses that folder, as does a language with
 no markers. An `lsp` entry may set `root_markers` for its language. With several servers for one
-language the first server's markers pick the root.
+language the first server's markers pick the root. Each manager keeps its own root: the status
+popup's **Restart Server**/**Stop Server** acts on the active document's manager root when the
+same language/name exists under nested roots, and without an active document it targets the
+current workspace root deterministically (never an arbitrary map-order manager). On a remote
+workspace the server process cwd/initialize root is the manager's root too, not always the
+outer workspace.
 
 ### External locations: slang-synth builtin modules
 

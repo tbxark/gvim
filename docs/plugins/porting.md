@@ -251,6 +251,25 @@ layout, collapsing/filtering, watch polling, status-bar chrome and the review-mo
 tracked file's diff and its new-side line target, the untracked synthetic diff, the clean and
 not-a-repository states, and the read-only command list.
 
+### Dev containers: read-only config inspection (port residual)
+
+Fresh's `devcontainer.ts` is a full devcontainer integration: it detects and parses the config,
+shows a status-bar summary and info panel, runs lifecycle commands, drives the `devcontainer` CLI
+for attach/rebuild/detach, streams container/build logs, forwards ports, reacts to failed attaches
+and offers attach prompts/scaffolding. gvim has no container runtime or attach surface, so the port
+keeps only the real read-only part: discovery in Fresh's three-location priority order, JSONC
+parsing with the bounded host parser, a read-only virtual info panel (image/build/compose, features,
+ports/attributes, container+remote env, lifecycle commands, users, mounts, host requirements), an
+Open Config command and a Refresh that re-detects and refreshes an open panel. Config reads go
+through `gvim.fs` (workspace authority on remote workspaces), are capped (1 MiB config; bounded
+features/ports/env/lifecycle/line counts) and run as plugin-task awaits, never Update. Invalid JSON,
+unreadable/oversized files and missing configs are reported as notices; the port never runs docker
+or the devcontainer CLI, never attaches/builds/runs lifecycle commands, forwards ports, streams
+logs, shows a status-bar summary, or claims the editor is in a container. OPEN: all execution and
+container state, status bar, attach/rebuild/logs/ports, prompts/scaffold, and Fresh's other modes.
+Tests: `devcontainer_test.go` covers JSONC + info sections, priority order, Open Config (with no
+process spawned), missing/invalid config, and the read-only command set.
+
 ### The shared Finder (port residual)
 
 Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `gvim.finder` library

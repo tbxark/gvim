@@ -180,6 +180,13 @@ func Search(entries []Entry, query string) []Entry {
 // custom contexts are not active, marks the rest Disabled from st, and ranks
 // them the way the legacy palette does.
 func SearchIn(entries []Entry, query string, st State) []Entry {
+	return SearchInHistory(entries, query, st, nil)
+}
+
+// SearchInHistory is SearchIn with the command palette's usage history, most recent
+// first. Fresh records each palette/plugin command run and uses that order to rank
+// equal matches and the empty command query.
+func SearchInHistory(entries []Entry, query string, st State, history []string) []Entry {
 	mode, text := ParseQuery(query)
 	if mode != ModeCommand {
 		return nil
@@ -192,7 +199,7 @@ func SearchIn(entries []Entry, query string, st State) []Entry {
 		e.Disabled = !available(e, st)
 		visible = append(visible, e)
 	}
-	return Filter(visible, text)
+	return FilterHistory(visible, text, history)
 }
 
 // available reports whether a command can run in the normal editor context with
@@ -244,29 +251,44 @@ var editingActions = map[string]bool{
 // match score first; then name in byte order. With an empty text every entry
 // matches, sorted only by disabled state and name.
 func Filter(entries []Entry, text string) []Entry {
+	return FilterHistory(entries, text, nil)
+}
+
+// FilterHistory is Filter with the command palette's usage history, most recent first.
+// After the match-quality criteria it orders used commands by recency and never-used
+// commands alphabetically, as Fresh's command registry does.
+func FilterHistory(entries []Entry, text string, history []string) []Entry {
 	type candidate struct {
 		e     Entry
 		kind  int // 0: name match, 1: description match
 		exact int // 0: exact name match, 1: otherwise
 		score int
+		hist  int // 1-based position in history; 0 means never used
+	}
+	histAt := make(map[string]int, len(history))
+	for i, action := range history {
+		if _, ok := histAt[action]; !ok {
+			histAt[action] = i + 1
+		}
 	}
 	trimmed := strings.TrimSpace(text)
 	pat := fuzzy.NewPattern(text)
 	var hits []candidate
 	for _, e := range entries {
+		hist := histAt[e.Action]
 		if score, _, ok := pat.Match(e.Name); ok {
 			exact := 1
 			if trimmed != "" && asciiEqualFold(e.Name, trimmed) {
 				exact = 0
 			}
-			hits = append(hits, candidate{e: e, kind: 0, exact: exact, score: score})
+			hits = append(hits, candidate{e: e, kind: 0, exact: exact, score: score, hist: hist})
 			continue
 		}
 		if text == "" {
 			continue
 		}
 		if score, _, ok := pat.Match(e.Description); ok {
-			hits = append(hits, candidate{e: e, kind: 1, exact: 1, score: score})
+			hits = append(hits, candidate{e: e, kind: 1, exact: 1, score: score, hist: hist})
 		}
 	}
 	hasQuery := text != ""
@@ -284,6 +306,15 @@ func Filter(entries []Entry, text string) []Entry {
 			if c := cmp.Compare(b.score, a.score); c != 0 {
 				return c
 			}
+		}
+		if a.hist != b.hist {
+			if a.hist == 0 {
+				return 1
+			}
+			if b.hist == 0 {
+				return -1
+			}
+			return cmp.Compare(a.hist, b.hist)
 		}
 		return cmp.Compare(a.e.Name, b.e.Name)
 	})

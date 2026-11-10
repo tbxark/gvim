@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/buffer"
 	commands "github.com/tbxark/gvim/commands"
@@ -84,6 +86,64 @@ func TestPaletteSaveFileRunsOnADirtyBuffer(t *testing.T) {
 	run, ok := cmd().(palette.RunCommandMsg)
 	if !ok || run.Action != "save" {
 		t.Fatalf("Enter ran %#v, want RunCommandMsg{Action: save}", run)
+	}
+}
+
+// TestPaletteHistoryRecordsACommandRun: a real palette Enter → RunCommandMsg run records
+// the action at the front of the palette history, which the next open passes to ranking.
+func TestPaletteHistoryRecordsACommandRun(t *testing.T) {
+	lt := newLSPTest(t, nil, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.m.ed = &dirtyEd{lspEd: lt.ed, modified: true}
+	lt.m.openPalette(">save file")
+	cmd := press(lt.m, special(tea.KeyEnter))
+	if cmd == nil {
+		t.Fatal("Enter on Save File started no command")
+	}
+	run, ok := cmd().(palette.RunCommandMsg)
+	if !ok || run.Action != "save" {
+		t.Fatalf("Enter ran %#v, want RunCommandMsg{save}", cmd())
+	}
+	lt.m.Update(run)
+	if len(lt.m.commandHistory) != 1 || lt.m.commandHistory[0] != "save" {
+		t.Fatalf("command history = %v, want [save]", lt.m.commandHistory)
+	}
+}
+
+// TestMenuCommandEntersPaletteHistory: a command run from the real menubar port is
+// recorded in palette usage history and appears before the alphabetical first row when
+// the command palette opens with an empty ">" query. Macro replay and the palette's own
+// run path must not double-record; they are covered by the same history reset.
+func TestMenuCommandEntersPaletteHistory(t *testing.T) {
+	lt := newLSPTest(t, nil, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.m.openMenu("View")
+	idx := -1
+	rows := lt.m.menu.Rows()
+	for i, row := range rows {
+		if row.Action == "toggle_line_numbers" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("the View menu has no Line Numbers row")
+	}
+	for i := 0; i < len(rows) && lt.m.menu.Selected() != idx; i++ {
+		lt.m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	if lt.m.menu.Selected() != idx {
+		t.Fatalf("menu selected %d, want %d", lt.m.menu.Selected(), idx)
+	}
+	lt.m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(lt.m.commandHistory) != 1 || lt.m.commandHistory[0] != "toggle_line_numbers" {
+		t.Fatalf("menu command history = %v, want [toggle_line_numbers]", lt.m.commandHistory)
+	}
+
+	lt.m.openPalette(">")
+	text := ansi.Strip(lt.m.View().Content)
+	recent := strings.Index(text, "Toggle Line Numbers")
+	alpha := strings.Index(text, "Add Cursor Above")
+	if recent < 0 || alpha < 0 || recent > alpha {
+		t.Fatalf("palette ordering after menu run: recent at %d, alphabetical at %d", recent, alpha)
 	}
 }
 

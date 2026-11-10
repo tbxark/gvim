@@ -270,6 +270,32 @@ func TestFilterPutsDisabledLast(t *testing.T) {
 	}
 }
 
+func TestFilterHistoryOrdersRecentThenAlphabetical(t *testing.T) {
+	entries := []commands.Entry{{Name: "Alpha", Action: "alpha"}, {Name: "Beta", Action: "beta"}, {Name: "Gamma", Action: "gamma"}}
+	got := commands.FilterHistory(entries, "", []string{"gamma", "alpha"})
+	if names(got)[0] != "Gamma" || names(got)[1] != "Alpha" || names(got)[2] != "Beta" {
+		t.Fatalf("history order = %v, want Gamma, Alpha, Beta", names(got))
+	}
+}
+
+func TestFilterHistoryBreaksEqualMatches(t *testing.T) {
+	entries := []commands.Entry{{Name: "a x", Action: "x"}, {Name: "a y", Action: "y"}}
+	got := commands.FilterHistory(entries, "a", []string{"y"})
+	if got[0].Name != "a y" {
+		t.Fatalf("history tie = %v, want a y first", names(got))
+	}
+}
+
+func TestSearchInHistoryOnlyHandlesCommandMode(t *testing.T) {
+	entries := []commands.Entry{{Name: "Alpha", Action: "alpha"}}
+	if got := commands.SearchInHistory(entries, ":12", commands.DefaultState(), []string{"alpha"}); got != nil {
+		t.Fatalf("line mode returned %v", names(got))
+	}
+	if got := commands.SearchInHistory(entries, ">", commands.DefaultState(), []string{"alpha"}); len(got) != 1 || got[0].Action != "alpha" {
+		t.Fatalf("command mode = %v", names(got))
+	}
+}
+
 func subsequence(q, s string) bool {
 	qi := 0
 	for _, r := range s {

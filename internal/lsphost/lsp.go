@@ -1030,8 +1030,20 @@ func runState(s manager.ServerState) tui.LSPServerRunState {
 }
 
 // RestartServer stops the named server and starts it again, whatever auto_start or
-// the mute says.
+// the mute says. With no active-file path this targets the current workspace root (not an
+// arbitrary map-order manager).
 func (p *lspPort) RestartServer(language, name string) error {
+	return p.restartServerAt(p.serverActionRoot("", language), language, name)
+}
+
+// RestartServerFor targets the root of path: the status popup's Restart Server uses the
+// active document so a language/name pair present in several roots restarts the manager
+// the user is looking at.
+func (p *lspPort) RestartServerFor(path, language, name string) error {
+	return p.restartServerAt(p.serverActionRoot(path, language), language, name)
+}
+
+func (p *lspPort) restartServerAt(root, language, name string) error {
 	// The pull may be asking this very server: cancel it before the restart.
 	p.wsPulls.cancelAll()
 	p.selectionMu.Lock()
@@ -1042,26 +1054,10 @@ func (p *lspPort) RestartServer(language, name string) error {
 	trustSeq := p.trustSeq
 	persist := p.autoStartGate == nil || p.autoStartGate()
 	delete(p.muted, language)
-	var root string
-	var mgr *manager.Manager
-	for r, m := range p.managers {
-		for _, st := range m.Servers() {
-			if st.Language == language && (name == "" || st.Name == name) {
-				root, mgr = r, m
-				break
-			}
-		}
-		if mgr != nil {
-			break
-		}
-	}
+	mgr := p.managers[root]
 	if mgr == nil {
-		root = p.root
-		mgr = p.managers[root]
-		if mgr == nil {
-			mgr = p.newManagerLocked(root)
-			p.managers[root] = mgr
-		}
+		mgr = p.newManagerLocked(root)
+		p.managers[root] = mgr
 	}
 	desired := slices.Clone(p.serverConfigsFor(root)[language])
 	p.mu.Unlock()
@@ -1080,10 +1076,39 @@ func (p *lspPort) RestartServer(language, name string) error {
 	return err
 }
 
-// StopServer stops the named server.
+// serverActionRoot returns the root a server action should target. An open document in
+// the same language supplies its recorded manager root; otherwise the current workspace
+// root is used, never random map iteration.
+func (p *lspPort) serverActionRoot(path, language string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if path != "" {
+		if rec, ok := p.docs[path]; ok && rec.lang == language && rec.root != "" {
+			return rec.root
+		}
+	}
+	return p.root
+}
+
+// StopServer stops the named server of the current workspace root.
 func (p *lspPort) StopServer(language, name string) error {
+	return p.stopServerAt(p.serverActionRoot("", language), language, name)
+}
+
+// StopServerFor stops the named server in the root of path.
+func (p *lspPort) StopServerFor(path, language, name string) error {
+	return p.stopServerAt(p.serverActionRoot(path, language), language, name)
+}
+
+func (p *lspPort) stopServerAt(root, language, name string) error {
 	p.wsPulls.cancelAll()
-	return p.managerForServer(language, name).StopServer(language, name)
+	p.mu.Lock()
+	mgr := p.managers[root]
+	p.mu.Unlock()
+	if mgr == nil {
+		return nil
+	}
+	return mgr.StopServer(language, name)
 }
 
 // SetLanguageEnabled mutes or unmutes a language.
@@ -1125,27 +1150,6 @@ func (p *lspPort) reopenDocs(root, language string) []error {
 		}
 	}
 	return errs
-}
-
-// managerForServer returns the manager that has the named server, or the one of the
-// current root when none does.
-func (p *lspPort) managerForServer(language, name string) *manager.Manager {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, mgr := range p.managers {
-		for _, st := range mgr.Servers() {
-			if st.Language == language && (name == "" || st.Name == name) {
-				return mgr
-			}
-		}
-	}
-	root := p.root
-	if mgr, ok := p.managers[root]; ok {
-		return mgr
-	}
-	mgr := p.newManagerLocked(root)
-	p.managers[root] = mgr
-	return mgr
 }
 
 // locationFile resolves one protocol location URI to a local path. A file URI is

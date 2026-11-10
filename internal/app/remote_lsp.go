@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"go.lsp.dev/uri"
 )
 
 // LSP over SSH (docs/authority.md §7): a remote workspace starts its language servers on
@@ -34,9 +35,18 @@ func remoteLSPSpawner(slot authority.Slot, workspace string, spawnEnv ...func() 
 		if len(cfg.Command) == 0 {
 			return nil, lsp.ErrNoCommand
 		}
-		root, err := expandRemotePath(ctx, slot, workspace)
+		// The manager passes the root it was created for (a nested root_markers project
+		// can differ from the workspace). Use that root for the remote cwd and RootURI so
+		// several managers of the same language do not all start in the workspace root.
+		root := workspace
+		if cfg.RootURI != "" {
+			if u := uri.URI(cfg.RootURI); u.IsFile() {
+				root = u.FsPath()
+			}
+		}
+		root, err := expandRemotePath(ctx, slot, root)
 		if err != nil {
-			return nil, fmt.Errorf("lsp: remote workspace %q: %w", workspace, err)
+			return nil, fmt.Errorf("lsp: remote workspace %q: %w", root, err)
 		}
 		var envEntries []string
 		if len(spawnEnv) > 0 && spawnEnv[0] != nil {

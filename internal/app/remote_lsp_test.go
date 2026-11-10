@@ -121,7 +121,7 @@ func TestRemoteLSPSpawnerRunsOnTheAuthority(t *testing.T) {
 	client, err := spawn(ctx, lsp.Config{
 		Command: []string{"gopls", "serve"},
 		Program: "/local/resolved/gopls",
-		RootURI: "file:///local/proj",
+		RootURI: "file:///remote/proj",
 		Limits:  lsp.ProcessLimits{Enabled: true, MaxMemoryPercent: &mem},
 	})
 	if err != nil {
@@ -143,5 +143,29 @@ func TestRemoteLSPSpawnerRunsOnTheAuthority(t *testing.T) {
 	}
 	if note := client.LimitsNote(); !strings.Contains(note, "not applied remotely") {
 		t.Fatalf("LimitsNote = %q, want the remote limits note", note)
+	}
+}
+
+// TestRemoteLSPSpawnerUsesTheManagersRoot: a manager created for a nested root_markers
+// project starts its server in that root, not in the outer workspace. This keeps two
+// managers of the same language/name on their own workspace roots.
+func TestRemoteLSPSpawnerUsesTheManagersRoot(t *testing.T) {
+	proc := newFakeLSPProc()
+	runner := &fakeLongRunner{proc: proc}
+	slot := authoritytest.New()
+	slot.LongRunner = runner
+	spawn := remoteLSPSpawner(slot, "/remote/proj")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := spawn(ctx, lsp.Config{
+		Command: []string{"gopls", "serve"},
+		RootURI: lsp.PathURI("/remote/proj/nested"),
+	})
+	if err != nil {
+		t.Fatalf("spawner: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	if runner.opts.Cwd != "/remote/proj/nested" {
+		t.Fatalf("remote cwd = %q, want the manager's nested root", runner.opts.Cwd)
 	}
 }

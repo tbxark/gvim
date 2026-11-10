@@ -1,0 +1,7 @@
+{
+  "name": "devcontainer",
+  "version": "1.0.0",
+  "description": "Read-only detection and inspection of .devcontainer/devcontainer.json",
+  "api": 2,
+  "default_enabled": false
+}

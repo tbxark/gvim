@@ -167,6 +167,11 @@ the caret line including its newline, repeated presses walk one line further, an
 selection squares off over the lines it covers. With multiple carets every caret's line selection
 grows; a visual block keeps its primary-caret behavior.
 
+**Palette command history.** Command mode keeps the most recently run commands first (Fresh's
+command_registry history, up to 50 distinct commands). After the match-quality ordering, recently
+used commands rank by recency and never-used commands alphabetically; the history starts empty and
+is session-local. Other palette modes are unaffected.
+
 **Palette keyboard.** Up/Down move the selection, PageUp/PageDown move it one visible
 page and clamp at the first/last row (Fresh's `prompt_page_up`/`prompt_page_down`; there is
 no page before the first layout), Enter or Ctrl+F runs/opens the selected row (Fresh's

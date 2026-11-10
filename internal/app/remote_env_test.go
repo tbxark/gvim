@@ -165,7 +165,7 @@ func TestRemoteLSPSpawnerPassesTheRemoteEnv(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := spawn(ctx, lsp.Config{Command: []string{"gopls", "serve"}, RootURI: "file:///local/proj"})
+	client, err := spawn(ctx, lsp.Config{Command: []string{"gopls", "serve"}, RootURI: "file:///remote/proj"})
 	if err != nil {
 		t.Fatalf("spawner: %v", err)
 	}

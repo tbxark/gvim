@@ -46,6 +46,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `live_diff` | **off** | Live Diff: Toggle (Global), Live Diff: Toggle (Buffer), Live Diff: vs HEAD, Live Diff: vs Disk (unsaved changes), Live Diff: vs Branch..., Live Diff: vs Default Branch, Live Diff: Refresh, Live Diff: Set Default Mode... | `default_mode` (head), `default_branch` (main), `debounce_ms` (75, 10 to 5000, project), `max_virtual_lines` (2000), `max_overlay_lines` (20000) |
 | `live_sessions` | **off** | Live Agent Sessions, Live Agent Sessions: Refresh | none |
 | `audit_mode` | **off** | Review Diff, Review Diff: Refresh, Review Diff: Close | none |
+| `devcontainer` | **off** | Dev Container: Show Info, Dev Container: Open Config, Dev Container: Refresh | none |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -205,6 +206,20 @@ as tier-1c virtual rows above the seam, with the `-` gutter glyph and bold+under
 Fresh's priority order and capped at the host's 64 virtual rows per anchor plus an "… N more deleted
 lines" summary row (the capability is live on the shipped host; an older host falls back to the line
 backgrounds and new-side emphasis). It is opt-in like Fresh's live_diff.
+
+**devcontainer** (reduced, read-only Fresh port): **Dev Container: Show Info** discovers and parses
+`.devcontainer/devcontainer.json`, `.devcontainer.json` or `.devcontainer/<subfolder>/devcontainer.json`
+(Fresh's priority order) as JSONC through the host's bounded parser, then opens a read-only virtual
+panel with the name/config path, image or Dockerfile/build or Compose source, features, forwarded
+ports and attributes, container/remote environment, lifecycle commands, users, mounts and host
+requirements. **Dev Container: Open Config** opens the detected file; **Dev Container: Refresh**
+re-detects it (and refreshes an open info panel). Invalid JSON, unreadable/large files and a missing
+config are reported in notices instead of a fake panel. Reads go through `gvim.fs` (the workspace
+authority on a remote workspace) and are bounded; all work is async, never in Update. This port does
+**not** run docker or the devcontainer CLI, attach/build/rebuild, run lifecycle commands, forward
+ports, stream logs, show a status-bar summary or offer the attach prompts/scaffold/range features:
+those need a container runtime and are OPEN. It never claims the editor is inside a container. No
+default keys; opt-in.
 
 **audit_mode** (reduced, read-only Fresh port): **Review Diff** reads `git status --porcelain -z
 -uall` plus staged/unstaged `git diff --numstat` and lists staged, unstaged and untracked files

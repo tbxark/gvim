@@ -122,6 +122,9 @@ type Options struct {
 	// State is the editor state the commands are checked against. Nil means
 	// commands.DefaultState.
 	State *commands.State
+	// History is the command palette usage history, most recent action first, used to
+	// rank equal matches and the empty command query as Fresh's registry does.
+	History []string
 	// Buffers are the open tabs, in tab order, for the buffer mode.
 	Buffers []Buffer
 	// Files is the file index. Nil until the index is wired.
@@ -1004,7 +1007,7 @@ func (p *Palette) rowsFor(query string) []row {
 	mode, text := commands.ParseQuery(query)
 	switch mode {
 	case commands.ModeCommand:
-		return commandRows(commands.SearchIn(p.opts.Commands, query, p.state))
+		return commandRows(commands.SearchInHistory(p.opts.Commands, query, p.state, p.opts.History))
 	case commands.ModeLine:
 		line, col, ok := editor.ParseLineCol(text)
 		if !ok {

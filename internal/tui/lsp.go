@@ -2003,9 +2003,28 @@ func (m *Model) lspStatusRowChosen(value string) tea.Cmd {
 // lspServerAction is the command that restarts or stops one server from the popup.
 func (m *Model) lspServerAction(action, language, name string) tea.Cmd {
 	port := m.lsp.port
+	// The popup is opened over the active document; use its root when the server pair
+	// also exists under nested project roots. Without a matching active document the
+	// port chooses its current workspace root deterministically.
+	path := ""
+	if doc := m.ed.Active(); doc != nil && m.lspLanguage(doc) == language {
+		path = docPath(doc)
+	}
 	return func() tea.Msg {
 		var err error
-		if action == "restart" {
+		if path != "" {
+			if target, ok := port.(LSPServerPathActions); ok {
+				if action == "restart" {
+					err = target.RestartServerFor(path, language, name)
+				} else {
+					err = target.StopServerFor(path, language, name)
+				}
+			} else if action == "restart" {
+				err = port.RestartServer(language, name)
+			} else {
+				err = port.StopServer(language, name)
+			}
+		} else if action == "restart" {
 			err = port.RestartServer(language, name)
 		} else {
 			err = port.StopServer(language, name)

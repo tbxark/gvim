@@ -27,6 +27,9 @@ overrides, one per context and chord. Fresh's `completion` and `compositeBuffer`
 emitted: gvim's completion popup and its compare view are not keymap surfaces (the popup's
 keys are handled in code), so a user binding there is skipped with a warning.
 
+The command palette keeps Fresh's command usage history (most recent first, 50 commands) and
+uses it to rank equal matches and the empty `>` query, with never-used commands alphabetical.
+
 The editor's `Ctrl+L` (`expand_line_selection`) grows the selection to whole lines: with no
 selection it takes the caret line including its newline, repeated presses walk one line further,
 and an upward selection squares off over the lines it already covers. With multiple carets every

@@ -356,9 +356,11 @@ deliberately does not take.
   host through the authority's `LongRunning` surface (a separate ssh exec channel with
   piped stdio), not as local `exec.Command`s. The manager gained a `SetSpawner` seam (nil =
   the local `lsp.Start`, so local launches are unchanged); for a remote launch the app
-  installs a spawner that starts the configured command verbatim on the remote host in the
-  remote workspace, overrides the initialize root URI with the remote workspace path
-  (`~` expanded through the remote shell's `$HOME`), clears the locally resolved Program
+  installs a spawner that starts the configured command verbatim on the remote host. The
+  manager's own root (the nearest `root_markers` project when one was resolved) is the
+  remote cwd and initialize root URI, falling back to the remote workspace path; this keeps
+  managers that share a language/name on their own roots instead of starting every server in
+  the workspace root (`~` is expanded through the remote shell's `$HOME`), clears the locally resolved Program
   (the remote shell resolves a bare command in the remote PATH), starts it in the session's
   REMOTE captured project environment delta (`env.Remote`) on top of the remote login
   environment - the local env overlay never applies remotely - and feeds the remote child's

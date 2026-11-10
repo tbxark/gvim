@@ -265,6 +265,15 @@ type LSPSession interface {
 	SetLanguageEnabled(language string, enabled bool) error
 }
 
+// LSPServerPathActions is the optional path-aware server-action surface: the
+// status popup passes the active document's path so a language/name pair that exists in
+// several workspace roots restarts/stops the manager of the file the user is looking at,
+// rather than an arbitrary map-order manager.
+type LSPServerPathActions interface {
+	RestartServerFor(path, language, name string) error
+	StopServerFor(path, language, name string) error
+}
+
 // DiagnosticsEvent is the diagnostics of one document. An empty Items list clears
 // them.
 type DiagnosticsEvent struct {
