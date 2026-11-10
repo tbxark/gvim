@@ -3,6 +3,7 @@ package bundled_test
 import (
 	"encoding/json"
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/plugin/bundled"
@@ -68,6 +69,18 @@ func TestDiffNavGermanNavigationNotices(t *testing.T) {
 	}
 	if got := diffRun(t, r, "diff_nav.next_change"); got != "Änderung 1/1 [umgebrochen]" {
 		t.Fatalf("wrapped notice = %q", got)
+	}
+}
+
+func TestDiffNavJumpFailureNotice(t *testing.T) {
+	r := diffRig(t, "a\nb\nc\n", "", "{ { newStart = 1 } }")
+	r.host.SetCursorErr = fs.ErrPermission
+	if err := r.h.Run("diff_nav.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	notices := r.h.NoticeTexts()
+	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "Could not jump to the change") {
+		t.Fatalf("notices = %v, want jump failure notice", notices)
 	}
 }
 

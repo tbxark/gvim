@@ -21,9 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `ca431a8` plus the round-81 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r81-final.log`).
+Last verified: 2026-11-10, tree commit `548e605` plus the round-82 working tree. Static gates
+passed (catalogue heap en 133 KiB / de 83 KiB / both 216 KiB); full
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r82-final.log`).
+Round 82 tests diff_nav jump-failure notifications with simulated buffer errors, documents
+Alt+M in the Live Grep prompt hint, and tests Alt+M quickfix export.
 Round 81 adds Fresh's translation catalogue to standalone diff_nav; German navigation and
 wrapping are tested. The gvim-specific jump-failure message retains its English fallback.
 Round 80 localizes git_gutter navigation with Fresh's catalogue; German no-change, change and

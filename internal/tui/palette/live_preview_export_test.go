@@ -165,6 +165,26 @@ func TestLiveGrepExportEmitsQuickfixMessage(t *testing.T) {
 	}
 }
 
+// TestLiveGrepExportAltMEmitsQuickfixMessage: Alt+M is Fresh's alternate shortcut
+// for live_grep_export_quickfix, emitting the same GrepExportMsg as Alt+Q.
+func TestLiveGrepExportAltMEmitsQuickfixMessage(t *testing.T) {
+	t.Parallel()
+	p := livePreviewPalette(&liveWindowPreviewer{})
+	p.seq = 1
+	p.update(GrepResultMsg{Token: p.token, Seq: 1, Text: "todo", Hits: []GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}})
+	cmd := p.key(altKey('m'))
+	if cmd == nil {
+		t.Fatal("Alt+M produced no export")
+	}
+	msg, ok := cmd().(GrepExportMsg)
+	if !ok || len(msg.Hits) != 1 {
+		t.Fatalf("Alt+M emitted %+v", msg)
+	}
+	if p.Active() {
+		t.Fatal("the palette stayed open after Alt+M export")
+	}
+}
+
 // TestPreviewCleansC1AndFormatText: file-mode preview text removes C1 controls, bidi
 // overrides, zero-width format characters and a BOM before it reaches the grid.
 func TestPreviewCleansC1AndFormatText(t *testing.T) {

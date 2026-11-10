@@ -64,7 +64,7 @@ const (
 	// liveHint is the bottom border of Live Grep, which has no prefixes: the whole
 	// query is the text searched for, the toolbar row carries the toggles and their
 	// keys, and Enter opens the selected row.
-	liveHint = "type text to search · Enter open · Alt+Q quickfix · Esc close"
+	liveHint = "type text to search · Enter open · Alt+Q/Alt+M quickfix · Esc close"
 )
 
 // Files is the file list the file mode searches. *finder.Index satisfies it.

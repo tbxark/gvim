@@ -436,6 +436,9 @@ func (f *FakeHost) Cursors(id pluginapi.BufferID) ([]pluginapi.Caret, error) {
 // SetCursor moves the primary caret; extend keeps (or starts) a selection.
 func (f *FakeHost) SetCursor(id pluginapi.BufferID, p pluginapi.Pos, extend, reveal, center bool) error {
 	f.rec("SetCursor", id, p, extend, reveal, center)
+	if f.SetCursorErr != nil {
+		return f.SetCursorErr
+	}
 	b := f.find(id)
 	if b == nil {
 		return bufClosedErr(id)

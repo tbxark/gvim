@@ -59,6 +59,8 @@ type FakeHost struct {
 
 	// SetContentErr, when non-nil, makes every SetContent call fail.
 	SetContentErr error
+	// SetCursorErr, when non-nil, makes every SetCursor call fail.
+	SetCursorErr error
 
 	// Notices are the Notify calls in order.
 	Notices []Notice
