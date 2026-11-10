@@ -14,6 +14,7 @@
 -- (file, buffer version) for 30 seconds. A file that is not tracked shows nothing.
 local gvim = require "gvim"
 local git = gvim.git
+local t = gvim.i18n.t
 
 local settings = gvim.settings.define {
   debounce_ms = {
@@ -348,7 +349,7 @@ gvim.command.register {
       return
     end
     gvim.clipboard.set(e.commit)
-    gvim.notify(string.format("Copied: %s (%s)", e.commit:sub(1, 7), e.commit))
+    gvim.notify(t("status.hash_copied", { short = e.commit:sub(1, 7), full = e.commit }))
   end,
 }
 
@@ -386,12 +387,12 @@ gvim.command.register {
     end
     local b = gvim.buf.current()
     if not b then
-      gvim.notify("No file open to blame")
+      gvim.notify(t("status.no_file"))
       return
     end
     local s = snapshot(b)
     if not s then
-      gvim.notify("No blame information available (not a git file or error)")
+      gvim.notify(t("status.no_blame_info"))
       return
     end
     if s.modified then
@@ -404,11 +405,11 @@ gvim.command.register {
     end
     if not e then
       gvim.log.debug("git_blame: %s", tostring(err))
-      gvim.notify("No blame information available (not a git file or error)")
+      gvim.notify(t("status.no_blame_info"))
       return
     end
     if e.uncommitted then
-      gvim.notify("This line is not yet committed")
+      gvim.notify(t("status.not_committed"))
       return
     end
     local commit = e.commit

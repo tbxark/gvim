@@ -21,9 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `48c7128` plus the round-87 working tree. Static gates
+Last verified: 2026-11-10, tree commit `882f489` plus the round-88 working tree. Static gates
 passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r87-final.log`).
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r88-final.log`).
+Round 88 localizes git_blame status notices with Fresh's catalogue (German copy notice verified),
+keeping default-enabled bundled plugin idle heap at 7.99 MiB (within the 8 MiB limit).
 Round 87 localizes git_find_file with Fresh's catalogue (German commands verified) and optimizes
 parseI18n in-place map cleaning, keeping default-enabled bundled plugin idle heap at 7.99 MiB (within 8 MiB).
 Round 86 adds translated command catalogues for goto_with_selection and tab_actions with German

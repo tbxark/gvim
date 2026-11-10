@@ -1,0 +1,14 @@
+{
+  "en": {
+    "status.hash_copied": "Copied: %{short} (%{full})",
+    "status.no_file": "No file open to blame",
+    "status.no_blame_info": "No blame information available (not a git file or error)",
+    "status.not_committed": "This line is not yet committed"
+  },
+  "de": {
+    "status.hash_copied": "Kopiert: %{short} (%{full})",
+    "status.no_file": "Keine Datei zum Blamen geoeffnet",
+    "status.no_blame_info": "Keine Blame-Informationen verfuegbar (keine Git-Datei oder Fehler)",
+    "status.not_committed": "Diese Zeile ist noch nicht committet"
+  }
+}

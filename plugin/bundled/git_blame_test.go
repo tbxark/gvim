@@ -357,6 +357,17 @@ func TestGitBlameCopyHash(t *testing.T) {
 	}
 }
 
+func TestGitBlameGermanCopyNotice(t *testing.T) {
+	r := blameRig(t, rigOpts{locale: "de", script: blameScript})
+	r.moveCaret(2)
+	if err := r.h.Run("git_blame.copy_hash", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.h.NoticeTexts(); len(got) == 0 || !strings.Contains(got[0], "Kopiert:") {
+		t.Errorf("German notice = %v, want Kopiert: ...", got)
+	}
+}
+
 func TestGitBlameCommandsOnUncommittedAndUnknownLines(t *testing.T) {
 	tests := []struct {
 		name string
