@@ -55,6 +55,22 @@ func diffRun(t *testing.T, r *rig, command string) string {
 	return lastNoticeText(r.h)
 }
 
+func TestDiffNavGermanNavigationNotices(t *testing.T) {
+	r := startRig(t, rigOpts{
+		locale:  "de",
+		plugins: []string{"diff_nav"},
+		buffers: []rigBuffer{{"/work/a.txt", "a\nb\nc\n"}},
+		extra:   map[string]string{"live_diff/init.lua": diffProvider("{ { newStart = 1 } }")},
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Änderung 1/1" {
+		t.Fatalf("notice = %q", got)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Änderung 1/1 [umgebrochen]" {
+		t.Fatalf("wrapped notice = %q", got)
+	}
+}
+
 func TestDiffNavManifestAndCommands(t *testing.T) {
 	t.Parallel()
 	data, err := fs.ReadFile(bundled.FS, "plugins/diff_nav/plugin.json")
