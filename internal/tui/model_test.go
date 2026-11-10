@@ -28,6 +28,7 @@ type fakeEditor struct {
 	quitAction editor.Action // the action that reports quit
 	extends    []buffer.Pos  // the drag ends passed to ExtendSelection
 	root       string        // the workspace root that SetRoot gave
+	bookmarks  []Bookmark
 }
 
 func newFakeEditor(lines ...string) *fakeEditor {
@@ -48,6 +49,7 @@ func (f *fakeEditor) Do(a editor.Action, args map[string]any) editor.Result {
 func (f *fakeEditor) Active() Document { return f.doc }
 func (f *fakeEditor) Tabs() []TabInfo  { return f.tabs }
 func (f *fakeEditor) Status() string   { return f.status }
+func (f *fakeEditor) Bookmarks() []Bookmark { return f.bookmarks }
 
 // SetRoot records the workspace root that the root gives the editor.
 func (f *fakeEditor) SetRoot(root string) { f.root = root }

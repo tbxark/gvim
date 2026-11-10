@@ -391,5 +391,185 @@ gvim.command.register {
     show_locations("type_definitions")
   end,
 }
+-- ---------------------------------------------------------------------------
+-- Workspace symbols
+-- ---------------------------------------------------------------------------
+local function parse_workspace_symbols(result)
+  local out = {}
+  if type(result) ~= "table" then
+    return out
+  end
+  for _, raw in ipairs(result) do
+    if #out >= MAX_SYMBOLS then
+      break
+    end
+    if type(raw) == "table" then
+      local name = tostring(raw.name or "")
+      local loc = raw.location
+      local uri = loc and (loc.uri or loc.targetUri)
+      local range = loc and (loc.range or loc.targetSelectionRange or loc.targetRange)
+      if name ~= "" and type(uri) == "string" and type(range) == "table" then
+        local path = gvim.path.from_uri(uri)
+        local start = range.start or {}
+        if path and type(start.line) == "number" then
+          local line = start.line
+          local col = type(start.character) == "number" and start.character or 0
+          local kind = tonumber(raw.kind) or 0
+          local kind_name = kind_label(kind)
+          local desc = string.format("[%s] %s", kind_name, name)
+          if raw.containerName and raw.containerName ~= "" then
+            desc = desc .. " (" .. tostring(raw.containerName) .. ")"
+          end
+          out[#out + 1] = {
+            path = path,
+            line = line,
+            col = col,
+            text = desc,
+            name = name,
+          }
+        end
+      end
+    end
+  end
+  return out
+end
+
+local function show_workspace_symbols()
+  local buf, path = buffer_state()
+  if not buf then
+    gvim.notify(t("status.no_file"))
+    return
+  end
+  if not buf:language() then
+    gvim.notify(t("status.no_language"))
+    return
+  end
+  local result, err = gvim.lsp.request("workspace/symbol", {
+    query = "",
+  }, { buf = buf })
+  if result == nil and err then
+    gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
+    return
+  end
+  local symbols = parse_workspace_symbols(result)
+  if #symbols == 0 then
+    gvim.notify(t("status.no_symbols"))
+    return
+  end
+  finder.read_snippets(symbols)
+  finder.open_locations {
+    title = t("panel.workspace_symbols_title", { count = #symbols }),
+    footer = t("panel.help"),
+    items = symbols,
+    on_jump = jump_to,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- Call Hierarchy (Incoming / Outgoing calls)
+-- ---------------------------------------------------------------------------
+local function show_call_hierarchy(direction)
+  local buf, path = buffer_state()
+  if not buf then
+    gvim.notify(t("status.no_file"))
+    return
+  end
+  if not buf:language() then
+    gvim.notify(t("status.no_language"))
+    return
+  end
+  local pos = buf:cursor()
+  local line_text = buf:line(pos.line) or ""
+  local char_utf16 = finder.byte_to_utf16(line_text, pos.col)
+  local label = direction == "incoming" and t("kind.incoming_calls") or t("kind.outgoing_calls")
+
+  local prep_result, err = gvim.lsp.request("textDocument/prepareCallHierarchy", {
+    textDocument = { uri = gvim.path.to_uri(path) },
+    position = { line = pos.line, character = char_utf16 },
+  }, { buf = buf })
+
+  if prep_result == nil and err then
+    gvim.notify(t("status.request_failed", { kind = label, error = tostring(err) }), "warn")
+    return
+  end
+  if type(prep_result) ~= "table" or #prep_result == 0 then
+    gvim.notify(t("status.no_call_hierarchy"))
+    return
+  end
+
+  local root_item = prep_result[1]
+  local method = direction == "incoming" and "callHierarchy/incomingCalls" or "callHierarchy/outgoingCalls"
+  local calls_result, call_err = gvim.lsp.request(method, {
+    item = root_item,
+  }, { buf = buf })
+
+  if calls_result == nil and call_err then
+    gvim.notify(t("status.request_failed", { kind = label, error = tostring(call_err) }), "warn")
+    return
+  end
+
+  local items = {}
+  if type(calls_result) == "table" then
+    for _, c in ipairs(calls_result) do
+      if #items >= MAX_SYMBOLS then break end
+      local target = direction == "incoming" and c.from or c.to
+      local uri = target and target.uri
+      local ranges = c.fromRanges
+      if type(uri) == "string" and type(ranges) == "table" and #ranges > 0 then
+        local target_path = gvim.path.from_uri(uri)
+        if target_path and target_path ~= "" then
+          for _, rng in ipairs(ranges) do
+            local start = rng.start or {}
+            local line = tonumber(start.line) or 0
+            local col = tonumber(start.character) or 0
+            local kind_name = kind_label(tonumber(target.kind) or 0)
+            local name = tostring(target.name or "")
+            items[#items + 1] = {
+              path = target_path,
+              line = line,
+              col = col,
+              text = string.format("[%s] %s", kind_name, name),
+            }
+          end
+        end
+      end
+    end
+  end
+
+  if #items == 0 then
+    gvim.notify(t("status.no_locations", { kind = label }))
+    return
+  end
+  if #items == 1 then
+    jump_to(items[1])
+    return
+  end
+  open_location_finder(items, label)
+end
+
+gvim.command.register {
+  name = "show_workspace_symbols",
+  title = "%cmd.show_workspace_symbols",
+  description = "%cmd.show_workspace_symbols_desc",
+  run = show_workspace_symbols,
+}
+
+gvim.command.register {
+  name = "show_incoming_calls",
+  title = "%cmd.show_incoming_calls",
+  description = "%cmd.show_incoming_calls_desc",
+  run = function()
+    show_call_hierarchy("incoming")
+  end,
+}
+
+gvim.command.register {
+  name = "show_outgoing_calls",
+  title = "%cmd.show_outgoing_calls",
+  description = "%cmd.show_outgoing_calls_desc",
+  run = function()
+    show_call_hierarchy("outgoing")
+  end,
+}
 
 gvim.log.debug("lsp navigation plugin loaded (shared gvim.finder)")

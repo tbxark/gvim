@@ -146,6 +146,32 @@ func TestMarkModeExtendsSelectionUntilCancelled(t *testing.T) {
 	}
 }
 
+func TestEditorBookmarksList(t *testing.T) {
+	t.Parallel()
+	e := withDoc("first line\nsecond line\nthird line\n")
+	if bms := e.Bookmarks(); len(bms) != 0 {
+		t.Fatalf("empty bookmarks = %v, want none", bms)
+	}
+	marksCaret(e, 1, 2)
+	if err := e.Do("set_bookmark", slotArgs("3")).Err; err != nil {
+		t.Fatal(err)
+	}
+	marksCaret(e, 2, 4)
+	if err := e.Do("set_bookmark", slotArgs("1")).Err; err != nil {
+		t.Fatal(err)
+	}
+	bms := e.Bookmarks()
+	if len(bms) != 2 {
+		t.Fatalf("bookmarks len = %d, want 2", len(bms))
+	}
+	if bms[0].Slot != "1" || bms[0].Line != 3 || bms[0].Snippet != "third line" {
+		t.Errorf("bms[0] = %+v, want slot 1 on line 3", bms[0])
+	}
+	if bms[1].Slot != "3" || bms[1].Line != 2 || bms[1].Snippet != "second line" {
+		t.Errorf("bms[1] = %+v, want slot 3 on line 2", bms[1])
+	}
+}
+
 func TestMarkAndBookmarkActionsNeedADocument(t *testing.T) {
 	t.Parallel()
 	for _, a := range []Action{"set_mark", "cancel_mark", "clear_mark", "set_bookmark", "jump_to_bookmark"} {

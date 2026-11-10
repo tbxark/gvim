@@ -67,6 +67,18 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return msg.ov.cmdFor(msg.ov.p.Update(msg.msg)), true
 	case agentPickMsg:
 		return m.openAgentActionPicker(msg.name), true
+	case bookmarkRankMsg:
+		if !msg.ov.p.Active() {
+			return nil, true
+		}
+		return msg.ov.cmdFor(msg.ov.p.Update(msg.msg)), true
+	case bookmarkPickMsg:
+		m.popOverlay()
+		r := m.ed.Do("jump_to_bookmark", map[string]any{"char": msg.slot})
+		if r.Err != nil {
+			m.notice = r.Err.Error()
+		}
+		return nil, true
 	case agentActionMsg:
 		return m.startAgentChoice(msg.name, msg.resume, msg.dir), true
 	case agentChangeDirMsg:

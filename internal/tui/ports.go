@@ -55,6 +55,22 @@ type VirtualSpaceEditor interface {
 	SetVirtualColumns(n int)
 }
 
+// Bookmark is one bookmark entry for listing and jumping.
+type Bookmark struct {
+	Slot    string     // "0".."9"
+	Path    string     // buffer path or name
+	Name    string     // display name
+	Line    int        // 1-based line number
+	Col     int        // 1-based column
+	Pos     buffer.Pos // 0-based buffer position
+	Snippet string     // text of the bookmarked line
+}
+
+// BookmarkEditor is the optional port of EditorState that lists the active bookmarks.
+type BookmarkEditor interface {
+	Bookmarks() []Bookmark
+}
+
 // PluginEditor is the port of the editor that plugins use: documents by id, edits in API
 // coordinates, tabs, change tracking. The app builds it over the editor and passes it as
 // RootPorts.PluginEditor. It cannot be an optional method set of EditorState: both have a

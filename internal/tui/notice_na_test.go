@@ -45,7 +45,7 @@ func TestUnfinishedCommandsSayWhatIsMissing(t *testing.T) {
 		action string
 		want   string
 	}{
-		{"list_bookmarks", "List Bookmarks is not available yet: the editor does not list its bookmark slots"},
+		{"list_bookmarks", "No bookmarks set"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.action, func(t *testing.T) {

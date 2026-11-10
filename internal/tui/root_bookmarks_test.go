@@ -119,3 +119,44 @@ func TestBookmarkPromptIsALinePrompt(t *testing.T) {
 		t.Fatalf("overlay is %T, want a line prompt", m.overlays[0])
 	}
 }
+
+// TestListBookmarksOpensPickerAndJumps verifies that list_bookmarks opens the
+// bookmarks picker when bookmarks exist, and selecting an item jumps to that slot.
+func TestListBookmarksOpensPickerAndJumps(t *testing.T) {
+	t.Parallel()
+	ed := newFakeEditor("x")
+	ed.bookmarks = []Bookmark{
+		{Slot: "1", Name: "alpha.go", Line: 5, Col: 2, Snippet: "var alpha = 1"},
+		{Slot: "4", Name: "beta.go", Line: 12, Col: 1, Snippet: "func Beta() {}"},
+	}
+	m := newTestModel(t, ed, nil, 80, 24)
+	cmd := rootPaletteRun(m, "list_bookmarks")
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want bookmarks picker", len(m.overlays))
+	}
+	ov, ok := m.overlays[0].(*bookmarksOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want *bookmarksOverlay", m.overlays[0])
+	}
+	if len(ov.slots) != 2 || ov.slots[0] != "1" || ov.slots[1] != "4" {
+		t.Fatalf("picker slots = %v, want [1 4]", ov.slots)
+	}
+
+	// Press Down then Enter to select the second item (slot 4)
+	press(m, special(tea.KeyDown))
+	jumpCmd := press(m, special(tea.KeyEnter))
+	for _, msg := range collect(jumpCmd) {
+		m.Update(msg)
+	}
+
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays after jump = %d, want closed", len(m.overlays))
+	}
+	if len(ed.actions) == 0 || ed.actions[len(ed.actions)-1] != "jump_to_bookmark" {
+		t.Fatalf("editor actions = %v, want jump_to_bookmark", ed.actions)
+	}
+	if got := ed.args[len(ed.args)-1]["char"]; got != "4" {
+		t.Fatalf("jump_to_bookmark char = %v, want 4", got)
+	}
+	_ = cmd
+}

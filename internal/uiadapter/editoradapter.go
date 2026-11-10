@@ -333,6 +333,25 @@ func (a *Editor) SetRoot(root string) {
 	a.ed.SetRoot(root)
 }
 
+// Bookmarks returns the active bookmarks for List Bookmarks. The port is
+// optional: the root type-asserts it on EditorState.
+func (a *Editor) Bookmarks() []tui.Bookmark {
+	bms := a.ed.Bookmarks()
+	out := make([]tui.Bookmark, len(bms))
+	for i, b := range bms {
+		out[i] = tui.Bookmark{
+			Slot:    b.Slot,
+			Path:    b.Path,
+			Name:    b.Name,
+			Line:    b.Line,
+			Col:     b.Col,
+			Pos:     b.Pos,
+			Snippet: b.Snippet,
+		}
+	}
+	return out
+}
+
 // Status returns the editor's status message.
 func (a *Editor) Status() string {
 	return a.ed.Status()

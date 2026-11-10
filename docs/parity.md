@@ -21,12 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `47310b8` plus the round-93 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 88 KiB / both 216 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r93-final.log`).
-Round 93 implements read-only code viewer protection mode (gvim -R / --view / --read-only), protecting
-opened documents against edits and writes with status notices, and formalizes the focused Code Viewer
-objective and scope boundaries in Section 8.
+Last verified: 2026-11-10, tree commit `c80ba54` plus the round-94 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 88 KiB / both 216 KiB); default-enabled bundled plugins idle
+heap costs 7.99 MiB (< 8.00 MiB limit).
+Round 94 implements features 1, 2, and 3: interactive bookmarks picker (list_bookmarks), LSP workspace
+symbols (workspace/symbol), and LSP call hierarchy (incoming and outgoing calls), adding items 352–354.
 Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
 markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
@@ -7264,6 +7263,18 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      the shell's PTY is sized to the editor column, so showing or resizing the explorer resizes the
      shell. Fresh's utility dock spans the frame; this is the layout difference allowed by item 2.
      `docs/ui.md` §1, `docs/terminal.md`.
+352. **Interactive bookmarks list and jump (list_bookmarks).** Lists all active bookmark slots (0–9)
+     with slot number, file/tab name, line:col, and line snippet in an interactive picker overlay;
+     fuzzy filters, Enter jumps to the target slot, and empty bookmarks report 'No bookmarks set'.
+     Tests cover empty notice, slot selection, and jump dispatch.
+353. **LSP workspace symbols (show_workspace_symbols).** Queries `workspace/symbol` from the language
+     server, parses `SymbolInformation` and `WorkspaceSymbol` results with kind and container names,
+     and displays them in an interactive location finder with preview tabs and Enter jump.
+     Tests cover command registration and result navigation.
+354. **LSP call hierarchy (show_incoming_calls & show_outgoing_calls).** Prepares call hierarchy at
+     cursor with `textDocument/prepareCallHierarchy` and queries `callHierarchy/incomingCalls` or
+     `callHierarchy/outgoingCalls`; lists callers or callees with call-site ranges in the location
+     finder with preview tabs and direct jump. Tests cover incoming and outgoing call workflows.
 
 ## 5. Ranked backlog for the remaining rounds
 

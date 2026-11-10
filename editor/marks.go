@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -133,4 +134,49 @@ func (e *Editor) indexOfDoc(d *Document) int {
 		}
 	}
 	return -1
+}
+
+// Bookmark is one active bookmark slot for listing and navigation.
+type Bookmark struct {
+	Slot    string     // "0".."9"
+	Path    string     // buffer path or name
+	Name    string     // display name
+	Line    int        // 1-based line number for display
+	Col     int        // 1-based column for display
+	Pos     buffer.Pos // 0-based buffer position
+	Snippet string     // text of the bookmarked line (trimmed)
+}
+
+// Bookmarks returns the currently set bookmarks, sorted by slot name ("0".."9").
+// Slots whose tab/buffer was closed are cleaned up and omitted.
+func (e *Editor) Bookmarks() []Bookmark {
+	if len(e.extras.slots) == 0 {
+		return nil
+	}
+	var out []Bookmark
+	for slot := '0'; slot <= '9'; slot++ {
+		s := string(slot)
+		mark, ok := e.extras.slots[s]
+		if !ok {
+			continue
+		}
+		if e.indexOfDoc(mark.Doc) < 0 {
+			delete(e.extras.slots, s)
+			continue
+		}
+		snippet := ""
+		if mark.Doc.Buffer != nil && mark.Pos.Line >= 0 && mark.Pos.Line < mark.Doc.Buffer.Lines() {
+			snippet = strings.TrimSpace(mark.Doc.Buffer.Line(mark.Pos.Line))
+		}
+		out = append(out, Bookmark{
+			Slot:    s,
+			Path:    mark.Doc.Path,
+			Name:    mark.Doc.Name(),
+			Line:    mark.Pos.Line + 1,
+			Col:     mark.Pos.Col + 1,
+			Pos:     mark.Pos,
+			Snippet: snippet,
+		})
+	}
+	return out
 }

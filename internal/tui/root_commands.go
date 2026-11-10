@@ -14,9 +14,7 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 	case "clear_warnings":
 		m.clearWarnings()
 	case "list_bookmarks":
-		// The editor keeps the bookmark slots and does not list them, so there is
-		// nothing to show yet.
-		m.notice = "List Bookmarks is not available yet: the editor does not list its bookmark slots"
+		return m.openBookmarksPicker(), true
 	case "plugin_manager", "plugin_show_log", "plugin_reload", "plugin_reload_all", "load_plugin_from_buffer",
 		"init_check", "init_edit", "init_reload", "prompt_save_macro_to_init", "prompt_promote_macro":
 		return m.pluginUIAction(action), true

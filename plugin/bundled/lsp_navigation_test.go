@@ -100,10 +100,13 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 		}
 	}
 	want := map[string]string{
-		lspNavPlugin + ".goto_lsp_symbol":       "Go to LSP Symbol",
-		lspNavPlugin + ".show_definitions":      "LSP: Show Definitions",
-		lspNavPlugin + ".show_implementations":  "LSP: Show Implementations",
-		lspNavPlugin + ".show_type_definitions": "LSP: Show Type Definitions",
+		lspNavPlugin + ".goto_lsp_symbol":        "Go to LSP Symbol",
+		lspNavPlugin + ".show_definitions":       "LSP: Show Definitions",
+		lspNavPlugin + ".show_implementations":   "LSP: Show Implementations",
+		lspNavPlugin + ".show_type_definitions":  "LSP: Show Type Definitions",
+		lspNavPlugin + ".show_workspace_symbols": "LSP: Workspace Symbols",
+		lspNavPlugin + ".show_incoming_calls":    "LSP: Incoming Calls",
+		lspNavPlugin + ".show_outgoing_calls":    "LSP: Outgoing Calls",
 	}
 	for id, title := range want {
 		if titles[id] != title {
@@ -112,6 +115,140 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 	}
 	if bindings := h.Host.Bindings[lspNavPlugin]; len(bindings) != 0 {
 		t.Errorf("bindings = %v, want none (Fresh binds none)", bindings)
+	}
+}
+
+func TestLSPNavigationWorkspaceSymbols(t *testing.T) {
+	t.Parallel()
+	host, _ := lspNavHost(t)
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		if c.Method == "workspace/symbol" {
+			return []any{
+				map[string]any{
+					"name": "GlobalFunction",
+					"kind": 12.0,
+					"location": map[string]any{
+						"uri": "file:///work/a.go",
+						"range": map[string]any{
+							"start": map[string]any{"line": 2.0, "character": 5.0},
+							"end":   map[string]any{"line": 5.0, "character": 0.0},
+						},
+					},
+				},
+			}, ""
+		}
+		return nil, "unexpected " + c.Method
+	}
+	h := startLSPNav(t, host)
+	navRun(t, h, "show_workspace_symbols")
+	o := host.UI().Last("picker")
+	if o == nil {
+		t.Fatal("picker is nil")
+	}
+	// Select item 0 to commit jump
+	h.Resolve(pluginapi.Completion{Token: o.Token, Values: []any{0}})
+	h.CompleteBuffers()
+	cursors, _ := host.Cursors(host.Buffers[0].Info.ID)
+	if len(cursors) == 0 || cursors[0].Pos.Line != 2 {
+		t.Fatalf("jump cursor = %+v, want line 2", cursors)
+	}
+}
+
+func TestLSPNavigationOutgoingCalls(t *testing.T) {
+	t.Parallel()
+	host, _ := lspNavHost(t)
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		switch c.Method {
+		case "textDocument/prepareCallHierarchy":
+			return []any{
+				map[string]any{
+					"name": "main",
+					"kind": 12.0,
+					"uri":  "file:///work/a.go",
+					"range": map[string]any{
+						"start": map[string]any{"line": 2.0, "character": 5.0},
+						"end":   map[string]any{"line": 5.0, "character": 0.0},
+					},
+				},
+			}, ""
+		case "callHierarchy/outgoingCalls":
+			return []any{
+				map[string]any{
+					"to": map[string]any{
+						"name": "helper",
+						"kind": 12.0,
+						"uri":  "file:///work/a.go",
+					},
+					"fromRanges": []any{
+						map[string]any{
+							"start": map[string]any{"line": 3.0, "character": 1.0},
+							"end":   map[string]any{"line": 3.0, "character": 9.0},
+						},
+					},
+				},
+			}, ""
+		}
+		return nil, "unexpected " + c.Method
+	}
+	h := startLSPNav(t, host)
+	if err := h.Run(lspNavPlugin+".show_outgoing_calls", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.CompleteLSP()
+	h.CompleteLSP()
+	h.CompleteBuffers()
+	cursors, _ := host.Cursors(host.Buffers[0].Info.ID)
+	if len(cursors) == 0 || cursors[0].Pos.Line != 3 {
+		t.Fatalf("call site cursor = %+v, want line 3", cursors)
+	}
+}
+
+func TestLSPNavigationCallHierarchy(t *testing.T) {
+	t.Parallel()
+	host, _ := lspNavHost(t)
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		switch c.Method {
+		case "textDocument/prepareCallHierarchy":
+			return []any{
+				map[string]any{
+					"name": "helper",
+					"kind": 12.0,
+					"uri":  "file:///work/a.go",
+					"range": map[string]any{
+						"start": map[string]any{"line": 6.0, "character": 5.0},
+						"end":   map[string]any{"line": 6.0, "character": 15.0},
+					},
+				},
+			}, ""
+		case "callHierarchy/incomingCalls":
+			return []any{
+				map[string]any{
+					"from": map[string]any{
+						"name": "main",
+						"kind": 12.0,
+						"uri":  "file:///work/a.go",
+					},
+					"fromRanges": []any{
+						map[string]any{
+							"start": map[string]any{"line": 3.0, "character": 1.0},
+							"end":   map[string]any{"line": 3.0, "character": 9.0},
+						},
+					},
+				},
+			}, ""
+		}
+		return nil, "unexpected " + c.Method
+	}
+	h := startLSPNav(t, host)
+	if err := h.Run(lspNavPlugin+".show_incoming_calls", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.CompleteLSP()     // completes textDocument/prepareCallHierarchy
+	h.CompleteLSP()     // completes callHierarchy/incomingCalls
+	h.CompleteBuffers() // completes jump_to buffer open
+	cursors, _ := host.Cursors(host.Buffers[0].Info.ID)
+	if len(cursors) == 0 || cursors[0].Pos.Line != 3 {
+		t.Fatalf("call site cursor = %+v, want line 3", cursors)
 	}
 }
 
