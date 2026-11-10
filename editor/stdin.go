@@ -22,6 +22,9 @@ func (e *Editor) OpenStdinText(text string, opts StdinOptions) *Document {
 	if opts.Language != "" {
 		d.SetLanguage(opts.Language)
 	}
+	if e.opts.ReadOnly {
+		d.SetReadOnly(true)
+	}
 	if e.pristineUntitled() && e.docs[0].UntitledNumber() == 0 {
 		e.releaseDoc(e.docs[0])
 		e.setDoc(0, d)

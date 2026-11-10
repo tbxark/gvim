@@ -89,6 +89,7 @@ func Run(ctx context.Context, opts Options) error {
 	// stdin explicitly must have a pipe: a terminal would block forever on a read.
 	if !serveDaemon && !opts.StdinLaunch() && len(opts.Files) == 0 && !term.IsTerminal(os.Stdin.Fd()) {
 		opts.ReadStdin = true
+		opts.ReadOnly = true
 	}
 	var stdinInput *os.File
 	if opts.ReadStdin {

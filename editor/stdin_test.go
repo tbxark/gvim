@@ -47,6 +47,15 @@ func TestOpenStdinTextIsAnUnmodifiedLabelledBuffer(t *testing.T) {
 	}
 }
 
+func TestOpenStdinTextRespectsReadOnlyOption(t *testing.T) {
+	t.Parallel()
+	e := New(Options{Rows: 24, Cols: 80, Empty: true, ReadOnly: true})
+	d := e.OpenStdinText("hello", StdinOptions{Label: "[stdin]"})
+	if !d.ReadOnly() {
+		t.Fatal("stdin document must be read-only when Options.ReadOnly is set")
+	}
+}
+
 func TestOpenStdinTextNormalizesLineEndings(t *testing.T) {
 	t.Parallel()
 	e := openStdinEditor(t)
