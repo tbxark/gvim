@@ -67,6 +67,35 @@ func TestClangdManifestAndCommands(t *testing.T) {
 	}
 }
 
+func TestClangdGermanCommandsAndNotices(t *testing.T) {
+	t.Parallel()
+	r := startRig(t, rigOpts{
+		locale:  "de",
+		plugins: []string{"clangd_support"},
+		buffers: []rigBuffer{{"/work/src/a.c", "int main(void) { return 0; }\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.SetDir("/work")
+		},
+	})
+	commands := map[string]string{}
+	for _, c := range r.host.Commands["clangd_support"] {
+		commands[c.ID] = c.Title
+	}
+	if got := commands["clangd_support.switch_source_header"]; got != "Clangd: Quelle/Header wechseln" {
+		t.Errorf("German switch command title = %q, want Clangd: Quelle/Header wechseln", got)
+	}
+	if got := commands["clangd_support.project_setup"]; got != "Clangd: Projekteinrichtung" {
+		t.Errorf("German project setup title = %q, want Clangd: Projekteinrichtung", got)
+	}
+	r.host.SetActive(0)
+	if err := r.h.Run("clangd_support.switch_source_header", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastNoticeText(r.h); !strings.Contains(got, "keine aktive Datei zum Wechseln") {
+		t.Errorf("notice = %q, want German no-active-file notice", got)
+	}
+}
+
 func TestClangdSwitchSourceToHeader(t *testing.T) {
 	t.Parallel()
 	r := clangdRig(t, "/work/src/a.c", "int f(void);\n", func(o *plugintest.FakeOS) {

@@ -629,7 +629,8 @@ primitive for this content. The port (`plugin/bundled/plugins/clangd_support/`, 
   directory targets, and reports when neither has one;
 * has no `lsp/custom_notification` handling (`textDocument/clangd.fileStatus`, `$/memoryUsage`), so
   clangd's file-status line never reaches gvim's status row;
-* registers the same three user commands as Fresh, no keys and no settings.
+* registers the same three user commands as Fresh, no keys and no settings; Fresh's command and
+  status translation catalogue is imported across all 15 locales (round 84).
 
 Tests: `plugin/bundled/clangd_support_test.go` covers the command table/no bindings, source→header and
 header→source switches (single match, picker choice), no-match/unsupported/no-active-file statuses,

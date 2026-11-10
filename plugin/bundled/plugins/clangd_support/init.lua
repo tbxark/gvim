@@ -336,8 +336,8 @@ end
 
 gvim.command.register({
   name = "switch_source_header",
-  title = t("cmd.switch"),
-  description = t("cmd.switch_desc"),
+  title = t("cmd.switch_source_header"),
+  description = t("cmd.switch_source_header_desc"),
   run = function()
     switch_source_header()
   end,
@@ -354,8 +354,8 @@ gvim.command.register({
 
 gvim.command.register({
   name = "open_project_config",
-  title = t("cmd.open_config"),
-  description = t("cmd.open_config_desc"),
+  title = t("cmd.open_project_config"),
+  description = t("cmd.open_project_config_desc"),
   run = function()
     open_project_config()
   end,
