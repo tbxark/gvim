@@ -597,8 +597,9 @@ project detection and the trust-gated restore, and reuses the native LSP actions
   Start/Restart LSP Server, Show LSP Status and the copy-install row;
 * Fresh prechecks `dotnet --version` and caches the answer; the port runs `dotnet restore` directly
   and reports an exec error, which also avoids trusting a local-machine `which` in a remote workspace;
-* i18n is English-only, unlike Fresh's translated status strings; the plugin registers two commands
-  (Fresh has none) and no keys/settings.
+* Fresh's translated restore status strings are imported into csharp_support.i18n.json across
+  all 15 locales (round 83); gvim-specific command and help strings use their English fallback; the
+  plugin registers two commands (Fresh has none) and no keys/settings.
 
 Tests: `plugin/bundled/csharp_support_test.go` covers the command table/no bindings, nearest-project
 restore and its once-per-project rule, the untrusted→`trust_changed` deferral, the no-project-file

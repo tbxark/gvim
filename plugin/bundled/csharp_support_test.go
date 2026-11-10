@@ -63,6 +63,31 @@ func TestCSharpManifestAndCommands(t *testing.T) {
 	}
 }
 
+func TestCSharpRestoreUsesGermanTranslations(t *testing.T) {
+	t.Parallel()
+	r := startRig(t, rigOpts{
+		locale:  "de",
+		plugins: []string{"csharp_support"},
+		buffers: []rigBuffer{{"/work/proj/src/a.cs", "class A {}\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.SetDir("/work")
+			o.SetDir("/work/proj")
+			o.SetDir("/work/proj/src")
+			o.Bin["dotnet"] = "/usr/bin/dotnet"
+			o.SetFile("/work/proj/App.csproj", "<Project/>\n")
+			o.Script([]string{"dotnet", "restore", "/work/proj"}, plugintest.ProcScript{Stdout: "restored\n"})
+		},
+	})
+	r.host.EnvTrust = "trusted"
+	csOpen(r, "/work/proj/src/a.cs")
+	if got := csRestoreCalls(r, "/work/proj"); got != 1 {
+		t.Fatalf("restore calls = %d (runs %v)", got, r.os.Runs())
+	}
+	if got := lastNoticeText(r.h); !strings.Contains(got, "NuGet-Wiederherstellung") {
+		t.Errorf("status = %q, want German restore completion notice", got)
+	}
+}
+
 func TestCSharpRestoresNearestProjectOnOpen(t *testing.T) {
 	t.Parallel()
 	r := csRig(t, "/work/proj/src/a.cs", "class A {}\n", func(o *plugintest.FakeOS) {
