@@ -21,12 +21,13 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `5c4cad5` plus the round-76 working tree. Static gates PASS
+Last verified: 2026-11-10, tree commit `ee17096` plus the round-77 working tree. Static gates PASS
 (Lead; catalogue heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0 (log `/tmp/gvim-r76-final2.log`).
-Round 76 adds browser Alt+E encoding choice, remote file `~user` expansion, and review diff refresh on
-save/revert. The slow refresh versus same-file hunk navigation fix reads the cursor after the fetch;
-a dedicated interleaving regression and independent final review remain outstanding. The Lead ran the
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0 (log `/tmp/gvim-r77-final.log`).
+Round 76 added browser Alt+E encoding choice, remote file `~user` expansion, and review diff refresh on
+save/revert. Round 77 adds a deterministic blocked-fetch regression: navigating to the second hunk
+during a save reload retains that location after reload; the targeted test also passes with `-race`.
+Independent final review and real terminal/git integration remain outstanding. The Lead ran the
 full suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
 clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
 Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching. Fresh reference: `refs/fresh` same

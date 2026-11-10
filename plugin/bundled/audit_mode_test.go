@@ -1243,6 +1243,48 @@ func (s *blockingReloadOS) Run(ctx context.Context, argv []string, o hostos.Proc
 	return s.FakeOS.Run(ctx, argv, o)
 }
 
+func TestAuditModeSaveReloadPreservesNavigationDuringFetch(t *testing.T) {
+	host, plain := auditHost(t)
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-old2\n+new2\n"
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: diff})
+	slow := &blockingReloadOS{FakeOS: plain, started: make(chan struct{}), release: make(chan struct{})}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: slow, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	diffID := openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: strings.ReplaceAll(diff, "+new2", "+reloaded")})
+	h.RT.Emit(pluginapi.Event{Name: "after_file_save", Data: map[string]any{"path": "/w/a.go"}})
+	work := runnableWork(h)
+	if work == nil {
+		t.Fatal("no save-triggered reload Work")
+	}
+	done := make(chan pluginapi.Completion, 1)
+	go func() { done <- work.Run(work.Ctx) }()
+	<-slow.started
+	if err := h.RT.Run(auditPlugin+".next_hunk", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	drainRuntime(h)
+	if got := auditDiffLine(t, host, diffID); got != 6 {
+		t.Fatalf("during reload cursor = %d, want 6", got)
+	}
+	close(slow.release)
+	h.RT.Resolve(<-done)
+	drainRuntime(h)
+	if got := auditDiffLine(t, host, diffID); got != 6 {
+		t.Fatalf("after reload cursor = %d, want 6", got)
+	}
+	for _, b := range host.Buffers {
+		if b.Info.ID == diffID && strings.Contains(strings.Join(b.Lines, "\n"), "+reloaded") {
+			return
+		}
+	}
+	t.Fatal("reload did not update the diff content")
+}
+
 func TestAuditModeSaveReloadDiscardedAfterClose(t *testing.T) {
 	t.Parallel()
 	host, plain := auditHost(t)
