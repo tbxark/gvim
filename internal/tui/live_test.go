@@ -243,6 +243,30 @@ func TestDiagnosticQuickfixKeepsTheDocumentColumn(t *testing.T) {
 	}
 }
 
+// TestDiagnosticQuickfixRowJumpsToDocumentColumn: selecting a diagnostic quickfix
+// row opens the diagnostic's document at Line/Col, not at the message highlight offset.
+func TestDiagnosticQuickfixRowJumpsToDocumentColumn(t *testing.T) {
+	t.Parallel()
+	m, ed := newLiveModel(t, &grepPort{})
+	m.openLiveGrepResultsList(palette.GrepExportMsg{
+		Root: "/ws", Query: "t+",
+		Hits: []palette.GrepHit{{
+			Source: palette.GrepDiagnostics, Path: "/ws/a.go", Rel: "a.go",
+			Line: 2, Col: 40, Text: "prefix ttt suffix", TextCol: 8, TextLen: 3,
+		}},
+	})
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want the quickfix list", len(m.overlays))
+	}
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if len(ed.opened) != 1 || ed.opened[0] != "/ws/a.go" {
+		t.Fatalf("diagnostic quickfix opened %v, want /ws/a.go", ed.opened)
+	}
+	if len(ed.gotos) == 0 || !slices.Equal(ed.gotos[len(ed.gotos)-1][:], []int{2, 40}) {
+		t.Fatalf("diagnostic quickfix jumped to %v, want 2:40", ed.gotos)
+	}
+}
+
 // TestLiveGrepExportOpensQuickfixList: Alt+Q from Live Grep closes the palette and opens
 // the shared list overlay with the hits; Enter on a row jumps to it while the list stays
 // open (the same walking behavior as the project-search export).

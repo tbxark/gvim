@@ -67,3 +67,40 @@ func settingsSectionNamed(snap tui.SettingsSnapshot, name string) *tui.SettingsS
 	}
 	return nil
 }
+
+// warmingEnv wraps a workspace environment and exposes the remote provider's warm
+// state; the Settings Environment rows must say "warming" instead of "none" while the
+// background remote probe is in flight.
+type warmingEnv struct {
+	workspaceEnv
+	warming bool
+}
+
+func (w *warmingEnv) Warming() bool { return w.warming }
+
+func TestSettingsEnvironmentRowsShowRemoteWarming(t *testing.T) {
+	root := t.TempDir()
+	base := env.New(root, nil, func() bool { return true })
+	provider := &warmingEnv{workspaceEnv: base, warming: true}
+	svc := &settingsService{root: root, trusted: func() bool { return true }, env: provider}
+	section := settingsSectionNamed(svc.snapshotFor(config.Defaults(), nil), "Environment")
+	if section == nil {
+		t.Fatal("no Environment section")
+	}
+	row := map[string]string{}
+	for _, item := range section.Items {
+		row[item.Name] = item.Value + "|" + item.Note
+	}
+	if got := row["Project environment"]; !strings.Contains(got, "warming") || !strings.Contains(strings.ToLower(got), "background") {
+		t.Fatalf("warming row = %q", got)
+	}
+	provider.warming = false
+	section = settingsSectionNamed(svc.snapshotFor(config.Defaults(), nil), "Environment")
+	row = map[string]string{}
+	for _, item := range section.Items {
+		row[item.Name] = item.Value
+	}
+	if got := row["Project environment"]; got != "none" {
+		t.Fatalf("post-warm row = %q, want none", got)
+	}
+}

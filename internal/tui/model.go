@@ -787,6 +787,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.pluginPanelKey(msg); ok {
 		return m, cmd
 	}
+	// Settings refresh messages belong to one page, not to whatever overlay is on top:
+	// route them to that page even while a child page or prompt is open, so a warm
+	// completion is not swallowed and the next tick never renews after the page closes.
+	if cmd, ok := m.routeSettingsMessage(msg); ok {
+		return m, cmd
+	}
 	// A message that is not input still goes to the top overlay, because an overlay
 	// may have started the work that sends it (the palette's file ranking). The
 	// root handles the message too.
@@ -3631,6 +3637,31 @@ func (m *Model) pushOverlay(o Overlay) {
 	if o != nil && o.Active() {
 		m.overlays = append(m.overlays, o)
 	}
+}
+
+// routeSettingsMessage routes a Settings page refresh tick/snapshot to the page it names,
+// regardless of the top overlay. A page no longer on the stack (or closed) drops the old
+// message without scheduling a replacement tick.
+func (m *Model) routeSettingsMessage(msg tea.Msg) (tea.Cmd, bool) {
+	var page *settingsPage
+	switch msg := msg.(type) {
+	case settingsRefreshTickMsg:
+		page = msg.page
+	case settingsSnapshotMsg:
+		page = msg.page
+	default:
+		return nil, false
+	}
+	if page == nil || !page.Active() {
+		return nil, true
+	}
+	for _, o := range m.overlays {
+		if o == Overlay(page) {
+			_, cmd := page.Update(msg)
+			return cmd, true
+		}
+	}
+	return nil, true
 }
 
 // routeOverlay gives msg to the top overlay and applies the result: the

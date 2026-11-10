@@ -201,3 +201,74 @@ func TestRemoteCaptureFailureClearsTheOverlay(t *testing.T) {
 		t.Fatal("the capture error was not recorded")
 	}
 }
+
+// TestRemoteWarmingState: the background Warm probe exposes a warming state while its
+// remote marker command is in flight, and clears it when the probe finishes. The Settings
+// Environment rows use it instead of reporting "none" during the warm.
+func TestRemoteWarmingState(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	run := func(context.Context, string) (string, error) {
+		once.Do(func() { close(started) })
+		<-release
+		return "", nil
+	}
+	p := NewRemote("/remote/proj", direnvDetectors(), func() bool { return true }, run)
+	done := make(chan struct{})
+	go func() {
+		p.Warm(context.Background())
+		close(done)
+	}()
+	<-started
+	if !p.Warming() {
+		t.Fatal("Warming is false while the background probe is in flight")
+	}
+	close(release)
+	<-done
+	if p.Warming() {
+		t.Fatal("Warming stayed true after the background probe finished")
+	}
+}
+
+// TestRemoteWarmingCountsOverlappingProbes: two Warm probes in flight keep Warming true
+// until both finish; the first completion must not clear the second one's state.
+func TestRemoteWarmingCountsOverlappingProbes(t *testing.T) {
+	releaseA := make(chan struct{})
+	releaseB := make(chan struct{})
+	started := make(chan int, 2)
+	var mu sync.Mutex
+	next := 0
+	run := func(context.Context, string) (string, error) {
+		mu.Lock()
+		next++
+		id := next
+		mu.Unlock()
+		started <- id
+		if id == 1 {
+			<-releaseA
+		} else {
+			<-releaseB
+		}
+		return "", nil
+	}
+	p := NewRemote("/remote/proj", nil, func() bool { return true }, run)
+	done := make(chan struct{}, 2)
+	go func() { p.Warm(context.Background()); done <- struct{}{} }()
+	go func() { p.Warm(context.Background()); done <- struct{}{} }()
+	<-started
+	<-started
+	if !p.Warming() {
+		t.Fatal("Warming is false with two probes in flight")
+	}
+	close(releaseA)
+	<-done
+	if !p.Warming() {
+		t.Fatal("the first completion cleared Warming while the second probe is still running")
+	}
+	close(releaseB)
+	<-done
+	if p.Warming() {
+		t.Fatal("Warming stayed true after both probes finished")
+	}
+}

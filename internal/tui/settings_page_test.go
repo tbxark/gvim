@@ -551,3 +551,112 @@ func TestSettingsSearchEnterEndsSearch(t *testing.T) {
 		t.Fatal("Enter closed the Settings page")
 	}
 }
+
+// TestSettingsPageRefreshesWhenSnapshotChanges: an open page schedules a non-blocking
+// snapshot command, applies the new snapshot and schedules the next tick. This is how the
+// remote environment "warming" row changes to the real value when Warm finishes without
+// the page being reopened.
+func TestSettingsPageRefreshesWhenSnapshotChanges(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	port.snap.Sections[0].Items[0].Value = "warming"
+	m := New(Deps{Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, SettingsPort: port})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	p := newSettingsPage(m, port)
+	p.refreshSeq = 1
+	updated := settingsSnapshot()
+	updated.Sections[0].Items[0].Value = "light"
+	port.snap = updated
+	_, cmd := p.Update(settingsRefreshTickMsg{page: p, seq: 1})
+	if cmd == nil {
+		t.Fatal("the refresh tick produced no snapshot command")
+	}
+	msg := cmd()
+	if _, ok := msg.(settingsSnapshotMsg); !ok {
+		t.Fatalf("snapshot command returned %T", msg)
+	}
+	_, next := p.Update(msg)
+	if next == nil {
+		t.Fatal("applying the refreshed snapshot did not schedule the next tick")
+	}
+	if got := p.snap.Sections[0].Items[0].Value; got != "light" {
+		t.Fatalf("page snapshot value = %q, want refreshed light", got)
+	}
+}
+
+// TestSettingsRefreshCrossesChildOverlay: refresh ticks/snapshots are routed to their
+// Settings page even while a child overlay (here a prompt stand-in) is on top; the child
+// must not swallow them, and a tick for a closed page must not renew.
+func TestSettingsRefreshCrossesChildOverlay(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	port.snap.Sections[0].Items[0].Value = "warming"
+	m := New(Deps{Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, SettingsPort: port})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.openSettings()
+	page := m.topSettingsPage()
+	if page == nil {
+		t.Fatal("open_settings did not push the Settings page")
+	}
+	page.refreshSeq = 1
+	child := &fakeOverlay{open: true}
+	m.pushOverlay(child)
+	updated := settingsSnapshot()
+	updated.Sections[0].Items[0].Value = "light"
+	port.snap = updated
+	_, cmd := m.Update(settingsRefreshTickMsg{page: page, seq: 1})
+	if cmd == nil {
+		t.Fatal("refresh tick was swallowed by the child overlay")
+	}
+	msg := cmd()
+	_, next := m.Update(msg)
+	if next == nil {
+		t.Fatal("refreshed snapshot did not schedule the next tick")
+	}
+	if got := page.snap.Sections[0].Items[0].Value; got != "light" {
+		t.Fatalf("Settings row = %q, want the refreshed light value", got)
+	}
+	if len(m.overlays) < 2 || m.overlays[len(m.overlays)-1] != Overlay(child) {
+		t.Fatal("the child overlay was popped by the refresh")
+	}
+	if len(child.keys) != 0 {
+		t.Fatalf("the child overlay received the settings refresh: %v", child.keys)
+	}
+	m.popOverlay() // child
+	m.popOverlay() // page
+	page.Close()
+	if _, old := m.Update(settingsRefreshTickMsg{page: page, seq: page.refreshSeq}); old != nil {
+		t.Fatal("a tick for a closed Settings page renewed the refresh")
+	}
+}
+
+// TestSettingsStaleSnapshotAfterSaveIsDropped: a refresh snapshot that started before a
+// Save must not overwrite the applied new values, and the save must restart the refresh
+// loop for the next snapshot.
+func TestSettingsStaleSnapshotAfterSaveIsDropped(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m, page := openSettingsPage(t, port)
+	if page.refreshSeq == 0 {
+		page.refreshSeq = 1
+	}
+	_, tickCmd := m.Update(settingsRefreshTickMsg{page: page, seq: page.refreshSeq})
+	if tickCmd == nil {
+		t.Fatal("no snapshot command for the old tick")
+	}
+	oldMsg := tickCmd()
+
+	updated := settingsSnapshot()
+	updated.Sections[0].Items[0].Value = "light"
+	port.saveChange = SettingsChange{Snapshot: updated}
+	_, saveCmd := m.Update(settingsChangeMsg{change: port.saveChange})
+	if saveCmd == nil {
+		t.Fatal("applying a save did not restart the refresh loop")
+	}
+	if got := page.snap.Sections[0].Items[0].Value; got != "light" {
+		t.Fatalf("applied snapshot value = %q, want light", got)
+	}
+	if _, staleCmd := m.Update(oldMsg); staleCmd != nil {
+		t.Fatal("the stale snapshot scheduled another refresh")
+	}
+	if got := page.snap.Sections[0].Items[0].Value; got != "light" {
+		t.Fatalf("stale snapshot overwrote the saved value: %q", got)
+	}
+}

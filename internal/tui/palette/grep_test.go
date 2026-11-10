@@ -1,6 +1,7 @@
 package palette
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -349,7 +350,7 @@ func TestDiagnosticHighlightUsesMessageMatch(t *testing.T) {
 		Path: "/w/a.go", Rel: "a.go", Line: 2, Col: 40,
 		Text: "prefix ttt suffix",
 	}}
-	hits, err := searchDiagnostics(diags, "t+", SearchOptions{Regex: true}, 10)
+	hits, err := searchDiagnostics(context.Background(), diags, "t+", SearchOptions{Regex: true}, 10)
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("searchDiagnostics = %v, %v; want one hit", hits, err)
 	}
@@ -392,6 +393,40 @@ func TestDiagnosticHighlightUsesMessageMatch(t *testing.T) {
 		if !g.At(at+i, geo.top+1).Style.Bold {
 			t.Fatalf("match rune %d is not bold in %q", i, label)
 		}
+	}
+}
+
+// countingContext cancels deterministically after a number of Err calls, so the
+// diagnostics scan can be stopped between messages without timing or goroutines.
+type countingContext struct {
+	context.Context
+	calls, cancelAt int
+}
+
+func (c *countingContext) Err() error {
+	c.calls++
+	if c.calls >= c.cancelAt {
+		return context.Canceled
+	}
+	return nil
+}
+
+// TestSearchDiagnosticsCancelsBetweenMessages: the in-memory diagnostics scan obeys
+// the same context as the text search; a canceled command stops before reading the
+// remaining messages.
+func TestSearchDiagnosticsCancelsBetweenMessages(t *testing.T) {
+	t.Parallel()
+	diags := make([]DiagnosticSource, 100)
+	for i := range diags {
+		diags[i] = DiagnosticSource{Path: "/w/a.go", Rel: "a.go", Line: 1, Col: i + 1, Text: "hit"}
+	}
+	ctx := &countingContext{Context: context.Background(), cancelAt: 4}
+	hits, err := searchDiagnostics(ctx, diags, "hit", SearchOptions{}, 100)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled scan err = %v, want context.Canceled", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("canceled scan returned %d hits, want the 2 before cancellation", len(hits))
 	}
 }
 

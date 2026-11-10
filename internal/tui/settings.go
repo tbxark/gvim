@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -107,7 +108,9 @@ func (m *Model) openSettings() {
 		m.openReadOnlySettings()
 		return
 	}
-	m.pushOverlay(newSettingsPage(m, m.util.settingsPort))
+	page := newSettingsPage(m, m.util.settingsPort)
+	m.pushOverlay(page)
+	m.pending = tea.Batch(m.pending, page.refreshCmd())
 }
 
 // openReadOnlySettings shows the effective settings without a way to change
@@ -165,8 +168,11 @@ type settingsPage struct {
 	// structureSeq is the generation of the sub-page request in flight: a
 	// structure that comes back for an older request is dropped.
 	structureSeq int
-	active       bool
-	box          space.Rect
+	// refreshSeq numbers the page's non-blocking snapshot refreshes. The page schedules
+	// a tick while it is open; the snapshot itself runs in a command (never Update).
+	refreshSeq int
+	active     bool
+	box        space.Rect
 	// help is Fresh's settings_help panel: it lists the page's keys and any key closes it.
 	help bool
 	// searching is Fresh's settings_search mode: / starts it, Esc cancels it without
@@ -308,6 +314,32 @@ func newSettingsPage(m *Model, port SettingsPort) *settingsPage {
 
 // Active reports whether the page is still open.
 func (p *settingsPage) Active() bool { return p.active }
+
+// settingsRefreshEvery bounds how often an open Settings page rebuilds its snapshot
+// while a background provider (for example the remote env Warm probe) may have changed.
+const settingsRefreshEvery = 500 * time.Millisecond
+
+// refreshCmd schedules the next non-blocking snapshot read off the update loop.
+func (p *settingsPage) refreshCmd() tea.Cmd {
+	p.refreshSeq++
+	seq := p.refreshSeq
+	return tea.Tick(settingsRefreshEvery, func(time.Time) tea.Msg {
+		return settingsRefreshTickMsg{page: p, seq: seq}
+	})
+}
+
+// settingsRefreshTickMsg asks an open Settings page to read its snapshot in a command.
+type settingsRefreshTickMsg struct {
+	page *settingsPage
+	seq  int
+}
+
+// settingsSnapshotMsg is one refreshed page snapshot.
+type settingsSnapshotMsg struct {
+	page     *settingsPage
+	seq      int
+	snapshot SettingsSnapshot
+}
 
 // Close closes the page.
 func (p *settingsPage) Close() { p.active = false }
@@ -757,23 +789,27 @@ func (p *settingsPage) confirmCancel() {
 
 // applied takes the result of a Save: on success the page shows the new
 // snapshot with no pending values; on failure it stays put and the status row
-// says why.
-func (p *settingsPage) applied(change SettingsChange, err error) {
+// says why. A success retires the refresh generation so a snapshot command that
+// started before the save cannot overwrite the just-applied values, and schedules
+// the next refresh so the loop continues.
+func (p *settingsPage) applied(change SettingsChange, err error) tea.Cmd {
 	if err != nil {
 		p.m.notice = uiTextVars("gvim.settings.notice.error", "Settings: %{error}", map[string]any{"error": err.Error()})
-		return
+		return nil
 	}
+	p.refreshSeq++
 	if change.Reload && p.dirty() {
 		// A Reload reaches the open page too (the palette command works while it
 		// is up): keep the unsaved changes over the new snapshot instead of
 		// dropping them.
 		p.snap = change.Snapshot
 		p.rebuild()
-		return
+		return p.refreshCmd()
 	}
 	p.pending = make(map[string]settingsPending)
 	p.snap = change.Snapshot
 	p.rebuild()
+	return p.refreshCmd()
 }
 
 // rowAt returns the index of the row drawn at (x, y) in the last draw.
@@ -808,6 +844,19 @@ func (p *settingsPage) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 			p.move(-list.WheelRows)
 		case tea.MouseWheelDown:
 			p.move(list.WheelRows)
+		}
+	case settingsRefreshTickMsg:
+		if msg.page == p && msg.seq == p.refreshSeq && p.active {
+			port, seq := p.port, msg.seq
+			cmd = func() tea.Msg {
+				return settingsSnapshotMsg{page: p, seq: seq, snapshot: port.Snapshot()}
+			}
+		}
+	case settingsSnapshotMsg:
+		if msg.page == p && msg.seq == p.refreshSeq && p.active {
+			p.snap = msg.snapshot
+			p.rebuild()
+			cmd = p.refreshCmd()
 		}
 	case prompt.Done:
 		if tag, ok := msg.Tag.(settingsEditTag); ok && tag.page == p {
@@ -908,15 +957,16 @@ func (m *Model) topSettingsPage() *settingsPage {
 func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch d := msg.(type) {
 	case settingsChangeMsg:
+		var cmd tea.Cmd
 		if page := m.topSettingsPage(); page != nil {
-			page.applied(d.change, d.err)
+			cmd = page.applied(d.change, d.err)
 		}
 		if d.err != nil {
 			m.notice = "Settings: " + d.err.Error()
-			return nil, true
+			return cmd, true
 		}
 		m.applySettingsChange(d.change)
-		return nil, true
+		return cmd, true
 	case settingsEditMsg:
 		if d.page.Active() {
 			return d.page.openEdit(d.key), true

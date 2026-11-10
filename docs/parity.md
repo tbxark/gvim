@@ -21,10 +21,10 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `7545ab3` (the round-72 commit; the previous round's commit is
-folded in) plus the merged round-73 work. Static gates PASS (Lead, heap en 128 KiB / de 83 KiB / both
+Last verified: 2026-11-10, tree commit `2fe707c` (the round-73 commit; the previous round's commit is
+folded in) plus the merged round-74 work. Static gates PASS (Lead, heap en 128 KiB / de 83 KiB / both
 211 KiB). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line
-(log `/tmp/gvim-r73-final2.log`). The audit ran targeted round-73 tests/diff review; the Lead ran the
+(log `/tmp/gvim-r74-final2.log`). The audit ran targeted round-74 tests/diff review; the Lead ran the
 full suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
 clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
 Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching. Fresh reference: `refs/fresh` same
@@ -1532,6 +1532,36 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-74 outcome (2026-11-10, merged working tree on `2fe707c`).** Three slices plus docs:
+diagnostics scan cancellation/quickfix jump, audit_mode cross-file hunk navigation with truncation/
+failure/close handling, and remote environment warming plus Settings async refresh. Static gates PASS;
+final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r74-final2.log`); heap en 128 KiB / de 83 KiB / both 211 KiB. No commit was made.
+**Live Grep Diagnostics cancellation + quickfix (item 344 update).** The in-memory diagnostics scan now
+takes the Live Grep command context and stops between messages on a new query/close, so a huge snapshot
+cannot outlive the palette. The row still separates TextCol/TextLen (message highlight) from document
+Line/Col (Enter/OpenDiagnosticMsg and quickfix d); tests now include a real quickfix Enter jump to the
+document column and a deterministic cancellation context. Scope remains off/session-local, Resume carries
+it. RESIDUALS: no extra snapshot cap; real LSP/quickfix callback on a real host UNTESTED.
+**audit_mode cross-file hunk navigation (item 345 update).** Next/Previous Hunk move within the active
+review diff, cross file boundaries in review order (next file first hunk / previous file last hunk), and
+stop with first/last notices. A hidden diff/tab switch, close/reopen, file selection or picker Esc drops
+a stale load. A truncated candidate opens with its own truncation notice; the 200-file bound and candidate
+read failures get explicit limit/failure notices instead of a false global boundary. Line targets remain
+separate from hunk rows. RESIDUALS: no wrap; real terminal/multi-diff and real git large diffs UNTESTED.
+**remote warming + Settings refresh (item 346).** The remote env provider counts overlapping Warm probes
+(warming int) so one completion cannot clear another; Settings' Environment row shows `warming` only while
+none is detected. The open Settings page refreshes its snapshot every 500 ms in a tea command (no Update
+IO); refresh messages are routed to their page even under a child prompt/structure page, and a save/reload
+advances the refresh generation so a snapshot started before the save cannot overwrite the applied values.
+A closed page drops old ticks/snapshots without renewing. Tests cover overlapping Warm, warming row,
+child-overlay routing, close discard and stale-snapshot-after-save. RESIDUALS: real SSH env probe and a
+close-with-in-flight-snapshot combination UNTESTED.
+Metrics: palette 242, settings 77 in 14 sections, bundled 37 (7 on)/30 off, 71 bundled-command
+registration sites, plugin API 250 functions/1531-line gvim.d.lua, API level 2; keymap default
+own 259/in effect 257, macos 60/279, macos-gui 52/330, emacs 98/322, vscode 9/262; i18n en 1188 /
+581 per locale, 575 KiB text, ≈665 KiB JSON, heap 128-83-211 KiB. Full suite EXIT 0 (77 packages, log
+/tmp/gvim-r74-final2.log); real hosts UNTESTED; no full-parity claim.
 **Round-73 outcome (2026-11-10, merged working tree on `7545ab3`).** Two built-in slices plus docs:
 Live Grep's Diagnostics scope and the audit_mode diff hunk navigation; the port layer has no new changes.
 Static gates PASS; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no
@@ -7121,14 +7151,26 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      snapshots wsDiags on the UI thread (no LSP request/IO), and the normal search matches messages with
      case/whole-word/regex modes after file/buffer/terminal hits. One row per matching diagnostic carries
      path/line/message; TextCol/TextLen locate the message match (including regex longer than query) for
-     highlighting while document Line/Col feed Enter/OpenDiagnosticMsg and quickfix d. Default off,
-     session-local, Resume carries it. Tests cover root Alt+D, matching/highlight, regex and document-column
-     Enter/quickfix. Residuals: no context cancellation for the diagnostics scan (close discards the result,
-     but a huge snapshot may finish scanning), no extra snapshot cap, real LSP/quickfix d callback UNTESTED.
+     highlighting while document Line/Col feed Enter/OpenDiagnosticMsg and quickfix d. The scan takes the
+     Live Grep command context and stops between messages on query change/close. Default off, session-local,
+     Resume carries it. Tests cover root Alt+D, matching/highlight, regex, document-column quickfix Enter and
+     deterministic cancellation. Residuals: no extra snapshot cap, real LSP/quickfix callback on a real host
+     UNTESTED.
 345. **audit_mode hunk navigation.** Next/Previous Hunk move the active review diff cursor to @@ headers,
-     report first/last without wrapping, and refuse to move a hidden diff from another tab. Switching files,
-     Close/reopen, late async diff and stale-diff discard are covered; line targets stay separate from hunk
-     rows. Residuals: no wrap, real terminal/multi-diff and real git large diffs UNTESTED.
+     cross file boundaries in review order (next file first hunk / previous file last hunk), report whole-
+     review first/last without wrapping, and refuse to move a hidden diff from another tab. Close/reopen,
+     file selection, picker Esc, late async loads and stale-diff discard are covered. Cross-file candidates
+     are bounded to 200; a truncated target gets its own notice and limit/read failures are explicit rather
+     than a false boundary. Line targets stay separate from hunk rows. Residuals: no wrap, real terminal/
+     multi-diff and real git large diffs UNTESTED.
+346. **Remote environment warming + Settings async refresh.** env.Remote counts overlapping Warm
+     probes (warming int) so the first completion cannot clear a later one; Settings' Environment row shows
+     `warming` only while no detection exists. The open Settings page refreshes a snapshot every 500 ms in a
+     tea command (no Update IO); ticks/snapshots are routed to their owning page even under a child
+     prompt/structure overlay. Save/reload advances the refresh generation and renews the loop, so an older
+     snapshot cannot overwrite applied values; a closed page drops old ticks without renewing. Tests cover
+     overlapping Warm, warming row, child-overlay routing, close discard and stale-snapshot-after-save.
+     Residuals: real SSH env probe UNTESTED; close-with-in-flight-snapshot lacks a dedicated test.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7669,8 +7711,9 @@ Round 13 recorded five open gaps:
   Tests: remote_env_test (remote-only runner, end-to-end, local overlay not forwarded, remote
   LSP env). OPEN: probe uses `sh -c`/remote login baseline rather than interactive remote login
   shell; env input files not watched (Reload/activate re-captures); cached until refresh/
-  reconnect; Settings Environment rows only after warm; no status-row indicator of active
-  remote env (Fresh has one).
+  reconnect; Settings Environment rows show a `warming` row while the background probe is
+  in flight instead of reporting none, and an open page refreshes its snapshot in a command
+  when the probe finishes; no status-row indicator of active remote env (Fresh has one).
 
 - **R13-19 (P2, L; remote plugin/Session/copy/realpath landed; residuals)** — jump box/session
   restore; plugin fs/proc authority OS; r21 walk/copy; r22 realpath RealPather (tool/POSIX/real host
@@ -9157,6 +9200,13 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-74 verification (2026-11-10, merged tree on `2fe707c`).** STATIC GATES PASS (Lead,
+  heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r74-final2.log`). Audit: targeted round-74 tests/diff review. Tracks: diagnostics scan
+  cancellation + quickfix jump; audit_mode cross-file hunk navigation and truncation/failure/close handling;
+  remote warming counter + Settings page async refresh/generation. Real-host checks remain UNTESTED. No
+  full-parity claim.
 - **Round-73 verification (2026-11-10, merged tree on `7545ab3`).** STATIC GATES PASS (Lead,
   heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
@@ -9351,13 +9401,14 @@ Round 13 recorded five open gaps:
   manager-root actions; round-71 adds k8s_workspace reduced, relative line jumps and structured remote
   root_markers notices; round-72 adds pkg read-only browser/plugins.list metadata, large-file
   diff_nav and searchPrompt root regression; round-73 adds Live Grep Diagnostics Alt+D and audit_mode
-  hunk navigation; full suite EXIT 0 (77 packages, log /tmp/gvim-r73-final2.log); real-host checks
-  UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–73 had their full-suite gate runs
+  hunk navigation; round-74 adds diagnostics cancellation/quickfix, cross-file hunk navigation and remote
+  warming/Settings refresh; full suite EXIT 0 (77 packages, log /tmp/gvim-r74-final2.log); real-host
+  checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–74 had their full-suite gate runs
   (Rounds 2–61 also recorded static gates; Round 62 supplied a full-suite log without a new static
-  measurement). Round 73 static gates PASS (Lead, heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
+  measurement). Round 74 static gates PASS (Lead, heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r73-final2.log`. The audit ran targeted round-73 tests and diff review only; the Lead
+  `/tmp/gvim-r74-final2.log`. The audit ran targeted round-74 tests and diff review only; the Lead
   ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts

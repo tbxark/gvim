@@ -330,7 +330,9 @@ root's query/modes/scopes. The command description says that it searches again.
   terminal hits. One row per matching diagnostic names its path, line and message;
   Enter opens the document at the diagnostic through the root's LSP goto (so an open
   buffer or a path outside the workspace root still resolves), and the quickfix export
-  carries the same absolute path. The scope starts off and is session-local.
+  carries the same absolute path. The in-memory scan shares the Live Grep command context
+  and stops between messages when a new query or a close cancels it, so Update never
+  blocks on a long diagnostic list. The scope starts off and is session-local.
 
 ### Search panel details: project-wide Search and Replace, and Git Grep
 

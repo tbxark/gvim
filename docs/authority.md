@@ -419,6 +419,8 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   remote LSP, remote project search and git grep receive; the local overlay is passed to no
   remote process. Activation is trust-gated exactly like the local path. The provider is
   warmed in the background after the authority connects (the remote root is expanded first);
+  Settings' Environment rows show a `warming` fact during that probe instead of `none`, and
+  an open Settings page refreshes the fact in a command when the probe finishes;
   the interactive-shell probe is refreshed in the background after a reconnect; spawn paths
   read the cached delta and never block the UI update loop on the remote host.
   Detection/activation is otherwise explicit (Env: Activate/Reload), matching local.

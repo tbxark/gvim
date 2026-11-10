@@ -493,7 +493,13 @@ start/restart/stop actions).
 Settings > Environment shows the process/workspace facts (shell, TERM, root, config
 files) and, when the app wired a project-environment provider, three project rows:
 the detected environment (detector name and kind, or "none"), the active environment
-(the applied name, or "system") and the trust level that gates activation. The status row also shows a read-only, cached
+(the applied name, or "system") and the trust level that gates activation. While the remote
+provider's background `Warm` probe is in flight the detected row says `warming` with the
+reason instead of falsely reporting `none`; the open page schedules its snapshot read in a
+command (no IO in Update) and refreshes it while the page is open, so the row changes to the
+real detection when the probe finishes without reopening Settings. A Save/Reload retires the
+in-flight refresh generation (an older snapshot cannot overwrite the applied values) and
+starts a new refresh tick, so the loop continues. The status row also shows a read-only, cached
 indicator: the active environment as `<name> ✓`, a detected but inactive one as `<name>`
 (or `<name> (locked)` while the workspace is untrusted), hidden when nothing is detected.
 It reads a side-effect-free cached status (no detection, capture, watcher retry, activation

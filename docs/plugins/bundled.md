@@ -262,9 +262,15 @@ and **Review Diff: Close** drops the picker and any diff view. Choosing a file o
 shown as a new file). Every new-side diff row is a line target that opens the working file at that
 line; old-side-only and deleted rows have no working-tree target. **Review Diff: Next Hunk** and
 **Review Diff: Previous Hunk** move the open diff view's cursor to the next/previous `@@` header
-(the equivalents of Fresh's `n`/`p`), saying when it is already at the first/last hunk or no diff
-is open. They only navigate when the review diff is the active buffer; running them from another
-tab reports that the user must switch back first instead of moving a hidden buffer. All git calls go through the hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
+(the equivalents of Fresh's `n`/`p`); at a file boundary they load the next/previous file with a
+hunk in the review's ordered file list and land on its first/last hunk. They say when the whole
+review is at its first/last hunk or no diff is open. They only navigate when the review diff is the
+active buffer; running them from another tab reports that the user must switch back first instead of
+moving a hidden buffer. Cross-file loads are bounded and checked against the diff generation and
+active buffer, so a close/reopen, file selection, tab switch or picker Esc discards a stale
+navigation instead of opening a background diff. A truncated candidate still opens with an explicit
+truncation notice; hitting the 200-candidate bound or failing to read a candidate is reported as
+that reason, not as a global first/last hunk. All git calls go through the hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
 and a closed picker/diff invalidates an in-flight answer by generation (an already-issued git
 process is not killed, only its result discarded; this includes an untracked file's bounded
 working-tree read, which is generation-checked after the read returns). The truncation footer is

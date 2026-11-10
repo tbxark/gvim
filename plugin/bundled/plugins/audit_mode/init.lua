@@ -29,6 +29,7 @@ local MAX_DIFF_BYTES = 2 * 1024 * 1024
 local MAX_FILES = 2000
 local MAX_DIFF_LINES = 20000
 local MAX_TARGETS = 10000
+local MAX_NAV_FILES = 200
 
 local state = {
   repo = nil,
@@ -37,6 +38,7 @@ local state = {
   generation = 0,
   diff_buf = nil,
   diff_hunks = {},
+  diff_file_key = nil,
   diff_generation = 0,
 }
 
@@ -53,6 +55,11 @@ local function truncate_text(s, limit)
     cut = cut:sub(1, #cut - 1)
   end
   return cut, true
+end
+
+local function clip(s, limit)
+  local cut = truncate_text(tostring(s or ""), limit)
+  return cut
 end
 
 -- git_run is one bounded read through the hardened git gateway.
@@ -252,6 +259,7 @@ local function close_previous_diff()
   end
   state.diff_buf = nil
   state.diff_hunks = {}
+  state.diff_file_key = nil
 end
 
 local function open_virtual_diff(name, text, language)
@@ -270,63 +278,63 @@ local function open_virtual_diff(name, text, language)
   return buf
 end
 
-local function show_diff(file, repo, generation)
+local function file_key(file)
+  return file.category .. "\0" .. file.path
+end
+
+-- fetch_diff reads one file's bounded unified diff without notifying. It returns
+-- text, abs_path, truncated, err. A missing/empty diff is text=nil, err=nil; a read or git
+-- failure is returned in err; "cancelled" means a close/reopen changed the generation.
+local function fetch_diff(file, repo, generation)
   local abs_path = gvim.path.join(repo.root, file.path)
-  local args
-  local pseudo
-  if file.category == "staged" then
-    args = { "diff", "--no-color", "--cached", "--unified=3", "--", file.path }
-  elseif file.category == "unstaged" then
-    args = { "diff", "--no-color", "--unified=3", "--", file.path }
-  else
-    local text, err = gvim.fs.read(abs_path, { max = MAX_DIFF_BYTES })
+  if file.category == "untracked" then
+    local data, err = gvim.fs.read(abs_path, { max = MAX_DIFF_BYTES })
     if generation ~= state.diff_generation then
-      return
+      return nil, abs_path, false, "cancelled"
     end
-    if not text then
-      notice(t("status.diff_failed", { path = file.path, error = tostring(err) }), "warn")
-      return
+    if not data then
+      return nil, abs_path, false, tostring(err)
     end
-    local lines = {}
-    for line in (text .. "\n"):gmatch("(.-)\n") do
+    local lines, truncated = {}, false
+    for line in (data .. "\n"):gmatch("(.-)\n") do
       lines[#lines + 1] = "+" .. line
       if #lines >= MAX_DIFF_LINES then
         lines[#lines + 1] = t("diff.truncated")
+        truncated = true
         break
       end
     end
-    pseudo = "--- /dev/null\n+++ b/" .. file.path .. "\n@@ -0,0 +1," .. tostring(#lines) .. " @@\n" .. table.concat(lines, "\n")
+    local text = "--- /dev/null\n+++ b/" .. file.path .. "\n@@ -0,0 +1," .. tostring(#lines) .. " @@\n" .. table.concat(lines, "\n")
+    return text, abs_path, truncated, nil
   end
-  local text
-  if pseudo then
-    text = pseudo
+  local args
+  if file.category == "staged" then
+    args = { "diff", "--no-color", "--cached", "--unified=3", "--", file.path }
   else
-    local result, err = git_run(repo, args, MAX_DIFF_BYTES)
-    if generation ~= state.diff_generation then
-      return
-    end
-    if not result then
-      notice(t("status.diff_failed", { path = file.path, error = tostring(err) }), "warn")
-      return
-    end
-    text = result.stdout
-    if result.truncated then
-      notice(t("status.truncated"))
-    end
-    if text == "" then
-      notice(t("status.diff_empty", { path = file.path }))
-      return
-    end
+    args = { "diff", "--no-color", "--unified=3", "--", file.path }
   end
-  local language = "diff"
-  local buf, err = open_virtual_diff("*Review Diff: " .. file.path .. "*", text, language)
+  local result, err = git_run(repo, args, MAX_DIFF_BYTES)
+  if generation ~= state.diff_generation then
+    return nil, abs_path, false, "cancelled"
+  end
+  if not result then
+    return nil, abs_path, false, tostring(err)
+  end
+  if result.stdout == "" then
+    return nil, abs_path, false, nil
+  end
+  return result.stdout, abs_path, result.truncated == true, nil
+end
+
+-- present_diff opens the read-only view for one file, installs its line targets, records
+-- the hunk table and optionally places the cursor on hunk_index (1-based). A truncated diff
+-- is announced after the view exists, so a quiet cross-file candidate cannot hide it.
+local function present_diff(file, text, abs_path, hunk_index, quiet_open, truncated)
+  local buf, err = open_virtual_diff("*Review Diff: " .. file.path .. "*", text, "diff")
   if not buf then
     notice(t("status.diff_failed", { path = file.path, error = tostring(err) }), "warn")
-    return
+    return nil
   end
-  -- Only a working-tree line that exists can be opened. A staged deletion (or a path
-  -- removed by the worktree side) has no right-hand target; skip those rows rather than
-  -- opening an empty buffer.
   if file.status ~= "D" and gvim.fs.exists(abs_path) then
     local targets = parse_diff_targets(text, abs_path)
     if #targets > 0 then
@@ -336,12 +344,40 @@ local function show_diff(file, repo, generation)
       end
     end
   end
-  state.diff_hunks = diff_hunk_rows(text)
-  if file.category == "untracked" then
-    notice(t("status.untracked", { path = file.path }))
-  else
-    notice(t("status.opened", { path = file.path }))
+  local hunks = diff_hunk_rows(text)
+  state.diff_hunks = hunks
+  state.diff_file_key = file_key(file)
+  if hunk_index and hunks[hunk_index] then
+    buf:set_cursor(gvim.pos(hunks[hunk_index], 0), { center = true })
+    notice(t("status.file_hunk", { file = file.path, current = hunk_index, total = #hunks }))
   end
+  if not quiet_open then
+    if file.category == "untracked" then
+      notice(t("status.untracked", { path = file.path }))
+    else
+      notice(t("status.opened", { path = file.path }))
+    end
+  end
+  if truncated then
+    notice(t("status.diff_truncated_file", { path = file.path }))
+  end
+  return buf
+end
+
+local function show_diff(file, repo, generation)
+  local text, abs_path, truncated, err = fetch_diff(file, repo, generation)
+  if err == "cancelled" then
+    return
+  end
+  if not text then
+    if err then
+      notice(t("status.diff_failed", { path = file.path, error = err }), "warn")
+    else
+      notice(t("status.diff_empty", { path = file.path }))
+    end
+    return
+  end
+  present_diff(file, text, abs_path, nil, false, truncated)
 end
 
 local function close_state()
@@ -457,7 +493,10 @@ local function show()
     items = { { text = t("status.loading"), disabled = true } },
     on_select = on_select,
     on_close = function()
+      -- Esc closes the picker; invalidate any cross-file/same-file diff load that may
+      -- have been started before it, so a late completion cannot open a new diff.
       state.generation = state.generation + 1
+      state.diff_generation = state.diff_generation + 1
       state.picker = nil
     end,
   }
@@ -486,25 +525,24 @@ gvim.command.register {
   end,
 }
 
-local function navigate_hunk(direction)
+
+-- active_diff is the cursor's buffer only when the stored review diff is the buffer on
+-- screen. A palette command can run while another tab is active; never move a hidden diff
+-- or open the next file behind the user's back.
+local function active_diff()
   if not state.diff_buf or not state.diff_buf:valid() then
     notice(t("status.no_diff"))
-    return
+    return nil
   end
-  -- A command can be run from the palette while another tab is active. The old diff buffer
-  -- may still exist and even be valid; never move a hidden buffer's cursor. Only the buffer
-  -- on screen is a review diff the user is looking at.
   local current = gvim.buf.current()
   if not current or not current:valid() or current:info().id ~= state.diff_buf:info().id then
     notice(t("status.not_active"))
-    return
+    return nil
   end
-  local hunks = state.diff_hunks or {}
-  if #hunks == 0 then
-    notice(t("status.no_hunks"))
-    return
-  end
-  local line = state.diff_buf:cursor().line
+  return state.diff_buf
+end
+
+local function hunk_index_at(hunks, line)
   local current = 0
   for i, row in ipairs(hunks) do
     if row <= line then
@@ -513,22 +551,118 @@ local function navigate_hunk(direction)
       break
     end
   end
-  local target
-  if direction > 0 then
-    if current >= #hunks then
-      notice(t("status.last_hunk"))
-      return
-    end
-    target = current + 1
-  else
-    if current <= 1 then
-      notice(t("status.first_hunk"))
-      return
-    end
-    target = current - 1
+  return current
+end
+
+local function move_to_hunk(index)
+  state.diff_buf:set_cursor(gvim.pos(state.diff_hunks[index], 0), { center = true })
+  notice(t("status.hunk", { current = index, total = #state.diff_hunks }))
+end
+
+local function current_file_index()
+  if not state.diff_file_key then
+    return nil
   end
-  state.diff_buf:set_cursor(gvim.pos(hunks[target], 0), { center = true })
-  notice(t("status.hunk", { current = target, total = #hunks }))
+  for i, file in ipairs(state.files or {}) do
+    if file_key(file) == state.diff_file_key then
+      return i
+    end
+  end
+  return nil
+end
+
+-- find_hunk_file walks the current review's file list in the requested direction and loads
+-- candidate diffs until one has a hunk. It checks the generation after every await and is
+-- bounded to MAX_NAV_FILES. Besides the found candidate it returns a reason table so a
+-- navigation boundary is never confused with a cap or an unreadable candidate.
+local function find_hunk_file(start, step, generation)
+  local files = state.files or {}
+  local i, checked = start, 0
+  local failure = nil
+  while i >= 1 and i <= #files and checked < MAX_NAV_FILES do
+    if state.diff_generation ~= generation or not state.repo then
+      return nil, { cancelled = true }
+    end
+    local file = files[i]
+    local text, abs_path, truncated, err = fetch_diff(file, state.repo, generation)
+    if state.diff_generation ~= generation or err == "cancelled" then
+      return nil, { cancelled = true }
+    end
+    if text then
+      local hunks = diff_hunk_rows(text)
+      if #hunks > 0 then
+        return { file = file, text = text, abs_path = abs_path, hunks = hunks, truncated = truncated }, nil
+      end
+    elseif err then
+      failure = failure or { path = file.path, error = err }
+    end
+    i = i + step
+    checked = checked + 1
+  end
+  local reason = { checked = checked, failure = failure }
+  -- If the loop stopped because of the bound (not because it ran off the list), say so.
+  if checked >= MAX_NAV_FILES and i >= 1 and i <= #files then
+    reason.limit = true
+  end
+  return nil, reason
+end
+
+local function navigate_hunk(direction)
+  local buf = active_diff()
+  if not buf then
+    return
+  end
+  local hunks = state.diff_hunks or {}
+  if #hunks == 0 then
+    notice(t("status.no_hunks"))
+    return
+  end
+  local current = hunk_index_at(hunks, buf:cursor().line)
+  if direction > 0 and current < #hunks then
+    move_to_hunk(current + 1)
+    return
+  end
+  if direction < 0 and current > 1 then
+    move_to_hunk(current - 1)
+    return
+  end
+
+  -- Boundary: cross to the next/previous file whose diff has a hunk. Fresh's global n/p
+  -- does this; our per-file diff views keep the same order as the review file list.
+  local index = current_file_index()
+  if not index or not state.repo then
+    notice(direction > 0 and t("status.last_hunk") or t("status.first_hunk"))
+    return
+  end
+  local generation = state.diff_generation
+  local found, reason = find_hunk_file(index + direction, direction, generation)
+  if reason and reason.cancelled then
+    return
+  end
+  -- A close/reopen, a file selection or a tab switch while the candidate diff loaded must
+  -- discard the navigation rather than opening a stale/background diff view.
+  if state.diff_generation ~= generation or not state.diff_buf or not state.diff_buf:valid() then
+    return
+  end
+  local visible = gvim.buf.current()
+  if not visible or not visible:valid() or visible:info().id ~= state.diff_buf:info().id then
+    return
+  end
+  if not found then
+    if reason and reason.limit then
+      notice(t("status.nav_limit", { count = MAX_NAV_FILES }), "warn")
+    elseif reason and reason.failure then
+      notice(t("status.nav_failed", {
+        path = reason.failure.path,
+        error = clip(reason.failure.error, 200),
+      }), "warn")
+    else
+      notice(direction > 0 and t("status.last_hunk") or t("status.first_hunk"))
+    end
+    return
+  end
+  local target = direction > 0 and 1 or #found.hunks
+  present_diff(found.file, found.text, found.abs_path, target, true, found.truncated)
 end
 
 gvim.command.register {

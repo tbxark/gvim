@@ -2,6 +2,7 @@ package bundled_test
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"strings"
 	"sync"
@@ -365,6 +366,7 @@ func TestAuditModeSeparatesStagedAndUnstagedNumstat(t *testing.T) {
 func TestAuditModeNextPreviousHunk(t *testing.T) {
 	t.Parallel()
 	host, os := auditHost(t)
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
 	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "a.go"), plugintest.ProcScript{Stdout: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-old2\n+new2\n"})
 	h := startAudit(t, host, os)
 	if err := h.Run(auditPlugin+".review", nil); err != nil {
@@ -486,13 +488,14 @@ func openAuditDiff(t *testing.T, h *plugintest.Harness, host *plugintest.FakeHos
 			return b.Info.ID
 		}
 	}
-	t.Fatal("no diff buffer")
+	t.Fatalf("no diff buffer (notices %v log %v buffers %+v)", h.NoticeTexts(), h.LogText(""), host.Buffers)
 	return 0
 }
 
 func TestAuditModeHunkNavigationAfterCloseAndReopen(t *testing.T) {
 	t.Parallel()
 	host, os := auditHost(t)
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00"})
 	h := startAudit(t, host, os)
 	first := openAuditDiff(t, h, host)
 	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
@@ -536,11 +539,13 @@ type slowDiffOS struct {
 	*plugintest.FakeOS
 	started chan struct{}
 	release chan struct{}
+	match   string
 	once    sync.Once
 }
 
 func (s *slowDiffOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
-	if strings.Contains(strings.Join(argv, " "), "--unified=3") {
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "--unified=3") && (s.match == "" || strings.Contains(joined, s.match)) {
 		s.once.Do(func() { close(s.started) })
 		select {
 		case <-s.release:
@@ -602,4 +607,278 @@ func TestAuditModeHunkNavigationIgnoresStaleDiffLoad(t *testing.T) {
 	if got := strings.Join(h.NoticeTexts(), "|"); !strings.Contains(got, "open a file diff first") {
 		t.Fatalf("stale-diff navigation notice = %q", got)
 	}
+}
+
+func findAuditDiff(t *testing.T, host *plugintest.FakeHost, name string) pluginapi.BufferID {
+	t.Helper()
+	for _, b := range host.Buffers {
+		if b.Info.Virtual && strings.Contains(b.Info.Name, "Review Diff: "+name) {
+			return b.Info.ID
+		}
+	}
+	t.Fatalf("no Review Diff: %s buffer", name)
+	return 0
+}
+
+func auditDiffLine(t *testing.T, host *plugintest.FakeHost, id pluginapi.BufferID) int {
+	t.Helper()
+	cursors, _ := host.Cursors(id)
+	if len(cursors) == 0 {
+		t.Fatalf("no cursor for diff %d", id)
+	}
+	return cursors[0].Pos.Line
+}
+
+func TestAuditModeCrossFileHunkNavigation(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.SetFile("/w/b.go", "package b\n")
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n2\t0\tb.go\n"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	os.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Stdout: "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-oldb\n+newb\n@@ -10 +10 @@\n-oldb2\n+newb2\n"})
+	h := startAudit(t, host, os)
+	aID := openAuditDiff(t, h, host)
+	if got := auditDiffLine(t, host, aID); got != 0 {
+		t.Fatalf("initial a cursor = %d", got)
+	}
+	// a's single hunk, then cross to b's first hunk.
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := auditDiffLine(t, host, aID); got != 3 {
+		t.Fatalf("a hunk cursor = %d, want 3", got)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	bID := findAuditDiff(t, host, "b.go")
+	if got := auditDiffLine(t, host, bID); got != 3 {
+		t.Fatalf("cross-file next cursor = %d, want b first hunk 3", got)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := auditDiffLine(t, host, bID); got != 6 {
+		t.Fatalf("b second hunk cursor = %d, want 6", got)
+	}
+	if err := h.Run(auditPlugin+".prev_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := auditDiffLine(t, host, bID); got != 3 {
+		t.Fatalf("b prev cursor = %d, want 3", got)
+	}
+	// Cross back to a's last hunk, then the global first-hunk boundary.
+	if err := h.Run(auditPlugin+".prev_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	aID = findAuditDiff(t, host, "a.go")
+	if got := auditDiffLine(t, host, aID); got != 3 {
+		t.Fatalf("cross-file prev cursor = %d, want a hunk 3", got)
+	}
+	if err := h.Run(auditPlugin+".prev_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(h.NoticeTexts(), "|"); !strings.Contains(got, "first hunk") {
+		t.Fatalf("global first-hunk notice = %q", got)
+	}
+	// Cross forward again and hit the global last-hunk boundary.
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(h.NoticeTexts(), "|"); !strings.Contains(got, "last hunk") {
+		t.Fatalf("global last-hunk notice = %q", got)
+	}
+}
+
+func TestAuditModeCrossFileHunkNavigationDiscardsStaleTarget(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.SetFile("/w/b.go", "package b\n")
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	plain.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Stdout: "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-old\n+new\n"})
+	slow := &slowDiffOS{FakeOS: plain, started: make(chan struct{}), release: make(chan struct{}), match: "-- b.go"}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: slow, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	picker := h.Host.UI().Last("picker")
+	idx := -1
+	for i, it := range picker.Picker.Items {
+		if strings.Contains(it.Text, "a.go") {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("no a.go row: %+v", picker.Picker.Items)
+	}
+	h.Resolve(pluginapi.Completion{Token: picker.Token, Values: []any{idx}})
+	if findAuditDiff(t, host, "a.go") == 0 {
+		t.Fatal("no a diff")
+	}
+	// At a's last hunk, next starts loading b. Close the review while b's diff is blocked;
+	// the stale cross-file target must not be opened.
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.RT.Run(auditPlugin+".next_hunk", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	work := runnableWork(h)
+	if work == nil {
+		t.Fatal("no cross-file diff Work")
+	}
+	done := make(chan pluginapi.Completion, 1)
+	go func() { done <- work.Run(work.Ctx) }()
+	<-slow.started
+	if err := h.RT.Run(auditPlugin+".close", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	drainRuntime(h)
+	close(slow.release)
+	h.RT.Resolve(<-done)
+	drainRuntime(h)
+	for _, b := range host.Buffers {
+		if b.Info.Virtual && strings.Contains(b.Info.Name, "Review Diff: b.go") {
+			t.Fatalf("stale cross-file target opened after close: %+v", b.Info)
+		}
+	}
+}
+
+func TestAuditModeCrossFileTruncatedCandidateNotices(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.SetFile("/w/b.go", "package b\n")
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	os.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Stdout: "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-old\n+new\n", Truncated: true})
+	h := startAudit(t, host, os)
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if findAuditDiff(t, host, "b.go") == 0 {
+		t.Fatal("truncated b diff did not open")
+	}
+	if got := strings.Join(h.NoticeTexts(), "|"); !strings.Contains(got, "diff for b.go was truncated") {
+		t.Fatalf("truncation notice = %q", got)
+	}
+}
+
+func TestAuditModeCrossFileReadFailureNotBoundary(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.SetFile("/w/b.go", "package b\n")
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	os.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Err: pluginapi.Errf(pluginapi.CodeExec, "cannot read b.go")})
+	h := startAudit(t, host, os)
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if findAuditDiff(t, host, "a.go") == 0 {
+		t.Fatal("a diff closed on failed cross load")
+	}
+	got := strings.Join(h.NoticeTexts(), "|")
+	if !strings.Contains(got, "could not read a candidate diff") || strings.Contains(got, "last hunk") {
+		t.Fatalf("failure notices = %q", got)
+	}
+}
+
+func TestAuditModeCrossFileLimitNotBoundary(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	var b strings.Builder
+	b.WriteString(" M a.go\x00")
+	for i := 1; i <= 201; i++ {
+		fmt.Fprintf(&b, " M z%03d.go\x00", i)
+	}
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: b.String()})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	// A generic empty diff for every candidate after a.go; a.go's specific script wins first.
+	os.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--"), plugintest.ProcScript{Stdout: ""})
+	h := startAudit(t, host, os)
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(h.NoticeTexts(), "|")
+	if !strings.Contains(got, "stopped after 200 files") || strings.Contains(got, "last hunk") {
+		t.Fatalf("limit notices = %q", got)
+	}
+}
+
+func TestAuditModePickerEscInvalidatesCrossFileLoad(t *testing.T) {
+	t.Parallel()
+	host, plain := auditHost(t)
+	plain.SetFile("/w/b.go", "package b\n")
+	plain.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	plain.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	plain.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Stdout: "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-old\n+new\n"})
+	slow := &slowDiffOS{FakeOS: plain, started: make(chan struct{}), release: make(chan struct{}), match: "-- b.go"}
+	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: slow, Timeout: 5 * time.Second, EventBudget: 5 * time.Second})
+	h.Start()
+	openAuditDiff(t, h, host)
+	if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.RT.Run(auditPlugin+".next_hunk", nil, pluginapi.SrcAPI); err != nil {
+		t.Fatal(err)
+	}
+	work := runnableWork(h)
+	if work == nil {
+		t.Fatal("no cross-file Work")
+	}
+	done := make(chan pluginapi.Completion, 1)
+	go func() { done <- work.Run(work.Ctx) }()
+	<-slow.started
+	// Esc on the review picker must invalidate the in-flight cross-file target.
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	picker := h.Host.UI().Last("picker")
+	if picker == nil {
+		t.Fatal("no review picker")
+	}
+	h.RT.Resolve(pluginapi.Completion{Token: picker.Token})
+	drainRuntime(h)
+	close(slow.release)
+	h.RT.Resolve(<-done)
+	drainRuntime(h)
+	if b := findAuditDiffMaybe(host, "b.go"); b != 0 {
+		t.Fatalf("Esc on picker allowed stale cross-file diff %d", b)
+	}
+}
+
+func findAuditDiffMaybe(host *plugintest.FakeHost, name string) pluginapi.BufferID {
+	for _, b := range host.Buffers {
+		if b.Info.Virtual && strings.Contains(b.Info.Name, "Review Diff: "+name) {
+			return b.Info.ID
+		}
+	}
+	return 0
 }

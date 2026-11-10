@@ -63,10 +63,19 @@ type settingsRuntime struct {
 // gates activation. They read the env.Provider, never a subprocess.
 func (s *settingsService) projectEnvFacts() []envFact {
 	facts := make([]envFact, 0, 5)
+	warming := false
+	if w, ok := s.env.(interface{ Warming() bool }); ok {
+		warming = w.Warming()
+	}
 	if det, ok := s.env.Detected(); ok {
 		facts = append(facts, envFact{
 			name: "Project environment", value: det.Name + " (" + string(det.Kind) + ")",
 			note: "detected from env.detectors markers at the workspace root",
+		})
+	} else if warming {
+		facts = append(facts, envFact{
+			name: "Project environment", value: "warming",
+			note: "the remote environment probe is running in the background; Env: Reload retries it",
 		})
 	} else {
 		facts = append(facts, envFact{name: "Project environment", value: "none", note: "no detector matched"})

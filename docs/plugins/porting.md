@@ -237,10 +237,16 @@ read-only core that the existing APIs can make real: `Review Diff` gathers
 `gvim.git` gateway, lists the files and stats in a picker, opens one file's unified diff in a
 read-only virtual buffer, and turns new-side diff rows into line targets that open the working
 file at that line. `Review Diff: Next Hunk` / `Previous Hunk` move the diff cursor through the
-`@@` rows, matching Fresh's `n`/`p` (no default key; palette commands). They require the review diff
-to be the active buffer, so a command run from another tab reports the mismatch rather than moving
-a hidden diff; closing the diff/navigating away clears the hunk table, and a stale tracked/untracked
-diff completion after close is discarded. `Review Diff: Refresh`
+`@@` rows and cross file boundaries in the review's ordered file list (next file first hunk /
+previous file last hunk), matching Fresh's global `n`/`p` for the per-file diff views this port
+builds (no default key; palette commands). They require the review diff to be the active buffer, so
+a command run from another tab reports the mismatch rather than moving a hidden diff; closing the
+diff/navigating away clears the hunk table. A cross-file candidate's git/untracked read is bounded
+(200 candidates, normal diff caps) and checked against the diff generation and active buffer before
+it can open, so close/reopen, file selection, tab changes or picker Esc discard it; stale same-file
+diff loads are also generation-discarded. A truncated candidate opens but announces the truncation;
+the 200-file bound and candidate read failures have their own notices and are never reported as a
+global first/last hunk. `Review Diff: Refresh`
 re-reads the list; `Review Diff: Close` drops it; untracked files are shown from a bounded
 working-tree read as a synthetic new-file diff.
 
@@ -253,8 +259,9 @@ OPEN: stage/unstage/discard
 (index writes), comments/notes and persistence, exports, range/stash modes, side-by-side/BufferGroup
 layout, collapsing/filtering, watch polling, status-bar chrome and the review-mode keymap. Tests:
 `audit_mode_test.go` covers the staged/unstaged/untracked overview with numstat, opening a
-tracked file's diff and its new-side line target, next/previous hunk movement, active-tab refusal, close/reopen hunk replacement, stale diff loads,
-the untracked synthetic diff, the clean and not-a-repository states, and the read-only command list.
+tracked file's diff and its new-side line target, next/previous hunk movement, cross-file hunk navigation, active-tab refusal, close/reopen hunk
+replacement, stale same-file and cross-file diff loads, truncated candidates, the 200-file bound,
+candidate read failures, picker-Esc cancellation, the untracked synthetic diff, the clean and not-a-repository states, and the read-only command list.
 
 ### Dev containers: read-only config inspection (port residual)
 

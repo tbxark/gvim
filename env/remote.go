@@ -70,6 +70,7 @@ type Remote struct {
 	// the probe only runs in a trusted workspace; an untrusted workspace gets an explicit
 	// notice and no remote command. detectedTrusted records which gate produced the cache
 	// so a later trust change re-probes.
+	warming         int // number of Warm probes in flight
 	detected        trust.DetectedEnv
 	found           bool
 	detectedSet     bool
@@ -192,6 +193,14 @@ func (p *Remote) SetRoot(root string) {
 // active. The app runs it in a goroutine after connecting; a failure is recorded (and kept
 // in LastError for a capture), it never blocks a UI update.
 func (p *Remote) Warm(ctx context.Context) {
+	p.mu.Lock()
+	p.warming++
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		p.warming--
+		p.mu.Unlock()
+	}()
 	p.ensureDetected(ctx)
 	p.mu.Lock()
 	hasRecipe := strings.TrimSpace(p.snippet) != ""
@@ -224,6 +233,13 @@ func (p *Remote) Detectors() []config.EnvDetector {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]config.EnvDetector(nil), p.detectors...)
+}
+
+// Warming reports whether the app's background Warm probe is currently in flight.
+func (p *Remote) Warming() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.warming > 0
 }
 
 // Detected returns the environment detected on the remote host, if a Warm/Overlay probe

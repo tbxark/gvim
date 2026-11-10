@@ -585,30 +585,36 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		}
 		if err == nil && sources.Diagnostics {
 			var diagHits []GrepHit
-			diagHits, err = searchDiagnostics(diagnostics, text, query, grepLimit-len(result.Hits))
+			diagHits, err = searchDiagnostics(ctx, diagnostics, text, query, grepLimit-len(result.Hits))
 			result.Hits = append(result.Hits, diagHits...)
 		}
 		return GrepResultMsg{Token: token, Seq: seq, Text: text, Hits: result.Hits, Err: err, Notice: result.Notice, Truncated: result.Truncated, Owner: owner}
 	}
-	if cancellable {
-		ctx, cancel := context.WithCancel(context.Background())
-		p.grep.cancel = cancel
-		return func() tea.Msg { return run(ctx) }
-	}
-	return func() tea.Msg { return run(context.Background()) }
+	// The command is always cancelable: a ContextGrepper uses the context to stop its
+	// own IO, and the in-memory diagnostics scan checks it between messages. Update
+	// never waits for either.
+	ctx, cancel := context.WithCancel(context.Background())
+	p.grep.cancel = cancel
+	return func() tea.Msg { return run(ctx) }
 }
 
 // searchDiagnostics matches the Diagnostics scope's messages with the same query
 // modes as the text sources. The snapshot is in memory, so this runs in the search
 // command off the update goroutine; at most limit hits are returned, one per
 // diagnostic, after the file/buffer/terminal hits.
-func searchDiagnostics(diags []DiagnosticSource, text string, opts SearchOptions, limit int) ([]GrepHit, error) {
+func searchDiagnostics(ctx context.Context, diags []DiagnosticSource, text string, opts SearchOptions, limit int) ([]GrepHit, error) {
 	if len(diags) == 0 || limit <= 0 || text == "" {
 		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	q := search.Query{Text: text, CaseSensitive: opts.CaseSensitive, WholeWord: opts.WholeWord, Regex: opts.Regex}
 	var hits []GrepHit
 	for _, d := range diags {
+		if err := ctx.Err(); err != nil {
+			return hits, err
+		}
 		if len(hits) >= limit {
 			break
 		}
