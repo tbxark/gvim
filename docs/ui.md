@@ -250,7 +250,8 @@ root's query/modes/scopes. The command description says that it searches again.
   segments: `Alt+C` case, `Alt+G` regex, `Alt+O` whole word; `Alt+L` files,
   `Alt+U` buffers when a buffer snapshot is available, `Alt+T` terminals when the dock
   has an open terminal (on by default, matching Fresh's terminal-scrollback default),
-  and `Alt+I` ignored and hidden files. The title border shows `Live Grep · N matches`
+  `Alt+D` language-server diagnostics when the LSP store has published some (off by
+  default, as Fresh's is), and `Alt+I` ignored and hidden files. The title border shows `Live Grep · N matches`
   (or `no matches`, `error`, `N+` at the 100-row cap, `· incomplete` when the remote
   adapter reports its result is truncated), and the footer carries the adapter's
   degradation/cap notice; an empty box says whether to type, turn a source on or that
@@ -320,8 +321,16 @@ root's query/modes/scopes. The command description says that it searches again.
   Fresh-style per-terminal backing files (`<data>/terminals/*.txt`), so a closed
   terminal and scrollback older than the bounded window are not searchable; the
   terminals of other workspaces are out of scope (the workspaces provider needs its own
-  cross-workspace seam). Diagnostics and all-workspaces sources remain out of scope for
-  the same provider-protocol reason.
+  cross-workspace seam); the All-workspaces source remains out of scope for the same
+  provider-protocol reason.
+- **Live Grep Diagnostics scope** (`Alt+D`, offered only when the LSP store has
+  published diagnostics): the root snapshots the in-memory workspace diagnostics on the
+  UI thread (no LSP request, no IO) and the ordinary Live Grep command matches their
+  messages with the same case/whole-word/regex modes, after the file, buffer and
+  terminal hits. One row per matching diagnostic names its path, line and message;
+  Enter opens the document at the diagnostic through the root's LSP goto (so an open
+  buffer or a path outside the workspace root still resolves), and the quickfix export
+  carries the same absolute path. The scope starts off and is session-local.
 
 ### Search panel details: project-wide Search and Replace, and Git Grep
 

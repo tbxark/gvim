@@ -936,7 +936,7 @@
   "gvim.palette.file_search_failed": "File search failed: %{error}",
   "gvim.palette.file_list_truncated": "File list truncated: too many files; the list is incomplete",
   "gvim.palette.type_to_search": "Type to search the files",
-  "gvim.palette.turn_on_sources": "Turn on Files, Buffers or Terminals to search",
+  "gvim.palette.turn_on_sources": "Turn on Files, Buffers, Terminals or Diagnostics to search",
   "gvim.palette.no_matches": "No matches",
   "gvim.palette.live_export_empty": "No Live Grep results to export",
   "gvim.palette.live_export_truncated": "Live Grep export limited to the first 100 matches",

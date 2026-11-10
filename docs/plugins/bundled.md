@@ -45,7 +45,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `compare_files` | **off** | Compare Files..., Compare Active File With..., Compare: Next Difference, Compare: Previous Difference, Compare: Switch Side, Compare: Copy Change to Other Side, Compare: Take Change from Other Side, Compare: Close | none |
 | `live_diff` | **off** | Live Diff: Toggle (Global), Live Diff: Toggle (Buffer), Live Diff: vs HEAD, Live Diff: vs Disk (unsaved changes), Live Diff: vs Branch..., Live Diff: vs Default Branch, Live Diff: Refresh, Live Diff: Set Default Mode... | `default_mode` (head), `default_branch` (main), `debounce_ms` (75, 10 to 5000, project), `max_virtual_lines` (2000), `max_overlay_lines` (20000) |
 | `live_sessions` | **off** | Live Agent Sessions, Live Agent Sessions: Refresh | none |
-| `audit_mode` | **off** | Review Diff, Review Diff: Refresh, Review Diff: Close | none |
+| `audit_mode` | **off** | Review Diff, Review Diff: Next Hunk, Review Diff: Previous Hunk, Review Diff: Refresh, Review Diff: Close | none |
 | `devcontainer` | **off** | Dev Container: Show Info, Dev Container: Open Config, Dev Container: Refresh | none |
 | `k8s_workspace` | **off** | K8s: Show Workspace Config, K8s: Open Config, K8s: Refresh Workspace Config | none |
 | `pkg` | **off** | Package: Packages | none |
@@ -260,8 +260,11 @@ with their status and additions/deletions in a picker; **Review Diff: Refresh** 
 and **Review Diff: Close** drops the picker and any diff view. Choosing a file opens a read-only
 `*Review Diff: <path>*` virtual buffer with git's unified diff (or, for an untracked file, the file
 shown as a new file). Every new-side diff row is a line target that opens the working file at that
-line; old-side-only and deleted rows have no working-tree target. All git calls go through the
-hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
+line; old-side-only and deleted rows have no working-tree target. **Review Diff: Next Hunk** and
+**Review Diff: Previous Hunk** move the open diff view's cursor to the next/previous `@@` header
+(the equivalents of Fresh's `n`/`p`), saying when it is already at the first/last hunk or no diff
+is open. They only navigate when the review diff is the active buffer; running them from another
+tab reports that the user must switch back first instead of moving a hidden buffer. All git calls go through the hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
 and a closed picker/diff invalidates an in-flight answer by generation (an already-issued git
 process is not killed, only its result discarded; this includes an untracked file's bounded
 working-tree read, which is generation-checked after the read returns). The truncation footer is

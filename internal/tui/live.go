@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/dock"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
@@ -65,22 +66,41 @@ func (m *Model) openLiveGrepResume(query string, resume *palette.LiveResume) tea
 	// The sheet is modal, so the buffers cannot change while it is open: one snapshot
 	// of them serves every search. Without the port the Buffers scope is not offered.
 	p := palette.New(palette.Options{
-		Query:           query,
-		Owner:           m.workspaceOwner,
-		Resume:          resume,
-		Root:            root,
-		Remote:          remote,
-		Files:           m.files,
-		Live:            true,
-		Grep:            g,
-		Preview:         m.root.ports.Preview,
-		LiveSearch:      m.liveSearchOptions(),
-		SourceBuffers:   m.bufferSources(),
-		SourceTerminals: m.terminalSources(),
-		Theme:           m.theme,
+		Query:             query,
+		Owner:             m.workspaceOwner,
+		Resume:            resume,
+		Root:              root,
+		Remote:            remote,
+		Files:             m.files,
+		Live:              true,
+		Grep:              g,
+		Preview:           m.root.ports.Preview,
+		LiveSearch:        m.liveSearchOptions(),
+		SourceBuffers:     m.bufferSources(),
+		SourceTerminals:   m.terminalSources(),
+		SourceDiagnostics: m.diagnosticSources(),
+		Theme:             m.theme,
 	})
 	m.pushOverlay(p)
 	return p.Init()
+}
+
+// diagnosticSources snapshots the workspace diagnostics for Live Grep's Diagnostics
+// scope. It reads the in-memory diagnostic store on the UI goroutine; a nil result means
+// no diagnostic set was published, so the scope is not offered.
+func (m *Model) diagnosticSources() []palette.DiagnosticSource {
+	var out []palette.DiagnosticSource
+	for _, file := range m.lsp.wsDiags {
+		rel := m.diagRel(file.Path)
+		for _, d := range file.Items {
+			out = append(out, palette.DiagnosticSource{
+				Path: file.Path, Rel: rel,
+				Line: d.Start.Line + 1, Col: d.Start.Col + 1,
+				Text: d.Message, Severity: d.Severity,
+			})
+		}
+	}
+	return out
 }
 
 // terminalSources snapshots the open dock terminals for Live Grep's Terminals scope.
@@ -237,6 +257,10 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 			m.activateTab(index)
 			m.gotoLine(line, col)
 			m.focusEditor()
+		case "d":
+			line, _ := strconv.Atoi(lineStr)
+			col, _ := strconv.Atoi(colStr)
+			return m.lspGoto(LSPLocation{Path: name, Start: buffer.Pos{Line: line - 1, Col: col - 1}})
 		case "t", "T":
 			// t carries the legacy dock position; T carries the stable tab id, the
 			// absolute transcript row and a snapshot payload (scrollback length + the
@@ -308,6 +332,8 @@ func liveGrepExportValue(hit palette.GrepHit) string {
 	switch hit.Source {
 	case palette.GrepBuffers:
 		return fmt.Sprintf("b	%d	%d	%d", hit.Index, hit.Line, hit.Col)
+	case palette.GrepDiagnostics:
+		return fmt.Sprintf("d\t%s\t%d\t%d", hit.Path, hit.Line, hit.Col)
 	case palette.GrepTerminals:
 		// T, stable dock tab id, absolute transcript row, snapshot payload. The callback
 		// focuses and positions the existing dock tab (never a file or a shell); the id

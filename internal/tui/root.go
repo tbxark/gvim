@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/explorer"
 
 	tea "charm.land/bubbletea/v2"
@@ -97,6 +98,10 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.openLiveGrepResultsList(msg), true
 	case palette.OpenLineMsg:
 		cmd := m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
+		m.focusEditor()
+		return cmd, true
+	case palette.OpenDiagnosticMsg:
+		cmd := m.lspGoto(LSPLocation{Path: msg.Path, Start: buffer.Pos{Line: msg.Line - 1, Col: msg.Col - 1}})
 		m.focusEditor()
 		return cmd, true
 	case openLoadedMsg:

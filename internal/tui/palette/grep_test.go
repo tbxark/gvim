@@ -308,13 +308,100 @@ func TestLiveGrepBufferHitActivatesTheTab(t *testing.T) {
 	}
 }
 
+// TestLiveGrepDiagnosticsScope: Alt+D offers the Diagnostics scope when the root
+// supplied a diagnostic snapshot, toggles it off by default, and the search command
+// converges the diagnostic message into a row whose Enter opens the document through
+// OpenDiagnosticMsg.
+func TestLiveGrepDiagnosticsScope(t *testing.T) {
+	t.Parallel()
+	g := &fakeGrepper{}
+	opts := liveOptions("", &fakeFiles{}, g)
+	opts.SourceDiagnostics = []DiagnosticSource{
+		{Path: "/w/a.go", Rel: "a.go", Line: 2, Col: 40, Text: "todo bad"},
+	}
+	p := New(opts)
+	draw(p, 140, 30)
+	row := rowText(draw(p, 140, 30), p.layout(140, 30).toolbarY)
+	if !strings.Contains(row, "Alt+D Diagnostics:off") {
+		t.Fatalf("toolbar %q does not offer the Diagnostics scope", row)
+	}
+	settle(t, p, p.update(typed("t")), 8)
+	settle(t, p, p.update(altKey('d')), 8)
+	if got := g.reqs[len(g.reqs)-1]; !got.Sources.Diagnostics {
+		t.Fatalf("Alt+D did not turn Diagnostics on: %+v", got.Sources)
+	}
+	if !hasRow(draw(p, 140, 30), "a.go:2: todo bad") {
+		t.Fatalf("diagnostic row not shown:\n%s", draw(p, 140, 30))
+	}
+	want := OpenDiagnosticMsg{Path: "/w/a.go", Line: 2, Col: 40}
+	if got := runCmd(p.update(key(tea.KeyEnter))); got != want {
+		t.Fatalf("Enter emitted %#v, want %#v", got, want)
+	}
+}
+
+// TestDiagnosticHighlightUsesMessageMatch: a diagnostic's document column (where Enter
+// jumps) is not an offset into its message. The row highlight follows the regex match
+// inside the message, including a match longer than the query, while the row keeps the
+// document column for Enter/quickfix.
+func TestDiagnosticHighlightUsesMessageMatch(t *testing.T) {
+	t.Parallel()
+	diags := []DiagnosticSource{{
+		Path: "/w/a.go", Rel: "a.go", Line: 2, Col: 40,
+		Text: "prefix ttt suffix",
+	}}
+	hits, err := searchDiagnostics(diags, "t+", SearchOptions{Regex: true}, 10)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("searchDiagnostics = %v, %v; want one hit", hits, err)
+	}
+	hit := hits[0]
+	if hit.Line != 2 || hit.Col != 40 {
+		t.Fatalf("document position = %d:%d, want 2:40", hit.Line, hit.Col)
+	}
+	if hit.TextCol != 8 || hit.TextLen != 3 {
+		t.Fatalf("message match = col %d len %d, want col 8 len 3", hit.TextCol, hit.TextLen)
+	}
+	grepLine := grepRow(hit, "t+")
+	if grepLine.line != 2 || grepLine.col != 40 {
+		t.Fatalf("row target = %d:%d, want document 2:40", grepLine.line, grepLine.col)
+	}
+	if grepLine.mcol != 7 || grepLine.qlen != 3 {
+		t.Fatalf("row highlight = offset %d len %d, want 7 and 3", grepLine.mcol, grepLine.qlen)
+	}
+	if !strings.Contains(grepLine.name, "a.go:2: prefix ttt suffix") {
+		t.Fatalf("row label = %q", grepLine.name)
+	}
+	// The rendered match is bold at the message offset, not at the document column.
+	p := New(Options{})
+	p.rows = []row{grepLine}
+	p.nav.SetSize(1, 10)
+	g := draw(p, 100, 30)
+	geo := layoutFor(100, 30)
+	label := rowText(g, geo.top+1)
+	runes := []rune(label)
+	at := -1
+	for i := 0; i+3 <= len(runes); i++ {
+		if string(runes[i:i+3]) == "ttt" {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		t.Fatalf("row %q has no match text", label)
+	}
+	for i := 0; i < 3; i++ {
+		if !g.At(at+i, geo.top+1).Style.Bold {
+			t.Fatalf("match rune %d is not bold in %q", i, label)
+		}
+	}
+}
+
 // TestLiveGrepNoSourcesSaysSo checks the state where both sources are off.
 func TestLiveGrepNoSourcesSaysSo(t *testing.T) {
 	t.Parallel()
 	p := New(liveOptions("todo", &fakeFiles{}, &fakeGrepper{}))
 	p.grep.sources.Files = false
 	g := draw(p, 100, 30)
-	if !hasRow(g, "Turn on Files, Buffers or Terminals to search") {
+	if !hasRow(g, "Turn on Files, Buffers, Terminals or Diagnostics to search") {
 		t.Fatalf("all sources off does not say so:\n%s", g)
 	}
 }

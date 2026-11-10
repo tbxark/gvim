@@ -162,6 +162,10 @@ type Options struct {
 	// painted and it stays off. A non-nil (even empty) snapshot offers the scope, which
 	// starts on, matching Fresh's default for terminal scrollback.
 	SourceTerminals []TerminalSource
+	// SourceDiagnostics are the language-server diagnostics, for Live Grep's Diagnostics
+	// scope. Nil means the scope is not available: its toggle is not painted and it stays
+	// off. A non-nil snapshot offers the scope, which starts off as Fresh's does.
+	SourceDiagnostics []DiagnosticSource
 	// Preview reads the start of a file for the file mode's preview column. Nil paints
 	// no column.
 	Preview Previewer
@@ -279,6 +283,7 @@ type row struct {
 	termRow         int
 	termTotal       int
 	termText        string
+	diagPath        string
 	termBefore      string
 	termAfter       string
 	termSnapshot    bool
@@ -1178,6 +1183,8 @@ func (r row) command(root string, remote bool, owner Owner) tea.Cmd {
 		switch r.grepSource {
 		case GrepBuffers:
 			msg = OpenBufferLineMsg{Index: r.index, Line: r.line, Col: r.col, Owner: owner}
+		case GrepDiagnostics:
+			msg = OpenDiagnosticMsg{Path: r.diagPath, Line: r.line, Col: r.col, Owner: owner}
 		case GrepTerminals:
 			// A terminal hit focuses the open dock tab; it opens no file and starts no
 			// shell (the transcript line is only the search location).
@@ -1205,8 +1212,8 @@ func (p *Palette) emptyText() string {
 		switch {
 		case p.input.Value() == "":
 			return paletteText("gvim.palette.type_to_search", "Type to search the files")
-		case !p.grep.sources.Files && !p.grep.sources.Buffers && !p.grep.sources.Terminals && !p.grep.sources.Ignored:
-			return paletteText("gvim.palette.turn_on_sources", "Turn on Files, Buffers or Terminals to search")
+		case !p.grep.sources.Files && !p.grep.sources.Buffers && !p.grep.sources.Terminals && !p.grep.sources.Diagnostics && !p.grep.sources.Ignored:
+			return paletteText("gvim.palette.turn_on_sources", "Turn on Files, Buffers, Terminals or Diagnostics to search")
 		}
 		return paletteText("gvim.palette.no_matches", "No matches")
 	}

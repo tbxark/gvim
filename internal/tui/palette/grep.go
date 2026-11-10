@@ -9,7 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/textsafe"
+	"github.com/tbxark/gvim/search"
 )
 
 // Live Grep is the palette's text search over the workspace files and the open
@@ -18,11 +20,11 @@ import (
 // comes back as a GrepResultMsg. The app adapter implements Grepper over internal/search.
 //
 // Live Grep has a toolbar row above its rows: the match modes (case, regex, whole
-// word) and the scopes (files, buffers, the dock's terminal transcripts, and
-// ignored/hidden files inside the file scope). Its keys are Fresh's prompt keys,
-// handled here because gvim's overlays answer their keys in code: Alt+C case, Alt+G
-// regex, Alt+O whole word, Alt+L files, Alt+U buffers, Alt+T terminals and Alt+I
-// ignored. The title shows the result count after a search.
+// word) and the scopes (files, buffers, the dock's terminal transcripts, language-server
+// diagnostics, and ignored/hidden files inside the file scope). Its keys are Fresh's
+// prompt keys, handled here because gvim's overlays answer their keys in code: Alt+C case,
+// Alt+G regex, Alt+O whole word, Alt+L files, Alt+U buffers, Alt+T terminals, Alt+D
+// diagnostics and Alt+I ignored. The title shows the result count after a search.
 
 // SearchOptions are how a Live Grep query is interpreted.
 type SearchOptions struct {
@@ -40,10 +42,22 @@ type SearchOptions struct {
 // are the sources; Ignored widens the file source to hidden and .gitignore-matched
 // files.
 type GrepSources struct {
-	Files     bool
-	Buffers   bool
-	Terminals bool
-	Ignored   bool
+	Files       bool
+	Buffers     bool
+	Terminals   bool
+	Diagnostics bool
+	Ignored     bool
+}
+
+// DiagnosticSource is one language-server diagnostic for Live Grep's Diagnostics scope.
+// Path is the document path to open; Rel is the label shown in the row. Line and Col are
+// 1-based. Text is the diagnostic message and Severity is the LSP severity number.
+type DiagnosticSource struct {
+	Path      string
+	Rel       string
+	Line, Col int
+	Text      string
+	Severity  int
 }
 
 // BufferSource is one open buffer's text, for the Buffers scope. Index is the tab's
@@ -167,6 +181,8 @@ const (
 	GrepBuffers
 	// GrepTerminals is a hit in an open dock terminal's transcript window.
 	GrepTerminals
+	// GrepDiagnostics is a hit in a language-server diagnostic message.
+	GrepDiagnostics
 )
 
 // GrepHit is one matching line. Rel is the file relative to the root, the buffer's
@@ -179,7 +195,13 @@ type GrepHit struct {
 	Line, Col int
 	Text      string
 	Source    GrepSource
-	Index     int
+	// TextCol and TextLen locate the match inside Text: TextCol is 1-based in runes
+	// and TextLen is the rune length of the match (the regex match, not the query
+	// length). Diagnostics need them because Col is the document column, not an offset
+	// into the message; the other sources leave them zero and derive the highlight from
+	// Col and the query.
+	TextCol, TextLen int
+	Index            int
 	// TerminalID is the stable dock tab id of a terminal hit (0 for older callers):
 	// opening the hit uses it so a close/reorder cannot focus another tab.
 	TerminalID uint64
@@ -202,6 +224,9 @@ type GrepHit struct {
 	TerminalValid       bool
 	TerminalBeforeKnown bool
 	TerminalAfterKnown  bool
+	// Path is the absolute document path of a diagnostic hit; the row opens it
+	// through the root's LSP goto rather than through a workspace-relative join.
+	Path string
 }
 
 // GrepResultMsg carries the hits of one Live Grep query. The palette applies it only
@@ -238,6 +263,17 @@ type OpenLineMsg struct {
 }
 
 func (m OpenLineMsg) PaletteOwner() Owner { return m.Owner }
+
+// OpenDiagnosticMsg asks the root to open the language-server diagnostic's document at
+// Line and Col, both 1-based. Path is absolute (or an authority path), so the root uses
+// its LSP goto rather than joining it to the palette root.
+type OpenDiagnosticMsg struct {
+	Path      string
+	Line, Col int
+	Owner     Owner
+}
+
+func (m OpenDiagnosticMsg) PaletteOwner() Owner { return m.Owner }
 
 // OpenBufferLineMsg asks the root to activate the tab at Index and put the caret at
 // Line and Col, both 1-based. It is sent when a live grep row of an open buffer is
@@ -334,6 +370,7 @@ const (
 	scopeFiles grepScope = iota
 	scopeBuffers
 	scopeTerminals
+	scopeDiagnostics
 	scopeIgnored
 )
 
@@ -351,6 +388,9 @@ type grepState struct {
 	// terminals says the Terminals scope is available: the root supplied a bounded
 	// dock transcript snapshot (the scope starts on, as Fresh's default does).
 	terminals bool
+	// diagnostics says the Diagnostics scope is available: the root supplied the
+	// language-server diagnostics. It starts off, as Fresh's default does.
+	diagnostics bool
 	// hits keeps the raw result for the Alt+Q quickfix export; they are not used by
 	// Resume (which always searches again).
 	hits []GrepHit
@@ -378,6 +418,7 @@ func newGrepState(opts Options) grepState {
 	}
 	st.buffers = opts.SourceBuffers != nil
 	st.terminals = opts.SourceTerminals != nil
+	st.diagnostics = opts.SourceDiagnostics != nil
 	st.sources.Terminals = st.terminals
 	return st
 }
@@ -404,6 +445,11 @@ func (p *Palette) liveKey(name string) (tea.Cmd, bool) {
 			return nil, false
 		}
 		return p.toggleScope(scopeTerminals), true
+	case "alt+d":
+		if !p.grep.diagnostics {
+			return nil, false
+		}
+		return p.toggleScope(scopeDiagnostics), true
 	case "alt+i":
 		return p.toggleScope(scopeIgnored), true
 	case "alt+q", "alt+m":
@@ -436,6 +482,8 @@ func (p *Palette) toggleScope(s grepScope) tea.Cmd {
 		p.grep.sources.Buffers = !p.grep.sources.Buffers
 	case scopeTerminals:
 		p.grep.sources.Terminals = !p.grep.sources.Terminals
+	case scopeDiagnostics:
+		p.grep.sources.Diagnostics = !p.grep.sources.Diagnostics
 	case scopeIgnored:
 		p.grep.sources.Ignored = !p.grep.sources.Ignored
 	}
@@ -513,6 +561,7 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 	token := p.token
 	g, files, root := p.opts.Grep, p.opts.Files, p.opts.Root
 	buffers, terminals, query, sources := p.opts.SourceBuffers, p.opts.SourceTerminals, p.grep.opts, p.grep.sources
+	diagnostics := p.opts.SourceDiagnostics
 	contextGrep, cancellable := g.(ContextGrepper)
 	run := func(ctx context.Context) tea.Msg {
 		req := GrepRequest{Root: root, Text: text, Query: query, Sources: sources, Limit: grepLimit}
@@ -534,6 +583,11 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		} else {
 			result.Hits, err = g.Search(req)
 		}
+		if err == nil && sources.Diagnostics {
+			var diagHits []GrepHit
+			diagHits, err = searchDiagnostics(diagnostics, text, query, grepLimit-len(result.Hits))
+			result.Hits = append(result.Hits, diagHits...)
+		}
 		return GrepResultMsg{Token: token, Seq: seq, Text: text, Hits: result.Hits, Err: err, Notice: result.Notice, Truncated: result.Truncated, Owner: owner}
 	}
 	if cancellable {
@@ -542,6 +596,55 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		return func() tea.Msg { return run(ctx) }
 	}
 	return func() tea.Msg { return run(context.Background()) }
+}
+
+// searchDiagnostics matches the Diagnostics scope's messages with the same query
+// modes as the text sources. The snapshot is in memory, so this runs in the search
+// command off the update goroutine; at most limit hits are returned, one per
+// diagnostic, after the file/buffer/terminal hits.
+func searchDiagnostics(diags []DiagnosticSource, text string, opts SearchOptions, limit int) ([]GrepHit, error) {
+	if len(diags) == 0 || limit <= 0 || text == "" {
+		return nil, nil
+	}
+	q := search.Query{Text: text, CaseSensitive: opts.CaseSensitive, WholeWord: opts.WholeWord, Regex: opts.Regex}
+	var hits []GrepHit
+	for _, d := range diags {
+		if len(hits) >= limit {
+			break
+		}
+		b := buffer.New(d.Text)
+		matches, err := search.Find(b, q)
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) == 0 {
+			continue
+		}
+		m := matches[0]
+		start := runeOffsetInText(d.Text, m.Start)
+		end := runeOffsetInText(d.Text, m.End)
+		hits = append(hits, GrepHit{
+			Rel: d.Rel, Line: d.Line, Col: d.Col, Text: d.Text,
+			Source: GrepDiagnostics, Path: d.Path,
+			TextCol: start + 1, TextLen: max(end-start, 1),
+		})
+	}
+	return hits, nil
+}
+
+// runeOffsetInText is the rune offset of p in text, whose lines are separated by
+// newlines. It is how a message match becomes a Text offset, independent of the
+// document line/column the diagnostic points at.
+func runeOffsetInText(text string, p buffer.Pos) int {
+	lines := strings.Split(text, "\n")
+	off := 0
+	for i := 0; i < p.Line && i < len(lines); i++ {
+		off += utf8.RuneCountInString(lines[i]) + 1
+	}
+	if p.Line < len(lines) {
+		off += min(p.Col, utf8.RuneCountInString(lines[p.Line]))
+	}
+	return off
 }
 
 // applyGrep shows a live grep result when it answers the current query. The highlight
@@ -579,6 +682,9 @@ func (p *Palette) restoreLive(resume LiveResume) {
 	}
 	if !p.grep.terminals {
 		p.grep.sources.Terminals = false
+	}
+	if !p.grep.diagnostics {
+		p.grep.sources.Diagnostics = false
 	}
 }
 
@@ -664,6 +770,9 @@ func (p *Palette) toolbarSegments() []toolbarSeg {
 	if p.grep.terminals {
 		segs = append(segs, toolbarSeg{text: "Alt+T Terminals:" + onOff(p.grep.sources.Terminals) + "  ", on: p.grep.sources.Terminals})
 	}
+	if p.grep.diagnostics {
+		segs = append(segs, toolbarSeg{text: "Alt+D Diagnostics:" + onOff(p.grep.sources.Diagnostics) + "  ", on: p.grep.sources.Diagnostics})
+	}
 	return append(segs, toolbarSeg{text: "Alt+I Ignored:" + onOff(p.grep.sources.Ignored), on: p.grep.sources.Ignored})
 }
 
@@ -677,11 +786,18 @@ func grepRowDisplay(h GrepHit, query string) (text string, mcol, qlen int) {
 	cleanText := strings.TrimSpace(cleanSpaced)
 	cleanLead := utf8.RuneCountInString(cleanSpaced) - utf8.RuneCountInString(strings.TrimLeftFunc(cleanSpaced, unicode.IsSpace))
 	rawRunes := []rune(spaced)
-	rawHit := min(max(h.Col-1, 0), len(rawRunes))
+	rawHit := h.Col - 1
+	qlen = utf8.RuneCountInString(textsafe.Clean(query))
+	if h.Source == GrepDiagnostics && h.TextCol > 0 {
+		// Col is the document column; the diagnostic row highlights the match in
+		// the message instead, and a regex match may be longer than the query.
+		rawHit = h.TextCol - 1
+		qlen = max(h.TextLen, 1)
+	}
+	rawHit = min(max(rawHit, 0), len(rawRunes))
 	hitClean := textsafe.MapIndex(mapping, rawHit)
 	display := []rune(cleanText)
 	mcol = min(max(hitClean-cleanLead, 0), len(display))
-	qlen = utf8.RuneCountInString(textsafe.Clean(query))
 	if qlen < 1 {
 		qlen = 1
 	}
@@ -719,6 +835,10 @@ func grepRows(msg GrepResultMsg) []row {
 			r.source = "buffer"
 			r.grepSource = GrepBuffers
 			r.index = h.Index
+		case GrepDiagnostics:
+			r.source = "diagnostic"
+			r.grepSource = GrepDiagnostics
+			r.diagPath = h.Path
 		case GrepTerminals:
 			r.source = "terminal"
 			r.grepSource = GrepTerminals

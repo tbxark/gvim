@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/theme"
@@ -128,6 +129,30 @@ func runKey(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
+// TestLiveGrepDiagnosticsThroughTheRoot: the root snapshots m.lsp.wsDiags into the
+// palette, the real Alt+D key turns the scope on, and Enter on a diagnostic row opens
+// that document through the root's diagnostic message.
+func TestLiveGrepDiagnosticsThroughTheRoot(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{}
+	m, ed := newLiveModel(t, g)
+	m.lsp.wsDiags = []FileDiagnostics{{
+		Path:  "/ws/a.go",
+		Items: []Diagnostic{{Start: buffer.Pos{Line: 1, Col: 2}, Message: "todo bad"}},
+	}}
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	feed(m, runKey(m, altKey('d')))
+	req := g.reqs[len(g.reqs)-1]
+	if !req.Sources.Diagnostics {
+		t.Fatalf("root search scopes = %+v, want diagnostics on", req.Sources)
+	}
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if len(ed.opened) == 0 || ed.opened[0] != "/ws/a.go" {
+		t.Fatalf("diagnostic Enter opened %v, want /ws/a.go", ed.opened)
+	}
+}
+
 // TestResumeLiveGrepRerunsWithPriorState: Resume keeps the prior query, modes and
 // scopes but always searches again, because file contents may have changed while the
 // palette was closed; the cached row is not reused.
@@ -202,6 +227,19 @@ func TestResumeCacheResetOnConfigAndProjectChanges(t *testing.T) {
 	m.adoptProject(projectOpenedMsg{root: "/next", project: Project{Tree: treeAt("/next", 1), Files: &fakeIndex{}}})
 	if m.root.lastGrep != nil {
 		t.Fatal("project root change kept the resume cache")
+	}
+}
+
+// TestDiagnosticQuickfixKeepsTheDocumentColumn: the message match position is only for
+// the row highlight; the quickfix payload keeps the document line/column Enter uses.
+func TestDiagnosticQuickfixKeepsTheDocumentColumn(t *testing.T) {
+	hit := palette.GrepHit{
+		Source: palette.GrepDiagnostics, Path: "/ws/a.go",
+		Rel: "a.go", Line: 2, Col: 40, Text: "prefix ttt suffix",
+		TextCol: 8, TextLen: 3,
+	}
+	if got, want := liveGrepExportValue(hit), "d\t/ws/a.go\t2\t40"; got != want {
+		t.Fatalf("export value = %q, want %q", got, want)
 	}
 }
 

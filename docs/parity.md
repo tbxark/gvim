@@ -21,12 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `e6e37c2` (the round-71 commit; the previous round's commit is
-folded in) plus the merged round-72 work. Static gates PASS (Lead; the supplied r72 log is the full suite;
-heap was not restated with that log, last recorded 133 KiB / de 83 KiB / both 216 KiB). Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r72-final.log`). The audit ran targeted round-72 tests/diff review; the Lead ran the full
-suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
+Last verified: 2026-11-10, tree commit `7545ab3` (the round-72 commit; the previous round's commit is
+folded in) plus the merged round-73 work. Static gates PASS (Lead, heap en 128 KiB / de 83 KiB / both
+211 KiB). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line
+(log `/tmp/gvim-r73-final2.log`). The audit ran targeted round-73 tests/diff review; the Lead ran the
+full suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
 clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
 Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching. Fresh reference: `refs/fresh` same
 date.
@@ -1533,6 +1532,30 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-73 outcome (2026-11-10, merged working tree on `7545ab3`).** Two built-in slices plus docs:
+Live Grep's Diagnostics scope and the audit_mode diff hunk navigation; the port layer has no new changes.
+Static gates PASS; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no
+FAIL line (log `/tmp/gvim-r73-final2.log`); heap en 128 KiB / de 83 KiB / both 211 KiB. No commit was made.
+**Live Grep Diagnostics Alt+D (item 344).** Alt+D is offered only when the LSP store has published
+diagnostics; the root snapshots the in-memory workspace diagnostics on the UI thread (no LSP request/IO),
+and the normal search matches their messages with case/whole-word/regex modes after file/buffer/terminal
+hits. One row per matching diagnostic carries path/line/message; TextCol/TextLen locate the message match
+(including a regex match longer than the query) for highlighting, while document Line/Col stay separate for
+Enter (OpenDiagnosticMsg) and quickfix `d	path	line	col`. Scope is session-local/off by default and
+Resume carries it. Tests cover root Alt+D, matching/highlight, regex, document-column Enter/quickfix.
+RESIDUALS: diagnostics search has no context cancellation (a close only discards the result; a huge
+snapshot can finish scanning), the snapshot has no additional cap, and real LSP/diagnostics plus quickfix
+d callback on a real host are UNTESTED.
+**audit_mode hunk navigation (item 345).** Review Diff Next/Previous Hunk move the active review diff's
+cursor to @@ headers, with first/last notices and no wrapping; a command from another tab reports that the
+diff must be active instead of moving a hidden buffer. Switching files, Close/reopen, late async diff and
+stale-diff discard are covered; line targets remain separate from hunk rows. RESIDUALS: no wrap, real
+terminal/multi-diff interaction and real git large diffs UNTESTED.
+Metrics: palette 242, settings 77 in 14 sections, bundled 37 (7 on)/30 off, 71 bundled-command
+registration sites, plugin API 250 functions/1531-line gvim.d.lua, API level 2; keymap default
+own 259/in effect 257, macos 60/279, macos-gui 52/330, emacs 98/322, vscode 9/262; i18n en 1188 /
+581 per locale, 575 KiB text, ≈665 KiB JSON, heap 128-83-211 KiB. Full suite EXIT 0 (77 packages, log
+/tmp/gvim-r73-final2.log); real hosts UNTESTED; no full-parity claim.
 **Round-72 outcome (2026-11-10, merged working tree on `e6e37c2`).** Three slices plus docs:
 the read-only pkg package browser and plugins.list metadata, git_gutter's large-file saved/live diff_nav
 targets, and a searchPrompt root-context regression test. Final full `go test ./... -p 1 -count=1
@@ -7094,6 +7117,18 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      Case/Word/Regex/ConfirmEach in the searchPrompt keymap context; an ordinary prompt ignores the same
      chords without changing find flags or prompt text. Docs list Alt+I. Residual: real terminal key
      delivery/macOS Alt translation UNTESTED.
+344. **Live Grep Diagnostics Alt+D.** Offered only when the LSP store published diagnostics; root
+     snapshots wsDiags on the UI thread (no LSP request/IO), and the normal search matches messages with
+     case/whole-word/regex modes after file/buffer/terminal hits. One row per matching diagnostic carries
+     path/line/message; TextCol/TextLen locate the message match (including regex longer than query) for
+     highlighting while document Line/Col feed Enter/OpenDiagnosticMsg and quickfix d. Default off,
+     session-local, Resume carries it. Tests cover root Alt+D, matching/highlight, regex and document-column
+     Enter/quickfix. Residuals: no context cancellation for the diagnostics scan (close discards the result,
+     but a huge snapshot may finish scanning), no extra snapshot cap, real LSP/quickfix d callback UNTESTED.
+345. **audit_mode hunk navigation.** Next/Previous Hunk move the active review diff cursor to @@ headers,
+     report first/last without wrapping, and refuse to move a hidden diff from another tab. Switching files,
+     Close/reopen, late async diff and stale-diff discard are covered; line targets stay separate from hunk
+     rows. Residuals: no wrap, real terminal/multi-diff and real git large diffs UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -9122,6 +9157,12 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-73 verification (2026-11-10, merged tree on `7545ab3`).** STATIC GATES PASS (Lead,
+  heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r73-final2.log`). Audit: targeted round-73 tests/diff review. Tracks: Live Grep Diagnostics
+  Alt+D with separate TextCol/TextLen vs document Col; audit_mode active-diff hunk navigation. Port layer
+  has no new changes. Real-host checks remain UNTESTED. No full-parity claim.
 - **Round-72 verification (2026-11-10, merged tree on `e6e37c2`).** STATIC GATES PASS (Lead; no new
   heap measurement was restated with the r72 log, last recorded 133/83/216 KiB). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
@@ -9309,14 +9350,15 @@ Round 13 recorded five open gaps:
   plugin fs.copy NewTarget gate; round-70 adds devcontainer reduced, palette menu history and remote LSP
   manager-root actions; round-71 adds k8s_workspace reduced, relative line jumps and structured remote
   root_markers notices; round-72 adds pkg read-only browser/plugins.list metadata, large-file
-  diff_nav and searchPrompt root regression; full suite EXIT 0 (77 packages, log /tmp/gvim-r72-final.log);
-  real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–72 had their full-suite gate runs
+  diff_nav and searchPrompt root regression; round-73 adds Live Grep Diagnostics Alt+D and audit_mode
+  hunk navigation; full suite EXIT 0 (77 packages, log /tmp/gvim-r73-final2.log); real-host checks
+  UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–73 had their full-suite gate runs
   (Rounds 2–61 also recorded static gates; Round 62 supplied a full-suite log without a new static
-  measurement). Round 72 static gates PASS (Lead); no new heap was restated with the r72 log (last
-  recorded 133/83/216 KiB, Round71). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0:
-  77 packages ok, no FAIL line, log `/tmp/gvim-r72-final.log`. The audit ran targeted round-72 tests and
-  diff review only; the Lead ran the full suite. Real-host verification remains UNTESTED rather
+  measurement). Round 73 static gates PASS (Lead, heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
+  `/tmp/gvim-r73-final2.log`. The audit ran targeted round-73 tests and diff review only; the Lead
+  ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts
   policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching, local

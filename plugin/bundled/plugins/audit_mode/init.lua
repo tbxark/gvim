@@ -36,6 +36,7 @@ local state = {
   picker = nil,
   generation = 0,
   diff_buf = nil,
+  diff_hunks = {},
   diff_generation = 0,
 }
 
@@ -227,11 +228,30 @@ local function parse_diff_targets(text, abs_path)
   return targets
 end
 
+-- diff_hunk_rows returns the 0-based rows of the unified diff's @@ headers. It is the
+-- navigation index for the Next/Previous Hunk commands; parse_diff_targets separately maps
+-- new-side rows to the working file.
+local function diff_hunk_rows(text)
+  local rows = {}
+  local row = 0
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    if row >= MAX_DIFF_LINES or #rows >= MAX_TARGETS then
+      break
+    end
+    if line:sub(1, 2) == "@@" then
+      rows[#rows + 1] = row
+    end
+    row = row + 1
+  end
+  return rows
+end
+
 local function close_previous_diff()
   if state.diff_buf and state.diff_buf:valid() then
     pcall(state.diff_buf.close, state.diff_buf)
   end
   state.diff_buf = nil
+  state.diff_hunks = {}
 end
 
 local function open_virtual_diff(name, text, language)
@@ -316,6 +336,7 @@ local function show_diff(file, repo, generation)
       end
     end
   end
+  state.diff_hunks = diff_hunk_rows(text)
   if file.category == "untracked" then
     notice(t("status.untracked", { path = file.path }))
   else
@@ -463,6 +484,65 @@ gvim.command.register {
       show()
     end
   end,
+}
+
+local function navigate_hunk(direction)
+  if not state.diff_buf or not state.diff_buf:valid() then
+    notice(t("status.no_diff"))
+    return
+  end
+  -- A command can be run from the palette while another tab is active. The old diff buffer
+  -- may still exist and even be valid; never move a hidden buffer's cursor. Only the buffer
+  -- on screen is a review diff the user is looking at.
+  local current = gvim.buf.current()
+  if not current or not current:valid() or current:info().id ~= state.diff_buf:info().id then
+    notice(t("status.not_active"))
+    return
+  end
+  local hunks = state.diff_hunks or {}
+  if #hunks == 0 then
+    notice(t("status.no_hunks"))
+    return
+  end
+  local line = state.diff_buf:cursor().line
+  local current = 0
+  for i, row in ipairs(hunks) do
+    if row <= line then
+      current = i
+    else
+      break
+    end
+  end
+  local target
+  if direction > 0 then
+    if current >= #hunks then
+      notice(t("status.last_hunk"))
+      return
+    end
+    target = current + 1
+  else
+    if current <= 1 then
+      notice(t("status.first_hunk"))
+      return
+    end
+    target = current - 1
+  end
+  state.diff_buf:set_cursor(gvim.pos(hunks[target], 0), { center = true })
+  notice(t("status.hunk", { current = target, total = #hunks }))
+end
+
+gvim.command.register {
+  name = "next_hunk",
+  title = "%cmd.next_hunk",
+  description = "%cmd.next_hunk_desc",
+  run = function() navigate_hunk(1) end,
+}
+
+gvim.command.register {
+  name = "prev_hunk",
+  title = "%cmd.prev_hunk",
+  description = "%cmd.prev_hunk_desc",
+  run = function() navigate_hunk(-1) end,
 }
 
 gvim.command.register {
