@@ -165,22 +165,23 @@ func parseI18n(r *Runtime, plugin, data string) map[string]map[string]string {
 		r.logf(plugin, levelWarn, "i18n: "+firstLine(err.Error()))
 		return nil
 	}
-	out := make(map[string]map[string]string, len(raw))
 	for locale, table := range raw {
 		if locale == "" || len(table) == 0 {
+			delete(raw, locale)
 			continue
 		}
-		clean := make(map[string]string, len(table))
 		for key, text := range table {
 			if key == "" {
+				delete(table, key)
 				continue
 			}
-			clean[key] = clipText(text, maxI18nValue)
+			if len(text) > maxI18nValue {
+				table[key] = clipText(text, maxI18nValue)
+			}
 		}
-		out[locale] = clean
 	}
-	if len(out) == 0 {
+	if len(raw) == 0 {
 		return nil
 	}
-	return out
+	return raw
 }

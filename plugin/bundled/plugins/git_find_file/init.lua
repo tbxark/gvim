@@ -7,6 +7,7 @@
 -- says so); a repository with more than 50 000 tracked files shows the first 50 000.
 local gvim = require "gvim"
 local git = gvim.git
+local t = gvim.i18n.t
 
 local MAX_FILES = 50000
 local MAX_NAME = 4000 -- the picker takes names up to 4096 bytes
@@ -57,11 +58,11 @@ local function load_files()
     end
   end
   if #out == 0 then
-    gvim.notify("No git-tracked files found")
+    gvim.notify(t("status.no_files"))
     return
   end
   if truncated then
-    gvim.notify(string.format("Showing the first %d git-tracked files", #out))
+    gvim.notify(t("status.showing_first", { shown = tostring(#out), total = tostring(#out) }))
   end
   return repo.root, out
 end
@@ -84,17 +85,17 @@ end
 
 gvim.command.register {
   name = "find",
-  title = "Git Find File",
-  description = "Find and open a git-tracked file",
+  title = t("cmd.find"),
+  description = t("cmd.find_desc"),
   run = find_file,
 }
 
 gvim.command.register {
   name = "reload",
-  title = "Git Find File: Reload",
-  description = "Reload the git file index",
+  title = t("cmd.reload"),
+  description = t("cmd.reload_desc"),
   run = function()
-    gvim.notify("Reloading git files...")
+    gvim.notify(t("status.loading"))
     find_file()
   end,
 }
