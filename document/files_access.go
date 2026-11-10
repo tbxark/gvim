@@ -51,7 +51,14 @@ func unwritable(path string) bool {
 // /nix/store stays editable. It reads the disk, so it may run in a command.
 func loadDocument(path string, spec loadSpec) (*Document, error) {
 	d, err := readDocument(path, spec)
-	if err != nil || !spec.AutoRO || !d.Disk.Exists {
+	if err != nil {
+		return d, err
+	}
+	if spec.ReadOnly {
+		d.readOnly = true
+		return d, nil
+	}
+	if !spec.AutoRO || !d.Disk.Exists {
 		return d, err
 	}
 	if target, err := filepath.EvalSymlinks(path); err == nil && libraryPath(path) && libraryPath(target) {

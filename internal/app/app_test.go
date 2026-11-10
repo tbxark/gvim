@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/internal/uitest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,5 +223,33 @@ func TestValidateRemote(t *testing.T) {
 				t.Fatalf("Validate() = %v, want %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestBuildModelReadOnlyProtectsFiles verifies that launching with Options.ReadOnly
+// protects opened files in code-viewer mode against typed edits.
+func TestBuildModelReadOnlyProtectsFiles(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "view.txt")
+	if err := os.WriteFile(path, []byte("code to read\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, files, err := buildModel(t.Context(), Options{
+		Root:     dir,
+		Files:    []FileTarget{{Path: path}},
+		ReadOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("buildModel() error = %v", err)
+	}
+	t.Cleanup(func() { files.Close() })
+	s := uitest.Start(t, m, 100, 30)
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("code to read") })
+	s.Type("XYZ")
+	s.Settle()
+	sc := s.Screen()
+	if sc.Contains("XYZ") {
+		t.Fatalf("read-only mode accepted typed edits: %s", sc.String())
 	}
 }

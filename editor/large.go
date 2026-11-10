@@ -7,7 +7,7 @@ import (
 
 // loadSpec returns the load settings of the editor's options.
 func (e *Editor) loadSpec() loadSpec {
-	spec := loadSpec{Eol: e.defaultEOL(), AutoRO: e.opts.AutoReadOnly, Access: e.opts.FileAccess}
+	spec := loadSpec{Eol: e.defaultEOL(), AutoRO: e.opts.AutoReadOnly, ReadOnly: e.opts.ReadOnly, Access: e.opts.FileAccess}
 	spec.LargeConf.FullMax = orDefault(e.opts.fullLoadMax, maxFullLoad)
 	if e.opts.LargeFileMode && e.opts.LargeFileThresholdBytes > 0 {
 		spec.LargeConf.Threshold = int64(e.opts.LargeFileThresholdBytes)

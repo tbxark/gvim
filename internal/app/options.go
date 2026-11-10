@@ -123,6 +123,9 @@ type Options struct {
 	// editor.auto_save_interval_secs, and it is off when the config does not enable it.
 	// A non-zero value wins over the config.
 	AutoSaveInterval time.Duration
+	// ReadOnly opens the editor in read-only code-viewer mode (-R, --read-only, --view).
+	// All open documents are protected against edits and writes.
+	ReadOnly bool
 	// Diff opens the two files, in tabs 0 and 1, in the compare view. It needs exactly
 	// two files and no folder.
 	Diff bool

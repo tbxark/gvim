@@ -242,3 +242,17 @@ func TestDocumentSaveRefusesReadOnly(t *testing.T) {
 		t.Fatalf("Save wrote %q to a read-only document", got)
 	}
 }
+
+// TestEditorReadOnlyOptionProtectsFiles verifies that Options.ReadOnly opens files in
+// code-viewer / read-only mode so edits are refused.
+func TestEditorReadOnlyOptionProtectsFiles(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{ReadOnly: true}, "hello world\n")
+	if !e.Active().ReadOnly() {
+		t.Fatal("e.Active().ReadOnly() = false, want true")
+	}
+	r := e.Do("insert_char", map[string]any{"text": "x"})
+	if !errors.Is(r.Err, ErrReadOnly) {
+		t.Fatalf("insert_char err = %v, want ErrReadOnly", r.Err)
+	}
+}

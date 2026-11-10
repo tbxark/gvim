@@ -57,6 +57,7 @@ func NewRootCommand(run Runner) *cobra.Command {
 		themeName  string
 		logFile    string
 		diff       bool
+		readOnly   bool
 		noPlugins  bool
 		pluginPath []string
 		restore    bool
@@ -121,6 +122,7 @@ command drops this client and leaves the editor running.`,
 		Example: `  gvim
   gvim ~/project
   gvim ~/project main.go:42:7 README.md
+  gvim -R file.go
   gvim --diff old.go new.go
   gvim --no-restore
   gvim --simple
@@ -161,8 +163,9 @@ command drops this client and leaves the editor running.`,
 				Config:  configPath,
 				Keymap:  keymapName,
 				Theme:   themeName,
-				LogFile: logFile,
-				Diff:    diff,
+				LogFile:  logFile,
+				Diff:     diff,
+				ReadOnly: readOnly,
 
 				NoPlugins:   noPlugins,
 				PluginPaths: pluginPath,
@@ -215,6 +218,8 @@ command drops this client and leaves the editor running.`,
 	flags.StringVar(&themeName, "theme", "", "theme `NAME` (default: dark)")
 	flags.StringVar(&logFile, "log-file", "", "append the status-row notices and the plugin log to `PATH`")
 	root.Flags().BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
+	root.Flags().BoolVarP(&readOnly, "read-only", "R", false, "open in read-only / code-viewer mode (protect files from edits)")
+	root.Flags().BoolVar(&readOnly, "view", false, "alias for -R / --read-only")
 	root.Flags().BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")
 	root.Flags().StringArrayVar(&pluginPath, "plugin", nil, "load the plugin at `PATH` (a .lua file or a plugin directory); repeatable")
 	root.Flags().BoolVar(&restore, "restore", false, "restore the previous session even when editor.restore_previous_session is off; makes a launch with files a session launch")

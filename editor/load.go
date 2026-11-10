@@ -57,6 +57,9 @@ func (e *Editor) OpenLoaded(d *Document) {
 		}
 	}
 	e.pushJump()
+	if e.opts.ReadOnly {
+		d.SetReadOnly(true)
+	}
 	if e.pristineUntitled() {
 		// The untouched startup buffer is replaced, not kept as a tab.
 		e.releaseDoc(e.docs[0])

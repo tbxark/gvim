@@ -84,6 +84,21 @@ func TestExecuteFlagsReachOptions(t *testing.T) {
 			want: app.Options{Files: []app.FileTarget{{Path: "missing.go", Line: 12, Col: 4}}},
 		},
 		{
+			name: "read-only flag short",
+			args: []string{"-R", "a.txt"},
+			want: app.Options{ReadOnly: true, Files: []app.FileTarget{{Path: "a.txt"}}},
+		},
+		{
+			name: "read-only flag long",
+			args: []string{"--read-only", "a.txt"},
+			want: app.Options{ReadOnly: true, Files: []app.FileTarget{{Path: "a.txt"}}},
+		},
+		{
+			name: "view flag alias",
+			args: []string{"--view", "a.txt"},
+			want: app.Options{ReadOnly: true, Files: []app.FileTarget{{Path: "a.txt"}}},
+		},
+		{
 			name: "no-plugins flag",
 			args: []string{"--no-plugins"},
 			want: app.Options{NoPlugins: true},

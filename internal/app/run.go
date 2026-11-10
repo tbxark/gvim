@@ -495,6 +495,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	edOpts.AutoSaveInterval = interval
 	edOpts.Root = root
 	edOpts.SessionDir = opts.SessionDir
+	edOpts.ReadOnly = opts.ReadOnly
 	ed := newEditor(edOpts)
 	ed.SetFormatters(formattersFor(cfg, lookPath))
 	ed.SetLanguageNamer(syntax.CachedFileLanguage())

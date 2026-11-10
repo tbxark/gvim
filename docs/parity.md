@@ -21,9 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `7295f6c` plus the round-92 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r92-final.log`).
+Last verified: 2026-11-10, tree commit `47310b8` plus the round-93 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 88 KiB / both 216 KiB); full
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r93-final.log`).
+Round 93 implements read-only code viewer protection mode (gvim -R / --view / --read-only), protecting
+opened documents against edits and writes with status notices, and formalizes the focused Code Viewer
+objective and scope boundaries in Section 8.
 Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
 markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
@@ -7247,6 +7250,15 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      spawner uses the expanded root for cwd/RootURI; the editor remote file access shares the validated expansion for
      opening, saving and Save As. Tests cover valid expansion, injection/name rejection, zero-call special
      names, spawner cwd and the editor access path. RESIDUAL: real SSH shell expansion UNTESTED.
+349. **Read-only / code-viewer protection mode (-R / --read-only / --view).** Launches gvim in read-only
+     code-viewer mode where all opened documents have readOnly=true; editing actions (typing, paste,
+     undo/redo, replace, format) are refused with ErrReadOnly and status notification 'document is read-only',
+     and file saves are blocked. Tests cover CLI flag parsing (-R, --read-only, --view), editor Option
+     protection, and end-to-end TUI rejection of typed edits.
+350. **Independent per-split-pane Markdown view mode.** In a multi-pane split, each pane can independently
+     toggle or cycle its view mode (markdown_mode_rendered, markdown_mode_source, markdown_cycle_mode)
+     without affecting other split panes; single-pane dual view semantics are preserved. Tests cover
+     independent per-pane rendered/source states and multi-pane cycle mode.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -9557,10 +9569,18 @@ Round 13 recorded five open gaps:
 
 ## 8. TUI objective, genuine equivalences and gvim-only additions
 
-**Objective.** The user asked for Fresh's TUI functionality; the only expressly flexible parts are
-the plugin implementation (Lua instead of TypeScript) and the visual style. Everything a user can
-do in Fresh's TUI is in scope. Incomplete TUI behaviour stays OPEN with concrete gaps; size,
-dependency, effort, or missing permission are never closure reasons.
+**Objective & Code-Viewer Product Definition.** Per explicit human user directive (Round 92),
+gvim's objective is a dedicated, fast, keyboard-driven terminal **Code Viewer** (代码查看器),
+rather than an all-in-one IDE or cloud orchestrator. The core focus is viewing, navigation,
+searching, syntax highlighting, diff/compare review, and viewing protection (-R / --view).
+The only flexible implementation choices remain the Lua plugin runtime and gvim's visual style.
+
+**Outside the Code-Viewer Objective (Defined Product Boundaries):**
+1. Complex plugin package management (pkg.ts git clone, install, update, remove, lockfile, registry sync).
+2. Container and cluster management (devcontainer and k8s-workspace lifecycle management/CLI attach).
+3. External code agent orchestration and interactive process injection (orchestrator.ts, agent_sessions_*).
+4. Remote daemon network clustering / SSH jump-box architecture.
+5. Multi-language localization scope is consolidated strictly to English and Simplified Chinese (en, zh-CN).
 
 **Outside the TUI objective (boundaries, not backlog gaps).** Fresh's GUI/desktop front end, the
 browser `--web` UI, the WASM build, packaging/installer matrices and daemon packaging are other

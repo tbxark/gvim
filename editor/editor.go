@@ -92,6 +92,8 @@ type Options struct {
 	// AutoReadOnly is editor.auto_read_only (default true): open files that are not
 	// writable, or that sit in a library folder, as read-only.
 	AutoReadOnly bool
+	// ReadOnly forces all opened documents to be read-only (gvim -R / --view / --read-only).
+	ReadOnly bool
 	// SnapshotInterval is editor.snapshot_interval (default 100): the edits between undo
 	// snapshots.
 	SnapshotInterval int
