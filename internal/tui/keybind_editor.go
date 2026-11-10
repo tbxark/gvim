@@ -1122,7 +1122,7 @@ func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 	keyText := "(press a key)"
 	switch {
 	case e.mode == kbRecord:
-		keyText = "press any key..."
+		keyText = "press any key…"
 	case f.chord != "":
 		keyText = keymap.FormatChord(f.chord)
 	}

@@ -34,7 +34,7 @@ func (m *Model) runUpdateCommand() tea.Cmd {
 	if index, ok := m.dock.FindSource(updateTabSource); ok {
 		// Keep the previous output above the new run.
 		m.dock.SetActive(index)
-		m.notice = uiText("gvim.notice.update_running", "Updating...")
+		m.notice = uiText("gvim.notice.update_running", "Updating…")
 		return tea.Batch(m.showDock(), m.dock.Restart())
 	}
 	launch := terminal.Launch{Argv: argv, Source: updateTabSource}
@@ -43,7 +43,7 @@ func (m *Model) runUpdateCommand() tea.Cmd {
 		m.notice = uiText("gvim.notice.update_dock_failed", "Update: the terminal dock could not start the update command")
 		return nil
 	}
-	m.notice = uiText("gvim.notice.update_running", "Updating...")
+	m.notice = uiText("gvim.notice.update_running", "Updating…")
 	return tea.Batch(m.showDock(), start)
 }
 

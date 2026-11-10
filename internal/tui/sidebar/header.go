@@ -35,6 +35,11 @@ type Header struct {
 	Text   string
 	Reload int // the explorer's refresh button
 	Close  int // the × close button
+	// TitleX is the first cell of the section's title in Text and TitleW its width
+	// in cells, zero when the row is too narrow for it. PaintHeader repaints those
+	// cells bold, so the title reads above the border and the body.
+	TitleX int
+	TitleW int
 }
 
 // HeaderFor returns the header row of a section of the given width. The title
@@ -77,7 +82,14 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 	headText := head.String()
 	headWidth := ansi.StringWidth(headText)
 	reload, closeGlyph := m.Glyph(icons.Refresh), m.Glyph(icons.Close)
-	h := Header{Reload: -1, Close: -1}
+	titleX := 2
+	if spec.Several {
+		titleX += 2
+	}
+	h := Header{Reload: -1, Close: -1, TitleX: titleX, TitleW: ansi.StringWidth(title)}
+	if visible := max(width-titleX, 0); h.TitleW > visible {
+		h.TitleW = visible
+	}
 
 	if spec.Kind == KindExplorer {
 		// The fixed width is the head, ⟳, "─", ×, "─" and the corner.
@@ -133,11 +145,17 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 }
 
 // PaintHeader paints h into row y of the column, which starts at column x and is
-// width cells wide, on the section-header style.
+// width cells wide, on the section-header style. The title cells are repainted
+// bold; the border, the chevron and the buttons keep the regular weight.
 func PaintHeader(dst *grid.Grid, x, width int, y int, h Header, st style.Styles) {
 	head := style.TaggedCell(st.ExplorerTitle, "ui", "menu_fg", "ui", "menu_bg")
 	dst.Fill(x, x+width, y, head)
 	dst.Put(x, y, x+width, h.Text, head)
+	if h.TitleW > 0 {
+		bold := head
+		bold.Bold = true
+		dst.Put(x+h.TitleX, y, x+h.TitleX+h.TitleW, ansi.Cut(h.Text, h.TitleX, h.TitleX+h.TitleW), bold)
+	}
 }
 
 // PaintBottomBorder paints the column's bottom border, └──┘, into row y. The

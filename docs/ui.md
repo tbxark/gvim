@@ -32,18 +32,41 @@ The chrome rows, from the top:
    bar is shown (with the menu bar hidden the strip is row 0 and the panel keeps its
    title on row 1). The new-tab button is a three-cell button (" + ") pinned to the
    right edge, so the glyph keeps one padding cell on each side and the hit target
-   covers the whole button.
-3. **Body**: the sidebar column on the left and the editor panes on the right. The
+   covers the whole button. The run under the pointer underlines (a tab label, its
+   close glyph, the plus and a scroll marker), and while the strip holds the keyboard
+   its active tab carries the accent marker in the leading cell, the same marker the
+   sidebar puts beside the row with the keyboard.
+3. **Body**: the sidebar column on the left and the editor column on the right. The
    column is a stack of sections, each a header row over a body (the File Explorer,
    then the Markdown Contents section); adjacent sections share one border row, so a
    boundary costs one row. It is the explorer panel's box when there is one section.
-   The section model and its row sharing are recorded in `docs/sidebar.md`.
-4. **Status bar**, one row, on the last row of the frame. With the `show_prompt_line`
+   The section model and its row sharing are recorded in `docs/sidebar.md`. The
+   sidebar column runs every body row, from its title row to the row above the status
+   bar: a tool in the editor column never cuts it.
+4. **Terminal dock**, when open: the bottom of the editor column only, a title row
+   and then the shell's rows, from the editor's left edge to its right edge. The
+   editor panes stop above it; the sidebar column keeps its rows beside it. The dock
+   is part of the working column, not a band across the frame, so the shell is sized
+   to the width it is painted in. `docs/terminal.md` records the dock itself.
+5. **Status bar**, one row, on the last row of the frame. With the `show_prompt_line`
    setting on, an open prompt takes the row below the status bar: the status row moves
    up one row **only while a prompt is open**, so when nothing is open the status bar
    keeps the last row and the space above and below it stays the same. With the setting
    off (the default) a prompt paints over the status row, as Fresh's auto-hide
-   prompt line does.
+   prompt line does. A message too long for the row wraps onto the **notice band**: at
+   most three rows directly above the status row, inside the editor column, and above
+   the dock when it is open, so a status message never paints over the shell.
+
+**Type.** The cell grid has one size, so hierarchy comes from weight, colour and
+position. The chrome's band titles (the sidebar section titles, an overlay box title)
+and the active editor or dock tab are **bold**; body text, menu labels and the
+status row stay regular, taking bold only for state emphasis (a warning pill, a
+focused control); secondary text (hints, pinned rows, a pending chord, empty
+states) is faint or muted. The accent marks focus (the `▌` marker), the selected row
+and the palette hint. The active tab is bold as well as coloured, so it does not
+rely on the two tab colours being distinguishable in a theme. Truncation uses the
+single `…`; the `...` in menu and command labels is Fresh's "this opens a surface"
+convention, not a truncation.
 
 ## 2. Floats: one frame for every surface
 
@@ -476,6 +499,7 @@ result region:
 | Context menu, "+" menu | menu | `internal/tui/ctxmenu` |
 | Anchored popup (LSP hover, ...) | menu | `internal/tui/popup` |
 | Sidebar column (File Explorer + Contents) | body, left column | `internal/tui/frame` (geometry and hit map), `internal/tui/sidebar` (section headers and the Contents body), `internal/tui/explorer` (tree body) |
+| Terminal dock, terminal tabs | body, bottom of the editor column | `internal/tui/frame` (geometry and hit map), `internal/tui/dock` (panel, tabs, paint, mouse, scrollback) |
 | Plugin widget panel | card (centred float), body of a virtual-buffer pane, or a sidebar section | `internal/tui/pluginpanel` (layout, paint, hit testing), `internal/tui/plugin_panels.go` (placement, focus, routing); a floating panel is a card with the shared frame, a buffer panel is painted inside the pane's text rectangle, a sidebar section's body is painted by the column |
 
 **File browser.** Alt+. toggles hidden entries and Alt+S cycles the sort order, as
@@ -553,6 +577,10 @@ Elements can be moved between the sides or omitted. A name Fresh knows but gvim 
 for still parses, so a Fresh config loads unchanged; a name neither knows is a config error, as
 Fresh's `StatusBarElement::try_from` rejects it.
 
+Every clickable run acknowledges the pointer: while a click target is under the pointer its text
+is underlined. `{terminal_restart}` adds Fresh's error-hover colours to that underline; the other
+segments keep the role they already wear.
+
 | Element | What gvim paints |
 |---------|------------------|
 | `{trust}` | the workspace-trust pill ("Trusted", "Restricted", "Blocked"), warning role for the restricted levels; click opens the Workspace Trust dialog |
@@ -587,7 +615,8 @@ element first, but `min(floor(2W/5), 40)` cells stay for the left group and the 
 element survives while the row has at least 15 cells. The left group is elided at its tail: the
 element that does not fit is cut and the rest drop. The `{remote}` label gives way as a whole
 before the rest of the left group. When `{messages}` is cut or does not fit the row, the
-message wraps on the notice band (section 1). The default left list starts with `{trust}`, so
+message wraps on the notice band (section 1): the rows above the status row, inside the
+editor column, and above the dock when it is open. The default left list starts with `{trust}`, so
 the trust pill is the last left element to give way.
 
 `{filename}`, `{chord}` and `{clock}` are ordinary configured elements at that squeeze: they

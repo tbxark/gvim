@@ -10,7 +10,11 @@ keys, painting, scrollback, selection, mouse, links), `internal/tui/dock_glue.go
 
 `internal/terminal` runs the shell in a PTY on Unix (`creack/pty`) or in a ConPTY
 pseudo console on Windows (`x/sys/windows`), and models its screen with
-`charmbracelet/x/vt`. The dock paints that screen into the frame's bottom band.
+`charmbracelet/x/vt`. The dock paints that screen into the bottom of the editor
+column: the explorer column runs beside it to the status row, and the panes stop
+above it. The shell's PTY is sized to the editor column, so showing or resizing the
+explorer resizes the shell, and its rows are re-wrapped on a width change like any
+other resize (`docs/ui.md` §1 has the chrome rows).
 The parity row and the remaining rounds live in `docs/parity.md`.
 
 ## Two views: live and scrollback
@@ -212,16 +216,26 @@ resizes, queued input), paints only the active one, and still keeps the
 background tabs' exited markers current.
 
 - **Strip.** The dock's title row is the tab strip: ` Terminal 1  build  Terminal 3 `,
-  the active tab in the tab-strip active style, an exited tab with an `(exited)`
-  marker, and a click on a label selects that tab. A tab is titled by its explicit
-  rename; without one it takes the name of the program it runs, as Fresh does: the
-  base name of the launch record's argv (the agent's configured argv, for a Run
-  Agent tab), else the launch record's agent name, else `Terminal N`. Duplicate
+  the active tab in the tab-strip active style and bold (the weight says which tab
+  is current even when a theme's two tab colours are close), an exited tab with an
+  `(exited)` marker, and a click on a label selects that tab. The strip starts at
+  the editor column's left edge and its labels are measured in the editor column's
+  width, so a label never spills into the explorer beside it. While the dock holds
+  the keyboard, the active tab's leading cell carries the accent marker (the same
+  cue the editor strip and the sidebar use); the shell's own caret stays in the body.
+  A tab is titled by its explicit rename; without one it takes the name of the program it
+  runs, as Fresh does: the base name of the launch record's argv (the agent's
+  configured argv, for a Run Agent tab), else the launch record's agent name, else
+  `Terminal N`. Duplicate
   titles get Fresh's ` (2)`, ` (3)` suffix, and because the launch record is
   saved per tab, a restored dead tab comes back with the same title plus the
   `(exited)` marker. Labels have control characters stripped and are truncated to
   one tab's cell budget with an ellipsis, counted in terminal cells, so a wide
-  glyph is never split and the strip's click targets measure the same cells.
+  glyph is never split and the strip's click targets measure the same cells. When
+  the labels are wider than the title row, the strip shows the active tab and the
+  labels around it, and an ellipsis at either end marks tabs off screen. The
+  ellipses are indicators, not buttons; Ctrl+PageDown / Ctrl+PageUp reach the
+  hidden tabs.
 - **Keys.** While the dock has the keyboard focus, Ctrl+PageDown / Ctrl+PageUp
   switch to the next/previous tab (wrapping); the keys work with or without
   keyboard capture, but not while the scrollback pager owns them. They are not

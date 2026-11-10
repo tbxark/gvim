@@ -139,17 +139,15 @@ func placeTabs(x0, w int, tabs []TabInfo, first int, ic icons.Mode) Strip {
 	s.Before = off > 0
 	s.After = off+window < total
 
-	before, after := " ", " "
+	// A marker is a run only while it is shown. At the scroll edge its cell stays
+	// blank bar fill and takes no press, so there is no live target that does
+	// nothing.
 	if s.Before {
-		before = ic.Glyph(icons.ScrollLeft)
+		s.Runs = append(s.Runs, Run{X: x0, W: 1, Text: ic.Glyph(icons.ScrollLeft), Kind: HitTabScrollBefore})
 	}
 	if s.After {
-		after = ic.Glyph(icons.ScrollRight)
+		s.Runs = append(s.Runs, Run{X: x0 + avail - 1, W: 1, Text: ic.Glyph(icons.ScrollRight), Kind: HitTabScrollAfter})
 	}
-	s.Runs = append(s.Runs,
-		Run{X: x0, W: 1, Text: before, Kind: HitTabScrollBefore},
-		Run{X: x0 + avail - 1, W: 1, Text: after, Kind: HitTabScrollAfter},
-	)
 	for _, r := range tabRuns(tabs, 0, ic) {
 		if c, ok := clipRunTo(r, off, off+window); ok {
 			c.X = x0 + 1 + (c.X - off)

@@ -25,7 +25,7 @@ const (
 	noTerminalsNotice   = "Terminals are not available in this build."
 	noClipboardNotice   = "The clipboard is not available in this build."
 	unsupportedNotice   = "Terminals are not supported on this platform yet."
-	startingShellNotice = "Starting a shell..."
+	startingShellNotice = "Starting a shell…"
 	captureOnNotice     = "Keyboard capture ON - all keys go to terminal (F9 to toggle)"
 	captureOffNotice    = "Keyboard capture OFF - UI bindings active (F9 to toggle)"
 )
@@ -845,11 +845,12 @@ func TestDockLayoutRegion(t *testing.T) {
 		wantY      int
 		wantH      int
 		wantBodyBt int
+		wantEdRows int
 	}{
-		{name: "80 by 24 with the dock takes 6 rows above the status row", w: 80, h: 24, open: true, wantOn: true, wantY: 17, wantH: 6, wantBodyBt: 16},
-		{name: "80 by 24 without the dock keeps the body", w: 80, h: 24, open: false, wantOn: false, wantBodyBt: 22},
-		{name: "80 by 11 takes the minimum dock", w: 80, h: 11, open: true, wantOn: true, wantY: 6, wantH: 4, wantBodyBt: 5},
-		{name: "80 by 8 leaves no room for a dock", w: 80, h: 8, open: true, wantOn: false, wantBodyBt: 6},
+		{name: "80 by 24 with the dock takes 6 editor rows above the status row", w: 80, h: 24, open: true, wantOn: true, wantY: 17, wantH: 6, wantBodyBt: 22, wantEdRows: 14},
+		{name: "80 by 24 without the dock keeps the body", w: 80, h: 24, open: false, wantOn: false, wantBodyBt: 22, wantEdRows: 20},
+		{name: "80 by 11 takes the minimum dock", w: 80, h: 11, open: true, wantOn: true, wantY: 6, wantH: 4, wantBodyBt: 9, wantEdRows: 3},
+		{name: "80 by 8 leaves no room for a dock", w: 80, h: 8, open: true, wantOn: false, wantBodyBt: 6, wantEdRows: 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -863,7 +864,40 @@ func TestDockLayoutRegion(t *testing.T) {
 			if l.BodyBottom != tt.wantBodyBt {
 				t.Fatalf("bodyBottom = %d, want %d", l.BodyBottom, tt.wantBodyBt)
 			}
+			if l.EditorRows() != tt.wantEdRows {
+				t.Fatalf("editor rows = %d, want %d", l.EditorRows(), tt.wantEdRows)
+			}
+			if tt.wantOn && (l.DockX != l.EditorX || l.DockX+l.EditorW != l.W) {
+				t.Fatalf("dock columns %d..%d, want the editor column %d..%d",
+					l.DockX, l.DockX+l.EditorW, l.EditorX, l.EditorX+l.EditorW)
+			}
 		})
+	}
+}
+
+// TestDockOwnsOnlyTheEditorColumn checks the side-by-side split: with the explorer
+// open the shell is sized to the editor column, a press beside the dock stays with
+// the explorer, and a press in the dock takes its focus.
+func TestDockOwnsOnlyTheEditorColumn(t *testing.T) {
+	starter := newFakeStarter()
+	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
+	m.explorerOpen = true
+	openDock(t, m)
+	l := m.layout()
+	if !l.ExplorerOpen || !l.DockOn || l.DockX == 0 {
+		t.Fatalf("layout: explorer %v, dock %v at column %d", l.ExplorerOpen, l.DockOn, l.DockX)
+	}
+	if want := [][2]int{{l.EditorW, l.DockH - 1}}; !slices.Equal(starter.sizes, want) {
+		t.Fatalf("shell sizes = %v, want the editor column %v", starter.sizes, want)
+	}
+	m.focusEditor()
+	m.Update(click(l.ExX+1, l.DockY+1, tea.MouseLeft))
+	if m.dock.Focus() {
+		t.Fatal("a press beside the dock gave the dock the focus")
+	}
+	m.Update(click(l.DockX+1, l.DockY+1, tea.MouseLeft))
+	if !m.dock.Focus() {
+		t.Fatal("a press in the dock did not give it the focus")
 	}
 }
 

@@ -91,10 +91,16 @@ func TestStickyBandPinsTheRunFirstRowsAncestors(t *testing.T) {
 			t.Fatalf("body row %d = %q, want %q: pins root,a,b then the run from offset 5", i, rows[2+i], name)
 		}
 	}
-	// The pinned band has the gutter ground, the run the panel ground.
+	// The pinned band has the gutter ground, the run the panel ground. The cursor is
+	// the pinned root, and a cursor keeps its own ground on a pinned row, as Fresh's
+	// explorer does.
 	gutter := style.Cell(st.Gutter)
 	panel := style.Cell(st.Explorer)
-	if got := gr.At(3, 2).Style.BG; got != gutter.BG {
+	cursor := style.Cell(st.CurrentLine)
+	if got := gr.At(3, 2).Style.BG; got != cursor.BG {
+		t.Errorf("pinned cursor row ground = %v, want the current-line ground %v", got, cursor.BG)
+	}
+	if got := gr.At(3, 3).Style.BG; got != gutter.BG {
 		t.Errorf("pinned row ground = %v, want the gutter ground %v", got, gutter.BG)
 	}
 	if got := gr.At(3, 5).Style.BG; got != panel.BG {

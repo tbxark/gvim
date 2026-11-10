@@ -12,6 +12,7 @@ import (
 const (
 	WelcomeRecentMax    = 5  // the recent folders listed
 	welcomeLabelW       = 18 // columns a door's label takes before its key
+	welcomePathMin      = 6  // cells a recent folder's path tail needs to say anything
 	WelcomeSubtitleText = "a terminal editor"
 	welcomeRecent       = "Recent"
 )
@@ -99,24 +100,39 @@ func WelcomeLines(x0, paneW, bodyTop, bodyRows int, recents []string, doorKeys [
 	// reaches PadX cells beyond the text on each side, so a full block is 4*PadX cells
 	// narrower than the pane.
 	bw := min(welcomeWidth(items), max(paneW-4*space.PadX, 0))
+	if bw <= 0 {
+		return nil
+	}
+	titleW := 0
+	for _, t := range WelcomeTitle {
+		titleW = max(titleW, ansi.StringWidth(t))
+	}
+	// A narrow pane drops the decorative lines rather than clipping them: a cut ASCII
+	// wordmark reads as a bug, and the doors still teach the space.
+	labelW := min(welcomeLabelW, bw)
 	var rows []WelcomeLine // y is the offset from the top of the block
 	blank := WelcomeLine{Role: WelcomeBlank, Item: -1, KeyX: -1}
-	for _, t := range WelcomeTitle {
-		rows = append(rows, WelcomeLine{Role: WelcomeTitleRow, Text: t, Item: -1, KeyX: -1, W: ansi.StringWidth(t)})
+	if titleW <= bw {
+		for _, t := range WelcomeTitle {
+			rows = append(rows, WelcomeLine{Role: WelcomeTitleRow, Text: t, Item: -1, KeyX: -1, W: ansi.StringWidth(t)})
+		}
+		rows = append(rows, blank)
 	}
-	rows = append(rows, blank,
-		WelcomeLine{Role: WelcomeSubtitle, Text: WelcomeSubtitleText, Item: -1, KeyX: -1, W: ansi.StringWidth(WelcomeSubtitleText)},
-		blank)
+	if ansi.StringWidth(WelcomeSubtitleText) <= bw {
+		rows = append(rows,
+			WelcomeLine{Role: WelcomeSubtitle, Text: WelcomeSubtitleText, Item: -1, KeyX: -1, W: ansi.StringWidth(WelcomeSubtitleText)},
+			blank)
+	}
 	for i, it := range items {
-		if i == len(WelcomeDoors) {
+		if i == len(WelcomeDoors) && ansi.StringWidth(welcomeRecent) <= bw {
 			rows = append(rows, blank, WelcomeLine{Role: WelcomeHeadingRow, Text: welcomeRecent, Item: -1, KeyX: -1, W: ansi.StringWidth(welcomeRecent)})
 		}
 		role := WelcomeDoorRow
 		if it.Path != "" {
 			role = WelcomeRecentRow
 		}
-		label := space.PadTo(space.End(it.Label, welcomeLabelW-1), welcomeLabelW)
-		rows = append(rows, WelcomeLine{Role: role, Text: label, KeyX: welcomeLabelW, Key: fitKey(it, max(bw-welcomeLabelW, 0)), Item: i, W: bw + 2*space.PadX})
+		label := space.PadTo(space.End(it.Label, max(labelW-1, 0)), labelW)
+		rows = append(rows, WelcomeLine{Role: role, Text: label, KeyX: labelW, Key: welcomeKey(it, max(bw-labelW, 0)), Item: i, W: bw + 2*space.PadX})
 	}
 
 	top := bodyTop + max((bodyRows-len(rows))/2, 0)
@@ -159,11 +175,18 @@ func WelcomeItemCount(recents []string) int {
 	return len(WelcomeItems(recents))
 }
 
-// fitKey fits the right column of a welcome row in w cells. A shortcut is cut at the end,
-// and the path of a recent folder gives up its middle and keeps its last directory.
-func fitKey(it WelcomeItem, w int) string {
+// welcomeKey fits a row's key in budget cells. A door shows its shortcut whole or
+// not at all: a cut "Ct…" names nothing. A recent folder abbreviates its path when
+// there is room for a useful tail.
+func welcomeKey(it WelcomeItem, budget int) string {
 	if it.Path != "" {
-		return space.Path(it.Key, w)
+		if budget < welcomePathMin {
+			return ""
+		}
+		return space.Path(it.Key, budget)
 	}
-	return space.End(it.Key, w)
+	if ansi.StringWidth(it.Key) > budget {
+		return ""
+	}
+	return it.Key
 }

@@ -339,6 +339,29 @@ func TestCtrlClickOpensPathAtALineAndColumn(t *testing.T) {
 	}
 }
 
+// TestMouseIsLocalToTheDockColumns checks a dock displaced by the explorer: a frame
+// column maps to the shell column by DockX, and a press left of DockX is not the
+// dock's.
+func TestMouseIsLocalToTheDockColumns(t *testing.T) {
+	t.Parallel()
+	p, term := livePanel(t, "see src/a.go:12 now")
+	term.cwd = "/term"
+	p.host.Stat = func(path string) bool { return path == "/term/src/a.go" }
+	l := scrollLayout()
+	l.DockX, l.EditorW = 10, 60
+	cmd, ok := p.Mouse(clickAt(10+8, 1, tea.ModCtrl, tea.MouseLeft), l, 1)
+	if !ok || cmd == nil {
+		t.Fatalf("Ctrl+Click inside the dock: taken %v, cmd %v", ok, cmd != nil)
+	}
+	msgs := messages(cmd)
+	if open, ok := msgs[0].(OpenPathMsg); !ok || open.Path != "/term/src/a.go" || open.Line != 12 {
+		t.Fatalf("message = %+v, want the link at the shell column", msgs[0])
+	}
+	if _, taken := p.Mouse(clickAt(9, 1, 0, tea.MouseLeft), l, 1); taken {
+		t.Fatal("a press left of the dock was taken")
+	}
+}
+
 func TestCtrlClickTriesTheWholeTokenForAColonName(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "see odd:1.go:2 now")

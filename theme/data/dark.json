@@ -101,10 +101,10 @@
     "status_error_indicator_hover_fg": [255, 255, 255],
     "tab_drop_zone_bg": [70, 130, 180],
     "tab_drop_zone_border": [100, 149, 237],
-    "popup_selection_fg": [239, 248, 255],
+    "popup_selection_fg": [13, 17, 23],
     "file_explorer_pinned_bg": [36, 38, 48],
     "accent_bg": [47, 129, 247],
-    "accent_fg": [239, 248, 255]
+    "accent_fg": [13, 17, 23]
   },
   "search": {
     "match_bg": [82, 65, 27],

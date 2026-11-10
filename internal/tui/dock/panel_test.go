@@ -335,7 +335,7 @@ func TestOutputKeepsWaitingUntilTheExit(t *testing.T) {
 		t.Fatalf("exited = %v, armed = %v; want exited and no wait", p.Exited(), p.armed)
 	}
 	g := grid.New(80, 6)
-	p.Draw(g, frame.Layout{DockOn: true, W: 80, DockY: 0, DockH: 6}, style.Styles{})
+	p.Draw(g, frame.Layout{DockOn: true, W: 80, DockX: 0, DockY: 0, DockH: 6, EditorW: 80}, style.Styles{})
 	if top := g.Plain()[0]; !strings.Contains(top, "(exited)") {
 		t.Fatalf("title row = %q, want it to say the shell exited", top)
 	}
@@ -346,6 +346,34 @@ func TestOutputKeepsWaitingUntilTheExit(t *testing.T) {
 	}
 }
 
+// TestDrawStaysInTheDockColumns checks the dock paints its own cells only: with a
+// column beside it, every dock row leaves the cells left of DockX untouched and
+// starts its title at DockX.
+func TestDrawStaysInTheDockColumns(t *testing.T) {
+	t.Parallel()
+	p := newTestPanel(t, &fakeStarter{term: newFakeTerm()})
+	const dockX, dockW, rows = 10, 40, 6
+	l := frame.Layout{DockOn: true, W: dockX + dockW, DockX: dockX, DockY: 1, DockH: 4, EditorW: dockW}
+	g := grid.New(l.W, rows)
+	for y := range rows {
+		for x := range dockX {
+			g.Set(x, y, "#", grid.Style{})
+		}
+	}
+	p.Draw(g, l, style.Styles{})
+	plain := g.Plain()
+	for y, row := range plain {
+		if got := row[:dockX]; got != strings.Repeat("#", dockX) {
+			t.Fatalf("row %d left of the dock = %q, want it untouched", y, got)
+		}
+	}
+	if got := plain[l.DockY][dockX:]; !strings.HasPrefix(got, " Terminal") {
+		t.Fatalf("dock title row = %q, want the title starting at column %d", got, dockX+1)
+	}
+}
+
+// TestExitIsSeenWhileOutputStaysOpen checks the dock shows an exited shell at once,
+// even while its output stays open.
 func TestExitIsSeenWhileOutputStaysOpen(t *testing.T) {
 	starter := &fakeStarter{term: newFakeTerm()}
 	p := newTestPanel(t, starter)
@@ -375,7 +403,7 @@ func TestExitIsSeenWhileOutputStaysOpen(t *testing.T) {
 		t.Fatal("the dock does not show the shell as exited while its output stays open")
 	}
 	g := grid.New(80, 6)
-	p.Draw(g, frame.Layout{DockOn: true, W: 80, DockY: 0, DockH: 6}, style.Styles{})
+	p.Draw(g, frame.Layout{DockOn: true, W: 80, DockX: 0, DockY: 0, DockH: 6, EditorW: 80}, style.Styles{})
 	if top := g.Plain()[0]; !strings.Contains(top, "(exited)") {
 		t.Fatalf("title row = %q, want it to say the shell exited", top)
 	}

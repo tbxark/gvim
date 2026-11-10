@@ -39,7 +39,7 @@
   "ui": {
     "tab_active_fg": [40, 40, 40],
     "tab_active_bg": [250, 189, 47],
-    "tab_inactive_fg": [168, 153, 132],
+    "tab_inactive_fg": [251, 241, 199],
     "tab_inactive_bg": [60, 56, 54],
     "tab_separator_bg": [40, 40, 40],
     "tab_close_hover_fg": [251, 73, 52],

@@ -42,7 +42,7 @@ func TestNoticesUseTheEmbeddedGermanCatalogue(t *testing.T) {
 		t.Fatalf("de NoTerminalNotice() = %q, want %q", got, want)
 	}
 	// The starting notice is gvim-only: the English fallback shows.
-	if got := startingShellNotice(); got != "Starting a shell..." {
+	if got := startingShellNotice(); got != "Starting a shell…" {
 		t.Fatalf("de startingShellNotice() = %q, want the English fallback", got)
 	}
 }

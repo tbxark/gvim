@@ -228,10 +228,12 @@ func (l Layout) hitWelcome(x, y int) HitTarget {
 }
 
 // onNotice reports whether cell (x, y) is on the notice band, the rows that a long
-// status message covers above the status row. The band starts at the editor's left edge,
-// so the explorer beside it is not covered.
+// status message covers above the status row. The band starts at the editor's left edge
+// and spans the editor column, so the explorer beside it is not covered; it stops above
+// the dock, whose rows are not part of the band.
 func (l Layout) OnNotice(x, y int) bool {
-	return !l.Gated && len(l.Notice) > 0 && x >= l.NoticeX && x < l.W && y >= l.NoticeY && y < l.StatusY
+	return !l.Gated && len(l.Notice) > 0 && x >= l.NoticeX && x < l.NoticeX+l.NoticeW &&
+		y >= l.NoticeY && y < l.NoticeY+len(l.Notice)
 }
 
 // BandTop is the first row the notice band covers, or the frame height when there is

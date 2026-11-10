@@ -1074,10 +1074,11 @@ func (t *Tabs) TabKey(k tea.Key) bool {
 func (t *Tabs) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	switch m := msg.(type) {
 	case tea.MouseClickMsg:
-		if l.DockOn && m.Button == tea.MouseLeft && m.Y == l.DockY {
-			if i, ok := t.tabAtX(l.W, m.X); ok {
+		if l.DockOn && m.Button == tea.MouseLeft && m.Y == l.DockY && l.InEditor(m.X) {
+			x := m.X - l.DockX
+			if i, ok := t.tabAtX(l.EditorW, x); ok {
 				t.SetActive(i)
-				t.drag = tabDrag{from: i, startX: m.X, x: m.X, on: true}
+				t.drag = tabDrag{from: i, startX: x, x: x, on: true}
 				// A press on the strip is still a press on the dock: it takes the
 				// keyboard when a shell runs (the host's focus gate refuses otherwise).
 				if t.host.Focus != nil {
@@ -1090,8 +1091,8 @@ func (t *Tabs) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 		}
 	case tea.MouseMotionMsg:
 		if t.drag.on {
-			t.drag.x = m.X
-			if !t.drag.active && dragDistance(m.X-t.drag.startX) > tabDragThreshold {
+			t.drag.x = m.X - l.DockX
+			if !t.drag.active && dragDistance(t.drag.x-t.drag.startX) > tabDragThreshold {
 				t.drag.active = true
 			}
 			// The drag owns the pointer until release, even when it leaves the strip:
@@ -1102,8 +1103,8 @@ func (t *Tabs) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 		if t.drag.on {
 			drag := t.drag
 			t.drag = tabDrag{}
-			if drag.active && l.DockOn && m.Y == l.DockY {
-				t.dropTab(drag.from, t.tabInsertAtX(l.W, m.X))
+			if drag.active && l.DockOn && m.Y == l.DockY && l.InEditor(m.X) {
+				t.dropTab(drag.from, t.tabInsertAtX(l.EditorW, m.X-l.DockX))
 			}
 			return nil, true
 		}
@@ -1123,50 +1124,105 @@ func dragDistance(n int) int {
 	return n
 }
 
+// tabRun is one tab label on the dock's title row, in the dock's own columns.
+type tabRun struct {
+	x, w, index int
+}
+
+// stripRuns lays the tab labels out in a title row w cells wide, in the dock's own
+// columns. When every label fits, all are shown. Otherwise the window starts at the
+// active tab, takes the following labels that fit and then the preceding ones that
+// fit, so the tab with the keyboard is always on screen. The hidden sides are marked
+// with one ellipsis cell at each end; the markers are indicators, not targets, and
+// Ctrl+PageUp/PageDown reach the hidden tabs.
+func (t *Tabs) stripRuns(w int) (runs []tabRun, moreBefore, moreAfter bool) {
+	if w <= 2 || len(t.tabs) == 0 {
+		return nil, false, false
+	}
+	widths := make([]int, len(t.tabs))
+	total := 0
+	for i := range t.tabs {
+		widths[i] = ansi.StringWidth(" " + t.stripLabel(i) + " ")
+		total += widths[i]
+	}
+	if total <= w-1 {
+		x := 1
+		for i := range t.tabs {
+			runs = append(runs, tabRun{x: x, w: widths[i], index: i})
+			x += widths[i]
+		}
+		return runs, false, false
+	}
+	// One cell at each end says that side is hidden; the labels sit between them.
+	budget := w - 2
+	active := min(max(t.active, 0), len(t.tabs)-1)
+	first, last := active, active
+	used := min(widths[active], budget)
+	for i := active + 1; i < len(t.tabs); i++ {
+		if used+widths[i] > budget {
+			break
+		}
+		used += widths[i]
+		last = i
+	}
+	for i := active - 1; i >= 0; i-- {
+		if used+widths[i] > budget {
+			break
+		}
+		used += widths[i]
+		first = i
+	}
+	moreBefore = first > 0
+	moreAfter = last < len(t.tabs)-1 || widths[active] > budget
+	x := 1
+	for i := first; i <= last; i++ {
+		cw := min(widths[i], 1+budget-x)
+		if cw <= 0 {
+			break
+		}
+		runs = append(runs, tabRun{x: x, w: cw, index: i})
+		x += cw
+	}
+	return runs, moreBefore, moreAfter
+}
+
 // tabInsertAtX maps a title-row column to Fresh's tab-drop insertion index: the
 // left half of a label inserts before that tab, its right half after, and a
-// column past the last label inserts at the end.
+// column past the last visible label inserts after it.
 func (t *Tabs) tabInsertAtX(w, x int) int {
-	col := 1
-	for i := range t.tabs {
-		n := ansi.StringWidth(" " + t.stripLabel(i) + " ")
-		mid := col + n/2
-		if x < mid {
-			return i
-		}
-		col += n
-		if col >= w {
-			return i + 1
+	runs, _, _ := t.stripRuns(w)
+	if len(runs) == 0 {
+		return len(t.tabs)
+	}
+	for _, r := range runs {
+		if x < r.x+r.w/2 {
+			return r.index
 		}
 	}
-	return len(t.tabs)
+	return runs[len(runs)-1].index + 1
 }
 
 // tabInsertCol is the strip column the drop marker for tabInsertAtX draws at.
 func (t *Tabs) tabInsertCol(w, x int) int {
 	idx := t.tabInsertAtX(w, x)
-	col := 1
-	for i := 0; i < idx && i < len(t.tabs); i++ {
-		col += ansi.StringWidth(" " + t.stripLabel(i) + " ")
+	col := max(w-1, 0)
+	if runs, _, _ := t.stripRuns(w); len(runs) > 0 {
+		for _, r := range runs {
+			if r.index >= idx {
+				col = r.x
+				break
+			}
+		}
 	}
 	return min(max(col, 0), max(w-1, 0))
 }
 
-// tabAtX maps a title-row column to a tab index. The strip mirrors drawStrip.
+// tabAtX maps a title-row column to the visible tab under it.
 func (t *Tabs) tabAtX(w, x int) (int, bool) {
-	if x <= 0 || len(t.tabs) == 0 {
-		return 0, false
-	}
-	col := 1
-	for i := range t.tabs {
-		label := " " + t.stripLabel(i) + " "
-		n := ansi.StringWidth(label)
-		if col <= x && x < col+n {
-			return i, true
-		}
-		col += n
-		if col >= w {
-			break
+	runs, _, _ := t.stripRuns(w)
+	for _, r := range runs {
+		if x >= r.x && x < r.x+r.w {
+			return r.index, true
 		}
 	}
 	return 0, false
@@ -1182,33 +1238,55 @@ func (t *Tabs) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	t.drawStrip(g, l, st)
 }
 
-// drawStrip paints " Terminal 1  Terminal 2 " across the dock title row, the
-// active tab in the active-tab style.
+// drawStrip paints " Terminal 1  Terminal 2 " across the dock title row of the
+// editor column, the active tab in the active-tab style. When the labels overflow,
+// the window keeps the active tab on screen and an ellipsis marks each hidden side.
 func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
-	if l.DockH <= 0 || l.W <= 0 {
+	if l.DockH <= 0 || l.EditorW <= 0 {
 		return
 	}
+	x0, w := l.DockX, l.EditorW
 	bar := style.Cell(st.ExplorerTitle)
 	active := style.Cell(st.TabActive)
 	inactive := style.Cell(st.Tab)
-	g.Fill(0, l.W, l.DockY, bar)
-	x := 1
-	for i := range t.tabs {
-		label := " " + t.stripLabel(i) + " "
+	accent := style.Cell(st.Accent).BG
+	// A focused dock marks its active tab in the leading cell, the same accent
+	// marker the editor strip and the sidebar use for the band with the keyboard.
+	// The shell's caret is in the body, so without this the title row does not say
+	// whether keys go to the terminal.
+	focused := false
+	if p := t.Active(); p != nil {
+		focused = p.Focus()
+	}
+	g.Fill(x0, x0+w, l.DockY, bar)
+	runs, moreBefore, moreAfter := t.stripRuns(w)
+	if moreBefore {
+		g.Set(x0, l.DockY, "…", bar)
+	}
+	if moreAfter {
+		g.Set(x0+w-1, l.DockY, "…", bar)
+	}
+	for _, r := range runs {
+		label := " " + t.stripLabel(r.index) + " "
 		cell := inactive
-		if i == t.active {
+		if r.index == t.active {
+			// The active tab takes the bold weight as well as its colour, the same
+			// hierarchy the editor strip uses.
 			cell = active
+			cell.Bold = true
 		}
-		x += g.Put(x, l.DockY, l.W-1, label, cell)
-		if x >= l.W-1 {
-			return
+		g.Put(x0+r.x, l.DockY, x0+r.x+r.w, ansi.Truncate(label, r.w, "…"), cell)
+		if focused && r.index == t.active {
+			marker := cell
+			marker.FG = accent
+			g.Set(x0+r.x, l.DockY, "▌", marker)
 		}
 	}
 	if t.drag.active {
 		// Where the dragged tab would land: Fresh shows a drop indicator during the
 		// drag, so the gesture is visible before the button is released.
-		if col := t.tabInsertCol(l.W, t.drag.x); col < l.W {
-			g.Put(col, l.DockY, min(col+1, l.W), "┃", active)
+		if col := t.tabInsertCol(w, t.drag.x); col < w {
+			g.Put(x0+col, l.DockY, min(x0+col+1, x0+w), "┃", active)
 		}
 	}
 }

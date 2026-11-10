@@ -1,10 +1,12 @@
 package dock
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/terminal"
@@ -191,7 +193,7 @@ func TestTabsStripHitAndDraw(t *testing.T) {
 	tabs, _ := newTestTabs(t, &notices)
 	startTab(t, tabs)
 	startTab(t, tabs)
-	l := frame.Layout{DockOn: true, DockY: 2, DockH: 4, W: 60}
+	l := frame.Layout{DockOn: true, DockX: 0, DockY: 2, DockH: 4, EditorW: 60}
 	g := grid.New(60, 8)
 	tabs.Draw(g, l, style.Styles{})
 	row := strings.Join(g.Plain()[2:3], "")
@@ -391,7 +393,7 @@ func TestTabsTitleStripIsCellAware(t *testing.T) {
 	if got := tabs.stripLabel(1); ansi.StringWidth(got) > MaxTerminalTabTitleCells || !strings.HasSuffix(got, "\u2026") {
 		t.Fatalf("long title = %q (width %d)", got, ansi.StringWidth(got))
 	}
-	l := frame.Layout{DockOn: true, DockY: 2, DockH: 4, W: 60}
+	l := frame.Layout{DockOn: true, DockX: 0, DockY: 2, DockH: 4, EditorW: 60}
 	g := grid.New(60, 8)
 	tabs.Draw(g, l, style.Styles{})
 	// Click the second tab using the cell width the strip painted: first label
@@ -533,7 +535,156 @@ func TestTabsTabKeyReorder(t *testing.T) {
 }
 
 // stripLayout is the dock layout the strip tests draw in: the title row is row 2.
-func stripLayout() frame.Layout { return frame.Layout{DockOn: true, DockY: 2, DockH: 4, W: 60} }
+func stripLayout() frame.Layout {
+	return frame.Layout{DockOn: true, DockX: 0, DockY: 2, DockH: 4, EditorW: 60}
+}
+
+// TestDockTitleMarksTheFocusedTab checks the dock's title row: while the dock holds
+// the keyboard its active tab carries the accent marker, the same cue the editor
+// strip and the sidebar use.
+func TestDockTitleMarksTheFocusedTab(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	l := stripLayout()
+	st := style.Styles{Accent: lipgloss.NewStyle().Background(lipgloss.Color("4"))}
+	accent := style.Cell(st.Accent).BG
+
+	tabs.Active().SetFocus(true)
+	focused := grid.New(60, 8)
+	tabs.Draw(focused, l, st)
+	if got := focused.At(l.DockX+1, l.DockY).Text; got != "▌" {
+		t.Fatalf("focused title leading cell = %q, want the accent marker", got)
+	}
+	if got := focused.At(l.DockX+1, l.DockY).Style.FG; got != accent {
+		t.Fatalf("marker ink = %v, want the accent %v", got, accent)
+	}
+
+	tabs.Active().SetFocus(false)
+	blurred := grid.New(60, 8)
+	tabs.Draw(blurred, l, st)
+	if got := blurred.At(l.DockX+1, l.DockY).Text; got == "▌" {
+		t.Fatal("the blurred dock still marks its title")
+	}
+}
+
+// TestDockStripWindowsToTheActiveTab checks the title row with more tabs than fit:
+// the active tab stays on screen, an ellipsis marks each hidden side, and the
+// markers are not click targets.
+func TestDockStripWindowsToTheActiveTab(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	for range 13 {
+		startTab(t, tabs)
+	}
+	for i := range 13 {
+		tabs.SetActive(i)
+		tabs.RenameActive(fmt.Sprintf("tab-%02d", i+1))
+	}
+	l := stripLayout()
+	l.EditorW = 30
+	for _, tt := range []struct {
+		name       string
+		active     int
+		wantBefore bool
+		wantAfter  bool
+		wantRowTab string
+	}{
+		{"the last tab", 12, true, false, "tab-13"},
+		{"a middle tab", 5, true, true, "tab-06"},
+		{"the first tab", 0, false, true, "tab-01"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tabs.SetActive(tt.active)
+			runs, before, after := tabs.stripRuns(l.EditorW)
+			if before != tt.wantBefore || after != tt.wantAfter {
+				t.Fatalf("window before %v after %v, want %v %v", before, after, tt.wantBefore, tt.wantAfter)
+			}
+			g := grid.New(60, 8)
+			tabs.Draw(g, l, style.Styles{})
+			row := g.Plain()[l.DockY]
+			if !strings.Contains(row, tt.wantRowTab) {
+				t.Fatalf("the active tab is not on the title row: %q", row)
+			}
+			if want := tt.wantBefore || tt.wantAfter; strings.Contains(row, "…") != want {
+				t.Fatalf("hidden-tab marker in %q, want %v", row, want)
+			}
+			found := false
+			for _, r := range runs {
+				if r.index == tt.active {
+					found = true
+					if i, ok := tabs.tabAtX(l.EditorW, r.x+1); !ok || i != tt.active {
+						t.Fatalf("hit on the active label = %d %v, want %d", i, ok, tt.active)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("the active tab is outside the window %+v", runs)
+			}
+			if _, ok := tabs.tabAtX(l.EditorW, 0); ok {
+				t.Fatal("the left marker is a click target")
+			}
+			if _, ok := tabs.tabAtX(l.EditorW, l.EditorW-1); ok {
+				t.Fatal("the right marker is a click target")
+			}
+		})
+	}
+}
+
+// TestDockStripShowsEveryLabelWhenTheyFit keeps the resting case: no markers and
+// the labels in tab order.
+func TestDockStripShowsEveryLabelWhenTheyFit(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	for i, name := range []string{"alpha", "beta"} {
+		tabs.SetActive(i)
+		tabs.RenameActive(name)
+	}
+	l := stripLayout()
+	runs, before, after := tabs.stripRuns(l.EditorW)
+	if before || after || len(runs) != 2 {
+		t.Fatalf("runs %+v before %v after %v, want both labels and no markers", runs, before, after)
+	}
+	g := grid.New(60, 8)
+	tabs.Draw(g, l, style.Styles{})
+	row := g.Plain()[l.DockY]
+	if !strings.Contains(row, "alpha") || !strings.Contains(row, "beta") || strings.Contains(row, "…") {
+		t.Fatalf("title row = %q, want both labels and no marker", row)
+	}
+}
+
+// TestDockActiveTabTakesTheBoldWeight checks the dock strip's hierarchy: the active
+// tab label is bold, the inactive label stays regular.
+func TestDockActiveTabTakesTheBoldWeight(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	tabs.SetActive(1)
+	l := stripLayout()
+	g := grid.New(60, 8)
+	tabs.Draw(g, l, style.Styles{})
+	runs, _, _ := tabs.stripRuns(l.EditorW)
+	if len(runs) != 2 {
+		t.Fatalf("runs = %+v, want both labels", runs)
+	}
+	for _, r := range runs {
+		// The label's leading cell is a blank; the first name cell follows it.
+		bold := g.At(l.DockX+r.x+1, l.DockY).Style.Bold
+		if r.index == 1 && !bold {
+			t.Fatalf("the active tab label at %d is not bold", r.x)
+		}
+		if r.index == 0 && bold {
+			t.Fatal("the inactive tab label is bold")
+		}
+	}
+}
 
 // TestTabsDragReorder drives Fresh's tab-drag gesture: press a label, move past the
 // three-cell threshold, release over the strip; the drop inserts at the pointer's

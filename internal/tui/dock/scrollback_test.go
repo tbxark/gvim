@@ -14,7 +14,7 @@ import (
 
 // scrollLayout is a frame with the dock on rows 0..4: a title row and 4 body rows.
 func scrollLayout() frame.Layout {
-	return frame.Layout{DockOn: true, W: 80, H: 5, DockY: 0, DockH: 5}
+	return frame.Layout{DockOn: true, W: 80, H: 5, DockX: 0, DockY: 0, DockH: 5, EditorW: 80}
 }
 
 // applyScroll runs the commands a scroll action returns and applies the snapshot

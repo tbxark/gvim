@@ -149,9 +149,7 @@ func TestOverflowWindowEndsBeforeTheButton(t *testing.T) {
 		case HitTabNew:
 			continue
 		case HitTabScrollBefore:
-			if r.X != 0 {
-				t.Errorf("left marker at %d, want 0", r.X)
-			}
+			t.Errorf("the left marker is a target while the window starts at the first tab: %+v", r)
 		case HitTabScrollAfter:
 			if r.X != w-4 {
 				t.Errorf("right marker at %d, want %d, one cell left of the button", r.X, w-4)
@@ -161,6 +159,28 @@ func TestOverflowWindowEndsBeforeTheButton(t *testing.T) {
 				t.Errorf("tab run %+v is outside the window left of the button", r)
 			}
 		}
+	}
+	if got := l.Hit(0, l.StripY); got.Kind == HitTabScrollBefore {
+		t.Errorf("the blank left edge is still a live scroll target: %+v", got)
+	}
+}
+
+// TestScrollMarkerDisappearsAtTheEdge checks the other end: the marker's cell stays
+// blank and takes no press once there is nothing more to scroll to.
+func TestScrollMarkerDisappearsAtTheEdge(t *testing.T) {
+	tabs := []TabInfo{{Name: "one.go"}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go"}}
+	const w = 20
+	s := PlaceStrip(0, w, tabs, len(tabs), icons.Plain)
+	if !s.Overflow || s.After {
+		t.Fatalf("strip at the tail: overflow %v after %v", s.Overflow, s.After)
+	}
+	for _, r := range s.Runs {
+		if r.Kind == HitTabScrollAfter {
+			t.Errorf("the right marker is a target at the tail: %+v", r)
+		}
+	}
+	if got := StripHit(s.Runs, w-4); got.Kind == HitTabScrollAfter {
+		t.Errorf("the blank right edge is still a live scroll target: %+v", got)
 	}
 }
 
@@ -773,6 +793,52 @@ func TestRightSideExplorerGeometry(t *testing.T) {
 	}
 	if got := l.Hit(l.ExReloadX, l.ExTitleY); got.Kind != HitExplorerTitleReload {
 		t.Errorf("hit on the reload button = %+v", got)
+	}
+}
+
+// TestDockIsTheEditorColumn checks the dock's cells on either side of the explorer:
+// the dock is the bottom of the editor column, the panes stop above it, and the
+// explorer column keeps every body row, so the navigator is never cut by the tool.
+func TestDockIsTheEditorColumn(t *testing.T) {
+	tests := []struct {
+		name string
+		side explorer.Side
+	}{
+		{"explorer on the left", explorer.SideLeft},
+		{"explorer on the right", explorer.SideRight},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := ComputeLayout(120, 40, Input{
+				DockOpen:      true,
+				ExplorerOpen:  true,
+				ExplorerWidth: explorer.ColumnsWidth(30),
+				ExplorerSide:  tt.side,
+				Lines:         200,
+			})
+			if !l.DockOn {
+				t.Fatal("the dock is not laid out")
+			}
+			if l.DockX != l.EditorX {
+				t.Errorf("dock starts at column %d, want the editor's %d", l.DockX, l.EditorX)
+			}
+			if l.ExBottom != l.BodyBottom {
+				t.Errorf("explorer ends at row %d, want the body's last row %d", l.ExBottom, l.BodyBottom)
+			}
+			if l.EditorRows() != l.DockY-l.BodyTop {
+				t.Errorf("editor rows = %d, want %d above the dock", l.EditorRows(), l.DockY-l.BodyTop)
+			}
+			if p := l.Panes[0]; p.Y+p.H-1 != l.DockY-1 {
+				t.Errorf("pane ends at row %d, want %d above the dock", p.Y+p.H-1, l.DockY-1)
+			}
+			// The explorer keeps a dock row; the dock's own cells are the dock's.
+			if got := l.Hit(l.ExX+1, l.DockY+1); got.Kind != HitExplorerRow && got.Kind != HitExplorerBody {
+				t.Errorf("hit beside the dock in the explorer = %+v, want the explorer", got)
+			}
+			if got := l.Hit(l.DockX+1, l.DockY+1); got.Kind != HitNone {
+				t.Errorf("hit in the dock = %+v, want no frame target", got)
+			}
+		})
 	}
 }
 

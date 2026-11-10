@@ -18,7 +18,7 @@ import (
 // selected row and the text on it.
 var (
 	colorPrimary   = color.RGBA{0x2F, 0x81, 0xF7, 0xFF}
-	colorOnPrimary = color.RGBA{0xEF, 0xF8, 0xFF, 0xFF}
+	colorOnPrimary = color.RGBA{0x0D, 0x11, 0x17, 0xFF}
 )
 
 // fakePorts implements Ports. Run records the actions it is given and fails

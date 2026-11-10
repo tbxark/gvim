@@ -144,7 +144,7 @@ func TestRevivedTabPaintsSnapshotAboveNewOutput(t *testing.T) {
 	}
 	// Scroll to the oldest row so the snapshot above the new output is visible.
 	p.scroll.top = 0
-	l := frame.Layout{DockOn: true, W: 80, H: 6, DockY: 0, DockH: 6}
+	l := frame.Layout{DockOn: true, W: 80, H: 6, DockX: 0, DockY: 0, DockH: 6, EditorW: 80}
 	g := grid.New(80, 6)
 	p.Draw(g, l, style.Styles{})
 	if row := g.Plain()[1]; !strings.Contains(row, "OLD") {
@@ -264,7 +264,7 @@ func TestTabsRestoreHistoryAndCursor(t *testing.T) {
 		t.Fatalf("saved metadata = %d %+v", p.savedVisibleRows, p.savedCursor)
 	}
 	// The read-only view paints the history styles and the saved cursor block.
-	l := frame.Layout{DockOn: true, W: 80, H: 6, DockY: 0, DockH: 6}
+	l := frame.Layout{DockOn: true, W: 80, H: 6, DockX: 0, DockY: 0, DockH: 6, EditorW: 80}
 	g := grid.New(80, 6)
 	p.Draw(g, l, style.Styles{})
 	if !g.At(0, 1).Style.Bold {
@@ -364,7 +364,7 @@ func TestRevivedTabStopsPaintingTheSavedCursor(t *testing.T) {
 	p := tabs.Active()
 	applyScroll(t, p, p.ToggleScrollback())
 	p.scroll.top = 0
-	l := frame.Layout{DockOn: true, W: 80, H: 6, DockY: 0, DockH: 6}
+	l := frame.Layout{DockOn: true, W: 80, H: 6, DockX: 0, DockY: 0, DockH: 6, EditorW: 80}
 	g := grid.New(80, 6)
 	p.Draw(g, l, style.Styles{})
 	if g.At(1, 2).Style.Reverse {

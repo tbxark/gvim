@@ -60,7 +60,7 @@ func TestAccentComesFromTheTheme(t *testing.T) {
 	if want := color.Color(color.RGBA{R: 47, G: 129, B: 247, A: 255}); c.BG != want {
 		t.Errorf("dark accent bg = %v, want %v", c.BG, want)
 	}
-	if want := color.Color(color.RGBA{R: 239, G: 248, B: 255, A: 255}); c.FG != want {
+	if want := color.Color(color.RGBA{R: 13, G: 17, B: 23, A: 255}); c.FG != want {
 		t.Errorf("dark accent fg = %v, want %v", c.FG, want)
 	}
 	if c := Cell(New(theme.Theme{}).Accent); c.FG != nil || c.BG != nil {
@@ -185,7 +185,7 @@ func TestOverlayTakesThePopupColorsAndTheAccent(t *testing.T) {
 	if got := ov.Box; got.FG != color.Color(rgb(230, 237, 243)) || got.BG != color.Color(rgb(13, 17, 23)) {
 		t.Errorf("box = %v on %v, want the popup text on the popup fill", got.FG, got.BG)
 	}
-	if got := ov.Selected; got.FG != color.Color(rgb(239, 248, 255)) || got.BG != color.Color(rgb(47, 129, 247)) {
+	if got := ov.Selected; got.FG != color.Color(rgb(13, 17, 23)) || got.BG != color.Color(rgb(47, 129, 247)) {
 		t.Errorf("selected = %v on %v, want the accent text on the accent", got.FG, got.BG)
 	}
 	if got := ov.Border; got.FG != color.Color(rgb(47, 129, 247)) {

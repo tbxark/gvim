@@ -502,31 +502,32 @@ func cellsTextRaw(cells []terminal.Cell) []rune {
 	return out
 }
 
-// paintSelection tints row y of the grid over the selection's columns. The dock's
-// text starts at column 0, so a cell column is a grid column. bg is the selection
-// background; with none the selected cells are reversed.
-func (p *Panel) paintSelection(g *grid.Grid, y, w int, abs int, bg color.Color) {
+// paintSelection tints row y of the grid over the selection's columns, at column
+// x0 of the frame. A cell column is a grid column offset by the dock's first
+// column. bg is the selection background; with none the selected cells are reversed.
+func (p *Panel) paintSelection(g *grid.Grid, x0, y, w int, abs int, bg color.Color) {
 	start, end, ok := p.selectionRange(abs)
 	if !ok {
 		return
 	}
 	start, end = max(start, 0), min(end, w)
 	if end > start {
-		tintRange(g, y, start, end, bg)
+		tintRange(g, x0, y, start, end, bg)
 	}
 }
 
-// tintRange tints cells [start, end) of row y: the selection background keeps the
-// cell's foreground, and without a background color the cells are reversed.
-func tintRange(g *grid.Grid, y, start, end int, bg color.Color) {
+// tintRange tints cells [start, end) of row y, starting at column x0: the selection
+// background keeps the cell's foreground, and without a background color the cells
+// are reversed.
+func tintRange(g *grid.Grid, x0, y, start, end int, bg color.Color) {
 	for c := start; c < end; c++ {
-		cell := g.At(c, y)
+		cell := g.At(x0+c, y)
 		st := cell.Style
 		if bg != nil {
 			st.BG = bg
 		} else {
 			st.Reverse = true
 		}
-		g.Set(c, y, cell.Text, st)
+		g.Set(x0+c, y, cell.Text, st)
 	}
 }

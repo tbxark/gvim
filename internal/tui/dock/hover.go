@@ -56,16 +56,16 @@ func (p *Panel) updateHover(mo tea.Mouse, row int) {
 	}
 }
 
-// paintHoverRow underlines the hover link's cells on one painted row. row is a
-// live screen row or an absolute combined row, as scroll says.
-func (p *Panel) paintHoverRow(g *grid.Grid, y, row, w int, scroll bool) {
+// paintHoverRow underlines the hover link's cells on one painted row at column x0.
+// row is a live screen row or an absolute combined row, as scroll says.
+func (p *Panel) paintHoverRow(g *grid.Grid, x0, y, row, w int, scroll bool) {
 	if !p.hover.on || p.hover.scroll != scroll || p.hover.row != row {
 		return
 	}
 	for c := max(p.hover.start, 0); c < min(p.hover.end, w); c++ {
-		cell := g.At(c, y)
+		cell := g.At(x0+c, y)
 		st := cell.Style
 		st.Underline = true
-		g.Set(c, y, cell.Text, st)
+		g.Set(x0+c, y, cell.Text, st)
 	}
 }

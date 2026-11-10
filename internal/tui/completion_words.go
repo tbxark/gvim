@@ -396,7 +396,7 @@ func (m *Model) wordSnapshot(doc Document) (editor.WordSnapshot, bool) {
 		lines = append(lines, doc.Line(i))
 	}
 	top := doc.Top()
-	bottom := top + max(m.layout().BodyBottom-m.layout().BodyTop, 0)
+	bottom := top + max(m.layout().EditorRows()-1, 0)
 	if bottom < top {
 		bottom = top
 	}

@@ -60,10 +60,17 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	default:
 		mo = tea.Mouse(wheel)
 	}
+	// The dock's cells start at the frame's DockX. The shell screen, the links and
+	// the selection are measured in the dock's own columns, so the pointer is made
+	// local once here.
+	mo.X -= l.DockX
 	// The title row is the dock's but not the shell's: a press there only takes
-	// the focus. Rows outside the dock are not ours unless a selection drag is
-	// held: then the motion still extends it and the release ends it.
+	// the focus. Cells outside the dock's columns are not ours unless a selection
+	// drag is held: then the motion still extends it and the release ends it.
 	selecting := p.sel.pending || p.sel.dragging
+	if (mo.X < 0 || mo.X >= l.EditorW) && !selecting {
+		return nil, false
+	}
 	bodyTop, bodyBottom := l.DockY+1, l.DockY+l.DockH-1
 	if mo.Y == l.DockY && !selecting {
 		if isPress {

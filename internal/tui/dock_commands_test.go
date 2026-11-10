@@ -170,21 +170,26 @@ func TestTerminalCommandsStartInTheWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestTerminalCommandsLayOutTheDockBelowTheBody(t *testing.T) {
-	// At 80 by 24 the dock takes the layout's rows at the bottom: the title row
-	// at row 17 and 5 shell rows, as open_terminal_in_dock does. open_terminal_below
-	// and open_terminal_right use the same rows, so they keep the layout's split.
+func TestTerminalCommandsLayOutTheDockInTheEditorColumn(t *testing.T) {
+	// At 80 by 24 the dock takes the bottom of the editor column: the title row at
+	// row 17 and 5 shell rows, as open_terminal_in_dock does. open_terminal_below
+	// and open_terminal_right use the same cells, so they keep the layout's split.
+	// The body keeps its rows, so a navigator beside the dock runs to the status row.
 	for _, action := range []string{"open_terminal_in_dock", "open_terminal", "open_terminal_below", "open_terminal_right"} {
 		t.Run(action, func(t *testing.T) {
 			m := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
 			dockRun(t, m, action)
 			l := m.layout()
-			if !l.DockOn || l.DockY != 17 || l.DockH != 6 || l.W != 80 {
-				t.Fatalf("dock on = %v at row %d with %d rows over %d columns; want on at row 17 with 6 rows over 80 columns",
-					l.DockOn, l.DockY, l.DockH, l.W)
+			if !l.DockOn || l.DockY != 17 || l.DockH != 6 || l.DockX != l.EditorX || l.DockX+l.EditorW != l.W {
+				t.Fatalf("dock on = %v at row %d with %d rows from column %d over %d; want on at row 17 with 6 rows in the editor column",
+					l.DockOn, l.DockY, l.DockH, l.DockX, l.EditorW)
 			}
-			if l.BodyBottom != 16 {
-				t.Fatalf("bodyBottom = %d, want 16: the editor body stops above the dock", l.BodyBottom)
+			if l.BodyBottom != 22 {
+				t.Fatalf("bodyBottom = %d, want 22: the body keeps the rows beside the dock", l.BodyBottom)
+			}
+			if l.EditorRows() != l.DockY-l.BodyTop || l.Panes[0].Y+l.Panes[0].H-1 != l.DockY-1 {
+				t.Fatalf("editor rows = %d, pane ends at %d; want them to stop above the dock at %d",
+					l.EditorRows(), l.Panes[0].Y+l.Panes[0].H-1, l.DockY-1)
 			}
 		})
 	}

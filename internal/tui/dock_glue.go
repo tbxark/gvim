@@ -259,17 +259,20 @@ func (m *Model) closeDock() { m.dock.Close() }
 // input. It runs after every update.
 func (m *Model) dockSync() tea.Cmd { return m.dock.Sync() }
 
-// dockMouse gives a mouse message to the dock when it lands in the dock's rows.
-// It reports whether the rows are the dock's, so the root takes no other action
+// dockMouse gives a mouse message to the dock when it lands in the dock's cells:
+// its rows and the editor column it shares with the panes. The explorer column
+// beside it is not the dock's, so a pointer there keeps its usual owner. It
+// reports whether the cells are the dock's, so the root takes no other action
 // for the message: the dock decides alone whether it forwards it, opens a link
 // with it, or only focuses.
-func (m *Model) dockMouse(msg tea.Msg, y, count int) (tea.Cmd, bool) {
+func (m *Model) dockMouse(msg tea.Msg, x, y, count int) (tea.Cmd, bool) {
 	l := m.layout()
-	inRows := l.DockOn && y >= l.DockY && y < l.DockY+l.DockH
-	if !inRows {
+	inDock := l.DockOn && y >= l.DockY && y < l.DockY+l.DockH &&
+		x >= l.DockX && x < l.DockX+l.EditorW
+	if !inDock {
 		// A drag that left the dock keeps the dock's mouse handling until the
 		// release, so the selection can auto-scroll past the edges. Anything else
-		// outside the rows ends the link hover.
+		// outside the cells ends the link hover.
 		if !m.dock.SelectionDragging() {
 			m.dock.ClearHover()
 			return nil, false
@@ -315,12 +318,13 @@ func (m *Model) copyToClipboard(text string) tea.Cmd {
 	return cmd
 }
 
-// dockContentSize is the size of the shell's screen in the frame as it is now. It is
-// zero when the dock is not laid out.
+// dockContentSize is the size of the shell's screen in the frame as it is now: the
+// editor column's width and the dock's rows under the title row. It is zero when
+// the dock is not laid out.
 func (m *Model) dockContentSize() (cols, rows int) {
 	l := m.layout()
 	if !l.DockOn {
 		return 0, 0
 	}
-	return l.W, l.DockH - 1
+	return l.EditorW, l.DockH - 1
 }

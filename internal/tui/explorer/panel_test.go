@@ -3,6 +3,7 @@ package explorer
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,56 @@ func TestDrawNoMarkerWhenUnfocused(t *testing.T) {
 	New(tr, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 12, Bottom: 7})
 	if got := g.Plain()[2]; strings.Contains(got, "▌") {
 		t.Errorf("unfocused panel drew the marker: %q", got)
+	}
+}
+
+// TestCursorBandFollowsFocus checks the cursor row's ground: the selection band
+// while the panel has the keyboard, the current-line shade while it does not, so the
+// tree still shows which file the editor holds when the focus is in the text.
+func TestCursorBandFollowsFocus(t *testing.T) {
+	t.Parallel()
+	styles := style.Styles{
+		Selection:   lipgloss.NewStyle().Background(lipgloss.Color("4")),
+		CurrentLine: lipgloss.NewStyle().Background(lipgloss.Color("8")),
+	}
+	sel := style.Cell(styles.Selection).BG
+	line := style.Cell(styles.CurrentLine).BG
+	for _, tt := range []struct {
+		name    string
+		focused bool
+		want    color.Color
+	}{
+		{"the focused panel takes the selection band", true, sel},
+		{"the blurred panel keeps the current-line shade", false, line},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := openTree(t, fixture(t))
+			g := grid.New(14, 8)
+			New(tr, styles, nil).Draw(g, Geometry{Top: 1, Width: 14, Bottom: 7, Focused: tt.focused})
+			if got := g.At(3, 2).Style.BG; got != tt.want {
+				t.Fatalf("cursor row ground = %v, want %v", got, tt.want)
+			}
+			// A row that is not the cursor keeps the panel's ground.
+			if got := g.At(3, 3).Style.BG; got != nil {
+				t.Errorf("plain row ground = %v, want none", got)
+			}
+		})
+	}
+}
+
+// TestPanelTitleTakesTheBoldWeight checks the panel's type hierarchy: the title
+// cells are bold while the box's corners and walls stay regular.
+func TestPanelTitleTakesTheBoldWeight(t *testing.T) {
+	t.Parallel()
+	tr := openTree(t, fixture(t))
+	g := grid.New(20, 8)
+	New(tr, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 20, Bottom: 7})
+	h := HeaderFor(20, icons.Plain)
+	if !g.At(h.TitleX, 1).Style.Bold {
+		t.Fatalf("title cell at %d is not bold: %+v", h.TitleX, g.At(h.TitleX, 1).Style)
+	}
+	if g.At(0, 1).Style.Bold {
+		t.Error("the panel's corner is bold")
 	}
 }
 

@@ -15,10 +15,17 @@ type Header struct {
 	Text   string
 	Reload int
 	Close  int
+	// TitleX is the first cell of the title in Text and TitleW its width in cells,
+	// zero when the row is too narrow. Panel.Draw repaints those cells bold.
+	TitleX int
+	TitleW int
 }
 
+// titleText is the panel's title without its corners or buttons.
+const titleText = "File Explorer"
+
 // headText is the title without its buttons. It is 16 cells wide.
-const headText = "┌ File Explorer "
+const headText = "┌ " + titleText + " "
 
 // headWidth is the width of headText in cells, and so the column of the first
 // button when there is no "─" fill.
@@ -37,7 +44,10 @@ const headerFixed = 21
 // in both modes (see package icons), so the row is exactly width cells.
 func HeaderFor(width int, m icons.Mode) Header {
 	reload, closeBtn := m.Glyph(icons.Refresh), m.Glyph(icons.Close)
-	h := Header{Reload: -1, Close: -1}
+	h := Header{Reload: -1, Close: -1, TitleX: 2, TitleW: ansi.StringWidth(titleText)}
+	if visible := max(width-2, 0); h.TitleW > visible {
+		h.TitleW = visible
+	}
 	switch {
 	case width <= headWidth:
 		h.Text = ansi.Truncate(headText, max(width, 0), "")

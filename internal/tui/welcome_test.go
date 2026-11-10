@@ -310,6 +310,71 @@ func TestWelcomeInAShortFrameDoesNotPanic(t *testing.T) {
 	}
 }
 
+// A narrow pane drops the wordmark and any key it cannot show whole instead of
+// clipping them; the doors and the subtitle stay.
+func TestWelcomeCompactsOnANarrowPane(t *testing.T) {
+	t.Parallel()
+	keys := []string{"Ctrl+N", "Ctrl+O", "", "Ctrl+P", "Ctrl+B"}
+	const x0, paneW = 0, 24
+	lines := frame.WelcomeLines(x0, paneW, 0, 14, nil, keys)
+	var title, subtitle, doors int
+	for _, l := range lines {
+		switch l.Role {
+		case welcomeTitleRow:
+			title++
+		case welcomeSubtitle:
+			subtitle++
+		case welcomeDoorRow:
+			doors++
+		}
+		if l.W <= 0 {
+			continue
+		}
+		if l.X < x0 || l.X+l.W > x0+paneW {
+			t.Errorf("line %q leaves the %d-cell pane: %+v", l.Text, paneW, l)
+		}
+		if l.Role == welcomeDoorRow && l.Key != "" {
+			t.Errorf("door %q shows the cut key %q", l.Text, l.Key)
+		}
+	}
+	if title != 0 {
+		t.Errorf("a %d-cell pane drew %d wordmark lines", paneW, title)
+	}
+	if subtitle != 1 || doors != len(frame.WelcomeDoors) {
+		t.Fatalf("subtitle %d doors %d, want 1 and %d", subtitle, doors, len(frame.WelcomeDoors))
+	}
+	// A wide pane keeps the wordmark and the whole shortcuts.
+	wide := frame.WelcomeLines(0, 80, 0, 30, nil, keys)
+	var sawTitle, sawKey bool
+	for _, l := range wide {
+		sawTitle = sawTitle || l.Role == welcomeTitleRow
+		sawKey = sawKey || (l.Role == welcomeDoorRow && l.Key == "Ctrl+N")
+	}
+	if !sawTitle || !sawKey {
+		t.Errorf("wide welcome: title %v, Ctrl+N key %v", sawTitle, sawKey)
+	}
+}
+
+// At a very narrow pane the labels truncate and the keys go, but nothing spills
+// past the pane.
+func TestWelcomeNeverSpillsAtTinyWidths(t *testing.T) {
+	t.Parallel()
+	for paneW := 4; paneW <= 24; paneW++ {
+		lines := frame.WelcomeLines(0, paneW, 0, 12, []string{"/ws/001"}, []string{"Ctrl+N", "Ctrl+O", "", "Ctrl+P", "Ctrl+B"})
+		for _, l := range lines {
+			if l.W <= 0 {
+				continue
+			}
+			if l.X < 0 || l.X+l.W > paneW {
+				t.Errorf("pane %d: line %q leaves it: %+v", paneW, l.Text, l)
+			}
+			if l.Key != "" && l.Role == welcomeDoorRow {
+				t.Errorf("pane %d: a door key survived at %q", paneW, l.Key)
+			}
+		}
+	}
+}
+
 // frame.WelcomeLines places the block on the pane and keeps the title centred.
 func TestWelcomeTitleIsCentredInTheBlock(t *testing.T) {
 	lines := frame.WelcomeLines(0, 80, 0, 30, nil, nil)

@@ -206,7 +206,7 @@ func knownLanguage(name string) bool {
 // unknownLanguage is the error for a name knownLanguage refuses; it does not echo a long name.
 func unknownLanguage(name string) error {
 	if len(name) > pluginMaxLanguageName {
-		name = name[:pluginMaxLanguageName] + "..."
+		name = name[:pluginMaxLanguageName] + "…"
 	}
 	return pluginapi.Errf(pluginapi.CodeInvalid, "unknown language %q", name)
 }

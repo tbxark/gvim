@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
@@ -102,6 +103,52 @@ func TestTheReasonSurvivesANarrowBand(t *testing.T) {
 				t.Errorf("%dx%d: row %q is wider than the band", size[0], size[1], row)
 			}
 		}
+	}
+}
+
+// The band stops above the dock: a status message must not paint over the shell's
+// rows. The band keeps the editor column's width.
+func TestTheBandStopsAboveTheDock(t *testing.T) {
+	t.Parallel()
+	in := noticeInput(longNotice)
+	in.DockOpen = true
+	l := frame.ComputeLayout(80, 24, in)
+	if !l.DockOn {
+		t.Fatal("the dock is not laid out")
+	}
+	if len(l.Notice) == 0 {
+		t.Fatal("a long notice got no band")
+	}
+	if end := l.NoticeY + len(l.Notice); end > l.DockY {
+		t.Errorf("band rows %d..%d, want them above the dock top %d", l.NoticeY, end-1, l.DockY)
+	}
+	if l.OnNotice(l.DockX, l.DockY) || l.OnNotice(l.DockX+l.EditorW-1, l.DockY+l.DockH-1) {
+		t.Error("the band covers a dock cell")
+	}
+	if l.NoticeW != l.EditorW {
+		t.Errorf("band width %d, want the editor column %d", l.NoticeW, l.EditorW)
+	}
+}
+
+// On the right side the band stays in the editor column: the explorer keeps its
+// own cells, and the band's width is the editor's.
+func TestTheBandStaysInTheEditorColumn(t *testing.T) {
+	t.Parallel()
+	in := noticeInput(longNotice)
+	in.ExplorerOpen = true
+	in.ExplorerSide = explorer.SideRight
+	l := frame.ComputeLayout(100, 24, in)
+	if len(l.Notice) == 0 {
+		t.Fatal("a long notice got no band")
+	}
+	if l.NoticeX != 0 || l.NoticeW != l.EditorW {
+		t.Errorf("band %d..%d, want the editor column 0..%d", l.NoticeX, l.NoticeX+l.NoticeW, l.EditorW)
+	}
+	if l.OnNotice(l.ExX, l.NoticeY) {
+		t.Error("the band covers the right explorer")
+	}
+	if !l.OnNotice(l.EditorW-1, l.NoticeY) {
+		t.Error("the band does not reach the editor's last column")
 	}
 }
 

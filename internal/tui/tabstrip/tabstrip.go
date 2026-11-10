@@ -12,6 +12,8 @@
 package tabstrip
 
 import (
+	"strings"
+
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -21,19 +23,39 @@ import (
 // from x0. The label and the close glyph of the active tab take the active style,
 // the other tabs and the plus take the tab style, and the markers take the bar
 // style.
-func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip) {
+//
+// focused marks the strip as the keyboard owner: its active tab gets the accent
+// marker in the leading cell, the same marker the sidebar puts beside the row that
+// has the keyboard. hover is the run under the pointer; its text is underlined, so
+// a tab, its close glyph and the plus say they are targets before they are pressed.
+func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, focused bool, hover frame.HitTarget) {
 	barStyle := style.Cell(st.TabBar)
 	g.Fill(x0, g.Width(), y, barStyle)
 	tab, active := style.Cell(st.Tab), style.Cell(st.TabActive)
+	accent := style.Cell(st.Accent).BG
 	for _, r := range s.Runs {
 		cell := tab
 		switch {
 		case r.Kind == frame.HitTabScrollBefore || r.Kind == frame.HitTabScrollAfter:
 			cell = barStyle
 		case r.Kind != frame.HitTabNew && r.Index == s.Active:
+			// The active tab carries weight as well as its colour, so it reads as the
+			// current one in a theme whose two tab colours are close.
 			cell = active
+			cell.Bold = true
+		}
+		if hover.Kind != frame.HitNone && hover.Kind == r.Kind && hover.Index == r.Index {
+			cell.Underline = true
 		}
 		g.Put(r.X, y, g.Width(), r.Text, cell)
+		// The active tab takes the focus marker in the blank cell before its name.
+		// A run cut at the window's left edge has no blank left to replace, so it
+		// keeps the text.
+		if focused && r.Kind == frame.HitTab && r.Index == s.Active && strings.HasPrefix(r.Text, " ") {
+			marker := cell
+			marker.FG = accent
+			g.Set(r.X, y, "▌", marker)
+		}
 	}
 }
 

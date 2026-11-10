@@ -115,12 +115,12 @@ func TestTerminalRestartHover(t *testing.T) {
 	if restart == nil {
 		t.Fatalf("no restart segment: %+v", m.layout().Status)
 	}
-	if m.statusRestartHover {
+	if m.statusHover.Kind != frame.HitNone {
 		t.Fatal("the restart element starts hovered")
 	}
 	l := m.layout()
 	m.Update(tea.MouseMotionMsg{X: restart.X + 1, Y: l.StatusY})
-	if !m.statusRestartHover {
+	if m.statusHover.Kind == frame.HitNone {
 		t.Fatal("moving onto the restart segment did not hover it")
 	}
 	g := m.paint()
@@ -129,7 +129,7 @@ func TestTerminalRestartHover(t *testing.T) {
 		t.Fatalf("hovered run style = %+v, want an underline", cell.Style)
 	}
 	m.Update(tea.MouseMotionMsg{X: 2, Y: 2})
-	if m.statusRestartHover {
+	if m.statusHover.Kind != frame.HitNone {
 		t.Fatal("leaving the status row kept the hover")
 	}
 	if cell := m.paint().At(restart.X, l.StatusY); cell.Style.Underline {

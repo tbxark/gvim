@@ -16,7 +16,9 @@ the config keys are Fresh's, the chrome follows gvim's style.
 The left column is a stack of sections, top to bottom. Section 0 is the File
 Explorer; the Contents section sits under it while it is on screen, and a future
 section takes the next slot. The column spans the frame's explorer width
-(`frame.ExplorerCols`) from the explorer header row to the body's last row:
+(`frame.ExplorerCols`) from the explorer header row to the body's last row, the row
+above the status bar. The terminal dock is the editor column's, so an open dock
+shortens the panes beside the column but never the column itself:
 
 ```text
 ┌ ▼ File Explorer ─────────⟳─×─┐   section 0 header: the column's top border
@@ -39,7 +41,9 @@ With more than one section every header row gains a chevron (`▼` open, `▶`
 collapsed) and is a control: a press on it gives that section the keyboard and,
 for the Contents section, starts the divider drag (a release that never moved
 folds the section). The chevron is the indicator, not the only target. With one
-section there is no chevron and no shared row.
+section there is no chevron and no shared row. The header's title is bold; the
+corner, the rule, the chevron and the ⟳/× buttons stay regular, so the title reads
+as the label and the border as chrome.
 
 The close button is the `×` at the right of a header row: the explorer's hides
 the whole column, as it always has; the Contents section's hides that section.
@@ -87,7 +91,14 @@ The mouse targets (`frame.HitKind`), in the column:
 
 The grip is the column's, not a section's: a drag on the right border resizes the
 column exactly as before, whatever section it is over. A press on the column's
-bottom border is not a target when the column has more than one section.
+bottom border is not a target when the column has more than one section. While the
+pointer is on the grip, its border cells take the accent; at rest it is the plain
+wall, as Fresh's grip paints nothing until it is hovered.
+
+The tree cursor wears Fresh's ground: the selection band while the column has the
+keyboard and the quieter `editor.current_line_bg` while it does not, so the tree still
+names the file the editor holds when the focus is in the text. The `▌` marker is the
+keyboard cue and shows only while the column is focused.
 
 ## 3. The Contents section
 
@@ -333,9 +344,10 @@ buffer switches once shown. The setting applies live through the Settings page.
   and behaviour stay the plugin's.
 - Indentation is two cells per heading level (gvim's tree convention) instead of
   Fresh's one column.
-- The selection is painted as a background band even when the section does not
-  have the keyboard, with the `▌` marker for focus; Fresh's tree marks the
-  selection with `▌` only.
+- The Contents selection is painted as a background band even when the section does
+  not have the keyboard, with the `▌` marker for focus; Fresh's Contents tree marks
+  the selection with `▌` only. The explorer column follows Fresh's ground (selection
+  under the keyboard, `editor.current_line_bg` otherwise).
 - The palette commands match Fresh's three (`Markdown: Toggle Table of Contents`,
   `Contents — Follow Cursor/Scroll`, `Focus Contents`) and keep gvim's older
   Show/Close Outline rows as extras; all reach the same section.

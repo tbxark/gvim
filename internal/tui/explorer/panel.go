@@ -334,7 +334,15 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	head := style.TaggedCell(p.styles.ExplorerTitle, "ui", "menu_fg", "ui", "menu_bg")
 	right := g.X + g.Width
 	dst.Fill(g.X, right, g.Top, head)
-	dst.Put(g.X, g.Top, right, HeaderFor(g.Width, g.Icons).Text, head)
+	h := HeaderFor(g.Width, g.Icons)
+	dst.Put(g.X, g.Top, right, h.Text, head)
+	// The title reads above the border and the body: it is the chrome's label, so
+	// it takes the bold weight while the box glyphs stay regular.
+	if h.TitleW > 0 {
+		bold := head
+		bold.Bold = true
+		dst.Put(g.X+h.TitleX, g.Top, g.X+h.TitleX+h.TitleW, ansi.Cut(h.Text, h.TitleX, h.TitleX+h.TitleW), bold)
+	}
 	p.drawBody(dst, g)
 	if g.Bottom > g.Top {
 		dst.Set(g.X, g.Bottom, "└", body)
@@ -398,9 +406,27 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 		}
 		if idx >= 0 && idx < len(rows) {
 			r := rows[idx]
+			isCursor := hasSel && r.Path == sel.Path
+			picked := p.state().picked[r.Path]
 			st := p.rowStyle(r, body)
-			marker := g.Focused && hasSel && r.Path == sel.Path
-			if isPin && !marker {
+			// The cursor's ground follows Fresh: the selection band while the column
+			// has the keyboard, and the quieter current-line shade otherwise, so the
+			// tree still says which file the editor holds while the focus is in the
+			// text. A picked row keeps its own selection band.
+			if isCursor && !picked {
+				ground := style.Cell(p.styles.CurrentLine)
+				if g.Focused {
+					ground = style.Cell(p.styles.Selection)
+				}
+				if ground.BG != nil {
+					st.BG, st.BGKey = ground.BG, ground.BGKey
+				}
+				if g.Focused && ground.FG != nil {
+					st.FG, st.FGKey = ground.FG, ground.FGKey
+				}
+			}
+			marker := g.Focused && isCursor
+			if isPin && !isCursor {
 				// A pinned row keeps its ink on the band's muted ground, so the
 				// strip reads as pinned above the tree rather than as part of it.
 				if pinned.BG != nil {

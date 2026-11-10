@@ -101,12 +101,16 @@ type Model struct {
 	searchSeed *find.State
 
 	width, height int
-	// statusRestartHover is the pointer over the clickable {terminal_restart}
-	// status element; its hover hit area is the same run the click uses.
-	statusRestartHover bool
-	explorerOpen       bool // the panel is shown
-	explorerFocus      bool // the panel has keyboard focus
-	tabFocus           bool // the tab strip has keyboard focus (F7 chrome cycle)
+	// The chrome's pointer feedback: the tab-strip run under the pointer, the
+	// clickable status run under it, and whether the pointer is on the explorer's
+	// resize grip. Each hit area is the one the click handlers read, so feedback
+	// and action cannot drift apart.
+	statusHover   frame.HitTarget
+	stripHover    frame.HitTarget
+	gripHover     bool
+	explorerOpen  bool // the panel is shown
+	explorerFocus bool // the panel has keyboard focus
+	tabFocus      bool // the tab strip has keyboard focus (F7 chrome cycle)
 	// The Contents sidebar section (see markdown_toc.go): contents is its tree
 	// and settings, contentsFocus says it holds the keyboard, and
 	// explorerRows is the explorer section's explicit body height (1..max); 0 means
@@ -830,6 +834,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// The cells under the pointer moved with the frame; the next motion names
+		// the new target.
+		m.stripHover, m.statusHover, m.gripHover = frame.HitTarget{}, frame.HitTarget{}, false
 		m.syncMenu()
 		m.syncViewport()
 		m.followSelection()
@@ -869,12 +876,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = m.handleDrag(msg.Mouse())
 		} else if panelCmd, taken := m.pluginPanelMouse(msg); taken {
 			cmd = panelCmd
-		} else if dockCmd, taken := m.dockMouse(msg, msg.Y, 1); taken {
+		} else if dockCmd, taken := m.dockMouse(msg, msg.X, msg.Y, 1); taken {
 			cmd = dockCmd
 		} else {
 			cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
 		}
-		m.updateStatusRestartHover(msg.Mouse())
+		m.updateChromeHover(msg.Mouse())
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
@@ -895,7 +902,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dropTab(td)
 		}
 		m.releaseDivider()
-		if dockCmd, taken := m.dockMouse(msg, msg.Y, 1); taken {
+		if dockCmd, taken := m.dockMouse(msg, msg.X, msg.Y, 1); taken {
 			cmd = dockCmd
 		} else {
 			cmd = m.explorerMouse(msg)
@@ -2765,7 +2772,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	}
 	// The dock's rows belong to the shell: the dock decides whether the press is
 	// forwarded, opens a link, scrolls the scrollback or only takes the focus.
-	if cmd, taken := m.dockMouse(msg, mo.Y, count); taken {
+	if cmd, taken := m.dockMouse(msg, mo.X, mo.Y, count); taken {
 		return cmd
 	}
 	t := m.layout().Hit(mo.X, mo.Y)
@@ -3030,7 +3037,7 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
 	l := m.layout()
-	if cmd, taken := m.dockMouse(msg, mo.Y, 1); taken {
+	if cmd, taken := m.dockMouse(msg, mo.X, mo.Y, 1); taken {
 		return cmd
 	}
 	if mo.Y == l.StripY && mo.X >= l.EditorX {
@@ -3528,9 +3535,12 @@ func (m *Model) paintInto(g *grid.Grid) {
 	m.paintEditor(g, l)
 	m.paintDropZone(g)
 	m.dock.Draw(g, l, m.styles)
-	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip)
+	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip, m.tabFocus, m.stripHover)
 	if l.ExplorerOpen {
 		m.paintSidebar(g, l)
+		if m.gripHover {
+			m.paintGripHover(g, l)
+		}
 	}
 	m.paintStatus(g, l)
 	// The menu bar comes last among the frame bands, so an open dropdown covers
@@ -3718,25 +3728,45 @@ func (m *Model) popOverlay() {
 	m.overlays = m.overlays[:n-1]
 }
 
-// updateStatusRestartHover keeps the {terminal_restart} hover in step with the
-// pointer. The hover hit area is the element's own status run, the same one the
-// click handler matches, so hover and click cannot drift apart.
-func (m *Model) updateStatusRestartHover(mo tea.Mouse) {
-	hover := false
-	l := m.layout()
-	if l.StatusOn && mo.Y == l.StatusY {
-		for i := range l.Status {
-			r := &l.Status[i]
-			if r.Kind != hitStatusSegment || r.Index != frame.StatusSegmentTerminalRestart {
-				continue
-			}
-			if mo.X >= r.X && mo.X < r.X+max(ansi.StringWidth(r.Text), 1) {
-				hover = true
-			}
-			break
+// updateChromeHover keeps the chrome's pointer feedback in step with the motion:
+// the run under the pointer in the tab strip and the status row underlines, and
+// the explorer's resize grip takes the accent. The hit map decides all three, so
+// the feedback and the click target are always the same cells.
+func (m *Model) updateChromeHover(mo tea.Mouse) {
+	m.stripHover, m.statusHover, m.gripHover = frame.HitTarget{}, frame.HitTarget{}, false
+	t := m.layout().Hit(mo.X, mo.Y)
+	switch t.Kind {
+	case hitTab, hitTabClose, hitTabNew, hitTabScrollBefore, hitTabScrollAfter:
+		m.stripHover = t
+	case hitStatusSegment, hitStatusPalette, hitStatusPlugin:
+		m.statusHover = t
+	case hitExplorerGrip:
+		m.gripHover = true
+	}
+}
+
+// paintGripHover recolours the explorer's resize grip while the pointer is on it.
+// The grip is the column's editor-facing wall on every section body, the cells the
+// hit map reports; the accent is what says the wall can be dragged, since the wall
+// is otherwise a plain border.
+func (m *Model) paintGripHover(g *grid.Grid, l layout) {
+	if !l.ExplorerOpen || l.Ex <= 0 {
+		return
+	}
+	x := l.ExX + l.Ex - 1
+	if l.ExRight {
+		x = l.ExX
+	}
+	accent := style.Cell(m.styles.Accent).BG
+	ink := grid.Style{FG: accent}
+	if accent != nil {
+		ink.FGKey = style.KeyIDFor("ui", "accent_bg")
+	}
+	for _, sec := range l.Sections {
+		for y := sec.BodyTop; y <= sec.BodyBottom; y++ {
+			g.Set(x, y, "│", ink)
 		}
 	}
-	m.statusRestartHover = hover
 }
 
 // paintStatus fills the status row and writes its segments. A hidden status row
@@ -3774,6 +3804,11 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 	g.Fill(0, g.Width(), l.StatusY, bar)
 	for _, r := range l.Status {
 		st := bar
+		// Every clickable run acknowledges the pointer the same way: the text is
+		// underlined while the pointer is on it. The restart element adds Fresh's
+		// error-hover colours; the others keep the role they already wear.
+		hovered := m.statusHover.Kind != frame.HitNone &&
+			m.statusHover.Kind == r.Kind && m.statusHover.Index == r.Index
 		switch {
 		case r.Style == frame.StyleWarning:
 			st = warning
@@ -3781,8 +3816,7 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 			st = muted
 		case r.Kind == hitStatusSegment && r.Index == frame.StatusSegmentTerminalRestart:
 			st = restart
-			if m.statusRestartHover {
-				st.Underline = true
+			if hovered {
 				if c := style.Color(m.theme, "ui", "status_error_indicator_hover_fg"); c != nil {
 					st.FG = c
 					st.FGKey = style.KeyIDFor("ui", "status_error_indicator_hover_fg")
@@ -3795,12 +3829,15 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 		case r.Kind == hitStatusPalette:
 			st = palette
 		}
+		if hovered {
+			st.Underline = true
+		}
 		g.Put(r.X, l.StatusY, g.Width(), r.Text, st)
 	}
 	for i, text := range l.Notice {
 		y := l.NoticeY + i
-		g.Fill(l.NoticeX, g.Width(), y, bar)
-		g.Put(l.NoticeX+space.PadX, y, g.Width(), text, bar)
+		g.Fill(l.NoticeX, l.NoticeX+l.NoticeW, y, bar)
+		g.Put(l.NoticeX+space.PadX, y, l.NoticeX+l.NoticeW, text, bar)
 	}
 }
 

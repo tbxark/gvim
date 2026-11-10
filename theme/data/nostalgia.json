@@ -32,7 +32,7 @@
     "whitespace_indicator_selected_fg": [85, 85, 255]
   },
   "ui": {
-    "popup_selection_fg": [255, 255, 255],
+    "popup_selection_fg": [0, 0, 170],
     "tab_active_fg": [0, 0, 0],
     "tab_active_bg": [170, 170, 170],
     "tab_inactive_fg": [255, 255, 85],
@@ -64,7 +64,7 @@
     "prompt_selection_bg": [170, 170, 170],
     "popup_border_fg": [255, 255, 255],
     "popup_bg": [0, 0, 170],
-    "popup_selection_bg": [0, 170, 0],
+    "popup_selection_bg": [24, 177, 21],
     "list_drop_target_bg": [0, 170, 170],
     "popup_text_fg": [255, 255, 85],
     "text_input_selection_bg": [0, 170, 0],
@@ -103,8 +103,8 @@
     "tab_drop_zone_bg": [0, 170, 170],
     "tab_drop_zone_border": [255, 255, 255],
     "file_explorer_pinned_bg": [0, 0, 148],
-    "accent_bg": [0, 170, 0],
-    "accent_fg": [255, 255, 255]
+    "accent_bg": [24, 177, 21],
+    "accent_fg": [0, 0, 170]
   },
   "search": {
     "match_bg": [170, 85, 0],

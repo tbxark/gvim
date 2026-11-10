@@ -7259,6 +7259,12 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      toggle or cycle its view mode (markdown_mode_rendered, markdown_mode_source, markdown_cycle_mode)
      without affecting other split panes; single-pane dual view semantics are preserved. Tests cover
      independent per-pane rendered/source states and multi-pane cycle mode.
+351. **Terminal dock placement.** The dock is the bottom of the editor column, not a band across
+     the frame: the explorer column runs beside it to the status row, the panes stop above it, and
+     the shell's PTY is sized to the editor column, so showing or resizing the explorer resizes the
+     shell. Fresh's utility dock spans the frame; this is the layout difference allowed by item 2.
+     `docs/ui.md` §1, `docs/terminal.md`.
+
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).

@@ -351,12 +351,14 @@ type Layout struct {
 	W, H  int
 	Gated bool // the minimum-size gate replaces the whole frame
 
-	// Row bands (section 4.1). The editor body is BodyTop..BodyBottom. The menu
-	// band is MenuTop..MenuBottom when the menu bar is shown, and both are -1 when
-	// it is hidden; MenuLabelY is the row of the labels. The tab Strip is stripY:
-	// row 2 under the menu band, row 0 without it, and -1 when the tab bar is
-	// hidden. statusY is the status row, drawn only when statusOn. Without it the
-	// body takes that row.
+	// Row bands (section 4.1). The body is BodyTop..BodyBottom. It holds the
+	// explorer column, which spans every body row, and the editor column on its
+	// other side: the panes, the tab strip and the dock. The menu band is
+	// MenuTop..MenuBottom when the menu bar is shown, and both are -1 when it is
+	// hidden; MenuLabelY is the row of the labels. The tab Strip is stripY: row 2
+	// under the menu band, row 0 without it, and -1 when the tab bar is hidden.
+	// statusY is the status row, drawn only when statusOn. Without it the body
+	// takes that row.
 	BodyTop, BodyBottom int
 	MenuOn              bool
 	MenuTop, MenuBottom int
@@ -368,8 +370,10 @@ type Layout struct {
 
 	// The notice band: a status message that does not fit the status row, wrapped onto
 	// the rows right above it and painted over the body (see setNotice). notice is empty
-	// when the message fits; noticeY is the first row of the band.
+	// when the message fits; noticeY is the first row of the band. It spans the editor
+	// column and stops above the dock, so it never paints over the shell.
 	NoticeX int // the band's first column, the editor's left edge
+	NoticeW int // the band's width, the editor column's width
 	NoticeY int
 	Notice  []string
 
@@ -379,11 +383,13 @@ type Layout struct {
 	PromptOn bool
 	PromptY  int
 
-	// The terminal dock (internal/tui/dock) sits under the body, over the full width. Its rows
-	// dockY..dockY+dockH-1 are the title row and then the shell's rows. The body ends
-	// above it, so bodyBottom is already past the dock. DockOn is false while the dock
-	// is hidden or does not fit.
+	// The terminal dock (internal/tui/dock) is the bottom of the editor column:
+	// columns DockX..DockX+EditorW-1 and rows DockY..DockY+DockH-1, a title row and
+	// then the shell's rows. The explorer column runs beside it to BodyBottom, so
+	// the navigator never loses rows to the tool. DockOn is false while the dock is
+	// hidden or does not fit.
 	DockOn bool
+	DockX  int
 	DockY  int
 	DockH  int
 
@@ -490,7 +496,6 @@ func ComputeLayout(w, h int, in Input) Layout {
 	if in.DockOpen {
 		l.setDock()
 	}
-	bodyRows := l.BodyBottom - l.BodyTop + 1
 
 	// The explorer column comes first: its side decides the editor rectangle the
 	// notice band, the panes, the tab strip and the welcome screen are measured
@@ -500,6 +505,9 @@ func ComputeLayout(w, h int, in Input) Layout {
 	if !l.ExRight {
 		l.EditorX = l.Ex
 	}
+	// The dock is the bottom of the editor column, so it takes the editor's first
+	// column once the explorer has placed that column.
+	l.DockX = l.EditorX
 	if l.StatusOn {
 		l.setNotice(in.Status, l.EditorX, l.EditorW)
 	}
@@ -514,7 +522,7 @@ func ComputeLayout(w, h int, in Input) Layout {
 	l.Strip = PlaceStrip(l.EditorX, l.EditorX+l.EditorW, in.Tabs, in.TabFirst, in.IconMode)
 	if in.Welcome {
 		l.WelcomeOn = true
-		l.Welcome = WelcomeLines(l.EditorX, l.EditorW, l.BodyTop, bodyRows, in.Recents, in.DoorKeys)
+		l.Welcome = WelcomeLines(l.EditorX, l.EditorW, l.BodyTop, l.EditorRows(), in.Recents, in.DoorKeys)
 	}
 	if l.StatusOn {
 		st := in.Status
@@ -528,17 +536,23 @@ func ComputeLayout(w, h int, in Input) Layout {
 }
 
 // setNotice wraps a status message that does not fit the status row onto the rows
-// above it. The rows are the body's, drawn over, and the first body row stays. The band
-// spans the editor area (x0, width), so an open explorer keeps its border.
+// above it. The rows are the body's, drawn over, and the first body row stays. The
+// band spans the editor area (x0, width), so an open explorer keeps its border, and
+// it stops above the dock, whose rows belong to the running shell.
 func (l *Layout) setNotice(s StatusView, x0, width int) {
-	room := min(l.StatusY-l.BodyTop-1, MaxNoticeRows)
+	bottom := l.StatusY - 1
+	if l.DockOn {
+		bottom = l.DockY - 1
+	}
+	room := min(bottom-l.BodyTop, MaxNoticeRows)
 	if room <= 0 {
 		return
 	}
 	if rows := statusNotice(l.W, x0, width, s, room); len(rows) > 0 {
 		l.Notice = rows
 		l.NoticeX = x0
-		l.NoticeY = l.StatusY - len(rows)
+		l.NoticeW = width
+		l.NoticeY = bottom - len(rows) + 1
 	}
 }
 
@@ -642,9 +656,10 @@ func dockHeight(bodyRows int) int {
 	return h
 }
 
-// setDock takes the dock's rows from the bottom of the body. It does nothing when the
-// dock does not fit. The rows come off bodyBottom before the explorer and the
-// welcome screen are placed, so they shrink to the rows left.
+// setDock takes the dock's rows from the bottom of the editor column. It does
+// nothing when the dock does not fit. The explorer column keeps its rows: the dock
+// belongs to the workspace, so it never cuts the navigator. DockX and the dock's
+// width follow the editor column, which is placed after this call.
 func (l *Layout) setDock() {
 	h := dockHeight(l.BodyBottom - l.BodyTop + 1)
 	if h == 0 {
@@ -653,7 +668,15 @@ func (l *Layout) setDock() {
 	l.DockOn = true
 	l.DockH = h
 	l.DockY = l.BodyBottom - h + 1
-	l.BodyBottom -= h
+}
+
+// EditorRows is the rows of the editor band: the body's rows, less the dock's when
+// it is open. The explorer column ignores the dock and keeps every body row.
+func (l Layout) EditorRows() int {
+	if l.DockOn {
+		return l.DockY - l.BodyTop
+	}
+	return l.BodyBottom - l.BodyTop + 1
 }
 
 // setExplorer fills the explorer fields. The panel spans ExTitleY..bodyBottom
