@@ -360,6 +360,18 @@ local function diff_nav_targets(b, base)
       end
     end
   end
+  -- An active Compare Files view supplies change targets for this buffer side.
+  local compare = gvim.plugins.get("compare_files")
+  if compare then
+    local ok, hunks = pcall(compare.hunks, b.id)
+    if ok and type(hunks) == "table" then
+      for _, h in ipairs(hunks) do
+        if type(h) == "table" then
+          add(h.line)
+        end
+      end
+    end
+  end
   local saved = b:diff_saved()
   if saved then
     for _, h in ipairs(saved) do

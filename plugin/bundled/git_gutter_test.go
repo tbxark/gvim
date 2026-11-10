@@ -514,6 +514,33 @@ gvim.plugins.export {
 	}
 }
 
+func TestGitGutterNavigationIncludesCompareTargets(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"git_gutter"},
+		buffers: []rigBuffer{{gutterFile, "a\nb\nc\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\nd\n"})
+		},
+		extra: map[string]string{"compare_files/init.lua": `local gvim = require "gvim"
+gvim.plugins.export { hunks = function(buf_id) return { { line = 2 } } end }`,
+		},
+	})
+	r.emit("after_file_open", gutterFile, nil)
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := r.host.Cursors(r.ids[gutterFile])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs[0].Pos.Line != 2 {
+		t.Fatalf("caret line = %d, want compare target 2", cs[0].Pos.Line)
+	}
+	if notices := r.h.NoticeTexts(); len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+		t.Fatalf("notices = %v", notices)
+	}
+}
+
 // TestGitGutterNavigationDedupesMergedSources: a line present in both the live
 // diff and the saved diff is one jump target.
 func TestGitGutterNavigationDedupesMergedSources(t *testing.T) {

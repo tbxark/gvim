@@ -21,9 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `ee17096` plus the round-77 working tree. Static gates PASS
-(Lead; catalogue heap en 128 KiB / de 83 KiB / both 211 KiB). Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0 (log `/tmp/gvim-r77-final.log`).
+Last verified: 2026-11-10, tree commit `730aedf` plus the round-78 working tree. Static gates PASS
+(Lead; catalogue heap en 128 KiB / de 82 KiB / both 211 KiB). Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0 (log `/tmp/gvim-r78-final.log`).
+Round 78 adds optional Compare Files hunk targets to git_gutter navigation; a provider-stub test
+covers the jump, while real Compare interaction remains unverified.
 Round 76 added browser Alt+E encoding choice, remote file `~user` expansion, and review diff refresh on
 save/revert. Round 77 adds a deterministic blocked-fetch regression: navigating to the second hunk
 during a save reload retains that location after reload; the targeted test also passes with `-race`.
@@ -7667,10 +7669,9 @@ Round 13 recorded five open gaps:
   merged-navigation user behaviour while `git_gutter` is enabled (it is default-enabled).
   OPEN residuals: (a) **large-file mode** is no longer refused: git HEAD regions are skipped because the
   plugin does not scan a large buffer, but saved-diff and live_diff targets still navigate and an
-  empty merge says `No changes`, matching Fresh's source-based navigation; (b) **cross-Compare is not covered** —
-  the commands read the active editor buffer's sources only, and Compare-view hunks
-  (`gvim.diff.compare_buffers`) are not a navigation target source, so navigating a Compare view
-  does not use its hunks; (c) **commands/i18n gap** — Fresh ships a standalone `diff_nav` plugin
+  empty merge says `No changes`, matching Fresh's source-based navigation; (b) **cross-Compare** — git_gutter now consumes the optional `compare_files` hunk export
+  for the active buffer (round 78); standalone diff_nav also consumes it (round 57). The
+  git_gutter source integration is tested with a provider stub; real Compare interaction remains unverified; (c) **commands/i18n gap** — Fresh ships a standalone `diff_nav` plugin
   with translated command/status keys (`diff_nav.i18n.json`: `cmd.next_change` (+desc),
   `cmd.prev_change` (+desc), `status.change`/`status.change_wrapped`/`status.no_changes` in 15
   locales), while gvim's Navigation lives inside `git_gutter` with hand-written English titles
