@@ -39,6 +39,7 @@ func showArgv(file string) []string {
 type rigBuffer struct{ path, text string }
 
 type rigOpts struct {
+	locale   string             // plugin translation locale
 	noGit    bool               // no git binary on the PATH of the fake OS
 	services pluginapi.Services // nil: the fake services
 	timeout  time.Duration      // plugin_timeout_ms; 0: 200 ms
@@ -114,7 +115,7 @@ func startRig(t *testing.T, o rigOpts) *rig {
 	if o.osWrap != nil {
 		osImpl = o.osWrap(r.os)
 	}
-	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: osImpl, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second, HTTPClient: o.httpClient})
+	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: osImpl, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second, HTTPClient: o.httpClient, Locale: o.locale})
 	bundledNames := map[string]bool{}
 	for _, name := range o.plugins {
 		bundledNames[name] = true

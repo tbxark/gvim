@@ -21,10 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `1e1b23c` plus the round-79 working tree. The round-78
-static gates passed (catalogue heap en 128 KiB / de 82 KiB / both 211 KiB). Round 79 full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed on rerun (log `/tmp/gvim-r79-final2.log`);
-the first run timed out in `TestOpenFileFromAnotherClientCwd`, which passed in isolation.
+Last verified: 2026-11-10, tree commit `9de61d0` plus the round-80 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r80-final.log`).
+Round 80 localizes git_gutter navigation with Fresh's catalogue; German no-change, change and
+wrapped notices are tested. Round 79 full tests passed on rerun after an isolated daemon test timeout.
 Round 78 adds optional Compare Files hunk targets to git_gutter navigation. Round 79 adds a
 real-plugin integration test that opens a comparison and checks the navigation on both sides;
 real terminal interaction remains unverified.
@@ -7674,11 +7675,9 @@ Round 13 recorded five open gaps:
   empty merge says `No changes`, matching Fresh's source-based navigation; (b) **cross-Compare** — git_gutter now consumes the optional `compare_files` hunk export
   for the active buffer (round 78); standalone diff_nav also consumes it (round 57). The
   git_gutter source integration is tested with both a provider stub and the real Compare Files plugin
-  on both sides (round 79); real terminal interaction remains unverified; (c) **commands/i18n gap** — Fresh ships a standalone `diff_nav` plugin
-  with translated command/status keys (`diff_nav.i18n.json`: `cmd.next_change` (+desc),
-  `cmd.prev_change` (+desc), `status.change`/`status.change_wrapped`/`status.no_changes` in 15
-  locales), while gvim's Navigation lives inside `git_gutter` with hand-written English titles
-  and notices and disappears when `git_gutter` is disabled; (d) targets are line-based (Fresh
+  on both sides (round 79); real terminal interaction remains unverified; (c) **commands/i18n** — git_gutter navigation uses Fresh's translated command and status
+  catalogue (round 80). Standalone `diff_nav` is opt-in and has its own catalogue; git_gutter
+  navigation is unavailable when git_gutter is disabled; (d) targets are line-based (Fresh
   sorts/dedups by byte positions), so deleted-only/duplicate-line edge cases across merged
   sources are untested. `plugin/bundled/plugins/git_gutter/init.lua`,
   `plugin/bundled/git_gutter_test.go`, Fresh `plugins/diff_nav.ts`/`plugins/diff_nav.i18n.json`;

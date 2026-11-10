@@ -17,6 +17,7 @@
 -- line = first line (0-based), count = lines}, ... } for a buffer that is tracked by git.
 local gvim = require "gvim"
 local git = gvim.git
+local t = gvim.i18n.t
 
 local settings = gvim.settings.define {
   debounce_ms = {
@@ -412,7 +413,7 @@ local function jump(direction)
     lines = change_lines(b)
   end
   if #lines == 0 then
-    gvim.notify("No changes")
+    gvim.notify(t("status.no_changes"))
     return
   end
   local cur = b:cursor().line
@@ -439,7 +440,8 @@ local function jump(direction)
     end
   end
   b:set_cursor({ line = lines[idx], col = 0 }, { center = true })
-  gvim.notify(string.format("Change %d/%d%s", idx, #lines, wrapped and " [wrapped]" or ""))
+  local key = wrapped and "status.change_wrapped" or "status.change"
+  gvim.notify(t(key, { n = tostring(idx), total = tostring(#lines) }))
 end
 
 -- ---------- commands and exports ----------
@@ -462,15 +464,15 @@ gvim.command.register {
 
 gvim.command.register {
   name = "next_change",
-  title = "Next Change",
-  description = "Jump to the next changed region",
+  title = t("cmd.next_change"),
+  description = t("cmd.next_change_desc"),
   run = function() jump(1) end,
 }
 
 gvim.command.register {
   name = "prev_change",
-  title = "Previous Change",
-  description = "Jump to the previous changed region",
+  title = t("cmd.prev_change"),
+  description = t("cmd.prev_change_desc"),
   run = function() jump(-1) end,
 }
 

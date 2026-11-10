@@ -514,6 +514,40 @@ gvim.plugins.export {
 	}
 }
 
+func TestGitGutterNavigationUsesGermanTranslations(t *testing.T) {
+	r := startRig(t, rigOpts{
+		locale:  "de",
+		plugins: []string{"git_gutter"},
+		buffers: []rigBuffer{{gutterFile, "a\nb\nc\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\n"})
+		},
+	})
+	r.emit("after_file_open", gutterFile, nil)
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Keine Änderungen" {
+		t.Fatalf("no changes notice = %v", got)
+	}
+	r.edit(gutterFile, "a\nB\nc\n")
+	if err := r.host.SetCursor(r.ids[gutterFile], pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Änderung 1/1" {
+		t.Fatalf("change notice = %v", got)
+	}
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Änderung 1/1 [umgebrochen]" {
+		t.Fatalf("wrapped notice = %v", got)
+	}
+}
+
 func TestGitGutterNavigationIncludesCompareTargets(t *testing.T) {
 	r := startRig(t, rigOpts{
 		plugins: []string{"git_gutter"},
