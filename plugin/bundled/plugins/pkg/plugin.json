@@ -1,0 +1,7 @@
+{
+  "name": "pkg",
+  "version": "1.0.0",
+  "description": "Read-only list and details of installed/bundled plugins and native themes",
+  "api": 2,
+  "default_enabled": false
+}

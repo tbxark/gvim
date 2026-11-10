@@ -175,3 +175,29 @@ T.command("go", function() T.spy(gvim.plugins.get("a").f(0)) end)`,
 		t.Fatalf("spy = %q log=%v", got, h.LogText(""))
 	}
 }
+
+func TestPluginsListMetadata(t *testing.T) {
+	h := startFiles(t, plugintest.Files{
+		"alpha/plugin.json": `{"name":"alpha","version":"1.2.3","description":"Alpha description","requires":["beta"]}`,
+		"alpha/init.lua":    `local gvim = require "gvim"`,
+		"beta/plugin.json":  `{"name":"beta","version":"0.4.0","description":"Beta description"}`,
+		"beta/init.lua":     `local gvim = require "gvim"`,
+		"probe.lua": `local gvim = require "gvim"
+T.command("go", function()
+  local l = gvim.plugins.list()
+  local a, b
+  for _, row in ipairs(l) do
+    if row.name == "alpha" then a = row end
+    if row.name == "beta" then b = row end
+  end
+  T.spy(a.version, a.description, a.enabled, #a.requires, a.requires[1], a.file ~= "", a.dir ~= "")
+  T.spy(b.version, b.description, b.enabled, #b.requires)
+end)`,
+	}, plugintest.Options{Timeout: 5 * time.Second})
+	if err := h.Run("probe.go", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := spyText(h); got != "1.2.3 Alpha description true 1 beta true true|0.4.0 Beta description true 0" {
+		t.Fatalf("spy = %q (log %v)", got, h.LogText(""))
+	}
+}

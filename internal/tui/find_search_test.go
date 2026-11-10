@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/theme"
 )
@@ -114,6 +115,39 @@ func TestSearchDefaultsComeFromTheConfig(t *testing.T) {
 		if !strings.Contains(opts, want) {
 			t.Errorf("options row %q lacks %q", opts, want)
 		}
+	}
+}
+
+// TestSearchPromptOptionTogglesThroughTheRoot drives the real find bar and the
+// searchPrompt keymap context: Alt+C, Alt+W, Alt+R and Alt+I each set their flag, and
+// the same keys on an ordinary one-line prompt leave the find flags and prompt text alone.
+func TestSearchPromptOptionTogglesThroughTheRoot(t *testing.T) {
+	m, _ := newDefaultSearchModel(t, "Foo foo")
+	press(m, ctrl('f'))
+	for _, r := range []rune{'c', 'w', 'r', 'i'} {
+		press(m, tea.KeyPressMsg{Code: r, Mod: tea.ModAlt})
+	}
+	st := m.findBar.State()
+	if !st.Case || !st.Word || !st.Regex || !st.ConfirmEach {
+		t.Fatalf("find toggles = %+v, want all four set", st)
+	}
+	q := m.findBar.Query()
+	if !q.CaseSensitive || !q.WholeWord || !q.Regex {
+		t.Fatalf("find query = %+v, want case/word/regex set", q)
+	}
+
+	press(m, special(tea.KeyEscape))
+	p := prompt.NewLine(m.styles, prompt.LineOptions{Label: "Value:", Input: "keep"})
+	m.pushOverlay(p)
+	for _, r := range []rune{'c', 'w', 'r', 'i'} {
+		press(m, tea.KeyPressMsg{Code: r, Mod: tea.ModAlt})
+	}
+	got := m.findBar.State()
+	if got.Case != st.Case || got.Word != st.Word || got.Regex != st.Regex || got.ConfirmEach != st.ConfirmEach {
+		t.Fatalf("ordinary prompt changed find toggles: %+v, want %+v", got, st)
+	}
+	if got := p.Value(); got != "keep" {
+		t.Fatalf("ordinary prompt value = %q, want keep", got)
 	}
 }
 

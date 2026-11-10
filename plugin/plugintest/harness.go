@@ -3,6 +3,7 @@ package plugintest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"runtime"
 	"sort"
@@ -180,6 +181,21 @@ func (h *Harness) sources() []plugin.Source {
 		}
 		if g.dir {
 			s.Dir = "/plugins/" + n
+			s.File = "/plugins/" + n + "/init.lua"
+			if raw, ok := g.files["plugin.json"]; ok {
+				var m struct {
+					Name        string   `json:"name"`
+					Version     string   `json:"version"`
+					Description string   `json:"description"`
+					Requires    []string `json:"requires"`
+				}
+				if json.Unmarshal([]byte(raw), &m) == nil {
+					if m.Name != "" {
+						s.Name = m.Name
+					}
+					s.Version, s.Description, s.Requires = m.Version, m.Description, m.Requires
+				}
+			}
 		}
 		// Compile in Work, on another goroutine, like the loader does.
 		done := make(chan map[string]*plugin.Compiled)

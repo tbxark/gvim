@@ -48,6 +48,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `audit_mode` | **off** | Review Diff, Review Diff: Refresh, Review Diff: Close | none |
 | `devcontainer` | **off** | Dev Container: Show Info, Dev Container: Open Config, Dev Container: Refresh | none |
 | `k8s_workspace` | **off** | K8s: Show Workspace Config, K8s: Open Config, K8s: Refresh Workspace Config | none |
+| `pkg` | **off** | Package: Packages | none |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -78,8 +79,9 @@ plugin is loaded, and the buffer's saved-diff lines of unsaved changes, then ded
 ascending, and jump with Fresh's `Change n/total [wrapped]` status. Unlike Fresh it compares the *buffer*,
 so the marks follow unsaved typing after a short pause. The HEAD text is read once per file with
 `git show` and compared in the host (no line arrays in Lua); a file outside a repository or untracked
-still navigates its saved-diff/live_diff changes, and a buffer in large-file mode keeps its own notice:
-**Next Change** and **Previous Change** say that git changes are not tracked there. Exports `hunks(buf_id)`
+still navigates its saved-diff/live_diff changes. In large-file mode it skips only the git HEAD
+regions (the plugin never scans such a buffer) but still navigates saved-diff/live_diff targets;
+when none exist it says `No changes`, without a special large-file refusal. Exports `hunks(buf_id)`
 for other plugins (`{type = "added"|"modified"|"deleted", line, count}`; `line` is 0-based and a
 deleted run points at the line before the seam). Its own **Next
 Change**/**Previous Change** remain for the pre-diff_nav behavior (they do not include a Compare
@@ -207,6 +209,22 @@ as tier-1c virtual rows above the seam, with the `-` gutter glyph and bold+under
 Fresh's priority order and capped at the host's 64 virtual rows per anchor plus an "… N more deleted
 lines" summary row (the capability is live on the shipped host; an older host falls back to the line
 backgrounds and new-side emphasis). It is opt-in like Fresh's live_diff.
+
+**pkg** (reduced, read-only Fresh port): Fresh's `pkg.ts` is a decentralized git package manager
+(install/update/remove from URLs or a registry, version pinning, registry sync, lockfiles). gvim has
+no package store or git/network surface in this port, so **Package: Packages** only browses what the
+editor already knows: `gvim.plugins.list()` rows grouped as INSTALLED (user/cli/init/buffer) and
+BUNDLED, plus native built-in/user themes from `gvim.theme.all()` under THEMES. Each row shows the
+package name, type `[P]`/`[T]`, version, enabled/disabled (or current/built-in/user for a native
+theme) and a clipped description. Enter opens a read-only virtual detail panel with name, type,
+version, status, source, path (plugin entry/dir, or `(embedded bundled plugin)`), description and
+the manifest `requires` dependencies; a native theme is explicitly labelled as not a
+package-manager package. The list is bounded to 1000 rows and clipped strings; the command schedules
+the list build as a plugin task (the plugin/theme metadata APIs are synchronous and cheap), so it
+never blocks Update, and picker/detail callbacks are tasks too. No filesystem or process I/O is
+involved. Not ported/OPEN: install, install from
+URL, update, remove, registry sync, lockfile, outdated/available registry rows, git clone/pull and
+package-manager theme/language/bundle installs. No default keys; opt-in.
 
 **k8s_workspace** (reduced, read-only Fresh port): **K8s: Show Workspace Config** reads and
 validates `.fresh/k8s.json` as JSONC and opens a read-only virtual panel listing the default target

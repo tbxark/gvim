@@ -861,7 +861,8 @@ func (r *Runtime) pluginRows() []pluginapi.PluginInfo {
 
 // row is the manager row of a plugin that is not running.
 func (c *candidate) row() pluginapi.PluginInfo {
-	info := pluginapi.PluginInfo{Name: c.name, Version: c.version, Source: c.kind, Dir: c.dir, File: c.entry(),
+	info := pluginapi.PluginInfo{Name: c.name, Version: c.version, Description: c.man.Description, Requires: append([]string(nil), c.man.Requires...),
+		Source: c.kind, Dir: c.dir, File: c.entry(),
 		Locked: c.locked, Enabled: c.enabled}
 	switch {
 	case !c.enabled:

@@ -159,10 +159,15 @@ file and process APIs (`gvim.fs`, `gvim.proc`) follow the remote host instead; s
 ## gvim.plugins
 
 ```text
-gvim.plugins.list() -> { {name, status, version, source}, ... }
+gvim.plugins.list() -> { {name, status, version, source, file, dir, enabled, description, requires}, ... }
 gvim.plugins.export(tbl) -> true | nil, err
 gvim.plugins.get(name) -> proxy | nil
 ```
+
+Each list row carries its manifest `name`, manager `status`, `version`, `source` (`bundled`, `user`,
+`cli`, `init` or `buffer`), entry `file`, plugin `dir`, `enabled`, manifest `description` and the
+`requires` dependency names. A bundled plugin has no on-disk `file`; a single-file plugin may have
+no `dir`.
 
 Plugins call each other through exports.
 

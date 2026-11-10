@@ -8,7 +8,7 @@ import (
 
 // gvim.plugins (stage S9):
 //
-//	gvim.plugins.list() -> { {name, status, version, source}, ... }
+//	gvim.plugins.list() -> { {name, status, version, source, file, dir, enabled, description, requires}, ... }
 //	gvim.plugins.export(tbl) -> true     expose the FUNCTIONS of tbl to other plugins; any other
 //	                                     value must be plain data (it is copied)
 //	gvim.plugins.get(name) -> proxy | nil
@@ -89,11 +89,20 @@ func installPlugins(e *apiEnv) {
 		infos := r.Plugins()
 		out := L.CreateTable(len(infos), 0)
 		for _, in := range infos {
-			row := L.CreateTable(0, 4)
+			row := L.CreateTable(0, 9)
 			row.RawSetString("name", lua.LString(in.Name))
 			row.RawSetString("status", lua.LString(in.Status))
 			row.RawSetString("version", lua.LString(in.Version))
 			row.RawSetString("source", lua.LString(in.Source))
+			row.RawSetString("file", lua.LString(in.File))
+			row.RawSetString("dir", lua.LString(in.Dir))
+			row.RawSetString("enabled", lua.LBool(in.Enabled))
+			row.RawSetString("description", lua.LString(in.Description))
+			requires := L.CreateTable(len(in.Requires), 0)
+			for _, r := range in.Requires {
+				requires.Append(lua.LString(r))
+			}
+			row.RawSetString("requires", requires)
 			out.Append(row)
 		}
 		L.Push(out)

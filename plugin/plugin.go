@@ -79,6 +79,8 @@ func CompileSource(chunk, src string) (*lua.FunctionProto, error) {
 // Source describes one plugin to load.
 type Source struct {
 	Name, Version string
+	Description   string
+	Requires      []string
 	Kind          string // SourceBundled ... SourceBuffer
 	Dir           string // "" for single-file and buffer plugins
 	File          string // absolute path of the entry file; "" for bundled and buffer plugins
@@ -96,16 +98,18 @@ type Source struct {
 // plugin is the runtime state of one plugin: its Lua state, tasks, registrations and
 // counters. A tombstone (failed or disabled) keeps only the row for the manager.
 type plugin struct {
-	r       *Runtime
-	name    string
-	version string
-	dir     string
-	file    string // Source.File
-	kindStr string // pluginapi.PluginInfo.Source
-	gen     uint64
-	status  string
-	errMsg  string
-	dead    bool
+	r           *Runtime
+	name        string
+	version     string
+	description string
+	requires    []string
+	dir         string
+	file        string // Source.File
+	kindStr     string // pluginapi.PluginInfo.Source
+	gen         uint64
+	status      string
+	errMsg      string
+	dead        bool
 
 	L   *lua.LState
 	tag *lua.LUserData // the unforgeable yield tag
@@ -187,7 +191,8 @@ func (p *plugin) info() pluginapi.PluginInfo {
 		}
 	}
 	return pluginapi.PluginInfo{
-		Name: p.name, Version: p.version, Source: p.kindStr, Dir: p.dir, File: p.file,
+		Name: p.name, Version: p.version, Description: p.description, Requires: append([]string(nil), p.requires...),
+		Source: p.kindStr, Dir: p.dir, File: p.file,
 		Status: p.status, Err: p.errMsg,
 		Commands: len(p.commands), Subscriptions: n,
 		Enabled: p.status != statusDisabled,
@@ -333,7 +338,8 @@ func (r *Runtime) LoadPlugin(s Source) error {
 	}
 	r.nextGen++
 	p := &plugin{
-		r: r, name: s.Name, version: s.Version, dir: s.Dir, file: s.File, kindStr: s.Kind, gen: r.nextGen,
+		r: r, name: s.Name, version: s.Version, description: s.Description, requires: append([]string(nil), s.Requires...),
+		dir: s.Dir, file: s.File, kindStr: s.Kind, gen: r.nextGen,
 		status: statusLoading, main: main, files: s.Compiled,
 		roots: map[*lua.LState]*task{}, tasks: map[*task]struct{}{},
 		commands: map[string]*command{}, subs: map[string][]*subscription{},

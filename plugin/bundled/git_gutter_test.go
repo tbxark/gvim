@@ -293,9 +293,61 @@ func TestGitGutterNavigationWithoutChanges(t *testing.T) {
 	}
 }
 
-// The plugin never scans a buffer in large-file mode, so navigation says that, not "No changes".
+// Large-file mode skips the git HEAD regions, but diff_nav's saved-diff targets still
+// navigate: unsaved changes move the caret and use the normal Change n/m notice.
 func TestGitGutterNavigationInLargeFileMode(t *testing.T) {
-	r := gutterRig(t, "a\nb\n", "a\nB\n")
+	r := startRig(t, rigOpts{
+		plugins: []string{"git_gutter"},
+		buffers: []rigBuffer{{gutterFile, lines("a", "b", "c", "")}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\n"})
+		},
+	})
+	r.emit("after_file_open", gutterFile, nil)
+	r.edit(gutterFile, lines("a", "B", "c", ""))
+	before := r.runs("show")
+	for _, b := range r.host.Buffers {
+		if b.Info.ID == r.ids[gutterFile] {
+			b.Info.Large = true
+		}
+	}
+	if err := r.host.SetCursor(r.ids[gutterFile], pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := r.host.Cursors(r.ids[gutterFile])
+	if cs[0].Pos.Line != 1 {
+		t.Errorf("caret on line %d, want the unsaved changed line 1", cs[0].Pos.Line)
+	}
+	notices := r.h.NoticeTexts()
+	if len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+		t.Errorf("notices = %v, want Change 1/1", notices)
+	}
+	if got := r.runs("show"); got != before {
+		t.Errorf("large-file navigation ran %d extra git show(s), want none", got-before)
+	}
+	if err := r.host.SetCursor(r.ids[gutterFile], pluginapi.Pos{Line: 2}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_gutter.prev_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ = r.host.Cursors(r.ids[gutterFile])
+	if cs[0].Pos.Line != 1 {
+		t.Errorf("prev_change caret on line %d, want the unsaved changed line 1", cs[0].Pos.Line)
+	}
+	notices = r.h.NoticeTexts()
+	if len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+		t.Errorf("prev_change notices = %v, want Change 1/1", notices)
+	}
+}
+
+// A large file with no git regions and no unsaved/live-diff changes says No changes,
+// without the old large-file refusal.
+func TestGitGutterNavigationInLargeFileWithoutChanges(t *testing.T) {
+	r := gutterRig(t, "a\nb\n", "a\nb\n")
 	for _, b := range r.host.Buffers {
 		if b.Info.ID == r.ids[gutterFile] {
 			b.Info.Large = true
@@ -307,13 +359,13 @@ func TestGitGutterNavigationInLargeFileMode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := r.h.NoticeTexts()
-	if len(got) == 0 || got[len(got)-1] != "Git changes are not tracked in large-file mode" {
-		t.Errorf("notices = %v, want the large-file message", got)
+	notices := r.h.NoticeTexts()
+	if len(notices) == 0 || notices[len(notices)-1] != "No changes" {
+		t.Errorf("notices = %v, want No changes", notices)
 	}
-	for _, n := range got {
-		if n == "No changes" {
-			t.Errorf("notices = %v: a large file was reported as unchanged", got)
+	for _, n := range notices {
+		if n == "Git changes are not tracked in large-file mode" {
+			t.Errorf("notices = %v: old large-file refusal is still emitted", notices)
 		}
 	}
 }

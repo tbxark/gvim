@@ -1277,7 +1277,7 @@ function gvim.dashboard.set_auto_open(enabled) end
 function gvim.dashboard.auto_open() end
 
 gvim.plugins = {}
----@return {name: string, status: string, version: string, source: string}[]
+---@return {name: string, status: string, version: string, source: string, file: string, dir: string, enabled: boolean, description: string, requires: string[]}[]
 function gvim.plugins.list() end
 ---@param tbl table
 ---@return true|nil, string?

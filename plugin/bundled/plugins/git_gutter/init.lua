@@ -390,12 +390,15 @@ local function jump(direction)
   if not b then
     return
   end
+  -- Large-file mode skips only the git HEAD regions (the plugin never scans such a
+  -- buffer); diff_nav's saved-diff and live_diff targets are still navigable.
   local info = b:info()
+  local lines
   if info and info.large then
-    gvim.notify("Git changes are not tracked in large-file mode")
-    return
+    lines = diff_nav_targets(b, nil)
+  else
+    lines = change_lines(b)
   end
-  local lines = change_lines(b)
   if #lines == 0 then
     gvim.notify("No changes")
     return

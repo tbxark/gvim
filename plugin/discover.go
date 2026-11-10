@@ -679,7 +679,8 @@ func (c *candidate) entry() string {
 
 // source returns what LoadPlugin needs.
 func (c *candidate) source() Source {
-	return Source{Name: c.name, Version: c.version, Kind: c.kind, Dir: c.dir, File: c.entry(), Main: c.main, Compiled: c.compiled,
+	return Source{Name: c.name, Version: c.version, Description: c.man.Description, Requires: append([]string(nil), c.man.Requires...),
+		Kind: c.kind, Dir: c.dir, File: c.entry(), Main: c.main, Compiled: c.compiled,
 		I18nJSON: c.i18n, Settings: c.settings.User, ProjectSettings: c.settings.Project}
 }
 

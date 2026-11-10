@@ -55,7 +55,8 @@ a late result is dropped unless it belongs to the same active prompt, workspace 
 copy/cut operation; copy/cut are single-flight, use only the native writer when one exists, and a
 process-wide permission refuses another workspace's write while one is pending rather than queueing it;
 a canceled not-yet-started write is skipped, but a started writer has no cancel and keeps the
-permission until it returns); the find bar's match steps and option toggles; list navigation and cancel;
+permission until it returns); the find bar's match steps and option toggles
+(`Alt+C`/`Alt+W`/`Alt+R`/`Alt+I`); list navigation and cancel;
 the menu bar's walk and close; the settings page's close, activate, reset, slash search and question-mark
 key help; and the dock's focus keys. Each preset keeps its own idiom:
 Emacs has the `C-x` chords and the `M-` keys, VS Code has `Ctrl+K Ctrl+L` and friends, macOS
@@ -107,7 +108,7 @@ overlay's are: `Tab` moves between the search field, the replacement field, the 
 the result rows (Git Grep has no replacement row: its `Tab` walks search, files and rows);
 `Alt+A` cycles the scope chip through all files, open buffers and the current file (Open Buffers
 searches only the open buffers' unsaved text; the file-glob field narrows the All Files walk);
-`Alt+C`/`Alt+R`/`Alt+W` toggle Case, Regex and Whole; `Alt+P` toggles soft wrap in the
+`Alt+C`/`Alt+R`/`Alt+W`/`Alt+I` toggle Case, Regex, Whole and Confirm Each; `Alt+P` toggles soft wrap in the
 preview column (a long line continues on the next display row instead of being cut, and
 the session remembers the setting for the next panel); the file-glob field takes comma or
 space separated patterns (`*.go`, `src/**`); Up and Down in the search field walk the

@@ -50,6 +50,8 @@ type Event struct {
 // PluginInfo is one row of the plugin manager.
 type PluginInfo struct {
 	Name, Version, Source, Dir string // Source: bundled|user|cli|init|buffer
+	Description                string
+	Requires                   []string
 	// File is the absolute path of the file the plugin runs from: the entry of a directory
 	// plugin (its plugin.json main, or init.lua) or the .lua file of a single-file plugin.
 	// It is "" for a plugin of the binary or of a buffer.

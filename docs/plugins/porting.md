@@ -289,6 +289,23 @@ invalid JSON, Open Config with zero process runs, missing config, the read-only 
 the inclusive 100/101 vars and 100/101 targets boundaries (the 101st entry is the error; exactly
 100 is accepted).
 
+### Package browser: metadata only (port residual)
+
+Fresh's `pkg.ts` is a git-based plugin/theme package manager: install from URLs or a curated
+registry, update/remove, version pinning, registry sync, lockfile generation and install, and
+package actions. gvim has no such package store or git/network surface, so the port is a read-only
+browser: `Package: Packages` reads `gvim.plugins.list()` (extended with manifest description,
+requires, file/dir and enabled metadata) and `gvim.theme.all()`, groups INSTALLED/BUNDLED plugins and
+THEMES, and Enter opens a virtual detail panel with name/type/version/status/source/path/description/
+dependencies. Themes are native gvim themes, not package-manager theme packages, and are labelled
+that way. The two metadata APIs are synchronous and cheap; the command schedules the list build as a
+plugin async task so Update never blocks, the list is bounded to 1000 rows and clipped strings, and
+no filesystem or process I/O is involved. OPEN: install/install-from-URL/update/remove,
+registry sync, lockfile, outdated/available registry rows, git clone/pull, and packaged
+theme/language/bundle management. Tests: `pkg_test.go` covers installed/bundled rows and alpha's
+manifest detail (description/requires/path/status), native theme rows/details, the read-only command
+list and zero process runs; `api_plugins_test.go` covers the extended list metadata.
+
 ### The shared Finder (port residual)
 
 Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `gvim.finder` library
