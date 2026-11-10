@@ -3,6 +3,7 @@
 -- left or right. A tab with unsaved changes is never closed, and no dialog asks about it:
 -- it stays, and the status message says how many were kept.
 local gvim = require "gvim"
+local t = gvim.i18n.t
 
 local function plural(n)
   return n == 1 and "1 tab" or (n .. " tabs")
@@ -55,46 +56,46 @@ end
 local commands = {
   {
     name = "close_others",
-    title = "Close Other Tabs",
-    description = "Close the other tabs",
+    title = t("cmd.close_others"),
+    description = t("cmd.close_others_desc"),
     run = function()
       close_where(function(i, active) return i ~= active end)
     end,
   },
   {
     name = "close_all",
-    title = "Close All Tabs",
-    description = "Close all tabs",
+    title = t("cmd.close_all"),
+    description = t("cmd.close_all_desc"),
     run = function()
       close_where(function() return true end)
     end,
   },
   {
     name = "close_to_right",
-    title = "Close Tabs To Right",
-    description = "Close the tabs to the right of the active tab",
+    title = t("cmd.close_to_right"),
+    description = t("cmd.close_to_right_desc"),
     run = function()
       close_where(function(i, active) return i > active end)
     end,
   },
   {
     name = "close_to_left",
-    title = "Close Tabs To Left",
-    description = "Close the tabs to the left of the active tab",
+    title = t("cmd.close_to_left"),
+    description = t("cmd.close_to_left_desc"),
     run = function()
       close_where(function(i, active) return i < active end)
     end,
   },
   {
     name = "move_to_left",
-    title = "Move Tab To Left",
-    description = "Move the active tab one place to the left",
+    title = t("cmd.move_to_left"),
+    description = t("cmd.move_to_left_desc"),
     run = function() move_active(-1) end,
   },
   {
     name = "move_to_right",
-    title = "Move Tab To Right",
-    description = "Move the active tab one place to the right",
+    title = t("cmd.move_to_right"),
+    description = t("cmd.move_to_right_desc"),
     run = function() move_active(1) end,
   },
 }

@@ -1,0 +1,10 @@
+{
+  "en": {
+    "cmd.goto_line_with_selection": "Go to Line with Selection",
+    "cmd.goto_line_with_selection_desc": "Select from current position to target line"
+  },
+  "de": {
+    "cmd.goto_line_with_selection": "Zur Zeile mit Auswahl",
+    "cmd.goto_line_with_selection_desc": "Von der aktuellen Position zur Zielzeile auswählen"
+  }
+}

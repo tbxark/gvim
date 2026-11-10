@@ -24,7 +24,11 @@ func load(t *testing.T, name string, names ...string) *plugintest.Harness {
 	for _, n := range names {
 		host.AddBuffer("/w/"+n, "text of "+n)
 	}
-	h := plugintest.New(t, plugintest.Files{name + "/init.lua": string(src)}, plugintest.Options{Host: host, Timeout: 200 * time.Millisecond, EventBudget: 5 * time.Second})
+	files := plugintest.Files{name + "/init.lua": string(src)}
+	if i18n, err := fs.ReadFile(bundled.FS, "plugins/"+name+"/"+name+".i18n.json"); err == nil {
+		files[name+"/"+name+".i18n.json"] = string(i18n)
+	}
+	h := plugintest.New(t, files, plugintest.Options{Host: host, Timeout: 200 * time.Millisecond, EventBudget: 5 * time.Second})
 	h.Start()
 	return h
 }
@@ -147,6 +151,59 @@ func TestTabActions(t *testing.T) {
 				t.Errorf("notices = %v, want %q", texts, tt.notice)
 			}
 		})
+	}
+}
+
+func TestTabActionsGermanCommands(t *testing.T) {
+	t.Parallel()
+	src, err := fs.ReadFile(bundled.FS, "plugins/tab_actions/init.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i18n, err := fs.ReadFile(bundled.FS, "plugins/tab_actions/tab_actions.i18n.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := plugintest.New(t, plugintest.Files{
+		"tab_actions/init.lua":              string(src),
+		"tab_actions/tab_actions.i18n.json": string(i18n),
+	}, plugintest.Options{Locale: "de", Timeout: 200 * time.Millisecond})
+	h.Start()
+	var got []string
+	for _, c := range h.Host.Commands["tab_actions"] {
+		got = append(got, c.ID+"="+c.Title)
+	}
+	want := []string{
+		"tab_actions.close_all=Alle Tabs schließen",
+		"tab_actions.close_others=Andere Tabs schließen",
+		"tab_actions.close_to_left=Tabs links schließen",
+		"tab_actions.close_to_right=Tabs rechts schließen",
+		"tab_actions.move_to_left=Tab nach links",
+		"tab_actions.move_to_right=Tab nach rechts",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("German commands = %v, want %v", got, want)
+	}
+}
+
+func TestGotoWithSelectionGermanCommand(t *testing.T) {
+	t.Parallel()
+	src, err := fs.ReadFile(bundled.FS, "plugins/goto_with_selection/init.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i18n, err := fs.ReadFile(bundled.FS, "plugins/goto_with_selection/goto_with_selection.i18n.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := plugintest.New(t, plugintest.Files{
+		"goto_with_selection/init.lua":                      string(src),
+		"goto_with_selection/goto_with_selection.i18n.json": string(i18n),
+	}, plugintest.Options{Locale: "de", Timeout: 200 * time.Millisecond})
+	h.Start()
+	cmds := h.Host.Commands["goto_with_selection"]
+	if len(cmds) != 1 || cmds[0].Title != "Zur Zeile mit Auswahl" {
+		t.Fatalf("German goto command = %+v, want Zur Zeile mit Auswahl", cmds)
 	}
 }
 

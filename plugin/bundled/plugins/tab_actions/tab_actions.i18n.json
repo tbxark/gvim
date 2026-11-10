@@ -1,0 +1,32 @@
+{
+  "en": {
+    "cmd.close_others": "Close Other Tabs",
+    "cmd.close_others_desc": "Close other tabs in the current split",
+    "cmd.close_all": "Close All Tabs",
+    "cmd.close_all_desc": "Close all tabs in the current split",
+    "cmd.close_to_right": "Close Tabs To Right",
+    "cmd.close_to_right_desc": "Close tabs to right in the current split",
+    "cmd.close_to_left": "Close Tabs To Left",
+    "cmd.close_to_left_desc": "Close tabs to left in the current split",
+    "cmd.move_to_left": "Move Tab To Left",
+    "cmd.move_to_left_desc": "Move active tab to the left in the current split",
+    "cmd.move_to_right": "Move Tab To Right",
+    "cmd.move_to_right_desc": "Move active tab to the right in the current split",
+    "status.plugin_loaded": "Tab actions plugin loaded"
+  },
+  "de": {
+    "cmd.close_others": "Andere Tabs schließen",
+    "cmd.close_others_desc": "Andere Tabs im aktuellen Split schließen",
+    "cmd.close_all": "Alle Tabs schließen",
+    "cmd.close_all_desc": "Alle Tabs im aktuellen Split schließen",
+    "cmd.close_to_right": "Tabs rechts schließen",
+    "cmd.close_to_right_desc": "Tabs rechts vom aktuellen Tab schließen",
+    "cmd.close_to_left": "Tabs links schließen",
+    "cmd.close_to_left_desc": "Tabs links vom aktuellen Tab schließen",
+    "cmd.move_to_left": "Tab nach links",
+    "cmd.move_to_left_desc": "Aktiven Tab im Split nach links verschieben",
+    "cmd.move_to_right": "Tab nach rechts",
+    "cmd.move_to_right_desc": "Aktiven Tab im Split nach rechts verschieben",
+    "status.plugin_loaded": "Tab actions Plugin geladen"
+  }
+}

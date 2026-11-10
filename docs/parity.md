@@ -21,9 +21,11 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `b781968` plus the round-85 working tree. Static gates
-passed (catalogue heap en 133 KiB / de 83 KiB / both 216 KiB); full
-`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r85-final.log`).
+Last verified: 2026-11-10, tree commit `66625e5` plus the round-86 working tree. Static gates
+passed (catalogue heap en 128 KiB / de 83 KiB / both 211 KiB); full
+`go test ./... -p 1 -count=1 -timeout 1200s` passed (log `/tmp/gvim-r86-final.log`).
+Round 86 adds translated command catalogues for goto_with_selection and tab_actions with German
+command titles verified, keeping the default-enabled bundled plugin idle heap at 7.98 MiB (within the 8 MiB limit).
 Round 85 imports Fresh's translated command and status catalogue across all 15 locales for welcome demo,
 with German say-hello and open-help commands and greeting notices verified; English-only restriction removed.
 Round 84 imports Fresh's translated command and status catalogue across all 15 locales for clangd_support,
