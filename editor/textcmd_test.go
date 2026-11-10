@@ -178,6 +178,49 @@ func TestExpandSelectionGrowsWordLineThenBuffer(t *testing.T) {
 	}
 }
 
+
+func TestExpandAndShrinkSelectionWithBrackets(t *testing.T) {
+	t.Parallel()
+	e := docWith(Options{}, "foo(bar, baz)\nx")
+	e.SetCursor(buffer.Pos{Line: 0, Col: 5}, false)
+
+	// Step 1: word
+	run(t, e, "expand_selection")
+	if got := selectedText(e.Active()); got != "bar" {
+		t.Fatalf("step 1 = %q, want 'bar'", got)
+	}
+
+	// Step 2: inside brackets
+	run(t, e, "expand_selection")
+	if got := selectedText(e.Active()); got != "bar, baz" {
+		t.Fatalf("step 2 = %q, want 'bar, baz'", got)
+	}
+
+	// Step 3: with brackets
+	run(t, e, "expand_selection")
+	if got := selectedText(e.Active()); got != "(bar, baz)" {
+		t.Fatalf("step 3 = %q, want '(bar, baz)'", got)
+	}
+
+	// Now shrink selection step 3 -> step 2
+	run(t, e, "shrink_selection")
+	if got := selectedText(e.Active()); got != "bar, baz" {
+		t.Fatalf("shrink 1 = %q, want 'bar, baz'", got)
+	}
+
+	// Shrink step 2 -> step 1
+	run(t, e, "shrink_selection")
+	if got := selectedText(e.Active()); got != "bar" {
+		t.Fatalf("shrink 2 = %q, want 'bar'", got)
+	}
+
+	// Shrink step 1 -> dropped
+	run(t, e, "shrink_selection")
+	if e.Active().HasAnySelection() {
+		t.Fatal("expected selection to be dropped after full shrink")
+	}
+}
+
 func TestDuplicateLineAbove(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

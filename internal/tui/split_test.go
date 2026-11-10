@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/theme"
 )
@@ -69,6 +70,35 @@ func TestStickyScrollPaintsHeader(t *testing.T) {
 	row2 := g2.Plain()[1]
 	if strings.Contains(row2, "func MyFunction()") {
 		t.Fatalf("row 1 = %q, want empty when sticky scroll is disabled", row2)
+	}
+}
+
+
+type fakePathDoc struct {
+	*fakeDoc
+	path string
+}
+
+func (d *fakePathDoc) FilePath() string {
+	return d.path
+}
+
+func TestOverviewRulerMarksWithDiagnostics(t *testing.T) {
+	m := New(Deps{})
+	m.lsp.diags = map[string][]Diagnostic{
+		"/work/a.go": {
+			{Start: buffer.Pos{Line: 10, Col: 0}, End: buffer.Pos{Line: 10, Col: 5}, Severity: editorpane.SeverityError},
+			{Start: buffer.Pos{Line: 25, Col: 0}, End: buffer.Pos{Line: 25, Col: 5}, Severity: editorpane.SeverityWarning},
+		},
+	}
+	doc := &fakePathDoc{fakeDoc: &fakeDoc{lines: make([]string, 100)}, path: "/work/a.go"}
+	pane := editorpane.Pane{Styles: m.panes}
+	pane = m.overviewRulerMarks(pane, doc)
+	if len(pane.TrackMarks) != 2 {
+		t.Fatalf("track marks count = %d, want 2", len(pane.TrackMarks))
+	}
+	if pane.TrackMarks[0].From != 10 || pane.TrackMarks[1].From != 25 {
+		t.Fatalf("track marks = %+v, want lines 10 and 25", pane.TrackMarks)
 	}
 }
 

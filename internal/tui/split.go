@@ -390,9 +390,42 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 	pane = m.lspData(pane, doc)
 	pane = m.lspGutter(pane, doc)
 	pane = m.compareDecor(p, pane)
+	pane = m.overviewRulerMarks(pane, doc)
 	if p.Focused {
 		pane = m.applyPan(pane, doc)
 		pane.TopRow = m.topRow(p.Top)
+	}
+	return pane
+}
+
+
+// overviewRulerMarks populates the scrollbar overview marks with LSP diagnostics.
+func (m *Model) overviewRulerMarks(pane editorpane.Pane, doc Document) editorpane.Pane {
+	if doc == nil || doc.LineCount() <= 0 {
+		return pane
+	}
+	path := docPath(doc)
+	var marks []editorpane.TrackMark
+	if ds := m.lsp.diags[path]; len(ds) > 0 {
+		for _, d := range ds {
+			st := pane.Styles.DiagError
+			switch d.Severity {
+			case editorpane.SeverityWarning:
+				st = pane.Styles.DiagWarning
+			case editorpane.SeverityInfo:
+				st = pane.Styles.DiagInfo
+			case editorpane.SeverityHint:
+				st = pane.Styles.DiagHint
+			}
+			marks = append(marks, editorpane.TrackMark{
+				From:  d.Start.Line,
+				To:    d.End.Line,
+				Style: st,
+			})
+		}
+	}
+	if len(marks) > 0 {
+		pane.TrackMarks = append(pane.TrackMarks, marks...)
 	}
 	return pane
 }

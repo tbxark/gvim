@@ -21,11 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `fd7276d` plus the round-97 working tree. Static gates
-passed (catalogue heap en 128 KiB / de 88 KiB / both 216 KiB); default-enabled bundled plugins idle
-heap costs 7.99 MiB (< 8.00 MiB limit).
-Round 97 implements features 1, 2, 3, and 4: Sticky Scroll, Peek Definition (Alt+F12), Fold All / Unfold All (Alt+Shift+Z),
-and Git diff hunk navigation (Ctrl+Alt+D), adding items 361–364.
+Last verified: 2026-11-10, tree commit `5c38591` plus the round-98 working tree. Static gates
+passed (catalogue heap en 133 KiB / de 83 KiB / both 216 KiB); default-enabled bundled plugins idle
+heap costs 8.00 MiB (<= 8.00 MiB limit).
+Round 98 implements features 5, 6, 7, and 8: interactive breadcrumbs outline (breadcrumbs_picker), notebook tab
+navigation (Ctrl+Tab), smart bracket-aware expand/shrink selection (Ctrl+Shift+Space/Alt+Shift+Space), and
+scrollbar overview ruler for diagnostics, adding items 365–368.
 Round 92 implements independent per-split-pane Markdown view mode switching (markdown_mode_rendered,
 markdown_mode_source, markdown_cycle_mode) across multi-pane splits, landing the item 12 residual.
 Round 91 tests virtual and large document selection paths for project-search selected-text prefill
@@ -7305,6 +7306,19 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
 364. **Git change / hunk navigation shortcuts (git_gutter.next_change & git_gutter.prev_change).** Binds `Ctrl+Alt+D`
      and `Ctrl+Alt+Shift+D` to step directly through Git modifications across the buffer. Tested across keymap and
      git_gutter.
+365. **Interactive breadcrumbs outline (breadcrumbs_picker).** Queries document symbols to extract the chain of
+     enclosing scopes (package -> class -> method) at cursor, displaying an interactive location finder with preview
+     snippets to jump to any ancestor declaration line. Tested in plugin/bundled/lsp_navigation_test.go.
+366. **Notebook-friendly buffer navigation (Ctrl+Tab & Ctrl+Shift+Tab / Ctrl+BackTab).** Binds standard browser/editor
+     tab switching shortcuts to `next_buffer` and `prev_buffer`, accommodating modern laptops without dedicated
+     PageUp/PageDown keys. Tested in keymap/common_set_test.go.
+367. **Smart bracket-aware expand and shrink selection (expand_selection & shrink_selection).** Enhances selection
+     expansion to recognize enclosing quotes, parentheses, brackets, and braces on the line before expanding to the line
+     and document, with a selection stack enabling step-by-step shrink on `Alt+Shift+Space` (`Ctrl+Shift+Space` to expand).
+     Tested in editor/textcmd_test.go.
+368. **Scrollbar overview ruler for diagnostics (overviewRulerMarks).** Populates the vertical scrollbar track with
+     themed color markers corresponding to LSP errors (red), warnings (yellow), and info/hints (blue) across the whole
+     document. Tested in internal/tui/split_test.go.
 
 ## 5. Ranked backlog for the remaining rounds
 

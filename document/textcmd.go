@@ -58,6 +58,56 @@ func (d *Document) SortLines() {
 // at the caret, the lines the selection touches, and the whole buffer. A level is
 // taken only when it is larger than the selection, so a press that changes nothing
 // means the buffer is already selected.
+// enclosingBrackets finds enclosing pairs (), [], {}, "", '', `` on line.
+func enclosingBrackets(line string, col int) (inFrom, inTo, outFrom, outTo int, ok bool) {
+	pairs := [][2]byte{
+		{'\'', '\''},
+		{'"', '"'},
+		{'`', '`'},
+		{'(', ')'},
+		{'[', ']'},
+		{'{', '}'},
+	}
+	n := len(line)
+	bestDist := n + 1
+	var bInFrom, bInTo, bOutFrom, bOutTo int
+	found := false
+
+	for _, p := range pairs {
+		open, close := p[0], p[1]
+		start := -1
+		for i := col - 1; i >= 0; i-- {
+			if line[i] == open {
+				start = i
+				break
+			}
+		}
+		if start < 0 {
+			continue
+		}
+		end := -1
+		for i := col; i < n; i++ {
+			if line[i] == close {
+				end = i
+				break
+			}
+		}
+		if end < 0 || end <= start {
+			continue
+		}
+		dist := end - start
+		if dist < bestDist {
+			bestDist = dist
+			bInFrom = start + 1
+			bInTo = end
+			bOutFrom = start
+			bOutTo = end + 1
+			found = true
+		}
+	}
+	return bInFrom, bInTo, bOutFrom, bOutTo, found
+}
+
 func (d *Document) ExpandSelection() {
 	cur := buffer.Selection{Anchor: d.Cursor, Head: d.Cursor}
 	if d.Sel != nil {
@@ -68,12 +118,23 @@ func (d *Document) ExpandSelection() {
 	if wFrom, wTo, ok := d.wordAt(d.Cursor); ok {
 		levels = append(levels, buffer.Selection{Anchor: wFrom, Head: wTo})
 	}
+	lineText := d.Buffer.Line(from.Line)
+	if inFrom, inTo, outFrom, outTo, ok := enclosingBrackets(lineText, from.Col); ok {
+		if inFrom < inTo {
+			levels = append(levels, buffer.Selection{
+				Anchor: buffer.Pos{Line: from.Line, Col: inFrom},
+				Head:   buffer.Pos{Line: from.Line, Col: inTo},
+			})
+		}
+		levels = append(levels, buffer.Selection{
+			Anchor: buffer.Pos{Line: from.Line, Col: outFrom},
+			Head:   buffer.Pos{Line: from.Line, Col: outTo},
+		})
+	}
 	lineFrom, _ := buffer.LineBounds(d.Buffer, from.Line)
 	_, lineTo := buffer.LineBounds(d.Buffer, to.Line)
 	levels = append(levels, buffer.Selection{Anchor: lineFrom, Head: lineTo})
 	if d.large == nil || d.Index().Complete {
-		// While the index of a large document is being built the end of the
-		// buffer is not the end of the document, so the last level is left out.
 		levels = append(levels, buffer.Selection{Anchor: buffer.Pos{}, Head: d.Buffer.End()})
 	}
 	for _, lv := range levels {
@@ -81,8 +142,29 @@ func (d *Document) ExpandSelection() {
 		if from.Less(lvFrom) || lvTo.Less(to) || (lvFrom == from && lvTo == to) {
 			continue
 		}
+		if d.Sel != nil {
+			d.selHistory = append(d.selHistory, *d.Sel)
+		} else {
+			d.selHistory = append(d.selHistory, buffer.Selection{Anchor: d.Cursor, Head: d.Cursor})
+		}
 		d.SetRange(lvFrom, lvTo)
 		return
+	}
+}
+
+// ShrinkSelection restores the narrower selection from before the last ExpandSelection.
+func (d *Document) ShrinkSelection() {
+	if len(d.selHistory) == 0 {
+		return
+	}
+	prev := d.selHistory[len(d.selHistory)-1]
+	d.selHistory = d.selHistory[:len(d.selHistory)-1]
+	if prev.Anchor == prev.Head {
+		d.Cursor = prev.Head
+		d.Sel = nil
+	} else {
+		from, to := prev.Ordered()
+		d.SetRange(from, to)
 	}
 }
 

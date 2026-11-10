@@ -33,6 +33,8 @@ type Document struct {
 	Extra []Caret
 	// block is the block selection in progress, or nil. See blockStep.
 	Block *blockState
+	// selHistory records previous selections for ShrinkSelection.
+	selHistory []buffer.Selection
 	// Top is the index of the first line shown in the editor pane.
 	Top int
 	// seen is the caret as ensureVisible last saw it. The scroll-off margin

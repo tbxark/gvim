@@ -37,6 +37,9 @@
     "cmd.document_outline_desc": "List the symbols of the active document in an interactive outline",
     "cmd.show_breadcrumbs": "LSP: Show Breadcrumbs",
     "cmd.show_breadcrumbs_desc": "Show the enclosing symbol path for the current cursor position",
+    "cmd.breadcrumbs_picker": "LSP: Breadcrumbs Outline",
+    "cmd.breadcrumbs_picker_desc": "Navigate enclosing scope ancestors interactively",
+    "panel.breadcrumbs_title": "Enclosing Hierarchy (%{count})",
     "status.no_enclosing_symbol": "No enclosing symbol at cursor"
   },
   "zh-CN": {
@@ -77,6 +80,9 @@
     "cmd.document_outline_desc": "在交互式大纲中列出当前文件的代码符号",
     "cmd.show_breadcrumbs": "LSP: 符号面包屑",
     "cmd.show_breadcrumbs_desc": "显示当前光标位置的代码符号路径",
+    "cmd.breadcrumbs_picker": "LSP: 符号层级导航",
+    "cmd.breadcrumbs_picker_desc": "交互式查看并跳转当前光标所在代码的祖先作用域",
+    "panel.breadcrumbs_title": "外层作用域层级 (%{count})",
     "status.no_enclosing_symbol": "当前光标处无外层符号"
   },
   "zh": {
@@ -117,6 +123,9 @@
     "cmd.document_outline_desc": "在交互式大纲中列出当前文件的代码符号",
     "cmd.show_breadcrumbs": "LSP: 符号面包屑",
     "cmd.show_breadcrumbs_desc": "显示当前光标位置的代码符号路径",
+    "cmd.breadcrumbs_picker": "LSP: 符号层级导航",
+    "cmd.breadcrumbs_picker_desc": "交互式查看并跳转当前光标所在代码的祖先作用域",
+    "panel.breadcrumbs_title": "外层作用域层级 (%{count})",
     "status.no_enclosing_symbol": "当前光标处无外层符号"
   }
 }

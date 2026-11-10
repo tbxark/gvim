@@ -112,6 +112,8 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Ctrl+P` | Quick Open (Files, `>commands`, `:line`, `#buffers`) |
 | `Ctrl+Shift+P` | Open Command Palette directly |
 | `Ctrl+T` / `Ctrl+N` | New tab / buffer |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / Previous open buffer (notebook-friendly) |
+| `Ctrl+Shift+Space` / `Alt+Shift+Space` | Smart expand / shrink selection (word → brackets → line → block) |
 | `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
 | `Alt+J` | Flash Jump (2-character on-screen jump motion) |
 | `Ctrl+Shift+M` | Toggle Diagnostics Drawer (problems panel) |
@@ -147,6 +149,7 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `LSP: Incoming / Outgoing Calls` | Call Hierarchy: explore callers and callees |
 | `LSP: Document Outline` | Interactive code symbol outline for active file |
 | `LSP: Show Breadcrumbs` | Display enclosing symbol scope path (`Class > Method`) |
+| `LSP: Breadcrumbs Outline` | Interactive enclosing scope hierarchy picker to jump to parent function/class |
 | `List Bookmarks` | Interactive bookmarks picker (jump between slots 0–9) |
 
 ### Git & Review
@@ -158,6 +161,14 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
 | `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
 | `Merge: Conflict Resolution` | Jump between conflict markers (`Alt+M` mode or `Ctrl+Alt+C`) |
+
+### Scrollbar Overview Ruler
+The right vertical scrollbar track acts as a real-time overview ruler:
+- **Red marks**: LSP diagnostic errors located in the document.
+- **Yellow marks**: LSP diagnostic warnings.
+- **Blue marks**: Diagnostic informational hints.
+- **Green/Gutter marks**: Git added and modified regions.
+Allows scanning long files and spotting issues at a glance without having to scroll through thousands of lines.
 
 ### Sticky Scroll
 When scrolling down into long functions, classes, or code blocks, the top row of the editor pane automatically pins the enclosing declaration header (e.g. `func (m *Model) paintPanes(...) {`), ensuring you never lose your place while reading code. Can be toggled on or off via the `toggle_sticky_scroll` action.

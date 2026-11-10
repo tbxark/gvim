@@ -17,6 +17,10 @@ func registerTextCmdHandlers(h map[Action]handler) {
 		d.ExpandSelection()
 		return nil
 	})
+	h["shrink_selection"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
+		d.ShrinkSelection()
+		return nil
+	})
 	h["duplicate_line_above"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
 		d.DuplicateLines(true)
 		return nil

@@ -639,4 +639,60 @@ gvim.command.register {
   run = show_breadcrumbs,
 }
 
+local function open_breadcrumbs_picker()
+  local buf, path = buffer_state()
+  if not buf then
+    gvim.notify(t("status.no_file"))
+    return
+  end
+  local language = buf:language()
+  if not language then
+    gvim.notify(t("status.no_language"))
+    return
+  end
+  local result, err = gvim.lsp.request("textDocument/documentSymbol", {
+    textDocument = { uri = gvim.path.to_uri(path) },
+  }, { buf = buf })
+  if result == nil and err then
+    gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
+    return
+  end
+  local symbols = parse_symbols(result, buf)
+  if #symbols == 0 then
+    gvim.notify(t("status.no_symbols"))
+    return
+  end
+  local enclosing = collect_enclosing_symbols(symbols, buf:cursor().line)
+  if #enclosing == 0 then
+    gvim.notify(t("status.no_enclosing_symbol"))
+    return
+  end
+  local items = {}
+  for i, s in ipairs(enclosing) do
+    local label = kind_label(s.kind)
+    items[#items + 1] = {
+      path = path,
+      line = s.start_line,
+      col = s.name_col or 0,
+      label = string.format("%d. [%s] %s", i, label, s.name),
+      detail = string.format("Line %d", s.start_line + 1),
+    }
+  end
+  finder.read_snippets(items)
+  finder.open_locations {
+    title = t("panel.breadcrumbs_title", { count = #items }),
+    footer = t("panel.help"),
+    items = items,
+    on_jump = jump_to,
+  }
+end
+
+gvim.command.register {
+  name = "breadcrumbs_picker",
+  title = "%cmd.breadcrumbs_picker",
+  description = "%cmd.breadcrumbs_picker_desc",
+  run = open_breadcrumbs_picker,
+}
+
+
 gvim.log.debug("lsp navigation plugin loaded (shared gvim.finder)")

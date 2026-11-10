@@ -109,6 +109,7 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 		lspNavPlugin + ".show_outgoing_calls":    "LSP: Outgoing Calls",
 		lspNavPlugin + ".document_outline":       "LSP: Document Outline",
 		lspNavPlugin + ".show_breadcrumbs":       "LSP: Show Breadcrumbs",
+		lspNavPlugin + ".breadcrumbs_picker":     "LSP: Breadcrumbs Outline",
 	}
 	for id, title := range want {
 		if titles[id] != title {
@@ -117,6 +118,43 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 	}
 	if bindings := h.Host.Bindings[lspNavPlugin]; len(bindings) != 0 {
 		t.Errorf("bindings = %v, want none (Fresh binds none)", bindings)
+	}
+}
+
+
+func TestLSPNavigationBreadcrumbsPicker(t *testing.T) {
+	t.Parallel()
+	host, _ := lspNavHost(t)
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		if c.Method == "textDocument/documentSymbol" {
+			return []any{
+				map[string]any{
+					"name": "Server",
+					"kind": 5.0,
+					"range": map[string]any{
+						"start": map[string]any{"line": 1.0, "character": 0.0},
+						"end":   map[string]any{"line": 10.0, "character": 0.0},
+					},
+				},
+				map[string]any{
+					"name": "Start",
+					"kind": 12.0,
+					"range": map[string]any{
+						"start": map[string]any{"line": 2.0, "character": 0.0},
+						"end":   map[string]any{"line": 5.0, "character": 0.0},
+					},
+				},
+			}, ""
+		}
+		return nil, "unexpected " + c.Method
+	}
+	h := startLSPNav(t, host)
+	_ = host.SetCursor(host.Buffers[0].Info.ID, pluginapi.Pos{Line: 3, Col: 1}, false, false, false)
+	navRun(t, h, "breadcrumbs_picker")
+	h.CompleteLSP()
+	o := host.UI().Last("picker")
+	if o == nil {
+		t.Fatal("expected location picker for breadcrumbs outline, got nil")
 	}
 }
 

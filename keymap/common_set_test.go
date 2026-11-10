@@ -44,11 +44,11 @@ var presetCounts = []struct {
 	dock         int
 	file         int
 }{
-	{"default", 264, 262, 14, 151, 34, 7, 6, 6, 5, 30, 6, 3, 264},
-	{"macos", 325, 285, 14, 166, 38, 9, 6, 6, 5, 30, 8, 3, 61},
-	{"macos-gui", 377, 336, 16, 210, 38, 11, 6, 6, 5, 32, 9, 3, 52},
-	{"emacs", 362, 327, 14, 196, 42, 9, 9, 11, 5, 32, 6, 3, 98},
-	{"vscode", 275, 269, 14, 158, 34, 7, 6, 6, 5, 30, 6, 3, 11},
+	{"default", 269, 266, 14, 155, 34, 7, 6, 6, 5, 30, 6, 3, 269},
+	{"macos", 330, 289, 14, 170, 38, 9, 6, 6, 5, 30, 8, 3, 61},
+	{"macos-gui", 382, 340, 16, 214, 38, 11, 6, 6, 5, 32, 9, 3, 52},
+	{"emacs", 367, 331, 14, 200, 42, 9, 9, 11, 5, 32, 6, 3, 98},
+	{"vscode", 280, 273, 14, 162, 34, 7, 6, 6, 5, 30, 6, 3, 11},
 }
 
 func TestPresetBindingCounts(t *testing.T) {
@@ -175,6 +175,10 @@ func TestGvimExtensions(t *testing.T) {
 		{"default", keymap.ContextNormal, []string{"alt+z"}, "toggle_fold"},
 		{"default", keymap.ContextNormal, []string{"alt+shift+z"}, "fold_all"},
 		{"default", keymap.ContextNormal, []string{"alt+F12"}, "lsp_peek_definition"},
+		{"default", keymap.ContextNormal, []string{"ctrl+Tab"}, "next_buffer"},
+		{"default", keymap.ContextNormal, []string{"ctrl+shift+Tab"}, "prev_buffer"},
+		{"default", keymap.ContextNormal, []string{"ctrl+shift+space"}, "expand_selection"},
+		{"default", keymap.ContextNormal, []string{"alt+shift+space"}, "shrink_selection"},
 		{"default", keymap.ContextNormal, []string{"ctrl+alt+d"}, "git_gutter.next_change"},
 		{"macos", keymap.ContextNormal, []string{"ctrl+alt+."}, "lsp_peek_definition"},
 		{"default", keymap.ContextNormal, []string{"ctrl+backslash"}, "split_vertical"},
