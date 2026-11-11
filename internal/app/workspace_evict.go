@@ -166,7 +166,7 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept
 	if err := m.quiesceModelForTeardown(sess); err != nil {
 		return true, err
 	}
-	sess.rt.exit()
+	sess.rt.shutdown()
 	m.mu.Lock()
 	delete(m.sessions, sess.ws.File.StableID)
 	h := m.host
@@ -174,7 +174,7 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept
 
 	msg := appTextVars("gvim.workspace.report_evicted", "Evicted workspace %{label} from memory (limit %{limit} materialized workspaces)", map[string]any{"label": fmt.Sprintf("%q", label), "limit": cap})
 	if captureErr != nil {
-		msg += appTextVars("gvim.workspace.report_evicted_capture", "%{message}; its capture write failed (%{error}) but the fallback save kept the session", map[string]any{"message": msg, "error": captureErr})
+		msg = appTextVars("gvim.workspace.report_evicted_capture", "%{message}; its capture write failed (%{error}) but the fallback save kept the session", map[string]any{"message": msg, "error": captureErr})
 	}
 	m.mu.Lock()
 	m.lastEviction = msg

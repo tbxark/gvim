@@ -288,7 +288,11 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 			}
 			d.GutterStyle, err = styleFromLua(t.RawGetString("gutter_style"))
 			if err == nil {
-				d.GutterStyle.FG, _ = func() (pluginapi.Color, error) { return colorFromLua(t.RawGetString("gutter_color")) }()
+				// gutter_color is a shorthand for gutter_style.fg: it does not clear one.
+				var c pluginapi.Color
+				if c, err = colorFromLua(t.RawGetString("gutter_color")); err == nil && c.Set {
+					d.GutterStyle.FG = c
+				}
 			}
 			d.ComposeOnly = o.boolean("compose_only", false)
 			d.Activation, _ = activationFromLua(t.RawGetString("activation"))
@@ -521,12 +525,21 @@ func installDecor(e *apiEnv) {
 		if !above {
 			d.Kind = pluginapi.DecorVirtualLineBelow
 		}
-		d.Style, _ = styleFromLua(o.get("style"))
+		var err error
+		if d.Style, err = styleFromLua(o.get("style")); err != nil {
+			return bufRet(L, invalidErr("style: %v", err))
+		}
 		if g, ok := o.get("gutter_glyph").(lua.LString); ok {
 			d.GutterText = clipText(string(g), 8)
 		}
-		d.GutterStyle, _ = styleFromLua(o.get("gutter_style"))
-		if c, err := colorFromLua(o.get("gutter_color")); err == nil {
+		if d.GutterStyle, err = styleFromLua(o.get("gutter_style")); err != nil {
+			return bufRet(L, invalidErr("gutter_style: %v", err))
+		}
+		c, err := colorFromLua(o.get("gutter_color"))
+		if err != nil {
+			return bufRet(L, invalidErr("gutter_color: %v", err))
+		}
+		if c.Set {
 			d.GutterStyle.FG = c
 		}
 		d.Activation, _ = activationFromLua(o.get("activation"))

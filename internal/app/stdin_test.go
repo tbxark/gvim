@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 )
@@ -207,5 +209,27 @@ func TestBuildRuntimeStdinBeforeFiles(t *testing.T) {
 	}
 	if doc := rt.ed.Active(); doc == nil || doc.Name() != "a.txt" {
 		t.Errorf("active = %v, want the file argument", doc.Name())
+	}
+}
+
+// TestReadStdinContextStopsOnCancel checks a pipe that never closes does not hold the
+// launch once the context ends (Ctrl-C while "tail -f x | gvim" waits).
+func TestReadStdinContextStopsOnCancel(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := readStdinContext(ctx, pr, MaxStdinBytes)
+		done <- err
+	}()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want the cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read did not stop when the context ended")
 	}
 }

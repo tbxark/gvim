@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/trust"
@@ -139,3 +141,52 @@ func TestProviderRefreshOnInputChange(t *testing.T) {
 }
 
 var _ = trust.DetectedEnv{}
+
+// TestProviderCaptureDoesNotBlockReaders checks the status readers answer while a slow
+// activation shell runs, and a second spawn waits for the same capture instead of
+// running the shells again.
+func TestProviderCaptureDoesNotBlockReaders(t *testing.T) {
+	root := t.TempDir()
+	release, entered := make(chan struct{}), make(chan struct{}, 4)
+	var mu sync.Mutex
+	calls := 0
+	p := New(root, nil, func() bool { return true })
+	p.SetRunner(func(_, command string) (string, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		entered <- struct{}{}
+		<-release
+		if strings.Contains(command, "set -a") {
+			return "C=4\x00", nil
+		}
+		return "", nil
+	})
+	if err := p.Set("export C=4", root, config.EnvKindShell); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan []string, 2)
+	go func() { results <- p.Overlay() }()
+	<-entered // the capture is running
+	go func() { results <- p.Overlay() }()
+	read := make(chan struct{})
+	go func() {
+		_ = p.Info()
+		_ = p.LastError()
+		close(read)
+	}()
+	select {
+	case <-read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the readers waited for the activation shell")
+	}
+	close(release)
+	for range 2 {
+		if got := <-results; len(got) != 1 || got[0] != "C=4" {
+			t.Fatalf("overlay = %v, want [C=4]", got)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("shells run = %d, want one capture (baseline and activation)", calls)
+	}
+}

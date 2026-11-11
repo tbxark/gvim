@@ -539,12 +539,14 @@ func scrollFollow(anchors []pluginapi.ScrollAnchor, line int, fromLeft bool) int
 		}
 	}
 	lastA, lastB := at(anchors[len(anchors)-1])
-	prevA, prevB := at(anchors[len(anchors)-2])
 	slope := 1
-	if lastA != prevA {
-		slope = (lastB - prevB) / (lastA - prevA)
-		if slope == 0 {
-			slope = 1
+	if len(anchors) > 1 {
+		prevA, prevB := at(anchors[len(anchors)-2])
+		if lastA != prevA {
+			slope = (lastB - prevB) / (lastA - prevA)
+			if slope == 0 {
+				slope = 1
+			}
 		}
 	}
 	return max(lastB+(line-lastA)*slope, 0)

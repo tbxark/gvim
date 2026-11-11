@@ -149,15 +149,18 @@ func (m *Model) inspectThemeAt(x, y int) {
 	if hasPos {
 		add(fmt.Sprintf("Buffer: line %d, col %d", pos.Line+1, pos.Col+1), nil, false)
 	}
-	// Context facts that pick a role among keys with the same color.
-	cur := doc.Cursor()
-	add(fmt.Sprintf("Current line: %s", yesNo(hasPos && pos.Line == cur.Line)), nil, false)
-	if a, h, ok := doc.Selection(); ok && hasPos {
-		from, to := buffer.Selection{Anchor: a, Head: h}.Ordered()
-		inSel := !pos.Less(from) && !to.Less(pos)
-		add("Selection: "+yesNo(inSel), nil, false)
-	} else {
-		add("Selection: no", nil, false)
+	// Context facts that pick a role among keys with the same color. The welcome
+	// screen has no document.
+	if doc != nil {
+		cur := doc.Cursor()
+		add(fmt.Sprintf("Current line: %s", yesNo(hasPos && pos.Line == cur.Line)), nil, false)
+		if a, h, ok := doc.Selection(); ok && hasPos {
+			from, to := buffer.Selection{Anchor: a, Head: h}.Ordered()
+			inSel := !pos.Less(from) && !to.Less(pos)
+			add("Selection: "+yesNo(inSel), nil, false)
+		} else {
+			add("Selection: no", nil, false)
+		}
 	}
 	if m.findBar != nil {
 		if q := m.findBar.Query(); q.Text != "" {

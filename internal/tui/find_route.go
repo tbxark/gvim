@@ -26,7 +26,7 @@ var errSearchUnsupported = errors.New("search is not supported in this port")
 
 // searchPort is the search surface of the editor over the active document. The
 // app adapter implements it, and the root asserts it on EditorState, as it does
-// for fileEditor. The matches come from internal/search over the document's
+// for fileEditor. The matches come from the search package over the document's
 // buffer. Each replacement is one undo step.
 type searchPort interface {
 	FindMatches(q search.Query) ([]search.Match, error)

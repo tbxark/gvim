@@ -108,12 +108,12 @@ type realDialogs struct {
 }
 
 func (d *realDialogs) Unsaved(name string, tag any, ov style.Overlay) Overlay {
-	return WrapDialog(dialog.NewUnsavedChanges(d.clock, name, tag, ov))
+	return dialog.NewUnsavedChanges(d.clock, name, tag, ov)
 }
 
 func (d *realDialogs) SaveAs(path string, tag any, ov style.Overlay) Overlay {
 	d.paths = append(d.paths, path)
-	return WrapDialog(dialog.NewSaveAs(d.clock, path, tag, dialog.PathChecks{}, ov))
+	return dialog.NewSaveAs(d.clock, path, tag, dialog.PathChecks{}, ov)
 }
 
 // TestSaveAsReplacesPrefillAfterTwoUntitledBuffers types a name into the Save

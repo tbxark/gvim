@@ -685,7 +685,7 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 		if st, ok := s.structureLanguageChild(object, rest); ok {
 			return st, nil
 		}
-		return s.structureLanguageFields(object, rest), nil
+		return s.structureLanguageFields(cfg, object, rest), nil
 	case structureKey == "editor.status_bar", structureKey == "editor.status_bar.left", structureKey == "editor.status_bar.right":
 		return s.structureStatusBar(cfg, object, structureKey), nil
 	case structureKey == "terminal.shell.args":
@@ -825,7 +825,7 @@ func (s *settingsService) structureLanguages(object map[string]json.RawMessage) 
 // filenames, formatter, on_save, indent). A field the layer does not set is
 // marked Inherited and shows the value it inherits; Enter writes an override and
 // Del removes one.
-func (s *settingsService) structureLanguageFields(object map[string]json.RawMessage, id string) tui.SettingsStructure {
+func (s *settingsService) structureLanguageFields(cfg config.Config, object map[string]json.RawMessage, id string) tui.SettingsStructure {
 	st := tui.SettingsStructure{Key: "languages." + id, Title: settingsLanguageTitle(id), Kind: "fields"}
 	st.Note = "Enter overrides a field, Del removes the override (inherit). The on_save JSON page edits the whole array; lists and the formatter are written whole."
 	entry, _ := layerObjectAt(object, []string{"languages", id})
@@ -840,7 +840,7 @@ func (s *settingsService) structureLanguageFields(object map[string]json.RawMess
 		} else {
 			row.Inherited = true
 			row.Note = "inherit"
-			if v, ok := s.cfg.LanguageInheritedValue(id, field.Key); ok {
+			if v, ok := cfg.LanguageInheritedValue(id, field.Key); ok {
 				row.Value = v
 			}
 		}

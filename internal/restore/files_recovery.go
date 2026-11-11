@@ -201,9 +201,25 @@ func restoreCrash(ed *editor.Editor, dir string) (failed []Unrestored, n int, sp
 	if len(failed) == 0 {
 		return nil, len(s.Files), true
 	}
-	_ = os.RemoveAll(dir + ".failed")
-	_ = os.Rename(dir, dir+".failed")
+	moveAside(dir)
 	return failed, len(s.Files) - len(failed), false
+}
+
+// moveAside moves the copy in dir to dir+".failed". Only the files move: the legacy
+// copy lives in the recovery root itself, next to the per-process directories of the
+// runs that may still be editing, and those must stay where their writers look.
+func moveAside(dir string) {
+	aside := dir + ".failed"
+	_ = os.RemoveAll(aside)
+	entries, err := os.ReadDir(dir)
+	if err != nil || os.Mkdir(aside, 0o700) != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			_ = os.Rename(filepath.Join(dir, e.Name()), filepath.Join(aside, e.Name()))
+		}
+	}
 }
 
 // clearRecovery empties the copy in dir: a clean exit has nothing to recover.

@@ -180,7 +180,7 @@ dock terminal's `Launch`, with the environment-aware hook) covers git/find one-s
 editor shell/formatter runner and the integrated terminal; `internal/pluginhost`'s OS runs
 it before every plugin `gvim.proc.run/spawn`; `lsp/manager` runs it in `launch` before
 `lsp.Start`, so auto-start, manual Start/Restart and universal servers are all covered.
-Only the local backend is gated: a remote launch (`internal/authority` SSH) keeps the
+Only the local backend is gated: a remote launch (`authority` SSH) keeps the
 coarse rule in the app (untrusted remote → remote commands denied) because a remote trust
 store is deferred to #21; its helper filesystem runs commands on the remote host, where a
 remote path policy would be a different decision.

@@ -447,3 +447,17 @@ func TestEditorMenuDisablesEditsOnAReadOnlyDocument(t *testing.T) {
 		}
 	}
 }
+
+func TestRelativePathKeepsDotDotNamesInsideTheRoot(t *testing.T) {
+	m := newTestModel(t, newFakeEditor("x"), newFakeTree(1), 80, 24)
+	for _, c := range []struct{ path, want string }{
+		{"/ws/a.go", "a.go"},
+		{"/ws/..foo", "..foo"},
+		{"/ws/..", "/ws/.."},
+		{"/other/a.go", "/other/a.go"},
+	} {
+		if got := m.relativePath(c.path); got != c.want {
+			t.Errorf("relativePath(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}

@@ -84,10 +84,13 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 	}
-	// A pipe on standard input with no files named is buffer content, as in Fresh
-	// ("git show | gvim"): consume it even without --stdin. A launch that asks for
-	// stdin explicitly must have a pipe: a terminal would block forever on a read.
-	if !serveDaemon && !opts.StdinLaunch() && len(opts.Files) == 0 && !term.IsTerminal(os.Stdin.Fd()) {
+	// A pipe on standard input with nothing named to open is buffer content, as in
+	// Fresh ("git show | gvim"): consume it even without --stdin. A folder, a remote
+	// target or --restore names what to open, as files do, so their stdin stays unread.
+	// A launch that asks for stdin explicitly must have a pipe: a terminal would block
+	// forever on a read.
+	if !serveDaemon && !opts.StdinLaunch() && len(opts.Files) == 0 && opts.Root == "" &&
+		opts.Remote == nil && !opts.Restore && !term.IsTerminal(os.Stdin.Fd()) {
 		opts.ReadStdin = true
 		opts.ReadOnly = true
 	}
@@ -96,7 +99,7 @@ func Run(ctx context.Context, opts Options) error {
 		if term.IsTerminal(os.Stdin.Fd()) {
 			return errors.New("stdin: no data piped to standard input (--stdin or - needs a pipe)")
 		}
-		data, err := readStdin(os.Stdin, MaxStdinBytes)
+		data, err := readStdinContext(ctx, os.Stdin, MaxStdinBytes)
 		if err != nil {
 			return err
 		}
@@ -217,6 +220,13 @@ func (r *runtime) exit() {
 	// the documents.
 	r.model.Close()
 	r.ed.Close()
+}
+
+// shutdown is exit followed by close: the end of a daemon workspace's runtime, which
+// no deferred close in Run covers.
+func (r *runtime) shutdown() {
+	r.exit()
+	r.close()
 }
 
 // runtime is a built session: the UI model, the editor it shows, and the resources
@@ -928,9 +938,6 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			recoverySession = opts.SessionDir
 		}
 		recPort, recEvery, recNotice = setupRemoteRecovery(ed, cfg, recoverySession, "SSH:"+remoteTrustTarget(opts.Remote))
-		if recNotice != "" {
-			openNotices = append(openNotices, recNotice)
-		}
 		deps.Root.Recovery, deps.Root.RecoveryEvery = recPort, recEvery
 		remoteRecoveryPath = restore.RecoveryDirFor(recoverySession, true)
 		// LSP over SSH: the servers run on the remote host through the slot's
@@ -1189,9 +1196,6 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	if recNotice != "" {
 		notices = append(notices, recNotice)
-	}
-	if logNotice != "" {
-		notices = append(notices, logNotice)
 	}
 	if opts.Remote != nil {
 		notices = append(notices, remoteEditingNotice(opts.Remote, deps.StartupOpen))

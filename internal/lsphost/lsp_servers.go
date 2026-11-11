@@ -145,14 +145,6 @@ func (p *lspPlan) put(spec manager.Spec, configs []manager.ServerConfig, state t
 			}
 		}
 	}
-	for _, cfg := range configs {
-		if cfg.AutoStart {
-			for _, name := range spec.Names() {
-				p.info[name] = tui.LSPServerInfo{State: state, Language: spec.Language, Command: command, Install: install}
-			}
-			break
-		}
-	}
 }
 
 // anyAutoStart reports whether one of the servers starts on its own.
@@ -287,6 +279,8 @@ func cppSibling(dir string) bool {
 // Server describes the server of a language from the configuration. It does no
 // lookup, so the messages can say why a language has no running server.
 func (p *lspPort) Server(languageID string) tui.LSPServerInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if info, ok := p.info[languageID]; ok {
 		return info
 	}

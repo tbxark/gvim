@@ -399,7 +399,6 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 	return pane
 }
 
-
 // overviewRulerMarks populates the scrollbar overview marks with LSP diagnostics.
 func (m *Model) overviewRulerMarks(pane editorpane.Pane, doc Document) editorpane.Pane {
 	if doc == nil || doc.LineCount() <= 0 {

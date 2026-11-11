@@ -30,7 +30,7 @@ func TestFontServesTheFileGiven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := &debugger{font: tt.font, state: "stopped"}
 			rec := httptest.NewRecorder()
-			d.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/font", nil))
+			d.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/font", nil))
 			if rec.Code != tt.code {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.code)
 			}

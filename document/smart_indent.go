@@ -31,7 +31,10 @@ func leadColumns(line []rune, limit, tabSize int) int {
 		case ' ':
 			w++
 		case '\t':
-			w += tabSize
+			// A tab advances to the next tab stop, as the display draws it.
+			if tabSize > 0 {
+				w = (w/tabSize + 1) * tabSize
+			}
 		default:
 			return w
 		}

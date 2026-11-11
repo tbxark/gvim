@@ -215,7 +215,7 @@ func (p *Palette) paint(g *grid.Grid) {
 	p.paintPreview(g, geo)
 	p.chrome.ov.PaintFooter(g, geo.left, geo.bottom, boxW, p.hint())
 	g.Fill(geo.left+1, geo.right, geo.inputY, p.chrome.input)
-	p.drawInput(g, geo.inputY, geo.nameX)
+	p.drawInput(g, geo.inputY, geo.nameX, geo.textEnd)
 }
 
 // hint is the text on the bottom border: the mode prefixes of the file, command, line
@@ -345,10 +345,11 @@ func (p *Palette) drawName(g *grid.Grid, geo geometry, y int, r row, st grid.Sty
 	}
 }
 
-// drawInput writes the query on row y from column x0 and reverses the cell under
-// the caret. The row scrolls so that the caret stays in view.
-func (p *Palette) drawInput(g *grid.Grid, y, x0 int) {
-	w := g.Width()
+// drawInput writes the query on row y in [x0, w) and reverses the cell under the
+// caret. The row scrolls so that the caret stays in view; the text never reaches
+// the card's border at w.
+func (p *Palette) drawInput(g *grid.Grid, y, x0, w int) {
+	w = min(w, g.Width())
 	x0 = min(x0, max(w-1, 0))
 	runes := []rune(p.input.Value())
 	pos := min(max(p.input.Position(), 0), len(runes))

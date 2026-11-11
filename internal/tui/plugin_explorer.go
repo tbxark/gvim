@@ -80,15 +80,19 @@ func (pe *pluginExplorer) countPlugin(plugin string) int {
 	return n
 }
 
-// drop forgets one namespace, and the key when it has nothing left.
-func (pe *pluginExplorer) drop(plugin, ns string) {
+// drop forgets one namespace's decorations or its slots, and the key when it has
+// nothing left.
+func (pe *pluginExplorer) drop(plugin, ns string, decos bool) {
 	key := plugin + "\x00" + ns
 	s := pe.sets[key]
 	if s == nil {
 		return
 	}
-	delete(s.decos, "")
-	delete(s.slots, "")
+	if decos {
+		s.decos = nil
+	} else {
+		s.slots = nil
+	}
 	if len(s.decos) == 0 && len(s.slots) == 0 {
 		delete(pe.sets, key)
 	}
@@ -184,7 +188,7 @@ func (h *pluginHost) SetExplorerDecorations(plugin, ns string, list []pluginapi.
 
 // ClearExplorerDecorations removes a namespace's decorations (its slots stay).
 func (h *pluginHost) ClearExplorerDecorations(plugin, ns string) {
-	h.model().plug.explorer.drop(plugin, ns)
+	h.model().plug.explorer.drop(plugin, ns, true)
 }
 
 // SetExplorerSlots replaces one namespace's slot overrides.
@@ -237,7 +241,7 @@ func (h *pluginHost) SetExplorerSlots(plugin, ns string, list []pluginapi.FileEx
 
 // ClearExplorerSlots removes a namespace's slot overrides (its decorations stay).
 func (h *pluginHost) ClearExplorerSlots(plugin, ns string) {
-	h.model().plug.explorer.drop(plugin, ns)
+	h.model().plug.explorer.drop(plugin, ns, false)
 }
 
 // cleanSlotText sanitizes a slot text and reserves its caps.

@@ -93,3 +93,38 @@ func containsAll(s string, subs ...string) bool {
 	}
 	return true
 }
+
+const gutterStylePlugin = `
+local gvim = require 'gvim'
+gvim.command.register{ name = "go", run = function()
+  local buf = gvim.buf.current()
+  local ns = gvim.decor.namespace("g")
+  gvim.notify("set:" .. tostring(ns:set(buf, {
+    { kind = "virtual_line_above", line = 1, text = "x", gutter_glyph = "+", gutter_style = { fg = "#00ff00" } },
+  })))
+  local _, err = gvim.decor.add_virtual_line(buf, 1, "y", { gutter_color = "#nothex" })
+  gvim.notify("bad:" .. tostring(err))
+end }
+`
+
+// TestVirtualLineGutterStyleKeepsItsColor checks gutter_style.fg survives when no
+// gutter_color is given, and a bad gutter_color is an error, not silently dropped.
+func TestVirtualLineGutterStyleKeepsItsColor(t *testing.T) {
+	h := plugintest.New(t, plugintest.Files{"g.lua": gutterStylePlugin}, plugintest.Options{})
+	h.Start()
+	id := h.Host.AddBuffer("/w/a.go", "a\nb\n")
+	if err := h.Run("g.go", nil); err != nil {
+		t.Fatal(err)
+	}
+	items := h.Host.Decor().Items("g", "g", id)
+	if len(items) != 1 || !items[0].GutterStyle.FG.Set || items[0].GutterStyle.FG.G != 255 {
+		t.Fatalf("items = %+v, want the gutter_style fg kept", items)
+	}
+	joined := ""
+	for _, n := range h.NoticeTexts() {
+		joined += n + "|"
+	}
+	if !containsAll(joined, "set:true|", "bad:invalid") {
+		t.Fatalf("notices = %q, want the bad gutter_color refused", joined)
+	}
+}

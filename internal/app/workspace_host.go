@@ -458,8 +458,6 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 		m.mu.Unlock()
 		return
 	}
-	sess := m.sessions[m.active]
-	_ = sess
 	targetID := m.pendingID
 	if m.evicting[targetID] {
 		m.pendingID = ""
@@ -601,13 +599,13 @@ func (m *workspaceManager) beginSelect(id string) (func() error, error) {
 			}
 			m.mu.Unlock()
 			if stale {
-				sess.rt.exit()
+				sess.rt.shutdown()
 				err = errWorkspaceStale
 			} else if !m.runOnUI(func() { m.applyCommit(seq) }) {
 				m.mu.Lock()
 				delete(m.sessions, id)
 				m.mu.Unlock()
-				sess.rt.exit()
+				sess.rt.shutdown()
 				err = errors.New("workspace: the daemon is not ready")
 			}
 		}
@@ -870,7 +868,7 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 			m.notify(err)
 			return err
 		}
-		sess.rt.exit()
+		sess.rt.shutdown()
 		m.releasePluginWorkspace(sess)
 	}
 	m.mu.Lock()

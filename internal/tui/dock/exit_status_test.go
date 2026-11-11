@@ -225,7 +225,7 @@ func TestExitMarkerAppearsAtExit(t *testing.T) {
 	if !p.exitMarkerPending() {
 		t.Fatal("the exit marker is not pending at the exit")
 	}
-	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+	if got, ok := p.combinedText(p.combined()-1, false); !ok || got != terminalExitMarker {
 		t.Fatalf("last transcript row at exit = %q, %v", got, ok)
 	}
 	// It is visible WITHOUT saving or a manual Ctrl+Space: the exit opens the
@@ -287,7 +287,7 @@ func TestExitMarkerNotDuplicatedAfterRestore(t *testing.T) {
 	if p.exitMarkerPending() {
 		t.Fatal("a restored marker row became a synthetic row too")
 	}
-	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+	if got, ok := p.combinedText(p.combined()-1, false); !ok || got != terminalExitMarker {
 		t.Fatalf("restored last row = %q, %v", got, ok)
 	}
 	st := tabs.SavedState()
@@ -323,7 +323,7 @@ func TestExitAutoScrollbackToggleKeepsOutputAndMarker(t *testing.T) {
 	if _, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}); !ok || !p.Scrolling() {
 		t.Fatalf("Ctrl+Space back to the transcript: taken %v scrolling %v", ok, p.Scrolling())
 	}
-	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+	if got, ok := p.combinedText(p.combined()-1, false); !ok || got != terminalExitMarker {
 		t.Fatalf("transcript last row = %q, %v", got, ok)
 	}
 	g = grid.New(l.W, l.H)
@@ -368,7 +368,7 @@ func TestExitMarkerAppearsWhenTheDockWasHidden(t *testing.T) {
 	if !p.Scrolling() {
 		t.Fatal("the hidden exit did not open the transcript after layout")
 	}
-	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+	if got, ok := p.combinedText(p.combined()-1, false); !ok || got != terminalExitMarker {
 		t.Fatalf("transcript last row = %q, %v", got, ok)
 	}
 	if got := p.title(); !strings.Contains(got, "(exited)") {
@@ -397,7 +397,7 @@ func TestAltScreenExitShowsFrozenFrameAndOneMarker(t *testing.T) {
 	if got := p.title(); !strings.Contains(got, "(exited)") {
 		t.Fatalf("alt exit title = %q, want the exit named", got)
 	}
-	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+	if got, ok := p.combinedText(p.combined()-1, false); !ok || got != terminalExitMarker {
 		t.Fatalf("alt transcript last row = %q, %v", got, ok)
 	}
 	// The frame is not overwritten: output above, marker below, in the pager.
@@ -560,7 +560,7 @@ func TestDockShowKeepsTheExitedTranscript(t *testing.T) {
 	if !p.Scrolling() {
 		t.Fatal("reopening the dock did not show the exited transcript")
 	}
-	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+	if got, ok := p.combinedText(p.combined()-1, false); !ok || got != terminalExitMarker {
 		t.Fatalf("reopened transcript last row = %q, %v", got, ok)
 	}
 	if got := p.title(); !strings.Contains(got, "(exited)") {

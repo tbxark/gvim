@@ -14,15 +14,22 @@ const (
 	// trustUnavailableNotice is Fresh's trust.unavailable: the session could not
 	// build a trust store, so there is no decision to show or take.
 	trustUnavailableNotice = "Workspace trust is unavailable in this workspace"
-	// trustTrustedNotice, trustRestrictedNotice and trustBlockedNotice are
-	// Fresh's trust.now_* messages, shown when a decision is recorded.
 )
 
-var (
-	trustTrustedNotice    = uiText("gvim.notice.trusted", "Workspace trusted — project tooling may run processes")
-	trustRestrictedNotice = uiText("gvim.notice.restricted", "Workspace restricted — repo-controlled execution is blocked")
-	trustBlockedNotice    = uiText("gvim.notice.blocked", "Workspace blocked — no processes will run")
-)
+// trustTrustedNotice, trustRestrictedNotice and trustBlockedNotice are Fresh's
+// trust.now_* messages, shown when a decision is recorded. They are looked up when
+// shown, so they follow a locale change.
+func trustTrustedNotice() string {
+	return uiText("gvim.notice.trusted", "Workspace trusted — project tooling may run processes")
+}
+
+func trustRestrictedNotice() string {
+	return uiText("gvim.notice.restricted", "Workspace restricted — repo-controlled execution is blocked")
+}
+
+func trustBlockedNotice() string {
+	return uiText("gvim.notice.blocked", "Workspace blocked — no processes will run")
+}
 
 // trustDecidedMsg is the result of the command that records a trust decision:
 // the state after it, and why the decision was not saved when it was not.
@@ -190,10 +197,10 @@ func (m *Model) applyTrustState(state trust.State) tea.Cmd {
 func trustNotice(level trust.Level) string {
 	switch level {
 	case trust.Trusted:
-		return trustTrustedNotice
+		return trustTrustedNotice()
 	case trust.Blocked:
-		return trustBlockedNotice
+		return trustBlockedNotice()
 	default:
-		return trustRestrictedNotice
+		return trustRestrictedNotice()
 	}
 }

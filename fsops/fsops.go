@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 var (
@@ -51,76 +50,6 @@ func CreateFile(path string) error {
 func Mkdir(path string) error {
 	if err := os.Mkdir(path, 0o755); err != nil {
 		return opError("mkdir", path, err)
-	}
-	return nil
-}
-
-// Rename renames oldPath to newPath. Both are full paths. Renaming an entry
-// to its own name is a no-op. If newPath exists and is a different entry,
-// Rename fails with an error wrapping ErrConflict and nothing is changed.
-// Case-only renames on case-insensitive filesystems are allowed.
-func Rename(oldPath, newPath string) error {
-	oldInfo, err := os.Lstat(oldPath)
-	if err != nil {
-		return opError("rename", oldPath, err)
-	}
-	newInfo, err := os.Lstat(newPath)
-	if err == nil {
-		if !os.SameFile(oldInfo, newInfo) {
-			return fmt.Errorf("fsops: rename to %s: %w", newPath, ErrConflict)
-		}
-		if oldPath == newPath {
-			return nil
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return opError("rename", newPath, err)
-	}
-	if err := os.Rename(oldPath, newPath); err != nil {
-		return opError("rename", oldPath, err)
-	}
-	return nil
-}
-
-// Move moves src into the directory dstDir, keeping its base name. If src
-// already lives in dstDir the call is a no-op, matching Fresh's same-directory
-// cut. It fails with ErrConflict if dstDir already holds an entry with that
-// name, and with ErrInvalidDest if dstDir is not a directory or lies inside
-// src. Across filesystems it copies and then removes src.
-func Move(src, dstDir string) error {
-	if _, err := os.Lstat(src); err != nil {
-		return opError("move", src, err)
-	}
-	dirInfo, err := os.Stat(dstDir)
-	if err != nil {
-		return opError("move", dstDir, err)
-	}
-	if !dirInfo.IsDir() {
-		return fmt.Errorf("fsops: move to %s: not a directory: %w", dstDir, ErrInvalidDest)
-	}
-	if filepath.Clean(filepath.Dir(src)) == filepath.Clean(dstDir) {
-		return nil
-	}
-	if contains(src, dstDir) {
-		return fmt.Errorf("fsops: move %s into %s: %w", src, dstDir, ErrInvalidDest)
-	}
-	dst := filepath.Join(dstDir, filepath.Base(src))
-	if _, err := os.Lstat(dst); err == nil {
-		return fmt.Errorf("fsops: move to %s: %w", dst, ErrConflict)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return opError("move", dst, err)
-	}
-	renameErr := os.Rename(src, dst)
-	if renameErr == nil {
-		return nil
-	}
-	if !errors.Is(renameErr, syscall.EXDEV) {
-		return opError("move", src, renameErr)
-	}
-	if err := Copy(src, dst, Cancel); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(src); err != nil {
-		return fmt.Errorf("fsops: move %s: copied to %s but could not remove source: %w", src, dst, err)
 	}
 	return nil
 }

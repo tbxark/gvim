@@ -1,18 +1,23 @@
 package fsops
 
-// Local no-replace rename and move. There is no portable atomic rename-new on every
-// supported local filesystem (os.Rename replaces an existing destination), so these
-// operations use the same bounded copy-and-remove shape as the remote authority path:
-// the destination is published with the ordinary no-replace copy (O_EXCL files,
-// os.Mkdir directories, O_EXCL-like symlinks), and the source is removed only after the
-// whole copy succeeded. A target that exists reports a conflict and the source stays.
+// Local no-replace rename and move. os.Rename replaces an existing destination, so these
+// use the platform's rename that refuses one instead (renameat2 RENAME_NOREPLACE on
+// Linux, renamex_np RENAME_EXCL on macOS, MoveFileEx without replace on Windows): one
+// step, whatever the size of the tree, keeping times, links and attributes. Where that
+// is not available (another device, a filesystem or platform without it) they fall back
+// to the bounded copy-and-remove shape of the remote authority path: the destination is
+// published with the ordinary no-replace copy (O_EXCL files, os.Mkdir directories,
+// O_EXCL-like symlinks), and the source is removed only after the whole copy succeeded.
+// A target that exists reports a conflict and the source stays.
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -23,10 +28,9 @@ const (
 	localRenameMaxDepth   = 64
 )
 
-// RenameNoReplace renames oldPath to newPath without replacing an existing target. It
-// copies first (bounded) and removes the source only after the copy succeeded; a failure
-// leaves the source and reports it. The destination is published with no-replace creates,
-// so a concurrent creator gets a conflict instead of being overwritten.
+// RenameNoReplace renames oldPath to newPath without replacing an existing target. A
+// rename to a name that differs only in case (the same file on a case-insensitive
+// filesystem) is allowed. A failure leaves the source and reports it.
 func RenameNoReplace(oldPath, newPath string) error {
 	_, err := RenameNoReplaceResult(oldPath, newPath)
 	return err
@@ -36,18 +40,26 @@ func RenameNoReplace(oldPath, newPath string) error {
 // no-hard-link O_EXCL fallback). Callers that show a status notice use it.
 func RenameNoReplaceResult(oldPath, newPath string) (CopyResult, error) {
 	oldPath, newPath = cleanPath(oldPath), cleanPath(newPath)
+	oldInfo, err := os.Lstat(oldPath)
+	if err != nil {
+		return CopyResult{}, opError("rename", oldPath, err)
+	}
 	if oldPath == newPath {
-		if _, err := os.Lstat(oldPath); err != nil {
+		return CopyResult{}, nil
+	}
+	if newInfo, err := os.Lstat(newPath); err == nil && os.SameFile(oldInfo, newInfo) {
+		// A case-only rename: the "existing target" is the source itself.
+		if err := os.Rename(oldPath, newPath); err != nil {
 			return CopyResult{}, opError("rename", oldPath, err)
 		}
 		return CopyResult{}, nil
 	}
-	return copyThenRemove(oldPath, newPath)
+	return renameOrCopy("rename", oldPath, newPath)
 }
 
 // MoveNoReplace moves src into dstDir keeping its name, without replacing an existing
-// destination. A move within the source's own directory is a no-op. It uses the same
-// bounded copy-and-remove path as RenameNoReplace.
+// destination. A move within the source's own directory is a no-op. It renames, or
+// copies and removes, as RenameNoReplace does.
 func MoveNoReplace(src, dstDir string) error {
 	_, err := MoveNoReplaceResult(src, dstDir)
 	return err
@@ -72,7 +84,43 @@ func MoveNoReplaceResult(src, dstDir string) (CopyResult, error) {
 	if contains(src, dstDir) {
 		return CopyResult{}, fmt.Errorf("fsops: move %s into %s: %w", src, dstDir, ErrInvalidDest)
 	}
-	return copyThenRemove(src, filepath.Join(dstDir, filepath.Base(src)))
+	return renameOrCopy("move", src, filepath.Join(dstDir, filepath.Base(src)))
+}
+
+// errNoNativeRename is renameNative's answer on a platform without a no-replace rename.
+var errNoNativeRename = errors.New("no native no-replace rename")
+
+// renameNativeFn is renameNative; a test replaces it to take the copy path.
+var renameNativeFn = renameNative
+
+// renameOrCopy renames src to dst with the platform's no-replace rename, and falls back
+// to the bounded copy-and-remove where the rename cannot be done in one step.
+func renameOrCopy(op, src, dst string) (CopyResult, error) {
+	err := renameNativeFn(src, dst)
+	switch {
+	case err == nil:
+		return CopyResult{}, nil
+	case errors.Is(err, fs.ErrExist):
+		return CopyResult{}, fmt.Errorf("fsops: %s to %s: %w", op, dst, ErrConflict)
+	case renameNeedsCopy(err):
+		return copyThenRemove(src, dst)
+	default:
+		return CopyResult{}, opError(op, src, err)
+	}
+}
+
+// renameNeedsCopy reports whether a failed native rename is one the copy can do: the
+// target is on another device, or the platform or filesystem has no such rename.
+func renameNeedsCopy(err error) bool {
+	if errors.Is(err, errNoNativeRename) || errors.Is(err, errors.ErrUnsupported) {
+		return true
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == errnoCrossDevice || errno == syscall.EINVAL || errno == syscall.ENOSYS ||
+		errno == syscall.ENOTSUP || errno == syscall.EOPNOTSUPP
 }
 
 // copyThenRemove is the shared bounded publish-then-remove path.

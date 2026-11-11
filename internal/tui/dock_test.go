@@ -786,7 +786,7 @@ func TestDockPaintsScreenCells(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			x := tt.x + 1
 			c := g.At(x, tt.y)
-		if c.Text != tt.text {
+			if c.Text != tt.text {
 				t.Fatalf("cell (%d, %d) text = %q, want %q", x, tt.y, c.Text, tt.text)
 			}
 			if !tt.check(c.Style) {

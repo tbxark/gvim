@@ -21,7 +21,7 @@ func StartFiles(ctx context.Context, root string) *finder.Index {
 	return finder.Start(ctx, root)
 }
 
-// fileRanker is the palette's Ranker over internal/finder. It holds the frecency
+// fileRanker is the palette's Ranker over finder. It holds the frecency
 // of the files opened through the picker. It is safe for concurrent use, since
 // the palette ranks on a command goroutine.
 type fileRanker struct {

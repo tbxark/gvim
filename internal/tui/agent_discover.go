@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -77,7 +78,7 @@ func agentDiscoverNone() string {
 	return uiText("gvim.agent_discover.none", "No agent sessions found.")
 }
 func agentDiscoverFooter() string {
-	return uiText("gvim.agent_discover.footer", "Enter opens · i imports as a workspace · Ctrl+R scans again · Esc closes")
+	return uiText("gvim.agent_discover.footer", "Enter opens · Alt+I imports as a workspace · Ctrl+R scans again · Esc closes")
 }
 func agentDiscoverMissing() string {
 	return uiText("gvim.agent_discover.missing", "Agent discovery is not available in this session")
@@ -129,10 +130,11 @@ func (o *agentDiscoverOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		k := tea.Key(key)
-		// i imports the selected session as a workspace (create-only: the registry
+		// Alt+I imports the selected session as a workspace (create-only: the registry
 		// v1 has no place for the attach argv, so the terminal is opened from the
-		// workspace afterwards; Enter still opens the attach tab directly).
-		if k.Code == 'i' && k.Mod == 0 {
+		// workspace afterwards; Enter still opens the attach tab directly). A bare i
+		// is filter text.
+		if k.Code == 'i' && k.Mod == tea.ModAlt {
 			return o.importSelected()
 		}
 		// Ctrl+R scans again without leaving the picker.
@@ -196,8 +198,8 @@ func (o *agentDiscoverOverlay) startExternal(session agentdiscover.ExternalSessi
 	if source != "" {
 		if idx, ok := o.m.dock.FindSource(source); ok {
 			o.m.dock.SetActive(idx)
-			o.m.dock.Focus()
-			return nil
+			o.m.focusDock()
+			return o.m.showDock()
 		}
 	}
 	launch := terminal.Launch{
@@ -446,48 +448,16 @@ func externalTabName(session agentdiscover.ExternalSession) string {
 	return clipDiscoveryText(name, 80)
 }
 
-// clipDiscoveryText bounds a display label on a rune boundary.
-func clipDiscoveryText(text string, max int) string {
-	if len(text) <= max {
+// clipDiscoveryText bounds a display label to limit bytes, cut on a rune boundary.
+func clipDiscoveryText(text string, limit int) string {
+	if len(text) <= limit {
 		return text
 	}
-	cut := text[:max]
-	for len(cut) > 0 && !utf8Valid(cut) {
-		cut = cut[:len(cut)-1]
+	n := limit
+	for n > 0 && !utf8.RuneStart(text[n]) {
+		n--
 	}
-	return cut
-}
-
-// utf8Valid reports whether s is valid UTF-8 (small helper for label clipping).
-func utf8Valid(s string) bool {
-	for len(s) > 0 {
-		c := s[0]
-		if c < 0x80 {
-			s = s[1:]
-			continue
-		}
-		size := 0
-		switch {
-		case c&0xe0 == 0xc0:
-			size = 2
-		case c&0xf0 == 0xe0:
-			size = 3
-		case c&0xf8 == 0xf0:
-			size = 4
-		default:
-			return false
-		}
-		if len(s) < size {
-			return false
-		}
-		for i := 1; i < size; i++ {
-			if s[i]&0xc0 != 0x80 {
-				return false
-			}
-		}
-		s = s[size:]
-	}
-	return true
+	return text[:n]
 }
 
 // openAgentDiscover opens the discovery picker and starts its first scan. The

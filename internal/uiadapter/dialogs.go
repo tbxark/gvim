@@ -18,12 +18,12 @@ type dialogPort struct{}
 
 // Unsaved opens the unsaved-changes dialog for the tab called name.
 func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) tui.Overlay {
-	return tui.WrapDialog(dialog.NewUnsavedChanges(time.Now, name, tag, ov))
+	return dialog.NewUnsavedChanges(time.Now, name, tag, ov)
 }
 
 // Error shows message with one OK button.
 func (dialogPort) Error(message string, tag any, ov style.Overlay) tui.Overlay {
-	return tui.WrapDialog(dialog.NewErrorDialog(time.Now, message, tag, ov))
+	return dialog.NewErrorDialog(time.Now, message, tag, ov)
 }
 
 // SaveAs opens the Save As prompt prefilled with path. A path whose parent
@@ -45,5 +45,5 @@ func (dialogPort) SaveAs(path string, tag any, ov style.Overlay) tui.Overlay {
 			return nil
 		},
 	}
-	return tui.WrapDialog(dialog.NewSaveAs(time.Now, path, tag, checks, ov))
+	return dialog.NewSaveAs(time.Now, path, tag, checks, ov)
 }

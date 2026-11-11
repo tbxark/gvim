@@ -26,7 +26,7 @@ import (
 // pluginServices is pluginapi.Services over the domain packages: display width and
 // truncation (ansi), line diffs (diff), fuzzy ranking (fuzzy), the workspace grep (finder
 // and search, within the caps of live_grep.go), decoding (encoding) and git root and
-// branch (gitx). The plugin runtime may not import any of them, so the app hands it this.
+// branch (gitstate). The plugin runtime may not import any of them, so the app hands it this.
 type pluginServices struct {
 	// agentDiscover is nil when the session has no agent-discovery capability (for
 	// example a shared daemon runtime, whose scanner is per workspace).

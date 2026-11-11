@@ -4,8 +4,10 @@ package terminal
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"unsafe"
@@ -110,14 +112,23 @@ func spawn(cmd *exec.Cmd, cols, rows int) (ptyProc, error) {
 }
 
 // windowsEnvBlock encodes env as the UTF-16 environment block CreateProcessW
-// wants: each "name=value" as a NUL-terminated string, then one more NUL. A
-// var with an empty name is dropped (Windows cannot represent it).
+// wants: each "name=value" as a NUL-terminated string, sorted by name without case,
+// then one more NUL. A var with an empty name is dropped (Windows cannot represent
+// it). Names are case-insensitive on Windows, and the last value of a repeated name
+// wins, as os/exec does: the overlay and TERM come after the inherited environment.
 func windowsEnvBlock(env []string) []uint16 {
-	var block []uint16
+	last := map[string]string{}
 	for _, kv := range env {
-		if i := strings.IndexByte(kv, '='); i <= 0 {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
 			continue
 		}
+		last[strings.ToUpper(kv[:i])] = kv
+	}
+	keys := slices.Sorted(maps.Keys(last))
+	var block []uint16
+	for _, key := range keys {
+		kv := last[key]
 		u, err := windows.UTF16FromString(kv)
 		if err != nil {
 			continue
@@ -154,7 +165,10 @@ func (p *windowsPTY) Resize(cols, rows int) error {
 
 // Kill terminates the child, if it is still running.
 func (p *windowsPTY) Kill() error {
-	if p.process == 0 {
+	// Wait closes the handle under mu once the child is reaped.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.waited || p.process == 0 {
 		return nil
 	}
 	return windows.TerminateProcess(p.process, 1)

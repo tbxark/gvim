@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"maps"
@@ -118,11 +119,8 @@ type lspState struct {
 	tokenSeq int
 	tokenErr map[string]string
 	tokenTop map[string]int
-	// folds holds the folding ranges each document's server last gave, by path,
-	// and foldSeq orders the refresh timers. The ranges are pushed into the
-	// editor, which merges them with its indentation folds; the map is kept for
-	// the refresh bookkeeping and the tests.
-	folds   map[string][]FoldRange
+	// foldSeq orders the folding-range refresh timers. The ranges are pushed into
+	// the editor, which merges them with its indentation folds.
 	foldSeq int
 	foldErr map[string]string
 	// comp is the open completion popup, or nil.
@@ -308,7 +306,11 @@ type (
 		// the popup opens.
 		version   editor.Version
 		versionOK bool
-		err       error
+		// peek is the start of the definition's file for a peek, read in the request
+		// command so Update does no IO: up to peekLines lines from peekFrom.
+		peek     []string
+		peekFrom int
+		err      error
 	}
 	lspServerMsg struct {
 		action string
@@ -900,7 +902,7 @@ func (m *Model) lspLocations(r lspReplyMsg) tea.Cmd {
 		items := make([]popup.Item, len(r.locs))
 		for i, loc := range r.locs {
 			items[i] = popup.Item{
-				Label: fmt.Sprintf("%s:%d:%d", m.lspRel(loc.Path), loc.Start.Line+1, loc.Start.Col+1),
+				Label: fmt.Sprintf("%s:%d:%d", m.relativePath(loc.Path), loc.Start.Line+1, loc.Start.Col+1),
 				Data:  lspPick{ask: r.ask, loc: loc},
 			}
 		}
@@ -973,6 +975,29 @@ func (m *Model) lspLoaded(msg lspLoadedMsg) {
 // notice.
 
 // lspPeek displays a preview card of the definition at the cursor.
+// peekLines is how many lines a definition peek shows: the line before the definition
+// and twelve from it.
+const peekLines = 13
+
+// readPeekLines reads n lines of the file at path from line from (0-based), stopping
+// there, so a peek into a large file does not read it whole. It runs in a command.
+func readPeekLines(path string, from, n int) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	var out []string
+	for line := 0; sc.Scan() && len(out) < n; line++ {
+		if line >= from {
+			out = append(out, sc.Text())
+		}
+	}
+	return out
+}
+
 func (m *Model) lspPeek(r lspReplyMsg) {
 	if len(r.locs) == 0 {
 		m.notice = "No definition found to peek"
@@ -987,13 +1012,9 @@ func (m *Model) lspPeek(r lspReplyMsg) {
 		for i := start; i < end; i++ {
 			lines = append(lines, fmt.Sprintf("%4d │ %s", i+1, active.Line(i)))
 		}
-	} else if data, err := os.ReadFile(loc.Path); err == nil {
-		all := strings.Split(string(data), "\n")
-		n := len(all)
-		start := max(0, loc.Start.Line-1)
-		end := min(n, loc.Start.Line+12)
-		for i := start; i < end; i++ {
-			lines = append(lines, fmt.Sprintf("%4d │ %s", i+1, all[i]))
+	} else {
+		for i, l := range r.peek {
+			lines = append(lines, fmt.Sprintf("%4d │ %s", r.peekFrom+i+1, l))
 		}
 	}
 	if len(lines) == 0 {
@@ -1007,7 +1028,7 @@ func (m *Model) lspPeek(r lspReplyMsg) {
 			Data:  lspPick{ask: lspAskPeekDefinition, loc: loc},
 		}
 	}
-	title := fmt.Sprintf("Peek: %s:%d (Enter to jump)", m.lspRel(loc.Path), loc.Start.Line+1)
+	title := fmt.Sprintf("Peek: %s:%d (Enter to jump)", m.relativePath(loc.Path), loc.Start.Line+1)
 	m.lspPopup(title, items)
 }
 
@@ -1308,13 +1329,6 @@ func (m *Model) completionResolved(msg completionResolvedMsg) tea.Cmd {
 	return nil
 }
 
-// completionDocumentVersioner is the optional editor view that reports an open
-// document's version. A multi-caret resolve refuses to start without it: the async
-// reply needs a version captured at acceptance to prove the document did not change.
-type completionDocumentVersioner interface {
-	DocumentVersion(path string) (editor.Version, bool)
-}
-
 // resolveMultiCursorAccept handles an item whose lazy fields need
 // completionItem/resolve while the document has extra carets. It captures the
 // document version and every caret before the request and applies the reply only
@@ -1342,7 +1356,7 @@ func (m *Model) resolveMultiCursorAccept(c *lspCompletion, item CompletionItem) 
 		m.notice = uiText("gvim.notice.completion.resolve_unsupported", "completion: multi-cursor resolved acceptance is not available in this editor")
 		return nil, true
 	}
-	versioner, ok := m.ed.(completionDocumentVersioner)
+	versioner, ok := m.ed.(lspVersionedEditor)
 	if !ok {
 		m.closeCompletion(c)
 		m.notice = uiText("gvim.notice.completion.resolve_version_unverifiable", "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor")
@@ -1400,7 +1414,7 @@ func (m *Model) completionMultiResolved(msg completionMultiResolvedMsg) tea.Cmd 
 		m.notice = uiText("gvim.notice.completion.resolve_inactive", "completion: the document is no longer active, so the resolved completion was not applied")
 		return nil
 	}
-	versioner, ok := m.ed.(completionDocumentVersioner)
+	versioner, ok := m.ed.(lspVersionedEditor)
 	if !ok {
 		m.notice = uiText("gvim.notice.completion.resolve_version_lost", "completion: the document version can no longer be verified, so the resolved completion was not applied")
 		return nil
@@ -1823,19 +1837,20 @@ func (m *Model) lspRequest(ask lspAsk, path string, at buffer.Pos, name string) 
 	return func() tea.Msg {
 		r := lspReplyMsg{ask: ask, path: path, at: at}
 		switch ask {
-		case lspAskDefinition, lspAskPeekDefinition:
+		case lspAskDefinition:
 			r.locs, r.err = port.Definition(path, at)
+		case lspAskPeekDefinition:
+			r.locs, r.err = port.Definition(path, at)
+			if len(r.locs) > 0 {
+				r.peekFrom = max(0, r.locs[0].Start.Line-1)
+				r.peek = readPeekLines(r.locs[0].Path, r.peekFrom, peekLines)
+			}
 		case lspAskImplementation:
 			r.locs, r.err = port.Implementation(path, at)
 		case lspAskReferences:
 			r.locs, r.err = port.References(path, at)
 		case lspAskHover:
 			r.text, r.err = port.Hover(path, at)
-		case lspAskCompletion:
-			if ve, ok := m.ed.(lspVersionedEditor); ok {
-				r.version, r.versionOK = ve.DocumentVersion(path)
-			}
-			r.items, r.err = port.Completion(path, at)
 		case lspAskRename:
 			r.edits, r.err = port.Rename(path, at, name)
 		case lspAskCodeActions:
@@ -2161,19 +2176,11 @@ func (m *Model) lspSetLanguageEnabledTarget(enabled bool, path, language string)
 			return nil
 		}
 	}
-	muteLang := want
-	if lang == want {
-		muteLang = lang
-	}
-	if enabled && m.lsp.port == nil {
-		m.notice = m.lspNoServer(muteLang)
+	if m.lsp.port == nil {
+		m.notice = m.lspNoServer(want)
 		return nil
 	}
-	if !enabled && m.lsp.port == nil {
-		m.notice = m.lspNoServer(muteLang)
-		return nil
-	}
-	return m.lspSetLanguage(!enabled, muteLang)
+	return m.lspSetLanguage(!enabled, want)
 }
 
 // lspServerActionDone applies the end of a status-popup action.
@@ -2454,16 +2461,6 @@ func (s *lspState) enabled(lang string) bool {
 // name the status row shows.
 func (m *Model) lspLanguage(doc Document) string {
 	return strings.ToLower(m.languageFor(doc.Name()))
-}
-
-// lspRel returns path relative to the workspace root when it is inside it.
-func (m *Model) lspRel(path string) string {
-	if root := m.rootDir(); root != "" {
-		if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
-			return rel
-		}
-	}
-	return path
 }
 
 // lspLargeReason is why no language server serves doc, or "" when its size does not

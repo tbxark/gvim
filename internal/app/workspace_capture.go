@@ -11,6 +11,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -150,9 +151,7 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 		}
 		snap.layout.MRU = append(snap.layout.MRU, session.MruFile{Path: files[fileIndex].Path, Label: files[fileIndex].Label})
 	}
-	for _, f := range snap.failed {
-		files = append(files, session.FileState{Path: f.path})
-	}
+	// A failed large-file stash gets its entry when writeSnapshot stashes its overlay.
 	files = append(files, s.rt.kept...)
 	snap.layout.Active = active
 	snap.layout.Files = files
@@ -217,6 +216,16 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 		return job
 	}
 	m.mu.Lock()
+	// Forget the writes that finished cleanly, so a long daemon does not keep one job
+	// per capture; a failed one stays for waitWrites to report.
+	m.writes = slices.DeleteFunc(m.writes, func(j *saveJob) bool {
+		select {
+		case <-j.done:
+			return j.err == nil
+		default:
+			return false
+		}
+	})
 	m.writes = append(m.writes, job)
 	w := m.writers[s.ws.File.StableID]
 	if w == nil {

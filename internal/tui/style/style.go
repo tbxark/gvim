@@ -1,4 +1,4 @@
-// Package style builds the chrome styles of gvim from an internal/theme value.
+// Package style builds the chrome styles of gvim from a theme value.
 // It is the only package besides the components that turns theme keys into
 // colors. Each role in Styles names the theme keys it reads. A key that is
 // missing, or that names the terminal default, leaves that side of the style to

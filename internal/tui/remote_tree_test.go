@@ -212,6 +212,24 @@ func TestRemoteTreeStaleToggleIsDropped(t *testing.T) {
 	wantRemoteRows(t, tree, "proj", "cmd", "main.go")
 }
 
+// TestRemoteTreeToggleDuringReloadKeepsTheReload checks a folder expanded while a
+// reload is in flight does not make the reload's result look stale.
+func TestRemoteTreeToggleDuringReloadKeepsTheReload(t *testing.T) {
+	loader := remoteTreeTestLoader()
+	tree := NewRemoteExplorerTree("/srv/proj", loader)
+	applyRemoteInitial(t, tree)
+	loader.set("/srv/proj", RemoteDirEntry{Name: "cmd", IsDir: true}, RemoteDirEntry{Name: "new.go"})
+	reload := tree.ReloadCmd("")
+	toggle := tree.ToggleCmd("/srv/proj/cmd")
+	if err := tree.ApplyReload(reload().(remoteTreeLoadedMsg)); err != nil {
+		t.Fatalf("ApplyReload: %v", err)
+	}
+	if err := tree.applyToggle(toggle().(remoteTreeToggleMsg)); err != nil {
+		t.Fatalf("applyToggle: %v", err)
+	}
+	wantRemoteRows(t, tree, "proj", "cmd", "app.go", "new.go")
+}
+
 // TestRemoteTreeReloadPrunesAndKeepsExpansion checks a reload drops entries that are
 // gone, keeps the loaded subdirectory and its expansion.
 func TestRemoteTreeReloadPrunesAndKeepsExpansion(t *testing.T) {

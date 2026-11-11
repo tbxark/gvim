@@ -414,7 +414,11 @@ func (s *Server) Write(p []byte) (int, error) {
 	s.mu.Unlock()
 	for _, c := range clients {
 		if err := c.fw.WriteFrame(TypeOutput, p); err != nil {
+			// Closing the connection ends its handleConn too: a dropped client must
+			// not keep sending input to a program whose frames it no longer gets, and
+			// a later frame must not land in the middle of a truncated one.
 			s.removeClient(c)
+			_ = c.conn.Close()
 		}
 	}
 	return len(p), nil

@@ -84,9 +84,6 @@ func ParseTargets(args []string, stat StatFunc) (Targets, error) {
 		if len(t.Files) > 0 || t.Root != "" {
 			return Targets{}, errors.New("a remote target cannot be combined with local directories or files")
 		}
-		if dirs > 1 {
-			return Targets{}, errors.New("only one directory may be given")
-		}
 	}
 	return t, nil
 }

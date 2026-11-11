@@ -96,7 +96,10 @@ type RemoteExplorerTree struct {
 	showHidden  bool
 	showIgnored bool
 	gen         uint64
-	pending     map[string]uint64
+	// reloadGen orders the whole-tree reloads apart from the folder toggles, so a toggle
+	// during a reload does not make the reload's result look stale.
+	reloadGen uint64
+	pending   map[string]uint64
 }
 
 // NewRemoteExplorerTree returns the tree of root, whose directories come from
@@ -417,8 +420,8 @@ func (t *RemoteExplorerTree) ToggleCmd(p string) tea.Cmd {
 // remote tree; the command's result is applied by the root.
 func (t *RemoteExplorerTree) ReloadCmd(reveal string) tea.Cmd {
 	t.mu.Lock()
-	t.gen++
-	gen := t.gen
+	t.reloadGen++
+	gen := t.reloadGen
 	dirs := t.loadedDirsLocked()
 	dirs = append(dirs, t.waypointsLocked(reveal)...)
 	dirs = dedupeStrings(dirs)
@@ -480,7 +483,7 @@ func (t *RemoteExplorerTree) waypointsLocked(reveal string) []string {
 func (t *RemoteExplorerTree) ApplyReload(msg remoteTreeLoadedMsg) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if msg.gen != t.gen {
+	if msg.gen != t.reloadGen {
 		return nil
 	}
 	if msg.err != nil {

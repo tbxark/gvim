@@ -339,7 +339,7 @@ func (m *Model) paintDiagPanel(dst *grid.Grid, l layout, sec sidebar.Section) {
 		}
 		nameX := x + 1 + space.PadX
 		if r.header {
-			name := m.diagRel(r.path) + diagOpenMarker(r.source)
+			name := m.relativePath(r.path) + diagOpenMarker(r.source)
 			dst.Put(nameX, y, end, ansi.Truncate(name, max(end-nameX, 0), "…"), headerStyle(body))
 			label := r.counts.Label()
 			if label != "" {
@@ -419,11 +419,6 @@ func diagPanelText(d Diagnostic) string {
 		text += " (" + d.Source + ")"
 	}
 	return text
-}
-
-// diagRel returns path relative to the workspace root when it is inside it.
-func (m *Model) diagRel(path string) string {
-	return m.lspRel(path)
 }
 
 // takeDiagFocus shows the column and gives the Diagnostics section the keyboard.
@@ -570,7 +565,7 @@ func (m *Model) openDiagnosticsList() tea.Cmd {
 	items := make([]list.Row, 0, len(rows))
 	for _, r := range rows {
 		if r.header {
-			items = append(items, list.Row{Header: true, Left: m.diagRel(r.path) + diagOpenMarker(r.source), Right: r.counts.Label()})
+			items = append(items, list.Row{Header: true, Left: m.relativePath(r.path) + diagOpenMarker(r.source), Right: r.counts.Label()})
 			continue
 		}
 		items = append(items, list.Row{

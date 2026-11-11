@@ -85,7 +85,10 @@ func writeFileStream(path string, fill func(io.Writer) error, onTemp func(os.Fil
 	switch {
 	case err == nil:
 		mode, old = info.Mode().Perm(), info
-	case !errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, fs.ErrNotExist):
+		// A new file is created as open(2) would create it: the umask applies.
+		mode &^= umask
+	default:
 		return "", err
 	}
 
@@ -102,6 +105,7 @@ func writeFileStream(path string, fill func(io.Writer) error, onTemp func(os.Fil
 		_ = os.Remove(name)
 		return "", err
 	}
+	syncDir(filepath.Dir(target))
 	return note, nil
 }
 

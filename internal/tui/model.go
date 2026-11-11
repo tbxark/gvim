@@ -1181,7 +1181,7 @@ func (m *Model) runAction(action string) error {
 		action, args = "copy_with_theme", map[string]any{"theme": name}
 	}
 	defer m.plugSource(srcMenu)()
-	m.recordCommand(Command{Action: action})
+	m.recordCommand(Command{Action: action, Args: args})
 	defer m.plugCommand(action, nil)()
 	if cmd, ok := m.uiAction(action, nil); ok {
 		m.pending = tea.Batch(m.pending, cmd)
@@ -1906,23 +1906,12 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 	case fullLoadTag:
 		return m.fullLoadAnswer(tag, d)
 	case authorityPasswordTag:
-		if d.Outcome == prompt.Submitted {
-			return m.authorityReconnectCmd(d.Text)
-		}
-		m.resetAuthorityRetry()
+		return m.authorityReconnectCmd(d.Text)
 	case authorityPassphraseTag:
-		if d.Outcome == prompt.Submitted {
-			return m.authorityPassphraseCmd(d.Text)
-		}
-		m.resetAuthorityRetry()
-		m.quietNotice("SSH reconnect cancelled")
+		return m.authorityPassphraseCmd(d.Text)
 	case authorityChallengeTag:
-		if d.Outcome == prompt.Submitted {
-			m.authorityAnswers = append(m.authorityAnswers, d.Text)
-			return m.askAuthorityChallenge()
-		}
-		m.resetAuthorityRetry()
-		m.quietNotice("SSH reconnect cancelled")
+		m.authorityAnswers = append(m.authorityAnswers, d.Text)
+		return m.askAuthorityChallenge()
 	default:
 		if cmd, ok := m.workspaceActionAnswer(d); ok {
 			return cmd
@@ -3573,7 +3562,7 @@ func (m *Model) paintInto(g *grid.Grid) {
 	m.paintEditor(g, l)
 	m.paintDropZone(g)
 	m.dock.Draw(g, l, m.styles)
-	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip, m.tabFocus, m.stripHover)
+	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip, m.stripHover)
 	if l.ExplorerOpen {
 		m.paintSidebar(g, l)
 		if m.gripHover {

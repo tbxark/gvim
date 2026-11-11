@@ -183,7 +183,7 @@ func TestPlaceStripEmptyStripHasOnlyPlus(t *testing.T) {
 
 func TestDrawTabStripPaintsTheFixtureRow(t *testing.T) {
 	g := grid.New(40, 3)
-	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0, icons.Plain), false, frame.HitTarget{})
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0, icons.Plain), frame.HitTarget{})
 	if g.At(0, 1).Text != " " || g.At(1, 1).Text != " " || g.At(2, 1).Text != "a" || g.At(8, 1).Text != "×" {
 		t.Fatalf("tab row = %q, want the tab at columns 0..9", g.Plain()[1])
 	}
@@ -198,7 +198,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 		TabActive: lipgloss.NewStyle().Bold(true),
 	}
 	g := grid.New(40, 3)
-	tabstrip.Draw(g, st, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0, icons.Plain), false, frame.HitTarget{})
+	tabstrip.Draw(g, st, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0, icons.Plain), frame.HitTarget{})
 	if g.At(2, 1).Style.Bold || !g.At(2, 1).Style.Italic {
 		t.Fatalf("inactive tab cell style = %+v", g.At(2, 1).Style)
 	}
@@ -221,7 +221,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 
 func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 	g := grid.New(40, 3)
-	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0, icons.Plain), false, frame.HitTarget{})
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0, icons.Plain), frame.HitTarget{})
 	row := strings.TrimRight(g.Plain()[1], " ")
 	if !strings.HasPrefix(row, "  ● a.txt × ") {
 		t.Fatalf("modified tab row = %q, want the dot before the name", row)
@@ -234,7 +234,7 @@ func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go"}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go", Active: true}}
 	g := grid.New(20, 3)
-	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, frame.RevealedFirst(tabs, 0, 20, 0, 3), icons.Plain), false, frame.HitTarget{})
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, frame.RevealedFirst(tabs, 0, 20, 0, 3), icons.Plain), frame.HitTarget{})
 	row := g.Plain()[1]
 	if ansi.StringWidth(row) != 20 {
 		t.Fatalf("row is %d cells wide", ansi.StringWidth(row))
@@ -274,7 +274,7 @@ func TestTabStripHoverAndFocus(t *testing.T) {
 	}
 
 	hovered := grid.New(40, 2)
-	tabstrip.Draw(hovered, st, 0, 1, s, false, frame.HitTarget{Kind: frame.HitTab, Index: 1})
+	tabstrip.Draw(hovered, st, 0, 1, s, frame.HitTarget{Kind: frame.HitTab, Index: 1})
 	for x := second.X; x < second.X+second.W; x++ {
 		if !hovered.At(x, 1).Style.Underline {
 			t.Fatalf("hovered second tab cell %d is not underlined", x)
@@ -284,18 +284,18 @@ func TestTabStripHoverAndFocus(t *testing.T) {
 		t.Fatal("the first tab underlined without the pointer")
 	}
 	closed := grid.New(40, 2)
-	tabstrip.Draw(closed, st, 0, 1, s, false, frame.HitTarget{Kind: frame.HitTabClose, Index: 0})
+	tabstrip.Draw(closed, st, 0, 1, s, frame.HitTarget{Kind: frame.HitTabClose, Index: 0})
 	if !closed.At(close.X, 1).Style.Underline {
 		t.Fatalf("the hovered close glyph at %d is not underlined", close.X)
 	}
 
 	focused := grid.New(40, 2)
-	tabstrip.Draw(focused, st, 0, 1, s, true, frame.HitTarget{})
+	tabstrip.Draw(focused, st, 0, 1, s, frame.HitTarget{})
 	if got := focused.At(0, 1).Text; got != " " {
 		t.Fatalf("focused strip leading cell = %q, want the tab padding", got)
 	}
 	unfocused := grid.New(40, 2)
-	tabstrip.Draw(unfocused, st, 0, 1, s, false, frame.HitTarget{})
+	tabstrip.Draw(unfocused, st, 0, 1, s, frame.HitTarget{})
 	if got := unfocused.At(0, 1).Text; got != " " {
 		t.Fatalf("unfocused strip leading cell = %q, want the tab's blank", got)
 	}
@@ -311,7 +311,7 @@ func TestTabStripHoverAndFocus(t *testing.T) {
 func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go", Active: true}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go"}}
 	g := grid.New(20, 3)
-	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, 0, icons.Plain), false, frame.HitTarget{})
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, 0, icons.Plain), frame.HitTarget{})
 	row := g.Plain()[1]
 	if g.At(0, 1).Text != " " || g.At(16, 1).Text != icons.Plain.Glyph(icons.ScrollRight) {
 		t.Fatalf("markers in %q, want only the right marker", row)
@@ -321,7 +321,7 @@ func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 func TestDrawTabStripWithNoTabsDoesNotPanic(t *testing.T) {
 	g := grid.New(10, 3)
 	s := frame.PlaceStrip(0, 10, nil, 0, icons.Plain)
-	tabstrip.Draw(g, style.Styles{}, 0, 1, s, false, frame.HitTarget{})
+	tabstrip.Draw(g, style.Styles{}, 0, 1, s, frame.HitTarget{})
 	if len(s.Runs) != 1 || s.Runs[0].Kind != hitTabNew {
 		t.Fatalf("runs = %+v", s.Runs)
 	}
@@ -331,7 +331,7 @@ func TestPlaceStripWithNarrowRowDoesNotPanic(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.go", Active: true}}
 	for w := 0; w <= 6; w++ {
 		g := grid.New(w, 2)
-		tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, w, tabs, 0, icons.Plain), false, frame.HitTarget{})
+		tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, w, tabs, 0, icons.Plain), frame.HitTarget{})
 	}
 }
 

@@ -164,6 +164,24 @@ func TestInlayHintErrorStopsTheRefresh(t *testing.T) {
 	}
 }
 
+// TestSemanticTokenErrorStopsTheRefresh checks a server that does not serve semantic
+// tokens: after the first failure the refreshes for the language stop asking.
+func TestSemanticTokenErrorStopsTheRefresh(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"let x = 1"}})
+	lt.open()
+	port.dataErr = &testError{"no server serves semantic_tokens"}
+	lt.drain(lt.m.lspDataArm(lspDataTokens))
+	calls := port.tokenCalls
+	if calls == 0 {
+		t.Fatal("no semantic token request")
+	}
+	lt.drain(lt.m.lspDataArm(lspDataTokens))
+	if port.tokenCalls != calls {
+		t.Fatalf("token requests = %d after the failure, want still %d", port.tokenCalls, calls)
+	}
+}
+
 // TestSemanticTokensPaintStyledSpans checks the semantic-token overlay: the token
 // range takes the syntax color of its type, the text outside it does not, and the
 // document text is untouched.

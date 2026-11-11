@@ -143,6 +143,10 @@ type plugin struct {
 
 	commands map[string]*command
 	panels   map[pluginapi.PanelID]bool // the widget panels the plugin mounted (api_panel.go)
+	// groups and scrolls are the buffer groups and scroll-sync groups the plugin made
+	// (api_groups.go): the ids are global, so a call naming another plugin's is refused.
+	groups  map[pluginapi.BufferGroupID]bool
+	scrolls map[uint64]bool
 	// i18n is the plugin's translation table by locale (api_i18n.go); nil when it has none.
 	i18n map[string]map[string]string
 	// menuItems are the rows the plugin added to the menu bar (api_menu.go).

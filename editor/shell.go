@@ -197,6 +197,12 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 	if e.indexOfDoc(d) < 0 || d.ContentMark() != job.snapshot {
 		return errShellStale
 	}
+	if job.format && out == job.snapshot.Text {
+		// Nothing to change: no edit, so a clean buffer stays clean and the undo
+		// history, the carets and the folds are kept.
+		e.setStatus("Formatted buffer")
+		return nil
+	}
 	caret := d.Cursor
 	var after buffer.Pos
 	var hunks []diff.Hunk

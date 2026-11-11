@@ -25,10 +25,9 @@ import (
 // the remote FileSystem (bounded exec helper commands, ssh_files.go). Connection state
 // feeds the status row and reconnect-on-activate.
 //
-// The SSH client carries no path translation of its own: a remote workspace lives in one
-// path space (IdentityPathMapper). Authentication: ssh-agent (SSH_AUTH_SOCK), identity
-// files (plain or with the injected passphrase callback) and the injected password
-// callback, tried in that order. Host keys come from ~/.ssh/known_hosts (knownhosts.New)
+// The SSH client carries no path translation: the editor's paths are the remote
+// host's. Authentication: ssh-agent (SSH_AUTH_SOCK), identity files (plain or with the
+// injected passphrase callback) and the injected password callback, tried in that order. Host keys come from ~/.ssh/known_hosts (knownhosts.New)
 // unless the caller injects a callback (tests use ssh.FixedHostKey); an unknown host is a
 // clear error, never silently trusted.
 

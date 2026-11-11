@@ -32,3 +32,9 @@ skills-lock.json
 /refs/
 /.tmp-inspect
 /.cache
+
+# Python bytecode from tools/*.py
+__pycache__/
+
+# The binary `go build -o gvim .` writes
+/gvim

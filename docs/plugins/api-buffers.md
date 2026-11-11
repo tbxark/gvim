@@ -247,7 +247,7 @@ gvim.buf.set_panel_content(id, panel, entries) -> true | nil, err
 gvim.buf.set_group_title(id, segments) -> true | nil, err
 gvim.buf.set_panel_visible(id, panel, visible) -> true | nil, err
 gvim.buf.focus_panel(id, panel) -> true | nil, err
-gvim.buf.close_group(id) -> true
+gvim.buf.close_group(id) -> true | nil, err
 gvim.buf.group_panels(id) -> { {name, buf, window?, visible}, ... } | nil, err
 ```
 
@@ -264,7 +264,8 @@ shape: `{text, style?, segments?, props?}`; read the props back with `b:props_at
 keeping its buffer and content) and shows it again by splitting a visible panel.
 `set_group_title` stores Fresh's title segments (a segment may name a panel); gvim keeps them
 for the port APIs and does not paint a group tab. Closing the group closes the split windows it
-created and the panel buffers it made; unloading the plugin does the same. Limits: at most 8
+created and the panel buffers it made; unloading the plugin does the same. Group, panel and
+scroll-sync ids are global, so a call naming one another plugin made answers `closed`. Limits: at most 8
 panels, a layout 4 deep, 64 KiB of layout JSON and 16 title segments. A leaf's
 §ratio§ is the FIRST child's share of its split. Fixed-height leaves are approximate: the split
 border can leave the leaf one row off, a fixed leaf inside a side-by-side split is only as
@@ -276,7 +277,7 @@ height is re-applied when it is shown again. git_log's height-1 toolbar now rend
 ```text
 gvim.win.create_scroll_sync(id, left, right) -> true | nil, err
 gvim.win.set_scroll_sync_anchors(id, { {left_line, right_line}, ... }) -> true | nil, err
-gvim.win.remove_scroll_sync(id) -> true
+gvim.win.remove_scroll_sync(id) -> true | nil, err
 ```
 
 Two split windows scroll together: the follower's top line follows the leader's through the

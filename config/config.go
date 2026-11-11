@@ -1117,7 +1117,6 @@ func (c *Config) setProjectLSP(path string, raw json.RawMessage) (diags []Diagno
 				refuse(lang, "command")
 				continue
 			}
-			keep := true
 			if len(s.Args) > 0 {
 				refuse(lang, "args")
 				s.Args = nil
@@ -1138,9 +1137,7 @@ func (c *Config) setProjectLSP(path string, raw json.RawMessage) (diags []Diagno
 				refuse(lang, "process_limits")
 				s.ProcessLimits = nil
 			}
-			if keep {
-				kept = append(kept, s)
-			}
+			kept = append(kept, s)
 		}
 		// An entry cannot replace the user's entry for the language: the user's
 		// program is what runs. The project may still add one for a language the

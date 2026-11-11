@@ -178,7 +178,6 @@ func TestExpandSelectionGrowsWordLineThenBuffer(t *testing.T) {
 	}
 }
 
-
 func TestExpandAndShrinkSelectionWithBrackets(t *testing.T) {
 	t.Parallel()
 	e := docWith(Options{}, "foo(bar, baz)\nx")

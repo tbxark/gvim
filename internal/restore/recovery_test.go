@@ -522,3 +522,28 @@ func TestRecoverySessionWithoutMRUStillRestores(t *testing.T) {
 		t.Fatalf("restored tabs = %v, want the saved file order", names)
 	}
 }
+
+// TestRecoverAbandonedLegacyFailureKeepsLiveCopies checks a legacy copy in the root that
+// cannot be restored is moved aside without taking the per-process copies with it.
+func TestRecoverAbandonedLegacyFailureKeepsLiveCopies(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "recovery")
+	name, err := session.StashContent(root, "lost\n")
+	apptest.Must(t, err)
+	apptest.Must(t, session.Save(root, session.Session{Files: []session.FileState{{Path: dir, StashFile: name}}}))
+	a := filepath.Join(dir, "a.txt")
+	apptest.Must(t, os.WriteFile(a, []byte("one\n"), 0o644))
+	live := filepath.Join(root, "111")
+	writeCrashCopy(t, a, "X", live)
+
+	failed, _ := recoverAbandoned(apptest.NewSessionEditor(), root, func(pid int) bool { return pid == 111 }, nil)
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want the legacy file", failed)
+	}
+	if _, err := os.Stat(filepath.Join(root+".failed", name)); err != nil {
+		t.Fatalf("the legacy stash was not kept aside: %v", err)
+	}
+	if s, ok, err := session.Load(live); err != nil || !ok || len(s.Files) != 1 {
+		t.Fatalf("the running process's copy = %+v (found %v, err %v), want it in place", s, ok, err)
+	}
+}

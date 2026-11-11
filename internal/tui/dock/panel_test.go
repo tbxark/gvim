@@ -449,7 +449,7 @@ func TestCtrlVPasteFollowsPassCtrlVWithoutText(t *testing.T) {
 			p, term := livePanel(t, "hi")
 			p.SetEffects(Effects{PassCtrlVWithoutText: tt.pass})
 			p.host.LastYank = func() string { return tt.yank }
-			if _, ok := p.Update(clipboardMsg{text: tt.text, err: tt.err}); !ok {
+			if _, ok := p.Update(clipboardMsg{gen: p.gen, text: tt.text, err: tt.err}); !ok {
 				t.Fatal("the clipboard message was not taken")
 			}
 			flushInput(t, p)

@@ -16,7 +16,8 @@ func (m *Model) openKeymapSwitch() {
 	rows := make([]list.Row, len(keymapPresets))
 	for i, name := range keymapPresets {
 		right := ""
-		if name == m.util.settings.Keymap {
+		// The same rule as the menu's check mark: no keymap name yet means default.
+		if m.util.keymapChecked("keymap_" + name) {
 			right = "current"
 		}
 		rows[i] = list.Row{Left: name, Right: right, Value: name}
@@ -38,20 +39,32 @@ func (m *Model) switchKeymap(name string) {
 		m.notice = "Keymap switching is not supported in this port"
 		return
 	}
+	if !m.applyKeymap(name) {
+		return
+	}
+	m.notice = "Keymap: " + name + " for this session; set \"keymap\" in the config to keep it"
+}
+
+// applyKeymap makes the preset called name the live keymap, with the plugin bindings
+// layered on it, and reports whether it did. A failure says why on the status row.
+func (m *Model) applyKeymap(name string) bool {
+	if m.util.switchKeymap == nil {
+		return false
+	}
 	k, err := m.util.switchKeymap(name)
 	if err == nil && k == nil {
 		err = errNoKeymap
 	}
 	if err != nil {
 		m.notice = "Keymap " + name + ": " + err.Error()
-		return
+		return false
 	}
 	m.keys = m.pluginSwitchKeymap(name, k)
 	m.resetLiveGrepResume()
 	m.relabelCommands()
 	m.util.settings.Keymap = name
-	m.notice = "Keymap: " + name + " for this session; set \"keymap\" in the config to keep it"
 	m.plugConfigChanged()
+	return true
 }
 
 // errNoKeymap is the error of a switch that returned neither a keymap nor an error.

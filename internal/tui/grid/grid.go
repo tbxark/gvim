@@ -186,6 +186,10 @@ func (g *Grid) Put(x, y, maxX int, s string, st Style) int {
 			break
 		}
 		g.breakPairs(x, y)
+		if w == 2 {
+			// The continuation lands on x+1, which may be the lead of another pair.
+			g.breakPairs(x+1, y)
+		}
 		g.cells[y][x] = Cell{Text: gr, Style: st}
 		g.recordKeys(x, y, st)
 		if w == 2 {

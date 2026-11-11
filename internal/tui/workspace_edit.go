@@ -240,8 +240,9 @@ type lspExpectEditor interface {
 }
 
 // lspVersionedEditor is the optional editor part that reports an open document's
-// version. The app adapter implements it, and the multi-file helper captures the
-// version each edit must still see.
+// version. The app adapter implements it. The multi-file helper captures the version
+// each edit must still see, and a multi-caret completion resolve refuses to start
+// without it: the async reply needs the version captured at acceptance.
 type lspVersionedEditor interface {
 	DocumentVersion(path string) (editor.Version, bool)
 }
@@ -446,7 +447,9 @@ func applyResourceOp(ops workspaceFileOps, op WorkspaceOp) string {
 			return err.Error()
 		}
 	case WorkspaceOpDelete:
-		return ops.DeleteFile(op.Path).Error()
+		if err := ops.DeleteFile(op.Path); err != nil {
+			return err.Error()
+		}
 	}
 	return ""
 }

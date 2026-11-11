@@ -15,7 +15,7 @@ import (
 )
 
 // searchFake is a fakeEditor that tracks a selection and searches the document
-// text with internal/search. It is the EditorState the find tests drive.
+// text with the search package. It is the EditorState the find tests drive.
 type searchFake struct {
 	*fileEditorFake
 	anchor buffer.Pos

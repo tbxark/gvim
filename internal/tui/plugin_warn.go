@@ -17,7 +17,7 @@ import (
 var knownWhen = map[string]bool{
 	"has_buffer": true, "has_text_buffer": true, "can_edit": true, "can_paste": true,
 	"line_numbers": true, "line_wrap": true, "vertical_scrollbar": true, "horizontal_scrollbar": true,
-	"mouse_capture": true, "mouse_hover": true, "scroll_sync": true,
+	"mouse_capture": true, "mouse_hover": true, "scroll_sync": true, "inlay_hints": true,
 	"keymap_default": true, "keymap_emacs": true, "keymap_vscode": true, "keymap_macos_gui": true,
 	"can_save": true, "can_revert": true, "can_save_all": true, "read_only": true, "modified": true,
 	"large": true, "formatter_available": true, "has_selection": true, "can_cut": true, "can_copy": true,

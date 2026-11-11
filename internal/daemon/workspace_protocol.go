@@ -19,7 +19,7 @@ const (
 	TypeWorkspaceClose  byte = 10
 	TypeWorkspaceRename byte = 11
 
-	TypeWorkspaces byte = 106
+	TypeWorkspaces byte = 107
 )
 
 // WorkspaceInfo is one workspace as the client sees it.

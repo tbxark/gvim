@@ -464,3 +464,16 @@ func TestFormatBufferKeepsTheCaretOnItsText(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatBufferWithNoChangeEditsNothing(t *testing.T) {
+	t.Parallel()
+	e := formatDoc("b\na", "go", map[string]string{"go": "cat"})
+	before := e.Active().Buffer.Version()
+	run(t, e, "format_buffer")
+	if after := e.Active().Buffer.Version(); after != before {
+		t.Fatalf("an unchanged format edited the buffer: version %v -> %v", before, after)
+	}
+	if want := "Formatted buffer"; e.Status() != want {
+		t.Fatalf("status = %q, want %q", e.Status(), want)
+	}
+}

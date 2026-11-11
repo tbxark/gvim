@@ -589,7 +589,7 @@ function gvim.buf.set_panel_visible(id, panel, visible) end
 ---@return true|nil, string?
 function gvim.buf.focus_panel(id, panel) end
 ---@param id integer
----@return true
+---@return true|nil, string?
 function gvim.buf.close_group(id) end
 ---@param id integer
 ---@return {name: string, buf: Buffer, window?: Window, visible: boolean}[]|nil, string?
@@ -655,7 +655,7 @@ function gvim.win.create_scroll_sync(id, left, right) end
 ---@return true|nil, string?
 function gvim.win.set_scroll_sync_anchors(id, anchors) end
 ---@param id integer
----@return true
+---@return true|nil, string?
 function gvim.win.remove_scroll_sync(id) end
 
 
@@ -863,7 +863,7 @@ function gvim.ui.mount_widget_panel(spec, opts) end
 ---@return true|nil, string?
 function gvim.ui.update_widget_panel(id, spec) end
 ---@param id integer
----@return true
+---@return true|nil, string?
 function gvim.ui.unmount_widget_panel(id) end
 ---@param id integer
 ---@param action {kind: "focusAdvance"|"activate"|"selectMove"|"textInputKey"|"textInputChar"|"key", delta?: integer, key?: string, text?: string}

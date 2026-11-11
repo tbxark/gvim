@@ -106,9 +106,18 @@ func (p *plugin) queueWork(tok pluginapi.Token, w pluginapi.Work) {
 // clock of the test harness drives it). The returned stop function abandons the timer. d
 // is raised to 1 ms: a timer of zero is a yield to the event loop.
 func (p *plugin) afterTimer(d time.Duration, f func()) (stop func()) {
-	tok, w := p.newWait(func(pluginapi.Completion) { f() }, nil)
-	p.queueWork(tok, pluginapi.Work{After: max(d, time.Millisecond)})
-	return func() { p.r.dropWait(w) }
+	// The timer's own context, so a stopped timer also ends the host's wait for it
+	// instead of parking a goroutine until its time is up.
+	ctx, cancel := context.WithCancel(p.pctx)
+	tok, w := p.newWait(func(pluginapi.Completion) {
+		cancel()
+		f()
+	}, nil)
+	p.queueWork(tok, pluginapi.Work{After: max(d, time.Millisecond), Ctx: ctx})
+	return func() {
+		p.r.dropWait(w)
+		cancel()
+	}
 }
 
 // afterTask calls f on the UI goroutine when t has finished (returned, failed or been

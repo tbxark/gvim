@@ -10,7 +10,7 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
 
 - **Fast Code Viewer & Read-Only Protection**
   - Launch with `gvim -R` / `gvim --view` to lock all buffers in read-only mode, protecting your codebase against accidental keystrokes, pastes, or saves.
-  - Syntax highlighting for 30+ programming languages powered by TextMate and Tree-Sitter grammars.
+  - Syntax highlighting for 30+ programming languages, powered by Chroma lexers.
   - Code folding based on indentation and syntax (`▼` / `▶`), supporting keyboard and mouse toggles.
   - Windowed streaming for large files (100+ MiB) without allocating the whole file into memory.
 
@@ -50,7 +50,7 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
 ## Installation & Build
 
 ### Requirements
-- Go 1.23 or later
+- Go 1.27.3 or later (the `go` directive in `go.mod`)
 
 ### Install via Go
 ```sh
@@ -92,13 +92,21 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `--diff` | Compare two files side by side |
 | `--keymap NAME` | Keymap profile: `default`, `vscode`, `emacs`, `macos`, `macos-gui` |
 | `--theme NAME` | Theme name (e.g. `dark`, `light`) |
-| `--config PATH` | Path to custom config file (default: `~/.config/gvim/config.json`) |
+| `--config PATH` | Path to custom config file (default: `config.json` in the platform config directory, `~/.config/gvim/` on Linux) |
 | `--log-file PATH` | Append status notices and plugin log to file |
 | `--simple` | Open without restoring or saving session, and without file explorer |
 | `--restore` | Force restoring previous session |
 | `--no-restore` | Skip restoring previous tabs |
 | `--stdin` (or `-`) | Read standard input into a scratch buffer |
-| `--no-plugins` | Skip discovering or loading plugins |
+| `--stdin-name NAME` | Name the stdin buffer, for its language and the Save-As suggestion |
+| `--no-session` | Alias for `--no-restore` |
+| `--no-plugins` | Skip discovering or loading plugins (`--plugin` still loads) |
+| `--plugin PATH` | Load the plugin at PATH (a `.lua` file or a plugin directory); repeatable |
+| `--daemon[=NAME]` | Run the editor as a daemon on a Unix socket (foreground) |
+| `-a`, `--attach[=NAME]` | Attach this terminal to a running daemon |
+
+Subcommands: `gvim config` (inspect the configuration), `gvim grammar list` (the syntax
+grammars) and `gvim version`. `gvim --help` has the full description of each flag.
 
 ---
 

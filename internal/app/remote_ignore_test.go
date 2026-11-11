@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -327,3 +328,24 @@ func TestRemoteIgnoreDisconnectedTouchesNothing(t *testing.T) {
 }
 
 var _ = time.Second
+
+// TestRemoteIgnoreRulesApplyToEveryEntry checks the rule budget is per directory: a
+// .gitignore with many rules keeps filtering however many entries are looked up.
+func TestRemoteIgnoreRulesApplyToEveryEntry(t *testing.T) {
+	var rules strings.Builder
+	for i := range 100 {
+		fmt.Fprintf(&rules, "skip%d\n", i)
+	}
+	rules.WriteString("*.log\n")
+	fs := newIgnoreFS().file("/remote/w/.gitignore", rules.String())
+	batch := newIgnoreBatch(func() authority.FileSystem { return fs }, "/remote/w")
+	ctx := context.Background()
+	for i := range 200 {
+		if !batch.ignored(ctx, "/remote/w", fmt.Sprintf("f%d.log", i), false) {
+			t.Fatalf("entry %d is not ignored", i)
+		}
+	}
+	if n := batch.Notice(); n != "" {
+		t.Fatalf("notice = %q, want none", n)
+	}
+}

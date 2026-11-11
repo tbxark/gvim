@@ -211,8 +211,8 @@ func (m *Model) StartWorkspaceLaunch(l WorkspaceLaunch) WorkspaceCmd {
 	if l.Source != "" {
 		if idx, ok := m.dock.FindSource(l.Source); ok {
 			m.dock.SetActive(idx)
-			m.dock.Focus()
-			return nil
+			m.focusDock()
+			return m.showDock()
 		}
 	}
 	resume := append([]string(nil), l.ResumeArgv...)

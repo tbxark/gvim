@@ -13,6 +13,7 @@ import (
 
 	"github.com/tailscale/hujson"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/keymap"
@@ -268,24 +269,10 @@ func writeKeybindings(path string, entries []any, kept []json.RawMessage) error 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.json")
-	if err != nil {
-		return err
-	}
-	_, werr := tmp.Write(v.Pack())
-	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr); err != nil {
-		_ = os.Remove(tmp.Name())
-		return err
-	}
-	if mode, err := os.Stat(path); err == nil {
-		_ = os.Chmod(tmp.Name(), mode.Mode().Perm())
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		_ = os.Remove(tmp.Name())
-		return err
-	}
-	return nil
+	// atomicfile keeps a symlinked (dotfile-managed) config a symlink, and the mode,
+	// owner and extended attributes of the file it replaces.
+	_, err = atomicfile.WriteFile(path, v.Pack())
+	return err
 }
 
 // rawEntries returns kept as the values a JSON list is made of.

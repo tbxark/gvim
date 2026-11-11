@@ -23,10 +23,9 @@ type Runner func(ctx context.Context, opts app.Options) error
 
 // Exit codes. exitError carries a non-default code; any other error exits 1.
 const (
-	exitOK             = 0
-	exitFailure        = 1
-	exitNotImplemented = 2
-	exitInterrupted    = 130
+	exitOK          = 0
+	exitFailure     = 1
+	exitInterrupted = 130
 )
 
 // exitError is an error that Execute reports with a specific exit code.
@@ -91,8 +90,9 @@ restoring and saving no session. --restore forces the session for this run,
 
 Standard input becomes a scratch [stdin] buffer (no path: Save runs Save As), and the
 keyboard then comes from the terminal. Use --stdin, or a - FILE argument anywhere among
-the files; when no files are named, piped stdin is read even without the flag, so
-"git show | gvim" works. The read is bounded at 32 MiB. A stdin launch never restores or
+the files; when nothing is named (no file, directory or remote target, and no --restore),
+piped stdin is read even without the flag, so "git show | gvim" works. The read is
+bounded at 32 MiB. A stdin launch never restores or
 saves the session. --stdin-name NAME names the buffer for the language (by extension) and
 the Save-As suggestion.
 
@@ -157,12 +157,12 @@ command drops this client and leaves the editor running.`,
 				return err
 			}
 			opts := app.Options{
-				Files:   targets.Files,
-				Root:    targets.Root,
-				Remote:  targets.Remote,
-				Config:  configPath,
-				Keymap:  keymapName,
-				Theme:   themeName,
+				Files:    targets.Files,
+				Root:     targets.Root,
+				Remote:   targets.Remote,
+				Config:   configPath,
+				Keymap:   keymapName,
+				Theme:    themeName,
 				LogFile:  logFile,
 				Diff:     diff,
 				ReadOnly: readOnly,
@@ -197,14 +197,13 @@ command drops this client and leaves the editor running.`,
 				}
 				opts.Daemon = &app.DaemonOptions{Mode: app.DaemonAttach, Name: name}
 			}
+			// From here no error prints the usage text: a validation message names the
+			// flag and the valid values, which the usage would only bury, and runtime
+			// errors are not usage errors.
+			cmd.SilenceUsage = true
 			if err := opts.Validate(); err != nil {
-				// The message names the flag and the valid values: the whole usage text
-				// after it would only bury it.
-				cmd.SilenceUsage = true
 				return err
 			}
-			// Runtime errors are not usage errors, so they print no usage text.
-			cmd.SilenceUsage = true
 			if run == nil {
 				return errors.New("no runner configured")
 			}

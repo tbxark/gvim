@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -151,7 +152,7 @@ func (s *settingsService) structureLSP(cfg config.Config, object map[string]json
 			languages[lang] = true
 		}
 	}
-	for _, lang := range sortedStrings(languages) {
+	for _, lang := range slices.Sorted(maps.Keys(languages)) {
 		servers := s.effectiveLSPServers(cfg, lang)
 		names := make([]string, 0, len(servers))
 		states := make([]string, 0, len(servers))
@@ -183,7 +184,7 @@ func (s *settingsService) structureLSP(cfg config.Config, object map[string]json
 		universal, _ = decodeUniversalAt(layerObjectRaw(object, "universal_lsp"))
 	}
 	universalStatuses := s.lspStatuses()[""]
-	for _, name := range sortedStrings(universal) {
+	for _, name := range slices.Sorted(maps.Keys(universal)) {
 		servers := universal[name]
 		names := make([]string, 0, len(servers))
 		states := make([]string, 0, len(servers))
@@ -324,22 +325,6 @@ func decodeUniversalAt(raw json.RawMessage) (map[string][]config.LSPServer, bool
 // is an object.
 func layerObjectRaw(object map[string]json.RawMessage, key string) json.RawMessage {
 	return object[key]
-}
-
-// mapsKeys returns the keys of a set as a slice.
-func mapsKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
-// sortedStrings returns the keys of a set in sorted order.
-func sortedStrings[V any](m map[string]V) []string {
-	out := mapsKeys(m)
-	slices.Sort(out)
-	return out
 }
 
 // lspStart/Stop/Restart run one LSP action for the page. The page sends the

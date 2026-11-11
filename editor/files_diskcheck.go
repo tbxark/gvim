@@ -1,6 +1,10 @@
 package editor
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tbxark/gvim/document"
+)
 
 // DiskChange is the result of checking one open file against the state the editor
 // recorded when it opened or last saved it.
@@ -21,9 +25,9 @@ type DiskChange struct {
 // reads only what the plan recorded, so it may run in a command.
 func (e *Editor) PlanDiskCheck() func() []DiskChange {
 	type recorded struct {
-		Path string
-		was  diskState
-		doc  *Document
+		Path   string
+		was    diskState
+		access document.FileAccess
 	}
 	var files []recorded
 	for _, d := range e.docs {
@@ -36,13 +40,13 @@ func (e *Editor) PlanDiskCheck() func() []DiskChange {
 		// Like the stat of RenamePath, it is the one exception to "Update does no IO".
 		_ = d.CheckSource()
 		if d.Path != "" && d.Disk.Exists {
-			files = append(files, recorded{Path: d.Path, was: d.Disk, doc: d})
+			files = append(files, recorded{Path: d.Path, was: d.Disk, access: d.FileAccess()})
 		}
 	}
 	return func() []DiskChange {
 		out := make([]DiskChange, 0, len(files))
 		for _, f := range files {
-			now := f.doc.DiskState()
+			now := document.DiskStateAt(f.access, f.Path)
 			out = append(out, DiskChange{
 				Path:    f.Path,
 				Changed: now.Exists && !now.SameAs(f.was),

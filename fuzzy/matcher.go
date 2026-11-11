@@ -35,15 +35,9 @@ func (m *Matcher) Match(target string) (score int, indexes []int, ok bool) {
 				return 0, nil, false
 			}
 		}
-	} else {
-		m.tc = appendRunes(m.tc[:0], target)
-		m.tl = appendLowerRunes(m.tl[:0], target)
-		for _, t := range m.terms {
-			if !isSubsequence(t.lower, m.tl) {
-				return 0, nil, false
-			}
-		}
 	}
+	// matchPrepared starts with the subsequence check, so a non-ASCII target is
+	// rejected there, after one conversion.
 	m.tc = appendRunes(m.tc[:0], target)
 	m.tl = appendLowerRunes(m.tl[:0], target)
 	r := matchPrepared(m.terms, m.tc, m.tl)

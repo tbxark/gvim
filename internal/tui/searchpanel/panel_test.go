@@ -718,6 +718,19 @@ func TestHistoryWalksTheSearchedPatterns(t *testing.T) {
 	}
 }
 
+func TestHistoryRecordsAnEditedRecall(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: sampleResult()}
+	p := New(searchOptions(s))
+	search(t, p, "foo")
+	step(t, p, p.walkHistory(true))
+	// Typing over the recalled pattern is a new search: it goes into the history.
+	search(t, p, "d")
+	if got := p.History(); len(got) != 2 || got[0] != "food" {
+		t.Fatalf("history = %v, want [food foo]", got)
+	}
+}
+
 func TestExportItemsGroupTheMatches(t *testing.T) {
 	t.Parallel()
 	p, _ := resultPanel(t)
@@ -1606,5 +1619,24 @@ func TestSearchRequestTreatsMissingCapabilityAsUnknown(t *testing.T) {
 	req := s.reqs[len(s.reqs)-1]
 	if !req.FilesKnown || req.FilesReady || !req.FilesUnknown {
 		t.Fatalf("unknown-capability state = known %v ready %v unknown %v, want true/false/true", req.FilesKnown, req.FilesReady, req.FilesUnknown)
+	}
+}
+
+// TestClearedResultForgetsItsCheckState checks a result cleared by an empty query does
+// not lend its unchecked boxes and folds to the next result's files.
+func TestClearedResultForgetsItsCheckState(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	p.Update(typedKey('n')) // uncheck everything
+	selectResultRows(p)
+	p.Update(specialKey(tea.KeyLeft)) // fold a.go
+	p.query.SetValue("")
+	p.requery()
+	p.appendBatchFiles(fileBatch("c.go", 1, 1, false).Files)
+	if matches, files := p.ReplaceCount(); matches != 1 || files != 1 {
+		t.Fatalf("the new result has %d checked matches in %d files, want all of its one", matches, files)
+	}
+	if len(p.expanded) != 1 || !p.expanded[0] {
+		t.Fatalf("expanded = %v, want the new file unfolded", p.expanded)
 	}
 }

@@ -17,7 +17,7 @@ import (
 // Live Grep is the palette's text search over the workspace files and the open
 // buffers. Its query is the whole query line, with no mode prefix, and its rows are the
 // matching lines. Searching reads the files, so it runs in a tea.Cmd and its result
-// comes back as a GrepResultMsg. The app adapter implements Grepper over internal/search.
+// comes back as a GrepResultMsg. The app adapter implements Grepper over the search package.
 //
 // Live Grep has a toolbar row above its rows: the match modes (case, regex, whole
 // word) and the scopes (files, buffers, the dock's terminal transcripts, language-server

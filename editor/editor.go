@@ -499,6 +499,12 @@ func Actions() []Action {
 	return names
 }
 
+// IsAction reports whether Do understands a.
+func IsAction(a Action) bool {
+	_, ok := handlers[a]
+	return ok
+}
+
 // Do runs action a. args carries action parameters: insert_char takes "text",
 // and close_tab and quit take "force" (bool). Do never panics on bad arguments;
 // it reports them through Result.Err and Status.

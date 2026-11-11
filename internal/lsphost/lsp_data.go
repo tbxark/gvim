@@ -578,7 +578,7 @@ func (p *lspPort) pullDiagnostics(path string, rec lspDocRec, mgr *manager.Manag
 
 	docURI := lsp.PathURI(path)
 	var items []protocol.Diagnostic
-	pulled := false
+	pulled, failed := false, false
 	for _, h := range mgr.Handles(rec.lang) {
 		caps := h.Capabilities()
 		if !caps.DiagnosticPull {
@@ -593,6 +593,9 @@ func (p *lspPort) pullDiagnostics(path string, rec lspDocRec, mgr *manager.Manag
 		report, err := h.Client().PullDiagnostics(ctx, docURI, "")
 		cancel()
 		if err != nil {
+			// A server still indexing answers ContentModified: ask again next time
+			// rather than remember "no diagnostics" for this version.
+			failed = true
 			continue
 		}
 		if !report.Unchanged {
@@ -600,12 +603,14 @@ func (p *lspPort) pullDiagnostics(path string, rec lspDocRec, mgr *manager.Manag
 		}
 		pulled = true
 	}
-	p.mu.Lock()
-	if p.pulled == nil {
-		p.pulled = make(map[string]pulledDiagnostics)
+	if !failed {
+		p.mu.Lock()
+		if p.pulled == nil {
+			p.pulled = make(map[string]pulledDiagnostics)
+		}
+		p.pulled[path] = pulledDiagnostics{version: rec.version, items: slices.Clone(items)}
+		p.mu.Unlock()
 	}
-	p.pulled[path] = pulledDiagnostics{version: rec.version, items: slices.Clone(items)}
-	p.mu.Unlock()
 	if !pulled {
 		return tui.DiagnosticsEvent{}, false
 	}

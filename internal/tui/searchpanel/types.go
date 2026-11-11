@@ -5,7 +5,7 @@
 //
 // The panel does no IO. A search is a tea.Cmd over the plain ports declared here, which
 // the app adapters implement, and the result comes back as a message that this package
-// applies. The panel never imports internal/search: the match and edit types below are
+// applies. The panel never imports the search package: the match and edit types below are
 // plain, and the app does the search and the replacement expansion.
 //
 // The root model stacks the panel as an overlay and keeps it after it closes, so the

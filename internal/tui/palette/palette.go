@@ -56,7 +56,7 @@ const (
 	// pollInterval is how long the file mode waits before it ranks again while
 	// the file index is still loading.
 	pollInterval = 100 * time.Millisecond
-	// wheelRows is the number of rows one wheel notch scrolls (BLUEPRINT-v2 3.2).
+	// wheelRows is the number of rows one wheel notch scrolls.
 	wheelRows = 3
 	// loadingText is the file mode's message while the index runs. It is
 	// finder.LoadingStatus, repeated for the same reason as fileLimit.

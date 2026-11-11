@@ -164,7 +164,6 @@ type ServerStatus struct {
 type Handle struct {
 	// key names the configured server: its language (empty for universal) and name.
 	key       string
-	id        uint64
 	language  string
 	universal bool
 	cfg       ServerConfig
@@ -197,9 +196,6 @@ func (h *Handle) Language() string { return h.language }
 func (h *Handle) Can(feature Feature) bool {
 	return h.filter.Allows(feature) && Capability(h.client.Capabilities(), feature)
 }
-
-// Allows reports whether the server's only/except filter lets feature through.
-func (h *Handle) Allows(feature Feature) bool { return h.filter.Allows(feature) }
 
 // Command is the program and arguments the server runs with.
 func (h *Handle) Command() []string { return h.cfg.CommandLine() }
@@ -325,8 +321,7 @@ type Manager struct {
 	// failures holds the message of the last failed start, by server key.
 	failures map[string]string
 	// epoch counts Shutdown calls, so that a server started across one is not kept.
-	epoch  uint64
-	nextID uint64
+	epoch uint64
 }
 
 // NewManager returns a Manager for the workspace at root, an absolute directory
@@ -1053,8 +1048,6 @@ func (m *Manager) startServer(key, language string, cfg ServerConfig, universal 
 		err = errServerGone
 	}
 	if err == nil {
-		m.nextID++
-		h.id = m.nextID
 		m.handles = append(m.handles, h)
 		m.resume[key] = resumeSpec{language: language, cfg: cfg, universal: universal}
 		delete(m.failures, key)
@@ -1294,7 +1287,9 @@ func (m *Manager) pruneLocked() {
 			kept = append(kept, h)
 			continue
 		}
-		_ = h.client.Close()
+		// Close reaps the process, which can wait out the kill grace period: do it
+		// off the lock, so Servers, Open and HandleForPath never stall behind it.
+		go func(c *lsp.Client) { _ = c.Close() }(h.client)
 		for file := range h.docs {
 			delete(h.docs, file)
 		}
@@ -1412,11 +1407,6 @@ func (m *Manager) handlesForLanguage(language string) []*Handle {
 		}
 	}
 	return out
-}
-
-// Running reports whether any live server serves language.
-func (m *Manager) Running(language string) bool {
-	return len(m.handlesForLanguage(language)) > 0
 }
 
 // Shutdown shuts down, exits and closes every running server, and forgets all

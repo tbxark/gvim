@@ -98,7 +98,7 @@ func TestRename(t *testing.T) {
 	newPath := filepath.Join(root, "b.txt")
 	writeFile(t, oldPath, "alpha")
 
-	if err := Rename(oldPath, newPath); err != nil {
+	if err := RenameNoReplace(oldPath, newPath); err != nil {
 		t.Fatalf("Rename: %v", err)
 	}
 	if exists(oldPath) || readFile(t, newPath) != "alpha" {
@@ -111,7 +111,7 @@ func TestRenameToSameNameIsNoop(t *testing.T) {
 	path := filepath.Join(root, "a.txt")
 	writeFile(t, path, "alpha")
 
-	if err := Rename(path, path); err != nil {
+	if err := RenameNoReplace(path, path); err != nil {
 		t.Fatalf("Rename to itself: %v", err)
 	}
 	if readFile(t, path) != "alpha" {
@@ -126,7 +126,7 @@ func TestRenameConflictKeepsBoth(t *testing.T) {
 	writeFile(t, oldPath, "alpha")
 	writeFile(t, newPath, "beta")
 
-	if err := Rename(oldPath, newPath); !errors.Is(err, ErrConflict) {
+	if err := RenameNoReplace(oldPath, newPath); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
 	if readFile(t, oldPath) != "alpha" || readFile(t, newPath) != "beta" {
@@ -142,7 +142,7 @@ func TestRenameDirectoryKeepsContents(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(dir, "main.go"), "package main")
 
-	if err := Rename(dir, filepath.Join(root, "lib")); err != nil {
+	if err := RenameNoReplace(dir, filepath.Join(root, "lib")); err != nil {
 		t.Fatalf("Rename dir: %v", err)
 	}
 	if got := readFile(t, filepath.Join(root, "lib", "main.go")); got != "package main" {
@@ -152,7 +152,7 @@ func TestRenameDirectoryKeepsContents(t *testing.T) {
 
 func TestRenameMissingSource(t *testing.T) {
 	root := t.TempDir()
-	err := Rename(filepath.Join(root, "nope"), filepath.Join(root, "x"))
+	err := RenameNoReplace(filepath.Join(root, "nope"), filepath.Join(root, "x"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("want ErrNotExist, got %v", err)
 	}
@@ -167,7 +167,7 @@ func TestMove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Move(src, dstDir); err != nil {
+	if err := MoveNoReplace(src, dstDir); err != nil {
 		t.Fatalf("Move: %v", err)
 	}
 	if exists(src) || readFile(t, filepath.Join(dstDir, "a.txt")) != "alpha" {
@@ -180,7 +180,7 @@ func TestMoveSameDirectoryIsNoop(t *testing.T) {
 	src := filepath.Join(root, "a.txt")
 	writeFile(t, src, "alpha")
 
-	if err := Move(src, root); err != nil {
+	if err := MoveNoReplace(src, root); err != nil {
 		t.Fatalf("Move within same dir: %v", err)
 	}
 	if readFile(t, src) != "alpha" {
@@ -198,7 +198,7 @@ func TestMoveConflictKeepsBoth(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(dstDir, "a.txt"), "beta")
 
-	if err := Move(src, dstDir); !errors.Is(err, ErrConflict) {
+	if err := MoveNoReplace(src, dstDir); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
 	if readFile(t, src) != "alpha" || readFile(t, filepath.Join(dstDir, "a.txt")) != "beta" {
@@ -213,7 +213,7 @@ func TestMoveRejectsNonDirectoryTarget(t *testing.T) {
 	writeFile(t, src, "alpha")
 	writeFile(t, notDir, "beta")
 
-	if err := Move(src, notDir); !errors.Is(err, ErrInvalidDest) {
+	if err := MoveNoReplace(src, notDir); !errors.Is(err, ErrInvalidDest) {
 		t.Fatalf("want ErrInvalidDest, got %v", err)
 	}
 	if !exists(src) {
@@ -232,7 +232,7 @@ func TestMoveDirectoryIntoItselfRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Move(dir, inner); !errors.Is(err, ErrInvalidDest) {
+	if err := MoveNoReplace(dir, inner); !errors.Is(err, ErrInvalidDest) {
 		t.Fatalf("want ErrInvalidDest, got %v", err)
 	}
 	if !exists(inner) {
@@ -245,7 +245,7 @@ func TestMoveMissingSource(t *testing.T) {
 	if err := Mkdir(filepath.Join(root, "dest")); err != nil {
 		t.Fatal(err)
 	}
-	err := Move(filepath.Join(root, "nope"), filepath.Join(root, "dest"))
+	err := MoveNoReplace(filepath.Join(root, "nope"), filepath.Join(root, "dest"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("want ErrNotExist, got %v", err)
 	}

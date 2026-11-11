@@ -180,9 +180,6 @@ type Options struct {
 	pluginLog func(pluginapi.LogEntry)
 }
 
-// Validate reports the first option that cannot be used. It does not touch
-// the file system: a missing file is valid, and a root is checked when Run
-// opens it.
 // StdinLaunch reports whether the launch carries standard-input content: the explicit
 // --stdin/- flag, a directly-set Stdin, or a --stdin-name. Such a launch is kept out of
 // the session (no session restore or save), because the piped content is not session
@@ -192,6 +189,9 @@ func (o Options) StdinLaunch() bool {
 	return o.ReadStdin || len(o.Stdin) > 0 || o.StdinName != ""
 }
 
+// Validate reports the first option that cannot be used. It does not touch
+// the file system: a missing file is valid, and a root is checked when Run
+// opens it.
 func (o Options) Validate() error {
 	if o.Keymap != "" {
 		if _, err := keymap.ByName(o.Keymap); err != nil {

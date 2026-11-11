@@ -35,9 +35,11 @@ internal/                       private executable shell (no top-level package i
     tabstrip/                   split tree, tab strip
     dock/                       terminal dock panel (the root keeps the glue)
     browser/ ctxmenu/ dialog/ editorpane/ explorer/ find/ grid/ icons/ menubar/
-    palette/ picker/ pluginpanel/ popup/ prompt/ space/ style/
+    palette/ picker/ pluginpanel/ popup/ prompt/ searchpanel/ space/ style/ textsafe/
   terminal/                     PTY + screen model behind the terminal dock
   filewatch/                    fsnotify watcher (explorer reloads, project switches)
+  daemon/                       attach/detach socket host and the workspace registry
+  agentdiscover/                read-only tmux and agent-transcript session discovery
   uitest/                       test-only in-process UI harness
 
 <top level>                     TUI-free engine, shared libraries and services
@@ -45,7 +47,9 @@ internal/                       private executable shell (no top-level package i
   decorations/ textlayout/ outline/
   atomicfile/ shellcmd/
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
-  config/ keymap/ theme/
+  config/ keymap/ theme/ i18n/
+  authority/ (the workspace backend slot: local or SSH, +authoritytest)
+  env/ (project environment detection and activation)
   trust/ (workspace trust: levels, decision store, policy, executable-content scan, the spawn gate DecideSpawn)
   updatecheck/ (the release check behind the status row element {update})
   lsp/ (+lsp/manager, lsp/lsptest) pluginapi/ plugin/ (+hostos, bundled, plugintest,
@@ -82,9 +86,9 @@ internal/cli → main (root package)
 | Rule | Statement |
 |---|---|
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
-| R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal` and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
-| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `i18n`, `plugin/bundled`, `plugin/pattern`, `outline`. (`lsp/manager` sits above `lsp` and may import it.) |
-| R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. |
+| R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal`, `internal/daemon` (it runs the TUI program over a client socket) and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
+| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `i18n`, `plugin/bundled`, `plugin/pattern`, `outline`, `updatecheck`, `internal/agentdiscover`, `internal/tui/textsafe`. (`lsp/manager` sits above `lsp` and may import it.) |
+| R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`, `document` and `atomicfile`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. `authority` imports only `trust` and `plugin/hostos`. `env` imports only `config` and `trust`. `internal/daemon` imports only `config` and `session`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports only `internal/app`, `internal/configview`, `authority` (the top-level remote-spec parser it classifies targets with) and `syntax` (and cobra). |
 | R7 | Only the root main package and `internal/cli` import `internal/app`; only the root main package imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
@@ -92,8 +96,8 @@ internal/cli → main (root package)
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
 | R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern`, `plugin/hostos` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
 | R11 | `editor`, `document`, `buffer` and `decorations` do not import `pluginapi`. |
-| R12 | Only `internal/tui` (its root and its own sub-packages), `internal/app` and `internal/uiadapter` import TUI sub-packages. |
-| R13 | The private host packages: only `internal/app` imports `uiadapter`, `pluginhost`, `lsphost` and `restore`; `keybindings` may also be imported by `uiadapter`/`pluginhost`/`configview`; `highlight` by `uiadapter`. |
+| R12 | Only `internal/tui` (its root and its own sub-packages), `internal/app` and `internal/uiadapter` import TUI sub-packages. `internal/tui/pluginpanel` imports only `grid`, `style`, `space` and `pluginapi`. |
+| R13 | The private host packages: only `internal/app` imports `uiadapter`, `pluginhost` and `lsphost`; `restore` and `highlight` may also be imported by `uiadapter`; `keybindings` by `uiadapter`/`pluginhost`/`configview`. |
 | R14 | `internal/configview` imports only `config`, `internal/keybindings`, `keymap` and `theme` among module packages; it never imports `internal/app`, `internal/cli` or `internal/tui`. |
 | R15 | The TUI root contract (`internal/tui`) is imported only by `internal/app`, the host packages (`uiadapter`, `keybindings`, `lsphost`, `restore`) and `internal/uitest`; TUI sub-packages never import the root (R5). |
 | R16 | No top-level package's test files import `internal/`; tests follow the same layer rule as the package they test. |
@@ -122,11 +126,11 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 
 | Package | Role | May import |
 |---|---|---|
-| `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `syntax`, cobra, stdlib |
+| `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`, remote targets through `authority`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `syntax`, `authority`, cobra, stdlib |
 | `internal/configview` | Backs `gvim config show`, `gvim config paths`: renders the effective config as JSON and reports config file locations. | `config`, `internal/keybindings`, `keymap`, `theme` |
 | `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
 | `internal/agentdiscover` | Read-only discovery of terminal sessions that already exist outside gvim: the tmux socket walk, bounded `list-sessions`/`list-panes` parsing, agent pane name matches and qualified attach argv. TUI-free; the runner and an `AllowCommands` trust gate are injected. | stdlib only; a scan never starts or attaches a session; see `docs/terminal.md` Agent discovery |
-| `internal/daemon` | The daemon MVP (#18a): the socket protocol and lifecycle, the hosted editor's socket IO, and the attach client that forwards this terminal to a daemon. | `internal/tui` (message types only), charm, stdlib |
+| `internal/daemon` | The daemon MVP (#18a): the socket protocol and lifecycle, the hosted editor's socket IO, the attach client that forwards this terminal to a daemon, and the workspace registry. | `config`, `session`, charm, stdlib |
 | `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
 | `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
 | `internal/lsphost` | Language-server port: managers, document sync, diagnostics polling, server catalogue. | `lsp`, `lsp/manager`, engine packages, `pluginapi`, `tui` |
@@ -154,7 +158,8 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `encoding` | Decoding/encoding detection and conversion (UTF-8/16, charsets via `x/text`). | |
 | `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/restore`. Session and search JSON go through `atomicfile`; the overlay-stash payload is `document.StashOverlay`. |
 | `decorations` | Plugin decoration store: namespaced items per buffer, anchors that follow edits, per-line query. | Pure data, stdlib only. |
-| `authority` | The workspace backend slot: four routing surfaces (file I/O, one-shot process, long-running stdio spawn, terminal wrapper), the local implementation over the plugin OS port, Fresh-compatible scp/ssh:// target parsing with path translation, and the first SSH backend (pure-Go x/crypto/ssh) for terminal and one-shot exec. | TUI-free, no internal imports; remote file I/O is the SFTP/remote-helper follow-up; the app/TUI wiring lands after the daemon work (docs/authority.md). |
+| `authority` | The workspace backend slot: four routing surfaces (file I/O, one-shot process, long-running stdio spawn, terminal wrapper), the local implementation over the plugin OS port, Fresh-compatible scp/ssh:// target parsing with path translation, and the first SSH backend (pure-Go x/crypto/ssh) for terminal and one-shot exec. | TUI-free, no internal imports; `internal/app` wires it for a remote launch (docs/authority.md). |
+| `env` | Project environment detection (detectors, markers) and activation: the shell snippet's environment delta, captured once per input fingerprint and applied to every spawn path. | Imports `config` and `trust`; a capture runs its shells without holding the provider lock. |
 | `textlayout` | Terminal text geometry: indent width, indent guides, word occurrences, match columns. | Leaf; used by `editor`/`fold` and the editor pane. |
 | `outline` | Markdown heading scan for the sidebar's Contents section: ATX and setext headings, fenced code skipped, bounded to 1 MiB. | Leaf, TUI-free; the widget and the model half are in `internal/tui/sidebar` and `internal/tui/markdown_toc.go` (docs/sidebar.md). |
 | `atomicfile` | Atomic file replacement: temp+sync+rename, mode/owner/xattr, symlink following. | Leaf; used by `editor` (saves) and `session` (session and search JSON). |
@@ -278,7 +283,7 @@ considered and rejected (see `migration/ARCH-v4.md` history and `buffer/doc.go`)
 | `gvim.*` API installers | `api_*.go` (one per area), `bindings.go`, `api_modules.go` | the Lua surface; `api_modules.go` lists the installers in order. Tier 1a adds `api_panel.go` (gvim.ui widget panels and sidebar sections), `api_i18n.go`, `api_menu.go`, the action popup and prompt suggestions in `api_ui.go`, the theme override in `data_time.go`, and the all-files diagnostics in `api_lsp.go` |
 | data libraries | `data_*.go`, `stdlib*.go` | `gvim.json`, `gvim.re`, `gvim.settings`, `gvim.text`, `gvim.diff`, `gvim.time`, `gvim.utf8`, and the repaired Lua 5.1 stdlib |
 | loader | `discover.go`, `manifest.go`, `order.go`, `lifecycle.go`, `control.go` | discovery, `plugin.json`, dependency order, enable/disable/reload, `plugin-state.json` |
-| OS port | `os.go`, `nopos.go` | file/process/watch interface used by `gvim.fs` and `gvim.proc`; the real implementation is in `internal/app` |
+| OS port | `hostos/os.go`, `hostos/nopos.go` | file/process/watch interface used by `gvim.fs` and `gvim.proc`; the real implementation is in `internal/pluginhost` |
 
 The `gvim.*` installers intentionally stay in the runtime package: they call 120 kernel
 symbols directly, so a separate package would only fake a boundary. The OS port is the
@@ -313,11 +318,11 @@ Done:
 1. Top-of-tree layout move and package renames (§5).
 2. `main` stays at the module root (easy `go install` / `go build .`); only auxiliary
    commands live under `cmd/`.
-3. Import gate rewritten for the new tree (R1-R14) and generator paths updated.
+3. Import gate rewritten for the new tree (now R1-R16) and generator paths updated.
 4. `internal/app` split into host packages (`uiadapter`, `pluginhost`, `lsphost`,
-   `restore`, `keybindings`, `highlight`, plus test-only `apptest`); `app` is now six
-   files (Options/Run/buildRuntime, settings, logfile, live grep, formatters), and the
+   `restore`, `keybindings`, `highlight`, plus test-only `apptest`), and the
    `gvim config` backend moved to `internal/configview` with `syntax.GrammarNames`.
+   (`app` has since grown again with the remote, daemon-workspace and settings wiring.)
 5. TUI kits: `overlay` (contract + Caret), `list` (list/box kit), `space` (`Rect` and text
    fitting), removing ten forwarding adapters (~36 methods) and the duplicated fit helpers;
    then `split` (tree + geometry), `frame` (layout + hit map) and `tabstrip` (strip paint),
@@ -329,22 +334,18 @@ Done:
 8. Terminal dock extracted to `internal/tui/dock` (panel + tests), root keeps the glue;
    the zero-importer `internal/tui/statusbar` package (status row primitives duplicated by
    `tui/frame.StatusView`) was deleted.
+9. `lsp` split into the client, `lsp/manager` and `lsp/lsptest`; the plugin OS port
+   extracted to `plugin/hostos`, and `plugin/doc.go` holds the plugin file map.
 
 Next (tracked as follow-up work; each keeps build + tests green):
 
-1. Remaining TUI extraction. The package moves for the keybinding editor
-   (`tui/keybindeditor`) and the terminal dock (`tui/dock`) are mechanical on top of the
-   kits, but their tests are model-driven (`keybind_editor_test.go` 743 LOC,
-   `dock_test.go` 1,090 LOC plus four dock tests) and need a dedicated harness rewrite
-   against the new types; do that in one focused pass. The plugin host and LSP UI remain
-   last.
-3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
-4. `lsp` split into client + `lsp/manager` + `lsp/lsptest`; `plugin/hostos` extracted from
-   the runtime, and `plugin/doc.go` now holds the file map.
-5. Finish the editor split tail: move the `editor` model tests into `document`, then delete
+1. Remaining TUI extraction: the keybinding editor (`tui/keybindeditor`); its tests are
+   model-driven (`keybind_editor_test.go`) and need a harness rewrite against the new
+   types. The plugin host and LSP UI remain last.
+2. Finish the editor split tail: move the `editor` model tests into `document`, then delete
    the alias bridge (`editor/bridge.go` + `document/export.go`, ~413 lines) by retargeting
    the ~165 consumer references; tighten `document`'s exported surface to accessors.
-6. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction; optional keybinding
+3. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction; optional keybinding
    editor extraction (`tui/keybindeditor`, needs its test harness rewritten).
 
 The analysis these steps build on (file clusters, symbol-level boundaries, risk

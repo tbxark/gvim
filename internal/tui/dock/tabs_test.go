@@ -759,3 +759,53 @@ func TestTabsDragReorder(t *testing.T) {
 		t.Fatalf("a cancelled drag changed the active tab to %d", tabs.ActiveIndex())
 	}
 }
+
+// fixedClipboard reads one text.
+type fixedClipboard string
+
+func (c fixedClipboard) Read() (string, error) { return string(c), nil }
+
+// TestTabsPasteReachesOnlyTheActiveTab checks a clipboard read is applied by the tab
+// that asked for it, not by every running tab.
+func TestTabsPasteReachesOnlyTheActiveTab(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, starter := newTestTabs(t, &notices)
+	tabs.SetPorts(Ports{Starter: starter, Clipboard: fixedClipboard("clip")})
+	startTab(t, tabs)
+	startTab(t, tabs)
+	cmd := tabs.PasteClipboard()
+	if cmd == nil {
+		t.Fatal("PasteClipboard read nothing")
+	}
+	tabs.Update(cmd())
+	for _, p := range tabs.tabs {
+		flushInput(t, p)
+	}
+	if got := starter.terms[1].pastes; len(got) != 1 || got[0] != "clip" {
+		t.Fatalf("active tab pastes = %q, want [clip]", got)
+	}
+	if got := starter.terms[0].pastes; len(got) != 0 {
+		t.Fatalf("background tab pastes = %q, want none", got)
+	}
+	if len(notices) != 0 {
+		t.Fatalf("notices = %q, want none", notices)
+	}
+}
+
+// TestTabsClosedWhileStartingClosesTheShell checks a shell that comes up after its
+// tab was closed is closed, not left running with nothing to show it.
+func TestTabsClosedWhileStartingClosesTheShell(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, starter := newTestTabs(t, &notices)
+	cmd := tabs.NewTab()
+	if cmd == nil {
+		t.Fatal("NewTab did not start a shell")
+	}
+	tabs.CloseTab()
+	tabs.Update(cmd())
+	if len(starter.terms) != 1 || !starter.terms[0].closed {
+		t.Fatal("the shell of the closed tab is still running")
+	}
+}

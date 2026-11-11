@@ -212,7 +212,7 @@ func (p *Panel) transcriptRows() (rows []string, first int) {
 		sc := p.term.Screen()
 		screenRows = sc.Rows
 		for r := 0; r < sc.Rows; r++ {
-			add(screenRowText(sc, r), prior+total+r)
+			add(screenRowText(sc, r, false), prior+total+r)
 		}
 	}
 	// An exited-but-not-restarted shell saves Fresh's marker after its frozen

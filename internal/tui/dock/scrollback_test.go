@@ -3,6 +3,7 @@ package dock
 import (
 	"strings"
 	"testing"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -217,6 +218,42 @@ func TestScrollbackSearch(t *testing.T) {
 	// The first match (history row 2) is selected and visible.
 	if got := p.ScrollSelected(); got != 2 {
 		t.Fatalf("selected = %d after the search, want history row 2", got)
+	}
+}
+
+// shifted is an uppercase letter as Bubble Tea delivers it: the lower-case code with
+// Shift, and the typed text.
+func shifted(r rune) tea.Key {
+	return tea.Key{Code: unicode.ToLower(r), ShiftedCode: r, Mod: tea.ModShift, Text: string(r)}
+}
+
+func TestScrollbackSearchTakesShiftedKeys(t *testing.T) {
+	t.Parallel()
+	p, _ := historyPanel(t, 20)
+	cmd, _ := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	applyScroll(t, p, cmd)
+	p.ScrollKey(tea.Key{Code: '/'})
+	for _, r := range "LINE-1" {
+		k := tea.Key{Code: r, Text: string(r)}
+		if unicode.IsUpper(r) {
+			k = shifted(r)
+		}
+		p.ScrollKey(k)
+	}
+	cmd, _ = p.ScrollKey(tea.Key{Code: tea.KeyEnter})
+	for _, msg := range messages(cmd) {
+		next, _ := p.Update(msg)
+		applyScroll(t, p, next)
+	}
+	if p.SearchQuery() != "LINE-1" || p.SearchMatches() < 2 {
+		t.Fatalf("search = %q with %d matches, want LINE-1 with several", p.SearchQuery(), p.SearchMatches())
+	}
+	first := p.ScrollSelected()
+	// Shift+N goes to the previous match, which wraps to the last one.
+	cmd, _ = p.ScrollKey(shifted('N'))
+	applyScroll(t, p, cmd)
+	if p.ScrollSelected() == first {
+		t.Fatalf("Shift+N left the selection on row %d", first)
 	}
 }
 

@@ -13,17 +13,17 @@
 package prompt
 
 import (
-	"github.com/tbxark/gvim/i18n"
-
 	"reflect"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/space"
@@ -145,6 +145,10 @@ type LineOptions struct {
 	// History holds earlier answers, oldest first. Up shows the previous one, Down the next, and
 	// Down past the newest brings back what was typed before Up.
 	History []string
+	// Secret masks the input on screen and keeps it out of copy and cut, for passwords.
+	Secret bool
+	// OnCancel runs when the prompt closes without an answer (Esc), which emits no Done.
+	OnCancel func()
 }
 
 // Line is a one-line text prompt. Enter submits the input, Esc closes the
@@ -161,6 +165,8 @@ type Line struct {
 	// selAnchor is the selection anchor in rune indices, -1 when there is no selection.
 	// The caret (field.Position) is the moving head; a non-empty range is highlighted.
 	selAnchor int
+	secret    bool
+	onCancel  func()
 	// The last painted input window, for a left press that places the caret. Fresh's
 	// prompt reports only a press position (prompt_line.rs GestureKind::Press); it has no
 	// prompt drag or double-click word selection, so neither is implemented here.
@@ -204,6 +210,8 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		tag:      o.Tag,
 		validate: o.Validate,
 		onChange: o.OnChange,
+		secret:   o.Secret,
+		onCancel: o.OnCancel,
 		styles:   newStyles(st),
 		// LineOptions.SelectAll is a real reverse-video selection from the start, like
 		// Fresh's rename/overwrite dialogs. Typing/paste replaces it and arrows cancel it.
@@ -218,6 +226,22 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 
 // Active reports whether the prompt is open.
 func (l *Line) Active() bool { return !l.closed }
+
+// Dismiss is the root's Esc: the prompt closes without an answer.
+func (l *Line) Dismiss() {
+	if l.onCancel != nil && !l.closed {
+		l.onCancel()
+	}
+	l.closed = true
+}
+
+// shown is the input as painted: a secret prompt shows one bullet per rune.
+func (l *Line) shown() string {
+	if l.secret {
+		return strings.Repeat("•", utf8.RuneCountInString(l.field.Value()))
+	}
+	return l.field.Value()
+}
 
 // AlertOverlay marks the prompt as an alert: it keeps the input until the user
 // answers it. See overlay.Alert.
@@ -252,7 +276,7 @@ func (l *Line) SelectedRange() (start, end int, ok bool) {
 // SelectedText returns the selected prompt text, empty when there is no selection.
 func (l *Line) SelectedText() string {
 	start, end, ok := l.selectionRange()
-	if !ok {
+	if !ok || l.secret {
 		return ""
 	}
 	return string([]rune(l.field.Value())[start:end])
@@ -337,7 +361,7 @@ func (l *Line) clickAt(x, y int) {
 	if !l.drawn || y != l.fieldY || x < l.fieldX || x >= l.fieldX+l.fieldW {
 		return
 	}
-	runes := []rune(l.field.Value())
+	runes := []rune(l.shown())
 	at, col := l.winStart, l.fieldX
 	for i := l.winStart; i < l.winStop; i++ {
 		w := ansi.StringWidth(string(runes[i]))
@@ -380,6 +404,9 @@ func (l *Line) CutValue() string {
 	l.errText = ""
 	if l.onChange != nil {
 		l.onChange("")
+	}
+	if l.secret {
+		return ""
 	}
 	return text
 }
@@ -439,7 +466,7 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	}
 	switch ks {
 	case "esc":
-		l.closed = true
+		l.Dismiss()
 		return l, nil
 	case "up", "down", "ctrl+p", "ctrl+n":
 		if len(l.history) > 0 {
@@ -681,8 +708,8 @@ func (l *Line) Draw(g *grid.Grid) {
 	}
 	x := space.PadX + g.Put(space.PadX, y, end, l.label+" ", l.styles.label)
 	g.Fill(x, end, y, l.styles.field)
-	runes := []rune(l.field.Value())
-	start, stop := windowRange(l.field.Value(), l.field.Position(), end-x)
+	runes := []rune(l.shown())
+	start, stop := windowRange(string(runes), l.field.Position(), end-x)
 	l.fieldX, l.fieldY, l.fieldW = x, y, end-x
 	l.winStart, l.winStop, l.drawn = start, stop, x < end
 	selStart, selEnd, hasSel := l.selectionRange()
@@ -807,7 +834,7 @@ func (l *Line) Cursor(w, h int) (x, y int, ok bool) {
 		return 0, 0, false
 	}
 	x = space.PadX + ansi.StringWidth(l.label+" ")
-	_, col := space.Window(l.field.Value(), l.field.Position(), l.inputEnd(w)-x)
+	_, col := space.Window(l.shown(), l.field.Position(), l.inputEnd(w)-x)
 	x += col
 	if x >= w {
 		return 0, 0, false

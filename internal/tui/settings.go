@@ -1077,13 +1077,7 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) {
 		}
 	case "keymap":
 		if change.Keymap != "" {
-			km, err := m.util.switchKeymap(change.Keymap)
-			if err != nil {
-				m.notice = "Keymap " + change.Keymap + ": " + err.Error()
-				return
-			}
-			m.keys = km
-			m.util.settings.Keymap = change.Keymap
+			m.applyKeymap(change.Keymap)
 		}
 	case "ui_icons", "ui_icons_font":
 		if change.UIIconsMode != "" {

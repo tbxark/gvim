@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -38,7 +39,27 @@ func (d *debugger) routes() http.Handler {
 	mux.HandleFunc("POST /resize", d.handleResize)
 	mux.HandleFunc("GET /font", d.handleFont)
 	mux.Handle("GET /", http.FileServerFS(assets))
-	return mux
+	// The POST routes type into a PTY that may run a shell: refuse a request another
+	// site's page makes, and one that reaches the port through a rebound domain name.
+	return localHostOnly(http.NewCrossOriginProtection().Handler(mux))
+}
+
+// localHostOnly refuses a request whose Host names neither localhost nor an IP
+// address. A DNS-rebinding page reaches the port under its own domain name, which the
+// browser then treats as same-origin; an IP literal or localhost cannot be rebound.
+func localHostOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		if host != "localhost" && net.ParseIP(host) == nil {
+			http.Error(w, "gvimdebug: open the page at an IP address or localhost", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (d *debugger) handleFrame(w http.ResponseWriter, _ *http.Request) {

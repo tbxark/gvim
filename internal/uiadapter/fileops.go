@@ -7,13 +7,12 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fsops"
 	"github.com/tbxark/gvim/internal/tui"
 	expl "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
-// fileOps is the explorer's file-operation adapter over internal/fsops. The
+// fileOps is the explorer's file-operation adapter over fsops. The
 // root runs the disk operations in a tea.Cmd, so the methods that touch the
 // disk never change the editor. Editor follow-ups are separate methods, and the
 // root calls them from Update, the goroutine that owns the editor, after the disk
@@ -64,9 +63,6 @@ type pathEditor interface {
 	RenamePath(oldPath, newPath string) error
 	CloseByPath(path string, force bool) error
 }
-
-// NewFileOps returns the adapter over ed.
-func NewFileOps(ed *editor.Editor) tui.FileOps { return newFileOps(ed) }
 
 // newFileOps returns the adapter over ed. ed is used by CheckRename, FollowRename
 // and CloseDeleted.

@@ -218,13 +218,7 @@ func place(ctx context.Context, src string, srcInfo fs.FileInfo, dst string, rep
 	if err := copyTree(ctx, src, srcInfo, staged, report); err != nil {
 		return err
 	}
-	if replace {
-		return swapIn(staged, dst)
-	}
-	if err := renamePath(staged, dst); err != nil {
-		return opError("copy", dst, err)
-	}
-	return nil
+	return swapIn(staged, dst)
 }
 
 // swapIn puts the staged copy in place of the existing dst. The existing dst is

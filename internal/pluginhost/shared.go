@@ -9,6 +9,7 @@ package pluginhost
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 
@@ -38,13 +39,16 @@ func (m *MuxOS) SetActive(osys hostos.OS) {
 	m.mu.Unlock()
 }
 
-// Register adds a workspace OS to the set Shutdown ends.
+// Register adds a workspace OS to the set Shutdown ends, once: Activate registers on
+// every switch back to a workspace.
 func (m *MuxOS) Register(osys hostos.OS) {
 	if osys == nil {
 		return
 	}
 	m.mu.Lock()
-	m.all = append(m.all, osys)
+	if !slices.Contains(m.all, osys) {
+		m.all = append(m.all, osys)
+	}
 	m.mu.Unlock()
 }
 

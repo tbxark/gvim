@@ -65,6 +65,16 @@ func TestExplorerHostStore(t *testing.T) {
 		t.Fatalf("suppressed trailing = %q", got)
 	}
 
+	// Clearing the slots keeps the decorations, and clearing those empties the row.
+	h.ClearExplorerSlots("p", "git")
+	if got := m.explorerRowDecor(b).Trailing; got != "U" {
+		t.Fatalf("after ClearExplorerSlots trailing = %q, want the decoration back", got)
+	}
+	h.ClearExplorerDecorations("p", "git")
+	if got := m.explorerRowDecor(b).Trailing; got != "" {
+		t.Fatalf("after ClearExplorerDecorations trailing = %q, want none", got)
+	}
+
 	// Relative paths are ignored without a workspace root; the clean absolute path works.
 	if err := h.SetExplorerDecorations("p", "rel", []pluginapi.FileExplorerDecoration{{Path: "a.go", Symbol: "R"}}); err != nil {
 		t.Fatal(err)

@@ -15,7 +15,7 @@ import (
 	"github.com/tbxark/gvim/search"
 )
 
-// liveGrep is the palette's Grepper over internal/search. It reads the project files
+// liveGrep is the palette's Grepper over the search package. It reads the project files
 // one at a time, within the limits above, and searches each one with the query the
 // palette asked for. The open buffers' text comes in the request, so it needs no IO.
 // It is called from a tea.Cmd.

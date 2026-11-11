@@ -63,22 +63,6 @@ func (s RemoteSpec) Workspace() string {
 // DefaultSSHPort is the port a spec without one uses.
 const DefaultSSHPort = 22
 
-// PathMapper maps the editor's host-side paths to the backend's path space and back. SSH
-// uses IdentityPathMapper (one path space); a future container backend gets the
-// host-root/remote-root pair.
-type PathMapper interface {
-	ToRemote(hostPath string) (remotePath string, ok bool)
-	ToHost(remotePath string) (hostPath string, ok bool)
-}
-
-// IdentityPathMapper is the mapper of a backend whose paths are the editor's paths.
-func IdentityPathMapper() PathMapper { return identityMapper{} }
-
-type identityMapper struct{}
-
-func (identityMapper) ToRemote(p string) (string, bool) { return p, true }
-func (identityMapper) ToHost(p string) (string, bool)   { return p, true }
-
 // ErrNotRemote is returned by ParseTarget when the argument is not a remote form.
 var ErrNotRemote = errors.New("not a remote target")
 

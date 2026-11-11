@@ -360,3 +360,26 @@ func TestWarningsRejectOverlaySequences(t *testing.T) {
 		t.Fatalf("warnings = %q, want the single-key warning", got)
 	}
 }
+
+// TestKeybindingStoreKeepsASymlinkedConfig checks a config file that is a symlink (a
+// dotfile manager's) stays one: the save writes through to the file it points at.
+func TestKeybindingStoreKeepsASymlinkedConfig(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "dotfiles", "config.json")
+	apptest.Must(t, os.MkdirAll(filepath.Dir(real), 0o755))
+	apptest.Must(t, os.WriteFile(real, []byte("{}\n"), 0o644))
+	link := filepath.Join(dir, "config.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	store := NewStore(link, config.Config{})
+	if _, err := store.Save([]tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the config is no longer a symlink: %v %v", fi, err)
+	}
+	if data, err := os.ReadFile(real); err != nil || !strings.Contains(string(data), `"save"`) {
+		t.Fatalf("the target file = %q (%v), want the binding", data, err)
+	}
+}

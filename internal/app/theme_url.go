@@ -15,7 +15,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -185,5 +184,3 @@ func writeThemeURLCache(path string, body []byte) error {
 	}
 	return nil
 }
-
-var _ = errors.Is

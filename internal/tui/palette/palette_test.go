@@ -1402,3 +1402,14 @@ func TestCtrlFConfirmsLikeEnter(t *testing.T) {
 		}
 	})
 }
+
+// TestLongQueryStaysInsideTheCard checks a query wider than the card is clipped before
+// the right border, so the border cell keeps its glyph.
+func TestLongQueryStaysInsideTheCard(t *testing.T) {
+	p := New(Options{Query: ":" + strings.Repeat("9", 200)})
+	g := draw(p, 60, 20)
+	geo := p.layout(60, 20)
+	if got := g.At(geo.right, geo.inputY).Text; got == "9" || got == " " {
+		t.Fatalf("border cell on the query row = %q, want the border glyph", got)
+	}
+}

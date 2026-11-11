@@ -224,3 +224,13 @@ func mustDarkTheme(t *testing.T) theme.Theme {
 	}
 	return th
 }
+
+// TestInspectOnTheWelcomeScreen checks the inspector opens with no document: the
+// welcome screen has no caret, selection or buffer position.
+func TestInspectOnTheWelcomeScreen(t *testing.T) {
+	m, _ := welcomeModel(t, 80, 24)
+	text := inspectText(t, m, 10, 10)
+	if !strings.Contains(text, "Cell: row 11, col 11") || strings.Contains(text, "Current line") {
+		t.Fatalf("inspector on the welcome screen =\n%s", text)
+	}
+}

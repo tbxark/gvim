@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
@@ -262,4 +264,9 @@ func TestDockShowKeepsARestoredTranscriptReadOnly(t *testing.T) {
 	if !tabs.Restored() {
 		t.Fatal("the restored transcript is no longer read-only after Show")
 	}
+	if !tabs.Scrolling() {
+		t.Fatal("the restored transcript lost its read-only view across Hide and Show")
+	}
+	// A wheel notch on the transcript scrolls it; there is no shell to forward it to.
+	tabs.Active().wheelMouse(tea.Mouse{Button: tea.MouseWheelUp}, 0, tea.MouseWheelUp)
 }

@@ -77,6 +77,7 @@ type Harness struct {
 type timer struct {
 	due time.Time
 	tok pluginapi.Token
+	ctx context.Context // the Work's context: a cancelled timer is dropped, as the ui drops it
 }
 
 // New builds a harness and the runtime; nothing is loaded until Start.
@@ -297,6 +298,9 @@ func (h *Harness) Advance(d time.Duration) {
 	for len(h.timers) > 0 && !h.timers[0].due.After(h.now) {
 		t := h.timers[0]
 		h.timers = h.timers[1:]
+		if t.ctx.Err() != nil {
+			continue
+		}
 		h.RT.Resolve(pluginapi.Completion{Token: t.tok})
 		h.Settle()
 	}
@@ -309,8 +313,17 @@ func (h *Harness) Now() time.Time { return h.now }
 // RunWork runs Work like the ui would (see Settle) and reports whether anything ran.
 func (h *Harness) RunWork(work []pluginapi.Work) bool { return h.runWork(work) }
 
-// PendingTimers is the number of Work{After} timers that have not fired yet.
-func (h *Harness) PendingTimers() int { return len(h.timers) }
+// PendingTimers is the number of Work{After} timers that have not fired and were not
+// cancelled.
+func (h *Harness) PendingTimers() int {
+	n := 0
+	for _, t := range h.timers {
+		if t.ctx.Err() == nil {
+			n++
+		}
+	}
+	return n
+}
 
 // runWork runs Work like tea.Cmds: Run and Stream on their own goroutines, with the result
 // resolved here; After on the manual clock. It reports whether anything ran.
@@ -337,7 +350,7 @@ func (h *Harness) runWork(work []pluginapi.Work) bool {
 			h.startStream(w, ctx)
 		case w.After > 0:
 			ran = true
-			h.timers = append(h.timers, timer{due: h.now.Add(w.After), tok: w.Token})
+			h.timers = append(h.timers, timer{due: h.now.Add(w.After), tok: w.Token, ctx: ctx})
 		}
 	}
 	return ran

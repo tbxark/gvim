@@ -44,7 +44,16 @@ func (p *unixPTY) foregroundProcessName() (string, bool) {
 	// The ioctl reads the kernel's foreground process group of the master. Keep the
 	// read lock only for this call: Close must not race a reused fd, but the /proc
 	// or ps lookup below uses the pgid alone.
-	pgid, err := unix.IoctlGetInt(int(p.ptmx.Fd()), unix.TIOCGPGRP)
+	// SyscallConn, not Fd: Fd would put the master in blocking mode, and Close could
+	// then no longer interrupt the output reader.
+	pgid, err := -1, error(nil)
+	if rc, rcErr := p.ptmx.SyscallConn(); rcErr != nil {
+		err = rcErr
+	} else if cerr := rc.Control(func(fd uintptr) {
+		pgid, err = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
+	}); cerr != nil {
+		err = cerr
+	}
 	p.fdMu.RUnlock()
 	if err != nil || pgid <= 0 {
 		return "", false

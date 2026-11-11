@@ -145,12 +145,16 @@ func TestListBookmarksOpensPickerAndJumps(t *testing.T) {
 	// Press Down then Enter to select the second item (slot 4)
 	press(m, special(tea.KeyDown))
 	jumpCmd := press(m, special(tea.KeyEnter))
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays after Enter = %d, want the picker closed", len(m.overlays))
+	}
+	// An overlay opened before the pick message lands is not the picker's to close.
+	m.openGoto("")
 	for _, msg := range collect(jumpCmd) {
 		m.Update(msg)
 	}
-
-	if len(m.overlays) != 0 {
-		t.Fatalf("overlays after jump = %d, want closed", len(m.overlays))
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays after jump = %d, want the later prompt kept", len(m.overlays))
 	}
 	if len(ed.actions) == 0 || ed.actions[len(ed.actions)-1] != "jump_to_bookmark" {
 		t.Fatalf("editor actions = %v, want jump_to_bookmark", ed.actions)

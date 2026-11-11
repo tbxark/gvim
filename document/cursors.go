@@ -398,39 +398,6 @@ func indentedPoint(p buffer.Pos, lines map[int]bool, width int, atStart bool) bu
 	return p
 }
 
-// displayColumn returns the display column of rune column col in line, where a
-// tab advances to the next multiple of tabSize and every other rune takes one
-// column.
-func displayColumn(line []rune, col, tabSize int) int {
-	dc := 0
-	for _, r := range line[:col] {
-		if r == '\t' {
-			dc += tabSize - dc%tabSize
-		} else {
-			dc++
-		}
-	}
-	return dc
-}
-
-// columnAtDisplay returns the largest rune column of line whose display column
-// is at most target. A target past the end of the line gives the line length.
-// A target inside a tab gives the column before that tab.
-func columnAtDisplay(line []rune, target, tabSize int) int {
-	dc, col := 0, 0
-	for col < len(line) {
-		next := dc + 1
-		if line[col] == '\t' {
-			next = dc + tabSize - dc%tabSize
-		}
-		if next > target {
-			break
-		}
-		dc, col = next, col+1
-	}
-	return col
-}
-
 // addCaretVertical adds a caret on the line above (dir -1) or below (dir +1) the
 // primary caret, at the same display column, clamped to the line length. The new
 // caret becomes the primary caret and the old primary becomes an extra caret, so
@@ -444,8 +411,9 @@ func (d *Document) AddCaretVertical(dir, tabSize int) error {
 		}
 		return errLastLine
 	}
-	col := displayColumn([]rune(d.Buffer.Line(d.Cursor.Line)), d.Cursor.Col, tabSize)
-	p := buffer.Pos{Line: line, Col: columnAtDisplay([]rune(d.Buffer.Line(line)), col, tabSize)}
+	// The same cells as a vertical move: wide characters take two, marks none.
+	col := cellColumn(d.Buffer, d.Cursor, tabSize)
+	p := buffer.Pos{Line: line, Col: colAtCell(d.Buffer, line, col, tabSize)}
 	cs := d.AllCarets()
 	for i := range cs {
 		cs[i].Primary = false

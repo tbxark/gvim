@@ -121,7 +121,7 @@ type Runtime interface {
 	Control(c Control) ([]Work, []Notice)
 }
 
-// ---------- services implemented by internal/app, used by internal/plugin ----------
+// ---------- services implemented by the app, used by the plugin runtime ----------
 
 // DiffOptions tune Services.DiffText.
 type DiffOptions struct{ IgnoreEOL bool } // normalise CRLF and lone CR to LF on both sides first

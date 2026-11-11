@@ -57,20 +57,3 @@ func MapIndex(mapping []int, i int) int {
 	}
 	return mapping[i]
 }
-
-// IsClean reports whether s already paints unchanged (no invalid UTF-8, Cc or Cf other
-// than tab/newline). It is a fast path helper for callers that freeze preview text.
-func IsClean(s string) bool {
-	if !utf8.ValidString(s) {
-		return false
-	}
-	for _, r := range s {
-		if r == '\t' || r == '\n' {
-			continue
-		}
-		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) {
-			return false
-		}
-	}
-	return true
-}

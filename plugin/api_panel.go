@@ -90,6 +90,9 @@ func installPanel(e *apiEnv) {
 
 	e.set(ui, "unmount_widget_panel", func(L *lua.LState) int {
 		id := pluginapi.PanelID(panelIDFromLua(L, 1))
+		if err := p.ownsPanel(id); err != nil {
+			return bufRet(L, err)
+		}
 		p.r.guard.UnmountWidgetPanel(id)
 		p.panelUnmount(id)
 		L.Push(lua.LTrue)
@@ -111,6 +114,9 @@ func installPanel(e *apiEnv) {
 		}
 		if o.err != "" {
 			L.ArgError(2, o.err)
+		}
+		if err := p.ownsPanel(id); err != nil {
+			return bufRet(L, err)
 		}
 		return bufTrue(L, p.r.guard.WidgetCommand(id, a))
 	})
@@ -190,6 +196,9 @@ func installPanel(e *apiEnv) {
 		}
 		if o.err != "" {
 			L.ArgError(2, o.err)
+		}
+		if err := p.ownsPanel(id); err != nil {
+			return bufRet(L, err)
 		}
 		return bufTrue(L, p.r.guard.WidgetMutate(id, mu))
 	})
@@ -760,6 +769,14 @@ func (p *plugin) panelMount(id pluginapi.PanelID) error {
 // panelUnmount forgets a panel the plugin unmounted.
 func (p *plugin) panelUnmount(id pluginapi.PanelID) {
 	delete(p.panels, id)
+}
+
+// ownsPanel refuses a panel id the plugin did not mount: panel ids are global.
+func (p *plugin) ownsPanel(id pluginapi.PanelID) error {
+	if !p.panels[id] {
+		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted by this plugin", id)
+	}
+	return nil
 }
 
 // bufferIDFromLua reads a Buffer handle option; 0, false when there is none.

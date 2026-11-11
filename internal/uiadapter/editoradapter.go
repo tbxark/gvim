@@ -2,7 +2,6 @@ package uiadapter
 
 import (
 	"fmt"
-	"slices"
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/buffer"
@@ -38,7 +37,7 @@ func (a *Editor) SetViewport(rows, cols int) {
 // planned write is pending, because its result is not yet recorded.
 func (a *Editor) Do(act editor.Action, args map[string]any) editor.Result {
 	a.edited()
-	if !slices.Contains(editor.Actions(), act) {
+	if !editor.IsAction(act) {
 		return editor.Result{Err: fmt.Errorf("%w: %s", editor.ErrUnknownAction, act)}
 	}
 	if a.saves != nil && a.saves.writing && (act == "save" || act == "save_as" || act == "save_all") {

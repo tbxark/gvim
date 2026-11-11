@@ -73,3 +73,34 @@ func readEvents(body io.Reader) <-chan string {
 	}()
 	return ch
 }
+
+func TestRoutesRefuseCrossSiteAndRebindingRequests(t *testing.T) {
+	h := (&debugger{}).routes()
+	for _, tc := range []struct {
+		name   string
+		host   string
+		header map[string]string
+		want   int
+	}{
+		{"a rebound domain", "evil.example:8765", nil, http.StatusForbidden},
+		{"another site's page", "127.0.0.1:8765", map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/status", nil)
+		req.Host = tc.host
+		for k, v := range tc.header {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s: status %d, want %d", tc.name, rec.Code, tc.want)
+		}
+	}
+	// The page itself, at the loopback address, is served.
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8765/status", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("loopback GET /status = %d, want 200", rec.Code)
+	}
+}

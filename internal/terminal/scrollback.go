@@ -15,8 +15,22 @@ type Line struct {
 	Cells []Cell
 }
 
-// Text returns the characters of the line with its trailing blanks trimmed.
+// Text returns the characters of the line with its trailing blanks trimmed. The
+// right half of a wide character (a cell with no rune) adds nothing, so the text is
+// what was printed.
 func (l Line) Text() string {
+	var b strings.Builder
+	for _, c := range l.Cells {
+		if c.Rune != 0 {
+			b.WriteRune(c.Rune)
+		}
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// ColumnText returns one rune per cell, a cell with no rune as a space, with the
+// trailing blanks trimmed: rune i is the character in column i, for hit tests.
+func (l Line) ColumnText() string {
 	var b strings.Builder
 	for _, c := range l.Cells {
 		if c.Rune == 0 {
@@ -117,9 +131,13 @@ func (s *Session) SearchScrollbackMode(query string, regex, matchCase bool, limi
 	for y := 0; y < total && len(matches) < limit; y++ {
 		var b strings.Builder
 		for x := range width {
-			if c := s.emu.ScrollbackCellAt(x, y); c != nil && c.Content != "" {
+			c := s.emu.ScrollbackCellAt(x, y)
+			switch {
+			case c != nil && c.Width == 0:
+				// The right half of a wide character: the character is already written.
+			case c != nil && c.Content != "":
 				b.WriteString(c.Content)
-			} else {
+			default:
 				b.WriteByte(' ')
 			}
 		}

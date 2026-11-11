@@ -920,7 +920,7 @@ screen/zellij) or remote machines. Nothing is attached or resumed automatically:
 only the picker's Enter or Import (user actions) start the attach, and a restored
 session tab stays dead until Restart. Agent rows are a foreground-command name
 match, not an identity.
-`docs/internal/tmux-native-sessions.md` in Fresh is the reference for the rungs
+`refs/fresh/docs/internal/tmux-native-sessions.md` (Fresh) is the reference for the rungs
 above this one.
 
 ## Config

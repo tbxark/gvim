@@ -489,15 +489,14 @@ func (p *Panel) copySelection() tea.Cmd {
 	}
 }
 
-// cellsTextRaw returns the runes of cells without trimming trailing blanks.
+// cellsTextRaw returns the printed runes of cells without trimming trailing blanks:
+// the right half of a wide character (a cell with no rune) adds nothing.
 func cellsTextRaw(cells []terminal.Cell) []rune {
-	out := make([]rune, len(cells))
-	for i, c := range cells {
-		if c.Rune == 0 {
-			out[i] = ' '
-			continue
+	out := make([]rune, 0, len(cells))
+	for _, c := range cells {
+		if c.Rune != 0 {
+			out = append(out, c.Rune)
 		}
-		out[i] = c.Rune
 	}
 	return out
 }

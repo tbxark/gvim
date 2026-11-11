@@ -26,7 +26,6 @@ func foldedStarts(d *Document, n int) []int {
 	return out
 }
 
-
 func TestFoldAllAndUnfoldAll(t *testing.T) {
 	t.Parallel()
 	e, _ := openFixture(t, Options{}, foldText)

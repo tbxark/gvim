@@ -290,7 +290,7 @@ func TestReflowReRunsCommittedSearch(t *testing.T) {
 		t.Fatalf("no matches after the reflow: rows %v", p.prior)
 	}
 	for _, abs := range p.scroll.matches {
-		text, ok := p.combinedText(abs)
+		text, ok := p.combinedText(abs, false)
 		if !ok || !strings.Contains(text, "beta") {
 			t.Fatalf("match at %d is %q, %v (rows %v)", abs, text, ok, p.prior)
 		}

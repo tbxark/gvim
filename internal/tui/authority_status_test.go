@@ -119,3 +119,32 @@ func TestAuthorityFocusReconnect(t *testing.T) {
 		t.Fatal("the reconnect did not run")
 	}
 }
+
+// TestAuthorityCancelledPromptIsNotReopenedByThePoll checks Esc on the credential prompt
+// is final for the poll (the next tick does not open it again) and does not wedge an
+// explicit reconnect.
+func TestAuthorityCancelledPromptIsNotReopenedByThePoll(t *testing.T) {
+	m := statusViewModel(t, nil)
+	m.SetAuthorityHooks(AuthorityHooks{
+		Status:        func() AuthorityStatus { return AuthorityStatus{Text: "SSH:u@h", Connected: false} },
+		NeedsPassword: func() bool { return true },
+		Reconnect:     func(context.Context, string) error { return nil },
+	})
+	m.authorityPollTick()
+	if !m.promptOpen() {
+		t.Fatal("the poll did not open the SSH password prompt")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.promptOpen() {
+		t.Fatal("Esc did not close the SSH password prompt")
+	}
+	m.authorityPollTick()
+	if m.promptOpen() {
+		t.Fatal("the poll reopened the cancelled SSH password prompt")
+	}
+	// The user can still ask again: an explicit reconnect is not blocked by the cancel.
+	m.beginAuthorityReconnect()
+	if !m.promptOpen() {
+		t.Fatal("an explicit reconnect after Esc did not prompt")
+	}
+}

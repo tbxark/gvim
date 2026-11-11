@@ -88,6 +88,9 @@ func (m *Model) lspDataArm(kind lspDataKind) tea.Cmd {
 		seq := s.foldSeq
 		return tea.Tick(lspHintDebounce, func(time.Time) tea.Msg { return lspDataMsg{kind: lspDataFolds, seq: seq} })
 	}
+	if s.tokenErr[m.lspLanguage(doc)] != "" {
+		return nil
+	}
 	s.tokenSeq++
 	seq := s.tokenSeq
 	return tea.Tick(lspTokenDebounce, func(time.Time) tea.Msg { return lspDataMsg{kind: lspDataTokens, seq: seq} })
@@ -142,7 +145,7 @@ func (m *Model) lspHints(msg lspHintsDoneMsg) {
 		if doc != nil {
 			lang = m.lspLanguage(doc)
 		}
-		if lang == "" || s.hintErr == nil {
+		if s.hintErr == nil {
 			s.hintErr = make(map[string]string)
 		}
 		if s.hintErr[lang] == "" {
@@ -174,7 +177,7 @@ func (m *Model) lspTokens(msg lspTokensDoneMsg) {
 		if doc != nil {
 			lang = m.lspLanguage(doc)
 		}
-		if lang == "" || s.tokenErr == nil {
+		if s.tokenErr == nil {
 			s.tokenErr = make(map[string]string)
 		}
 		s.tokenErr[lang] = msg.err.Error()
@@ -366,10 +369,6 @@ func (m *Model) lspFolds(msg lspFoldsDoneMsg) {
 		}
 		return
 	}
-	if s.folds == nil {
-		s.folds = make(map[string][]FoldRange)
-	}
-	s.folds[msg.path] = msg.ranges
 	setter, ok := m.ed.(externalFoldSetter)
 	if !ok {
 		return
@@ -394,7 +393,6 @@ type externalFoldSetter interface {
 func (m *Model) lspDropData(path string) {
 	delete(m.lsp.hints, path)
 	delete(m.lsp.tokens, path)
-	delete(m.lsp.folds, path)
 	if setter, ok := m.ed.(externalFoldSetter); ok {
 		setter.SetExternalFolds(path, nil)
 	}

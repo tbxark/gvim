@@ -126,16 +126,20 @@ func (m *Model) beginAuthorityReconnect() tea.Cmd {
 	if m.auth.NeedsPassword != nil && m.auth.NeedsPassword() {
 		m.authorityBusy = true
 		m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-			Label: uiText("gvim.prompt.ssh_password", "SSH password:"),
-			Tag:   authorityPasswordTag{},
+			Label:    uiText("gvim.prompt.ssh_password", "SSH password:"),
+			Tag:      authorityPasswordTag{},
+			Secret:   true,
+			OnCancel: m.cancelAuthorityPrompt,
 		}))
 		return nil
 	}
 	if m.auth.NeedsPassphrase != nil && m.auth.NeedsPassphrase() {
 		m.authorityBusy = true
 		m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-			Label: uiText("gvim.prompt.ssh_key_passphrase", "SSH key passphrase:"),
-			Tag:   authorityPassphraseTag{},
+			Label:    uiText("gvim.prompt.ssh_key_passphrase", "SSH key passphrase:"),
+			Tag:      authorityPassphraseTag{},
+			Secret:   true,
+			OnCancel: m.cancelAuthorityPrompt,
 		}))
 		return nil
 	}
@@ -322,6 +326,17 @@ func (m *Model) resetAuthorityRetry() {
 	m.authorityEchos = nil
 }
 
+// cancelAuthorityPrompt ends a credential prompt the user closed with Esc, which emits
+// no Done. The one-shot prompt flag stays set, so the poll does not ask again until a
+// connect succeeds; an explicit reconnect (focus, the status segment) still prompts.
+func (m *Model) cancelAuthorityPrompt() {
+	m.authorityBusy = false
+	m.authorityQuestions = nil
+	m.authorityAnswers = nil
+	m.authorityEchos = nil
+	m.quietNotice("SSH reconnect cancelled")
+}
+
 // askAuthorityChallenge opens the prompt of the next keyboard-interactive question, or
 // dials with all the answers once there is none.
 func (m *Model) askAuthorityChallenge() tea.Cmd {
@@ -332,12 +347,17 @@ func (m *Model) askAuthorityChallenge() tea.Cmd {
 	}
 	question := m.authorityQuestions[0]
 	m.authorityQuestions = m.authorityQuestions[1:]
+	// A question without its echo flag is masked: it is safer to hide an answer.
+	secret := true
 	if len(m.authorityEchos) > 0 {
+		secret = !m.authorityEchos[0]
 		m.authorityEchos = m.authorityEchos[1:]
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label: question,
-		Tag:   authorityChallengeTag{},
+		Label:    question,
+		Tag:      authorityChallengeTag{},
+		Secret:   secret,
+		OnCancel: m.cancelAuthorityPrompt,
 	}))
 	return nil
 }

@@ -114,9 +114,8 @@ Rules (all covered by table tests):
   path unless the trailing suffix is numeric (`/a/b:name:12` is path `/a/b:name`,
   line 12).
 - Positions are 1-based; 0 means "not given".
-- `RemoteSpec.Workspace()` is the remote root the workspace would use; `PathMapper` is
-  the host↔remote translation seam (identity for SSH; a container backend will map the
-  project root). `RemoteCommand`/`ShellQuote`/`QuoteDir` compose the remote command line:
+- `RemoteSpec.Workspace()` is the remote root the workspace would use. SSH has one path
+  space: the editor's paths are the remote host's, with no translation. `RemoteCommand`/`ShellQuote`/`QuoteDir` compose the remote command line:
   `cd <dir> && env K=V ... argv...`, POSIX-quoted, with `~`/`~user` left for the remote shell
   to expand. The env entries are the session's REMOTE captured delta (`env.Remote`),
   never the local process environment.

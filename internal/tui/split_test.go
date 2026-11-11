@@ -28,7 +28,6 @@ type multiFake struct {
 	cols   int
 }
 
-
 type fakeFolderDoc struct {
 	*fakeDoc
 	folds []fold.Range
@@ -72,7 +71,6 @@ func TestStickyScrollPaintsHeader(t *testing.T) {
 		t.Fatalf("row 1 = %q, want empty when sticky scroll is disabled", row2)
 	}
 }
-
 
 type fakePathDoc struct {
 	*fakeDoc

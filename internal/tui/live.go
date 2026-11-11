@@ -91,7 +91,7 @@ func (m *Model) openLiveGrepResume(query string, resume *palette.LiveResume) tea
 func (m *Model) diagnosticSources() []palette.DiagnosticSource {
 	var out []palette.DiagnosticSource
 	for _, file := range m.lsp.wsDiags {
-		rel := m.diagRel(file.Path)
+		rel := m.relativePath(file.Path)
 		for _, d := range file.Items {
 			out = append(out, palette.DiagnosticSource{
 				Path: file.Path, Rel: rel,

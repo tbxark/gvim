@@ -166,8 +166,10 @@ type resizedMsg struct {
 	err        error
 }
 
-// clipboardMsg carries the clipboard text that a paste read.
+// clipboardMsg carries the clipboard text that a paste read, for the shell
+// generation that asked.
 type clipboardMsg struct {
+	gen  int
 	text string
 	err  error
 }
@@ -266,7 +268,10 @@ func (p *Panel) Hide() {
 	if p.scroll.typing {
 		_ = p.cancelSearchInput()
 	}
-	p.scroll = scrollState{}
+	// A restored tab has no shell: its read-only transcript view is all it shows.
+	if !p.restored {
+		p.scroll = scrollState{}
+	}
 	p.clearSelection()
 	// A hidden dock that shows an exited shell opens its transcript again when it
 	// is next shown, so the marker is not lost by hiding the dock.
@@ -689,7 +694,9 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case clipboardMsg:
-		p.applyClipboard(msg)
+		if msg.gen == p.gen {
+			p.applyClipboard(msg)
+		}
 		return nil, true
 	}
 	return nil, false
@@ -851,10 +858,10 @@ func (p *Panel) PasteClipboard() tea.Cmd {
 		p.noticeOf(noClipboardNotice())
 		return nil
 	}
-	cb := p.clipboard
+	cb, gen := p.clipboard, p.gen
 	return func() tea.Msg {
 		text, err := cb.Read()
-		return clipboardMsg{text: text, err: err}
+		return clipboardMsg{gen: gen, text: text, err: err}
 	}
 }
 

@@ -45,6 +45,9 @@ const (
 // concurrency slots.
 type httpState struct {
 	client *http.Client
+	// safe is clientFor's client, built once so its transport reuses connections.
+	safe     *http.Client
+	safeOnce sync.Once
 
 	global chan struct{}
 	mu     sync.Mutex
@@ -229,8 +232,21 @@ func safeHTTPDial(ctx context.Context, network, addr string) (net.Conn, error) {
 			return nil, err
 		}
 	}
+	// Every address passed the policy: try them in order, as net.Dial does for a name,
+	// so a dual-stack host with an unreachable first address still connects.
 	d := &net.Dialer{}
-	return d.DialContext(ctx, network, net.JoinHostPort(addrs[0].Unmap().String(), port))
+	var errs []error
+	for _, ip := range addrs {
+		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.Unmap().String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		errs = append(errs, err)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, errors.Join(errs...)
 }
 
 // safeHTTPTransport clones t and replaces its dialer with safeHTTPDial. Proxy support is
@@ -265,6 +281,13 @@ var httpResultHeaders = map[string]bool{
 // transport installed. A custom RoundTripper (tests) is preserved; in production there is
 // no client and the safe default transport is used.
 func (h *httpState) clientFor() *http.Client {
+	h.safeOnce.Do(func() { h.safe = h.buildClient() })
+	return h.safe
+}
+
+// buildClient is clientFor's client: one transport for every request, so keep-alive
+// connections are reused instead of left idle per request.
+func (h *httpState) buildClient() *http.Client {
 	var base http.Client
 	if h.client != nil {
 		base = *h.client

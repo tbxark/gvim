@@ -183,3 +183,19 @@ func TestSwitchingTheKeymapRelabelsTheMenusAndTheStatusRow(t *testing.T) {
 		t.Errorf("palette hint = %q after the switch", got)
 	}
 }
+
+// TestSettingsKeymapChangeRelabelsThePalette checks a keymap saved from the Settings page
+// takes the same path as the keymap switcher: the palette labels follow it.
+func TestSettingsKeymapChangeRelabelsThePalette(t *testing.T) {
+	emacs := hintKeys(map[string]string{"search": "ctrl+s"})
+	m := hintModel(t, hintKeys(map[string]string{"search": "ctrl+f"}), func(string) (Keymap, error) { return emacs, nil })
+	m.applyLiveSetting("keymap", SettingsChange{Keymap: "emacs"})
+	for _, e := range m.allCommands() {
+		if e.Action == "search" && e.Keybinding != "Ctrl+S" {
+			t.Fatalf("Search shows %q after the Settings change, want Ctrl+S", e.Keybinding)
+		}
+	}
+	// Without a switcher the change is ignored, not a panic.
+	plain := hintModel(t, testKeys(), nil)
+	plain.applyLiveSetting("keymap", SettingsChange{Keymap: "emacs"})
+}

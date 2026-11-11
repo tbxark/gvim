@@ -85,6 +85,8 @@ end, { debounce = 300 })
 | `language_changed` | `{buf, language}` | `Set Language`, or the path changed |
 | `config_changed` | `{}` | the keymap changed |
 | `theme_changed` | `{name, dark}` | a theme was selected or a plugin applied session color overrides |
+| `env_changed` | `{detected, active, name, kind}` | the project environment was detected, activated or reloaded; `name`/`kind` are the active environment's, else the detected one's, else `""` |
+| `trust_changed` | `{level}` | a workspace trust decision was recorded; `level` is `trusted`, `restricted` or `blocked` |
 | `pre_command` / `post_command` (hot) | `{action, args}` / `{action, args, ok, err}` | a command the user started (palette, key, menu); not what a plugin runs with `command.run` |
 | `idle` (hot) | `{ms, period}` | the editor was idle for `opts.after_ms`; once per idle period. `period` is a number that changes with each input |
 | `mode_changed` | `{mode, plugin, previous, previous_plugin}` | the editor input mode changed; absent fields mean "none" |

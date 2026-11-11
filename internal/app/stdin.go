@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,27 @@ func readStdin(r io.Reader, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("stdin: input exceeds %d MiB", limit>>20)
 	}
 	return data, nil
+}
+
+// readStdinContext is readStdin that gives up when ctx ends: a pipe whose writer never
+// closes (tail -f x | gvim) must not make the launch deaf to Ctrl-C. The abandoned read
+// ends with the process.
+func readStdinContext(ctx context.Context, r io.Reader, limit int64) ([]byte, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		data, err := readStdin(r, limit)
+		done <- result{data, err}
+	}()
+	select {
+	case res := <-done:
+		return res.data, res.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("stdin: %w", ctx.Err())
+	}
 }
 
 // stdinHasNUL reports whether the piped text looks binary. The buffer keeps the bytes

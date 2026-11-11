@@ -82,15 +82,19 @@ func (d *Document) FileAccess() FileAccess { return d.access }
 // DiskState reports the current state of the document's file through its file I/O seam.
 // A remote document stat'ed this way never consults the local filesystem, so a remote
 // path that does not exist locally is not mistaken for a deleted file.
-func (d *Document) DiskState() DiskState {
-	if d.access != nil {
-		st, err := d.access.Stat(d.Path)
+func (d *Document) DiskState() DiskState { return DiskStateAt(d.access, d.Path) }
+
+// DiskStateAt is DiskState for path through access (nil for the local disk). It needs
+// no document, so a check planned on the editor's goroutine can run in a command.
+func DiskStateAt(access FileAccess, path string) DiskState {
+	if access != nil {
+		st, err := access.Stat(path)
 		if err != nil {
 			return DiskState{}
 		}
 		return st.diskState()
 	}
-	return diskStateOf(d.Path)
+	return diskStateOf(path)
 }
 
 // errNoRemoteLarge refuses a remote large-file save: large-file mode streams the file

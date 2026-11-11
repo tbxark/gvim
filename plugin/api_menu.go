@@ -22,10 +22,6 @@ import (
 // The set is whole-set replace per plugin: a reload or unload drops the rows of the old
 // generation.
 
-func init() {
-	// no awaits: the plugin manager edits the set and the host is told at once.
-}
-
 // installMenu installs gvim.menu.
 func installMenu(e *apiEnv) {
 	p := e.p

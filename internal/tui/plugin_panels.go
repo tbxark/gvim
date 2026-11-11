@@ -236,8 +236,6 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 		return pluginapi.Errf(pluginapi.CodeInvalid, "scope must be \"window\", \"editor\" or \"buffer\", not %q", string(o.Scope))
 	}
 	if old := m.plug.panels.get(id); old != nil {
-		editorChrome := old.mount.Scope == pluginapi.ScopeEditor || o.Scope == pluginapi.ScopeEditor
-		_ = editorChrome
 		old.owner, old.mount, old.scopeBuffer = plugin, o, scopeBuffer
 		old.panel.Update(o.Panel)
 		if old.mount.Scope == pluginapi.ScopeEditor {

@@ -39,6 +39,10 @@ func TestWindowsEnvBlock(t *testing.T) {
 	if len(got) != 2 || got[0] != "A=1" || got[1] != "B=2" {
 		t.Fatalf("env block entries = %q, want A=1 and B=2 with invalid entries dropped", got)
 	}
+	dup := windowsEnvBlock([]string{"Path=old", "TERM=dumb", "PATH=new"})
+	if got := string(utf16.Decode(dup[:len(dup)-2])); got != "PATH=new\x00TERM=dumb" {
+		t.Fatalf("deduplicated block = %q, want the last PATH and the names sorted", got)
+	}
 	empty := windowsEnvBlock(nil)
 	if len(empty) != 2 || empty[0] != 0 || empty[1] != 0 {
 		t.Fatalf("empty block = %v, want two NULs", empty)

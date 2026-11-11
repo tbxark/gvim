@@ -71,6 +71,10 @@ func installGroups(e *apiEnv) {
 		if err := p.r.guard.CreateBufferGroup(p.name, id, pluginapi.BufferGroupSpec{Name: name, Layout: layout}); err != nil {
 			return bufRet(L, err)
 		}
+		if p.groups == nil {
+			p.groups = map[pluginapi.BufferGroupID]bool{}
+		}
+		p.groups[id] = true
 		L.Push(lua.LNumber(uint64(id)))
 		return 1
 	})
@@ -106,6 +110,9 @@ func installGroups(e *apiEnv) {
 				return bufRet(L, invalidErr("title segment %d: %s", i, o.err))
 			}
 		}
+		if err := p.ownsGroup(id); err != nil {
+			return bufRet(L, err)
+		}
 		return bufTrue(L, p.r.guard.SetBufferGroupTitle(id, segs))
 	})
 
@@ -113,23 +120,37 @@ func installGroups(e *apiEnv) {
 		id := pluginapi.BufferGroupID(groupIDFromLua(L, 1))
 		panel := L.CheckString(2)
 		visible := bool(L.CheckBool(3))
+		if err := p.ownsGroup(id); err != nil {
+			return bufRet(L, err)
+		}
 		return bufTrue(L, p.r.guard.SetBufferGroupPanelVisible(id, panel, visible))
 	})
 
 	e.set(buf, "focus_panel", func(L *lua.LState) int {
 		id := pluginapi.BufferGroupID(groupIDFromLua(L, 1))
+		if err := p.ownsGroup(id); err != nil {
+			return bufRet(L, err)
+		}
 		return bufTrue(L, p.r.guard.FocusBufferGroupPanel(id, L.CheckString(2)))
 	})
 
 	e.set(buf, "close_group", func(L *lua.LState) int {
-		p.r.guard.CloseBufferGroup(pluginapi.BufferGroupID(groupIDFromLua(L, 1)))
+		id := pluginapi.BufferGroupID(groupIDFromLua(L, 1))
+		if err := p.ownsGroup(id); err != nil {
+			return bufRet(L, err)
+		}
+		p.r.guard.CloseBufferGroup(id)
+		delete(p.groups, id)
 		L.Push(lua.LTrue)
 		return 1
 	})
 
 	e.set(buf, "group_panels", func(L *lua.LState) int {
 		id := pluginapi.BufferGroupID(groupIDFromLua(L, 1))
-		panels := p.r.guard.BufferGroupPanels(id)
+		var panels []pluginapi.BufferGroupPanel
+		if p.groups[id] {
+			panels = p.r.guard.BufferGroupPanels(id)
+		}
 		if panels == nil {
 			v, msg := errTuple(pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id))
 			L.Push(v)
@@ -158,7 +179,15 @@ func installGroups(e *apiEnv) {
 		}
 		left := pluginapi.WinID(checkID(L, 2, kindWindow))
 		right := pluginapi.WinID(checkID(L, 3, kindWindow))
-		return bufTrue(L, p.r.guard.CreateScrollSyncGroup(p.name, id, left, right))
+		if err := p.r.guard.CreateScrollSyncGroup(p.name, id, left, right); err != nil {
+			return bufRet(L, err)
+		}
+		if p.scrolls == nil {
+			p.scrolls = map[uint64]bool{}
+		}
+		p.scrolls[id] = true
+		L.Push(lua.LTrue)
+		return 1
 	})
 
 	e.set(win, "set_scroll_sync_anchors", func(L *lua.LState) int {
@@ -167,22 +196,32 @@ func installGroups(e *apiEnv) {
 		if list.Len() > 10_000 {
 			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "a scroll sync group takes at most 10000 anchors"))
 		}
+		if !p.scrolls[id] {
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeClosed, "scroll sync group %d is not mounted by this plugin", id))
+		}
 		anchors := make([]pluginapi.ScrollAnchor, 0, list.Len())
 		for i := 1; i <= list.Len(); i++ {
 			row, ok := list.RawGetInt(i).(*lua.LTable)
 			if !ok || row.Len() < 2 {
 				continue
 			}
-			anchors = append(anchors, pluginapi.ScrollAnchor{
-				Left:  clampInt(float64(row.RawGetInt(1).(lua.LNumber))),
-				Right: clampInt(float64(row.RawGetInt(2).(lua.LNumber))),
-			})
+			left, lok := row.RawGetInt(1).(lua.LNumber)
+			right, rok := row.RawGetInt(2).(lua.LNumber)
+			if !lok || !rok {
+				return bufRet(L, invalidErr("scroll sync anchor %d must be {left, right} line numbers", i))
+			}
+			anchors = append(anchors, pluginapi.ScrollAnchor{Left: clampInt(float64(left)), Right: clampInt(float64(right))})
 		}
 		return bufTrue(L, p.r.guard.SetScrollSyncAnchors(id, anchors))
 	})
 
 	e.set(win, "remove_scroll_sync", func(L *lua.LState) int {
-		p.r.guard.RemoveScrollSyncGroup(uint64(L.CheckInt64(1)))
+		id := uint64(L.CheckInt64(1))
+		if !p.scrolls[id] {
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeClosed, "scroll sync group %d is not mounted by this plugin", id))
+		}
+		p.r.guard.RemoveScrollSyncGroup(id)
+		delete(p.scrolls, id)
 		L.Push(lua.LTrue)
 		return 1
 	})
@@ -252,4 +291,12 @@ func groupLayoutNode(node *bgNode, depth int) (pluginapi.BufferGroupLayout, erro
 		return pluginapi.BufferGroupLayout{Dir: node.Direction, Ratio: ratio, First: &first, Second: &second}, nil
 	}
 	return pluginapi.BufferGroupLayout{}, invalidErr("layout: unknown node type %q", node.Type)
+}
+
+// ownsGroup refuses a buffer group id the plugin did not create: group ids are global.
+func (p *plugin) ownsGroup(id pluginapi.BufferGroupID) error {
+	if !p.groups[id] {
+		return pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted by this plugin", id)
+	}
+	return nil
 }

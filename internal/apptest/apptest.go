@@ -37,23 +37,6 @@ func IsolateConfig(t *testing.T) {
 	}
 }
 
-// TempRoot returns a fresh directory with a file a.txt holding "A" and a
-// directory sub/ holding b.txt.
-func TempRoot(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	Must(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("A"), 0o644))
-	Must(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
-	Must(t, os.WriteFile(filepath.Join(root, "sub", "b.txt"), []byte("B"), 0o644))
-	return root
-}
-
-// Exists reports whether p exists.
-func Exists(p string) bool {
-	_, err := os.Lstat(p)
-	return err == nil
-}
-
 // WriteTestFile writes content to path.
 func WriteTestFile(t *testing.T, path, content string) {
 	t.Helper()

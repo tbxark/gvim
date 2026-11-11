@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -789,7 +790,6 @@ func TestLSPDefinitionOneLocationOpensTheFile(t *testing.T) {
 	}
 }
 
-
 func TestLSPPeekDefinitionOpensPopupWithoutOpeningFile(t *testing.T) {
 	port := newFakeLSP("go")
 	port.defs = []LSPLocation{lspLoc("/p/a.go", 0, 0)}
@@ -805,6 +805,34 @@ func TestLSPPeekDefinitionOpensPopupWithoutOpeningFile(t *testing.T) {
 	p := lt.popup()
 	if p == nil {
 		t.Fatal("expected popup for peek definition, got nil")
+	}
+}
+
+// TestLSPPeekDefinitionInAnotherFile checks a peek into a file that is not the active
+// tab shows its lines, read by the request command (not by Update).
+func TestLSPPeekDefinitionInAnotherFile(t *testing.T) {
+	other := filepath.Join(t.TempDir(), "b.go")
+	var text strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&text, "line %d\n", i+1)
+	}
+	if err := os.WriteFile(other, []byte(text.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	port := newFakeLSP("go")
+	port.defs = []LSPLocation{lspLoc(other, 20, 0)}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.open()
+	for _, msg := range lt.act("lsp_peek_definition") {
+		lt.feed(msg)
+	}
+	p := lt.popup()
+	if p == nil {
+		t.Fatalf("no peek popup; notice %q", lt.m.notice)
+	}
+	rows := p.Items()
+	if len(rows) != peekLines || !strings.Contains(rows[0].Label, "line 20") || !strings.Contains(rows[1].Label, "line 21") {
+		t.Fatalf("peek rows = %+v, want 13 lines from line 20", rows)
 	}
 }
 

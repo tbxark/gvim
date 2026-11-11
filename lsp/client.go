@@ -633,5 +633,3 @@ var semanticTokenModifiers = []string{
 	"declaration", "definition", "readonly", "static", "deprecated", "abstract",
 	"async", "modification", "documentation", "defaultLibrary",
 }
-
-//go:fix inline

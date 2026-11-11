@@ -86,6 +86,7 @@ func TestDirectoryCopyFailureRemovesPartialDestination(t *testing.T) {
 // TestRenameNoReplaceWriteFailureLeavesNoDestination: rename uses the same atomic file
 // publish; the source remains and a retry succeeds.
 func TestRenameNoReplaceWriteFailureLeavesNoDestination(t *testing.T) {
+	forceRenameCopy(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "a.txt")
 	dst := filepath.Join(root, "b.txt")
@@ -206,6 +207,7 @@ func TestFileCopyCleanupFailureIsReported(t *testing.T) {
 // TestRenameFallbackReportsWarning: the rename/move copy-and-remove result carries the
 // no-hard-link fallback warning to its caller.
 func TestRenameFallbackReportsWarning(t *testing.T) {
+	forceRenameCopy(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "a.txt")
 	dst := filepath.Join(root, "b.txt")
@@ -292,6 +294,7 @@ func TestDirectoryCopyCleanupFailureIsReported(t *testing.T) {
 // TestRenameSourceRemovalFailureIsReported: the copy succeeds but deleting the source
 // fails; both copies stay and the error names the source-removal failure.
 func TestRenameSourceRemovalFailureIsReported(t *testing.T) {
+	forceRenameCopy(t)
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the read-only mode this test relies on")
 	}
@@ -316,4 +319,12 @@ func TestRenameSourceRemovalFailureIsReported(t *testing.T) {
 	if got := tempNames(t, root); len(got) != 0 {
 		t.Fatalf("rename left temporary files: %v", got)
 	}
+}
+
+// forceRenameCopy makes RenameNoReplace and MoveNoReplace take the copy-and-remove path,
+// as they do across devices, for the tests of that path.
+func forceRenameCopy(t *testing.T) {
+	t.Helper()
+	renameNativeFn = func(string, string) error { return errNoNativeRename }
+	t.Cleanup(func() { renameNativeFn = renameNative })
 }

@@ -136,7 +136,11 @@ type Provider struct {
 	unset      []string
 	lastErr    error
 	incomplete bool
-	capturing  bool
+	// capture is open while a capture runs, without p.mu: a spawn path that needs the
+	// overlay waits on it, while the readers (Info, Active, the status row) do not.
+	capture chan struct{}
+	// gen counts invalidations, so a capture that ran across one is not stored.
+	gen uint64
 	// watchNotice is the local detector/marker watcher's degradation message ("" when
 	// watching works or was not attempted), shown in the Settings Environment rows.
 	watchNotice string
@@ -322,6 +326,7 @@ func (p *Provider) Refresh() {
 }
 
 func (p *Provider) invalidateLocked() {
+	p.gen++
 	p.cacheKey = ""
 	p.set, p.unset, p.lastErr = nil, nil, nil
 }
@@ -332,32 +337,60 @@ func (p *Provider) invalidateLocked() {
 // environment.
 func (p *Provider) Overlay() []string {
 	p.mu.Lock()
+	var key string
+	for {
+		if strings.TrimSpace(p.snippet) == "" {
+			p.mu.Unlock()
+			return nil
+		}
+		if fn := p.trusted; fn == nil || !fn() {
+			p.mu.Unlock()
+			return nil
+		}
+		key = p.fingerprintLocked()
+		if key == p.cacheKey {
+			out := append([]string(nil), p.set...)
+			p.mu.Unlock()
+			return out
+		}
+		ch := p.capture
+		if ch == nil {
+			break
+		}
+		// Another caller is capturing: wait for its result rather than run the
+		// shells twice.
+		p.mu.Unlock()
+		<-ch
+		p.mu.Lock()
+	}
+	ch := make(chan struct{})
+	p.capture = ch
+	gen := p.gen
+	dir := p.dir
+	if dir == "" {
+		dir = p.root
+	}
+	snippet, runner := p.snippet, p.runner
+	p.mu.Unlock()
+
+	set, unset, err := capture(runner, dir, snippet)
+
+	p.mu.Lock()
 	defer p.mu.Unlock()
-	if strings.TrimSpace(p.snippet) == "" {
+	p.capture = nil
+	close(ch)
+	if gen != p.gen {
+		// The recipe changed while the shells ran: this delta is not its.
 		return nil
 	}
-	if fn := p.trusted; fn == nil || !fn() {
-		return nil
-	}
-	key := p.fingerprintLocked()
-	if key == p.cacheKey {
-		return append([]string(nil), p.set...)
-	}
-	if p.capturing {
-		return append([]string(nil), p.set...)
-	}
-	p.capturing = true
-	set, unset, err := p.captureLocked()
-	p.capturing = false
+	p.cacheKey = key
 	if err != nil {
 		p.lastErr = err
 		p.set, p.unset = nil, nil
-		p.cacheKey = key
 		return nil
 	}
 	p.set, p.unset = set, unset
 	p.lastErr = nil
-	p.cacheKey = key
 	return append([]string(nil), p.set...)
 }
 
@@ -423,19 +456,14 @@ func removeKeys(base, keys []string) []string {
 	return out
 }
 
-// captureLocked runs the baseline and the activation shell and diffs their
-// environments. The caller holds p.mu.
-func (p *Provider) captureLocked() (set, unset []string, err error) {
-	dir := p.dir
-	if dir == "" {
-		dir = p.root
-	}
-	fn := p.runner
+// capture runs the baseline and the activation shell in dir and diffs their
+// environments.
+func capture(fn Runner, dir, snippet string) (set, unset []string, err error) {
 	baseline, err := fn(dir, "env -0")
 	if err != nil {
 		return nil, nil, fmt.Errorf("env: reading the baseline environment: %w", err)
 	}
-	activated, err := fn(dir, "set -a; "+p.snippet+"\nenv -0")
+	activated, err := fn(dir, "set -a; "+snippet+"\nenv -0")
 	if err != nil {
 		return nil, nil, fmt.Errorf("env: activating the environment: %w", err)
 	}

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -336,7 +337,7 @@ func (pr *process) output(stderr bool, data string) {
 	}
 	buf := append(pr.partial[i], data...)
 	for {
-		nl := strings.IndexByte(string(buf), '\n')
+		nl := bytes.IndexByte(buf, '\n')
 		if nl < 0 {
 			break
 		}

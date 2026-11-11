@@ -21,7 +21,7 @@ import (
 	"github.com/tbxark/gvim/search"
 )
 
-// projectSearch is the panel's project-wide searcher and replacer over internal/search.
+// projectSearch is the panel's project-wide searcher and replacer over the search package.
 // It reads the project's files, with the open dirty buffers' text in place of their
 // files on disk, and plans a replacement as edits so the root can apply it through the
 // editor: own offsets are never reused against text that a later read changed.

@@ -15,6 +15,14 @@ func NewPattern(query string) Pattern {
 
 // Match scores target against the pattern. It is Score for a prepared query.
 func (p Pattern) Match(target string) (score int, indexes []int, ok bool) {
+	if len(p.terms) > 0 && isASCIIString(target) {
+		// Reject without converting the target, as Matcher does.
+		for _, t := range p.terms {
+			if t.ascii == nil || !isSubsequenceASCIIString(t.ascii, target) {
+				return 0, nil, false
+			}
+		}
+	}
 	r := matchTerms(p.terms, target)
 	return r.score, r.positions, r.matched
 }

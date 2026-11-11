@@ -619,3 +619,38 @@ func TestCloseRetainsWorkspaceWhenBothWritesFail(t *testing.T) {
 		t.Fatalf("the retried close lost the unsaved text: %s", raw)
 	}
 }
+
+// TestWorkspaceCloseReleasesTheRuntime checks closing a daemon workspace closes what its
+// runtime holds beyond the model: the file index stops (the watcher, the authority and
+// the log go with it in runtime.close).
+func TestWorkspaceCloseReleasesTheRuntime(t *testing.T) {
+	m, _ := newWorkspaceManagerTest(t)
+	cmd, err := m.Create(t.TempDir(), "second")
+	if err != nil || cmd == nil {
+		t.Fatalf("Create = %v, %v", cmd, err)
+	}
+	cmd()
+	var id string
+	for _, e := range m.Entries() {
+		if e.Active {
+			id = e.ID
+		}
+	}
+	m.mu.Lock()
+	sess := m.sessions[id]
+	m.mu.Unlock()
+	if sess == nil || sess.rt.projects.Index() == nil {
+		t.Fatal("the second workspace has no file index")
+	}
+	index := sess.rt.projects.Index()
+	closeCmd, err := m.Close(id)
+	if err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if closeCmd != nil {
+		closeCmd()
+	}
+	if _, _, _, _, _, closed, _, _ := index.IndexSnapshot(); !closed {
+		t.Fatal("the closed workspace's file index is still running")
+	}
+}

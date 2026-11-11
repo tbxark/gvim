@@ -121,7 +121,6 @@ func TestLSPNavigationManifestAndLoad(t *testing.T) {
 	}
 }
 
-
 func TestLSPNavigationBreadcrumbsPicker(t *testing.T) {
 	t.Parallel()
 	host, _ := lspNavHost(t)

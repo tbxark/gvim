@@ -89,10 +89,12 @@ there is no `Makefile`, no `.sphere/layout.json`, and no generate target.
 ```
 go build ./... && CGO_ENABLED=0 go build ./...   # shipped binary must stay pure Go
 go vet ./...
-golangci-lint run ./...                          # v2; currently reports 0 issues
+golangci-lint run ./...                          # v2; reports 0 issues
 bash tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
 bash tools/import_rules_check.sh       # layering gate R1-R16, prints IMPORT_RULES_OK
-go test ./...                                    # all packages pass today
+bash tools/i18n_check.sh               # locale catalogue gate
+python3 tools/gen_menus.py --check     # generated menu table is in sync
+go test ./...
 go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
 go run . [DIR] [FILE[:LINE[:COL]]]...           # launch the TUI
@@ -101,31 +103,37 @@ go run . [DIR] [FILE[:LINE[:COL]]]...           # launch the TUI
 ### Architecture
 
 The design record is `docs/architecture.md` (package table, import rules R1-R16,
-package maps, migration phases). `migration/ARCH-v4.md` is the earlier proposal-only
-record; where the two disagree, `docs/architecture.md` wins. The shape that needs
-several files to see:
+package maps). `migration/` holds the earlier planning records; where they disagree,
+`docs/architecture.md` wins. The shape that needs several files to see:
 
 - Three layers. `main.go` (module root, kept there so `go install` works) →
   `internal/cli` (cobra flags and arguments) →
   `internal/app.Run`. `internal/` is the private executable shell (`app` plus the host packages
   `uiadapter`, `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`, the
   test-only `apptest`, then `configview`, `cli`, `tui`, `terminal`, `filewatch`,
-  `uitest`). TUI-free engine and library packages are at the
+  `daemon` (the attach/detach socket host and workspace registry), `agentdiscover`
+  (tmux and agent-transcript session discovery) and `uitest`). `cmd/gvimdebug` is a
+  developer page that runs gvim in a PTY. TUI-free engine and library packages are at the
   module top level: `buffer`, `document`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
   `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`,
   `fsops`, `gitstate`, `config`, `keymap`, `theme`, `trust`, `outline` (the Markdown
   heading scan behind the sidebar's Contents section), `lsp`, `pluginapi`,
   `plugin`, `commands`, the LSP manager/test support (`lsp/manager`, `lsp/lsptest`), the
-  plugin OS port (`plugin/hostos`), and the shared leaves `atomicfile` and `shellcmd`.
+  plugin OS port (`plugin/hostos`), `authority` (the workspace backend: local or SSH),
+  `env` (project environment detection and activation), `i18n` (the message
+  catalogue), `updatecheck` (the release check), and the shared leaves `atomicfile`
+  and `shellcmd`.
 - Import direction: engine → shell, never the reverse. No top-level package imports
-  `internal/`. Only `internal/app` imports the host packages (`uiadapter`, `pluginhost`,
-  `lsphost`, `restore`, `keybindings`, `highlight`); only `internal/app` and
+  `internal/`. Only `internal/app` imports `uiadapter`, `pluginhost` and `lsphost`;
+  `restore` and `highlight` are also imported by `uiadapter`, and `keybindings` by
+  `uiadapter`, `pluginhost` and `configview`. Only `internal/app` and
   `internal/uiadapter` import the TUI sub-packages; `internal/cli` imports `internal/app`
-  for `Options`/`Run` and `internal/configview` + `syntax` for the config and grammar
-  commands.
+  for `Options`/`Run`, `internal/configview` + `syntax` for the config and grammar
+  commands, and `authority` to classify remote targets.
   `tools/import_rules_check.sh` is the enforcement.
-- `internal/app` is the thin composition root (`Options`, `Run`, `buildRuntime`, settings,
-  logfile, live grep, default formatters); the `gvim config` backend is
+- `internal/app` is the composition root (`Options`, `Run`, `buildRuntime`, settings,
+  logfile, live grep, default formatters, and the remote and daemon-workspace wiring); the
+  `gvim config` backend is
   `internal/configview`. The host packages implement the ports:
   `uiadapter` (editor/document/dialogs/files/git/projects/terminal/clipboard),
   `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`.
@@ -136,8 +144,9 @@ several files to see:
   column's section stack and Contents widget), `split`, `tabstrip`, `dock`,
   `editorpane`, `menubar`,
   `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `pluginpanel` (the
-  plugin API's declarative widget panel), `popup`, `ctxmenu`,
-  `dialog`, `style`, `grid`, `icons`, `space`) must not import the root
+  plugin API's declarative widget panel), `searchpanel` (project search and replace),
+  `popup`, `ctxmenu`, `dialog`, `style`, `grid`, `icons`, `space`, `textsafe` (the
+  sanitizer for untrusted text)) must not import the root
   `tui`.
   `internal/tui/frame` is the single geometry source for painting and the hit map;
   `internal/tui/split` owns the split tree and `internal/tui/tabstrip` the strip paint.
@@ -167,8 +176,8 @@ several files to see:
 - Test domain packages (`buffer`, `editor`, `search`, `fuzzy`, ...) directly, without Bubble Tea.
 - Fix a bug with a regression test that fails first. Run the single package's tests while
   iterating, then `go test ./...` before finishing.
-- Existing `testdata` fixtures and the 26-scenario parity floor stay as they are. Do not extend
-  them, and do not regenerate them to make a failing test pass.
+- The existing `testdata` fixture (`commands/testdata`) stays as it is. Do not extend it, and
+  do not regenerate it to make a failing test pass.
 
 ### Generated and reference code
 
@@ -176,11 +185,9 @@ several files to see:
   `python3 commands/gen/generate.py refs/fresh`. Do not edit by hand.
 - `internal/tui/menubar/menu_table_gen.go`: regenerate with `python3 tools/gen_menus.py`
   (`--check` reports drift). It reads `refs/fresh`. Do not edit by hand.
-- `refs/` (crush, fresh, lazygit, micro, orbiton, toast) are read-only reference checkouts, and
-  `_attic/tui` is the retired legacy TUI. Neither is part of the build (`_attic` is ignored by
-  `./...`, and `go list ./...` lists nothing under `refs`). Do not edit or import them.
-- The old parity/golden scripts mentioned by earlier notes are not in the working tree;
-  the current gates are the ones in `Commands` and `docs/architecture.md`.
+- `refs/` (crush, fresh, lazygit, micro, orbiton, toast) are read-only reference checkouts. They
+  are not part of the build (`go list ./...` lists nothing under `refs`). Do not edit or import
+  them.
 
 ---
 

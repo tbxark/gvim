@@ -32,6 +32,30 @@ T.spy("cancel", c:cancel(), c:cancel(), c:active())`)
 	}
 }
 
+// TestTimerCancelReleasesTheHostWait checks a cancelled timer ends the host's wait for
+// it: a debounce re-armed on every call must not leave one parked wait per call.
+func TestTimerCancelReleasesTheHostWait(t *testing.T) {
+	h := start(t, `
+local gvim = require "gvim"
+local d = gvim.timer.debounce(10000, function() T.spy("deb") end)
+T.command("call", function() d() end)
+T.command("one", function() gvim.timer.after(10000, function() end):cancel() end)`)
+	for range 20 {
+		if err := h.Run("t.call", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := h.PendingTimers(); n != 1 {
+		t.Fatalf("pending timers = %d after 20 debounced calls, want 1", n)
+	}
+	if err := h.Run("t.one", nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.PendingTimers(); n != 1 {
+		t.Fatalf("pending timers = %d after a cancelled timer, want still 1", n)
+	}
+}
+
 func TestTimerActive(t *testing.T) {
 	h := cmd(t, "local t", `
 t = gvim.timer.after(10, function() T.spy("fired", t:active()) end)

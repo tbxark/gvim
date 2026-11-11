@@ -121,7 +121,9 @@ func TestStdinPipedPipeUnderAPTY(t *testing.T) {
 		}
 		return false
 	}
-	if !waitFor("[stdin]", "hello from the pipe", "second line") {
+	// The caret cell is painted in reverse video, so the first rune of the first
+	// line is split from the rest by SGR codes.
+	if !waitFor("[stdin]", "ello from the pipe", "second line") {
 		mu.Lock()
 		text := out.String()
 		mu.Unlock()

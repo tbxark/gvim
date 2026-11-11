@@ -24,7 +24,7 @@ func TestNewUIDepsLeavesNilExplorerNil(t *testing.T) {
 	if deps.Clock == nil || deps.Keys == nil || deps.Editor == nil {
 		t.Fatal("required ports are missing")
 	}
-	if deps.LSP != nil || deps.Markdown != nil {
+	if deps.LSP != nil {
 		t.Fatal("ports for later phases are not nil")
 	}
 }

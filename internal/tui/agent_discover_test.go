@@ -264,7 +264,7 @@ func TestDiscoverImportCreatesAWorkspace(t *testing.T) {
 	m.SetWorkspacePort(workspaces)
 	cmd := rootPaletteRun(m, "discover_agent_sessions")
 	runDiscoverDone(t, m, cmd)
-	_, importCmd := m.Update(typed("i"))
+	_, importCmd := m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if len(workspaces.created) != 1 {
 		t.Fatalf("imports = %v, want one workspace", workspaces.created)
 	}
@@ -282,12 +282,32 @@ func TestDiscoverImportCreatesAWorkspace(t *testing.T) {
 	}
 }
 
+func TestDiscoverPlainIIsFilterText(t *testing.T) {
+	source := &fakeDiscoverer{report: discoverSessionReport()}
+	m := discoverModel(t, source)
+	workspaces := &fakeWorkspaces{}
+	m.SetWorkspacePort(workspaces)
+	cmd := rootPaletteRun(m, "discover_agent_sessions")
+	runDiscoverDone(t, m, cmd)
+	m.Update(typed("i"))
+	if len(workspaces.created) != 0 {
+		t.Fatalf("a typed i imported %v, want it in the filter", workspaces.created)
+	}
+	o, ok := discoverOverlay(m)
+	if !ok {
+		t.Fatal("the picker closed on a typed i")
+	}
+	if got := o.p.Query(); got != "i" {
+		t.Fatalf("query = %q, want %q", got, "i")
+	}
+}
+
 func TestDiscoverImportWithoutTheWorkspaceLayer(t *testing.T) {
 	source := &fakeDiscoverer{report: discoverSessionReport()}
 	m := discoverModel(t, source)
 	cmd := rootPaletteRun(m, "discover_agent_sessions")
 	runDiscoverDone(t, m, cmd)
-	m.Update(typed("i"))
+	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if !strings.Contains(m.notice, "daemon-hosted session") {
 		t.Fatalf("notice = %q, want the workspace-layer explanation", m.notice)
 	}
@@ -304,7 +324,7 @@ func TestDiscoverImportWithoutADirectory(t *testing.T) {
 	m.SetWorkspacePort(workspaces)
 	cmd := rootPaletteRun(m, "discover_agent_sessions")
 	runDiscoverDone(t, m, cmd)
-	m.Update(typed("i"))
+	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if len(workspaces.created) != 0 {
 		t.Fatalf("imported a session with no directory: %v", workspaces.created)
 	}
@@ -336,7 +356,7 @@ func TestDiscoverImportQueuesTheSessionAttachLaunch(t *testing.T) {
 	m.SetWorkspacePort(workspaces)
 	cmd := rootPaletteRun(m, "discover_agent_sessions")
 	runDiscoverDone(t, m, cmd)
-	_, importCmd := m.Update(typed("i"))
+	_, importCmd := m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if len(workspaces.roots) != 1 || workspaces.roots[0] != "/home/me/project" {
 		t.Fatalf("import roots = %v", workspaces.roots)
 	}
@@ -519,12 +539,16 @@ func TestDiscoverResumesATranscriptAndDedupsItsSource(t *testing.T) {
 		t.Fatalf("dock = %d tabs, name %q", m.dock.Count(), m.dock.Name(0))
 	}
 	// Choosing the same transcript again focuses the tab that already resumed it.
+	m.dock.SetFocus(false)
 	cmd = rootPaletteRun(m, "discover_agent_sessions")
 	runDiscoverDone(t, m, cmd)
 	_, resume = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	dockSettle(t, m, resume)
 	if len(starter.launches) != 1 || m.dock.Count() != 1 {
 		t.Fatalf("a repeated choice duplicated the resume: launches %+v tabs %d", starter.launches, m.dock.Count())
+	}
+	if !m.dock.Focus() {
+		t.Fatal("a repeated choice left the dock unfocused")
 	}
 }
 
@@ -534,7 +558,7 @@ func TestDiscoverImportsATranscriptWorkspace(t *testing.T) {
 	m.SetWorkspacePort(workspaces)
 	cmd := rootPaletteRun(m, "discover_agent_sessions")
 	runDiscoverDone(t, m, cmd)
-	m.Update(typed("i"))
+	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if len(workspaces.roots) != 1 || workspaces.roots[0] != "/home/u/proj" {
 		t.Fatalf("import roots = %v", workspaces.roots)
 	}
@@ -568,11 +592,28 @@ func TestDiscoverTranscriptProblemsAndNoDirectory(t *testing.T) {
 	}
 	workspaces := &launchWorkspaces{}
 	m.SetWorkspacePort(workspaces)
-	m.Update(typed("i"))
+	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if len(workspaces.roots) != 0 {
 		t.Fatalf("imported a transcript with no directory: %v", workspaces.roots)
 	}
 	if !strings.Contains(m.notice, "records no directory") {
 		t.Fatalf("notice = %q, want the missing-directory explanation", m.notice)
+	}
+}
+
+func TestClipDiscoveryTextCutsOnARuneBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		limit int
+		want  string
+	}{
+		{"short", 80, "short"},
+		{"日本語", 4, "日"},
+		{"ab日本", 5, "ab日"},
+		{"abcdef", 3, "abc"},
+	} {
+		if got := clipDiscoveryText(tc.text, tc.limit); got != tc.want {
+			t.Errorf("clipDiscoveryText(%q, %d) = %q, want %q", tc.text, tc.limit, got, tc.want)
+		}
 	}
 }

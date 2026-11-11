@@ -46,29 +46,23 @@ const (
 	remoteIgnoreReadTimeout = 5 * time.Second
 )
 
-// ignoreFileCache is one .gitignore read (or the reason it was not applied).
-type ignoreFileCache struct {
-	patterns []gitignore.Pattern
-	rules    int
-	failed   bool
-}
-
-// ignoreBatch reads and caches the remote ignore files of one listing/walk.
+// ignoreBatch reads and caches the remote ignore files of one listing/walk, and the
+// matcher of each directory listed.
 type ignoreBatch struct {
 	files func() authority.FileSystem
 	root  string
 
-	mu     sync.Mutex
-	cache  map[string]ignoreFileCache
-	notice string
-	rules  int
+	mu       sync.Mutex
+	cache    map[string][]gitignore.Pattern
+	matchers map[string]gitignore.Matcher
+	notice   string
 }
 
 // newIgnoreBatch returns a batch for the remote workspace root over files. files is a
 // function so a reconnected authority resolves the current carrier; a nil result is
 // treated as "no ignore files" (filtering is not applicable), never a local fallback.
 func newIgnoreBatch(files func() authority.FileSystem, root string) *ignoreBatch {
-	return &ignoreBatch{files: files, root: root, cache: map[string]ignoreFileCache{}}
+	return &ignoreBatch{files: files, root: root, cache: map[string][]gitignore.Pattern{}, matchers: map[string]gitignore.Matcher{}}
 }
 
 // Notice returns the one-shot degradation notice, if any.
@@ -114,6 +108,7 @@ func (b *ignoreBatch) rulesFor(ctx context.Context, dir string) []gitignore.Patt
 		return nil
 	}
 	var out []gitignore.Pattern
+	rules := 0
 	for i := 0; i <= len(parts); i++ {
 		dirPath := b.root
 		if i > 0 {
@@ -123,19 +118,16 @@ func (b *ignoreBatch) rulesFor(ctx context.Context, dir string) []gitignore.Patt
 		if len(patterns) == 0 {
 			continue
 		}
-		b.mu.Lock()
-		room := remoteIgnoreMaxRules - b.rules
-		if room <= 0 {
-			b.mu.Unlock()
-			b.setNotice("remote .gitignore rule limit reached; some rules were not applied")
-			break
-		}
+		room := remoteIgnoreMaxRules - rules
 		if len(patterns) > room {
 			patterns = patterns[:room]
+			b.setNotice("remote .gitignore rule limit reached; some rules were not applied")
 		}
-		b.rules += len(patterns)
-		b.mu.Unlock()
+		rules += len(patterns)
 		out = append(out, patterns...)
+		if rules >= remoteIgnoreMaxRules {
+			break
+		}
 	}
 	return out
 }
@@ -147,11 +139,10 @@ func (b *ignoreBatch) ignoreFile(ctx context.Context, dir string, dirParts []str
 	b.mu.Lock()
 	if cached, ok := b.cache[file]; ok {
 		b.mu.Unlock()
-		return cached.patterns
+		return cached
 	}
 	b.mu.Unlock()
 	patterns := make([]gitignore.Pattern, 0, 8)
-	failed := false
 	if files := b.files(); files != nil {
 		readCtx, cancel := context.WithTimeout(ctx, remoteIgnoreReadTimeout)
 		data, err := files.ReadFile(readCtx, file, remoteIgnoreFileMaxBytes)
@@ -162,19 +153,28 @@ func (b *ignoreBatch) ignoreFile(ctx context.Context, dir string, dirParts []str
 		case errors.Is(err, fs.ErrNotExist):
 			// A directory without a .gitignore is normal.
 		default:
-			failed = true
 			b.setNotice("some remote .gitignore files could not be read (size or permissions); ignore filtering may be incomplete")
 		}
 	}
 	b.mu.Lock()
-	b.cache[file] = ignoreFileCache{patterns: patterns, rules: len(patterns), failed: failed}
+	b.cache[file] = patterns
 	b.mu.Unlock()
 	return patterns
 }
 
-// matcher returns the ignore matcher that applies to dir.
+// matcher returns the ignore matcher that applies to dir, built once per batch.
 func (b *ignoreBatch) matcher(ctx context.Context, dir string) gitignore.Matcher {
-	return gitignore.NewMatcher(b.rulesFor(ctx, dir))
+	b.mu.Lock()
+	m, ok := b.matchers[dir]
+	b.mu.Unlock()
+	if ok {
+		return m
+	}
+	m = gitignore.NewMatcher(b.rulesFor(ctx, dir))
+	b.mu.Lock()
+	b.matchers[dir] = m
+	b.mu.Unlock()
+	return m
 }
 
 // ignored reports whether the entry name of dir is matched by the ignore rules that apply

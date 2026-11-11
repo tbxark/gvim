@@ -122,7 +122,7 @@ its input:
 ```text
 gvim.ui.mount_widget_panel(spec, opts?) -> id | nil, err
 gvim.ui.update_widget_panel(id, spec) -> true | nil, err
-gvim.ui.unmount_widget_panel(id) -> true
+gvim.ui.unmount_widget_panel(id) -> true | nil, err
 gvim.ui.widget_command(id, action) -> true | nil, err
 gvim.ui.widget_mutate(id, mutation) -> true | nil, err
 gvim.ui.mount_sidebar_section(spec, opts?) -> id | nil, err

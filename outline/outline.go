@@ -64,6 +64,24 @@ type Heading struct {
 	EndByte   int
 }
 
+// frontMatterLines bounds the search for the line that closes YAML front matter, as
+// the syntax package's Markdown lexer does.
+const frontMatterLines = 200
+
+// frontMatterEnd returns the index of the line that closes the YAML front matter that
+// opens lines ("---" ... "---" or "..."), or -1 when there is none.
+func frontMatterEnd(lines []string) int {
+	if len(lines) < 2 || strings.TrimRight(lines[0], " \t\r") != "---" {
+		return -1
+	}
+	for i := 1; i < len(lines) && i <= frontMatterLines; i++ {
+		if s := strings.TrimRight(lines[i], " \t\r"); s == "---" || s == "..." {
+			return i
+		}
+	}
+	return -1
+}
+
 // Scan returns the headings of lines, in line order, with their section extents
 // and HasChildren from the same walk.
 func Scan(lines []string) []Heading {
@@ -77,7 +95,11 @@ func Scan(lines []string) []Heading {
 	}
 
 	inFence, fenceChar, fenceLen := false, byte(0), 0
+	body := frontMatterEnd(lines) + 1
 	for i, line := range lines {
+		if i < body {
+			continue // YAML front matter: its "---" fences are not setext underlines
+		}
 		if inFence {
 			if closesFence(line, fenceChar, fenceLen) {
 				inFence = false

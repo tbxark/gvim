@@ -19,7 +19,6 @@ package app
 import (
 	"context"
 	"os"
-	"path"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -349,5 +348,3 @@ func (lw *localEnvWatch) armDirs() bool {
 	}
 	return true
 }
-
-var _ = path.Clean

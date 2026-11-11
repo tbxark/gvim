@@ -101,6 +101,11 @@ func TestScrollFollowMapping(t *testing.T) {
 	if got := scrollFollow(anchors, 20, false); got != 10 {
 		t.Errorf("reverse follow(20) = %d, want 10", got)
 	}
+	// One anchor shifts by its offset on both sides of it.
+	one := []pluginapi.ScrollAnchor{{Left: 10, Right: 15}}
+	if got := scrollFollow(one, 20, true); got != 25 {
+		t.Errorf("one-anchor follow(20) = %d, want 25", got)
+	}
 	// No anchors is the identity.
 	if got := scrollFollow(nil, 7, true); got != 7 {
 		t.Errorf("identity = %d", got)

@@ -334,7 +334,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		return p.startSearchInput(), true
 	case k.Mod == 0 && k.Code == 'n':
 		return p.nextMatch(1), true
-	case k.Mod == 0 && k.Code == 'N':
+	case k.Text == "N": // Shift+N: the key arrives as n with Shift and the text "N"
 		return p.nextMatch(-1), true
 	case k.Mod == 0 && k.Code == 'y':
 		if p.sel.active {
@@ -565,7 +565,7 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 		}
 		p.scroll.searchHistPos, p.scroll.searchHistTemp = -1, ""
 		return p.incrementalSearchCmd()
-	case k.Mod == 0 && k.Text != "":
+	case k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper|tea.ModMeta) == 0:
 		if p.scroll.searchPrefill {
 			// Typing over the selected pre-fill starts a new query, like Fresh's
 			// pre-filled search prompt.
@@ -618,11 +618,11 @@ func (p *Panel) searchCmd(query string, regex, matchCase bool) tea.Cmd {
 func (p *Panel) searchCommand(query string, regex, matchCase, commit bool) tea.Cmd {
 	p.scroll.searchSeq++
 	seq := p.scroll.searchSeq
+	t, gen := p.term, p.gen
 	match, err := matcher(query, regex, matchCase)
 	if err != nil {
-		return func() tea.Msg { return searchMsg{gen: p.gen, query: query, seq: seq, commit: commit, err: err.Error()} }
+		return func() tea.Msg { return searchMsg{gen: gen, query: query, seq: seq, commit: commit, err: err.Error()} }
 	}
-	t, gen := p.term, p.gen
 	prior := slices.Clone(p.prior)
 	total := p.scroll.total
 	rows := p.scroll.screenRows
@@ -644,7 +644,7 @@ func (p *Panel) searchCommand(query string, regex, matchCase, commit bool) tea.C
 			}
 			sc := t.Screen()
 			for r := 0; r < min(sc.Rows, rows); r++ {
-				if match(screenRowText(sc, r)) {
+				if match(screenRowText(sc, r, false)) {
 					matches = append(matches, len(prior)+total+r)
 				}
 			}
@@ -748,7 +748,7 @@ func (p *Panel) jumpToMatch(i int) {
 
 // combinedText returns the text of a combined row: a history row from the
 // snapshot, or a live screen row. ok is false when the row is not loaded yet.
-func (p *Panel) combinedText(abs int) (string, bool) {
+func (p *Panel) combinedText(abs int, columns bool) (string, bool) {
 	if abs < 0 || abs >= p.combined() {
 		return "", false
 	}
@@ -756,6 +756,9 @@ func (p *Panel) combinedText(abs int) (string, bool) {
 		return terminalExitMarker, true
 	}
 	if abs < len(p.prior) {
+		if columns {
+			return p.prior[abs].ColumnText(), true
+		}
 		return p.prior[abs].Text(), true
 	}
 	hist := abs - len(p.prior)
@@ -763,6 +766,9 @@ func (p *Panel) combinedText(abs int) (string, bool) {
 		i := hist - p.scroll.from
 		if i < 0 || i >= len(p.scroll.lines) {
 			return "", false
+		}
+		if columns {
+			return p.scroll.lines[i].ColumnText(), true
 		}
 		return p.scroll.lines[i].Text(), true
 	}
@@ -774,12 +780,12 @@ func (p *Panel) combinedText(abs int) (string, bool) {
 	if r < 0 || r >= sc.Rows {
 		return "", false
 	}
-	return screenRowText(sc, r), true
+	return screenRowText(sc, r, columns), true
 }
 
 // copySelected copies the selected row through the host's clipboard path.
 func (p *Panel) copySelected() tea.Cmd {
-	text, ok := p.combinedText(p.scroll.selected)
+	text, ok := p.combinedText(p.scroll.selected, false)
 	if !ok || text == "" {
 		p.noticeOf(nothingToCopyNotice())
 		return nil
@@ -808,7 +814,7 @@ func (p *Panel) copyScreen() tea.Cmd {
 		if abs >= p.combined() {
 			break
 		}
-		text, ok := p.combinedText(abs)
+		text, ok := p.combinedText(abs, false)
 		if !ok {
 			continue
 		}
@@ -825,16 +831,16 @@ func (p *Panel) copyScreen() tea.Cmd {
 	return p.host.Copy(strings.Join(lines, "\n"))
 }
 
-// screenRowText is the text of row r of a screen, trailing blanks trimmed.
-func screenRowText(sc terminal.Screen, r int) string {
-	var b strings.Builder
-	for c := 0; c < sc.Cols; c++ {
-		ch := sc.Cell(r, c).Rune
-		if ch == 0 {
-			b.WriteByte(' ')
-			continue
-		}
-		b.WriteRune(ch)
+// screenRowText is the text of row r of a screen, trailing blanks trimmed. With
+// columns it has one rune per cell (terminal.Line.ColumnText), else the printed text
+// (terminal.Line.Text).
+func screenRowText(sc terminal.Screen, r int, columns bool) string {
+	line := terminal.Line{Cells: make([]terminal.Cell, sc.Cols)}
+	for c := range sc.Cols {
+		line.Cells[c] = sc.Cell(r, c)
 	}
-	return strings.TrimRight(b.String(), " ")
+	if columns {
+		return line.ColumnText()
+	}
+	return line.Text()
 }

@@ -174,6 +174,7 @@ func TestLocalRenameMoveNoReplaceSameName(t *testing.T) {
 // TestRenameNoReplaceBoundsBeforeCopy: the local bounded copy-and-remove refuses an
 // over-deep tree before creating a destination or removing the source.
 func TestRenameNoReplaceBoundsBeforeCopy(t *testing.T) {
+	forceRenameCopy(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	cur := src
@@ -189,5 +190,44 @@ func TestRenameNoReplaceBoundsBeforeCopy(t *testing.T) {
 	}
 	if !exists(src) || exists(dst) {
 		t.Fatalf("bounded rename changed the tree: src=%v dst=%v", exists(src), exists(dst))
+	}
+}
+
+// TestRenameNoReplaceRenamesATreeOverTheCopyBounds checks a tree the copy would refuse
+// is renamed in one step where the platform has a no-replace rename.
+func TestRenameNoReplaceRenamesATreeOverTheCopyBounds(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	cur := src
+	must(t, os.Mkdir(cur, 0o755))
+	for range localRenameMaxDepth + 1 {
+		cur = filepath.Join(cur, "d")
+		must(t, os.Mkdir(cur, 0o755))
+	}
+	writeFile(t, filepath.Join(cur, "deep.txt"), "deep")
+	if errors.Is(renameNative(filepath.Join(root, "none"), filepath.Join(root, "none2")), errNoNativeRename) {
+		t.Skip("no native no-replace rename on this platform")
+	}
+	dst := filepath.Join(root, "dst")
+	if err := RenameNoReplace(src, dst); err != nil {
+		t.Fatalf("rename of a deep tree = %v", err)
+	}
+	if exists(src) || !exists(dst) {
+		t.Fatalf("rename did not move the tree: src=%v dst=%v", exists(src), exists(dst))
+	}
+}
+
+// TestRenameNoReplaceCaseOnly checks a rename that only changes the case of the name
+// works, also on a case-insensitive filesystem where the "target" is the source.
+func TestRenameNoReplaceCaseOnly(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "a.txt")
+	writeFile(t, src, "content")
+	dst := filepath.Join(root, "A.txt")
+	if err := RenameNoReplace(src, dst); err != nil {
+		t.Fatalf("case-only rename = %v", err)
+	}
+	if got := readFile(t, dst); got != "content" {
+		t.Fatalf("renamed content = %q", got)
 	}
 }

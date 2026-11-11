@@ -40,7 +40,4 @@ func TestCleanWithMap(t *testing.T) {
 			t.Errorf("MapIndex(%d) = %d, want %d (mapping %v)", raw, got, want, mapping)
 		}
 	}
-	if !IsClean("a\tb") || IsClean("a\u202Eb") || IsClean("a\xff") {
-		t.Errorf("IsClean did not distinguish safe text")
-	}
 }

@@ -209,7 +209,7 @@ func (p *Panel) wheelMouse(mo tea.Mouse, row int, button tea.MouseButton) tea.Cm
 		}
 		return p.afterScroll()
 	}
-	if mo.Mod&tea.ModShift != 0 && p.effects.MouseForwarding != MouseForwardAltScreen {
+	if p.term == nil || mo.Mod&tea.ModShift != 0 && p.effects.MouseForwarding != MouseForwardAltScreen {
 		return p.scrollFromWheel(up)
 	}
 	reporting, _, _ := p.term.MouseReporting()
@@ -265,6 +265,9 @@ func (p *Panel) altScreen() bool { return p.term != nil && p.term.AltScreen() }
 // The legacy alt_screen mode sends every event to an alternate-screen program and
 // has no Shift bypass.
 func (p *Panel) forwardsMouse(kind terminal.MouseKind, mo tea.Mouse) bool {
+	if p.term == nil {
+		return false
+	}
 	legacy := p.effects.MouseForwarding == MouseForwardAltScreen
 	reporting, drag, all := p.term.MouseReporting()
 	alt := p.altScreen()
@@ -358,7 +361,7 @@ func (p *Panel) linkAt(x, row int) (string, bool) {
 // visibleRowText is the text of body row row in the mode the dock shows.
 func (p *Panel) visibleRowText(row int) (string, bool) {
 	if p.scroll.on {
-		return p.combinedText(p.scroll.top + row)
+		return p.combinedText(p.scroll.top+row, true)
 	}
 	if p.term == nil {
 		return "", false
@@ -367,7 +370,7 @@ func (p *Panel) visibleRowText(row int) (string, bool) {
 	if row < 0 || row >= sc.Rows {
 		return "", false
 	}
-	return screenRowText(sc, row), true
+	return screenRowText(sc, row, true), true
 }
 
 // linkRune reports whether r can be part of a path token. White space and the

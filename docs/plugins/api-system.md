@@ -307,7 +307,7 @@ p:write(data) -> true | nil, err        -- queued (up to 8 MiB) until the child 
 p:close_stdin()
 p:kill(signal?) -> true | nil, err      -- "TERM" | "KILL" | "INT" | "HUP"
 p:is_running() -> boolean
-p:wait() ⏳ -> Result | nil, err
+p:wait() ⏳ -> {code, ok, timed_out, signal?} | nil, err   -- the output went to the callbacks
 p:wait_started() ⏳ -> pid | nil, err
 ```
 

@@ -154,12 +154,14 @@ type lspPort struct {
 	// externalOpener resolves non-file LSP locations (slang-synth and similar) to
 	// generated local content; nil means no provider.
 	externalOpener ExternalLocationOpener
-	servers        map[string][]manager.ServerConfig // by language ID; read only after construction
-	universal      []manager.ServerConfig
-	info           map[string]tui.LSPServerInfo // read only after construction
-	auto           map[string]bool              // languages with a server that starts on its own
-	startable      map[string]bool              // languages with any configured server
-	status         []tui.LSPServerStatus        // every configured server, for the popup
+	// The server plan: SetConfig replaces it under mu, so a read after construction
+	// takes mu too.
+	servers   map[string][]manager.ServerConfig // by language ID
+	universal []manager.ServerConfig
+	info      map[string]tui.LSPServerInfo
+	auto      map[string]bool       // languages with a server that starts on its own
+	startable map[string]bool       // languages with any configured server
+	status    []tui.LSPServerStatus // every configured server, for the popup
 
 	mu sync.Mutex
 	// selectionMu serializes per-root provider updates with an explicit Start/Restart
@@ -1142,6 +1144,7 @@ func (p *lspPort) Servers() []tui.LSPServerStatus {
 	p.mu.Lock()
 	mgrs := slices.Collect(maps.Values(p.managers))
 	muted := maps.Clone(p.muted)
+	status := p.status
 	p.mu.Unlock()
 	running := make(map[string]manager.ServerStatus)
 	for _, mgr := range mgrs {
@@ -1149,8 +1152,8 @@ func (p *lspPort) Servers() []tui.LSPServerStatus {
 			running[st.Language+"\x00"+st.Name] = st
 		}
 	}
-	out := make([]tui.LSPServerStatus, 0, len(p.status))
-	for _, st := range p.status {
+	out := make([]tui.LSPServerStatus, 0, len(status))
+	for _, st := range status {
 		cur, ok := running[st.Language+"\x00"+st.Name]
 		if ok {
 			st.State = runState(cur.State)
@@ -1470,6 +1473,8 @@ func (p *lspPort) textOf(path string) string {
 // rootMarkers returns the root markers a server uses for language, from the first
 // configured server of it.
 func (p *lspPort) rootMarkers(language string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if configs := p.servers[language]; len(configs) > 0 {
 		return configs[0].RootMarkers
 	}

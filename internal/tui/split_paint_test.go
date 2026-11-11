@@ -65,7 +65,6 @@ func TestSeparatorsDrawCrossAtIntersection(t *testing.T) {
 	}
 }
 
-
 // mustLoadTheme loads the bundled theme name, and fails the test when it is missing.
 func mustLoadTheme(t *testing.T, name string) theme.Theme {
 	t.Helper()

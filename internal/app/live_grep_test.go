@@ -103,7 +103,7 @@ func TestLiveGrepReadsAtMostOneMegabytePerFile(t *testing.T) {
 	}
 }
 
-// TestLiveGrepMatchModes: Live Grep's modes reach internal/search. The palette sends
+// TestLiveGrepMatchModes: Live Grep's modes reach the search package. The palette sends
 // them in the request; a regex that does not compile is an error even before a file is
 // read.
 func TestLiveGrepMatchModes(t *testing.T) {

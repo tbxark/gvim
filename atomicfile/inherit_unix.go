@@ -77,3 +77,19 @@ func keepOwner(f *os.File, st *syscall.Stat_t) (lost []string) {
 	}
 	return lost
 }
+
+// umask is the process's file-creation mask, read once at start (Umask can only be read
+// by setting it, so it is set back at once, before any other goroutine creates files).
+var umask = func() fs.FileMode {
+	m := syscall.Umask(0)
+	syscall.Umask(m)
+	return fs.FileMode(m)
+}()
+
+// syncDir flushes dir's entries, so a rename into it survives a crash.
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+}

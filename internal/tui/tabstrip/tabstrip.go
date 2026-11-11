@@ -26,7 +26,7 @@ import (
 //
 // hover is the run under the pointer; its text is underlined, so
 // a tab, its close glyph and the plus say they are targets before they are pressed.
-func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, _ bool, hover frame.HitTarget) {
+func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, hover frame.HitTarget) {
 	barStyle := style.Cell(st.TabBar)
 	g.Fill(x0, g.Width(), y, barStyle)
 	tab, active := style.Cell(st.Tab), style.Cell(st.TabActive)

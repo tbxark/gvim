@@ -125,11 +125,11 @@ func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
 	}
 	// Nothing here may keep a runtime alive: close after the durability attempts.
 	if active != nil {
-		active.rt.exit()
+		active.rt.shutdown()
 		m.releasePluginWorkspace(active)
 	}
 	for _, s := range rest {
-		s.rt.exit()
+		s.rt.shutdown()
 		m.releasePluginWorkspace(s)
 	}
 	// The manager is done: drop the sessions so a second close (the test cleanup, a
@@ -206,6 +206,5 @@ func recoveryNote(m *workspaceManager, s *workspaceSession) string {
 	if err := s.rt.recoveryWriter.Plan()(); err != nil {
 		return fmt.Sprintf("the crash-recovery copy also failed (%v)", err)
 	}
-	_ = m
 	return fmt.Sprintf("a crash-recovery copy was kept in %s", s.rt.recovery)
 }

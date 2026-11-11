@@ -117,6 +117,17 @@ func TestOverwritingLeadBlanksTheContinuation(t *testing.T) {
 	}
 }
 
+func TestWideOverAnOffsetWidePairBlanksItsContinuation(t *testing.T) {
+	g := New(5, 1)
+	g.Put(1, 0, 5, "日", Style{})
+	// A wide glyph one column left covers the old lead; the old continuation must
+	// not stay an orphan, or the row loses a column.
+	g.Put(0, 0, 5, "本", Style{})
+	if got := g.Plain()[0]; got != "本   " {
+		t.Errorf("row = %q, want %q", got, "本   ")
+	}
+}
+
 func TestFillAndSetClipToTheGrid(t *testing.T) {
 	g := New(3, 2)
 	g.Fill(-2, 10, 1, Style{Reverse: true})

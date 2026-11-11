@@ -188,7 +188,7 @@ func TestIncrementalSearchOnALiveTranscript(t *testing.T) {
 	if len(p.scroll.preview) != 1 {
 		t.Fatalf("live preview = %v, want the one line-3 row", p.scroll.preview)
 	}
-	if got, ok := p.combinedText(p.ScrollSelected()); !ok || !strings.Contains(got, "line-3") {
+	if got, ok := p.combinedText(p.ScrollSelected(), false); !ok || !strings.Contains(got, "line-3") {
 		t.Fatalf("preview selected row = %q, %v", got, ok)
 	}
 }
@@ -271,11 +271,11 @@ func TestIncrementalSearchStepOrdersAndRestores(t *testing.T) {
 		t.Fatal("typing/F3 produced no search command")
 	}
 	applyKeys(t, p, cmdStep) // first F3 on the un-answered query lands on its first match
-	if got, ok := p.combinedText(p.ScrollSelected()); !ok || !strings.Contains(got, "one") {
+	if got, ok := p.combinedText(p.ScrollSelected(), false); !ok || !strings.Contains(got, "one") {
 		t.Fatalf("first F3 selected %q, %v, want the first 'o' match", got, ok)
 	}
 	applyKeys(t, p, cmdTyping) // late answer for the pre-F3 typing
-	if got, ok := p.combinedText(p.ScrollSelected()); !ok || !strings.Contains(got, "one") {
+	if got, ok := p.combinedText(p.ScrollSelected(), false); !ok || !strings.Contains(got, "one") {
 		t.Fatalf("a late typing answer moved the preview: %q, %v", got, ok)
 	}
 	// Shift+F3 on a fresh un-answered query lands on its last match.

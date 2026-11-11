@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -110,5 +111,68 @@ func TestBufferGroupLuaAPI(t *testing.T) {
 		if strings.Contains(r, "group:") || strings.Contains(r, "scroll_sync:") {
 			t.Fatalf("the unload left %q", r)
 		}
+	}
+}
+
+// intruderPlugin tries to drive, close and remove what another plugin made: the ids are
+// global and guessable, so each call must answer closed.
+const intruderPlugin = `
+local gvim = require 'gvim'
+gvim.command.register{ name = "poke", run = function(ctx)
+  local group, panel = ctx.args.group, ctx.args.panel
+  local _, e1 = gvim.buf.close_group(group)
+  local _, e2 = gvim.buf.set_panel_visible(group, "files", false)
+  local _, e3 = gvim.win.set_scroll_sync_anchors(7, { { 0, 0 } })
+  local _, e4 = gvim.win.remove_scroll_sync(7)
+  local _, e5 = gvim.ui.unmount_widget_panel(panel)
+  gvim.notify(table.concat({ tostring(e1), tostring(e2), tostring(e3), tostring(e4), tostring(e5) }, "|"))
+end }
+`
+
+const ownerPlugin = `
+local gvim = require 'gvim'
+gvim.command.register{ name = "make", run = function()
+  local layout = gvim.json.encode{ type = "scrollable", id = "files" }
+  local group = gvim.buf.create_group("Mine", layout)
+  local wins = gvim.win.list()
+  gvim.win.create_scroll_sync(7, wins[1], wins[2])
+  local panel, err = gvim.ui.mount_widget_panel({ kind = "text", text = "x" })
+  gvim.notify("made:" .. tostring(group) .. ":" .. tostring(panel) .. ":" .. tostring(err))
+end }
+`
+
+func TestPluginsCannotTouchEachOthersGroups(t *testing.T) {
+	h := plugintest.New(t, plugintest.Files{"owner.lua": ownerPlugin, "intruder.lua": intruderPlugin}, plugintest.Options{})
+	h.Start()
+	if _, err := h.Host.SplitWindow(1, pluginapi.SplitOptions{Dir: "right"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run("owner.make", nil); err != nil {
+		t.Fatal(err)
+	}
+	var group, panel int
+	for _, n := range h.NoticeTexts() {
+		if rest, ok := strings.CutPrefix(n, "made:"); ok {
+			if _, err := fmt.Sscanf(strings.ReplaceAll(rest, ":", " "), "%d %d", &group, &panel); err != nil {
+				t.Fatalf("owner notice %q: %v", n, err)
+			}
+		}
+	}
+	if group == 0 || panel == 0 {
+		t.Fatalf("the owner made nothing: %q", h.NoticeTexts())
+	}
+	if err := h.Run("intruder.poke", map[string]any{"group": group, "panel": panel}); err != nil {
+		t.Fatal(err)
+	}
+	notices := strings.Join(h.NoticeTexts(), "\n")
+	if strings.Count(notices, "not mounted by this plugin") != 5 {
+		t.Fatalf("notices = %q, want five refusals", notices)
+	}
+	groups := h.Host.Groups()
+	if fg := groups.ByID[pluginapi.BufferGroupID(group)]; fg == nil || fg.Closed {
+		t.Fatalf("the owner's group = %+v, want it open", fg)
+	}
+	if sg := groups.Scroll[7]; sg == nil || sg.Removed {
+		t.Fatalf("the owner's scroll sync = %+v, want it kept", sg)
 	}
 }

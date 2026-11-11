@@ -24,6 +24,13 @@ var unhandledActions = map[string]bool{
 	"file_explorer_search_backspace": true,
 }
 
+// pluginActions are bound by the embedded keymaps but registered by a default-enabled
+// bundled plugin, which a bare probe model does not load. plugin/bundled tests run them.
+var pluginActions = map[string]bool{
+	"git_gutter.next_change": true,
+	"git_gutter.prev_change": true,
+}
+
 // presetNames are the embedded keymaps. keymap does not export the list.
 var presetNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 
@@ -83,6 +90,9 @@ func TestEveryBoundActionRunsOrIsListed(t *testing.T) {
 	dir := t.TempDir()
 	var unhandled []string
 	for _, action := range boundActions(t) {
+		if pluginActions[action] {
+			continue
+		}
 		err := newProbeModel(t, dir).Run(action)
 		isUnhandled := errors.Is(err, menubar.ErrUnsupported)
 		if isUnhandled {

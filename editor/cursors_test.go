@@ -129,6 +129,13 @@ func TestAddCursorAboveAndBelow(t *testing.T) {
 			Want:   carets{Primary: Caret{Cursor: caretPos(0, 1)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
 		},
 		{
+			Name:   "below keeps the display column past wide characters",
+			Text:   "日本x\nabcdef",
+			Start:  caretPos(0, 2),
+			action: "add_cursor_below",
+			Want:   carets{Primary: Caret{Cursor: caretPos(1, 4)}, extras: []Caret{{Cursor: caretPos(0, 2)}}},
+		},
+		{
 			Name:    "below on the last line is refused",
 			Text:    "ab\ncd",
 			Start:   caretPos(1, 1),

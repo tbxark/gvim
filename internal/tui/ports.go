@@ -533,12 +533,6 @@ type LSPServerStatus struct {
 	Limits string
 }
 
-// MarkdownRenderer renders a markdown preview at a fixed width. Nil until a
-// feature needs it (P8).
-type MarkdownRenderer interface {
-	Render(ctx context.Context, src string, width int) (string, error)
-}
-
 // Overlay is a layer drawn over the frame and given the input while it is on
 // top: the palette, the find bar, the prompts, the browser, the dialogs, the
 // lists and the menus. The contract, and the routing and painting rules, are in
@@ -707,7 +701,6 @@ type Deps struct {
 	Commands []commands.Entry
 	Ops      FileOps    // nil until P6
 	LSP      LSPSession // nil disables the language-server features
-	Markdown MarkdownRenderer
 	// MarkdownTOC configures the Contents sidebar section from the
 	// plugins.markdown_toc entry of the config. Nil enables it with the
 	// defaults, as the bundled plugin is on out of the box.

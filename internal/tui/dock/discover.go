@@ -107,14 +107,7 @@ func (t *Tabs) startLaunchRecordAt(launch terminal.Launch, name, dir string) (te
 	if prev := t.Active(); prev != nil {
 		prev.SetFocus(false)
 	}
-	var p Panel
-	p.SetHost(t.host)
-	p.SetPorts(t.ports)
-	p.SetEffects(t.effects)
-	// A disjoint generation namespace, like NewTab: every Panel counts from 0, so
-	// two tabs would otherwise both reach generation 1 and consume each other's
-	// output/exit messages.
-	p.gen = t.genBase()
+	p := t.newPanel()
 	if p.launcher == nil {
 		if t.host.Notice != nil {
 			t.host.Notice(NoTerminalNotice())
@@ -125,7 +118,7 @@ func (t *Tabs) startLaunchRecordAt(launch terminal.Launch, name, dir string) (te
 	if name == "" {
 		name = "session"
 	}
-	t.tabs = append(t.tabs, &p)
+	t.tabs = append(t.tabs, p)
 	t.names = append(t.names, name)
 	t.ids = append(t.ids, t.newID())
 	t.active = len(t.tabs) - 1

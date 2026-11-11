@@ -1,6 +1,7 @@
 package dock
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -98,6 +99,19 @@ func (t *Tabs) genBase() int {
 	return t.nextGen << 20
 }
 
+// newPanel returns a tab panel wired to the dock's ports and shared state, with its
+// own shell-generation namespace.
+func (t *Tabs) newPanel() *Panel {
+	p := &Panel{}
+	p.SetHost(t.host)
+	p.SetPorts(t.ports)
+	p.SetEffects(t.effects)
+	p.hostBlurred = t.hostBlurred
+	p.history = &t.history
+	p.gen = t.genBase()
+	return p
+}
+
 // Active returns the active tab, or nil when the dock has no tabs.
 func (t *Tabs) Active() *Panel {
 	if t.active < 0 || t.active >= len(t.tabs) {
@@ -135,16 +149,6 @@ func (t *Tabs) IndexForID(id uint64) (int, bool) {
 		}
 	}
 	return 0, false
-}
-
-// SetActiveID focuses the tab with the stable id. A missing id (the tab closed) is
-// reported without changing the active tab.
-func (t *Tabs) SetActiveID(id uint64) bool {
-	i, ok := t.IndexForID(id)
-	if !ok {
-		return false
-	}
-	return t.SetActive(i)
 }
 
 // Count returns the number of tabs.
@@ -431,14 +435,8 @@ func (t *Tabs) NewTab() tea.Cmd {
 	if prev := t.Active(); prev != nil {
 		prev.SetFocus(false)
 	}
-	var p Panel
-	p.SetHost(t.host)
-	p.SetPorts(t.ports)
-	p.SetEffects(t.effects)
-	p.hostBlurred = t.hostBlurred
-	p.history = &t.history
-	p.gen = t.genBase()
-	t.tabs = append(t.tabs, &p)
+	p := t.newPanel()
+	t.tabs = append(t.tabs, p)
 	t.names = append(t.names, "")
 	t.ids = append(t.ids, t.newID())
 	t.active = len(t.tabs) - 1
@@ -666,14 +664,8 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	if prev := t.Active(); prev != nil {
 		prev.SetFocus(false)
 	}
-	var p Panel
-	p.SetHost(t.host)
-	p.SetPorts(t.ports)
-	p.SetEffects(t.effects)
-	p.hostBlurred = t.hostBlurred
-	p.history = &t.history
-	p.gen = t.genBase()
-	t.tabs = append(t.tabs, &p)
+	p := t.newPanel()
+	t.tabs = append(t.tabs, p)
 	t.names = append(t.names, name)
 	t.ids = append(t.ids, t.newID())
 	t.active = len(t.tabs) - 1
@@ -986,6 +978,13 @@ func (t *Tabs) Press(l frame.Layout, y int) bool {
 // generation, so at most one consumes it), batches the commands, and then applies
 // the per-tab close_on_exit rule and the exited markers.
 func (t *Tabs) Update(msg tea.Msg) (tea.Cmd, bool) {
+	if ts, ok := msg.(tabStartedMsg); ok && !slices.Contains(t.tabs, ts.tab) {
+		// The tab closed while its shell was starting: nothing shows that shell.
+		if st, ok := ts.inner.(startedMsg); ok && st.term != nil {
+			_ = st.term.Close()
+		}
+		return nil, true
+	}
 	var cmds []tea.Cmd
 	any := false
 	for _, p := range t.tabs {
@@ -1416,20 +1415,15 @@ func (t *Tabs) ActiveSavedTab() (terminal.SavedTab, bool) {
 // flag, so the target revives it on the first dive (the dock's normal dive rule),
 // never at append time. The existing tabs and the active index stay as they were.
 func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
-	var p Panel
-	p.SetHost(t.host)
-	p.SetPorts(t.ports)
-	p.SetEffects(t.effects)
-	p.hostBlurred = t.hostBlurred
-	p.history = &t.history
-	p.gen = t.genBase()
+	p := t.newPanel()
 	p.Restore(terminal.SavedState{
 		Version: terminal.SavedStateVersion, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
 		Title: tab.Title, Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
 		Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
 		Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
+		ExitCode: tab.ExitCode, ExitKnown: tab.ExitKnown,
 	})
-	t.tabs = append(t.tabs, &p)
+	t.tabs = append(t.tabs, p)
 	t.names = append(t.names, tab.Name)
 	t.ids = append(t.ids, t.newID())
 	if len(t.tabs) == 1 {
@@ -1460,13 +1454,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		}}
 	}
 	for _, tab := range saved {
-		var p Panel
-		p.SetHost(t.host)
-		p.SetPorts(t.ports)
-		p.SetEffects(t.effects)
-		p.hostBlurred = t.hostBlurred
-		p.history = &t.history
-		p.gen = t.genBase()
+		p := t.newPanel()
 		p.Restore(terminal.SavedState{
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
 			Title: tab.Title, Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
@@ -1474,7 +1462,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 			Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
 			ExitCode: tab.ExitCode, ExitKnown: tab.ExitKnown,
 		})
-		t.tabs = append(t.tabs, &p)
+		t.tabs = append(t.tabs, p)
 		t.names = append(t.names, tab.Name)
 		t.ids = append(t.ids, t.newID())
 	}

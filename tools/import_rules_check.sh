@@ -26,12 +26,13 @@
 #     configview/                the `gvim config show/paths` backend (config + keybindings)
 #     tui/ (+ sub-packages)      the Bubble Tea UI
 #     terminal/  filewatch/      private backends of the shell
+#     daemon/                    the attach/detach socket host and workspace registry
 #     uitest/                    test-only in-process UI harness
 #   top level (no internal/):    the TUI-free engine and shared libraries
 #     buffer, document, editor, search, syntax, fold, diff, encoding, session,
 #     decorations, textlayout, config, keymap, theme, workspace, explorer,
 #     finder, fuzzy, fsops, gitstate, trust, lsp, pluginapi, plugin, commands,
-#     outline, i18n
+#     outline, i18n, atomicfile, shellcmd, updatecheck, authority, env
 #
 # Rules:
 #   R1  no top-level (non-cmd, non-internal) package imports internal/.
@@ -44,8 +45,8 @@
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
 #       lsp/lsptest, atomicfile, shellcmd, config, explorer, keymap, i18n,
-#       plugin/bundled, plugin/pattern, outline. (lsp/manager sits above lsp and
-#       may import it.)
+#       plugin/bundled, plugin/pattern, outline, updatecheck, internal/agentdiscover,
+#       internal/tui/textsafe. (lsp/manager sits above lsp and may import it.)
 #   R4  engine direction: document (the per-file model) imports only its leaf
 #       packages (buffer, search, syntax, textlayout, fold, diff, encoding,
 #       atomicfile, shellcmd), never editor, session or internal/; editor may
@@ -55,7 +56,9 @@
 #       theme among module packages; session imports only buffer, document and
 #       atomicfile; commands imports only fuzzy and keymap; workspace imports
 #       only config; trust imports only config and atomicfile; finder imports
-#       only explorer and fuzzy.
+#       only explorer and fuzzy; authority imports only trust and plugin/hostos;
+#       env imports only config and trust; internal/daemon imports only config and
+#       session.
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
 #       runtime, lsp, finder or fsops; a tui sub-package must not import its
 #       parent package (internal/tui).
@@ -76,8 +79,18 @@
 #       other module package.
 #   R11 editor, buffer and decorations do not import pluginapi.
 #   R12 tui sub-packages may import each other and the kits, but no package
-#       outside internal/tui and internal/app may import them. The tier-1a
-#       pluginpanel sub-package imports only grid, style, space and pluginapi.
+#       outside internal/tui, internal/app and internal/uiadapter may import them.
+#       The tier-1a pluginpanel sub-package imports only grid, style, space and
+#       pluginapi.
+#   R13 the private host packages: only internal/app imports uiadapter, pluginhost
+#       and lsphost; restore and highlight are also imported by uiadapter;
+#       keybindings by uiadapter, pluginhost and configview.
+#   R14 internal/configview imports only config, internal/keybindings, keymap and
+#       theme.
+#   R15 internal/tui (the root) is imported only by itself, internal/app,
+#       internal/uiadapter, internal/keybindings, internal/lsphost, internal/restore
+#       and internal/uitest.
+#   R16 a top-level package's tests do not import internal/.
 #
 # Bash 3.2 compatible (macOS).
 
@@ -163,7 +176,7 @@ while IFS=$'\t' read -r pkg imp; do
   if [ "$ours" = 1 ]; then
     # R3: leaf packages have no module dependency at all.
     case "$rel" in
-      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | i18n | plugin/bundled | plugin/pattern | outline)
+      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | i18n | plugin/bundled | plugin/pattern | outline | updatecheck | internal/agentdiscover | internal/tui/textsafe)
         add R3 "$pkg" "$imp"
         ;;
     esac
@@ -202,6 +215,23 @@ while IFS=$'\t' read -r pkg imp; do
     fi
     if [ "$rel" = trust ] && [ "$irel" != config ] && [ "$irel" != atomicfile ]; then
       add R4 "$pkg" "$imp"
+    fi
+    if [ "$rel" = authority ] && [ "$irel" != trust ] && [ "$irel" != plugin/hostos ]; then
+      add R4 "$pkg" "$imp"
+    fi
+    if [ "$rel" = env ] && [ "$irel" != config ] && [ "$irel" != trust ]; then
+      add R4 "$pkg" "$imp"
+    fi
+    if [ "$rel" = internal/daemon ] && [ "$irel" != config ] && [ "$irel" != session ]; then
+      add R4 "$pkg" "$imp"
+    fi
+
+    # R12: the plugin panel kit stays small.
+    if [ "$rel" = internal/tui/pluginpanel ]; then
+      case "$irel" in
+        internal/tui/grid | internal/tui/style | internal/tui/space | pluginapi) ;;
+        *) add R12 "$pkg" "$imp" ;;
+      esac
     fi
 
     # R5: the TUI tree does not reach the shell or concrete backends.

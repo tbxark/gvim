@@ -102,11 +102,13 @@ func (r ExecRunner) Run(ctx context.Context, name string, args ...string) Result
 	if err != nil {
 		var exit *exec.ExitError
 		switch {
-		case errors.As(err, &exit):
-			res.Code = exit.ExitCode()
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			// Checked first: the context kills a started command, which then also
+			// reports an exit error.
 			res.Code = -1
 			res.Err = ctx.Err()
+		case errors.As(err, &exit):
+			res.Code = exit.ExitCode()
 		default:
 			// The command did not start (not installed, not executable): code -1
 			// and the error, which the scan reports.

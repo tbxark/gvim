@@ -424,7 +424,7 @@ func (p *Panel) mouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	if m.X < g.x0 || m.X >= g.end {
 		return nil
 	}
-	target := focusResults
+	var target focus
 	switch m.Y {
 	case g.searchY:
 		target = focusSearch
@@ -529,8 +529,12 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 	before := f.Value()
 	next, cmd := f.Update(kp)
 	*f = next
-	if (p.focus == focusSearch && p.query.Value() != before) ||
-		(p.focus == focusGlob && p.glob.Value() != before) {
+	if p.focus == focusSearch && p.query.Value() != before {
+		// Typing over a recalled pattern makes it a new search, which history records.
+		p.histWalk = false
+		return p, p.requery()
+	}
+	if p.focus == focusGlob && p.glob.Value() != before {
 		return p, p.requery()
 	}
 	if p.focus == focusReplace && p.replace.Value() != before {
@@ -837,7 +841,7 @@ func (p *Panel) previewCmd() tea.Cmd {
 	rev := p.previewer
 	return func() tea.Msg {
 		res, err := rev.Preview(req)
-		return previewDoneMsg{seq: seq, result: res, err: err}
+		return previewDoneMsg{seq: seq, result: res, err: err, owner: owner}
 	}
 }
 
@@ -1037,7 +1041,7 @@ func (p *Panel) requery() tea.Cmd {
 		p.matcher = nil
 		p.errText = "Bad glob: " + err.Error()
 		p.loading = false
-		p.fileMatches, p.rows, p.checked = nil, nil, nil
+		p.fileMatches, p.rows, p.checked, p.expanded = nil, nil, nil, nil
 		p.truncated, p.skippedCount, p.skipped = false, 0, nil
 		p.resultNotice = ""
 		p.selected, p.top = 0, 0
@@ -1046,7 +1050,7 @@ func (p *Panel) requery() tea.Cmd {
 	p.matcher = m
 	if p.query.Value() == "" {
 		p.loading = false
-		p.fileMatches, p.rows = nil, nil
+		p.fileMatches, p.rows, p.checked, p.expanded = nil, nil, nil, nil
 		p.truncated, p.skippedCount, p.skipped = false, 0, nil
 		p.resultNotice = ""
 		p.selected, p.top = 0, 0
@@ -1204,6 +1208,10 @@ func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
 // the highlighted row and the window stay where the user left them.
 func (p *Panel) appendBatchFiles(files []FileMatches) {
 	wasEmpty := len(p.fileMatches) == 0
+	if wasEmpty {
+		// The fold and check state is per file: a new result starts its own.
+		p.expanded, p.checked = nil, nil
+	}
 	for _, f := range files {
 		p.fileMatches = append(p.fileMatches, f)
 		p.expanded = append(p.expanded, true)

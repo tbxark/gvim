@@ -54,13 +54,11 @@ func (d *Document) SortLines() {
 	d.ClampToText()
 }
 
-// expandSelection grows the selection one level per call. The levels are the word
-// at the caret, the lines the selection touches, and the whole buffer. A level is
-// taken only when it is larger than the selection, so a press that changes nothing
-// means the buffer is already selected.
-// enclosingBrackets finds enclosing pairs (), [], {}, "", '', `` on line.
+// enclosingBrackets finds the innermost pair around rune column col of line: (), [] and
+// {} nest, and a quote (a single, double or back quote) pairs with the nearest one on
+// each side. in is the range inside the pair and out the range with it, in rune columns.
 func enclosingBrackets(line string, col int) (inFrom, inTo, outFrom, outTo int, ok bool) {
-	pairs := [][2]byte{
+	pairs := [][2]rune{
 		{'\'', '\''},
 		{'"', '"'},
 		{'`', '`'},
@@ -68,46 +66,57 @@ func enclosingBrackets(line string, col int) (inFrom, inTo, outFrom, outTo int, 
 		{'[', ']'},
 		{'{', '}'},
 	}
-	n := len(line)
+	rs := []rune(line)
+	n := len(rs)
+	col = min(max(col, 0), n)
 	bestDist := n + 1
-	var bInFrom, bInTo, bOutFrom, bOutTo int
-	found := false
-
 	for _, p := range pairs {
 		open, close := p[0], p[1]
-		start := -1
+		nests := open != close
+		start, depth := -1, 0
 		for i := col - 1; i >= 0; i-- {
-			if line[i] == open {
-				start = i
-				break
+			if nests && rs[i] == close {
+				depth++
+			} else if rs[i] == open {
+				if depth == 0 {
+					start = i
+					break
+				}
+				depth--
 			}
 		}
 		if start < 0 {
 			continue
 		}
 		end := -1
+		depth = 0
 		for i := col; i < n; i++ {
-			if line[i] == close {
-				end = i
-				break
+			if nests && rs[i] == open {
+				depth++
+			} else if rs[i] == close {
+				if depth == 0 {
+					end = i
+					break
+				}
+				depth--
 			}
 		}
-		if end < 0 || end <= start {
+		if end < 0 {
 			continue
 		}
-		dist := end - start
-		if dist < bestDist {
+		if dist := end - start; dist < bestDist {
 			bestDist = dist
-			bInFrom = start + 1
-			bInTo = end
-			bOutFrom = start
-			bOutTo = end + 1
-			found = true
+			inFrom, inTo, outFrom, outTo, ok = start+1, end, start, end+1, true
 		}
 	}
-	return bInFrom, bInTo, bOutFrom, bOutTo, found
+	return inFrom, inTo, outFrom, outTo, ok
 }
 
+// ExpandSelection grows the selection one level per call. The levels are the word
+// at the caret, the inside of the brackets or quotes around it, the brackets with
+// their contents, the lines the selection touches, and the whole buffer. A level is
+// taken only when it is larger than the selection, so a press that changes nothing
+// means the buffer is already selected.
 func (d *Document) ExpandSelection() {
 	cur := buffer.Selection{Anchor: d.Cursor, Head: d.Cursor}
 	if d.Sel != nil {

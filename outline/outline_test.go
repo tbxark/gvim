@@ -189,3 +189,16 @@ func TestScanDoesNotKeepAWholeLongTitle(t *testing.T) {
 		t.Fatalf("title is %d bytes, want %d", len(got[0].Title), MaxTitleBytes)
 	}
 }
+
+func TestScanSkipsYAMLFrontMatter(t *testing.T) {
+	lines := []string{"---", "title: Foo", "# not a heading", "---", "", "# Real", "text"}
+	heads := Scan(lines)
+	if len(heads) != 1 || heads[0].Title != "Real" || heads[0].Line != 5 {
+		t.Fatalf("headings = %+v, want only Real on line 5", heads)
+	}
+	// A "---" that never closes is not front matter.
+	open := Scan([]string{"---", "# Title"})
+	if len(open) != 1 || open[0].Title != "Title" {
+		t.Fatalf("unclosed fence headings = %+v, want Title", open)
+	}
+}

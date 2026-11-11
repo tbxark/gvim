@@ -17,7 +17,7 @@ import (
 )
 
 // ErrNotRepo is returned when a directory is not inside a git repository.
-var ErrNotRepo = errors.New("gitx: not a git repository")
+var ErrNotRepo = errors.New("gitstate: not a git repository")
 
 // FileStatus is the state of one changed path in a work tree. The zero value
 // is not a valid status.
@@ -92,15 +92,15 @@ func Status(root string) (map[string]FileStatus, error) {
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
-		return nil, fmt.Errorf("gitx: worktree: %w", err)
+		return nil, fmt.Errorf("gitstate: worktree: %w", err)
 	}
 	st, err := wt.Status()
 	if err != nil {
-		return nil, fmt.Errorf("gitx: status: %w", err)
+		return nil, fmt.Errorf("gitstate: status: %w", err)
 	}
 	idx, err := repo.Storer.Index()
 	if err != nil {
-		return nil, fmt.Errorf("gitx: index: %w", err)
+		return nil, fmt.Errorf("gitstate: index: %w", err)
 	}
 
 	out := make(map[string]FileStatus, len(st))
@@ -133,7 +133,7 @@ func Branch(root string) (string, error) {
 	}
 	head, err := repo.Reference(plumbing.HEAD, false)
 	if err != nil {
-		return "", fmt.Errorf("gitx: read HEAD: %w", err)
+		return "", fmt.Errorf("gitstate: read HEAD: %w", err)
 	}
 	if head.Type() == plumbing.SymbolicReference {
 		return head.Target().Short(), nil
@@ -149,7 +149,7 @@ func open(root string) (*git.Repository, error) {
 		return nil, ErrNotRepo
 	}
 	if err != nil {
-		return nil, fmt.Errorf("gitx: open %s: %w", root, err)
+		return nil, fmt.Errorf("gitstate: open %s: %w", root, err)
 	}
 	return repo, nil
 }
@@ -181,15 +181,15 @@ func pairRenames(repo *git.Repository, idx *index.Index, st git.Status, out map[
 		return nil // no commit yet, so nothing can be a staged deletion
 	}
 	if err != nil {
-		return fmt.Errorf("gitx: head: %w", err)
+		return fmt.Errorf("gitstate: head: %w", err)
 	}
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
-		return fmt.Errorf("gitx: commit: %w", err)
+		return fmt.Errorf("gitstate: commit: %w", err)
 	}
 	tree, err := commit.Tree()
 	if err != nil {
-		return fmt.Errorf("gitx: tree: %w", err)
+		return fmt.Errorf("gitstate: tree: %w", err)
 	}
 
 	deleted := make(map[plumbing.Hash][]string)
@@ -202,7 +202,7 @@ func pairRenames(repo *git.Repository, idx *index.Index, st git.Status, out map[
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("gitx: tree entry %s: %w", path, err)
+			return fmt.Errorf("gitstate: tree entry %s: %w", path, err)
 		}
 		deleted[entry.Hash] = append(deleted[entry.Hash], path)
 	}

@@ -3,10 +3,10 @@ package plugin
 // gvim.dashboard: third-party dashboard sections (the gvim counterpart of Fresh's
 // dashboard registerSection API).
 //
-//	gvim.dashboard.register_section(name, refresh, opts?) -> id | nil, err
+//	gvim.dashboard.register_section(name, refresh, opts?) -> id |//	gvim.dashboard.set_auto_open(enabled) -> true
 //	gvim.dashboard.remove_section(id_or_name) -> boolean
 //	gvim.dashboard.sections() -> { {id, plugin, name, title, key, ttl_ms, timeout_ms, priority}, ... }
-//	gvim.dashboard.set_auto_open(enabled) -> true | nil, err
+//	gvim.dashboard.set_auto_open(enabled) -> true
 //	gvim.dashboard.auto_open() -> boolean | nil  (nil: dashboard plugin setting applies)
 //
 // The refresh callback is retained in the registering plugin's state. The dashboard
