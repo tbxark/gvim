@@ -68,10 +68,10 @@ type Strip struct {
 	After    bool  // tabs are scrolled off the right edge
 }
 
-// tabCells is the width of one tab in cells: the label " name " followed by the
-// "×" and one blank. Tabs follow each other with no gap.
+// tabCells includes a divider cell, padding around the label, the close button,
+// and a trailing blank. The divider occupies the first cell of each following tab.
 func tabCells(t TabInfo) int {
-	return ansi.StringWidth(space.Pad(StripLabel(t))) + 2
+	return ansi.StringWidth(space.Pad(StripLabel(t))) + 3
 }
 
 // TabStarts returns the first cell of every tab, measured from the Strip's left
@@ -86,9 +86,9 @@ func TabStarts(tabs []TabInfo) (starts []int, total int) {
 }
 
 // PlaceStrip places the tab Strip from column x0 in a row w cells wide. Each tab
-// is the label " name × " in three runs: the name with its leading blank (hitTab),
-// the "×" (hitTabClose), and the trailing blank (hitTab). Tabs follow each other
-// with no gap.
+// is the label "  name × " in three runs: the name with two leading blanks (hitTab),
+// the "×" (hitTabClose), and the trailing blank (hitTab). The first blank is used
+// for a divider between adjacent tabs, leaving one padding cell before the name.
 //
 // The "+" (hitTabNew) is a three-cell button, " + ", pinned to the end of the
 // row (columns w-3..w-1), outside the scrolled window, so it is always on screen
@@ -163,7 +163,7 @@ func tabRuns(tabs []TabInfo, x0 int, ic icons.Mode) []Run {
 	var runs []Run
 	p := x0
 	for i, t := range tabs {
-		name := space.Pad(StripLabel(t))
+		name := " " + space.Pad(StripLabel(t))
 		nw := ansi.StringWidth(name)
 		runs = append(runs,
 			Run{X: p, W: nw, Text: name, Kind: HitTab, Index: i},

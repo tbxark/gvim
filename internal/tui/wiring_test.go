@@ -32,15 +32,19 @@ func numberedLines(n int) []string {
 
 func TestViewPaintsTheEditorText(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello", "world"), nil, 40, 15)
+	l := m.layout()
 	rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-	if got, want := rows[3], "  1 │ hello"; !strings.HasPrefix(got, want) {
-		t.Errorf("row 3 = %q, want the first line after the gutter %q", got, want)
+	// The row's first cell is the frame's border, so the pane is read from the
+	// editor column on.
+	row := func(y int) string { return ansi.Cut(rows[y], l.EditorX, l.W) }
+	if got, want := row(l.BodyTop), "  1 │ hello"; !strings.HasPrefix(got, want) {
+		t.Errorf("first body row = %q, want the first line after the gutter %q", got, want)
 	}
-	if got, want := rows[4], "  2 │ world"; !strings.HasPrefix(got, want) {
-		t.Errorf("row 4 = %q, want %q", got, want)
+	if got, want := row(l.BodyTop+1), "  2 │ world"; !strings.HasPrefix(got, want) {
+		t.Errorf("second body row = %q, want %q", got, want)
 	}
-	if got := rows[5]; !strings.HasPrefix(got, "~") {
-		t.Errorf("row 5 = %q, want a tilde row past the end", got)
+	if got := row(l.BodyTop + 2); !strings.HasPrefix(got, "~") {
+		t.Errorf("row under the text = %q, want a tilde row past the end", got)
 	}
 }
 
@@ -52,8 +56,8 @@ func TestViewPaintsTheEditorPaneRightOfTheExplorer(t *testing.T) {
 		t.Fatal("the explorer takes no columns at 80 wide")
 	}
 	rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-	if got := ansi.Cut(rows[3], l.EditorX, l.W); !strings.HasPrefix(got, "  1 │ hello") {
-		t.Errorf("row 3 from x0 %d = %q, want the text", l.EditorX, got)
+	if got := ansi.Cut(rows[l.BodyTop], l.EditorX, l.W); !strings.HasPrefix(got, "  1 │ hello") {
+		t.Errorf("first body row from x0 %d = %q, want the text", l.EditorX, got)
 	}
 }
 
@@ -205,7 +209,8 @@ func TestScrollbarTrackPressMovesTheViewport(t *testing.T) {
 		t.Fatal("a 100-line document has no scrollbar at 15 rows")
 	}
 	row := 6
-	m.Update(click(l.W-1, l.BodyTop+row, tea.MouseLeft))
+	// The scrollbar is the editor column's last cell: the frame border is outside it.
+	m.Update(click(l.EditorX+l.EditorW-1, l.BodyTop+row, tea.MouseLeft))
 	p := m.pane(m.ed.Active())
 	if want := p.ScrollTopFor(l.FocusedPane().W, m.bodyRows(), row); ed.doc.top != want || want == 0 {
 		t.Fatalf("viewport top = %d, want %d (non-zero)", ed.doc.top, want)

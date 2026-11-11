@@ -24,16 +24,13 @@ import (
 // the other tabs and the plus take the tab style, and the markers take the bar
 // style.
 //
-// focused marks the strip as the keyboard owner: its active tab gets the accent
-// marker in the leading cell, the same marker the sidebar puts beside the row that
-// has the keyboard. hover is the run under the pointer; its text is underlined, so
+// hover is the run under the pointer; its text is underlined, so
 // a tab, its close glyph and the plus say they are targets before they are pressed.
-func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, focused bool, hover frame.HitTarget) {
+func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, _ bool, hover frame.HitTarget) {
 	barStyle := style.Cell(st.TabBar)
 	g.Fill(x0, g.Width(), y, barStyle)
 	tab, active := style.Cell(st.Tab), style.Cell(st.TabActive)
-	accent := style.Cell(st.Accent).BG
-	for _, r := range s.Runs {
+	for i, r := range s.Runs {
 		cell := tab
 		switch {
 		case r.Kind == frame.HitTabScrollBefore || r.Kind == frame.HitTabScrollAfter:
@@ -48,13 +45,17 @@ func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, focused bool,
 			cell.Underline = true
 		}
 		g.Put(r.X, y, g.Width(), r.Text, cell)
-		// The active tab takes the focus marker in the blank cell before its name.
-		// A run cut at the window's left edge has no blank left to replace, so it
-		// keeps the text.
-		if focused && r.Kind == frame.HitTab && r.Index == s.Active && strings.HasPrefix(r.Text, " ") {
-			marker := cell
-			marker.FG = accent
-			g.Set(r.X, y, "▌", marker)
+		// Put the divider at the start of the next tab, leaving a blank after ×.
+		boundary := i > 0 && r.Kind == frame.HitTab && strings.HasPrefix(r.Text, " ") && s.Runs[i-1].Kind == frame.HitTab && s.Runs[i-1].Index != r.Index && s.Runs[i-1].X+s.Runs[i-1].W == r.X
+		if boundary {
+			sep := barStyle
+			sep.Underline = cell.Underline
+			if fg := style.Cell(st.Scrollbar).FG; fg != nil {
+				sep.FG = fg
+			} else {
+				sep.Faint = true
+			}
+			g.Set(r.X, y, "│", sep)
 		}
 	}
 }

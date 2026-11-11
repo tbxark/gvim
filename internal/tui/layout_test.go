@@ -72,7 +72,7 @@ func TestEditorColumnsAtSampleWidths(t *testing.T) {
 		if l.Gutter != 6 || l.TextX != g.explorer+6 {
 			t.Errorf("W=%d: gutter %d at textX %d", g.w, l.Gutter, l.TextX)
 		}
-		if want := g.w - g.explorer - 6; l.TextW != want {
+		if want := g.w - g.explorer - 7; l.TextW != want {
 			t.Errorf("W=%d: textW = %d, want %d", g.w, l.TextW, want)
 		}
 	}
@@ -91,19 +91,19 @@ func TestGutterWidthWidensWithDigits(t *testing.T) {
 func TestRowBandsAtSampleHeights(t *testing.T) {
 	for _, h := range sampleHeights {
 		l := layoutFor(100, h, layoutInput{})
-		if l.BodyTop != 3 || l.BodyBottom != h-2 || l.StatusY != h-1 {
+		if l.BodyTop != 3 || l.BodyBottom != h-3 || l.StatusY != h-1 {
 			t.Errorf("H=%d: body %d..%d status %d", h, l.BodyTop, l.BodyBottom, l.StatusY)
 		}
 	}
 }
 
 func TestScrollbarShowsOnlyWhenContentOverflows(t *testing.T) {
-	const h = 15 // body rows 3..13, so 11 rows
-	if layoutFor(80, h, layoutInput{Lines: 11}).Scrollbar {
-		t.Error("11 lines in 11 rows show a scrollbar")
+	const h = 15 // body rows 3..12, so 10 rows
+	if layoutFor(80, h, layoutInput{Lines: 10}).Scrollbar {
+		t.Error("10 lines in 10 rows show a scrollbar")
 	}
-	if !layoutFor(80, h, layoutInput{Lines: 12}).Scrollbar {
-		t.Error("12 lines in 11 rows do not show a scrollbar")
+	if !layoutFor(80, h, layoutInput{Lines: 11}).Scrollbar {
+		t.Error("11 lines in 10 rows do not show a scrollbar")
 	}
 }
 
@@ -133,14 +133,14 @@ func TestExplorerHiddenHasNoColumns(t *testing.T) {
 		t.Fatalf("hidden explorer: open %v ex %d buttons %d and %d",
 			l.ExplorerOpen, l.Ex, l.ExReloadX, l.ExCloseX)
 	}
-	if l.EditorX != 0 {
+	if l.EditorX != 1 {
 		t.Fatalf("editorX = %d with the explorer hidden", l.EditorX)
 	}
 }
 
 func TestTabStripStartsAfterTheExplorer(t *testing.T) {
 	l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, Tabs: []TabInfo{{Name: "a.txt"}}})
-	if got := l.Strip.Runs[0]; got.X != 32 || got.Text != " a.txt " {
+	if got := l.Strip.Runs[0]; got.X != 32 || got.Text != "  a.txt " {
 		t.Fatalf("first tab run = %+v", got)
 	}
 }

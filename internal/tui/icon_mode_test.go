@@ -80,7 +80,7 @@ func TestIconModeDrawsTheChosenSet(t *testing.T) {
 		}
 		// The new-tab button is three cells wide, so the glyph keeps one blank on
 		// each side and sits in its middle cell.
-		if got := cell(l.W-2, l.StripY); got != mode.Glyph(icons.New) {
+		if got := cell(l.W-3, l.StripY); got != mode.Glyph(icons.New) {
 			t.Errorf("%v: new-tab cell %q", mode, got)
 		}
 		closes := 0
@@ -104,10 +104,10 @@ func TestNerdTabsShowTheFileIcon(t *testing.T) {
 	pl, nl := plain.layout(), nerd.layout()
 	want := icons.Nerd.FileIcon("a.txt", false, false)
 	g := nerd.paint()
-	// A tab is " name " with a blank before the name; the icon takes that place and
-	// a blank follows it, so every tab is two cells wider.
+	// A tab has two blanks before the name; the icon and a following blank
+	// make every tab two cells wider.
 	first := nl.Strip.Runs[0]
-	if got := g.At(first.X+1, nl.StripY).Text; got != want {
+	if got := g.At(first.X+2, nl.StripY).Text; got != want {
 		t.Errorf("first tab icon cell %q, want %q", got, want)
 	}
 	if got := nl.Strip.Runs[1].X - pl.Strip.Runs[1].X; got != 2 {

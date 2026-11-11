@@ -467,7 +467,7 @@ func TestExplorerDividerDragResizesWithinBounds(t *testing.T) {
 
 func TestEightyByTwentyFourLayoutDefaultsToThirtyTwoColumns(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{ExplorerOpen: true, Lines: 10})
-	if l.Ex != 32 || l.EditorX != 32 || l.BodyTop != 3 || l.BodyBottom != 22 || l.StatusY != 23 {
+	if l.Ex != 32 || l.EditorX != 32 || l.BodyTop != 3 || l.BodyBottom != 21 || l.StatusY != 23 {
 		t.Fatalf("80x24: ex %d editorX %d body %d-%d status %d",
 			l.Ex, l.EditorX, l.BodyTop, l.BodyBottom, l.StatusY)
 	}

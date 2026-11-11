@@ -172,20 +172,20 @@ func TestTerminalCommandsStartInTheWorkspaceRoot(t *testing.T) {
 
 func TestTerminalCommandsLayOutTheDockInTheEditorColumn(t *testing.T) {
 	// At 80 by 24 the dock takes the bottom of the editor column: the title row at
-	// row 17 and 5 shell rows, as open_terminal_in_dock does. open_terminal_below
+	// row 16 and 5 shell rows, as open_terminal_in_dock does. open_terminal_below
 	// and open_terminal_right use the same cells, so they keep the layout's split.
-	// The body keeps its rows, so a navigator beside the dock runs to the status row.
+	// The body keeps its rows, so a navigator beside the dock runs to the bottom border.
 	for _, action := range []string{"open_terminal_in_dock", "open_terminal", "open_terminal_below", "open_terminal_right"} {
 		t.Run(action, func(t *testing.T) {
 			m := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
 			dockRun(t, m, action)
 			l := m.layout()
-			if !l.DockOn || l.DockY != 17 || l.DockH != 6 || l.DockX != l.EditorX || l.DockX+l.EditorW != l.W {
-				t.Fatalf("dock on = %v at row %d with %d rows from column %d over %d; want on at row 17 with 6 rows in the editor column",
+			if !l.DockOn || l.DockY != 16 || l.DockH != 6 || l.DockX != l.EditorX || l.DockX+l.EditorW != l.W-1 {
+				t.Fatalf("dock on = %v at row %d with %d rows from column %d over %d; want on at row 16 with 6 rows in the editor column",
 					l.DockOn, l.DockY, l.DockH, l.DockX, l.EditorW)
 			}
-			if l.BodyBottom != 22 {
-				t.Fatalf("bodyBottom = %d, want 22: the body keeps the rows beside the dock", l.BodyBottom)
+			if l.BodyBottom != 21 {
+				t.Fatalf("bodyBottom = %d, want 21: the body keeps the rows beside the dock", l.BodyBottom)
 			}
 			if l.EditorRows() != l.DockY-l.BodyTop || l.Panes[0].Y+l.Panes[0].H-1 != l.DockY-1 {
 				t.Fatalf("editor rows = %d, pane ends at %d; want them to stop above the dock at %d",
@@ -344,8 +344,8 @@ func TestOpenTerminalCommandsKeepTheRunningShell(t *testing.T) {
 			if !m.dock.Open() || !m.dock.Focus() {
 				t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.Open(), m.dock.Focus())
 			}
-			if l := m.layout(); !l.DockOn || l.DockY != 17 || l.DockH != 6 || l.DockY+l.DockH != l.StatusY {
-				t.Fatalf("dock on = %v at row %d with %d rows; want on at row 17 with 6 rows, directly above the status row",
+			if l := m.layout(); !l.DockOn || l.DockY != 16 || l.DockH != 6 || l.DockY+l.DockH != l.StatusY-1 {
+				t.Fatalf("dock on = %v at row %d with %d rows; want on at row 16 with 6 rows, directly above the bottom border",
 					l.DockOn, l.DockY, l.DockH)
 			}
 			if m.notice != tt.notice {

@@ -268,9 +268,9 @@ func TestSplitRefusesWhenThePaneIsTooSmall(t *testing.T) {
 		panes  int
 		notice string // the notice the split leaves, empty when it splits
 	}{
-		// At H=4 the body is one row, so a stacked split has no room.
-		{"stacked in a one-row body", 40, 4, "split_horizontal", 1, "Not enough room to split"},
-		{"side by side in the same body", 40, 4, "split_vertical", 2, ""},
+		// At H=6 the body is one row, so a stacked split has no room.
+		{"stacked in a one-row body", 40, 6, "split_horizontal", 1, "Not enough room to split"},
+		{"side by side in the same body", 40, 6, "split_vertical", 2, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -365,7 +365,7 @@ func TestClickFocusesThePaneUnderThePointer(t *testing.T) {
 		{60, 5, 1},  // a press in the right pane focuses it
 		{40, 5, 1},  // the border takes no focus
 		{10, 5, 0},  // a press in the left pane focuses it
-		{40, 22, 0}, // the bottom cell of the border takes no focus
+		{40, 21, 0}, // the bottom cell of the border takes no focus
 	}
 	for _, tt := range tests {
 		m.Update(click(tt.x, tt.y, tea.MouseLeft))
@@ -383,8 +383,8 @@ func TestCaretFollowsTheFocusedPane(t *testing.T) {
 	}
 	runAction(t, m, "next_split") // the left pane has the focus
 	m.ed.SetCursor(buffer.Pos{Line: 3, Col: 2}, false)
-	if x, y, ok := m.caret(); !ok || x != 8 || y != 6 {
-		t.Errorf("caret in the left pane = (%d, %d, %v), want (8, 6, true)", x, y, ok)
+	if x, y, ok := m.caret(); !ok || x != 9 || y != 6 {
+		t.Errorf("caret in the left pane = (%d, %d, %v), want (9, 6, true)", x, y, ok)
 	}
 }
 
@@ -397,8 +397,8 @@ func TestFocusingAPaneRevealsTheCaret(t *testing.T) {
 	// The left pane's own top is 0, which hides line 25. Focusing it scrolls the
 	// pane so that the caret is on its last row.
 	x, y, ok := m.caret()
-	if !ok || x != 6 || y != 22 {
-		t.Errorf("caret after focusing the left pane = (%d, %d, %v), want (6, 22, true)", x, y, ok)
+	if !ok || x != 7 || y != 21 {
+		t.Errorf("caret after focusing the left pane = (%d, %d, %v), want (7, 21, true)", x, y, ok)
 	}
 }
 
@@ -407,8 +407,8 @@ func TestSplittingRevealsTheCaretInTheNewPane(t *testing.T) {
 	m.ed.SetCursor(buffer.Pos{Line: 15}, false)
 	// The new bottom pane has 10 rows, so line 15 is off its first rows.
 	runAction(t, m, "split_horizontal")
-	if x, y, ok := m.caret(); !ok || y < 13 || y > 22 {
-		t.Errorf("caret in the new pane = (%d, %d, %v), want a row in 13..22", x, y, ok)
+	if x, y, ok := m.caret(); !ok || y < 13 || y > 21 {
+		t.Errorf("caret in the new pane = (%d, %d, %v), want a row in 13..21", x, y, ok)
 	}
 }
 
@@ -439,8 +439,8 @@ func TestPaintsEachPaneAndTheBorder(t *testing.T) {
 	g := m.paint()
 	// The text starts after the six-cell gutter. The tab index is the second
 	// character of the first line.
-	if got := g.At(7, 3).Text; got != "0" {
-		t.Errorf("left pane shows %q at (7, 3), want the t0 text", got)
+	if got := g.At(8, 3).Text; got != "0" {
+		t.Errorf("left pane shows %q at (8, 3), want the t0 text", got)
 	}
 	if got := g.At(48, 3).Text; got != "1" {
 		t.Errorf("right pane shows %q at (48, 3), want the t1 text", got)
@@ -448,8 +448,8 @@ func TestPaintsEachPaneAndTheBorder(t *testing.T) {
 	if got := g.At(40, 3).Text; got != splitVLine {
 		t.Errorf("border at (40, 3) = %q, want %q", got, splitVLine)
 	}
-	if got := g.At(40, 22).Text; got != splitVLine {
-		t.Errorf("border at (40, 22) = %q, want %q", got, splitVLine)
+	if got := g.At(40, 21).Text; got != splitVLine {
+		t.Errorf("border at (40, 21) = %q, want %q", got, splitVLine)
 	}
 }
 

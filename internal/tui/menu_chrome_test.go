@@ -126,20 +126,20 @@ func TestAnOpenDropdownHangsBelowTheLabelRow(t *testing.T) {
 	}
 }
 
-func TestHiddenMenuBarIsNotDrawnAndTheBodyStartsAtRowOne(t *testing.T) {
+func TestHiddenMenuBarIsNotDrawnAndTheBodyStartsAtRowTwo(t *testing.T) {
 	m := menuModel(t, true)
-	if l := m.layout(); l.BodyTop != 1 {
-		t.Fatalf("body top %d with the menu bar hidden, want 1", l.BodyTop)
+	if l := m.layout(); l.BodyTop != 2 {
+		t.Fatalf("body top %d with the menu bar hidden, want 2", l.BodyTop)
 	}
 	rows := m.paint().Plain()
 	if strings.Contains(rows[0], "File") || strings.Contains(rows[0], "Help") {
 		t.Fatalf("row 0 %q still shows menu labels", rows[0])
 	}
-	if !strings.Contains(rows[0], " a.txt ") {
-		t.Fatalf("row 0 %q has no tab strip", rows[0])
+	if !strings.Contains(rows[1], " a.txt ") {
+		t.Fatalf("row 1 %q has no tab strip", rows[1])
 	}
-	if !strings.Contains(rows[1], "hello") {
-		t.Fatalf("row 1 %q has no body text", rows[1])
+	if !strings.Contains(rows[2], "hello") {
+		t.Fatalf("row 2 %q has no body text", rows[2])
 	}
 }
 

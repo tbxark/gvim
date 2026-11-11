@@ -397,10 +397,9 @@ func TestGutterAgreesBetweenLayoutAndPaneAndStaysAcrossABatch(t *testing.T) {
 		t.Fatalf("the gutter ignores the estimate")
 	}
 	// The pane paints the separator where the layout says the gutter ends.
-	rows := screenRows(m)
-	x := strings.Index(rows[m.layout().BodyTop], "│")
-	if x < 0 || x != m.layout().TextX-2 {
-		t.Errorf("separator at column %d, layout text starts at %d", x, m.layout().TextX)
+	if l := m.layout(); m.paint().At(l.TextX-2, l.BodyTop).Text != "│" {
+		t.Errorf("separator at column %d is %q, want the gutter edge; layout text starts at %d",
+			l.TextX-2, m.paint().At(l.TextX-2, l.BodyTop).Text, l.TextX)
 	}
 	feedAll(t, m, cmd, 10)
 	if got := m.layout().Gutter; got != before {

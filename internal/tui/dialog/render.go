@@ -97,7 +97,7 @@ func (m *modal) drawText(g *grid.Grid, text string) {
 
 // buttonWidth is the cells a button takes: its label and two spaces on each side.
 func buttonWidth(b button) int {
-	return len([]rune(b.label)) + 4
+	return ansi.StringWidth(b.label) + 4
 }
 
 // buttonsWidth is the width of the button row.

@@ -64,8 +64,8 @@ func TestOverflowShowsTheActiveTab(t *testing.T) {
 	if !tabsOnScreen(m)[11] {
 		t.Fatalf("active tab 11 is not on screen; first = %d", m.tabFirst)
 	}
-	if plus := plusColumn(m); plus != 57 {
-		t.Fatalf("plus at column %d, want columns 57..59", plus)
+	if plus := plusColumn(m); plus != 56 {
+		t.Fatalf("plus at column %d, want columns 56..58", plus)
 	}
 }
 
@@ -106,8 +106,8 @@ func TestClickRightMarkerScrollsAndPlusOpensItsMenu(t *testing.T) {
 		t.Fatalf("click on > moved first from %d to %d, want one tab", before, got)
 	}
 	plus := plusColumn(m)
-	if plus != 57 {
-		t.Fatalf("plus at column %d after scrolling, want 57", plus)
+	if plus != 56 {
+		t.Fatalf("plus at column %d after scrolling, want 56", plus)
 	}
 	_, cmd := m.Update(click(plus+1, m.layout().StripY, tea.MouseLeft))
 	drain(t, m, cmd)

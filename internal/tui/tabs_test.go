@@ -35,7 +35,7 @@ func TestStripLabelMarksModifiedAndPreview(t *testing.T) {
 	}
 }
 
-// The fixture at 100 columns: " a.txt × " then " b.txt × " with no gap, and the
+// The fixture at 100 columns: "  a.txt × " then "  b.txt × " with no gap, and the
 // three-cell " + " button pinned to the last columns.
 func TestPlaceStripFixtureAt100Columns(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt", Active: true}, {Name: "b.txt"}}
@@ -50,12 +50,12 @@ func TestPlaceStripFixtureAt100Columns(t *testing.T) {
 		idx  int
 	}
 	expect := []want{
-		{0, " a.txt ", hitTab, 0},
-		{7, "×", hitTabClose, 0},
-		{8, " ", hitTab, 0},
-		{9, " b.txt ", hitTab, 1},
-		{16, "×", hitTabClose, 1},
-		{17, " ", hitTab, 1},
+		{0, "  a.txt ", hitTab, 0},
+		{8, "×", hitTabClose, 0},
+		{9, " ", hitTab, 0},
+		{10, "  b.txt ", hitTab, 1},
+		{18, "×", hitTabClose, 1},
+		{19, " ", hitTab, 1},
 		{97, " + ", hitTabNew, 0},
 	}
 	if len(s.Runs) != len(expect) {
@@ -76,12 +76,12 @@ func TestStripHitRegions(t *testing.T) {
 		want hitTarget
 	}{
 		{1, hitTarget{Kind: hitTab, Index: 0}},
-		{6, hitTarget{Kind: hitTab, Index: 0}},
-		{7, hitTarget{Kind: hitTabClose, Index: 0}},
-		{8, hitTarget{Kind: hitTab, Index: 0}},
-		{9, hitTarget{Kind: hitTab, Index: 1}},
-		{16, hitTarget{Kind: hitTabClose, Index: 1}},
-		{18, hitTarget{Kind: hitNone}},
+		{7, hitTarget{Kind: hitTab, Index: 0}},
+		{8, hitTarget{Kind: hitTabClose, Index: 0}},
+		{9, hitTarget{Kind: hitTab, Index: 0}},
+		{10, hitTarget{Kind: hitTab, Index: 1}},
+		{18, hitTarget{Kind: hitTabClose, Index: 1}},
+		{20, hitTarget{Kind: hitNone}},
 		{96, hitTarget{Kind: hitNone}},
 		{97, hitTarget{Kind: hitTabNew}},
 		{98, hitTarget{Kind: hitTabNew}},
@@ -97,18 +97,18 @@ func TestStripHitRegions(t *testing.T) {
 // A modified tab's close glyph is still the × cell, and the marker is not a target.
 func TestStripHitWithModifiedTab(t *testing.T) {
 	s := frame.PlaceStrip(0, 100, []TabInfo{{Name: "a.txt", Modified: true}}, 0, icons.Plain)
-	// " ● a.txt " is 9 cells, so the × is at column 9.
-	if got := frame.StripHit(s.Runs, 9); got != (hitTarget{Kind: hitTabClose, Index: 0}) {
+	// "  ● a.txt " is 10 cells, so the × is at column 10.
+	if got := frame.StripHit(s.Runs, 10); got != (hitTarget{Kind: hitTabClose, Index: 0}) {
 		t.Errorf("close of a modified tab = %+v", got)
 	}
-	if got := frame.StripHit(s.Runs, 1); got != (hitTarget{Kind: hitTab, Index: 0}) {
+	if got := frame.StripHit(s.Runs, 2); got != (hitTarget{Kind: hitTab, Index: 0}) {
 		t.Errorf("marker cell = %+v, want the tab name", got)
 	}
 }
 
 func TestPlaceStripStartsAfterTheExplorerColumns(t *testing.T) {
 	s := frame.PlaceStrip(30, 100, []TabInfo{{Name: "a.txt"}}, 0, icons.Plain)
-	if s.Runs[0].X != 30 || s.Runs[0].Text != " a.txt " {
+	if s.Runs[0].X != 30 || s.Runs[0].Text != "  a.txt " {
 		t.Fatalf("first run = %+v, want the tab at column 30", s.Runs[0])
 	}
 	if plus := s.Runs[len(s.Runs)-1]; plus.Kind != hitTabNew || plus.X != 97 || plus.W != 3 {
@@ -184,8 +184,8 @@ func TestPlaceStripEmptyStripHasOnlyPlus(t *testing.T) {
 func TestDrawTabStripPaintsTheFixtureRow(t *testing.T) {
 	g := grid.New(40, 3)
 	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0, icons.Plain), false, frame.HitTarget{})
-	if g.At(0, 1).Text != " " || g.At(1, 1).Text != "a" || g.At(7, 1).Text != "×" {
-		t.Fatalf("tab row = %q, want the tab at columns 0..8", g.Plain()[1])
+	if g.At(0, 1).Text != " " || g.At(1, 1).Text != " " || g.At(2, 1).Text != "a" || g.At(8, 1).Text != "×" {
+		t.Fatalf("tab row = %q, want the tab at columns 0..9", g.Plain()[1])
 	}
 	if g.At(37, 1).Text != " " || g.At(38, 1).Text != "+" || g.At(39, 1).Text != " " {
 		t.Fatalf("+ button = %q %q %q at columns 37..39, want \" + \"", g.At(37, 1).Text, g.At(38, 1).Text, g.At(39, 1).Text)
@@ -199,14 +199,20 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 	}
 	g := grid.New(40, 3)
 	tabstrip.Draw(g, st, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0, icons.Plain), false, frame.HitTarget{})
-	if g.At(1, 1).Style.Bold || !g.At(1, 1).Style.Italic {
-		t.Fatalf("inactive tab cell style = %+v", g.At(1, 1).Style)
+	if g.At(2, 1).Style.Bold || !g.At(2, 1).Style.Italic {
+		t.Fatalf("inactive tab cell style = %+v", g.At(2, 1).Style)
 	}
-	if !g.At(10, 1).Style.Bold {
-		t.Fatalf("active tab cell style = %+v", g.At(10, 1).Style)
+	if !g.At(12, 1).Style.Bold {
+		t.Fatalf("active tab cell style = %+v", g.At(12, 1).Style)
 	}
-	if g.At(16, 1).Text != "×" || !g.At(16, 1).Style.Bold {
-		t.Fatalf("active tab close = %q, want the bold ×", g.At(16, 1).Text)
+	if g.At(18, 1).Text != "×" || !g.At(18, 1).Style.Bold {
+		t.Fatalf("active tab close = %q, want the bold ×", g.At(18, 1).Text)
+	}
+	if got := g.At(9, 1).Text; got != " " {
+		t.Errorf("space after close = %q, want a blank", got)
+	}
+	if got := g.At(10, 1).Text; got != "│" {
+		t.Errorf("separator between tabs at column 10 = %q, want '│'", got)
 	}
 	if g.At(38, 1).Style.Bold || g.At(37, 1).Style.Bold || g.At(39, 1).Style.Bold {
 		t.Fatal("the plus button takes the active style")
@@ -217,7 +223,7 @@ func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 	g := grid.New(40, 3)
 	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0, icons.Plain), false, frame.HitTarget{})
 	row := strings.TrimRight(g.Plain()[1], " ")
-	if !strings.HasPrefix(row, " ● a.txt × ") {
+	if !strings.HasPrefix(row, "  ● a.txt × ") {
 		t.Fatalf("modified tab row = %q, want the dot before the name", row)
 	}
 	if strings.Contains(row, "*") {
@@ -248,13 +254,11 @@ func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 }
 
 // TestTabStripHoverAndFocus checks the strip's pointer and keyboard feedback: the
-// run under the pointer underlines (label, close glyph and the plus), and a strip
-// that holds the keyboard marks its active tab in the leading cell.
+// run under the pointer underlines (label, close glyph and the plus).
 func TestTabStripHoverAndFocus(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt", Active: true}, {Name: "b.txt"}}
 	s := frame.PlaceStrip(0, 40, tabs, 0, icons.Plain)
 	st := style.Styles{Accent: lipgloss.NewStyle().Background(lipgloss.Color("4"))}
-	accent := style.Cell(st.Accent).BG
 
 	var second, close frame.Run
 	for _, r := range s.Runs {
@@ -287,11 +291,8 @@ func TestTabStripHoverAndFocus(t *testing.T) {
 
 	focused := grid.New(40, 2)
 	tabstrip.Draw(focused, st, 0, 1, s, true, frame.HitTarget{})
-	if got := focused.At(0, 1).Text; got != "▌" {
-		t.Fatalf("focused strip leading cell = %q, want the accent marker", got)
-	}
-	if got := focused.At(0, 1).Style.FG; got != accent {
-		t.Fatalf("marker ink = %v, want the accent %v", got, accent)
+	if got := focused.At(0, 1).Text; got != " " {
+		t.Fatalf("focused strip leading cell = %q, want the tab padding", got)
 	}
 	unfocused := grid.New(40, 2)
 	tabstrip.Draw(unfocused, st, 0, 1, s, false, frame.HitTarget{})

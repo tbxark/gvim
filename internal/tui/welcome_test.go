@@ -63,8 +63,8 @@ func TestWelcomeShowsWhenNoTabIsOpen(t *testing.T) {
 func TestWelcomeFitsTheEightyByTwentyFourFrame(t *testing.T) {
 	m, _ := welcomeModel(t, 80, 24, "/work/alpha", "/work/beta")
 	l := m.layout()
-	if l.BodyTop != 3 || l.BodyBottom != 22 {
-		t.Fatalf("body rows %d..%d, want 3..22 at 24 rows", l.BodyTop, l.BodyBottom)
+	if l.BodyTop != 3 || l.BodyBottom != 21 {
+		t.Fatalf("body rows %d..%d, want 3..21 at 24 rows", l.BodyTop, l.BodyBottom)
 	}
 	for _, r := range l.Welcome {
 		if r.Y < l.BodyTop || r.Y > l.BodyBottom {

@@ -38,10 +38,9 @@ const (
 	explorerDefaultWidth = 32 // spec section 3: the automatic width
 	explorerEditorMin    = 20 // the editor keeps this many columns when the frame allows
 
-	// MenuRows is the height of the menu band: the row of the labels and one
-	// padding row of the menu background under them, so the labels do not sit
-	// against the tab strip. The tab strip is the row under the band.
-	MenuRows = 2
+	// MenuRows is the height of the menu band: 1 row of labels, so the bar
+	// stays compact and directly abuts the tabs and the tree.
+	MenuRows = 1
 
 	LabelGap       = 3 // blank cells between menu labels
 	NoNameLabel    = "[No Name]"
@@ -90,6 +89,7 @@ type Input struct {
 	HideLineNumbers bool       // the gutter is not drawn
 	DockOpen        bool       // the terminal dock is shown (internal/tui/dock); it takes rows under the body
 	HideTabBar      bool       // the tab Strip row is not drawn; the body takes it
+	Style           Style      // the frame's look; nil is Classic, the workbench frame
 	ShowPromptLine  bool       // reserve the prompt row under the status row (only while a prompt is open)
 	HideVScroll     bool       // the vertical scrollbar is not drawn, so its column is text
 	IconMode        icons.Mode // the glyphs of the explorer buttons and the tab buttons
@@ -359,7 +359,12 @@ type Layout struct {
 	// under the menu band, row 0 without it, and -1 when the tab bar is hidden.
 	// statusY is the status row, drawn only when statusOn. Without it the body
 	// takes that row.
-	BodyTop, BodyBottom int
+	BodyTop, BodyBottom   int
+	FrameOn               bool
+	FrameTop, FrameBottom int
+	// Chrome is the decoration of the layout's Style. FrameOn is true while its
+	// border takes cells from the frame; the painter draws these glyphs in them.
+	Chrome              Chrome
 	MenuOn              bool
 	MenuTop, MenuBottom int
 	MenuLabelY          int
@@ -482,6 +487,19 @@ func ComputeLayout(w, h int, in Input) Layout {
 	// panel keeps the rows it had before the band existed: the title on row 1 and
 	// the tree body on row 2.
 	l.ExTitleY = max(menuRows, 1)
+	// The style's border is the row under the menu band and the row above the status
+	// row, and a column on each side of the editor. It yields those cells when the
+	// terminal would leave the workspace without a row.
+	l.Chrome = in.chrome()
+	if l.Chrome.Border && h-in.FindRows >= menuRows+5 {
+		l.FrameOn = true
+		l.FrameTop = menuRows
+		if l.StripY >= 0 {
+			l.StripY++
+		}
+		l.BodyTop++
+		l.ExTitleY = menuRows + 1
+	}
 	l.ExBodyTop = l.ExTitleY + 1
 	l.StatusY = h - 1 - in.FindRows
 	if in.ShowPromptLine {
@@ -492,6 +510,10 @@ func ComputeLayout(w, h int, in Input) Layout {
 	l.BodyBottom = l.StatusY - 1
 	if !l.StatusOn {
 		l.BodyBottom = l.StatusY
+	}
+	if l.FrameOn {
+		l.FrameBottom = l.BodyBottom
+		l.BodyBottom--
 	}
 	if in.DockOpen {
 		l.setDock()
@@ -504,6 +526,15 @@ func ComputeLayout(w, h int, in Input) Layout {
 	l.EditorX, l.EditorW = 0, w-l.Ex
 	if !l.ExRight {
 		l.EditorX = l.Ex
+	}
+	if l.FrameOn {
+		if !l.ExplorerOpen || l.ExRight {
+			l.EditorX++
+			l.EditorW--
+		}
+		if !l.ExRight {
+			l.EditorW--
+		}
 	}
 	// The dock is the bottom of the editor column, so it takes the editor's first
 	// column once the explorer has placed that column.
@@ -541,6 +572,9 @@ func ComputeLayout(w, h int, in Input) Layout {
 // it stops above the dock, whose rows belong to the running shell.
 func (l *Layout) setNotice(s StatusView, x0, width int) {
 	bottom := l.StatusY - 1
+	if l.FrameOn {
+		bottom = l.FrameBottom - 1
+	}
 	if l.DockOn {
 		bottom = l.DockY - 1
 	}
@@ -694,6 +728,9 @@ func (l *Layout) setExplorer(in Input) {
 		l.ExX = l.W - l.Ex
 	}
 	l.ExBottom = l.BodyBottom
+	if l.FrameOn {
+		l.ExBottom = l.FrameBottom
+	}
 	specs := in.Sidebar
 	if len(specs) == 0 {
 		specs = []sidebar.Spec{{Kind: sidebar.KindExplorer}}

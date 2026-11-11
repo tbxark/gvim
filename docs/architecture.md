@@ -218,7 +218,8 @@ keys, so the built-in behaviour is preserved and only the chord moves.
 
 `overlay` (the Overlay/Caret contract every overlay implements), `list` (the list/box
 overlay kit: `View`, `TextBox`, centring and scroll helpers), `frame` (the single geometry
-source: `ComputeLayout`, hit map, tab-strip and welcome placement), `sidebar` (the explorer
+source: `ComputeLayout`, the `Style` chrome a look is built from, hit map, tab-strip and
+welcome placement), `sidebar` (the explorer
 column's section stack: `Layout`, header rows, the Contents widget; docs/sidebar.md), `split` (the split tree
 and pure pane geometry), `tabstrip` (strip painting and pointer mapping), `grid` (cell
 surface on `x/ansi`), `space` (padding, text fitting and `Rect`), `style` (theme → lipgloss

@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
@@ -86,7 +88,9 @@ func TestPageViewReachesThePaneThroughTheView(t *testing.T) {
 func TestPageViewComposesInTheView(t *testing.T) {
 	t.Parallel()
 	ed := editor.New(editor.Options{})
-	m, ed := viewModelWith(t, ed, DefaultViewOptions(), "Some **bold** text\nplain\ntail\n", 60, 8)
+	// The frame's border and tab strip leave the page view four body rows here, so the
+	// composed first line is in the frame.
+	m, ed := viewModelWith(t, ed, DefaultViewOptions(), "Some **bold** text\nplain\ntail\n", 60, 12)
 	ed.Active().SetLanguage("markdown")
 	// Keep the caret off the line under test so its markup stays concealed.
 	ed.SetCursor(buffer.Pos{Line: 2, Col: 0}, false)
@@ -94,9 +98,11 @@ func TestPageViewComposesInTheView(t *testing.T) {
 	runAction(t, m, "set_page_width")
 	press(m, typed("20"))
 	settle(t, m, press(m, special(tea.KeyEnter)))
-	rows := frameText(m)
+	l := m.layout()
 	found := false
-	for _, row := range rows {
+	for _, full := range frameText(m) {
+		// The editor column starts inside the frame border.
+		row := ansi.Cut(full, l.EditorX, l.W)
 		if !strings.Contains(row, "bold") {
 			continue
 		}
@@ -109,6 +115,6 @@ func TestPageViewComposesInTheView(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("the composed text is not in the frame: %q", rows)
+		t.Fatalf("the composed text is not in the frame: %q", frameText(m))
 	}
 }

@@ -75,7 +75,7 @@ func TestHitEditorGutterTextAndTrack(t *testing.T) {
 	in := layoutInput{ExplorerOpen: true, Lines: 100}
 	l := layoutFor(80, 15, in)
 	if !l.Scrollbar {
-		t.Fatal("100 lines in 12 rows should show the scrollbar")
+		t.Fatal("100 lines in 10 rows should show the scrollbar")
 	}
 	if got := l.Hit(l.EditorX, l.BodyTop+2); got.Kind != hitGutter || got.Index != 2 {
 		t.Errorf("gutter = %+v", got)
@@ -83,8 +83,11 @@ func TestHitEditorGutterTextAndTrack(t *testing.T) {
 	if got := l.Hit(l.TextX, l.BodyTop+2); got.Kind != hitEditorText || got.Index != 2 {
 		t.Errorf("text = %+v", got)
 	}
-	if got := l.Hit(l.W-1, l.BodyTop); got.Kind != hitScrollbarTrack {
-		t.Errorf("last column = %+v", got)
+	if got := l.Hit(l.W-2, l.BodyTop); got.Kind != hitScrollbarTrack {
+		t.Errorf("scrollbar column = %+v", got)
+	}
+	if got := l.Hit(l.W-1, l.BodyTop); got.Kind != hitNone {
+		t.Errorf("frame border = %+v, want no target", got)
 	}
 }
 
@@ -107,8 +110,11 @@ func TestHitStatusRowIsNotTheBody(t *testing.T) {
 	if got := l.Hit(10, l.StatusY); got.Kind != hitStatusSegment || got.Index != statusSegmentPosition {
 		t.Errorf("caret position press = %+v", got)
 	}
-	if got := l.Hit(10, l.StatusY-1); got.Kind != hitEditorText {
-		t.Errorf("row above status = %+v", got)
+	if got := l.Hit(10, l.BodyBottom); got.Kind != hitEditorText {
+		t.Errorf("last body row = %+v", got)
+	}
+	if got := l.Hit(10, l.StatusY-1); got.Kind != hitNone {
+		t.Errorf("bottom border = %+v, want no target", got)
 	}
 }
 

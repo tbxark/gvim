@@ -89,9 +89,12 @@ func TestResizeToAGatedFrameKeepsTheView(t *testing.T) {
 // takes the caret off screen leaves the view where the wheel put it.
 func TestWheelScrollIsNotPulledBackToTheCaret(t *testing.T) {
 	ed := newFakeEditor(wrappedLines()...)
-	m := newTestModel(t, ed, nil, 24, 8)
+	// The frame leaves five body rows, more than a wrapped line is tall, so a wheel
+	// notch moves whole lines and the caret is left behind.
+	m := newTestModel(t, ed, nil, 24, 10)
 	ed.SetCursor(buffer.Pos{Line: 1}, false)
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 10, Y: 4, Button: tea.MouseWheelDown}))
+	l := m.layout()
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.TextX + 1, Y: l.BodyTop + 1, Button: tea.MouseWheelDown}))
 	if got := ed.doc.top; got != wheelRows {
 		t.Errorf("view top %d after the wheel, want %d, the view the wheel chose", got, wheelRows)
 	}

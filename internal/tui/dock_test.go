@@ -363,8 +363,8 @@ func TestDockShellStartsInTheWorkspaceRoot(t *testing.T) {
 	if !slices.Equal(starter.dirs, []string{"/ws"}) {
 		t.Fatalf("start directories = %q, want [/ws]", starter.dirs)
 	}
-	// The start is sized to the dock: 80 columns, and the rows under the title row.
-	if want := [2]int{80, 5}; starter.sizes[0] != want {
+	// The start is sized to the dock: 78 columns, and the rows under the title row.
+	if want := [2]int{78, 5}; starter.sizes[0] != want {
 		t.Fatalf("start size = %v, want %v", starter.sizes[0], want)
 	}
 }
@@ -721,7 +721,7 @@ func TestDockResizesWithTheLayout(t *testing.T) {
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	dockSettle(t, m, cmd)
 	// At 100 by 30 the dock takes 8 rows: the title row and 7 rows of shell.
-	if want := [][2]int{{100, 7}}; !slices.Equal(starter.term.resizes, want) {
+	if want := [][2]int{{98, 7}}; !slices.Equal(starter.term.resizes, want) {
 		t.Fatalf("resizes = %v, want %v", starter.term.resizes, want)
 	}
 }
@@ -784,12 +784,13 @@ func TestDockPaintsScreenCells(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := g.At(tt.x, tt.y)
-			if c.Text != tt.text {
-				t.Fatalf("cell (%d, %d) text = %q, want %q", tt.x, tt.y, c.Text, tt.text)
+			x := tt.x + 1
+			c := g.At(x, tt.y)
+		if c.Text != tt.text {
+				t.Fatalf("cell (%d, %d) text = %q, want %q", x, tt.y, c.Text, tt.text)
 			}
 			if !tt.check(c.Style) {
-				t.Fatalf("cell (%d, %d) style = %+v", tt.x, tt.y, c.Style)
+				t.Fatalf("cell (%d, %d) style = %+v", x, tt.y, c.Style)
 			}
 		})
 	}
@@ -829,8 +830,8 @@ func TestDockCaretFollowsTheShellCursor(t *testing.T) {
 				return
 			}
 			dockTop := m.layout().DockY + 1
-			if x != tt.wantCol || y != dockTop+tt.wantRow {
-				t.Fatalf("caret = (%d, %d), want (%d, %d)", x, y, tt.wantCol, dockTop+tt.wantRow)
+			if x != 1+tt.wantCol || y != dockTop+tt.wantRow {
+				t.Fatalf("caret = (%d, %d), want (%d, %d)", x, y, 1+tt.wantCol, dockTop+tt.wantRow)
 			}
 		})
 	}
@@ -847,10 +848,11 @@ func TestDockLayoutRegion(t *testing.T) {
 		wantBodyBt int
 		wantEdRows int
 	}{
-		{name: "80 by 24 with the dock takes 6 editor rows above the status row", w: 80, h: 24, open: true, wantOn: true, wantY: 17, wantH: 6, wantBodyBt: 22, wantEdRows: 14},
-		{name: "80 by 24 without the dock keeps the body", w: 80, h: 24, open: false, wantOn: false, wantBodyBt: 22, wantEdRows: 20},
-		{name: "80 by 11 takes the minimum dock", w: 80, h: 11, open: true, wantOn: true, wantY: 6, wantH: 4, wantBodyBt: 9, wantEdRows: 3},
-		{name: "80 by 8 leaves no room for a dock", w: 80, h: 8, open: true, wantOn: false, wantBodyBt: 6, wantEdRows: 4},
+		{name: "80 by 24 with the dock takes 6 rows above the bottom border", w: 80, h: 24, open: true, wantOn: true, wantY: 16, wantH: 6, wantBodyBt: 21, wantEdRows: 13},
+		{name: "80 by 24 without the dock keeps the body", w: 80, h: 24, open: false, wantOn: false, wantBodyBt: 21, wantEdRows: 19},
+		{name: "80 by 12 takes the minimum dock", w: 80, h: 12, open: true, wantOn: true, wantY: 6, wantH: 4, wantBodyBt: 9, wantEdRows: 3},
+		{name: "80 by 11 leaves no room for a dock", w: 80, h: 11, open: true, wantOn: false, wantBodyBt: 8, wantEdRows: 6},
+		{name: "80 by 8 leaves no room for a dock", w: 80, h: 8, open: true, wantOn: false, wantBodyBt: 5, wantEdRows: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -867,7 +869,7 @@ func TestDockLayoutRegion(t *testing.T) {
 			if l.EditorRows() != tt.wantEdRows {
 				t.Fatalf("editor rows = %d, want %d", l.EditorRows(), tt.wantEdRows)
 			}
-			if tt.wantOn && (l.DockX != l.EditorX || l.DockX+l.EditorW != l.W) {
+			if tt.wantOn && (l.DockX != l.EditorX || l.DockX+l.EditorW != l.W-1) {
 				t.Fatalf("dock columns %d..%d, want the editor column %d..%d",
 					l.DockX, l.DockX+l.EditorW, l.EditorX, l.EditorX+l.EditorW)
 			}

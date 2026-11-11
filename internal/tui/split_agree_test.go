@@ -12,7 +12,7 @@ func checkFrame(t *testing.T, m *Model, f *multiFake, label string) {
 	t.Helper()
 	l := m.layout()
 	for y := l.BodyTop; y <= l.BodyBottom; y++ {
-		for x := l.EditorX; x < l.W; x++ {
+		for x := l.EditorX; x < l.EditorX+l.EditorW; x++ {
 			var owners []int // the panes that contain the cell
 			for i, p := range l.Panes {
 				if p.Contains(x, y) {

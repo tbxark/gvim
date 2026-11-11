@@ -3347,6 +3347,7 @@ func (m *Model) layoutInput() layoutInput {
 		DoorKeys:        m.welcomeDoorKeys(),
 		Status:          m.statusView(),
 		HideMenuBar:     m.hideMenuBar,
+		Style:           frame.Classic,
 		HideStatus:      m.statusHidden(),
 		HideLineNumbers: m.hideLineNumbers,
 		DockOpen:        m.dock.Open(),
@@ -3579,6 +3580,9 @@ func (m *Model) paintInto(g *grid.Grid) {
 			m.paintGripHover(g, l)
 		}
 	}
+	if l.FrameOn {
+		m.paintFrameChrome(g, l)
+	}
 	m.paintStatus(g, l)
 	// The menu bar comes last among the frame bands, so an open dropdown covers
 	// the rows under it. The band is the label row and one padding row of the menu
@@ -3596,6 +3600,51 @@ func (m *Model) paintInto(g *grid.Grid) {
 	m.paintPluginPanels(g, l)
 	for _, o := range m.overlays {
 		o.Draw(g)
+	}
+}
+
+// paintFrameChrome draws the Style's border outside the workspace cells: the glyphs
+// are the layout's Chrome, which the same Style gave the geometry.
+func (m *Model) paintFrameChrome(g *grid.Grid, l layout) {
+	st := m.splitCell()
+	ch := l.Chrome
+	for x := 1; x < l.W-1; x++ {
+		g.Set(x, l.FrameTop, ch.Horizontal, st)
+		g.Set(x, l.FrameBottom, ch.Horizontal, st)
+	}
+	for y := l.FrameTop + 1; y < l.FrameBottom; y++ {
+		g.Set(0, y, ch.Vertical, st)
+		g.Set(l.W-1, y, ch.Vertical, st)
+	}
+	g.Set(0, l.FrameTop, ch.TopLeft, st)
+	g.Set(l.W-1, l.FrameTop, ch.TopRight, st)
+	g.Set(0, l.FrameBottom, ch.BottomLeft, st)
+	g.Set(l.W-1, l.FrameBottom, ch.BottomRight, st)
+	if l.ExplorerOpen {
+		x := l.ExX + l.Ex - 1
+		if l.ExRight {
+			x = l.ExX
+		}
+		g.Set(x, l.FrameTop, ch.TopJoin, st)
+		g.Set(x, l.FrameBottom, ch.BottomJoin, st)
+		// The divider between two sidebar sections runs into the side border the
+		// column stands against, so the border turns into the column there.
+		for _, sec := range l.Sections {
+			if sec.Index == 0 {
+				continue
+			}
+			if l.ExX == 0 {
+				g.Set(0, sec.HeaderY, ch.LeftJoin, st)
+			}
+			if l.ExX+l.Ex == l.W {
+				g.Set(l.W-1, sec.HeaderY, ch.RightJoin, st)
+			}
+		}
+	}
+	for _, border := range l.Borders {
+		if border.Vertical && border.Y+border.H == l.FrameBottom {
+			g.Set(border.X, l.FrameBottom, ch.BottomJoin, st)
+		}
 	}
 }
 
@@ -3935,7 +3984,7 @@ func (m *Model) revealActiveTab() {
 		return
 	}
 	l := m.layout()
-	m.setTabFirst(frame.RevealedFirst(m.stripTabs(), l.EditorX, l.W, l.Strip.First, i))
+	m.setTabFirst(frame.RevealedFirst(m.stripTabs(), l.EditorX, l.EditorX+l.EditorW, l.Strip.First, i))
 }
 
 // next says what a file action does once a save or a discard is done. The

@@ -65,8 +65,8 @@ func TestStatusRowGivesWayToThePalette(t *testing.T) {
 		t.Fatalf("palette open: %d status runs, body bottom %d; want none and %d",
 			len(l.Status), l.BodyBottom, shown.BodyBottom+1)
 	}
-	if got := l.Hit(10, l.StatusY); got.Kind != hitEditorText {
-		t.Fatalf("the status row hits %v with the palette open, want the body", got.Kind)
+	if got := l.Hit(10, l.BodyBottom); got.Kind != hitEditorText {
+		t.Fatalf("the last body row hits %v with the palette open, want the body", got.Kind)
 	}
 	if ed.rows != l.BodyBottom-l.BodyTop+1 {
 		t.Fatalf("the editor viewport has %d rows, want the %d body rows", ed.rows, l.BodyBottom-l.BodyTop+1)
@@ -107,27 +107,27 @@ func TestHiddenMenuBarLayoutMovesTheStripAndTheBodyUp(t *testing.T) {
 		Lines:       4,
 		Tabs:        []TabInfo{{Name: "a.txt", Active: true}},
 	})
-	if l.BodyTop != 1 || l.BodyBottom != 22 || l.StatusY != 23 {
-		t.Fatalf("body %d..%d status %d, want 1..22 and 23", l.BodyTop, l.BodyBottom, l.StatusY)
+	if l.BodyTop != 2 || l.BodyBottom != 21 || l.StatusY != 23 {
+		t.Fatalf("body %d..%d status %d, want 2..21 and 23", l.BodyTop, l.BodyBottom, l.StatusY)
 	}
-	if got := l.Hit(1, 0); got.Kind != hitTab {
-		t.Fatalf("row 0 at the first tab hits %v, want the tab", got.Kind)
+	if got := l.Hit(1, 1); got.Kind != hitTab {
+		t.Fatalf("row 1 at the first tab hits %v, want the tab", got.Kind)
 	}
-	if got := l.Hit(l.TextX, 1); got.Kind != hitEditorText {
-		t.Fatalf("row 1 at the text hits %v, want the editor text", got.Kind)
+	if got := l.Hit(l.TextX, 2); got.Kind != hitEditorText {
+		t.Fatalf("row 2 at the text hits %v, want the editor text", got.Kind)
 	}
 }
 
 func TestHiddenStatusRowGivesItsRowToTheBody(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{HideStatus: true, Lines: 4})
-	if l.BodyBottom != 23 {
-		t.Fatalf("body bottom %d, want 23 with the status row hidden", l.BodyBottom)
+	if l.BodyBottom != 22 {
+		t.Fatalf("body bottom %d, want 22 with the status row hidden", l.BodyBottom)
 	}
 	if len(l.Status) != 0 {
 		t.Fatalf("%d status runs with the status row hidden", len(l.Status))
 	}
-	if got := l.Hit(l.TextX, 23); got.Kind != hitEditorText {
-		t.Fatalf("row 23 hits %v, want the editor text", got.Kind)
+	if got := l.Hit(l.TextX, 22); got.Kind != hitEditorText {
+		t.Fatalf("row 22 hits %v, want the editor text", got.Kind)
 	}
 }
 
@@ -147,8 +147,8 @@ func TestExplorerRowsStartAtRowTwoWithoutMenuBar(t *testing.T) {
 // With the gutter hidden the text starts PadX cells into the pane, not on its first column.
 func TestHiddenLineNumbersLayoutHasNoGutter(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{HideLineNumbers: true, Lines: 4})
-	if l.Gutter != 0 || l.TextX != space.PadX || l.TextW != 80-space.PadX {
-		t.Fatalf("gutter %d textX %d textW %d, want 0, %d and %d", l.Gutter, l.TextX, l.TextW, space.PadX, 80-space.PadX)
+	if l.Gutter != 0 || l.TextX != 1+space.PadX || l.TextW != 78-space.PadX {
+		t.Fatalf("gutter %d textX %d textW %d, want 0, %d and %d", l.Gutter, l.TextX, l.TextW, 1+space.PadX, 78-space.PadX)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestToggleLineNumbersFlipsTheGutter(t *testing.T) {
 	if l := m.layout(); l.Gutter != 0 {
 		t.Fatalf("gutter %d after the toggle, want 0", l.Gutter)
 	}
-	if row := m.paint().Plain()[m.layout().BodyTop]; !strings.HasPrefix(row, " hello") {
+	if row := m.paint().Plain()[m.layout().BodyTop]; !strings.HasPrefix(row, "│ hello") {
 		t.Fatalf("body row %q does not start with the text", row)
 	}
 	if err := m.Run("toggle_line_numbers"); err != nil {

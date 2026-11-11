@@ -37,9 +37,10 @@ func TestALongMessageWrapsAboveTheStatusRow(t *testing.T) {
 			}
 			continue
 		}
-		// The band is painted over the bottom body rows: the body keeps its size.
-		if l.NoticeY != l.StatusY-len(l.Notice) || l.BodyBottom != l.StatusY-1 {
-			t.Errorf("width %d: noticeY %d, statusY %d, bodyBottom %d, %d rows", w, l.NoticeY, l.StatusY, l.BodyBottom, len(l.Notice))
+		// The band is painted over the bottom body rows, which stop at the frame's
+		// bottom border: the border and the status row keep their cells.
+		if l.NoticeY != l.FrameBottom-len(l.Notice) || l.BodyBottom != l.FrameBottom-1 {
+			t.Errorf("width %d: noticeY %d, frameBottom %d, bodyBottom %d, %d rows", w, l.NoticeY, l.FrameBottom, l.BodyBottom, len(l.Notice))
 		}
 		joined := strings.Join(l.Notice, " ")
 		for _, word := range []string{"se_e.txt:", "encoding:", "another"} {
@@ -141,13 +142,13 @@ func TestTheBandStaysInTheEditorColumn(t *testing.T) {
 	if len(l.Notice) == 0 {
 		t.Fatal("a long notice got no band")
 	}
-	if l.NoticeX != 0 || l.NoticeW != l.EditorW {
-		t.Errorf("band %d..%d, want the editor column 0..%d", l.NoticeX, l.NoticeX+l.NoticeW, l.EditorW)
+	if l.NoticeX != l.EditorX || l.NoticeW != l.EditorW {
+		t.Errorf("band %d..%d, want the editor column %d..%d", l.NoticeX, l.NoticeX+l.NoticeW, l.EditorX, l.EditorX+l.EditorW)
 	}
 	if l.OnNotice(l.ExX, l.NoticeY) {
 		t.Error("the band covers the right explorer")
 	}
-	if !l.OnNotice(l.EditorW-1, l.NoticeY) {
+	if !l.OnNotice(l.EditorX+l.EditorW-1, l.NoticeY) {
 		t.Error("the band does not reach the editor's last column")
 	}
 }

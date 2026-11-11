@@ -8,30 +8,30 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
-// TestMenuBandPaddingRowTakesTheMenuStyle checks the padding row of the menu band:
-// it is painted with the menu background, so the labels keep one row of air before
-// the tab strip, and the menu bar paints the labels on row 0.
+// TestMenuBandPaddingRowTakesTheMenuStyle checks the menu band above the classic frame.
 func TestMenuBandPaddingRowTakesTheMenuStyle(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(3), 80, 24)
 	m.styles.Menu = lipgloss.NewStyle().Background(lipgloss.Color("#123456"))
+	m.menu = menubar.New(m, m.styles)
 	l := m.layout()
-	if l.MenuTop != 0 || l.MenuBottom != 1 || l.MenuLabelY != 0 || l.StripY != 2 || l.BodyTop != 3 {
-		t.Fatalf("menu band %d..%d label %d strip %d body %d, want 0..1, 0, 2 and 3",
+	if l.MenuTop != 0 || l.MenuBottom != 0 || l.MenuLabelY != 0 || l.StripY != 2 || l.BodyTop != 3 {
+		t.Fatalf("menu band %d..%d label %d strip %d body %d, want 0..0, 0, 2 and 3",
 			l.MenuTop, l.MenuBottom, l.MenuLabelY, l.StripY, l.BodyTop)
 	}
 	g := m.paint()
 	want := style.TaggedCell(m.styles.Menu, "ui", "menu_fg", "ui", "menu_bg")
 	for x := range g.Width() {
-		if got := g.At(x, l.MenuBottom).Style; got != want {
-			t.Fatalf("padding cell (%d, %d) style %+v, want the menu background %+v", x, l.MenuBottom, got, want)
+		if got := g.At(x, l.MenuBottom).Style; got.BG != want.BG {
+			t.Fatalf("menu cell (%d, %d) bg %+v, want %+v", x, l.MenuBottom, got.BG, want.BG)
 		}
 	}
-	if got := l.Hit(1, l.MenuBottom); got.Kind != hitNone {
-		t.Errorf("the padding row of the band hits %v, want nothing", got.Kind)
+	if got := l.Hit(1, l.MenuBottom); got.Kind != hitMenuLabel {
+		t.Errorf("menu row hits %v, want hitMenuLabel", got.Kind)
 	}
 	for _, label := range []string{"File", "Edit", "View", "Help"} {
 		if !strings.Contains(g.Plain()[l.MenuLabelY], label) {
@@ -48,18 +48,18 @@ func TestPromptRowIsReservedOnlyWhileAPromptIsOpen(t *testing.T) {
 	o.ShowPromptLine = true
 	m, _ := viewModel(t, o, "hello\n", 60, 12)
 	const last = 11
-	if l := m.layout(); l.PromptOn || l.StatusY != last || l.BodyBottom != last-1 {
+	if l := m.layout(); l.PromptOn || l.StatusY != last || l.BodyBottom != last-2 {
 		t.Fatalf("idle with the setting on: promptOn %v status %d body bottom %d, want off, %d and %d",
-			l.PromptOn, l.StatusY, l.BodyBottom, last, last-1)
+			l.PromptOn, l.StatusY, l.BodyBottom, last, last-2)
 	}
 	if row := viewRow(m, last); !strings.Contains(row, "Ln 1") {
 		t.Fatalf("the idle status bar is not on the last row: %q", row)
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{Label: "Go to line:"}))
 	l := m.layout()
-	if !l.PromptOn || l.PromptY != last || l.StatusY != last-1 || l.BodyBottom != last-2 {
+	if !l.PromptOn || l.PromptY != last || l.StatusY != last-1 || l.BodyBottom != last-3 {
 		t.Fatalf("prompt open: prompt %d on=%v status %d body bottom %d; want %d on, %d and %d",
-			l.PromptY, l.PromptOn, l.StatusY, l.BodyBottom, last, last-1, last-2)
+			l.PromptY, l.PromptOn, l.StatusY, l.BodyBottom, last, last-1, last-3)
 	}
 	if row := viewRow(m, last-1); !strings.Contains(row, "Ln 1") {
 		t.Errorf("the status bar did not move up: %q", viewRow(m, last-1))

@@ -201,6 +201,15 @@ func TestConfirmTrashDrawsQuestionAndUnderlinesT(t *testing.T) {
 	}
 }
 
+func TestConfirmTrashWideButtonClick(t *testing.T) {
+	d := NewConfirmTrash(newFakeClock().Now, "old.txt", nil, testOv)
+	d.buttons[0] = newButton("删除文件", 0, ChoiceMoveToTrash)
+	g := draw(d, 80, 24)
+	x, y := mustFind(t, g, "删除文件")
+	_, cmd := d.Update(click(x+7, y))
+	mustClose(t, d, cmd, ChoiceMoveToTrash, "")
+}
+
 func TestConfirmTrashClickMovesToTrash(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()

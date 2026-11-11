@@ -173,8 +173,9 @@ type Line struct {
 	draft   string   // the text being typed, while an entry is shown
 	// suggestions are the plugin's completion candidates (gvim.ui.set_prompt_suggestions),
 	// shown above the prompt row. selSuggestion is the highlighted one, -1 for none.
-	suggestions   []Suggestion
-	selSuggestion int
+	suggestions                                             []Suggestion
+	selSuggestion                                           int
+	suggestionY, suggestionW, suggestionRows, suggestionTop int
 	// paste reads the clipboard for Ctrl+V. It is textinput.Paste in production; a
 	// test can substitute a deterministic result without touching the system clipboard.
 	paste func() tea.Msg
@@ -389,7 +390,9 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	if !ok {
 		if click, ok := msg.(tea.MouseClickMsg); ok {
 			if click.Button == tea.MouseLeft {
-				l.clickAt(click.X, click.Y)
+				if !l.clickSuggestion(click.X, click.Y) {
+					l.clickAt(click.X, click.Y)
+				}
 			}
 			return l, nil
 		}
@@ -724,6 +727,7 @@ const maxSuggestionRows = 4
 // drawSuggestions paints the suggestion list in the rows above the prompt row, nearest
 // first, the highlighted row on the raised field style.
 func (l *Line) drawSuggestions(g *grid.Grid, y, w int) {
+	l.suggestionY, l.suggestionW, l.suggestionRows = y, w, 0
 	if len(l.suggestions) == 0 {
 		return
 	}
@@ -732,6 +736,7 @@ func (l *Line) drawSuggestions(g *grid.Grid, y, w int) {
 	if l.selSuggestion >= rows {
 		top = l.selSuggestion - rows + 1
 	}
+	l.suggestionRows, l.suggestionTop = min(rows, max(y-1, 0)), top
 	for k := rows - 1; k >= 0; k-- {
 		i := top + k
 		if i >= len(l.suggestions) {
@@ -752,6 +757,31 @@ func (l *Line) drawSuggestions(g *grid.Grid, y, w int) {
 			g.Put(x+2, row, w, space.End(s.Description, w-x-2), l.styles.label)
 		}
 	}
+}
+
+// clickSuggestion fills the clicked visible completion, just as keyboard navigation does.
+func (l *Line) clickSuggestion(x, y int) bool {
+	k := l.suggestionY - y - 1
+	if x < 0 || x >= l.suggestionW || k < 0 || k >= l.suggestionRows {
+		return false
+	}
+	i := l.suggestionTop + k
+	if i >= len(l.suggestions) || l.suggestions[i].Disabled {
+		return true
+	}
+	l.selSuggestion = i
+	s := l.suggestions[i]
+	value := s.Value
+	if value == "" {
+		value = s.Text
+	}
+	l.field.SetValue(value)
+	l.field.CursorEnd()
+	l.clearSelection()
+	if l.onChange != nil {
+		l.onChange(value)
+	}
+	return true
 }
 
 // inputEnd is the column where the input stops on a row w cells wide: before the
@@ -793,6 +823,7 @@ type Confirm struct {
 	styles styles
 
 	yesText, noText string // the labels of the answers
+	hits            [2]space.Rect
 }
 
 // NewConfirm returns a Yes/No prompt that asks label. The focus starts on No.
@@ -829,6 +860,14 @@ func (c *Confirm) Question() string { return c.label }
 // as an overlay. The returned command is the Done message once an answer is given, and
 // nil otherwise.
 func (c *Confirm) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
+	if m, ok := msg.(tea.MouseClickMsg); ok && m.Button == tea.MouseLeft {
+		if c.hits[0].Contains(m.X, m.Y) {
+			return c.answer(Yes)
+		}
+		if c.hits[1].Contains(m.X, m.Y) {
+			return c.answer(No)
+		}
+	}
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return c, nil
@@ -864,6 +903,7 @@ func (c *Confirm) answer(o Outcome) (*Confirm, tea.Cmd) {
 // Draw paints the question on the bottom row of g, followed by the two answers.
 // The focused answer takes the active style.
 func (c *Confirm) Draw(g *grid.Grid) {
+	c.hits = [2]space.Rect{}
 	y := promptRow(g.Height())
 	if y < 0 {
 		return
@@ -877,9 +917,12 @@ func (c *Confirm) Draw(g *grid.Grid) {
 	} else {
 		noStyle = c.styles.active
 	}
-	x += g.Put(x, y, w, "[ "+c.yesText+" ]", yesStyle)
+	n := g.Put(x, y, w, "[ "+c.yesText+" ]", yesStyle)
+	c.hits[0] = space.Rect{X: x, Y: y, W: n, H: 1}
+	x += n
 	x += g.Put(x, y, w, " ", c.styles.bar)
-	g.Put(x, y, w, "[ "+c.noText+" ]", noStyle)
+	n = g.Put(x, y, w, "[ "+c.noText+" ]", noStyle)
+	c.hits[1] = space.Rect{X: x, Y: y, W: n, H: 1}
 }
 
 // Cursor reports no caret: a confirm has no text field.

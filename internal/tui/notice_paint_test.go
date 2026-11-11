@@ -32,9 +32,9 @@ func TestALongNoticeIsPaintedOnTheBandAndGoesWithTheNextKey(t *testing.T) {
 	if got := strings.Join(band, " "); !strings.Contains(got, "cannot represent U+4E2D") || !strings.Contains(got, "save /private/tmp") {
 		t.Errorf("the band reads %q, want the whole notice", got)
 	}
-	// The row text is padded from the edge.
-	if !strings.HasPrefix(rows[l.NoticeY], " save") {
-		t.Errorf("band row %q: want one padding cell before the text", rows[l.NoticeY])
+	// The row text is padded from the band's first cell, the editor column's edge.
+	if got := m.paint().At(l.NoticeX, l.NoticeY).Text; got != " " {
+		t.Errorf("band cell %q: want one padding cell before the text", got)
 	}
 	if strings.Contains(rows[l.StatusY], "cannot represent") {
 		t.Errorf("the status row repeats the notice: %q", rows[l.StatusY])

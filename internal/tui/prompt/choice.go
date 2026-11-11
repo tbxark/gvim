@@ -30,6 +30,7 @@ type Choice struct {
 	opts   []ChoiceOption
 	focus  int
 	closed bool
+	hits   []space.Rect
 }
 
 // NewChoice returns a prompt asking label with the given options; the first option is
@@ -45,6 +46,13 @@ func (c *Choice) Active() bool { return !c.closed }
 // left/right/tab move the focus; an option's exact mnemonic key answers it. Anything else
 // leaves the prompt open (a typo must not drop a paste queue).
 func (c *Choice) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
+	if m, ok := msg.(tea.MouseClickMsg); ok && m.Button == tea.MouseLeft {
+		for i, hit := range c.hits {
+			if hit.Contains(m.X, m.Y) {
+				return c.answer(i)
+			}
+		}
+	}
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return c, nil
@@ -83,6 +91,7 @@ func (c *Choice) answer(i int) (*Choice, tea.Cmd) {
 // Draw paints the question and the options on the bottom row. Each option shows its
 // mnemonic in the button; the focused one takes the active style.
 func (c *Choice) Draw(g *grid.Grid) {
+	c.hits = c.hits[:0]
 	y := promptRow(g.Height())
 	if y < 0 {
 		return
@@ -96,7 +105,9 @@ func (c *Choice) Draw(g *grid.Grid) {
 			st = c.styles.active
 		}
 		text := "[ " + opt.Key + " " + opt.Label + " ]"
-		x += g.Put(x, y, w, text, st)
+		n := g.Put(x, y, w, text, st)
+		c.hits = append(c.hits, space.Rect{X: x, Y: y, W: n, H: 1})
+		x += n
 		if i+1 < len(c.opts) {
 			x += g.Put(x, y, w, " ", c.styles.bar)
 		}

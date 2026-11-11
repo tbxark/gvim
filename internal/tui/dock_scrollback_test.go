@@ -142,8 +142,8 @@ func TestDockMouseForwardedFromTheRoot(t *testing.T) {
 	if len(starter.term.mice) != 1 {
 		t.Fatalf("forwarded = %+v, want the shell's press", starter.term.mice)
 	}
-	if got := starter.term.mice[0]; got.X != 5 || got.Y != 1 || got.Kind != terminal.MousePress {
-		t.Fatalf("press = %+v, want (5,1) into the shell", got)
+	if got := starter.term.mice[0]; got.X != 4 || got.Y != 1 || got.Kind != terminal.MousePress {
+		t.Fatalf("press = %+v, want (4,1) into the shell", got)
 	}
 	// The press did not reach the editor behind the dock: no action ran there.
 	if len(ed.actions) != 0 {

@@ -113,30 +113,30 @@ func TestTabStripOverflowAtSixtyColumns(t *testing.T) {
 	if !sc.Contains("f11.txt") {
 		t.Fatalf("active tab f11.txt is not in the strip:\n%s", sc)
 	}
-	// The menu band is rows 0..1 and the tab strip row 2; the "+" is the three-cell
-	// button at columns 57..59 with its glyph in the middle cell.
-	if got := sc.Cell(58, 2).Char; got != "+" {
-		t.Fatalf("cell (58,2) = %q, want the pinned +:\n%s", got, sc)
+	// The menu occupies row 0, the frame's top border row 1 and the tab strip row 2;
+	// the "+" is the three-cell button at columns 56..58 with its glyph in the middle.
+	if got := sc.Cell(57, 2).Char; got != "+" {
+		t.Fatalf("cell (57,2) = %q, want the pinned +:\n%s", got, sc)
 	}
 	if !strings.Contains(sc.Row(2), "<") {
 		t.Fatalf("no left marker on a scrolled strip:\n%s", sc)
 	}
 	before := sc.Row(2)
-	s.Click(0, 2) // the left marker scrolls one tab back
+	s.Click(1, 2) // the left marker scrolls one tab back
 	scrolled := s.Screen().Row(2)
 	if before == scrolled || !strings.Contains(scrolled, ">") {
 		t.Fatalf("a click on < did not scroll the strip back one tab:\n%s", scrolled)
 	}
-	s.Click(56, 2) // the right marker, one cell left of the button, scrolls forward again
+	s.Click(55, 2) // the right marker, one cell left of the button, scrolls forward again
 	if got := s.Screen().Row(2); got != before {
 		t.Fatalf("a click on > did not scroll forward:\nwant %q\ngot  %q", before, got)
 	}
-	if got := s.Screen().Cell(58, 2).Char; got != "+" {
+	if got := s.Screen().Cell(57, 2).Char; got != "+" {
 		t.Fatalf("plus moved after scrolling: %q", got)
 	}
 	// A click on + opens its menu, as Fresh's does. Its second row, New File, opens the
 	// untitled tab.
-	s.Click(58, 2)
+	s.Click(57, 2)
 	sc = s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("New Terminal") })
 	if !sc.Contains("New File") {
 		t.Fatalf("clicking + did not open its menu:\n%s", sc)

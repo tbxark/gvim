@@ -140,8 +140,10 @@ func TestMenuBarToggleHidesTheMenuRow(t *testing.T) {
 	if strings.Contains(viewRow(m, labelRow), "File") {
 		t.Fatalf("row %d still shows the menu after toggle_menu_bar: %q", labelRow, viewRow(m, labelRow))
 	}
-	if l := m.layout(); l.MenuOn || l.BodyTop != 1 {
-		t.Fatalf("menuOn %v bodyTop %d, want off and 1", l.MenuOn, l.BodyTop)
+	// The top border row keeps its cell under the menu band, so the body starts
+	// at row 2 with the bar hidden: row 0 is the border, row 1 the tab strip.
+	if l := m.layout(); l.MenuOn || l.BodyTop != 2 {
+		t.Fatalf("menuOn %v bodyTop %d, want off and 2", l.MenuOn, l.BodyTop)
 	}
 	runAction(t, m, "toggle_menu_bar")
 	if !strings.Contains(viewRow(m, m.layout().MenuLabelY), "File") {
@@ -178,8 +180,9 @@ func TestStatusBarToggleGivesItsRowToTheBody(t *testing.T) {
 		t.Fatalf("setup: the last row %q has no position", viewRow(m, last))
 	}
 	runAction(t, m, "toggle_status_bar")
-	if l := m.layout(); l.StatusOn || l.BodyBottom != last {
-		t.Fatalf("statusOn %v bodyBottom %d, want off and %d", l.StatusOn, l.BodyBottom, last)
+	// The frame's bottom border takes the row the status bar leaves.
+	if l := m.layout(); l.StatusOn || l.BodyBottom != last-1 {
+		t.Fatalf("statusOn %v bodyBottom %d, want off and %d", l.StatusOn, l.BodyBottom, last-1)
 	}
 	if strings.Contains(viewRow(m, last), "Ln 1") {
 		t.Errorf("the status row is still drawn: %q", viewRow(m, last))
@@ -352,15 +355,16 @@ func TestIndentGuidesAndFoldIndicatorsAreStoredPerBuffer(t *testing.T) {
 
 func TestLineNumbersCurrentBufferHidesOnlyTheCurrentBuffer(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 40, 8)
-	y := m.layout().BodyTop
-	if got := viewCell(t, m, 2, y).Text; got != "1" {
+	l := m.layout()
+	y := l.BodyTop
+	if got := viewCell(t, m, l.TextX-4, y).Text; got != "1" {
 		t.Fatalf("setup: gutter cell %q, want the line number 1", got)
 	}
 	runAction(t, m, "toggle_line_numbers_current_buffer")
-	if got := viewCell(t, m, 0, y).Text; got != " " {
+	if got := viewCell(t, m, l.EditorX, y).Text; got != " " {
 		t.Errorf("after the toggle the first cell is %q, want the padding", got)
 	}
-	if got := viewCell(t, m, 1, y).Text; got != "a" {
+	if got := viewCell(t, m, l.EditorX+1, y).Text; got != "a" {
 		t.Errorf("after the toggle the text starts at %q, want the text a after the padding", got)
 	}
 	if m.hideLineNumbers {
@@ -639,7 +643,8 @@ func TestFileExplorerSideToggles(t *testing.T) {
 	if m.explorerSide != explorer.SideRight || m.notice != "File explorer moved to the right" {
 		t.Errorf("after the toggle side %v notice %q, want right and the Fresh message", m.explorerSide, m.notice)
 	}
-	if l := m.layout(); !l.ExRight || l.ExX != 60-l.Ex || l.EditorX != 0 {
+	// The frame border takes column 0, so the editor starts one cell in.
+	if l := m.layout(); !l.ExRight || l.ExX != 60-l.Ex || l.EditorX != 1 {
 		t.Errorf("right-side layout ex %d at %d editor %d, want the column on the right", l.Ex, l.ExX, l.EditorX)
 	}
 	runAction(t, m, "toggle_file_explorer_side")
@@ -701,8 +706,9 @@ func TestIndentGuidesDrawOnTheFrameRow(t *testing.T) {
 
 func TestFoldIndicatorsCurrentBufferHidesTheArrow(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 8)
-	y := m.layout().BodyTop
-	x := m.layout().Gutter - 1
+	l := m.layout()
+	y := l.BodyTop
+	x := l.EditorX + l.Gutter - 1
 	if got := viewCell(t, m, x, y).Text; got != "▾" {
 		t.Fatalf("setup: the fold arrow cell %q, want ▾", got)
 	}

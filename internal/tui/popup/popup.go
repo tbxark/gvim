@@ -233,7 +233,7 @@ func (p *Popup) keepVisible() {
 // its highlighted row.
 func (p *Popup) rowAt(x, y int) (int, bool) {
 	b := p.box
-	if !b.contains(x, y) || y <= b.y || y > b.y+p.rows || x <= b.x || x >= b.x+b.w-1 {
+	if !b.contains(x, y) || y <= b.y+len(p.noteLines) || y > b.y+len(p.noteLines)+p.rows || x <= b.x || x >= b.x+b.w-1 {
 		return 0, false
 	}
 	i := p.top + (y - b.y - 1 - len(p.noteLines))

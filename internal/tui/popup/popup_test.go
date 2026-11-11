@@ -203,6 +203,33 @@ func TestClickChoosesRowAndClickOutsideCloses(t *testing.T) {
 	}
 }
 
+func TestNoteAndScrolledRowsMouseHits(t *testing.T) {
+	p := New(style.Overlay{})
+	p.ShowNote(Point{1, 0}, "Actions", `first note line
+second note line`, items(12))
+	p.Draw(grid.New(60, 12))
+	p.update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	p.Draw(grid.New(60, 12))
+	if p.top == 0 || len(p.noteLines) != 2 {
+		t.Fatalf("test needs a scrolled popup with two note lines: top=%d notes=%d", p.top, len(p.noteLines))
+	}
+	x := p.box.x + 2
+	for y := p.box.y + 1; y <= p.box.y+len(p.noteLines); y++ {
+		if cmd := p.update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}); cmd != nil || !p.Active() {
+			t.Fatalf("click on note row %d chose an item or closed popup", y)
+		}
+	}
+	y := p.box.y + len(p.noteLines) + p.rows
+	want := p.top + p.rows - 1
+	cmd := p.update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatal("click on last visible item did not choose it")
+	}
+	if got := cmd().(Chosen); got.Index != want {
+		t.Fatalf("chosen index = %d, want %d", got.Index, want)
+	}
+}
+
 func TestDrawPaintsTitleRowsAndDetail(t *testing.T) {
 	p := New(style.Overlay{})
 	p.Show(Point{0, 0}, "Remote", []Item{

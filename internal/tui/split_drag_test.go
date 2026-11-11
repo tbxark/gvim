@@ -28,31 +28,31 @@ func TestPressOnABorderDragsItsRatio(t *testing.T) {
 			name:  "a vertical line follows the pointer to the left",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{20, 5},
-			ratio: 25, line: rect{X: 20, Y: 3, W: 1, H: 20}, vertical: true,
+			ratio: 25, line: rect{X: 20, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a vertical line follows the pointer to the right",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{60, 5},
-			ratio: 76, line: rect{X: 60, Y: 3, W: 1, H: 20}, vertical: true,
+			ratio: 77, line: rect{X: 60, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a line dragged past the right edge stops at 90 percent",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{79, 5},
-			ratio: 90, line: rect{X: 71, Y: 3, W: 1, H: 20}, vertical: true,
+			ratio: 90, line: rect{X: 70, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a line dragged past the left edge stops at 10 percent",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{0, 5},
-			ratio: 10, line: rect{X: 8, Y: 3, W: 1, H: 20}, vertical: true,
+			ratio: 10, line: rect{X: 9, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a stacked line follows the pointer up",
 			setup: []string{"split_horizontal"},
-			press: [2]int{10, 13}, move: [2]int{10, 8},
-			ratio: 26, line: rect{X: 0, Y: 8, W: 80, H: 1}, vertical: false,
+			press: [2]int{10, 12}, move: [2]int{10, 8},
+			ratio: 28, line: rect{X: 1, Y: 8, W: 78, H: 1}, vertical: false,
 		},
 	}
 	for _, tt := range tests {

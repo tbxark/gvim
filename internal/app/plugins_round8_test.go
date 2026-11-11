@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // Round-8 real-host smoke: live_diff against a real git repository (full tier-1c
@@ -152,6 +154,10 @@ func TestRealHostGitLogFromThePalette(t *testing.T) {
 	writeUserFile(t, "config.json", `{"plugins":{"git_log":{"enabled":true}}}`)
 
 	s := newSession(t, Options{Root: root})
+	// The classic frame and the plugin group's split leave the log column too narrow at
+	// 120 columns for both subjects to stay on one row, so the session is widened here;
+	// the list is expected to show each subject whole.
+	s.send(tea.WindowSizeMsg{Width: 200, Height: 50})
 	s.waitStatus("git_log", "loaded")
 	s.openReal(path)
 	s.settle(40 * time.Millisecond)

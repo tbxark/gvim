@@ -219,6 +219,8 @@ type Panel struct {
 	top      int
 
 	width, height int
+	mouseGeo      geometry
+	optionHits    []optionHit
 }
 
 // tickMsg and doneMsg bring a search back to the update loop.
@@ -375,6 +377,8 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		// A batch can fill an empty result while the rows already have the focus; the
 		// preview follows the new selected row. The target dedupe keeps this cheap.
 		return p, tea.Batch(p.applyBatch(msg), p.previewCmd())
+	case tea.MouseClickMsg:
+		return p, p.mouseClick(msg)
 	case tea.MouseWheelMsg:
 		return p, p.previewWheel(msg)
 	case previewDoneMsg:
@@ -395,6 +399,70 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		return p, nil
 	}
 	return p, nil
+}
+
+type optionHit struct {
+	x0, x1 int
+	key    tea.KeyPressMsg
+}
+
+func (p *Panel) mouseClick(msg tea.MouseClickMsg) tea.Cmd {
+	m := msg.Mouse()
+	if m.Button != tea.MouseLeft || p.width == 0 || p.height == 0 {
+		return nil
+	}
+	g := p.mouseGeo
+	if m.Y == g.optY {
+		for _, hit := range p.optionHits {
+			if m.X >= hit.x0 && m.X < hit.x1 {
+				_, cmd := p.key(hit.key)
+				return cmd
+			}
+		}
+		return nil
+	}
+	if m.X < g.x0 || m.X >= g.end {
+		return nil
+	}
+	target := focusResults
+	switch m.Y {
+	case g.searchY:
+		target = focusSearch
+	case g.replY:
+		if p.git {
+			return nil
+		}
+		target = focusReplace
+	case g.globY:
+		target = focusGlob
+	default:
+		if m.Y < g.resultsTop || m.Y >= g.resultsTop+g.results || m.X >= g.listEnd || p.errText != "" || p.query.Value() == "" {
+			return nil
+		}
+		i := p.top + m.Y - g.resultsTop
+		if i < 0 || i >= len(p.rows) {
+			return nil
+		}
+		for p.focus != focusResults {
+			p.cycleFocus(1)
+		}
+		p.selectRow(i)
+		p.notice = ""
+		if m.X < g.x0+3 {
+			p.toggleChecked()
+			return p.previewCmd()
+		}
+		cmd := p.activate()
+		if cmd != nil {
+			return cmd
+		}
+		return p.previewCmd()
+	}
+	for p.focus != target {
+		p.cycleFocus(1)
+	}
+	p.notice = ""
+	return nil
 }
 
 // key runs one key press.

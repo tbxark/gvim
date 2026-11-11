@@ -16,9 +16,9 @@ func stripTabs() []TabInfo {
 	return []TabInfo{{Name: "a.txt", Active: true}, {Name: "b.txt"}}
 }
 
-// TestMenuBandTakesTwoRows checks the menu band: the labels on row 0, one
-// padding row under them, the tab strip on row 2 and the body from row 3.
-func TestMenuBandTakesTwoRows(t *testing.T) {
+// TestMenuBandTakesOneRow checks the menu band: the labels on row 0,
+// the tab strip on row 2 and the body from row 3.
+func TestMenuBandTakesOneRow(t *testing.T) {
 	l := ComputeLayout(100, 30, Input{Tabs: stripTabs()})
 	if !l.MenuOn || l.MenuTop != 0 || l.MenuBottom != MenuRows-1 {
 		t.Fatalf("menu band on=%v at %d..%d, want on at 0..%d", l.MenuOn, l.MenuTop, l.MenuBottom, MenuRows-1)
@@ -32,10 +32,7 @@ func TestMenuBandTakesTwoRows(t *testing.T) {
 	if got := l.Hit(1, l.MenuLabelY); got.Kind != HitMenuLabel {
 		t.Errorf("the label row at File hits %v, want a menu label", got.Kind)
 	}
-	if got := l.Hit(1, l.MenuBottom); got.Kind != HitNone {
-		t.Errorf("the padding row of the band hits %v, want nothing", got.Kind)
-	}
-	if got := l.Hit(1, l.StripY); got.Kind != HitTab {
+	if got := l.Hit(l.EditorX+1, l.StripY); got.Kind != HitTab {
 		t.Errorf("row 2 at the first tab hits %v, want the tab", got.Kind)
 	}
 	if got := l.Hit(l.TextX, l.BodyTop); got.Kind != HitEditorText {
@@ -44,26 +41,25 @@ func TestMenuBandTakesTwoRows(t *testing.T) {
 }
 
 // TestHiddenMenuBarKeepsTheOldRows checks the rows with the menu bar hidden: the
-// strip on row 0, the body from row 1 and the explorer title on row 1, as before
-// the band existed.
+// strip and explorer title on row 1 and the body from row 2.
 func TestHiddenMenuBarKeepsTheOldRows(t *testing.T) {
 	l := ComputeLayout(100, 30, Input{HideMenuBar: true, ExplorerOpen: true, ExplorerRows: 3, Tabs: stripTabs()})
 	if l.MenuOn || l.MenuTop != -1 || l.MenuBottom != -1 {
 		t.Fatalf("menu band on=%v at %d..%d with the bar hidden", l.MenuOn, l.MenuTop, l.MenuBottom)
 	}
-	if l.StripY != 0 || l.BodyTop != 1 {
-		t.Fatalf("strip row %d, body top %d; want 0 and 1", l.StripY, l.BodyTop)
+	if l.StripY != 1 || l.BodyTop != 2 {
+		t.Fatalf("strip row %d, body top %d; want 1 and 2", l.StripY, l.BodyTop)
 	}
 	if l.ExTitleY != 1 || l.ExBodyTop != 2 {
 		t.Fatalf("explorer title row %d body top %d, want 1 and 2", l.ExTitleY, l.ExBodyTop)
 	}
-	if got := l.Hit(l.EditorX+1, 0); got.Kind != HitTab {
-		t.Errorf("row 0 at the first tab hits %v, want the tab", got.Kind)
+	if got := l.Hit(l.EditorX+1, l.StripY); got.Kind != HitTab {
+		t.Errorf("row 1 at the first tab hits %v, want the tab", got.Kind)
 	}
-	if got := l.Hit(3, 1); got.Kind != HitExplorerBody {
+	if got := l.Hit(3, l.ExTitleY); got.Kind != HitExplorerBody {
 		t.Errorf("row 1 in the explorer title hits %v, want the title body", got.Kind)
 	}
-	if got := l.Hit(3, 2); got.Kind != HitExplorerRow || got.Index != 0 {
+	if got := l.Hit(3, l.ExBodyTop); got.Kind != HitExplorerRow || got.Index != 0 {
 		t.Errorf("row 2 hits %+v, want the first tree row", got)
 	}
 }
@@ -84,28 +80,25 @@ func TestExplorerTitleAlignsWithTheStrip(t *testing.T) {
 	if got := l.Hit(3, l.ExBodyTop); got.Kind != HitExplorerRow || got.Index != 0 {
 		t.Errorf("the first tree row hits %+v", got)
 	}
-	if got := l.Hit(3, 1); got.Kind != HitNone {
-		t.Errorf("the menu padding row over the explorer hits %v, want nothing", got.Kind)
-	}
 }
 
 // TestNewTabButtonIsThreeCellsAtTheRightEdge checks the " + " button: three cells
-// ending on the last column, one blank on each side of the glyph, and a hit target
+// ending before the right border, one blank on each side of the glyph, and a hit target
 // that covers all three cells.
 func TestNewTabButtonIsThreeCellsAtTheRightEdge(t *testing.T) {
 	for _, mode := range []icons.Mode{icons.Plain, icons.Nerd} {
 		const w = 100
 		l := ComputeLayout(w, 30, Input{Tabs: stripTabs(), IconMode: mode})
 		last := l.Strip.Runs[len(l.Strip.Runs)-1]
-		if want := " " + mode.Glyph(icons.New) + " "; last.Kind != HitTabNew || last.X != w-3 || last.W != 3 || last.Text != want {
-			t.Fatalf("%v: + button = %+v, want %q at %d..%d", mode, last, want, w-3, w-1)
+		if want := " " + mode.Glyph(icons.New) + " "; last.Kind != HitTabNew || last.X != w-4 || last.W != 3 || last.Text != want {
+			t.Fatalf("%v: + button = %+v, want %q at %d..%d", mode, last, want, w-4, w-2)
 		}
-		for x := w - 3; x < w; x++ {
+		for x := w - 4; x < w-1; x++ {
 			if got := l.Hit(x, l.StripY); got.Kind != HitTabNew {
 				t.Errorf("%v: column %d hits %v, want the new-tab button", mode, x, got.Kind)
 			}
 		}
-		if got := l.Hit(w-4, l.StripY); got.Kind == HitTabNew {
+		if got := l.Hit(w-5, l.StripY); got.Kind == HitTabNew {
 			t.Errorf("%v: the cell left of the button hits it", mode)
 		}
 	}
@@ -141,8 +134,8 @@ func TestOverflowWindowEndsBeforeTheButton(t *testing.T) {
 	if !l.Strip.Overflow {
 		t.Fatal("four tabs at 20 columns do not overflow")
 	}
-	if last := l.Strip.Runs[len(l.Strip.Runs)-1]; last.Kind != HitTabNew || last.X != w-3 {
-		t.Fatalf("+ button = %+v, want it at %d", last, w-3)
+	if last := l.Strip.Runs[len(l.Strip.Runs)-1]; last.Kind != HitTabNew || last.X != w-4 {
+		t.Fatalf("+ button = %+v, want it at %d", last, w-4)
 	}
 	for _, r := range l.Strip.Runs {
 		switch r.Kind {
@@ -151,11 +144,11 @@ func TestOverflowWindowEndsBeforeTheButton(t *testing.T) {
 		case HitTabScrollBefore:
 			t.Errorf("the left marker is a target while the window starts at the first tab: %+v", r)
 		case HitTabScrollAfter:
-			if r.X != w-4 {
-				t.Errorf("right marker at %d, want %d, one cell left of the button", r.X, w-4)
+			if r.X != w-5 {
+				t.Errorf("right marker at %d, want %d, one cell left of the button", r.X, w-5)
 			}
 		default:
-			if r.X < 1 || r.X+r.W > w-4 {
+			if r.X < 1 || r.X+r.W > w-5 {
 				t.Errorf("tab run %+v is outside the window left of the button", r)
 			}
 		}
@@ -747,7 +740,7 @@ func TestExplorerWidthForms(t *testing.T) {
 }
 
 // TestRightSideExplorerGeometry checks file_explorer.side right: the column takes
-// the right edge, the editor area starts at column 0 and ends at the column, the
+// the right edge, the editor area starts at column 1 and ends at the column, the
 // tab strip and its "+" are pinned inside the editor area, and the hit map reads
 // the same columns.
 func TestRightSideExplorerGeometry(t *testing.T) {
@@ -762,16 +755,16 @@ func TestRightSideExplorerGeometry(t *testing.T) {
 	if !l.ExplorerOpen || !l.ExRight || l.Ex != 30 || l.ExX != w-30 {
 		t.Fatalf("ex %d at %d right %v, want 30 at %d", l.Ex, l.ExX, l.ExRight, w-30)
 	}
-	if l.EditorX != 0 || l.EditorW != w-30 {
-		t.Fatalf("editor %d..%d, want 0..%d", l.EditorX, l.EditorX+l.EditorW, w-30)
+	if l.EditorX != 1 || l.EditorW != w-31 {
+		t.Fatalf("editor %d..%d, want 1..%d", l.EditorX, l.EditorX+l.EditorW, w-30)
 	}
 	// The tab strip begins at the frame's left edge and its "+" ends at the
 	// editor's right edge.
 	if len(l.Strip.Runs) == 0 {
 		t.Fatal("no tab strip runs")
 	}
-	if first := l.Strip.Runs[0]; first.X != 0 {
-		t.Errorf("first strip run at %d, want column 0", first.X)
+	if first := l.Strip.Runs[0]; first.X != 1 {
+		t.Errorf("first strip run at %d, want column 1", first.X)
 	}
 	last := l.Strip.Runs[len(l.Strip.Runs)-1]
 	if last.Kind != HitTabNew || last.X+last.W != l.EditorX+l.EditorW {
@@ -822,8 +815,8 @@ func TestDockIsTheEditorColumn(t *testing.T) {
 			if l.DockX != l.EditorX {
 				t.Errorf("dock starts at column %d, want the editor's %d", l.DockX, l.EditorX)
 			}
-			if l.ExBottom != l.BodyBottom {
-				t.Errorf("explorer ends at row %d, want the body's last row %d", l.ExBottom, l.BodyBottom)
+			if l.ExBottom != l.FrameBottom {
+				t.Errorf("explorer ends at row %d, want the frame bottom %d", l.ExBottom, l.FrameBottom)
 			}
 			if l.EditorRows() != l.DockY-l.BodyTop {
 				t.Errorf("editor rows = %d, want %d above the dock", l.EditorRows(), l.DockY-l.BodyTop)
@@ -883,8 +876,8 @@ func TestRightSideNoticeBandStartsAtTheEditorEdge(t *testing.T) {
 	if len(l.Notice) == 0 {
 		t.Fatal("no notice band on a narrow row")
 	}
-	if l.NoticeX != 0 {
-		t.Errorf("notice band starts at %d, want the editor's left edge 0", l.NoticeX)
+	if l.NoticeX != 1 {
+		t.Errorf("notice band starts at %d, want the editor's left edge 1", l.NoticeX)
 	}
 	if l.NoticeX+l.EditorW > l.ExX {
 		t.Errorf("notice band ends at %d, past the explorer column at %d", l.NoticeX+l.EditorW, l.ExX)

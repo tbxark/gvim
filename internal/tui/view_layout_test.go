@@ -10,7 +10,7 @@ func TestHiddenTabBarGivesItsRowToTheBody(t *testing.T) {
 		labelRow int // -1 when the menu bar is hidden
 	}{
 		{"menu bar shown", layoutInput{HideTabBar: true, Lines: 4}, 2, 0},
-		{"menu bar and tab bar hidden", layoutInput{HideTabBar: true, HideMenuBar: true, Lines: 4}, 0, -1},
+		{"menu bar and tab bar hidden", layoutInput{HideTabBar: true, HideMenuBar: true, Lines: 4}, 1, -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,11 +46,11 @@ func TestShownTabBarKeepsItsRow(t *testing.T) {
 func TestPromptLineSitsUnderTheStatusRow(t *testing.T) {
 	shown := layoutFor(80, 24, layoutInput{Lines: 4})
 	withPrompt := layoutFor(80, 24, layoutInput{Lines: 4, ShowPromptLine: true})
-	if shown.StatusY != 23 || shown.BodyBottom != 22 {
-		t.Fatalf("without the prompt line: status %d body bottom %d, want 23 and 22", shown.StatusY, shown.BodyBottom)
+	if shown.StatusY != 23 || shown.BodyBottom != 21 {
+		t.Fatalf("without the prompt line: status %d body bottom %d, want 23 and 21", shown.StatusY, shown.BodyBottom)
 	}
-	if withPrompt.StatusY != 22 || withPrompt.BodyBottom != 21 {
-		t.Fatalf("with the prompt line: status %d body bottom %d, want 22 and 21", withPrompt.StatusY, withPrompt.BodyBottom)
+	if withPrompt.StatusY != 22 || withPrompt.BodyBottom != 20 {
+		t.Fatalf("with the prompt line: status %d body bottom %d, want 22 and 20", withPrompt.StatusY, withPrompt.BodyBottom)
 	}
 	if !withPrompt.PromptOn || withPrompt.PromptY != 23 {
 		t.Fatalf("prompt row %d on=%v, want row 23 on", withPrompt.PromptY, withPrompt.PromptOn)

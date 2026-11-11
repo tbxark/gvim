@@ -556,7 +556,7 @@ func TestWindowGeometry(t *testing.T) {
 	if w.X != p.TextX || w.Y != p.Y || w.Width != p.TextW-1 || w.Height != p.H || w.TopLine != 0 || w.LeftCol != 0 {
 		t.Fatalf("window = %+v, pane = %+v", w, p)
 	}
-	if w.Width != 80-p.Gutter-1 {
+	if w.Width != 78-p.Gutter-1 {
 		t.Fatalf("text width %d, want the pane less its gutter %d and the scrollbar column", w.Width, p.Gutter)
 	}
 	f.docs[0].top = 7

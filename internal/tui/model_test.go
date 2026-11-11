@@ -382,9 +382,10 @@ func TestClipboardActionsAreSkippedInExplorer(t *testing.T) {
 func TestWindowSizeSetsTheEditorViewport(t *testing.T) {
 	ed := newFakeEditor("hello")
 	newTestModel(t, ed, nil, 80, 24)
-	// Body rows 3..22 are 20 rows. The gutter for one line is six cells.
-	if ed.rows != 20 || ed.cols != 74 {
-		t.Fatalf("viewport = %dx%d, want 20x74", ed.rows, ed.cols)
+	// Body rows 3..21 are 19 rows. The frame border takes one column on each side
+	// and the gutter for one line is six cells, so the text is 72 wide.
+	if ed.rows != 19 || ed.cols != 72 {
+		t.Fatalf("viewport = %dx%d, want 19x72", ed.rows, ed.cols)
 	}
 }
 

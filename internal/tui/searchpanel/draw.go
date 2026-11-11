@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -114,6 +115,8 @@ func (p *Panel) Covers(x, y, w, h int) bool {
 // result rows, the search row, the replacement row (Search and Replace only), the option
 // row, and the hints on the bottom border.
 func (p *Panel) Draw(g *grid.Grid) {
+	p.width, p.height = 0, 0
+	p.optionHits = nil
 	geo := layoutFor(g.Width(), g.Height(), p.git)
 	if geo.top < 0 || geo.right <= geo.left+1 {
 		return
@@ -121,6 +124,8 @@ func (p *Panel) Draw(g *grid.Grid) {
 	p.width, p.height = g.Width(), g.Height()
 	geo.listEnd = geo.end
 	p.previewColumns(&geo)
+	p.mouseGeo = geo
+	p.optionHits = nil
 	boxW, boxH := geo.right-geo.left+1, geo.bottom-geo.top+1
 	p.styles.ov.PaintBox(g, geo.left, geo.top, boxW, boxH, p.title())
 	p.paintResults(g, geo)
@@ -750,10 +755,15 @@ func (p *Panel) paintOptions(g *grid.Grid, geo geometry) {
 	limit := geo.end
 	if rightW > 0 && rightW+2 < geo.end-geo.x0 {
 		g.Put(geo.end-rightW, geo.optY, geo.end, right, p.styles.label)
+		p.optionHits = append(p.optionHits, optionHit{geo.end - rightW, geo.end, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}})
 		limit = geo.end - rightW - 2
 	}
 	x := geo.x0
-	for _, o := range opts {
+	keys := []rune{'a', 'c', 'r', 'w'}
+	if p.git {
+		keys = []rune{'c'}
+	}
+	for i, o := range opts {
 		text := o.text
 		if x+ansi.StringWidth(text) > limit {
 			break
@@ -762,7 +772,9 @@ func (p *Panel) paintOptions(g *grid.Grid, geo geometry) {
 		if o.on {
 			st = p.styles.file
 		}
+		start := x
 		x += g.Put(x, geo.optY, limit, text, st)
+		p.optionHits = append(p.optionHits, optionHit{start, x, tea.KeyPressMsg{Code: keys[i], Mod: tea.ModAlt}})
 		x += optionGap
 	}
 }

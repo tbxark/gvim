@@ -65,8 +65,8 @@ func shapes(bs []splitBorder) []splitBorder {
 }
 
 func TestSplitLayoutPanesAtOneTwoAndThreeLeaves(t *testing.T) {
-	// The band at W=80, H=24 with no explorer is x 0..79 and rows 3..22: 80 by 20
-	// (menu band 0..1, tab strip 2, status 23).
+	// The editor band at W=80, H=24 is x 1..78 and rows 3..21,
+	// inside the classic frame and above the status row.
 	tests := []struct {
 		name     string
 		explorer bool
@@ -78,44 +78,44 @@ func TestSplitLayoutPanesAtOneTwoAndThreeLeaves(t *testing.T) {
 		{
 			name:  "one leaf fills the band",
 			tree:  leafNode(0),
-			panes: []rect{{X: 0, Y: 3, W: 80, H: 20}},
+			panes: []rect{{X: 1, Y: 3, W: 78, H: 19}},
 		},
 		{
 			name:    "two leaves side by side",
 			tree:    innerNode(sideBySide, leafNode(0), leafNode(1)),
-			panes:   []rect{{X: 0, Y: 3, W: 40, H: 20}, {X: 41, Y: 3, W: 39, H: 20}},
-			borders: []splitBorder{{Rect: rect{X: 40, Y: 3, W: 1, H: 20}, Vertical: true}},
+			panes:   []rect{{X: 1, Y: 3, W: 39, H: 19}, {X: 41, Y: 3, W: 38, H: 19}},
+			borders: []splitBorder{{Rect: rect{X: 40, Y: 3, W: 1, H: 19}, Vertical: true}},
 		},
 		{
 			name:    "two leaves stacked",
 			tree:    innerNode(stacked, leafNode(0), leafNode(1)),
-			panes:   []rect{{X: 0, Y: 3, W: 80, H: 10}, {X: 0, Y: 14, W: 80, H: 9}},
-			borders: []splitBorder{{Rect: rect{X: 0, Y: 13, W: 80, H: 1}, Vertical: false}},
+			panes:   []rect{{X: 1, Y: 3, W: 78, H: 9}, {X: 1, Y: 13, W: 78, H: 9}},
+			borders: []splitBorder{{Rect: rect{X: 1, Y: 12, W: 78, H: 1}, Vertical: false}},
 		},
 		{
 			name:    "three leaves, right column stacked",
 			tree:    innerNode(sideBySide, leafNode(0), innerNode(stacked, leafNode(1), leafNode(2))),
-			panes:   []rect{{X: 0, Y: 3, W: 40, H: 20}, {X: 41, Y: 3, W: 39, H: 10}, {X: 41, Y: 14, W: 39, H: 9}},
-			borders: []splitBorder{{Rect: rect{X: 40, Y: 3, W: 1, H: 20}, Vertical: true}, {Rect: rect{X: 41, Y: 13, W: 39, H: 1}, Vertical: false}},
+			panes:   []rect{{X: 1, Y: 3, W: 39, H: 19}, {X: 41, Y: 3, W: 38, H: 9}, {X: 41, Y: 13, W: 38, H: 9}},
+			borders: []splitBorder{{Rect: rect{X: 40, Y: 3, W: 1, H: 19}, Vertical: true}, {Rect: rect{X: 41, Y: 12, W: 38, H: 1}, Vertical: false}},
 		},
 		{
 			name:    "three leaves, bottom row side by side",
 			tree:    innerNode(stacked, leafNode(0), innerNode(sideBySide, leafNode(1), leafNode(2))),
-			panes:   []rect{{X: 0, Y: 3, W: 80, H: 10}, {X: 0, Y: 14, W: 40, H: 9}, {X: 41, Y: 14, W: 39, H: 9}},
-			borders: []splitBorder{{Rect: rect{X: 0, Y: 13, W: 80, H: 1}, Vertical: false}, {Rect: rect{X: 40, Y: 14, W: 1, H: 9}, Vertical: true}},
+			panes:   []rect{{X: 1, Y: 3, W: 78, H: 9}, {X: 1, Y: 13, W: 39, H: 9}, {X: 41, Y: 13, W: 38, H: 9}},
+			borders: []splitBorder{{Rect: rect{X: 1, Y: 12, W: 78, H: 1}, Vertical: false}, {Rect: rect{X: 40, Y: 13, W: 1, H: 9}, Vertical: true}},
 		},
 		{
 			name:    "three leaves, left column stacked",
 			tree:    innerNode(sideBySide, innerNode(stacked, leafNode(0), leafNode(1)), leafNode(2)),
-			panes:   []rect{{X: 0, Y: 3, W: 40, H: 10}, {X: 0, Y: 14, W: 40, H: 9}, {X: 41, Y: 3, W: 39, H: 20}},
-			borders: []splitBorder{{Rect: rect{X: 40, Y: 3, W: 1, H: 20}, Vertical: true}, {Rect: rect{X: 0, Y: 13, W: 40, H: 1}, Vertical: false}},
+			panes:   []rect{{X: 1, Y: 3, W: 39, H: 9}, {X: 1, Y: 13, W: 39, H: 9}, {X: 41, Y: 3, W: 38, H: 19}},
+			borders: []splitBorder{{Rect: rect{X: 40, Y: 3, W: 1, H: 19}, Vertical: true}, {Rect: rect{X: 1, Y: 12, W: 39, H: 1}, Vertical: false}},
 		},
 		{
 			name:     "two leaves side by side next to the explorer",
 			explorer: true,
 			tree:     innerNode(sideBySide, leafNode(0), leafNode(1)),
-			panes:    []rect{{X: 32, Y: 3, W: 24, H: 20}, {X: 57, Y: 3, W: 23, H: 20}},
-			borders:  []splitBorder{{Rect: rect{X: 56, Y: 3, W: 1, H: 20}, Vertical: true}},
+			panes:    []rect{{X: 32, Y: 3, W: 23, H: 19}, {X: 56, Y: 3, W: 23, H: 19}},
+			borders:  []splitBorder{{Rect: rect{X: 55, Y: 3, W: 1, H: 19}, Vertical: true}},
 		},
 	}
 	for _, tt := range tests {
@@ -146,7 +146,7 @@ func TestSinglePaneIsTheCurrentBand(t *testing.T) {
 				t.Fatalf("W=%d H=%d: %d panes, want 1", g.w, h, len(l.Panes))
 			}
 			p := l.Panes[0]
-			want := rect{X: l.EditorX, Y: l.BodyTop, W: g.w - l.EditorX, H: l.BodyBottom - l.BodyTop + 1}
+			want := rect{X: l.EditorX, Y: l.BodyTop, W: l.EditorW, H: l.BodyBottom - l.BodyTop + 1}
 			if p.Rect != want || !p.Focused || l.Focus != 0 {
 				t.Errorf("W=%d H=%d: pane %+v focus %d, want rect %+v focused", g.w, h, p, l.Focus, want)
 			}
@@ -186,8 +186,8 @@ func TestEachPaneSizesItsGutterFromItsOwnDocument(t *testing.T) {
 		t.Errorf("two-line pane gutter = %d, want 6", g)
 	}
 	// 1000 lines is four digits: the gutter is 8 and the text starts after it.
-	if p := l.Panes[1]; p.Gutter != 8 || p.TextX != 49 || p.TextW != 31 {
-		t.Errorf("long pane gutter %d textX %d textW %d, want 8, 49, 31", p.Gutter, p.TextX, p.TextW)
+	if p := l.Panes[1]; p.Gutter != 8 || p.TextX != 49 || p.TextW != 30 {
+		t.Errorf("long pane gutter %d textX %d textW %d, want 8, 49, 30", p.Gutter, p.TextX, p.TextW)
 	}
 }
 
@@ -207,21 +207,21 @@ func TestHitSplitBordersAndPanes(t *testing.T) {
 			hitTarget{Kind: hitSplitBorder, Index: 0}},
 		{"vertical border top row", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{2, 2}, 40, 3,
 			hitTarget{Kind: hitSplitBorder, Index: 0}},
-		{"vertical border bottom row", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{2, 2}, 40, 22,
+		{"vertical border bottom row", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{2, 2}, 40, 21,
 			hitTarget{Kind: hitSplitBorder, Index: 0}},
 		{"right pane gutter", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{2, 2}, 41, 3,
 			hitTarget{Kind: hitGutter, Index: 0, Pane: 1}},
 		{"right pane text", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{2, 2}, 50, 5,
 			hitTarget{Kind: hitEditorText, Index: 2, Pane: 1}},
-		{"upper pane row", innerNode(stacked, leafNode(0), leafNode(1)), []int{2, 2}, 10, 11,
-			hitTarget{Kind: hitEditorText, Index: 8, Pane: 0}},
-		{"horizontal border", innerNode(stacked, leafNode(0), leafNode(1)), []int{2, 2}, 10, 13,
+		{"upper pane row", innerNode(stacked, leafNode(0), leafNode(1)), []int{2, 2}, 10, 10,
+			hitTarget{Kind: hitEditorText, Index: 7, Pane: 0}},
+		{"horizontal border", innerNode(stacked, leafNode(0), leafNode(1)), []int{2, 2}, 10, 12,
 			hitTarget{Kind: hitSplitBorder, Index: 0}},
-		{"lower pane first row", innerNode(stacked, leafNode(0), leafNode(1)), []int{2, 2}, 10, 14,
+		{"lower pane first row", innerNode(stacked, leafNode(0), leafNode(1)), []int{2, 2}, 10, 13,
 			hitTarget{Kind: hitEditorText, Index: 0, Pane: 1}},
 		{"scrollbar of a long pane", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{100, 2}, 39, 5,
 			hitTarget{Kind: hitScrollbarTrack, Index: 2, Pane: 0}},
-		{"last column of a short pane is text", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{100, 2}, 79, 5,
+		{"last column of a short pane is text", innerNode(sideBySide, leafNode(0), leafNode(1)), []int{100, 2}, 78, 5,
 			hitTarget{Kind: hitEditorText, Index: 2, Pane: 1}},
 	}
 	for _, tt := range tests {
