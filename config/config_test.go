@@ -30,6 +30,8 @@ func isolateHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	return home
 }
 
@@ -54,7 +56,8 @@ func TestDefaults(t *testing.T) {
 		CursorStyle:             "block",
 		UIIcons:                 "auto",
 
-		PluginTimeout: 500 * time.Millisecond,
+		ExplorerShowHidden: true,
+		PluginTimeout:      500 * time.Millisecond,
 
 		Terminal:     DefaultTerminalOptions(),
 		Daemon:       DefaultDaemonConfig(),
@@ -707,5 +710,64 @@ func TestDirIsDotConfigGvimOnUnix(t *testing.T) {
 	files, err := Paths()
 	if err != nil || files.User != filepath.Join(home, ".config", "gvim", "config.json") {
 		t.Errorf("Paths().User = %q, %v", files.User, err)
+	}
+}
+
+func TestStateDirIsXDGStateGvim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses os.UserConfigDir")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	if got, err := StateDir(); err != nil || got != filepath.Join(home, ".local", "state", "gvim") {
+		t.Errorf("StateDir() = %q, %v, want ~/.local/state/gvim", got, err)
+	}
+	xdg := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_HOME", xdg)
+	if got, err := StateDir(); err != nil || got != filepath.Join(xdg, "gvim") {
+		t.Errorf("StateDir() = %q, %v, want gvim under XDG_STATE_HOME", got, err)
+	}
+	t.Setenv("XDG_STATE_HOME", "relative/dir")
+	if got, err := StateDir(); err != nil || got != filepath.Join(home, ".local", "state", "gvim") {
+		t.Errorf("StateDir() = %q, %v, want a relative XDG_STATE_HOME ignored", got, err)
+	}
+}
+
+func TestCacheDirIsGvim(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", base)
+	t.Setenv("HOME", t.TempDir())
+	got, err := CacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got, "gvim") {
+		t.Errorf("CacheDir() = %q, want a gvim directory", got)
+	}
+}
+
+func TestMoveLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old", "state.json")
+	newPath := filepath.Join(dir, "new", "state.json")
+	writeFile(t, oldPath, "old")
+	if err := MoveLegacyFile(oldPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(newPath); err != nil || string(data) != "old" {
+		t.Fatalf("new file = %q, %v", data, err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old file still exists: %v", err)
+	}
+	// A file already at the new path wins and the old one is left alone.
+	writeFile(t, oldPath, "stale")
+	writeFile(t, newPath, "current")
+	if err := MoveLegacyFile(oldPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(newPath); string(data) != "current" {
+		t.Fatalf("new file overwritten: %q", data)
 	}
 }

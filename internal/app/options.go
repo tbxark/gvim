@@ -113,10 +113,10 @@ type Options struct {
 	// cannot be written is a notice, and the editor runs without a log.
 	LogFile string
 	// SessionDir holds the saved session: the open tabs, the unsaved text and the
-	// explorer state. Run saves it when the program ends. Run uses
-	// os.UserCacheDir()/gvim/session when this is empty. Without a directory, the
-	// session is not restored either, so a caller that builds the model for a test
-	// does not read the user's session.
+	// explorer state. Run saves it when the program ends. It is honored only when
+	// editor.save_session is on; Run then defaults it to <root>/.gvim/session.
+	// Without a directory, the session is not restored either, so a caller that
+	// builds the model for a test does not read the user's session.
 	SessionDir string
 	// AutoSaveInterval is how often the modified, named files are saved. Zero defers to
 	// the config: editor.auto_save_enabled turns auto-save on at

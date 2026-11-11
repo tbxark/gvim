@@ -70,6 +70,23 @@ type settingsService struct {
 	lspBase *lspBaselineUpdater
 }
 
+// loadTrustedLSP reads the newly trusted project layer before automatic starts resume.
+// It only applies the LSP fields; other editor settings still use the normal reload path.
+func (s *settingsService) loadTrustedLSP(root string) (config.Config, error) {
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
+	cfg, _, err := config.Load(config.Options{Root: root, UserFile: s.opts.Config})
+	if err != nil {
+		return config.Config{}, err
+	}
+	s.mu.Lock()
+	s.cfg.LSP, s.cfg.LSPDisabled = cfg.LSP, cfg.LSPDisabled
+	s.cfg.UniversalLSP, s.cfg.LSPEnabled = cfg.UniversalLSP, cfg.LSPEnabled
+	current := s.cfg
+	s.mu.Unlock()
+	return current, nil
+}
+
 // currentConfig returns the effective configuration of the last load/reload. Deno
 // auto-selection reads it when a manager is created, so a settings reload invalidates a
 // decision taken before an explicit/disabled change.

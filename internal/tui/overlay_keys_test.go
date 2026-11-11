@@ -50,6 +50,9 @@ func TestOverlayContextsMapToTheirFreshNames(t *testing.T) {
 	if ctx, ok := overlayContextOf(menu); !ok || ctx != KeyContextMenu {
 		t.Fatalf("context menu context = %q, %v", ctx, ok)
 	}
+	// The prompt is still the top overlay and an alert keeps the input: the find bar
+	// would open under it. Clear the prompt so the bar is the overlay under test.
+	m.popOverlay()
 	m.openFind(false)
 	if ctx, ok := overlayContextOf(m.overlays[len(m.overlays)-1]); !ok || ctx != KeyContextSearchPrompt {
 		t.Fatalf("find bar context = %q, %v", ctx, ok)

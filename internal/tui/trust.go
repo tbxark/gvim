@@ -38,6 +38,8 @@ type trustLoadedMsg struct {
 	err   error
 }
 
+type trustLSPReadyMsg struct{}
+
 // startTrustPrompt opens the mandatory open-time trust prompt when the open
 // workspace is undecided and can execute code. The app's startup policy leaves
 // such a workspace Restricted and undecided, so the decision is the first thing
@@ -112,6 +114,9 @@ func (m *Model) trustMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.trustDecided(msg), true
 	case trustLoadedMsg:
 		return m.trustLoaded(msg), true
+	case trustLSPReadyMsg:
+		m.lsp.stale = true
+		return nil, true
 	}
 	return nil, false
 }
@@ -120,16 +125,17 @@ func (m *Model) trustMessage(msg tea.Msg) (tea.Cmd, bool) {
 // status row what the decision means. A decision that could not be persisted
 // still applies to the session, and the row says it will not be remembered.
 func (m *Model) trustDecided(msg trustDecidedMsg) tea.Cmd {
+	var cmd tea.Cmd
 	if msg.state.Root != "" {
-		m.trust.state = msg.state
+		cmd = m.applyTrustState(msg.state)
 		m.emitTrustChanged(string(msg.state.Level))
 	}
 	if msg.err != nil {
 		m.notice = "Workspace trust was not saved: " + msg.err.Error()
-		return nil
+		return cmd
 	}
 	m.notice = trustNotice(msg.state.Level)
-	return nil
+	return cmd
 }
 
 // trustLoaded applies the trust state of a workspace that was just opened. A
@@ -143,14 +149,38 @@ func (m *Model) trustLoaded(msg trustLoadedMsg) tea.Cmd {
 		}
 		return nil
 	}
-	m.trust.state = msg.state
+	cmd := m.applyTrustState(msg.state)
 	m.emitTrustChanged(string(msg.state.Level))
 	if msg.err != nil {
 		m.notice = "Workspace trust was not saved: " + msg.err.Error()
-		return nil
+		return cmd
 	}
 	if m.trust.state.NeedsPrompt() {
 		m.openTrustDialog(true)
+	}
+	return cmd
+}
+
+// applyTrustState retries documents rejected before tooling was allowed.
+func (m *Model) applyTrustState(state trust.State) tea.Cmd {
+	wasTrusted := m.trust.state.Level == trust.Trusted
+	m.trust.state = state
+	if wasTrusted || state.Level != trust.Trusted {
+		return nil
+	}
+	clear(m.lsp.unavailable)
+	clear(m.lsp.noted)
+	for _, tr := range m.lsp.tracks {
+		if tr.state == lspOpening {
+			tr.retryTrust = true
+		}
+	}
+	m.lsp.stale = true
+	if waiter, ok := m.lsp.port.(interface{ WaitBaseline() }); ok {
+		return func() tea.Msg {
+			waiter.WaitBaseline()
+			return trustLSPReadyMsg{}
+		}
 	}
 	return nil
 }

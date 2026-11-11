@@ -170,7 +170,7 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 	}
 	id := ws.File.StableID
 	discard := func() { _ = m.reg.Remove(id) }
-	dir, err := m.reg.SessionDir(id)
+	dir, err := m.workspaceSessionDir(id)
 	if err != nil {
 		discard()
 		m.notify(fmt.Errorf("cannot extract: %w", err))

@@ -153,6 +153,7 @@ type EditorOptions struct {
 	// Startup and quit.
 
 	ConfirmQuit                       bool // confirm_quit, default false
+	SaveSession                       bool // save_session, default false
 	RestorePreviousSession            bool // restore_previous_session, default true
 	SkipSessionRestoreWhenFilesPassed bool // skip_session_restore_when_files_passed, default true
 	// EphemeralFilePatterns is ephemeral_file_patterns: globs of files that are not
@@ -475,6 +476,7 @@ var editorOptions = []option{
 
 	// Startup and quit.
 	boolOpt("confirm_quit", "", func(c *Config) *bool { return &c.ConfirmQuit }),
+	boolOpt("save_session", "", func(c *Config) *bool { return &c.SaveSession }),
 	boolOpt("restore_previous_session", "", func(c *Config) *bool { return &c.RestorePreviousSession }),
 	boolOpt("skip_session_restore_when_files_passed", "", func(c *Config) *bool { return &c.SkipSessionRestoreWhenFilesPassed }),
 	{key: "ephemeral_file_patterns", apply: applyEphemeral},

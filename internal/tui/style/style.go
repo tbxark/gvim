@@ -30,6 +30,7 @@ type Styles struct {
 	Menu           lipgloss.Style // ui.menu_fg on ui.menu_bg
 	Accent         lipgloss.Style // ui.accent_fg on ui.accent_bg, the one accent of the theme
 	TabActive      lipgloss.Style // ui.tab_active_fg on ui.tab_active_bg, the active tab
+	Sticky         lipgloss.Style // editor.fg on a blend of editor.bg and ui.tab_active_bg
 	Overlay        Overlay        // the overlay boxes, from ui.popup and the accent
 	TabBar         lipgloss.Style // ui.tab_separator_bg, the strip behind the tabs
 	Tab            lipgloss.Style // ui.tab_inactive_fg on ui.tab_inactive_bg
@@ -84,6 +85,7 @@ func New(th theme.Theme) Styles {
 		Menu:           build(th, ref{"ui", "menu_fg"}, ref{"ui", "menu_bg"}),
 		Accent:         build(th, refAccentFG, refAccentBG),
 		TabActive:      build(th, ref{"ui", "tab_active_fg"}, ref{"ui", "tab_active_bg"}),
+		Sticky:         stickyStyle(th),
 		Overlay:        NewOverlay(th),
 		TabBar:         build(th, ref{}, ref{"ui", "tab_separator_bg"}),
 		Tab:            build(th, ref{"ui", "tab_inactive_fg"}, ref{"ui", "tab_inactive_bg"}),
@@ -105,6 +107,19 @@ func New(th theme.Theme) Styles {
 		DiagHint:       build(th, refDiagHint, ref{}),
 		Decor:          newDecor(th),
 	}
+}
+
+// stickyStyle keeps the scope header in the editor palette while separating it from the tab.
+func stickyStyle(th theme.Theme) lipgloss.Style {
+	st := build(th, ref{"editor", "fg"}, ref{"editor", "current_line_bg"})
+	base := Color(th, "editor", "bg")
+	tab := Color(th, "ui", "tab_active_bg")
+	if base == nil || tab == nil {
+		return st
+	}
+	br, bg, bb, _ := base.RGBA()
+	tr, tg, tb, _ := tab.RGBA()
+	return st.Background(color.RGBA{R: uint8((br*2 + tr) / 3 >> 8), G: uint8((bg*2 + tg) / 3 >> 8), B: uint8((bb*2 + tb) / 3 >> 8), A: 255})
 }
 
 // build returns a style with the foreground from fg, the background from bg,

@@ -14,7 +14,7 @@ import (
 // writeUpdateStamp seeds the debounce stamp a previous launch would have left.
 func writeUpdateStamp(t *testing.T, checked time.Time, latest, url string) {
 	t.Helper()
-	dir, err := config.Dir()
+	dir, err := config.StateDir()
 	if err != nil {
 		t.Fatal(err)
 	}

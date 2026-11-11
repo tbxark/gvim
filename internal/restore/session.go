@@ -15,16 +15,6 @@ import (
 	"github.com/tbxark/gvim/session"
 )
 
-// DefaultSessionDir is the session directory Run uses when Options.SessionDir is
-// empty: os.UserCacheDir()/gvim/session.
-func DefaultSessionDir() (string, error) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return "", fmt.Errorf("session: cache dir: %w", err)
-	}
-	return filepath.Join(cache, "gvim", "session"), nil
-}
-
 // Unrestored is a saved file with unsaved text that restoreSession could not put
 // back. Its stash file must survive the next save, and the user is told about it.
 type Unrestored struct {

@@ -140,7 +140,12 @@ func loaderOptions(cfg config.Config, o Options) *plugin.LoaderOptions {
 	if cfgDir != "" {
 		ld.UserDir = filepath.Join(cfgDir, "plugins")
 		ld.InitFile = filepath.Join(cfgDir, "init.lua")
-		ld.StateFile = filepath.Join(cfgDir, "plugin-state.json")
+	}
+	if stateDir, err := config.StateDir(); err == nil {
+		ld.StateFile = filepath.Join(stateDir, "plugin-state.json")
+		if cfgDir != "" {
+			_ = config.MoveLegacyFile(filepath.Join(cfgDir, "plugin-state.json"), ld.StateFile)
+		}
 	}
 	for name, pc := range cfg.Plugins {
 		if pc.Enabled != nil {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -77,6 +78,32 @@ func topTrustDialog(t *testing.T, m *Model) *trustDialog {
 // trustFrame returns the painted frame of m as rows without styles.
 func trustFrame(m *Model) []string {
 	return m.paint().Plain()
+}
+
+func TestTrustRetriesUnavailableAndInflightLSPOpens(t *testing.T) {
+	for _, inflight := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unavailable", true: "in flight"}[inflight], func(t *testing.T) {
+			p := &fakeTrustPort{state: trust.State{Root: "/ws", Level: trust.Restricted}}
+			m := newTrustModel(t, p)
+			tr := &lspTrack{path: "/ws/main.go", lang: "go", state: lspClosed}
+			m.lsp.tracks = map[string]*lspTrack{tr.path: tr}
+			if inflight {
+				tr.state, tr.busy = lspOpening, true
+			} else {
+				m.lsp.unavailable = map[string]*LSPUnavailableError{"go": {Err: errors.New("blocked")}}
+			}
+			m.trustDecided(trustDecidedMsg{state: trust.State{Root: "/ws", Level: trust.Trusted}})
+			if m.lsp.unavailable["go"] != nil || !m.lsp.stale {
+				t.Fatal("trust did not invalidate unavailable languages and request reconciliation")
+			}
+			if inflight {
+				cmd := m.lspOpened(lspOpenedMsg{path: tr.path, err: &LSPUnavailableError{Err: errors.New("blocked")}})
+				if cmd == nil || m.lsp.unavailable["go"] != nil {
+					t.Fatal("in-flight failure was not retried after trust")
+				}
+			}
+		})
+	}
 }
 
 func TestWorkspaceTrustCommandOpensTheDialog(t *testing.T) {

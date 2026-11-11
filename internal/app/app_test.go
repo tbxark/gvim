@@ -16,7 +16,18 @@ func isolateConfig(t *testing.T) {
 	home := tempHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("AppData", home)
+	// Session tests predate editor.save_session defaulting to off: the isolated user
+	// config enables it, like a user who turned saving on. The disabled default has
+	// its own tests in config and internal/app/project_session_storage_test.go.
+	userConfig := filepath.Join(home, ".config", "gvim", "config.json")
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfig, []byte(`{"editor":{"save_session":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// ui_icons "auto" reads the terminal from these, so a test run inside kitty, WezTerm
 	// or Ghostty would otherwise start with Nerd Font icons.
 	for _, k := range []string{"KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "GHOSTTY_RESOURCES_DIR", "TERM_PROGRAM", "TERM"} {

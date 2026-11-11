@@ -19,7 +19,7 @@ import (
 	"github.com/tbxark/gvim/updatecheck"
 )
 
-// updateStampName is the file under the user config directory that remembers the
+// updateStampName is the file under the user state directory that remembers the
 // last successful release check (the daily debounce and its answer).
 const updateStampName = "update-check.json"
 
@@ -42,8 +42,11 @@ type updateTracker struct {
 func newUpdateTracker(cfg *config.Config) *updateTracker {
 	t := &updateTracker{}
 	t.checker = &updatecheck.Checker{Current: updateVersion(), URL: updateFeedURL(cfg)}
-	if dir, err := config.Dir(); err == nil {
+	if dir, err := config.StateDir(); err == nil {
 		t.checker.StampPath = filepath.Join(dir, updateStampName)
+		if oldDir, err := config.Dir(); err == nil {
+			_ = config.MoveLegacyFile(filepath.Join(oldDir, updateStampName), t.checker.StampPath)
+		}
 	}
 	t.st.Current = t.checker.Current
 	t.st.Feed = t.checker.URL

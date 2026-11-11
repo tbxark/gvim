@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/config"
 )
 
 const (
@@ -100,7 +102,11 @@ func TestPluginManagerDisableAndEnable(t *testing.T) {
 	s := newManagerSession(t)
 	s.choosePluginAction("hello", "Disable", 1) // Reload, Disable
 	s.waitStatus("hello", "disabled")
-	state := filepath.Join(pluginConfigDir(), "plugin-state.json")
+	stateDir, err := config.StateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(stateDir, "plugin-state.json")
 	s.until("plugin-state.json", func() bool {
 		data, err := os.ReadFile(state)
 		return err == nil && strings.Contains(string(data), "hello")

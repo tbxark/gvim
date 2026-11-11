@@ -324,21 +324,21 @@ func TestOpenReportsASaveFailureAndStillTrusts(t *testing.T) {
 	}
 }
 
-// TestDefaultStoreIsInTheConfigDir checks the default location: gvim's config
-// directory, which is where the recent list and the plugins live, not a file
-// inside a project (a repository must not be able to vouch for itself).
-func TestDefaultStoreIsInTheConfigDir(t *testing.T) {
+// TestDefaultStoreIsInTheStateDir keeps trust global rather than project-owned.
+func TestDefaultStoreIsInTheStateDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("AppData", home)
 
 	store, err := DefaultStore()
 	if err != nil {
 		t.Fatalf("DefaultStore error = %v", err)
 	}
-	dir, err := config.Dir()
+	dir, err := config.StateDir()
 	if err != nil {
-		t.Fatalf("config.Dir error = %v", err)
+		t.Fatalf("config.StateDir error = %v", err)
 	}
 	want := filepath.Join(dir, "trust.json")
 	if got := store.Path(); got != want {

@@ -41,6 +41,10 @@ func (o *agentPickerOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 func (o *agentPickerOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
 func (o *agentPickerOverlay) Active() bool      { return o.p.Active() }
 
+// ExclusiveOverlay marks the picker as a transient interaction. See
+// overlay.Exclusive.
+func (*agentPickerOverlay) ExclusiveOverlay() {}
+
 // agentPickMsg carries the chosen agent name, and agentRankMsg a ranking result
 // back to the picker that asked for it.
 type (
@@ -169,6 +173,10 @@ func (o *agentActionPickerOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 
 func (o *agentActionPickerOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
 func (o *agentActionPickerOverlay) Active() bool      { return o.p.Active() }
+
+// ExclusiveOverlay marks the picker as a transient interaction. See
+// overlay.Exclusive.
+func (*agentActionPickerOverlay) ExclusiveOverlay() {}
 
 // openAgentActionPicker asks the Run Agent dialog's second question for the
 // configured agent name, starting from the workspace root.

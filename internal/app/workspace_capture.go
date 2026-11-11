@@ -254,7 +254,7 @@ func (m *workspaceManager) runWriter(w *captureWriter) {
 			continue
 		}
 		err := write(c.sess, c.snap)
-		if err == nil {
+		if err == nil && c.sess.rt.sessionDir != "" {
 			// Registry disk work stays off the UI goroutine; the registry is
 			// concurrency-safe and this is the newest written layout of the workspace.
 			layout := c.snap.layout

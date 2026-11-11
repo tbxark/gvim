@@ -27,6 +27,10 @@ func (o *bookmarksOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 func (o *bookmarksOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
 func (o *bookmarksOverlay) Active() bool      { return o.p.Active() }
 
+// ExclusiveOverlay marks the picker as a transient interaction. See
+// overlay.Exclusive.
+func (*bookmarksOverlay) ExclusiveOverlay() {}
+
 type (
 	bookmarkPickMsg struct{ slot string }
 	bookmarkRankMsg struct {

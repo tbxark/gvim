@@ -71,7 +71,7 @@ loads the config, passes it to the TUI through `tui.Deps.Trust` (see
 `internal/tui/trust_state.go`), and gates the config layer on it.
 
 **Store path and format.** gvim keeps *one* store file,
-`<config.Dir()>/trust.json`:
+`<config.StateDir()>/trust.json`:
 
 ~~~json
 {
@@ -83,9 +83,15 @@ loads the config, passes it to the TUI through `tui.Deps.Trust` (see
 }
 ~~~
 
-`config.Dir()` is gvim's user config directory: `$XDG_CONFIG_HOME/gvim` or
-`~/.config/gvim` on Unix (macOS included), and `os.UserConfigDir()/gvim` on Windows.
-It is where `config.json`, the recent list and the plugins live. Keys are workspace roots
+`config.StateDir()` is gvim's per-user state directory: `$XDG_STATE_HOME/gvim` or
+`~/.local/state/gvim` on Unix (macOS included), and `os.UserConfigDir()/gvim/state` on Windows.
+It holds the files gvim writes for itself (this store, the recent list, the plugin toggles and
+the update stamp), never the configuration: `config.Dir()` keeps what the user writes
+(`config.json`, `init.lua`, `plugins`, `themes`). A store left in the config directory by an
+older build is moved there once; when the move fails the store keeps reading and writing the
+legacy file in place (the next launch retries the move), so a recorded decision is never lost.
+The store stays a per-user file and is never written inside a workspace, because a repository
+must not be able to vouch for itself. Keys are workspace roots
 made canonical with `filepath.EvalSymlinks`, so a symlinked spelling and its target share
 a decision. The store is written through `atomicfile` (temp file, sync, rename), so a
 half-written file is never read; the directory is created on the first write. A missing

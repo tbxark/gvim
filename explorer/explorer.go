@@ -547,6 +547,7 @@ func (t *Tree) expand(n *node) error {
 		}
 	}
 	n.expanded = true
+	t.dirty = true
 	return nil
 }
 

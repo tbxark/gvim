@@ -111,11 +111,6 @@ func Run(ctx context.Context, opts Options) error {
 		defer func() { _ = in.Close() }()
 		stdinInput = in
 	}
-	if opts.SessionDir == "" {
-		if dir, err := restore.DefaultSessionDir(); err == nil {
-			opts.SessionDir = dir
-		}
-	}
 	var srv *daemon.Server
 	if serveDaemon {
 		// The daemon's one shared plugin runtime and host mux: every local workspace model
@@ -453,6 +448,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		return nil, err
 	}
 	printDiagnostics(os.Stderr, diags)
+	if !cfg.SaveSession {
+		opts.SessionDir = ""
+	} else if opts.SessionDir == "" && opts.Remote == nil && opts.Daemon == nil {
+		opts.SessionDir = filepath.Join(root, ".gvim", "session")
+	}
 	// The SSH policy is config-derived: strict known_hosts, the safe host-key algorithm
 	// order and no keyring use unless the user opted in (authority_app.go).
 	opts.SSHSecurity = sshSecurityFromConfig(cfg.SSH)
@@ -574,8 +574,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// URL themes are fetched at startup only (the bounded request runs before the
 	// program exists, never in Update): the registry reads the app-written cache for
 	// runtime theme switches, so the Settings path never waits on the network.
-	if dir, err := config.Dir(); err == nil {
-		themeReg.SetURLCacheDir(theme.URLCacheDir(dir))
+	if dir, err := themeURLCacheDir(); err == nil {
+		themeReg.SetURLCacheDir(dir)
 	}
 	themeCat := newThemeCatalog(themeReg)
 	th, themeRef, themeWarn, err := runTheme(ctx, opts.Theme, cfg, themeReg)
@@ -772,6 +772,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// (a trust revoke must not leave their old AutoStart configs running new
 		// servers); manual StartLanguage/Restart still goes through lspGate.
 		setter.SetAutoStartGate(trustedLive)
+		// Keep the configured plan in managers; the live gate decides when it may run.
+		if configSetter, ok := deps.LSP.(lspConfigSetter); ok {
+			configSetter.SetConfig(cfg)
+		}
 	}
 	// A remote launch routes the language servers through the authority (LSP over SSH,
 	// docs/authority.md §7) once the slot exists, below. Until then the port is built as
@@ -917,6 +921,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// recover abandoned copies now that the remote file access is installed, so the
 		// recorded remote paths reopen through the authority. It is a deliberate local
 		// staging divergence from Fresh, whose recovery routes through the authority.
+		// Remote workspaces stage their session under the local cache keyed by the
+		// remote target; the remote project path is never used as a local path.
 		recoverySession := remoteRecoverySessionDir(opts.Remote)
 		if deferRemoteRestore {
 			recoverySession = opts.SessionDir
@@ -1091,12 +1097,29 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.SettingsPort = settingsSvc
 	lspBase = newLSPBaselineUpdater(ctx, deps.LSP, settingsSvc.currentConfig(), trust.State{Level: levelOf()})
 	settingsSvc.lspBase = lspBase
+	if setter, ok := deps.LSP.(interface{ SetBaselineWait(func()) }); ok && lspBase != nil {
+		setter.SetBaselineWait(lspBase.Wait)
+	}
 
 	// A live trust change (revoke/restore) re-gates the LSP baseline at once, so a
 	// revoke cannot leave an auto-starting configuration behind even without a
 	// Settings reload. The updater keeps the latest settings config; a stale reload
 	// snapshot cannot overwrite a newer baseline. Manual Start/Restart remains available.
 	if trustCtl != nil {
+		if opts.Remote == nil && lspBase != nil {
+			trustCtl.prepareTrust = func(state trust.State) error {
+				cfg, err := settingsSvc.loadTrustedLSP(state.Root)
+				if err != nil {
+					return err
+				}
+				lspBase.UpdateConfig(cfg, state)
+				lspBase.Wait()
+				if refresher, ok := deps.LSP.(interface{ RefreshServerPlans() }); ok {
+					refresher.RefreshServerPlans()
+				}
+				return nil
+			}
+		}
 		trustCtl.SetChangeListener(func(state trust.State) {
 			// A manual start performed while Trusted must not survive as a forced
 			// automatic=false bypass after a revoke. Clear it before any new manager or

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tbxark/gvim/config"
 )
 
 // isolateConfig points the user config dir at a fresh temporary home on every
@@ -16,6 +18,7 @@ func isolateConfig(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("AppData", home)
 	return home
 }
@@ -218,7 +221,7 @@ func TestSwitchRejectsFileWithoutRecording(t *testing.T) {
 	}
 }
 
-func TestRecentFileLivesInUserConfigDir(t *testing.T) {
+func TestRecentFileLivesInUserStateDir(t *testing.T) {
 	isolateConfig(t)
 	dir := t.TempDir()
 	if _, err := Switch(dir); err != nil {
@@ -227,6 +230,14 @@ func TestRecentFileLivesInUserConfigDir(t *testing.T) {
 	path, err := recentPath()
 	if err != nil {
 		t.Fatal(err)
+	}
+	stateDir, err := config.StateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(stateDir, "recent.json")
+	if path != want {
+		t.Fatalf("recent path = %q, want %q", path, want)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -274,6 +285,7 @@ func TestSwitchReturnsValidRootWhenRecordFails(t *testing.T) {
 	}
 	t.Setenv("HOME", blocker)
 	t.Setenv("XDG_CONFIG_HOME", blocker)
+	t.Setenv("XDG_STATE_HOME", blocker)
 	t.Setenv("AppData", blocker)
 
 	dir := t.TempDir()

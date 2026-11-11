@@ -34,6 +34,11 @@ var (
 	_ overlay.Caret   = (*Bar)(nil)
 )
 
+// ExclusiveOverlay marks the find bar as a transient interaction: opening it closes
+// the other exclusive overlays (the palette, the browser, a picker list). See
+// overlay.Exclusive.
+func (*Bar) ExclusiveOverlay() {}
+
 // Labels of the bar. The search and replace prompts are the legacy texts.
 const (
 	searchLabel  = "Search:"

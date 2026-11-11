@@ -78,7 +78,7 @@ func TestBuildRuntimeRestorePreviousSessionOffKeepsTheUnsavedText(t *testing.T) 
 	opts := Options{
 		Root:       root,
 		SessionDir: sessDir,
-		Config:     userConfigFile(t, `{"editor":{"restore_previous_session":false}}`),
+		Config:     userConfigFile(t, `{"editor":{"save_session":true,"restore_previous_session":false}}`),
 	}
 	rt := launchRuntime(t, opts)
 
@@ -91,7 +91,7 @@ func TestBuildRuntimeRestorePreviousSessionOffKeepsTheUnsavedText(t *testing.T) 
 	}
 	// The directory argument still opens the tree, but the saved tree settings
 	// are part of the layout, so they are not restored.
-	if st := rt.model.ExplorerState(); st.ShowHidden || st.ShowIgnored {
+	if st := rt.model.ExplorerState(); !st.ShowHidden || st.ShowIgnored {
 		t.Errorf("explorer settings = %+v, want the layout's settings skipped", st)
 	}
 	if rt.sessionDir != sessDir {
@@ -144,7 +144,7 @@ func TestBuildRuntimeWithFilesRestoresWhenTheSkipKeyIsOff(t *testing.T) {
 		Root:       root,
 		SessionDir: sessDir,
 		Files:      []FileTarget{{Path: given}},
-		Config:     userConfigFile(t, `{"editor":{"skip_session_restore_when_files_passed":false}}`),
+		Config:     userConfigFile(t, `{"editor":{"save_session":true,"skip_session_restore_when_files_passed":false}}`),
 	}
 	rt := launchRuntime(t, opts)
 
@@ -199,7 +199,7 @@ func TestBuildRuntimeRestoreFlagForcesTheSession(t *testing.T) {
 		SessionDir: sessDir,
 		Files:      []FileTarget{{Path: saved, Line: 2}},
 		Restore:    true,
-		Config:     userConfigFile(t, `{"editor":{"restore_previous_session":false}}`),
+		Config:     userConfigFile(t, `{"editor":{"save_session":true,"restore_previous_session":false}}`),
 	}
 	rt := launchRuntime(t, opts)
 
@@ -274,7 +274,7 @@ func TestHotExitQuitBehavior(t *testing.T) {
 		files    bool // a file launch: the session is not saved, so no hot exit
 		wantQuit bool
 	}{
-		{name: "session launch with hot exit quits at once", hotExit: true, wantQuit: true},
+		{name: "session launch asks even with hot exit", hotExit: true, wantQuit: false},
 		{name: "session launch with hot exit off asks", hotExit: false, wantQuit: false},
 		{name: "a file launch keeps the prompt even with hot exit on", hotExit: true, files: true, wantQuit: false},
 	}
@@ -288,7 +288,7 @@ func TestHotExitQuitBehavior(t *testing.T) {
 				Root:       root,
 				SessionDir: filepath.Join(root, "session"),
 				Keymap:     "default",
-				Config:     userConfigFile(t, fmt.Sprintf(`{"editor":{"hot_exit":%v}}`, tt.hotExit)),
+				Config:     userConfigFile(t, fmt.Sprintf(`{"editor":{"save_session":true,"hot_exit":%v}}`, tt.hotExit)),
 			}
 			if tt.files {
 				opts.Files = []FileTarget{{Path: file}}
@@ -337,7 +337,7 @@ func TestHotExitEditorKeepsTheAdapterPorts(t *testing.T) {
 		Root:       root,
 		SessionDir: filepath.Join(root, "session"),
 		Keymap:     "default",
-		Config:     userConfigFile(t, `{"editor":{"hot_exit":true}}`),
+		Config:     userConfigFile(t, `{"editor":{"save_session":true,"hot_exit":true}}`),
 	}
 	got, err := buildCaptured(t, opts)
 	if err != nil {

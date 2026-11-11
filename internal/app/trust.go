@@ -19,9 +19,12 @@ var newTrustStore = trust.DefaultStore
 // update goroutine reads the state; the commands that write the store run off
 // it, so the two sides take a lock.
 type trustController struct {
-	mu    sync.Mutex
-	store *trust.Store
-	state trust.State
+	prepareMu    sync.Mutex
+	transition   uint64
+	prepareTrust func(trust.State) error
+	mu           sync.Mutex
+	store        *trust.Store
+	state        trust.State
 	// recordKey, when set, is the explicit store key of a non-filesystem workspace (a
 	// remote target). Decide writes the record key instead of canonicalizing a root.
 	recordKey string
@@ -96,6 +99,33 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 		c.mu.Unlock()
 		return state, fmt.Errorf("trust: invalid level %q", string(level))
 	}
+	c.transition++
+	seq := c.transition
+	if level == trust.Trusted && c.state.Level != trust.Trusted && c.prepareTrust != nil {
+		state, prepare := c.state, c.prepareTrust
+		c.mu.Unlock()
+		c.prepareMu.Lock()
+		c.mu.Lock()
+		if c.transition != seq {
+			state = c.state
+			c.mu.Unlock()
+			c.prepareMu.Unlock()
+			return state, fmt.Errorf("trust decision superseded")
+		}
+		c.mu.Unlock()
+		err := prepare(state)
+		c.prepareMu.Unlock()
+		c.mu.Lock()
+		if c.transition != seq {
+			state = c.state
+			c.mu.Unlock()
+			return state, fmt.Errorf("trust decision superseded")
+		}
+		if err != nil {
+			c.mu.Unlock()
+			return state, err
+		}
+	}
 	var err error
 	if c.recordKey != "" {
 		err = c.store.SetRecord(c.recordKey, level)
@@ -115,6 +145,7 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 // level. It keeps the current state when the load fails.
 func (c *trustController) Load(root string) (trust.State, error) {
 	c.mu.Lock()
+	c.transition++
 	state, err := c.store.Open(root)
 	if state.Root != "" {
 		c.state = state

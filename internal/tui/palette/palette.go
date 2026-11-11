@@ -44,6 +44,11 @@ import (
 // The palette is an overlay of the root's stack.
 var _ overlay.Overlay = (*Palette)(nil)
 
+// ExclusiveOverlay marks the palette as a transient interaction: opening it closes
+// the other exclusive overlays (the find bar, the browser, a picker list). See
+// overlay.Exclusive.
+func (*Palette) ExclusiveOverlay() {}
+
 const (
 	// fileLimit is how many matches the file mode asks the Ranker for. It is
 	// finder.MaxResults; ui may not import finder, so the value is repeated here.

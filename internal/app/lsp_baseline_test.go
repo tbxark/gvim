@@ -100,6 +100,32 @@ func TestLSPBaselineLatestConfigWinsOverStaleTrustCallback(t *testing.T) {
 	}
 }
 
+func TestLSPBaselineWaitBlocksUntilPendingConfigApplied(t *testing.T) {
+	fake := &fakeLSPConfigSetter{started: make(chan struct{}), release: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := newLSPBaselineUpdater(ctx, fake, config.Defaults(), trust.State{Level: trust.Restricted})
+	b.UpdateTrust(trust.State{Level: trust.Trusted})
+	select {
+	case <-fake.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("baseline apply did not start")
+	}
+	done := make(chan struct{})
+	go func() { b.Wait(); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("wait returned before the baseline was applied")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(fake.release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("wait did not return after the baseline was applied")
+	}
+}
+
 // TestLSPBaselineUpdateDoesNotBlockCaller checks UI non-blocking: with SetConfig stalled,
 // UpdateConfig/UpdateTrust return promptly because only the worker applies.
 func TestLSPBaselineUpdateDoesNotBlockCaller(t *testing.T) {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -26,6 +27,7 @@ type tabFake struct {
 	untitled bool // the active document has no path
 	exists   bool // Save As finds the target already on disk
 	quit     bool
+	saveErr  error
 }
 
 func newTabFake(names ...string) *tabFake {
@@ -66,6 +68,9 @@ func (f *tabFake) Do(a editor.Action, args map[string]any) editor.Result {
 	f.args = append(f.args, args)
 	switch a {
 	case "save":
+		if f.saveErr != nil {
+			return editor.Result{Err: f.saveErr}
+		}
 		if f.untitled {
 			return editor.Result{Err: editor.ErrNoPath}
 		}
@@ -267,28 +272,72 @@ func TestForcedCloseGoesToTheEditor(t *testing.T) {
 	}
 }
 
-func TestQuitAsksEachDirtyTabInOrderThenQuits(t *testing.T) {
-	tf := newTabFake("a.txt", "b.txt")
-	tf.dirty = []bool{true, true}
-	d := &fakeDialogs{}
-	m := shellModel(t, tf, d)
+func TestQuitConfirmsAllDirtyTabsOnce(t *testing.T) {
+	for _, choice := range []dialog.Choice{dialog.ChoiceSave, dialog.ChoiceDiscard, dialog.ChoiceCancel} {
+		t.Run(fmt.Sprint(choice), func(t *testing.T) {
+			tf := newTabFake("a.txt", "b.txt", "clean.txt")
+			tf.dirty = []bool{true, true, false}
+			tf.sync()
+			d := &fakeDialogs{}
+			m := shellModel(t, tf, d)
+			if cmd := m.dispatch(Command{Action: "quit"}); cmd != nil || tf.quit {
+				t.Fatal("quit before confirmation")
+			}
+			if got := d.last(t); got.kind != "unsaved" || got.text != "2 modified files" {
+				t.Fatalf("dialog = %+v", got)
+			}
+			msgs := runCmd(answer(m, d, choice, ""))
+			if len(d.opened) != 1 {
+				t.Fatalf("opened %d dialogs", len(d.opened))
+			}
+			if choice == dialog.ChoiceCancel {
+				if quitted(msgs) || len(tf.closed) != 0 || !tf.dirty[0] || !tf.dirty[1] {
+					t.Fatal("cancel changed files or quit")
+				}
+				return
+			}
+			if !quitted(msgs) {
+				t.Fatalf("no quit: %v", msgs)
+			}
+			if choice == dialog.ChoiceSave && (tf.dirty[0] || tf.dirty[1]) {
+				t.Fatal("dirty files not saved")
+			}
+			if choice == dialog.ChoiceDiscard && (len(tf.closed) != 2 || len(tf.names) != 1) {
+				t.Fatalf("discard left files: %v", tf.names)
+			}
+		})
+	}
+}
 
-	cmd := m.dispatch(Command{Action: "quit"})
-	if cmd != nil || tf.quit {
-		t.Fatalf("quit with dirty tabs returned %v and quit=%v", cmd, tf.quit)
-	}
-	if got := d.last(t); got.text != "a.txt" {
-		t.Fatalf("first dialog = %+v, want a.txt", got)
-	}
-	// Save writes a.txt, and the loop asks about b.txt next.
-	drain(t, m, answer(m, d, dialog.ChoiceSave, ""))
-	if got := d.last(t); got.text != "b.txt" {
-		t.Fatalf("second dialog = %+v, want b.txt", got)
-	}
-	// Cancel stops the quit.
-	drain(t, m, answer(m, d, dialog.ChoiceCancel, ""))
-	if tf.quit {
-		t.Fatal("cancel quit the editor")
+func TestQuitSaveFailureAndSaveAsCancelStopQuit(t *testing.T) {
+	for _, untitled := range []bool{false, true} {
+		t.Run(fmt.Sprint(untitled), func(t *testing.T) {
+			tf := newTabFake("Untitled-1", "b.txt")
+			tf.dirty = []bool{true, true}
+			tf.untitled = untitled
+			tf.sync()
+			if !untitled {
+				tf.saveErr = errors.New("write failed")
+			}
+			d := &fakeDialogs{}
+			m := shellModel(t, tf, d)
+			m.dispatch(Command{Action: "quit"})
+			if got := d.last(t).text; got != "2 modified files" {
+				t.Fatalf("count = %q", got)
+			}
+			msgs := runCmd(answer(m, d, dialog.ChoiceSave, ""))
+			if untitled {
+				if d.last(t).kind != "saveas" {
+					t.Fatal("missing Save As")
+				}
+				msgs = runCmd(answer(m, d, dialog.ChoiceCancel, ""))
+			} else if m.notice != "write failed" {
+				t.Fatalf("notice = %q", m.notice)
+			}
+			if quitted(msgs) || tf.quit || !tf.dirty[0] || !tf.dirty[1] {
+				t.Fatal("quit or lost unsaved changes")
+			}
+		})
 	}
 }
 
@@ -307,6 +356,7 @@ func TestQuitWithoutDirtyTabsQuitsAtOnce(t *testing.T) {
 func TestDiscardOnLastDirtyTabQuits(t *testing.T) {
 	tf := newTabFake("a.txt")
 	tf.dirty[0] = true
+	tf.sync()
 	d := &fakeDialogs{}
 	m := shellModel(t, tf, d)
 	m.dispatch(Command{Action: "quit"})

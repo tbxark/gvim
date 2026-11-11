@@ -458,7 +458,11 @@ are only the starting height.
 
 The file explorer honours Fresh's `file_explorer` options (verified against
 `refs/fresh/crates/fresh-editor-core/src/config.rs` and
-`refs/fresh/docs/features/file-explorer.md`). gvim's config defaults are Fresh's.
+`refs/fresh/docs/features/file-explorer.md`). gvim's config defaults are Fresh's,
+except `file_explorer.show_hidden`: gvim shows dot-entries by default (a developer
+tool, where `.env` and `.github` are everyday entries). `explorer_show_hidden`
+turns it off, and `editor.save_session` off (the default) means the choice always
+comes from the config rather than from a restored session.
 
 | Key | Default | gvim |
 |---|---|---|

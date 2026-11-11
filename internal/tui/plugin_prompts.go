@@ -195,6 +195,10 @@ func (o *pluginLineOverlay) Draw(g *grid.Grid) {
 }
 func (o *pluginLineOverlay) Active() bool { return !o.closed && o.l.Active() }
 
+// AlertOverlay marks the plugin prompt as an alert: the plugin waits for the answer,
+// so a transient overlay opened meanwhile goes under it. See overlay.Alert.
+func (*pluginLineOverlay) AlertOverlay() {}
+
 // UsesPromptRow marks the overlay as a prompt on the bottom row, so the root reserves
 // that row for it while it is open.
 func (o *pluginLineOverlay) UsesPromptRow() {}
@@ -235,6 +239,10 @@ func (o *pluginConfirmOverlay) Draw(g *grid.Grid) {
 	}
 }
 func (o *pluginConfirmOverlay) Active() bool { return !o.closed && o.c.Active() }
+
+// AlertOverlay marks the plugin confirm as an alert: the plugin waits for the
+// answer. See overlay.Alert.
+func (*pluginConfirmOverlay) AlertOverlay() {}
 
 // UsesPromptRow marks the overlay as a prompt on the bottom row, so the root reserves
 // that row for it while it is open.
@@ -336,6 +344,10 @@ func (o *pluginPopupOverlay) Draw(g *grid.Grid) {
 }
 func (o *pluginPopupOverlay) Active() bool { return !o.closed && o.p.Active() }
 func (o *pluginPopupOverlay) Dismiss()     { o.dismissed(prompt.Done{Tag: pluginPopupTag{tok: o.tok}}) }
+
+// AlertOverlay marks the plugin popup as an alert: the plugin waits for the choice.
+// See overlay.Alert.
+func (*pluginPopupOverlay) AlertOverlay() {}
 
 // ---- the stack
 

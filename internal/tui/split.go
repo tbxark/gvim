@@ -573,7 +573,7 @@ func (m *Model) paintStickyScroll(g *grid.Grid, p splitPane, doc Document) {
 	}
 	text := doc.Line(stickyLine)
 	lineNum := fmt.Sprintf("%4d │ ", stickyLine+1)
-	cell := style.Cell(m.styles.TabActive)
+	cell := style.Cell(m.styles.Sticky)
 	cell.Italic = true
 	g.Fill(p.X, p.X+p.W, p.Y, cell)
 	g.Put(p.X, p.Y, p.W, lineNum+text, cell)

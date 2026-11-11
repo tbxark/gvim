@@ -340,9 +340,11 @@ func (m *workspaceManager) notifyOnUI(err error) {
 // workspaceOptions is the build options of one workspace: its root, no launch files, and
 // its own session directory (layout, stashes, terminal record).
 func (m *workspaceManager) workspaceOptions(ws daemon.Workspace) (Options, error) {
-	dir, err := m.reg.SessionDir(ws.File.StableID)
-	if err != nil {
-		return Options{}, err
+	// Workspace sessions live in the daemon registry (user cache) unless the
+	// project config enables saving them; the project root is never touched.
+	dir := ""
+	if d, derr := m.workspaceSessionDir(ws.File.StableID); derr == nil {
+		dir = d
 	}
 	opts := m.opts
 	opts.Root = ws.File.Root
@@ -376,6 +378,25 @@ func (m *workspaceManager) workspaceOptions(ws daemon.Workspace) (Options, error
 
 // buildWorkspace builds a dormant workspace's runtime. It runs off the UI goroutine: file
 // loads, plugin setup and process start belong to the new runtime, not to the active one.
+func (m *workspaceManager) workspaceSessionDir(id string) (string, error) {
+	ws, ok, err := m.reg.Get(id)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", errors.New("workspace session storage is unavailable")
+	}
+	_, state, _ := openTrust(ws.File.Root)
+	cfg, _, err := config.Load(config.Options{Root: ws.File.Root, UserFile: m.opts.Config, Untrusted: !state.AllowsProjectConfig()})
+	if err != nil {
+		return "", err
+	}
+	if !cfg.SaveSession {
+		return "", errors.New("workspace session saving is disabled")
+	}
+	return m.reg.SessionDir(id)
+}
+
 func (m *workspaceManager) buildWorkspace(ctx context.Context, id string) (*workspaceSession, error) {
 	ws, ok, err := m.reg.Get(id)
 	if err != nil {
@@ -400,6 +421,7 @@ func (m *workspaceManager) buildWorkspace(ctx context.Context, id string) (*work
 	rt.model.SetWorkspacePort(m)
 	rt.model.SetWorkspaceLabel(ws.File.Label)
 	rt.model.AddWorkspaceCommands()
+	restoreRegistryLayout(rt, ws)
 	return &workspaceSession{ws: ws, rt: rt}, nil
 }
 
@@ -778,6 +800,14 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 			m.pendingID = ""
 		}
 		m.mu.Unlock()
+		if sess != nil && sess.rt.sessionDir == "" {
+			for _, tab := range sess.rt.ed.Tabs() {
+				if tab.Modified {
+					prepareErr = fmt.Errorf("workspace %q has unsaved changes; save or discard them before closing", sess.ws.File.Label)
+					return
+				}
+			}
+		}
 		if id == active && next == "" {
 			prepareErr = errors.New("workspace: cannot close the last workspace")
 			return
@@ -1122,12 +1152,14 @@ func (m *workspaceManager) dormantOwner(canonical string) (string, workspacePosi
 		if materialized {
 			continue
 		}
+		dir, derr := m.workspaceSessionDir(e.File.StableID)
+		if derr != nil {
+			continue
+		}
 		layout := e.File.Layout
 		if layout == nil {
-			if dir, derr := m.reg.SessionDir(e.File.StableID); derr == nil {
-				if sess, ok, err := session.Load(dir); err == nil && ok {
-					layout = &sess
-				}
+			if sess, ok, err := session.Load(dir); err == nil && ok {
+				layout = &sess
 			}
 		}
 		if layout == nil {

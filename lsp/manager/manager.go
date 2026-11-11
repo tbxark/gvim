@@ -856,6 +856,18 @@ func (m *Manager) AllHandles() []*Handle {
 	return slices.Clone(m.handles)
 }
 
+// UpdateServerPlan replaces the plan used for future automatic starts without stopping
+// running servers or changing explicit user mutes and starts.
+func (m *Manager) UpdateServerPlan(servers map[string][]ServerConfig, universal []ServerConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.servers = make(map[string][]ServerConfig, len(servers))
+	for lang, configs := range servers {
+		m.servers[lang] = slices.Clone(configs)
+	}
+	m.universal = slices.Clone(universal)
+}
+
 // CurrentServers returns a copy of the configured servers for language.
 func (m *Manager) CurrentServers(language string) []ServerConfig {
 	m.mu.Lock()

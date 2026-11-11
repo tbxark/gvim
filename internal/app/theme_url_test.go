@@ -38,7 +38,7 @@ func countingThemeServer(t *testing.T, body string) (*httptest.Server, *atomic.I
 // urlThemeCacheDir is the cache directory a launch with the isolated config uses.
 func urlThemeCacheDir(t *testing.T) string {
 	t.Helper()
-	dir, err := config.Dir()
+	dir, err := config.CacheDir()
 	if err != nil {
 		t.Fatal(err)
 	}

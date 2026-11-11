@@ -130,6 +130,9 @@ func (m *workspaceManager) evictToCap() {
 // (it became active, or the capture and the fallback save both failed) and err explains why.
 func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept bool, err error) {
 	label := sess.ws.File.Label
+	if sess.rt.sessionDir == "" {
+		return true, fmt.Errorf("cannot evict workspace %q: session saving is disabled; the workspace stays open", label)
+	}
 	// Snapshot on the UI goroutine (it reads the editor state); the write itself runs in the
 	// session's ordered capture writer, off the UI.
 	var job *saveJob

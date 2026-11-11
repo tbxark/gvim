@@ -694,6 +694,7 @@
   "gvim.settings.field.contents.rows": "rows",
   "gvim.settings.section.contents": "Contents",
   "gvim.settings.field.editor.hot_exit": "hot_exit",
+  "gvim.settings.field.editor.save_session": "save_session",
   "gvim.settings.section.session": "Session",
   "gvim.settings.field.editor.restore_previous_session": "restore_previous_session",
   "gvim.settings.field.editor.auto_save_enabled": "auto_save_enabled",

@@ -32,7 +32,7 @@ func liveRestoreConfig(t *testing.T, restoreLive, resumeAgents bool) string {
 	}
 	flags := "\"restore_live\":" + strconv.FormatBool(restoreLive) + ",\"resume_agents\":" + strconv.FormatBool(resumeAgents)
 	cfg := filepath.Join(dir, "config.json")
-	body = "{\"terminal\":{\"shell\":{\"command\":\"" + script + "\"}, " + flags + "},\"lsp_enabled\":false}"
+	body = "{\"editor\":{\"save_session\":true},\"terminal\":{\"shell\":{\"command\":\"" + script + "\"}, " + flags + "},\"lsp_enabled\":false}"
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -3732,10 +3732,15 @@ func (m *Model) overlayInput(msg tea.Msg) bool {
 }
 
 // pushOverlay puts o on top of the stack, so it gets the input next. An overlay
-// that is already inactive is not pushed.
+// that is already inactive is not pushed. An exclusive transient overlay first
+// closes the exclusive overlays below it, and an alert keeps the input: the new
+// overlay goes under it (see placeOverlay). The stackable layers, such as a dialog
+// or a prompt that needs an answer, stay in place.
 func (m *Model) pushOverlay(o Overlay) {
 	if o != nil && o.Active() {
-		m.overlays = append(m.overlays, o)
+		if !m.placeOverlay(o) && o.Active() {
+			m.overlays = append(m.overlays, o)
+		}
 	}
 }
 
@@ -4036,32 +4041,53 @@ func (m *Model) requestClose(index int) tea.Cmd {
 	return nil
 }
 
-// quitLoop quits when no tab has unsaved edits. Otherwise it activates the
-// first dirty tab and asks about it. The dialog's answer comes back through
-// dialogDone, which runs the loop again. Cancel stops it.
+// quitLoop asks once about all modified tabs, including those retained by hot exit.
 func (m *Model) quitLoop() tea.Cmd {
-	t := m.tabPort()
-	if t == nil {
+	if m.tabPort() == nil {
 		return m.quit()
 	}
-	dirty := t.Quit(false)
-	if len(dirty) == 0 {
+	count := 0
+	if p, ok := m.workspace.(workspaceQuitPort); ok {
+		count = p.QuitDirtyCount()
+	} else {
+		for _, tab := range m.ed.Tabs() {
+			if tab.Modified {
+				count++
+			}
+		}
+	}
+	if count == 0 {
 		return m.quit()
 	}
-	// A tab stays modified until the results of its write are applied, so the question
-	// would be stale by the time the write ends. Wait for the write instead, and ask
-	// then if the tab is still modified. A second quit asks at once, for a write that
-	// does not end.
 	if len(m.large.saves) > 0 && !m.large.quitAfterSave {
 		m.large.quitAfterSave = true
 		m.notice = "Quit when the save has finished"
 		return nil
 	}
-	d := dirty[0]
-	t.ActivateTab(d.Index)
-	m.syncViewport()
-	m.askUnsaved(flow{then: nextQuit, index: d.Index}, d.Name)
+	m.askUnsaved(flow{then: nextQuit}, fmt.Sprintf("%d modified files", count))
 	return nil
+}
+
+// saveQuitNext saves each remaining modified tab without asking again.
+func (m *Model) saveQuitNext() tea.Cmd {
+	t := m.tabPort()
+	if t == nil {
+		return nil
+	}
+	for i, tab := range m.ed.Tabs() {
+		if !tab.Modified {
+			continue
+		}
+		t.ActivateTab(i)
+		m.syncViewport()
+		f := flow{then: nextQuit, index: i}
+		if !hasPath(m.ed.Active()) {
+			m.askSaveAs(f)
+			return nil
+		}
+		return m.saveThen(f)
+	}
+	return m.quit()
 }
 
 // askUnsaved opens the unsaved-changes dialog for the tab called name.
@@ -4120,20 +4146,43 @@ func (m *Model) unsavedAnswer(f flow, c dialog.Choice) tea.Cmd {
 	}
 	switch c {
 	case dialog.ChoiceSave:
+		if f.then == nextQuit {
+			if _, ok := m.workspace.(workspaceQuitPort); ok {
+				return workspaceQuitNextCmd()
+			}
+			return m.saveQuitNext()
+		}
 		if !hasPath(m.ed.Active()) {
 			m.askSaveAs(f)
 			return nil
 		}
 		return m.saveThen(f)
 	case dialog.ChoiceDiscard:
+		if f.then == nextQuit {
+			if p, ok := m.workspace.(workspaceQuitPort); ok {
+				if err := p.QuitDiscardAll(); err != nil {
+					m.notice = err.Error()
+					return nil
+				}
+				return m.quit()
+			}
+			tabs := m.ed.Tabs()
+			for i := len(tabs) - 1; i >= 0; i-- {
+				if tabs[i].Modified {
+					if err := m.closeTab(t, i, true); err != nil {
+						m.notice = err.Error()
+						return nil
+					}
+				}
+			}
+			m.syncViewport()
+			return m.quit()
+		}
 		if err := m.closeTab(t, f.index, true); err != nil {
 			m.notice = err.Error()
 			return nil
 		}
 		m.syncViewport()
-		if f.then == nextQuit {
-			return m.quitLoop()
-		}
 	}
 	return nil
 }
@@ -4150,7 +4199,10 @@ func (m *Model) afterSave(f flow) tea.Cmd {
 			m.syncViewport()
 		}
 	case nextQuit:
-		return m.quitLoop()
+		if _, ok := m.workspace.(workspaceQuitPort); ok {
+			return workspaceQuitNextCmd()
+		}
+		return m.saveQuitNext()
 	}
 	return nil
 }

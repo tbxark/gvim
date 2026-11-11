@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/session"
 )
 
@@ -92,8 +93,10 @@ type Registry struct {
 	mu sync.Mutex
 }
 
-// WorkspaceDir returns the workspace directory: <user data dir>/gvim/workspaces, mode
-// 0700. It creates the directory.
+// WorkspaceDir returns the workspace directory: <state dir>/workspaces, mode 0700. It
+// creates the directory. The registry and the per-workspace sessions are runtime state,
+// so they live beside the recent list and the trust store, never in the config
+// directory. GVIM_WORKSPACE_DIR overrides the location (the tests use it).
 func WorkspaceDir() (string, error) {
 	if dir := os.Getenv("GVIM_WORKSPACE_DIR"); dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -101,11 +104,11 @@ func WorkspaceDir() (string, error) {
 		}
 		return dir, nil
 	}
-	data, err := os.UserConfigDir()
+	base, err := config.StateDir()
 	if err != nil {
-		return "", fmt.Errorf("workspace: user data dir: %w", err)
+		return "", fmt.Errorf("workspace: state dir: %w", err)
 	}
-	dir := filepath.Join(data, "gvim", "workspaces")
+	dir := filepath.Join(base, "workspaces")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("workspace: %w", err)
 	}

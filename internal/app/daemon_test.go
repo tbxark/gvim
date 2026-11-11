@@ -589,8 +589,9 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 		t.Fatal(err)
 	}
 	drainDaemonForText(t, conn, "Xhello")
-	// Quit and make sure the daemon exits cleanly.
-	if err := daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11}); err != nil {
+	// The unsaved tab makes quit ask once; Discard keeps the daemon's exit save path and
+	// lets it exit cleanly.
+	if err := daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11, 'd'}); err != nil {
 		t.Fatal(err)
 	}
 	select {

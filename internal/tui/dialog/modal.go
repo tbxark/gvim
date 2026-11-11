@@ -84,6 +84,11 @@ func (m *modal) setup(clock Clock, title string, tag any, escape Choice, buttons
 // Active reports whether the dialog is still open.
 func (m *modal) Active() bool { return !m.closed }
 
+// AlertOverlay marks every dialog as an alert: it keeps the input until the user
+// answers it, and a transient overlay a background request opens goes under it. See
+// overlay.Alert.
+func (*modal) AlertOverlay() {}
+
 // Cursor returns the caret when the text field has the focus.
 func (m *modal) Cursor(w, h int) (int, int, bool) {
 	if !m.caretOK || !m.fieldFocused() {

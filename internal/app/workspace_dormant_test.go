@@ -85,6 +85,24 @@ func quitDaemon(t *testing.T, conn net.Conn, done <-chan error) {
 	}
 }
 
+// quitDaemonDiscard sends ctrl+q and answers the one unsaved-changes confirmation with
+// Discard, then waits for the daemon to return. Use it when a modified tab (in the active
+// or in a background workspace) keeps a plain ctrl+q waiting for an answer.
+func quitDaemonDiscard(t *testing.T, conn net.Conn, done <-chan error) {
+	t.Helper()
+	if err := daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11, 'd'}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("daemon Run: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the daemon did not quit after answering the quit confirmation")
+	}
+}
+
 // TestOpenFileFromAnotherClientCwd checks a named daemon opens a client's relative
 // file:line:col from the client's own working directory, with the positional form and
 // with the legacy Paths-only form.
@@ -253,7 +271,7 @@ func TestOpenFileDormantStashIsRestored(t *testing.T) {
 	if list.Active != idB {
 		t.Fatalf("the stashed dormant owner was not activated: %+v", list)
 	}
-	quitDaemon(t, conn, done)
+	quitDaemonDiscard(t, conn, done)
 }
 
 // TestOpenTargetsFromRequestResolvesCwd checks the pure request resolution: client-relative

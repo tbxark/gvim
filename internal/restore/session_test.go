@@ -110,18 +110,6 @@ func TestSessionDropsEmptyUntitledTabs(t *testing.T) {
 	}
 }
 
-func TestSessionDirDefaultsToTheUserCache(t *testing.T) {
-	apptest.IsolateConfig(t)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	dir, err := DefaultSessionDir()
-	apptest.Must(t, err)
-	cache, err := os.UserCacheDir()
-	apptest.Must(t, err)
-	if want := filepath.Join(cache, "gvim", "session"); dir != want {
-		t.Fatalf("DefaultSessionDir() = %q, want %q", dir, want)
-	}
-}
-
 // TestSessionRoundTripKeepsUntitledBufferLabel: the label of a preserved unnamed buffer
 // (a shared-buffer conflict copy) is part of the session, so a restart/repeated restore
 // keeps the buffer recognisable instead of showing a plain Untitled-N tab.

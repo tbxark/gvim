@@ -5,7 +5,7 @@ package app
 // fetches one JSON file at startup, under the update check's transport policy (per
 // updatecheck.ValidateURL: https, or http only on the loopback interface), with a
 // bounded request and response, validates it through the same theme parser and
-// resolver user themes use, and caches it under the user config dir keyed by the
+// resolver user themes use, and caches it under the user cache dir keyed by the
 // URL hash. A fresh cache avoids the request; a failed fetch uses the cached copy
 // (last-known-good) with a warning. The runtime Settings theme path never fetches:
 // theme.Registry.Load(URL) reads the cache only, so no Update ever blocks on the
@@ -48,13 +48,25 @@ const (
 var themeURLClient = &http.Client{Timeout: themeURLTimeout}
 
 // themeURLCacheDir is where URL themes are cached for this launch:
-// <user config dir>/gvim/theme-cache.
+// <user cache dir>/gvim/theme-cache. Move old entries individually so existing
+// cache entries do not hide other themes in the old directory.
 func themeURLCacheDir() (string, error) {
-	dir, err := config.Dir()
+	dir, err := config.CacheDir()
 	if err != nil {
-		return "", fmt.Errorf("theme: user config dir: %w", err)
+		return "", fmt.Errorf("theme: user cache dir: %w", err)
 	}
-	return theme.URLCacheDir(dir), nil
+	dest := theme.URLCacheDir(dir)
+	if old, err := config.Dir(); err == nil {
+		old = theme.URLCacheDir(old)
+		if entries, err := os.ReadDir(old); err == nil {
+			for _, entry := range entries {
+				if entry.Type().IsRegular() {
+					_ = config.MoveLegacyFile(filepath.Join(old, entry.Name()), filepath.Join(dest, entry.Name()))
+				}
+			}
+		}
+	}
+	return dest, nil
 }
 
 // themeURLPolicy applies the update check's transport policy to a theme URL and

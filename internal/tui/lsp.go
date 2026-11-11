@@ -23,6 +23,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/trust"
 )
 
 // lspDebounce is how long the root waits after the last edit before it sends the
@@ -170,6 +171,7 @@ type lspTrack struct {
 	path, lang string
 	state      lspDocState
 	busy       bool // an open or change command is in flight
+	retryTrust bool // retry an in-flight open if trust was granted during it
 	want, have string
 	// dirty is set when the active document changed since want was read. The text is read
 	// when the debounce timer fires (lspFresh), not on each key press.
@@ -648,9 +650,15 @@ func (m *Model) lspOpened(msg lspOpenedMsg) tea.Cmd {
 	tr.busy = false
 	if msg.err != nil {
 		tr.state = lspClosed
+		if tr.retryTrust && m.trust.state.Level == trust.Trusted {
+			tr.retryTrust = false
+			return m.lspSendFor(tr)
+		}
+		tr.retryTrust = false
 		m.lspOpenFailed(tr, msg.err)
 		return nil
 	}
+	tr.retryTrust = false
 	tr.state, tr.have = lspOpen, msg.text
 	tr.lspVersion, tr.lspVersionOK = msg.version, true
 	var cmds []tea.Cmd

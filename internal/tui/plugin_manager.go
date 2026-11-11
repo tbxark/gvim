@@ -109,6 +109,10 @@ func (o *managerOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 func (o *managerOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
 func (o *managerOverlay) Active() bool      { return o.p.Active() }
 
+// ExclusiveOverlay marks the picker as a transient interaction. See
+// overlay.Exclusive.
+func (*managerOverlay) ExclusiveOverlay() {}
+
 // managerPickMsg carries a choice of the picker; managerRankMsg carries a ranking result
 // back to the picker that asked for it.
 type (

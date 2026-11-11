@@ -59,10 +59,8 @@ func (r *Registry) SetURLCacheDir(dir string) {
 	r.urlCacheDir = dir
 }
 
-// URLCacheDir is the URL-theme cache directory under a user config dir: a
-// subdirectory next to the user theme dir, so fetched themes are not listed as
-// user themes and are easy to clear.
-func URLCacheDir(configDir string) string { return filepath.Join(configDir, "theme-cache") }
+// URLCacheDir is the URL-theme cache directory under the given cache root.
+func URLCacheDir(cacheRoot string) string { return filepath.Join(cacheRoot, "theme-cache") }
 
 // URLCachePath is the cache file of a URL theme: the hex sha256 of the trimmed
 // URL plus .json, so any URL maps to a stable, safe file name.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
@@ -22,6 +23,35 @@ func useTrustStore(t *testing.T) *trust.Store {
 	newTrustStore = func() (*trust.Store, error) { return store, nil }
 	t.Cleanup(func() { newTrustStore = prev })
 	return store
+}
+
+func TestTrustRevokeSupersedesPendingGrant(t *testing.T) {
+	root := t.TempDir()
+	c := newTrustController(trust.NewStore(filepath.Join(t.TempDir(), "trust.json")), trust.State{Root: root, Level: trust.Restricted})
+	started, release := make(chan struct{}), make(chan struct{})
+	c.prepareTrust = func(trust.State) error { close(started); <-release; return nil }
+	done := make(chan error, 1)
+	go func() { _, err := c.Decide(trust.Trusted); done <- err }()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("trust preparation did not start")
+	}
+	if _, err := c.Decide(trust.Blocked); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("superseded grant succeeded")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("grant did not finish")
+	}
+	if got := c.State().Level; got != trust.Blocked {
+		t.Fatalf("trust level = %s, want blocked", got)
+	}
 }
 
 // TestOpenTrustAppliesTheStartupPolicy checks the policy the engine and the app

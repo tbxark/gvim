@@ -147,6 +147,10 @@ func (o *agentDiscoverOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 func (o *agentDiscoverOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
 func (o *agentDiscoverOverlay) Active() bool      { return o.p.Active() }
 
+// ExclusiveOverlay marks the picker as a transient interaction. See
+// overlay.Exclusive.
+func (*agentDiscoverOverlay) ExclusiveOverlay() {}
+
 // cmdFor turns what the picker asks of its owner into commands: the ranking, and
 // the chosen row opening in a new dock tab. A tmux row attaches; a Claude
 // Code/Codex transcript row starts its agent's resume command.

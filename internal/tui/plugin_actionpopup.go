@@ -103,6 +103,10 @@ func (o *pluginActionPopupOverlay) Dismiss() {
 	o.dismissed(prompt.Done{Tag: pluginActionPopupTag{tok: o.tok}})
 }
 
+// AlertOverlay marks the action popup as an alert: the plugin waits for the chosen
+// action. See overlay.Alert.
+func (*pluginActionPopupOverlay) AlertOverlay() {}
+
 // pluginActionPopupDone resolves the wait of an action popup that closed without a choice,
 // and reports the result to the plugins.
 func (m *Model) pluginActionPopupDone(t pluginapi.Token) tea.Cmd {

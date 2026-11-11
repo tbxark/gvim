@@ -12,6 +12,16 @@ can to the running editor. This file records the design: the schema, the layers,
 the write path, the structured sub-pages, the live-versus-restart boundary, the
 Reload command, per-setting reset, and what is deferred.
 
+**What lives where.** `config.Dir()` (`~/.config/gvim`, or `$XDG_CONFIG_HOME/gvim`) holds
+what the user writes: `config.json`, `init.lua`, `plugins/` and `themes/`. What gvim writes
+for itself goes to `config.StateDir()` (`~/.local/state/gvim`, or `$XDG_STATE_HOME/gvim`):
+the recent project list, the workspace trust decisions, the plugin toggles, the update
+stamp and the daemon workspace registry. Regenerable data (fetched URL themes) goes to
+`config.CacheDir()`. A workspace's own session lives in its `.gvim/session` only when
+`editor.save_session` is on. [files.md](files.md) lists every file and the moment it is
+written; files an older build left in the config directory are moved to their new place
+once.
+
 ## 1. The schema
 
 `config/settings_schema.go` holds the descriptor table the page is built from:
@@ -301,8 +311,8 @@ service and the root:
   section rescans, also while hidden), and switching it off clears the outline
   source and opens the folds the section applied, leaving hand folds alone.
 
-**Restart settings** in this slice: `editor.hot_exit`,
-`editor.restore_previous_session`, `editor.auto_save_enabled` and its
+**Restart settings** in this slice: `editor.save_session`,
+`editor.hot_exit`, `editor.restore_previous_session`, `editor.auto_save_enabled` and its
 interval, `editor.recovery_enabled`, `editor.virtual_space`,
 `editor.scroll_offset`, the default line ending, trim-trailing-whitespace and
 ensure-final-newline on save, `editor.auto_read_only`, `mouse_capture`, and
@@ -383,7 +393,7 @@ release is published. The feed is `update_check_url`, else the `GVIM_RELEASES_UR
 override, else the built-in GitHub releases feed. The transport policy is https, or plain http
 on the loopback interface for a local mirror; any other override is refused (the check then
 simply does nothing). A successful check is remembered for a day in
-`<config dir>/update-check.json`, so launches do not poll; a failed check, or a build with no
+`<state dir>/update-check.json`, so launches do not poll; a failed check, or a build with no
 version, is silent and never blocks startup. gvim has no self-update: the indicator names the
 release and its release page, and upgrading stays the package manager's or the user's job.
 

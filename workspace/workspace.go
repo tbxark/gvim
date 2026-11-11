@@ -2,8 +2,7 @@
 // roots used recently. A root is a directory: the file explorer shows it, and
 // the finder and open-file paths resolve against it.
 //
-// The recent list is JSON at gvim/recent.json under config.Dir. Only the
-// standard library is used.
+// The recent list is JSON at recent.json under config.StateDir.
 package workspace
 
 import (
@@ -108,13 +107,22 @@ type recentFile struct {
 	Roots []string `json:"roots"`
 }
 
-// recentPath returns the location of the recent list in the user config dir.
+// recentPath returns the recent list in the per-user state directory, moving
+// the old config-directory file on first use.
 func recentPath() (string, error) {
-	dir, err := config.Dir()
+	dir, err := config.StateDir()
+	if err != nil {
+		return "", fmt.Errorf("workspace: state dir: %w", err)
+	}
+	oldDir, err := config.Dir()
 	if err != nil {
 		return "", fmt.Errorf("workspace: config dir: %w", err)
 	}
-	return filepath.Join(dir, "recent.json"), nil
+	path := filepath.Join(dir, "recent.json")
+	if err := config.MoveLegacyFile(filepath.Join(oldDir, "recent.json"), path); err != nil {
+		return "", fmt.Errorf("workspace: migrate recent list: %w", err)
+	}
+	return path, nil
 }
 
 // load reads the stored root paths. A missing file is an empty list.

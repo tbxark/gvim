@@ -202,14 +202,16 @@ func TestDaemonRefusalKeepsUnsavedWork(t *testing.T) {
 	if raw, err := os.ReadFile(path); err != nil || string(raw) != "hello\n" {
 		t.Fatalf("the daemon's unsaved text was written past the refused direct launch: %q, %v", raw, err)
 	}
-	if err := daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11}); err != nil {
+	// The background workspace still has unsaved text, so quit asks once; Discard closes
+	// the modified tabs and quits.
+	if err := daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11, 'd'}); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case err := <-done:
 		_ = err
 	case <-time.After(5 * time.Second):
-		t.Fatal("the daemon did not quit after the switch")
+		t.Fatal("the daemon did not quit after answering the quit confirmation")
 	}
 }
 

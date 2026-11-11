@@ -142,6 +142,37 @@ func (h *WorkspaceHost) deliverModelCmd(env modelCmdMsg) (tea.Model, tea.Cmd) {
 	if env.source == nil || env.source.Closed() {
 		return h, nil
 	}
+	if _, ok := env.msg.(workspaceQuitNextMsg); ok {
+		p, ok := env.source.workspace.(workspaceQuitPort)
+		if !ok {
+			return h, nil
+		}
+		target, index := p.QuitNextDirty()
+		if target == nil {
+			return h, wrapModelCmd(env.owner, env.source, env.source.quit())
+		}
+		if err := p.QuitActivate(target); err != nil {
+			env.source.notice = err.Error()
+			return h, nil
+		}
+		if len(target.large.saves) > 0 {
+			target.notice = "Wait for the save to finish, then quit again"
+			return h, nil
+		}
+		t := target.tabPort()
+		if t == nil {
+			target.notice = "Cannot save workspace"
+			return h, nil
+		}
+		t.ActivateTab(index)
+		target.syncViewport()
+		flow := flow{then: nextQuit, index: index}
+		if !hasPath(target.ed.Active()) {
+			target.askSaveAs(flow)
+			return h, nil
+		}
+		return h, wrapModelCmd(target.WorkspaceOwner(), target, target.saveThen(flow))
+	}
 	if batch, ok := env.msg.(tea.BatchMsg); ok {
 		cmds := make([]tea.Cmd, 0, len(batch))
 		for _, c := range batch {

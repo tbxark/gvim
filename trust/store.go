@@ -18,7 +18,7 @@ const storeVersion = 1
 // Store is the per-user workspace-trust store: a JSON file that maps the
 // canonical root of each workspace to the level the user chose for it.
 //
-// The file lives in the user's config directory and never inside a project: a
+// The file lives in the user's state directory and never inside a project: a
 // repository must not be able to vouch for itself. One file holds every
 // workspace, keyed by the canonical root, so a workspace keeps its decision
 // across restarts. The file is written through atomicfile, so a half-written
@@ -29,16 +29,29 @@ type Store struct {
 	path string
 }
 
-// DefaultStore returns the store at trust.json under gvim's user config
-// directory (config.Dir: ~/.config/gvim on Unix, including macOS, and
-// os.UserConfigDir()/gvim on Windows). It fails only when the user config
-// directory cannot be found.
+// DefaultStore returns the per-user state store, moving a legacy config-directory
+// store on first use. It never reads trust decisions from a project.
 func DefaultStore() (*Store, error) {
-	dir, err := config.Dir()
+	dir, err := config.StateDir()
+	if err != nil {
+		return nil, fmt.Errorf("trust: state dir: %w", err)
+	}
+	oldDir, err := config.Dir()
 	if err != nil {
 		return nil, fmt.Errorf("trust: config dir: %w", err)
 	}
-	return NewStore(filepath.Join(dir, "trust.json")), nil
+	path := filepath.Join(dir, "trust.json")
+	legacy := filepath.Join(oldDir, "trust.json")
+	// A migration failure must not make the store unavailable (callers treat an
+	// unavailable store as trusted), and it must not drop recorded decisions: a
+	// legacy file that cannot move is still read and written in place, and the
+	// next launch tries the move again.
+	if err := config.MoveLegacyFile(legacy, path); err != nil {
+		if _, statErr := os.Stat(legacy); statErr == nil {
+			return NewStore(legacy), nil
+		}
+	}
+	return NewStore(path), nil
 }
 
 // NewStore returns the store backed by the file at path. The file is read and

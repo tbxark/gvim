@@ -42,6 +42,10 @@ func NewChoice(st style.Styles, label string, tag any, opts []ChoiceOption) *Cho
 // Active reports whether the prompt is open.
 func (c *Choice) Active() bool { return !c.closed }
 
+// AlertOverlay marks the choice prompt as an alert: it keeps the input until the
+// user answers it. See overlay.Alert.
+func (*Choice) AlertOverlay() {}
+
 // Update handles one key: Esc closes without an answer; Enter answers the focused option;
 // left/right/tab move the focus; an option's exact mnemonic key answers it. Anything else
 // leaves the prompt open (a typo must not drop a paste queue).

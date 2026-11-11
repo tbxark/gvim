@@ -90,8 +90,12 @@ Plugins load in dependency order (`requires`, `after`), then by source, then by 
       init.lua                the entry file ("main" in the manifest changes it)
       lua/blame/util.lua      require "blame.util" finds it (<dir>/lua first, then <dir>)
   plugin-data/<name>/state.json    what gvim.state keeps for the plugin (direct launches)
-  plugin-state.json           the manager's enable/disable switches
 ```
+
+The manager's enable/disable switches are state, not configuration: they live at
+`~/.local/state/gvim/plugin-state.json` (`$XDG_STATE_HOME/gvim`, or
+`os.UserConfigDir()/gvim/state` on Windows), beside the recent list and the trust store. A
+toggle file left in the config directory by an older build is moved there once.
 
 A daemon host runs ONE editor-wide plugin runtime for all of its local workspaces; a
 workspace switch rebinds the runtime's host and OS and swaps the state namespace below. The
@@ -199,8 +203,12 @@ Plugins load in dependency order (`requires`, `after`), then by source, then by 
       init.lua                the entry file ("main" in the manifest changes it)
       lua/blame/util.lua      require "blame.util" finds it (<dir>/lua first, then <dir>)
   plugin-data/<name>/state.json    what gvim.state keeps for the plugin (direct launches)
-  plugin-state.json           the manager's enable/disable switches
 ```
+
+The manager's enable/disable switches are state, not configuration: they live at
+`~/.local/state/gvim/plugin-state.json` (`$XDG_STATE_HOME/gvim`, or
+`os.UserConfigDir()/gvim/state` on Windows), beside the recent list and the trust store. A
+toggle file left in the config directory by an older build is moved there once.
 
 ; a file that does not is skipped with a notice. A
 plugin may have at most 64 files, 5 MiB in all, 256 KiB per `.lua` file and 1 MiB for `plugin.json`, and its files are read

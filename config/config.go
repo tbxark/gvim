@@ -334,7 +334,8 @@ func Defaults() Config {
 		CursorStyle:             CursorStyleBlock,
 		UIIcons:                 UIIconsAuto,
 
-		PluginTimeout: DefaultPluginTimeout,
+		ExplorerShowHidden: true,
+		PluginTimeout:      DefaultPluginTimeout,
 
 		Terminal:      DefaultTerminalOptions(),
 		Daemon:        DefaultDaemonConfig(),
@@ -434,10 +435,12 @@ func Paths() (Files, error) {
 	return Files{User: user}, nil
 }
 
-// Dir returns gvim's per-user directory, which holds config.json, plugins and the
-// recent list. It is gvim under $XDG_CONFIG_HOME when that is an absolute path, and
-// ~/.config/gvim otherwise, on macOS as on Linux. Windows uses os.UserConfigDir. It
-// fails only when no home directory is known.
+// Dir returns the directory that holds what the user writes: config.json,
+// init.lua, plugins and themes. It is gvim under $XDG_CONFIG_HOME when that is an
+// absolute path, and ~/.config/gvim otherwise, on macOS as on Linux. Windows uses
+// os.UserConfigDir. Runtime state (the recent list, trust decisions, plugin
+// toggles, update stamps) lives in StateDir, never here. It fails only when no
+// home directory is known.
 func Dir() (string, error) {
 	if runtime.GOOS == "windows" {
 		base, err := os.UserConfigDir()
@@ -454,6 +457,60 @@ func Dir() (string, error) {
 		return "", fmt.Errorf("config: user config dir: %w", err)
 	}
 	return filepath.Join(home, ".config", "gvim"), nil
+}
+
+// StateDir returns the directory of gvim's runtime state: the recent project
+// list, the workspace trust decisions, the plugin toggles and the update-check
+// stamp. None of it is configuration, and none of it lives in the project: a
+// repository must not be able to vouch for itself. It is gvim under
+// $XDG_STATE_HOME when that is an absolute path, and ~/.local/state/gvim
+// otherwise. Windows uses os.UserConfigDir()/gvim/state.
+func StateDir() (string, error) {
+	if runtime.GOOS == "windows" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("config: user config dir: %w", err)
+		}
+		return filepath.Join(base, "gvim", "state"), nil
+	}
+	if base := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(base) {
+		return filepath.Join(base, "gvim"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("config: user state dir: %w", err)
+	}
+	return filepath.Join(home, ".local", "state", "gvim"), nil
+}
+
+// CacheDir returns gvim's regenerable cache directory (fetched URL themes).
+// It is gvim under os.UserCacheDir().
+func CacheDir() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("config: user cache dir: %w", err)
+	}
+	return filepath.Join(base, "gvim"), nil
+}
+
+// MoveLegacyFile renames oldPath to newPath when the new file does not exist yet
+// and the old one does. It is the one-time move of a state file that left the
+// config directory; a failure is reported to the caller, which then simply starts
+// without the old file.
+func MoveLegacyFile(oldPath, newPath string) error {
+	if _, err := os.Stat(newPath); err == nil {
+		return nil
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return err
+	}
+	return nil
 }
 
 // defaultUserFile returns the default user config file path.

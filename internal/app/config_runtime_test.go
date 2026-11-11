@@ -184,7 +184,11 @@ func TestConfigEditorSettingsReachEditor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := buildCaptured(t, projectRoot(t, tt.body))
+			opts := projectRoot(t, tt.body)
+			// This test is about the editor options, not session storage: turn saving
+			// off so the project session directory is not part of the comparison.
+			opts.Config = userConfigFile(t, `{"editor":{"save_session":false}}`)
+			got, err := buildCaptured(t, opts)
 			if err != nil {
 				t.Fatalf("buildModel() error = %v", err)
 			}
@@ -350,9 +354,9 @@ func TestConfigExplorerSettingsReachTree(t *testing.T) {
 		wantHidden  bool // .env is listed
 		wantIgnored bool // build.log is listed
 	}{
-		{"defaults", ``, false, false},
-		{"explorer_show_hidden", `{"explorer_show_hidden": true}`, true, false},
-		{"explorer_show_ignored", `{"explorer_show_ignored": true}`, false, true},
+		{"defaults", ``, true, false},
+		{"explorer_show_hidden", `{"explorer_show_hidden": false}`, false, false},
+		{"explorer_show_ignored", `{"explorer_show_ignored": true}`, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

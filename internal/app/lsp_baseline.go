@@ -21,14 +21,17 @@ type lspConfigSetter interface {
 }
 
 type lspBaselineUpdater struct {
-	setter lspConfigSetter
+	setter   lspConfigSetter
+	liveGate bool
 
-	mu      sync.Mutex
-	cfg     config.Config
-	trust   trust.State
-	seq     uint64
-	applied uint64
-	wake    chan struct{}
+	mu          sync.Mutex
+	cfg         config.Config
+	trust       trust.State
+	seq         uint64
+	applied     uint64
+	wake        chan struct{}
+	appliedWake chan struct{}
+	ctx         context.Context
 }
 
 // newLSPBaselineUpdater starts the serialized baseline worker. It returns nil when the LSP
@@ -38,11 +41,15 @@ func newLSPBaselineUpdater(ctx context.Context, lsp any, cfg config.Config, stat
 	if !ok {
 		return nil
 	}
+	_, liveGate := lsp.(interface{ SetAutoStartGate(func() bool) })
 	b := &lspBaselineUpdater{
-		setter: setter,
-		cfg:    cfg,
-		trust:  state,
-		wake:   make(chan struct{}, 1),
+		setter:      setter,
+		liveGate:    liveGate,
+		cfg:         cfg,
+		trust:       state,
+		wake:        make(chan struct{}, 1),
+		appliedWake: make(chan struct{}),
+		ctx:         ctx,
 	}
 	go b.run(ctx)
 	return b
@@ -89,6 +96,24 @@ func (b *lspBaselineUpdater) Seq() uint64 {
 	return b.seq
 }
 
+// Wait waits for the updates requested before it was called. It runs off the UI
+// goroutine, before an LSP open, so the open sees the settled baseline.
+func (b *lspBaselineUpdater) Wait() {
+	b.mu.Lock()
+	target := b.seq
+	for b.applied < target {
+		wake := b.appliedWake
+		b.mu.Unlock()
+		select {
+		case <-wake:
+		case <-b.ctx.Done():
+			return
+		}
+		b.mu.Lock()
+	}
+	b.mu.Unlock()
+}
+
 // run applies the newest snapshot repeatedly until the sequence is stable. A single worker
 // serializes applies, so an older snapshot can never land after a newer one.
 func (b *lspBaselineUpdater) run(ctx context.Context) {
@@ -108,9 +133,14 @@ func (b *lspBaselineUpdater) run(ctx context.Context) {
 			if seq == done {
 				break
 			}
-			b.setter.SetConfig(lspConfig(cfg, state))
+			if !b.liveGate {
+				cfg = lspConfig(cfg, state)
+			}
+			b.setter.SetConfig(cfg)
 			b.mu.Lock()
 			b.applied = seq
+			close(b.appliedWake)
+			b.appliedWake = make(chan struct{})
 			done = seq
 			changed := b.seq != seq
 			b.mu.Unlock()

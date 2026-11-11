@@ -112,6 +112,7 @@ const freshEditorDefaults = `{
   "auto_save_interval_secs": 30,
   "hot_exit": true,
   "confirm_quit": false,
+  "save_session": false,
   "restore_previous_session": true,
   "skip_session_restore_when_files_passed": true,
   "ephemeral_file_patterns": [
@@ -405,6 +406,7 @@ func TestEditorDefaultValues(t *testing.T) {
 		{"auto_save_interval_secs", d.AutoSaveIntervalSecs, 30},
 		{"hot_exit", d.HotExit, true},
 		{"confirm_quit", d.ConfirmQuit, false},
+		{"save_session", d.SaveSession, false},
 		{"restore_previous_session", d.RestorePreviousSession, true},
 		{"skip_session_restore_when_files_passed", d.SkipSessionRestoreWhenFilesPassed, true},
 		{"ephemeral_file_patterns", d.EphemeralFilePatterns, []string{"**/.git/**"}},

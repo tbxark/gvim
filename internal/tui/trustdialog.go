@@ -123,6 +123,10 @@ func newTrustDialog(m *Model, cancellable bool) *trustDialog {
 // Active reports whether the prompt is still open.
 func (d *trustDialog) Active() bool { return !d.closed }
 
+// AlertOverlay marks the trust prompt as an alert: it keeps the input until the
+// user answers it. See overlay.Alert.
+func (*trustDialog) AlertOverlay() {}
+
 // TakesEscape reports that the prompt handles Esc itself: the mandatory prompt
 // swallows it, and the prompt the user opened closes on it.
 func (d *trustDialog) TakesEscape() bool { return true }

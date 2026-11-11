@@ -131,6 +131,35 @@ func TestToggleAndCollapse(t *testing.T) {
 	}
 }
 
+func TestReopenLoadedDirectory(t *testing.T) {
+	for _, method := range []string{"toggle", "expand"} {
+		t.Run(method, func(t *testing.T) {
+			root := fixture(t)
+			tr, err := Open(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tr.Collapse(root); err != nil {
+				t.Fatal(err)
+			}
+			if rows := tr.Rows(); len(rows) != 1 || rows[0].Expanded {
+				t.Fatalf("collapsed rows = %+v", rows)
+			}
+			if method == "toggle" {
+				err = tr.Toggle(root)
+			} else {
+				err = tr.Expand(root)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rows := tr.Rows(); len(rows) != 6 || !rows[0].Expanded {
+				t.Fatalf("reopened rows = %+v, want expanded root and its children", rows)
+			}
+		})
+	}
+}
+
 func TestErrors(t *testing.T) {
 	root := fixture(t)
 	tree, err := Open(root)

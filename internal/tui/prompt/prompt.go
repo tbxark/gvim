@@ -219,6 +219,10 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 // Active reports whether the prompt is open.
 func (l *Line) Active() bool { return !l.closed }
 
+// AlertOverlay marks the prompt as an alert: it keeps the input until the user
+// answers it. See overlay.Alert.
+func (*Line) AlertOverlay() {}
+
 // Value returns the current input.
 func (l *Line) Value() string { return l.field.Value() }
 
@@ -852,6 +856,10 @@ func NewConfirmWith(st style.Styles, label string, tag any, o ConfirmOptions) *C
 
 // Active reports whether the prompt is open.
 func (c *Confirm) Active() bool { return !c.closed }
+
+// AlertOverlay marks the confirm as an alert: it keeps the input until the user
+// answers it. See overlay.Alert.
+func (*Confirm) AlertOverlay() {}
 
 // Question returns the text the confirm asks, for Fresh's prompt_copy without a selection.
 func (c *Confirm) Question() string { return c.label }

@@ -172,6 +172,11 @@ type Browser struct {
 // The browser is an overlay of the root's stack.
 var _ overlay.Overlay = (*Browser)(nil)
 
+// ExclusiveOverlay marks the browser as a transient interaction: opening it closes
+// the other exclusive overlays (the palette, the find bar, a picker list). See
+// overlay.Exclusive.
+func (*Browser) ExclusiveOverlay() {}
+
 // box is where Draw put the list, so a mouse press can find its row.
 type box struct {
 	ok         bool

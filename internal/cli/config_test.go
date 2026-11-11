@@ -291,7 +291,11 @@ func TestConfigShowReal(t *testing.T) {
 	t.Chdir(root)
 	// The viewer follows the editor's trust gate, so the workspace has to be trusted for
 	// its project layer to merge.
-	if err := trust.NewStore(filepath.Join(userDir, "trust.json")).Set(root, trust.Trusted); err != nil {
+	store, err := trust.DefaultStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(root, trust.Trusted); err != nil {
 		t.Fatal(err)
 	}
 
@@ -311,7 +315,7 @@ func TestConfigShowReal(t *testing.T) {
   "auto_indent": true,
   "line_numbers": true,
   "show_menu_bar": true,
-  "explorer_show_hidden": false,
+  "explorer_show_hidden": true,
   "explorer_show_ignored": false
 }
 `

@@ -32,6 +32,65 @@ func waitLSPBaseline(t *testing.T, got built) {
 	t.Fatalf("LSP baseline did not apply: applied %d seq %d", s.lspBase.Applied(), s.lspBase.Seq())
 }
 
+func TestTrustGrantStartsExistingManagerAndRespectsDisabledServers(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, project, command string
+		want                           int
+	}{
+		{"enabled", "{}", "", "gopls", 1},
+		{"globally disabled", `{"lsp_enabled":false}`, "", "", 0},
+		{"language disabled", `{"lsp":{"go":{"enabled":false}}}`, "", "", 0},
+		{"project disabled", "{}", `{"lsp":{"go":{"enabled":false}}}`, "", 0},
+		{"project server dormant", "{}", `{"lsp":{"go":{"auto_start":false}}}`, "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			root := t.TempDir()
+			user := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(user, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.project != "" {
+				writeTestFile(t, filepath.Join(root, ".gvim", "config.json"), tc.project)
+			}
+			store := useTrustStore(t)
+			if err := store.Set(root, trust.Restricted); err != nil {
+				t.Fatal(err)
+			}
+			prev := newLSP
+			var port tui.LSPSession
+			newLSP = func(cfg config.Config) tui.LSPSession { port = prev(cfg); return port }
+			t.Cleanup(func() { newLSP = prev })
+			got, err := buildCaptured(t, Options{Root: root, Config: user, Simple: true, NoPlugins: true, SessionDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			spawned := 0
+			var command string
+			port.(interface {
+				SetSpawner(func(context.Context, lsp.Config) (*lsp.Client, error))
+			}).SetSpawner(func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
+				spawned++
+				command = cfg.Command[0]
+				return nil, context.Canceled
+			})
+			port.SetRoot(root)
+			_, _ = port.Open(filepath.Join(root, "a.go"), "go", "package a")
+			if spawned != 0 {
+				t.Fatalf("restricted spawned %d servers", spawned)
+			}
+			if _, err := got.deps.Trust.Decide(trust.Trusted); err != nil {
+				t.Fatal(err)
+			}
+			// No baseline wait: trust takes effect even when its worker is delayed.
+			_, _ = port.Open(filepath.Join(root, "b.go"), "go", "package b")
+			if spawned != tc.want || command != tc.command {
+				t.Fatalf("after trust spawned %d servers with command %q, want %d with %q", spawned, command, tc.want, tc.command)
+			}
+		})
+	}
+}
+
 // TestRestrictedReloadDoesNotBypassTrustAutoStart checks the settings-reload hook against
 // live trust: a Restricted/Blocked workspace reloading a user config with lsp_enabled true
 // and an lsp entry must not install an auto-starting baseline (the raw reloaded config would

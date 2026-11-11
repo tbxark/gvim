@@ -129,7 +129,7 @@ The Settings page's theme preview landed (four colour chips on the theme row; me
 | `theme/registry.go` | builtin+user discovery, config forms, reload, save/delete paths |
 | `theme/overrides.go` | `WithOverrides` and the theme editor's save format |
 | `theme/form.go` | config/CLI theme form validation (bundled, builtin://, user path, file://, http(s) URL) |
-| `internal/app/theme_url.go` | URL theme fetch at start-up: update-check transport policy, bounded request, theme-parser validation, atomic cache under the user config dir, fresh-cache skip and last-known-good fallback; the registry itself never fetches |
+| `internal/app/theme_url.go` | URL theme fetch at start-up: update-check transport policy, bounded request, theme-parser validation, atomic cache under the user cache dir, fresh-cache skip and last-known-good fallback; the registry itself never fetches |
 | `internal/tui/style` | the single theme-to-styles conversion (fg+bg attributes); `style/roles.go` is the theme-key id role table and the tagging helpers |
 | `internal/tui/grid` | the cell grid; `grid.Style.FGKey/BGKey` and the opt-in `CaptureKeys`/`KeysAt` buffer are the provenance capture |
 | `internal/tui/theme_inspect.go` | inspect popup and Ctrl+Right-Click |

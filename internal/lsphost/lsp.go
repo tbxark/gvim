@@ -142,6 +142,7 @@ type lspPort struct {
 	// autoStartGate is the live trust gate for automatic (Open) starts. Manual
 	// StartLanguage/Restart bypasses it; it never stops a running server.
 	autoStartGate func() bool
+	baselineWait  func()
 	// spawner, when set, starts the server instead of lsp.Start: a remote workspace
 	// runs the server on the remote host through the authority's LongRunning surface
 	// (docs/authority.md). The manager's spawn gate still runs before it.
@@ -313,7 +314,10 @@ func (p *lspPort) SetRootChangeListener(fn func(root string)) {
 
 // Supports reports whether a server starts on its own for lang.
 func (p *lspPort) Supports(lang string) bool {
-	return p.auto[lang]
+	p.mu.Lock()
+	auto, gate := p.auto[lang], p.autoStartGate
+	p.mu.Unlock()
+	return auto && (gate == nil || gate())
 }
 
 // SetRemoteMarkerChecker installs the authority-backed marker checker of a remote
@@ -429,6 +433,9 @@ func (p *lspPort) markerAt(ctx context.Context, checker func(context.Context, st
 // Open sends the text of the document at path, starting its servers if needed. A
 // document that fails to open is not kept.
 func (p *lspPort) Open(path, lang, text string) (int32, error) {
+	p.WaitBaseline()
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
 	lang = openLanguage(path, lang)
 	p.mu.Lock()
 	workspace := p.root
@@ -1487,6 +1494,35 @@ func (p *lspPort) SetConfig(cfg config.Config) {
 	p.rootCache = make(map[string]remoteRootCacheEntry)
 	p.rootCacheOrder = nil
 	p.mu.Unlock()
+}
+
+// RefreshServerPlans applies the current baseline to existing managers without stopping
+// running servers. It is used before a workspace becomes trusted.
+func (p *lspPort) RefreshServerPlans() {
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for root, mgr := range p.managers {
+		mgr.UpdateServerPlan(p.serverConfigsFor(root), p.universal)
+	}
+}
+
+// SetBaselineWait installs the app's asynchronous config barrier.
+func (p *lspPort) SetBaselineWait(wait func()) {
+	p.mu.Lock()
+	p.baselineWait = wait
+	p.mu.Unlock()
+}
+
+// WaitBaseline waits for pending config changes without holding the port lock.
+func (p *lspPort) WaitBaseline() {
+	p.mu.Lock()
+	wait := p.baselineWait
+	p.mu.Unlock()
+	if wait != nil {
+		wait()
+	}
 }
 
 // SetExternalLocationOpener installs the app's resolver for non-file LSP locations.

@@ -40,7 +40,7 @@ func tabTestConfig(t *testing.T) string {
 		t.Fatal(err)
 	}
 	cfg := filepath.Join(dir, "config.json")
-	body = "{\"terminal\":{\"shell\":{\"command\":\"" + script + "\"}},\"lsp_enabled\":false}"
+	body = "{\"editor\":{\"save_session\":true},\"terminal\":{\"shell\":{\"command\":\"" + script + "\"}},\"lsp_enabled\":false}"
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

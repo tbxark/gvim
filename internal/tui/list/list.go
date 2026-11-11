@@ -108,6 +108,12 @@ var (
 	_ overlay.Caret   = (*View)(nil)
 )
 
+// ExclusiveOverlay marks the list as a transient interaction: opening it closes the
+// other exclusive overlays (the palette, the find bar, the browser, another list).
+// TextBox does not implement it: an information box stacks over the list that
+// opened it. See overlay.Exclusive.
+func (*View) ExclusiveOverlay() {}
+
 // New returns an open list with rows, titled title. run is called when a row
 // is chosen, and it closes the list with Close when it means to.
 func New(title string, rows []Row, chrome style.Overlay, run func(*View, Row) tea.Cmd) *View {

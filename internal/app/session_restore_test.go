@@ -62,6 +62,31 @@ func TestBuildRuntimeRestoresTheSessionWhenNoFilesGiven(t *testing.T) {
 	}
 }
 
+func TestHiddenFilesWithRestoredSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		show bool
+		want bool
+	}{
+		{"session remembers hidden", false, false},
+		{"session remembers shown", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			root := t.TempDir()
+			must(t, os.WriteFile(filepath.Join(root, ".example"), []byte("test"), 0o644))
+			dir := filepath.Join(root, "session")
+			must(t, session.Save(dir, session.Session{Root: root, ShowHidden: tc.show}))
+			rt, err := buildRuntime(t.Context(), Options{Root: root, SessionDir: dir}, false)
+			must(t, err)
+			defer rt.close()
+			if got := rt.model.ExplorerState().ShowHidden; got != tc.want {
+				t.Fatalf("show hidden = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestBuildRuntimeWithFilesDoesNotRestore checks that file arguments win: the session
 // is not opened when gvim is given files.
 func TestBuildRuntimeWithFilesDoesNotRestore(t *testing.T) {
@@ -119,9 +144,6 @@ func TestBuildRuntimeWithFilesLeavesTheSavedSessionAlone(t *testing.T) {
 		t.Fatalf("stash after the exit save = %q (error %v), want it unchanged", got, err)
 	}
 }
-
-// TestSessionDirDefaultsToTheUserCache checks the default session directory:
-// os.UserCacheDir()/gvim/session.
 
 // TestRuntimeSaveWritesTheSessionAtExit checks what Run does when the program ends
 // after a start without file arguments: the runtime writes the session of its editor to

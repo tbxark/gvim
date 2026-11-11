@@ -135,7 +135,7 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 		m.notify(errors.New("cannot extract: the target workspace is not over this root; nothing was moved"))
 		return nil
 	}
-	dir, err := m.reg.SessionDir(target.File.StableID)
+	dir, err := m.workspaceSessionDir(target.File.StableID)
 	if err != nil {
 		m.notify(fmt.Errorf("cannot extract: %w", err))
 		return nil
@@ -326,7 +326,7 @@ func (m *workspaceManager) runMixedExtractNew(ext *mixedExtract) {
 	}
 	id := ws.File.StableID
 	discard := func() { _ = m.reg.Remove(id) }
-	dir, err := m.reg.SessionDir(id)
+	dir, err := m.workspaceSessionDir(id)
 	if err != nil {
 		discard()
 		m.notify(fmt.Errorf("cannot extract: %w", err))

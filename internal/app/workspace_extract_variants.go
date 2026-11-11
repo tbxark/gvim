@@ -170,7 +170,7 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 		m.notify(errors.New("cannot extract: the target workspace is not over this root; the tab stays open"))
 		return
 	}
-	dir, err := m.reg.SessionDir(target.File.StableID)
+	dir, err := m.workspaceSessionDir(target.File.StableID)
 	if err != nil {
 		m.notify(fmt.Errorf("cannot extract: %w", err))
 		return
@@ -375,7 +375,7 @@ func (m *workspaceManager) runExtractTerminalTab(ext *extractTerminalTab) {
 		m.notify(errors.New("cannot extract: the target workspace is not over this root; the terminal tab stays open"))
 		return
 	}
-	dir, err := m.reg.SessionDir(target.File.StableID)
+	dir, err := m.workspaceSessionDir(target.File.StableID)
 	if err != nil {
 		m.notify(fmt.Errorf("cannot extract: %w", err))
 		return
@@ -567,7 +567,7 @@ func (m *workspaceManager) runExtractTabs(exts []*extractTab, mru []session.MruF
 	}
 	id := ws.File.StableID
 	discard := func() { _ = m.reg.Remove(id) }
-	dir, err := m.reg.SessionDir(id)
+	dir, err := m.workspaceSessionDir(id)
 	if err != nil {
 		discard()
 		m.notify(fmt.Errorf("cannot extract: %w", err))
