@@ -474,6 +474,16 @@ comes from the config rather than from a restored session.
 | sticky parents | always on | the run's first row's ancestors are pinned above it, up to 7 of them, never taking the whole body. The band is drawn on the gutter ground (faint when the theme has none), so it reads as pinned above the tree; a press on a pinned row selects that row. |
 | `respect_gitignore`, `custom_ignore_patterns`, `preview_tabs`, `tree_indicator_collapsed`/"expanded" | — | accepted and ignored for now (documented gaps): gvim's explorer always respects .gitignore through its own reader and has its own preview-tab click behaviour and icon glyphs. |
 
+**`.git` is never shown.** The repository metadata directory has no row, at any
+depth, with `file_explorer.show_hidden` on or off, and neither has a linked
+worktree's `.git` pointer file: it holds the object store and refs, the tree has
+no use for it, and listing it stalls the explorer. The rule lives in the shared listing
+(`explorer.GitDirName`, `explorer.ListDir`), so the file browser (Open File,
+Switch Project) drops it too, and the remote explorer's tree hides it the same
+way. This is a gvim deviation from Fresh, which shows `.git` as an ordinary dot
+directory when hidden entries are on; a file inside `.git` is therefore not
+revealed in the tree (the reveal reports it as not in the tree).
+
 **Reveal.** Showing the panel or focusing it (Ctrl+E) is the explicit "show me
 where I am": the tree expands to the active file and selects it, and the status row
 says why when it cannot (Fresh's strings): "File explorer focused; this buffer has

@@ -86,6 +86,31 @@ func TestRowsOrderAndHiddenFiles(t *testing.T) {
 	}
 }
 
+// TestGitDirectoryNeverListed checks the repository metadata directory is not a
+// node of the tree and not a row, even with Show Hidden Files on: it cannot be
+// expanded, revealed or operated on, so it cannot stall the explorer.
+func TestGitDirectoryNeverListed(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{".git/config": "", ".git/objects/ab/cd": "", ".env": "", "a.txt": ""})
+	tree, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree.SetShowHidden(true)
+	got := names(tree.Rows())
+	got[0] = "root"
+	if want := []string{"root", "  .env", "  a.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	git := filepath.Join(root, ".git")
+	if err := tree.Toggle(git); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Toggle(.git) = %v, want ErrNotFound", err)
+	}
+	if err := tree.Reveal(filepath.Join(git, "config")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Reveal(.git/config) = %v, want ErrNotFound", err)
+	}
+}
+
 func TestExpandShowsChildrenDirectoriesFirst(t *testing.T) {
 	root := fixture(t)
 	tree, err := Open(root)

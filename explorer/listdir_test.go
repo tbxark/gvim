@@ -49,6 +49,18 @@ func TestListDirOrderAndHiddenRules(t *testing.T) {
 			want:  []string{".config/", ".hidden", "a.txt"},
 		},
 		{
+			name:  "the .git directory is never listed",
+			files: map[string]string{".git/config": "", ".gitkeep": "", "a.txt": ""},
+			opts:  ListOptions{ShowHidden: true, ShowIgnored: true},
+			want:  []string{".gitkeep", "a.txt"},
+		},
+		{
+			name:  "a worktree .git pointer file is never listed",
+			files: map[string]string{".git": "gitdir: /elsewhere/repo/.git/worktrees/w\n", ".env": "", "a.txt": ""},
+			opts:  ListOptions{ShowHidden: true},
+			want:  []string{".env", "a.txt"},
+		},
+		{
 			name:  "gitignored entries hidden by default",
 			files: map[string]string{".gitignore": "*.log\nbuild/\n", "a.log": "", "b.txt": "", "build/": ""},
 			want:  []string{"b.txt"},

@@ -503,10 +503,13 @@ result region:
 | Plugin widget panel | card (centred float), body of a virtual-buffer pane, or a sidebar section | `internal/tui/pluginpanel` (layout, paint, hit testing), `internal/tui/plugin_panels.go` (placement, focus, routing); a floating panel is a card with the shared frame, a buffer panel is painted inside the pane's text rectangle, a sidebar section's body is painted by the column |
 
 **File browser.** Alt+. toggles hidden entries and Alt+S cycles the sort order, as
-before. Alt+E toggles Fresh's file_browser_toggle_detect_encoding: while auto-detection
-is on (the default) a chosen file opens normally; while it is off the browser opens an
-"Open with Encoding" list first, and choosing an encoding opens the file and reloads it
-with that codec before the caret moves to the chosen `:line:col`. The setting is per
+before. The repository metadata directory `.git` is never listed, even with hidden
+entries on: the browser shares the explorer's listing, which drops it (see
+[docs/sidebar.md](sidebar.md) §9). Alt+E toggles Fresh's
+file_browser_toggle_detect_encoding: while auto-detection is on (the default) a
+chosen file opens normally; while it is off the browser opens an "Open with
+Encoding" list first, and choosing an encoding opens the file and reloads it with
+that codec before the caret moves to the chosen `:line:col`. The setting is per
 browser opening; the list uses the same encoding catalogue as Set Encoding. If the chosen
 file is already open with unsaved edits, its tab is activated but the reload is refused:
 the buffer and edits are kept and the unsaved-changes error is shown in the status row

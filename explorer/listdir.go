@@ -12,6 +12,12 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
+// GitDirName is the repository metadata directory. No listing of the explorer
+// returns it, whatever ListOptions.ShowHidden says: it holds the object store and
+// refs, the tree has no use for it, and reading it stalls the explorer. The name
+// rule also skips a linked worktree's ".git" pointer file.
+const GitDirName = ".git"
+
 // ListOptions selects the entries ListDir returns. The zero value hides dot-
 // entries and gitignored entries, as the tree does by default.
 type ListOptions struct {
@@ -42,7 +48,7 @@ type Entry struct {
 // ListDir returns the entries of dir in tree display order: directories first,
 // then names in natural, case-insensitive order (see naturalCompare). It is the
 // listing the tree uses, without the tree's loading state, so a file browser can
-// share it.
+// share it. An entry named GitDirName is never returned, not even with ShowHidden.
 func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -68,6 +74,9 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 	out := make([]Entry, 0, len(dirents))
 	for _, d := range dirents {
 		name := d.Name()
+		if name == GitDirName {
+			continue
+		}
 		hidden := strings.HasPrefix(name, ".")
 		if hidden && !opts.ShowHidden {
 			continue

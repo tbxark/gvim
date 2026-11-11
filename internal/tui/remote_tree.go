@@ -549,6 +549,11 @@ func (t *RemoteExplorerTree) mergeLocked(dir string, entries []RemoteDirEntry) {
 		if e.Name == "" || e.Name == "." || e.Name == ".." {
 			continue
 		}
+		if e.Name == explorer.GitDirName {
+			// The local listing drops it (explorer.GitDirName), so the remote tree
+			// never caches it and it has no row to expand.
+			continue
+		}
 		cp := path.Join(dir, e.Name)
 		if seen[cp] {
 			continue

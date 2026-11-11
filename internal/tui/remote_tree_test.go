@@ -155,6 +155,24 @@ func TestRemoteTreeNaturalOrder(t *testing.T) {
 	wantRemoteRows(t, tree, "r", "alpha", "Zoo", "chapter-2.md", "chapter-10.md")
 }
 
+// TestRemoteTreeNeverListsGitDir checks the repository metadata directory has no
+// row even with Show Hidden Files on, as the local tree's listing drops it: it
+// is never cached, so it cannot be expanded.
+func TestRemoteTreeNeverListsGitDir(t *testing.T) {
+	loader := (&fakeRemoteLoader{}).set("/r",
+		RemoteDirEntry{Name: ".git", IsDir: true, Hidden: true},
+		RemoteDirEntry{Name: ".env", Hidden: true},
+		RemoteDirEntry{Name: "a.go"},
+	)
+	tree := NewRemoteExplorerTree("/r", loader)
+	applyRemoteInitial(t, tree)
+	tree.SetShowHidden(true)
+	wantRemoteRows(t, tree, "r", ".env", "a.go")
+	if cmd := tree.ToggleCmd("/r/.git"); cmd != nil {
+		t.Fatal("ToggleCmd listed the repository metadata directory")
+	}
+}
+
 // applyRemoteInitial runs the initial reload command and applies it.
 func applyRemoteInitial(t *testing.T, tree *RemoteExplorerTree) {
 	t.Helper()

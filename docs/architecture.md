@@ -921,8 +921,10 @@ still loads unchanged.
   the window to reconnect` notice and the tree keeps its cached rows until the existing
   authority-reconnect path reloads it. Listings are bounded (5000 entries per directory, the
   authority's own cap, over it a clear error naming the directory), hidden entries are filtered
-  by the explorer's show-hidden toggle, ordering matches the local tree (directories first,
-  natural, case-insensitive), and a trailing slash-free remote root is shown as given.
+  by the explorer's show-hidden toggle, the repository metadata directory (`.git`) is never
+  cached and has no row (the local tree's `explorer.ListDir` drops it the same way), ordering
+  matches the local tree (directories first, natural, case-insensitive), and a trailing
+  slash-free remote root is shown as given.
   Remote .gitignore filtering uses the same parser and go-git matcher as the local
   explorer: the workspace root's and every ancestor/nested .gitignore are read through
   `authority.Files()` (never the local disk), bounded to 64 directory levels, 64 KiB per
