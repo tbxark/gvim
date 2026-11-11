@@ -106,7 +106,8 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `-a`, `--attach[=NAME]` | Attach this terminal to a running daemon |
 
 Subcommands: `gvim config` (inspect the configuration), `gvim grammar list` (the syntax
-grammars) and `gvim version`. `gvim --help` has the full description of each flag.
+grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integration) and
+`gvim version`. `gvim --help` has the full description of each flag.
 
 ---
 
