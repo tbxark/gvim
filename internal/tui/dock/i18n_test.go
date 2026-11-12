@@ -6,11 +6,11 @@ import (
 	"github.com/tbxark/gvim/i18n"
 )
 
-// TestDockTitlesUseTheCatalogue checks the extracted dock titles/notices: German shows the
+// TestDockTitlesUseTheCatalogue checks the extracted dock titles/notices: Chinese shows the
 // English fallback (gvim-only keys) and the exit-suffix composition stays byte-identical.
 // Not parallel: locale.
 func TestDockTitlesUseTheCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	if got := dockTextVars("gvim.dock.title_exited_suffix", "Terminal (exited, %{suffix})", map[string]any{"suffix": "exit 2"}); got != "Terminal (exited, exit 2)" {
 		t.Errorf("exited title = %q", got)

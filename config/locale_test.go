@@ -12,8 +12,8 @@ func TestLocaleDefaultsAndParsing(t *testing.T) {
 	if len(diags) != 0 || cfg.Locale != "" {
 		t.Fatalf("default locale = %q, diags %v; want auto", cfg.Locale, diags)
 	}
-	cfg, diags = loadBody(t, `{"locale": "pt-BR"}`)
-	if len(diags) != 0 || cfg.Locale != "pt-BR" {
+	cfg, diags = loadBody(t, `{"locale": "zh-CN"}`)
+	if len(diags) != 0 || cfg.Locale != "zh-CN" {
 		t.Fatalf("locale = %q, diags %v", cfg.Locale, diags)
 	}
 	// Fresh writes null for the automatic locale; "auto" is gvim's setting value.
@@ -35,7 +35,7 @@ func TestLocaleDefaultsAndParsing(t *testing.T) {
 
 func TestLocaleProjectLayerRefused(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"locale": "de"}`)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"locale": "zh-CN"}`)
 	cfg, diags, err := Load(Options{Root: root, UserFile: filepath.Join(t.TempDir(), "absent.json")})
 	if err != nil {
 		t.Fatal(err)
@@ -63,8 +63,8 @@ func TestLocaleSetting(t *testing.T) {
 	if s.Kind != SettingEnum || s.Apply != ApplyLive || !s.Layers.Has(LayerUser) || s.Layers.Has(LayerProject) {
 		t.Fatalf("locale setting = %+v, want a live user-layer enum", s)
 	}
-	if len(s.Choices) != 16 || s.Choices[0] != "auto" {
-		t.Fatalf("choices = %v, want auto and the 15 locales", s.Choices)
+	if len(s.Choices) != 3 || s.Choices[0] != "auto" || s.Choices[1] != "en" || s.Choices[2] != "zh-CN" {
+		t.Fatalf("choices = %v, want auto, en and zh-CN", s.Choices)
 	}
 	if got := s.Value(Defaults()); got != "auto" {
 		t.Fatalf("default value = %q, want auto", got)
@@ -78,9 +78,12 @@ func TestLocaleSetting(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(auto)) != "null" {
 		t.Fatalf("encode auto = %q, %v; want null", auto, err)
 	}
-	raw, err := s.Encode("pt-BR")
-	if err != nil || strings.TrimSpace(string(raw)) != `"pt-BR"` {
-		t.Fatalf("encode pt-BR = %q, %v", raw, err)
+	raw, err := s.Encode("zh-CN")
+	if err != nil || strings.TrimSpace(string(raw)) != `"zh-CN"` {
+		t.Fatalf("encode zh-CN = %q, %v", raw, err)
+	}
+	if _, err := s.Encode("de"); err == nil {
+		t.Fatal("encode accepted the removed German locale")
 	}
 	if _, err := s.Encode("xx"); err == nil {
 		t.Fatal("encode accepted an unknown locale")

@@ -357,14 +357,14 @@ func TestGitBlameCopyHash(t *testing.T) {
 	}
 }
 
-func TestGitBlameGermanCopyNotice(t *testing.T) {
-	r := blameRig(t, rigOpts{locale: "de", script: blameScript})
+func TestGitBlameChineseFallsBackToEnglish(t *testing.T) {
+	r := blameRig(t, rigOpts{locale: "zh-CN", script: blameScript})
 	r.moveCaret(2)
 	if err := r.h.Run("git_blame.copy_hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.h.NoticeTexts(); len(got) == 0 || !strings.Contains(got[0], "Kopiert:") {
-		t.Errorf("German notice = %v, want Kopiert: ...", got)
+	if got := r.h.NoticeTexts(); len(got) == 0 || !strings.Contains(got[0], "Copied:") {
+		t.Errorf("Chinese notice = %v, want the English Copied fallback", got)
 	}
 }
 

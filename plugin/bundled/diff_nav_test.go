@@ -56,18 +56,18 @@ func diffRun(t *testing.T, r *rig, command string) string {
 	return lastNoticeText(r.h)
 }
 
-func TestDiffNavGermanNavigationNotices(t *testing.T) {
+func TestDiffNavChineseNavigationNotices(t *testing.T) {
 	r := startRig(t, rigOpts{
-		locale:  "de",
+		locale:  "zh-CN",
 		plugins: []string{"diff_nav"},
 		buffers: []rigBuffer{{"/work/a.txt", "a\nb\nc\n"}},
 		extra:   map[string]string{"live_diff/init.lua": diffProvider("{ { newStart = 1 } }")},
 		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
 	})
-	if got := diffRun(t, r, "diff_nav.next_change"); got != "Änderung 1/1" {
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "更改 1/1" {
 		t.Fatalf("notice = %q", got)
 	}
-	if got := diffRun(t, r, "diff_nav.next_change"); got != "Änderung 1/1 [umgebrochen]" {
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "更改 1/1 [已循环]" {
 		t.Fatalf("wrapped notice = %q", got)
 	}
 }

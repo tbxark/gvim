@@ -1,7 +1,10 @@
 package editor
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"image/png"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -95,6 +98,44 @@ func TestRevertWithoutPathFails(t *testing.T) {
 	e := pathDoc(Options{}, "", "text")
 	if r := e.Do("revert", nil); !errors.Is(r.Err, ErrNoPath) {
 		t.Fatalf("err = %v, want ErrNoPath", r.Err)
+	}
+}
+
+// pngFixture returns a 1x1 PNG, so a file the editor opens takes the image
+// document path rather than the text one.
+func pngFixture(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestRevertRefusesAnImage checks the manual revert of an image: its picture is read
+// when the tab opens, so the reload is refused with ErrImage and the summary stays.
+func TestRevertRefusesAnImage(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pic.png")
+	if err := os.WriteFile(path, pngFixture(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := New(Options{})
+	if err := e.OpenFile(path); err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	if !e.Active().IsImage() {
+		t.Fatal("the opened PNG is not an image document")
+	}
+	plan, err := e.PlanRevert(false)
+	if !errors.Is(err, ErrImage) || plan.Path != "" {
+		t.Fatalf("PlanRevert = (%+v, %v), want an ErrImage refusal", plan, err)
+	}
+	if err := e.Revert(false); !errors.Is(err, ErrImage) {
+		t.Fatalf("Revert = %v, want ErrImage", err)
+	}
+	if !e.Active().IsImage() {
+		t.Error("the refused revert lost the image document")
 	}
 }
 

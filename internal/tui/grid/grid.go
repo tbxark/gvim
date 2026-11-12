@@ -18,7 +18,11 @@ import (
 
 // Style is the set of attributes of one cell. A nil color is the terminal default.
 type Style struct {
-	FG, BG                                          color.Color
+	FG, BG color.Color
+	// UnderlineColor is the underline color (SGR 58), which the Kitty Unicode
+	// placeholder protocol reads as the placement id. Nil leaves the terminal's
+	// default underline color.
+	UnderlineColor                                  color.Color
 	Bold, Faint, Italic, Underline, Strike, Reverse bool
 	// FGKey and BGKey are the theme-key ids Style's colours came from, for the
 	// theme inspector's per-cell provenance. Zero means unknown (a style built
@@ -263,7 +267,7 @@ func sameStyle(a, b Style) bool {
 		a.Underline != b.Underline || a.Strike != b.Strike || a.Reverse != b.Reverse {
 		return false
 	}
-	return sameColor(a.FG, b.FG) && sameColor(a.BG, b.BG)
+	return sameColor(a.FG, b.FG) && sameColor(a.BG, b.BG) && sameColor(a.UnderlineColor, b.UnderlineColor)
 }
 
 func sameColor(a, b color.Color) bool {
@@ -303,5 +307,17 @@ func sgr(st Style) string {
 	if st.BG != nil {
 		s = s.BackgroundColor(st.BG)
 	}
+	if st.UnderlineColor != nil {
+		s = s.UnderlineColor(convertColor(st.UnderlineColor))
+	}
 	return s.String()
+}
+
+// convertColor keeps a color that is already an ansi color, so an indexed
+// underline color stays indexed, and otherwise hands the color to ansi.
+func convertColor(c color.Color) ansi.Color {
+	if ac, ok := c.(ansi.Color); ok {
+		return ac
+	}
+	return c
 }

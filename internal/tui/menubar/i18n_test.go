@@ -7,7 +7,7 @@ import (
 	"github.com/tbxark/gvim/i18n"
 )
 
-// TestMenuLabelsFollowTheLocale checks the extracted menu labels: German uses Fresh's
+// TestMenuLabelsFollowTheLocale checks the extracted menu labels: Chinese uses Fresh's
 // translations for the bar titles and dropdown rows, while a gvim-rewritten label
 // (Show Help, gvim-only key) and an unmapped row fall back to English, never the key.
 // Not parallel: it changes and restores the process locale.
@@ -19,20 +19,20 @@ func TestMenuLabelsFollowTheLocale(t *testing.T) {
 	if rows := dropdownRows("File", func(string) bool { return true }, nil, nil); len(rows) == 0 || rows[0].Label != "New File" {
 		t.Fatalf("English first File row = %+v, want New File", rows)
 	}
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
-	if got := menuBarLabel("File"); got != "Datei" {
-		t.Errorf("German bar label = %q, want Datei", got)
+	if got := menuBarLabel("File"); got != "文件" {
+		t.Errorf("Chinese bar label = %q, want 文件", got)
 	}
-	if got := menuBarLabel("Edit"); got != "Bearbeiten" {
-		t.Errorf("German bar label = %q, want Bearbeiten", got)
+	if got := menuBarLabel("Edit"); got != "编辑" {
+		t.Errorf("Chinese bar label = %q, want 编辑", got)
 	}
 	rows := dropdownRows("File", func(string) bool { return true }, nil, nil)
-	if len(rows) == 0 || rows[0].Label != "Neue Datei" {
-		t.Errorf("German first File row = %+v, want Neue Datei", rows[0])
+	if len(rows) == 0 || rows[0].Label != "新建文件" {
+		t.Errorf("Chinese first File row = %+v, want 新建文件", rows[0])
 	}
 	// Show Help is gvim's rewording of Fresh's manual row: a gvim-only key with no
-	// German translation, so the English label is the explicit fallback.
+	// Chinese translation, so the English label is the explicit fallback.
 	help := dropdownRows("Help", func(string) bool { return true }, nil, nil)
 	var showHelp string
 	for _, row := range help {
@@ -41,7 +41,7 @@ func TestMenuLabelsFollowTheLocale(t *testing.T) {
 		}
 	}
 	if showHelp != "Show Help" {
-		t.Errorf("German extra help row = %q, want the English fallback", showHelp)
+		t.Errorf("Chinese extra help row = %q, want the English fallback", showHelp)
 	}
 }
 

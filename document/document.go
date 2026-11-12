@@ -4,15 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/encoding"
-	"github.com/tbxark/gvim/fold"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/encoding"
+	"github.com/tbxark/gvim/fold"
 )
 
 // Document is one open file: its text, the cursor, an optional selection, and
@@ -144,6 +146,10 @@ type Document struct {
 	// binary marks a file that is not text. It is read-only and cannot be saved. See
 	// binary.go.
 	binary bool
+	// image is what an image file holds, and nil for any other document. It is
+	// read-only, and the UI draws the picture from it instead of the text. See
+	// image.go.
+	image *ImageInfo
 	// metaDirty is set when the encoding or the line ending was changed since the
 	// last save, which leaves the text as it is but changes the file. See
 	// markMetaChanged.
@@ -454,6 +460,31 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		}
 		return nil, fmt.Errorf("open %s: remote file is at or above the large-file threshold and the remote file access has no windowed reader", path)
 	}
+	// Probe only the head before reading a whole file. A binary blob or a picture
+	// larger than the sample must not be loaded into memory just to learn that its
+	// text cannot be shown: GetBinaryRange later reads the hex dump in windows.
+	// The full read still checks the whole file, so a NUL after the sample keeps
+	// the old behaviour for small text-shaped files.
+	if disk.Exists {
+		if head, truncated, err := readHead(path, spec.Access, disk.Size, largeSampleSize); err == nil {
+			if info, ok := imageInfoOf(head); ok {
+				if truncated {
+					info.Size = disk.Size
+				}
+				d := newImageDocument(path, disk, info)
+				d.access = spec.Access
+				return d, nil
+			}
+			if encoding.IsBinary(head) {
+				d := binaryDocument(path, disk)
+				d.access = spec.Access
+				return d, nil
+			}
+		} else if spec.Access == nil && errors.Is(err, fs.ErrNotExist) {
+			// A local file that disappeared between the stat and the probe falls
+			// through to the whole read, which turns it into the usual empty buffer.
+		}
+	}
 	var data []byte
 	var err error
 	if spec.Access != nil {
@@ -479,8 +510,13 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
+	if info, ok := imageInfoOf(data); ok {
+		d := imageDocument(path, data, disk, info)
+		d.access = spec.Access
+		return d, nil
+	}
 	if encoding.IsBinary(data) {
-		d := binaryDocument(path, data, disk)
+		d := binaryDocument(path, disk)
 		d.access = spec.Access
 		return d, nil
 	}
@@ -497,6 +533,55 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	d.encoding = encodingLabel(codec, text)
 	d.access = spec.Access
 	return d, nil
+}
+
+// readHead reads at most n bytes from the start of path through access. It is
+// deliberately bounded: a binary probe must not read a large file whole. The
+// caller checks the stat first; a missing or unreadable file returns the error.
+func readHead(path string, access FileAccess, size, n int64) ([]byte, bool, error) {
+	if n <= 0 || size <= 0 {
+		return nil, false, nil
+	}
+	want := min(size, n)
+	if access != nil {
+		var data []byte
+		var err error
+		if ranges, ok := access.(RangeAccess); ok {
+			// A remote binary probe is a bounded window like the hex reader. Do
+			// not ask the whole-file surface for a prefix: some authorities refuse
+			// it, and a large file must never be transferred just to inspect its head.
+			data, err = ranges.ReadRange(context.Background(), path, 0, want)
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+		} else {
+			data, err = access.ReadFile(path, want)
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		if int64(len(data)) > want {
+			data = data[:want]
+		}
+		return data, size > want, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = f.Close() }()
+	data := make([]byte, want)
+	read, err := io.ReadFull(f, data)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return data[:read], size > int64(read), nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return data, size > int64(read), nil
 }
 
 // fileText returns text as it is written to disk: each "\n" becomes the

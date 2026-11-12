@@ -254,7 +254,7 @@ compiling until consumers are retargeted.
 | document core | `document.go`, `docid.go`, `changes.go`, `diskstate.go`, `settings.go`, `accessors.go` | `Document` struct and state, identity/generation, change ring, disk stamps, the options it reads |
 | cursor & editing | `cursors*.go`, `edit.go`, `edit_api.go`, `block.go`, `smart*.go`, `indent*.go`, `indent_rules.go`, `case.go`, `comment.go`, `bracket.go`, `textcmd.go`, `textops.go`, `vi_actions.go`, `dabbrev.go`, `scanbudget.go` | carets and selections, edit primitives, typing/auto-close/auto-indent, line/selection commands, case/comment/bracket, vi, dabbrev |
 | motions & clusters | `motion*.go`, `fold.go`, `viewsettings.go` | grapheme/word/line movement helpers and row mapping inputs, folds, per-document view settings |
-| files & state | `files_*.go`, `encoding.go`, `binary.go`, `paths.go`, `readonly.go`, `pending.go`, `large*.go`, `save_large.go`, `autosave_async.go`, `stash.go` | load/decode, encoding/EOL, disk state, large mode and its index, save planning and jobs, overlay stash format |
+| files & state | `files_*.go`, `encoding.go`, `binary.go`, `image.go`, `paths.go`, `readonly.go`, `pending.go`, `large*.go`, `save_large.go`, `autosave_async.go`, `stash.go` | load/decode, encoding/EOL and bounded binary/image head probes, read-only binary and image documents (binary hex ranges), disk state, large mode and its index, save planning and jobs, overlay stash format |
 | plugin data | `virtual.go`, `docops_id.go`, `lspedit.go`, `save_info.go` | virtual-document state, id-based ops data, LSP edit value, save result payload |
 
 `editor` clusters:

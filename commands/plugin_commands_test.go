@@ -31,7 +31,10 @@ func TestPluginCommandRows(t *testing.T) {
 			if e.Name != tt.name || e.Source != SourceBuiltin || e.Description == "" {
 				t.Fatalf("row = %+v", e)
 			}
-			if want := len(entries) - len(tests) + i; idx != want {
+			// The generated rows and the other hand-written rows precede the plugin
+			// manager, which stays in its own contiguous tail block.
+			want := slices.IndexFunc(entries, func(e Entry) bool { return e.Action == "plugin_manager" }) + i
+			if idx != want {
 				t.Fatalf("%s is row %d, want %d (after the generated rows)", tt.action, idx, want)
 			}
 			got := Search(entries, tt.query)

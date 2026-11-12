@@ -50,8 +50,11 @@ Contents, Session, Mouse, Languages, Formatters, Status Bar, File Explorer and
 Terminal.
 The scalar rows cover the settings gvim reads today; the structured rows open
 the sub-pages of section 4. The Interface section's `locale` row picks the UI
-language (`auto` plus Fresh's 15 locales); it is a user-layer setting and applies
-live through the i18n package and the plugin runtime (see [i18n.md](i18n.md)). The app adds the non-scalar rows the config schema
+language (`auto`, English and Simplified Chinese); it is a user-layer setting and applies
+live through the i18n package and the plugin runtime (see [i18n.md](i18n.md)). The
+Interface section's `image_protocol` row picks the image viewer's protocol
+(`auto`, `kitty`, `off`) and applies live; see [images.md](images.md) for what each
+value does and when the terminal is asked. The app adds the non-scalar rows the config schema
 cannot describe: the **Language Servers** page row (the LSP page: effective
 built-in/user/universal servers with their live manager state, manual
 start/stop/restart action rows, and each language's whole server array as

@@ -20,6 +20,8 @@ import (
 // fakeEditor implements EditorState. It records every action it is asked to run.
 type fakeEditor struct {
 	doc        *fakeDoc
+	docAlt     Document // when set, Active returns it (a test document with extra methods)
+	tabDocs    []Document
 	tabs       []TabInfo
 	status     string
 	rows, cols int
@@ -46,10 +48,24 @@ func (f *fakeEditor) Do(a editor.Action, args map[string]any) editor.Result {
 	return editor.Result{Quit: a == f.quitAction}
 }
 
-func (f *fakeEditor) Active() Document      { return f.doc }
+func (f *fakeEditor) Active() Document {
+	if f.docAlt != nil {
+		return f.docAlt
+	}
+	return f.doc
+}
 func (f *fakeEditor) Tabs() []TabInfo       { return f.tabs }
 func (f *fakeEditor) Status() string        { return f.status }
 func (f *fakeEditor) Bookmarks() []Bookmark { return f.bookmarks }
+
+// DocAt returns the document of tab i when the test set one, so a split can show
+// a background tab the way the app adapter does.
+func (f *fakeEditor) DocAt(i int) Document {
+	if i < 0 || i >= len(f.tabDocs) {
+		return nil
+	}
+	return f.tabDocs[i]
+}
 
 // SetRoot records the workspace root that the root gives the editor.
 func (f *fakeEditor) SetRoot(root string) { f.root = root }

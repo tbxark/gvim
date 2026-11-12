@@ -50,6 +50,18 @@ func TestSettingsForCarriesTheSaveOptions(t *testing.T) {
 	}
 }
 
+// TestSettingsForCarriesTheImageProtocol checks the settings snapshot that the
+// settings page shows: a session without a SettingsPort must still list the
+// configured image_protocol, not fall back to auto.
+func TestSettingsForCarriesTheImageProtocol(t *testing.T) {
+	t.Parallel()
+	cfg := config.Defaults()
+	cfg.UIImageProtocol = config.UIImageProtocolOff
+	if s := settingsFor(Options{}, cfg); s.UIImageProtocol != config.UIImageProtocolOff {
+		t.Fatalf("UIImageProtocol = %q, want %q", s.UIImageProtocol, config.UIImageProtocolOff)
+	}
+}
+
 func TestSwitchKeymapKeepsTheConfigKeybindings(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()

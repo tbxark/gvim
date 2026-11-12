@@ -25,9 +25,9 @@ FRESH = ROOT / "refs" / "fresh" / "crates" / "fresh-editor-core" / "locales"
 MAP = ROOT / "i18n" / "fresh_map.json"
 PLUGINS = ROOT / "refs" / "fresh" / "crates" / "fresh-editor" / "plugins"
 
-# The translated locales: every language gvim offers except English. Fresh ships the
-# same set (i18n/i18n.go Locales()); the tool fails if the Fresh checkout differs.
-TRANSLATED = ["bg", "cs", "de", "es", "fr", "it", "ja", "ko", "pt-BR", "ru", "th", "uk", "vi", "zh-CN"]
+# The translated locales: every language gvim offers except English. Fresh also
+# ships the other languages, but gvim deliberately embeds only Simplified Chinese.
+TRANSLATED = ["zh-CN"]
 
 
 def load(path):

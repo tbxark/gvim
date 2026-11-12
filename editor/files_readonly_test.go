@@ -18,6 +18,9 @@ func TestBinaryFileOpensReadOnlyAndNeverAsGarbage(t *testing.T) {
 	if !d.Binary() || !d.ReadOnly() {
 		t.Fatalf("Binary() = %v, ReadOnly() = %v, want both true", d.Binary(), d.ReadOnly())
 	}
+	if strings.Contains(d.Buffer.Text(), "\x89PNG") || strings.Contains(d.Buffer.Text(), "\x00") {
+		t.Fatalf("the binary summary holds the file's bytes: %q", d.Buffer.Text())
+	}
 	for _, r := range d.Buffer.Text() {
 		if r != '\n' && r != '\t' && r != '\r' && unicode.IsControl(r) {
 			t.Fatalf("the buffer holds the control character %U, which would reach the terminal", r)

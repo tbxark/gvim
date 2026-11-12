@@ -7,10 +7,10 @@ import (
 )
 
 // TestRemoteEnvNoticesUseTheCatalogue checks the extracted remote-environment notices:
-// German shows the English fallback (gvim-only keys) and the placeholders compose the
+// Chinese shows the English fallback (gvim-only keys) and the placeholders compose the
 // same text the shell/watch code produced before. Not parallel: locale.
 func TestRemoteEnvNoticesUseTheCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	got := appTextVars("gvim.notice.remote_env_watch_limit", "Remote environment: %{markers} detector marker path(s) in %{directories} director(ies) are not watched (watch bound reached); use Env: Reload after changing them", map[string]any{"markers": 2, "directories": 1})
 	if got != "Remote environment: 2 detector marker path(s) in 1 director(ies) are not watched (watch bound reached); use Env: Reload after changing them" {

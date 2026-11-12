@@ -10,6 +10,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/icons"
@@ -45,6 +46,10 @@ type ViewOptions struct {
 	MouseHover              bool
 	ScrollSync              bool
 	UIIcons                 string // "plain" or "nerd"; empty and unknown names are plain
+	// ImageProtocol is image_protocol: "auto" probes the terminal when the first
+	// image tab opens, "kitty" trusts it, and "off" never draws an image. Empty
+	// reads as auto.
+	ImageProtocol string
 
 	// The fields below are the Fresh editor.* display options. The app fills them from
 	// the config, whose defaults are Fresh's, and DefaultViewOptions returns the same
@@ -626,16 +631,49 @@ func (m *Model) ClearThemeOverrides() {
 	}
 }
 
-// openLocales lists the locales built in. English is the only one, so the list has
-// one row, and choosing it says that the others are not built in.
+// openLocales lists the locales built in: English and Simplified Chinese. Choosing
+// one applies it immediately.
 func (m *Model) openLocales() {
-	rows := []list.Row{{Left: "English", Right: "current", Value: "en"}}
+	rows := localeRows(i18n.Locale(), i18n.Locales())
 	v := list.New("Locale", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
 		v.Close()
-		m.notice = "Other locales are not built in: English is the only locale"
-		return nil
+		return m.setLocale(r.Value)
 	})
 	m.pushOverlay(v)
+}
+
+// localeRows lists the built-in languages, marking code as current.
+func localeRows(code string, locales []i18n.Language) []list.Row {
+	rows := make([]list.Row, 0, len(locales))
+	for _, lang := range locales {
+		right := ""
+		if lang.Code == code {
+			right = "current"
+		}
+		rows = append(rows, list.Row{Left: lang.English, Right: right, Value: lang.Code})
+	}
+	return rows
+}
+
+// setLocale persists a locale choice through the Settings port, whose apply step
+// pushes the resolved locale into the i18n package and the plugin runtime. Without
+// a port the choice applies to this session only.
+func (m *Model) setLocale(code string) tea.Cmd {
+	lang, ok := i18n.Find(code)
+	if !ok {
+		m.notice = "Locale: " + code + " is not built in"
+		return nil
+	}
+	m.notice = "Locale: " + lang.English
+	if m.util.settingsPort == nil {
+		i18n.SetLocale(lang.Code)
+		return nil
+	}
+	port := m.util.settingsPort
+	return func() tea.Msg {
+		change, err := port.Save([]SettingEdit{{Key: "locale", Value: lang.Code}}, SettingsLayerUser)
+		return settingsChangeMsg{change: change, err: err}
+	}
 }
 
 // viewLayout sets the chrome rows and the gutter of the frame from the view state. It

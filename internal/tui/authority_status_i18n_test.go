@@ -35,9 +35,9 @@ func TestAuthoritySegmentUsesCataloguedStatusKeys(t *testing.T) {
 			}
 		})
 	}
-	// German has no gvim.status.* translation: the English catalogue value is the
+	// Chinese has no gvim.status.* translation: the English catalogue value is the
 	// explicit fallback, never the bare key.
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	m := &Model{}
 	m.SetAuthorityHooks(AuthorityHooks{Status: func() AuthorityStatus {
 		return AuthorityStatus{Text: "SSH:user@host", Connected: false}

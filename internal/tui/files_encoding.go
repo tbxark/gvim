@@ -132,6 +132,8 @@ func (m *Model) statusSegmentClick(i int) tea.Cmd {
 		return m.openWorkspaceTrust()
 	case statusSegmentUpdate:
 		return m.dispatch(Command{Action: "show_update_output"})
+	case statusSegmentHexView:
+		return m.toggleHexView()
 	}
 	return nil
 }

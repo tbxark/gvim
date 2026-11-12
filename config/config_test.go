@@ -55,6 +55,7 @@ func TestDefaults(t *testing.T) {
 		LSPEnabled:              true,
 		CursorStyle:             "block",
 		UIIcons:                 "auto",
+		UIImageProtocol:         "auto",
 
 		ExplorerShowHidden: true,
 		PluginTimeout:      500 * time.Millisecond,

@@ -43,7 +43,7 @@ func TestRevertRefreshesAReadOnlyTab(t *testing.T) {
 		wantBinary bool
 	}{
 		{"read-only text", "a\n", "b\n", true, "b\n", false},
-		{"binary tab, binary file", "a\x00b\n", "c\x00d\n", false, "c␀d\n", true},
+		{"binary tab, binary file", "a\x00b\n", "c\x00d\n", false, binarySummaryText("doc.txt"), true},
 		{"binary tab, file turns to text", "a\x00b\n", "plain\n", false, "plain\n", false},
 	}
 	for _, tt := range tests {
@@ -58,8 +58,14 @@ func TestRevertRefreshesAReadOnlyTab(t *testing.T) {
 				t.Fatalf("Revert: %v", err)
 			}
 			d := e.Active()
-			if got := d.Buffer.Text(); got != tt.wantText {
-				t.Errorf("text = %q, want %q", got, tt.wantText)
+			got := d.Buffer.Text()
+			want := tt.wantText
+			if tt.wantBinary {
+				if !strings.HasPrefix(got, want) || !strings.Contains(got, "Binary file: read-only.") {
+					t.Errorf("text = %q, want the binary summary beginning %q", got, want)
+				}
+			} else if got != want {
+				t.Errorf("text = %q, want %q", got, want)
 			}
 			if !d.ReadOnly() {
 				t.Error("ReadOnly() = false, want true")
@@ -75,6 +81,11 @@ func TestRevertRefreshesAReadOnlyTab(t *testing.T) {
 			}
 		})
 	}
+}
+
+// binarySummaryText is the summary a binary document of path shows.
+func binarySummaryText(path string) string {
+	return filepath.Base(path) + "\n\nBinary file\n"
 }
 
 // TestRevertActionStillRefusesReadOnlyTab checks that the user-invoked revert action keeps

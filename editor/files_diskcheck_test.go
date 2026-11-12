@@ -81,3 +81,32 @@ func TestPlanDiskCheckSkipsDocumentsWithoutAFile(t *testing.T) {
 		t.Fatalf("DiskCheck of untitled buffers = %+v, want none", got)
 	}
 }
+
+// TestPlanDiskCheckSkipsImages checks that an open image is not polled: its picture
+// is read when the tab opens, so a changed file waits for a close and reopen instead
+// of being offered as a reload.
+func TestPlanDiskCheckSkipsImages(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	text := filepath.Join(dir, "a.txt")
+	pic := filepath.Join(dir, "pic.png")
+	if err := os.WriteFile(text, []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pic, pngFixture(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := New(Options{})
+	for _, p := range []string{text, pic} {
+		if err := e.OpenFile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !e.Active().IsImage() {
+		t.Fatal("the opened PNG is not an image document")
+	}
+	got := e.PlanDiskCheck()()
+	if len(got) != 1 || filepath.Base(got[0].Path) != "a.txt" {
+		t.Fatalf("disk check = %+v, want only a.txt", got)
+	}
+}

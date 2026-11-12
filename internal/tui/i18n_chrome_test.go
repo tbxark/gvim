@@ -6,17 +6,17 @@ import (
 	"github.com/tbxark/gvim/i18n"
 )
 
-// TestChromeStringsUseTheCatalogue checks the extracted chrome strings: German uses
+// TestChromeStringsUseTheCatalogue checks the extracted chrome strings: Chinese uses
 // Fresh's menu translations for the mapped context-menu rows, the gvim-only rows keep
 // their English text (never the bare key), and the help context headings fall back to
 // English. Not parallel: locale.
 func TestChromeStringsUseTheCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(2), 80, 20)
 	items := m.tabMenuItems(1)
 	if len(items) == 0 || items[0].Label != "Close" {
-		t.Fatalf("German tab menu first row = %+v, want the English fallback Close", items)
+		t.Fatalf("Chinese tab menu first row = %+v, want the English fallback Close", items)
 	}
 	for _, it := range items {
 		if it.Separator {
@@ -26,7 +26,7 @@ func TestChromeStringsUseTheCatalogue(t *testing.T) {
 			t.Errorf("tab menu row %q looks like an unresolved key", it.Label)
 		}
 	}
-	if got := uiText("gvim.context.cut", "Cut"); got != "Ausschneiden" {
+	if got := uiText("gvim.context.cut", "Cut"); got != "剪切" {
 		t.Errorf("mapped Cut = %q, want Fresh's translation", got)
 	}
 	if got := contextTitle("normal"); got != "Editor" {

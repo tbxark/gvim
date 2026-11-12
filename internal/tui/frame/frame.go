@@ -145,6 +145,9 @@ type StatusView struct {
 	// Update is the release the check found, as the {update} element shows it
 	// ("Update: v0.4.2"), or "" while no newer release is known.
 	Update string
+	// HexView is the binary-view switch: "Hex" while the summary is shown and
+	// "Summary" while the hex dump is shown. Empty for text and image documents.
+	HexView string
 
 	Extra []StatusItem // the items of plugins (plugin_status.go)
 
@@ -857,7 +860,7 @@ type statusSeg struct {
 // anchors. The search hint (Palette) and every clickable element keep their hit
 // targets.
 func statusSide(elements []StatusElement, s StatusView, right bool) []statusSeg {
-	out := make([]statusSeg, 0, len(elements)+len(s.Extra)+1)
+	out := make([]statusSeg, 0, len(elements)+len(s.Extra)+2)
 	add := func(seg statusSeg) {
 		if seg.text == "" {
 			return
@@ -879,6 +882,15 @@ func statusSide(elements []StatusElement, s StatusView, right bool) []statusSeg 
 	// group, before the configured elements.
 	if right && s.Large != "" {
 		add(statusSeg{text: space.Pad(s.Large)})
+	}
+	// The binary-view switch is a gvim extension too: it follows the document rather
+	// than the configured element lists, so a custom status bar cannot hide it.
+	if right && s.HexView != "" {
+		add(statusSeg{
+			text: space.Pad("[" + s.HexView + "]"),
+			kind: HitStatusSegment,
+			id:   StatusSegmentHexView,
+		})
 	}
 	plugins := make([]int, 0, len(s.Extra))
 	for i, it := range s.Extra {

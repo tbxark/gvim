@@ -46,7 +46,7 @@ var pluralCategories = []string{"zero", "one", "two", "few", "many", "other"}
 func allowedCategories(locale string) map[string]bool {
 	allowed := map[string]bool{}
 	// The runtime rule is an integer rule; 0..200 covers every residue class the
-	// shipped languages distinguish.
+	// CLDR rules distinguish.
 	for n := 0; n <= 200; n++ {
 		allowed[PluralCategory(locale, n)] = true
 	}

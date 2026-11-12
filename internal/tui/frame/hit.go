@@ -53,7 +53,8 @@ const (
 
 // The Index of a hitStatusSegment target: the line ending, the encoding, the language,
 // the caret position, the language server, the workspace-trust level, the status
-// message or the terminal restart of the status row.
+// message, the terminal restart, the update indicator or the binary-view switch of the
+// status row.
 const (
 	StatusSegmentEOL = iota
 	StatusSegmentEncoding
@@ -64,6 +65,7 @@ const (
 	StatusSegmentMessages        // the status message: opens the warnings list (the status log)
 	StatusSegmentTerminalRestart // the dock's shell has exited: restarts the terminal
 	StatusSegmentUpdate          // a newer release is known: shows the update details
+	StatusSegmentHexView         // a binary document: switches summary and hex view
 )
 
 // HitTarget is the result of a hit test. Index depends on Kind. Menu labels,

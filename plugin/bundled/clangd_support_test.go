@@ -67,10 +67,10 @@ func TestClangdManifestAndCommands(t *testing.T) {
 	}
 }
 
-func TestClangdGermanCommandsAndNotices(t *testing.T) {
+func TestClangdChineseCommandsAndNotices(t *testing.T) {
 	t.Parallel()
 	r := startRig(t, rigOpts{
-		locale:  "de",
+		locale:  "zh-CN",
 		plugins: []string{"clangd_support"},
 		buffers: []rigBuffer{{"/work/src/a.c", "int main(void) { return 0; }\n"}},
 		script: func(o *plugintest.FakeOS) {
@@ -81,18 +81,18 @@ func TestClangdGermanCommandsAndNotices(t *testing.T) {
 	for _, c := range r.host.Commands["clangd_support"] {
 		commands[c.ID] = c.Title
 	}
-	if got := commands["clangd_support.switch_source_header"]; got != "Clangd: Quelle/Header wechseln" {
-		t.Errorf("German switch command title = %q, want Clangd: Quelle/Header wechseln", got)
+	if got := commands["clangd_support.switch_source_header"]; got != "Clangd: 切换源文件/头文件" {
+		t.Errorf("Chinese switch command title = %q, want Clangd: 切换源文件/头文件", got)
 	}
-	if got := commands["clangd_support.project_setup"]; got != "Clangd: Projekteinrichtung" {
-		t.Errorf("German project setup title = %q, want Clangd: Projekteinrichtung", got)
+	if got := commands["clangd_support.project_setup"]; got != "Clangd: 项目设置" {
+		t.Errorf("Chinese project setup title = %q, want Clangd: 项目设置", got)
 	}
 	r.host.SetActive(0)
 	if err := r.h.Run("clangd_support.switch_source_header", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastNoticeText(r.h); !strings.Contains(got, "keine aktive Datei zum Wechseln") {
-		t.Errorf("notice = %q, want German no-active-file notice", got)
+	if got := lastNoticeText(r.h); !strings.Contains(got, "没有活动文件可切换") {
+		t.Errorf("notice = %q, want Chinese no-active-file notice", got)
 	}
 }
 

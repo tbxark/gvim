@@ -186,6 +186,10 @@ type tabFile struct {
 	path     string
 	modified bool
 	active   bool
+	// image marks a tab that shows an image. Images take no part in automatic
+	// reloads, watcher registration or the disk poll: closing and reopening the tab
+	// is what reads the file again.
+	image bool
 }
 
 // openTabFiles returns the open documents that have a file: the active one first, then the
@@ -194,12 +198,16 @@ func (m *Model) openTabFiles() []tabFile {
 	var out []tabFile
 	if doc := m.ed.Active(); doc != nil {
 		if p := docPath(doc); p != "" {
-			out = append(out, tabFile{path: p, modified: doc.Modified(), active: true})
+			out = append(out, tabFile{path: p, modified: doc.Modified(), active: true, image: isImageDoc(doc)})
 		}
 	}
-	for _, t := range m.ed.Tabs() {
+	for i, t := range m.ed.Tabs() {
 		if !t.Active && t.Path != "" {
-			out = append(out, tabFile{path: t.Path, modified: t.Modified})
+			image := false
+			if doc := m.docAt(i); doc != nil {
+				image = isImageDoc(doc)
+			}
+			out = append(out, tabFile{path: t.Path, modified: t.Modified, image: image})
 		}
 	}
 	return out
@@ -220,6 +228,11 @@ func (m *Model) autoRevertChanged(files []string) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, f := range m.openTabFiles() {
 		if !m.autoRevertOn(f.path) || !changed[filepath.Clean(f.path)] {
+			continue
+		}
+		if f.image {
+			// An open image is not reloaded under the viewer: closing and reopening is
+			// what reads the file again.
 			continue
 		}
 		if f.modified {

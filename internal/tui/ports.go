@@ -137,6 +137,21 @@ type ReadOnlyDoc interface {
 	ReadOnly() bool
 }
 
+// BinaryDoc is the optional view of a Document that reports whether it is a
+// non-text file. Images also report Binary, so a caller that offers a byte dump
+// must check IsImage first (see binaryViewDoc).
+type BinaryDoc interface {
+	Binary() bool
+}
+
+// BinaryRangeDoc is the optional view of a binary Document that can read a
+// bounded range of its bytes for the hex view. It refuses text and image
+// documents, and a remote file access without range reads.
+type BinaryRangeDoc interface {
+	BinaryStat() (size, mtime int64)
+	ReadBinaryRange(ctx context.Context, off, n int64) ([]byte, error)
+}
+
 // LargeDoc is the optional view of a Document in large file mode, as *editor.Document
 // has it and the app adapter forwards it. The root asserts it on the active document.
 // Large reports whether the document is in that mode, and Index how much of its line

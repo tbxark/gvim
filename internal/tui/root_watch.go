@@ -50,6 +50,11 @@ func (m *Model) watchSync() tea.Cmd {
 	}
 	var fresh []string
 	for _, f := range m.openTabFiles() {
+		if f.image {
+			// An image is not reloaded under the viewer, so its folder needs no
+			// watcher entry; closing and reopening reads the file again.
+			continue
+		}
 		dir := filepath.Dir(f.path)
 		if m.root.watched[dir] {
 			continue

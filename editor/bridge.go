@@ -19,6 +19,10 @@ type EditOptions = document.EditOptions
 
 var ErrAlreadyOpen = document.ErrAlreadyOpen
 var ErrBinary = document.ErrBinary
+
+// ErrImage is returned by a revert of an image document: its picture is read when
+// its tab opens, so closing and reopening is what reloads it.
+var ErrImage = document.ErrImage
 var ErrEmptyPath = document.ErrEmptyPath
 var ErrIndexing = document.ErrIndexing
 var ErrLargeFile = document.ErrLargeFile

@@ -14,6 +14,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/syntax"
@@ -552,15 +553,53 @@ func TestSelectThemeAppliesTheChosenThemeLive(t *testing.T) {
 	}
 }
 
-func TestSelectLocaleSaysOnlyEnglishIsBuiltIn(t *testing.T) {
+func TestSelectLocaleListsAndAppliesSimplifiedChinese(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 12)
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	i18n.SetLocale("en")
 	runAction(t, m, "select_locale")
-	if !frameHas(m, "English") {
-		t.Fatal("the locale list does not show English")
+	if !frameHas(m, "English") || !frameHas(m, "Chinese (Simplified)") {
+		t.Fatal("the locale list does not show English and Simplified Chinese")
 	}
-	settle(t, m, press(m, special(tea.KeyEnter)))
-	if !strings.Contains(m.notice, "not built in") {
-		t.Errorf("notice %q does not say the other locales are not built in", m.notice)
+	press(m, special(tea.KeyDown))
+	cmd := press(m, special(tea.KeyEnter))
+	if got := i18n.Locale(); got != "zh-CN" {
+		t.Fatalf("locale after choosing Chinese = %q, want zh-CN", got)
+	}
+	if !strings.Contains(m.notice, "Chinese (Simplified)") {
+		t.Errorf("notice %q does not name the chosen locale", m.notice)
+	}
+	if cmd != nil {
+		t.Fatal("a locale choice without a Settings port started a command")
+	}
+}
+
+// TestSelectLocaleWithAPortWaitsForTheSave checks that a locale choice with a
+// Settings port does not change the UI before the Save succeeds: the save command
+// carries the edit, and the settings change applies the locale.
+func TestSelectLocaleWithAPortWaitsForTheSave(t *testing.T) {
+	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 12)
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	i18n.SetLocale("en")
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m.util.settingsPort = port
+	runAction(t, m, "select_locale")
+	press(m, special(tea.KeyDown))
+	cmd := press(m, special(tea.KeyEnter))
+	if got := i18n.Locale(); got != "en" {
+		t.Fatalf("locale before the save = %q, want en", got)
+	}
+	if cmd == nil {
+		t.Fatal("choosing a locale with a Settings port started no save")
+	}
+	msgs := collect(cmd)
+	if len(port.saves) != 1 || port.saves[0].layer != SettingsLayerUser ||
+		len(port.saves[0].edits) != 1 || port.saves[0].edits[0].Key != "locale" ||
+		port.saves[0].edits[0].Value != "zh-CN" {
+		t.Fatalf("saves = %+v, want the locale edit in the user layer", port.saves)
+	}
+	if _, ok := firstSettingsChange(msgs); !ok {
+		t.Fatalf("the locale save produced %T messages, want a settings change", msgs)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 // TestDialogLabelsUseTheCatalogue checks the extracted dialog labels: English is byte
-// identical to the old literals, German uses Fresh's dialog translations for the mapped
+// identical to the old literals, Chinese uses Fresh's dialog translations for the mapped
 // buttons/title, and a gvim-only label falls back to English, never the bare key. Not
 // parallel: it changes and restores the process locale.
 func TestDialogLabelsUseTheCatalogue(t *testing.T) {
@@ -21,18 +21,18 @@ func TestDialogLabelsUseTheCatalogue(t *testing.T) {
 	if got := buttonLabels(en.buttons); got != "Save,Discard,Cancel" {
 		t.Fatalf("English buttons = %q", got)
 	}
-	i18n.SetLocale("de")
-	de := NewUnsavedChanges(nil, "a.go", nil, ov)
-	if de.title != "Ungespeicherte Änderungen" {
-		t.Errorf("German title = %q, want Fresh's dialog title", de.title)
+	i18n.SetLocale("zh-CN")
+	zh := NewUnsavedChanges(nil, "a.go", nil, ov)
+	if zh.title != "未保存的更改" {
+		t.Errorf("Chinese title = %q, want Fresh's dialog title", zh.title)
 	}
-	if got := buttonLabels(de.buttons); got != "Speichern,Verwerfen,Abbrechen" {
-		t.Errorf("German buttons = %q, want Fresh's dialog buttons", got)
+	if got := buttonLabels(zh.buttons); got != "保存,丢弃,取消" {
+		t.Errorf("Chinese buttons = %q, want Fresh's dialog buttons", got)
 	}
 	// Error/OK are gvim-only: the explicit English fallback.
 	errDlg := NewErrorDialog(nil, "boom", nil, ov)
 	if errDlg.title != "Error" || buttonLabels(errDlg.buttons) != "OK" {
-		t.Errorf("German error dialog = %q/%q, want the English fallback", errDlg.title, buttonLabels(errDlg.buttons))
+		t.Errorf("Chinese error dialog = %q/%q, want the English fallback", errDlg.title, buttonLabels(errDlg.buttons))
 	}
 	// The dynamic labels are catalogue text with placeholders; the English rendering is
 	// what the dialog always showed.

@@ -7,10 +7,10 @@ import (
 )
 
 // TestRemoteSearchAndLocalWatchNoticesUseTheCatalogue checks this round's new notices:
-// German shows the English fallback (gvim-only keys) and the remote-search degradation
+// Chinese shows the English fallback (gvim-only keys) and the remote-search degradation
 // strings keep their exact English. Not parallel: locale.
 func TestRemoteSearchAndLocalWatchNoticesUseTheCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	if got := appText("gvim.notice.local_env_watch_off", "Local environment: file watching is off; changed detector markers are picked up on Env: Reload"); got != "Local environment: file watching is off; changed detector markers are picked up on Env: Reload" {
 		t.Errorf("local watch off = %q", got)

@@ -269,6 +269,13 @@ type WorkspacePort interface {
 // New for a daemon-hosted session only.
 func (m *Model) SetWorkspacePort(p WorkspacePort) { m.workspace = p }
 
+// SetHostedWorkspace marks the model as a workspace hosted by a daemon. The daemon
+// has one screen shared by clients with different terminals, so it cannot own a
+// single terminal's image placements: hosted workspaces keep the text summary.
+func (m *Model) SetHostedWorkspace(hosted bool) {
+	m.img.localOnly = hosted
+}
+
 // SetWorkspaceLabel sets the status-row label of the active workspace.
 func (m *Model) SetWorkspaceLabel(label string) { m.workspaceLabel = label }
 

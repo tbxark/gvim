@@ -470,6 +470,56 @@ func TestStatusRowUsesFreshDefaultListsWhenUnset(t *testing.T) {
 	}
 }
 
+// TestStatusRowHexViewSwitchFollowsTheDocument checks the binary-view switch: the
+// summary shows a clickable "[Hex]", the dump shows "[Summary]", and the switch is
+// independent of the configured status-bar elements. A text or image document
+// leaves HexView empty and paints no switch.
+func TestStatusRowHexViewSwitchFollowsTheDocument(t *testing.T) {
+	t.Parallel()
+	find := func(runs []Run, text string) *Run {
+		for i := range runs {
+			if runs[i].Text == text {
+				return &runs[i]
+			}
+		}
+		return nil
+	}
+	s := StatusView{
+		Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8",
+		HexView: "Hex",
+		Row: StatusRow{
+			Left:  []StatusElement{{Kind: StatusElementMessages}},
+			Right: []StatusElement{{Kind: StatusElementPalette}},
+		},
+	}
+	runs := StatusRuns(100, s)
+	hex := find(runs, " [Hex] ")
+	if hex == nil {
+		t.Fatalf("no [Hex] switch in %+v", runs)
+	}
+	if hex.Kind != HitStatusSegment || hex.Index != StatusSegmentHexView {
+		t.Errorf("[Hex] run = %+v, want a clickable hex switch", *hex)
+	}
+	if find(runs, " [RO] ") != nil {
+		t.Errorf("the custom row grew a [RO] marker although it does not name {read_only}: %+v", runs)
+	}
+
+	s.HexView = "Summary"
+	runs = StatusRuns(100, s)
+	summary := find(runs, " [Summary] ")
+	if summary == nil {
+		t.Fatalf("no [Summary] switch in %+v", runs)
+	}
+	if summary.Kind != HitStatusSegment || summary.Index != StatusSegmentHexView {
+		t.Errorf("[Summary] run = %+v, want a clickable summary switch", *summary)
+	}
+
+	s.HexView = ""
+	if find(StatusRuns(100, s), " [Hex] ") != nil {
+		t.Error("a text or image document paints the binary switch")
+	}
+}
+
 // TestStatusRowWalksTheConfiguredLists checks that the row is exactly the configured
 // elements: order, a missing element gone, and the separator between neighbours.
 func TestStatusRowWalksTheConfiguredLists(t *testing.T) {

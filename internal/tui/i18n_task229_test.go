@@ -7,11 +7,11 @@ import (
 )
 
 // TestTask229MoveAndResolveStrings checks the extracted task-220 move confirmation/notices
-// and task-216 resolve/accept refusal notices: German shows the English fallback for these
+// and task-216 resolve/accept refusal notices: Chinese shows the English fallback for these
 // gvim-only keys (never the bare key) and the placeholders compose byte-identically.
 // Not parallel: locale.
 func TestTask229MoveAndResolveStrings(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	if got := uiTextVars("gvim.prompt.move_remote", "Move %{what} on %{target} to %{dir}?", map[string]any{"what": "a.go", "target": "host", "dir": "src"}); got != "Move a.go on host to src?" {
 		t.Errorf("move confirm = %q", got)

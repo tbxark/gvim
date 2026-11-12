@@ -31,7 +31,9 @@ func (e *Editor) PlanDiskCheck() func() []DiskChange {
 	}
 	var files []recorded
 	for _, d := range e.docs {
-		if d.Ext().Virtual {
+		if d.Ext().Virtual || d.IsImage() {
+			// An image document is not reloaded under the viewer: closing and
+			// reopening its tab is what reads the file again.
 			continue
 		}
 		// A large document keeps its file open. The check is an fstat of that

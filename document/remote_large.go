@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/encoding"
 )
 
 // Remote large-file mode: a remote file at or above the large-file threshold opens
@@ -276,10 +277,52 @@ func (s *remoteWindowSource) Close() error {
 	return nil
 }
 
+// readRemoteHead reads at most n bytes at the start of path through a remote
+// range reader. It mirrors readHead's local branch but takes the narrower
+// interface the remote large-file path already has.
+func readRemoteHead(ctx context.Context, access RangeAccess, path string, size, n int64) ([]byte, bool, error) {
+	if n <= 0 || size <= 0 {
+		return nil, false, nil
+	}
+	want := min(size, n)
+	data, err := access.ReadRange(ctx, path, 0, want)
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > want {
+		data = data[:want]
+	}
+	return data, size > int64(len(data)), nil
+}
+
 // readRemoteLargeDocument opens path in large-file mode over a windowed remote
 // source. Edits are an in-memory overlay over the windowed base; a non-UTF-8 file
 // fails with ErrTooLargeToTranscode instead of loading whole.
 func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, spec loadSpec, access RangeAccess) (*Document, error) {
+	// Probe the head before building the windowed source. A binary or an image
+	// needs no line index, and the source would eagerly fetch a 1 MiB window only
+	// to throw it away; text still opens the source below. The probe itself is
+	// bounded to the same 64 KiB sample the local large path reads.
+	head, truncated, err := readRemoteHead(ctx, access, path, disk.Size, largeSampleSize)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	if info, ok := imageInfoOf(head); ok {
+		if truncated {
+			info.Size = disk.Size
+		}
+		d := newImageDocument(path, disk, info)
+		d.access = spec.Access
+		return d, nil
+	}
+	if encoding.IsBinary(head) {
+		d := binaryDocument(path, disk)
+		d.access = spec.Access
+		return d, nil
+	}
 	src, err := newRemoteWindowSource(ctx, access, path, disk.Size)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -292,6 +335,23 @@ func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, s
 			return nil, fmt.Errorf("open %s: remote large file is not UTF-8; a full remote load is not supported: %w", path, ErrTooLargeToTranscode)
 		}
 		return nil, err
+	}
+	if info.image != nil {
+		// A picture whose header follows more than the 64 KiB head probe is still
+		// an image: the source sample sees it, and the windowed text path must not
+		// claim it.
+		_ = src.Close()
+		d := newImageDocument(path, disk, *info.image)
+		d.access = spec.Access
+		return d, nil
+	}
+	if info.binary {
+		// A binary marker after the head probe is caught by the first source
+		// window. It is a summary too; hex reads use bounded RangeAccess windows.
+		_ = src.Close()
+		d := binaryDocument(path, disk)
+		d.access = spec.Access
+		return d, nil
 	}
 	geom := spec.LargeConf.Geom
 	geom.Skip = info.Skip

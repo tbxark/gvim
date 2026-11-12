@@ -91,6 +91,7 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 		MouseHover:              cfg.MouseHover,
 		ScrollSync:              cfg.ScrollSync,
 		UIIcons:                 icons,
+		ImageProtocol:           cfg.UIImageProtocol,
 
 		RelativeLineNumbers:        cfg.RelativeLineNumbers,
 		HideCurrentLineOnSelection: cfg.HideCurrentLineOnSelection,

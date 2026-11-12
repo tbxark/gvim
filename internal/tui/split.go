@@ -529,17 +529,51 @@ func (m *Model) paneHitIn(i, x, y int) (p editorpane.Pane, hit editorpane.Hit, t
 }
 
 // paintPanes paints every editor pane and the lines between them. A pane with no
-// document is left blank.
+// document is left blank. A pane that shows an image file draws the picture over
+// the placeholder cells when the terminal supports it; otherwise the text summary
+// of the document is painted the usual way.
 func (m *Model) paintPanes(g *grid.Grid, l layout) {
-	for _, p := range l.Panes {
+	for i, p := range l.Panes {
 		doc := m.paneDoc(p)
 		if doc == nil || p.W <= 0 || p.H <= 0 {
+			continue
+		}
+		if pg, ok := m.imagePane(p, doc, i+1); ok {
+			editorpane.Blit(g, p.X, p.Y, pg)
+			continue
+		}
+		if m.hexPane(g, p, doc) {
 			continue
 		}
 		editorpane.Blit(g, p.X, p.Y, m.paneFor(p, doc).Render(p.W, p.H))
 		m.paintStickyScroll(g, p, doc)
 	}
 	drawBorders(g, l.Borders, m.splitCell())
+}
+
+// imagePane returns the grid that draws doc's picture in pane p, and whether the
+// pane is an image pane at all. It is true for an image document when the terminal
+// can show pictures and the picture has reached it; otherwise the caller paints the
+// text pane, so the summary is shown while the upload is in flight and when the
+// terminal cannot draw images at all.
+func (m *Model) imagePane(p splitPane, doc Document, placement int) (*grid.Grid, bool) {
+	img, ok := doc.(imageDoc)
+	if !ok || !m.img.imageEnabled() {
+		return nil, false
+	}
+	info, ok := img.Image()
+	if !ok {
+		return nil, false
+	}
+	id, uploaded := m.imageIDFor(doc)
+	if !uploaded {
+		return nil, false
+	}
+	area := imageRegion{x: 0, y: 0, w: p.W, h: p.H}
+	cellW, cellH := m.img.cellSize()
+	pg := grid.New(area.w, area.h)
+	paintImage(pg, area, info, id, placement, cellW, cellH, style.Cell(m.styles.Editor))
+	return pg, true
 }
 
 // paintStickyScroll displays a sticky header on the top row of the pane showing

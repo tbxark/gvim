@@ -108,6 +108,10 @@ type sampleInfo struct {
 	Eol    string
 	binary bool
 	Label  string
+	// image is set when the head is an image file. The document then opens as
+	// read-only image document with the header's dimensions; the picture itself is
+	// not in memory. See image.go.
+	image *ImageInfo
 }
 
 // utf8BOM is the byte-order mark of UTF-8 text.
@@ -175,6 +179,10 @@ func readSample(path string, src buffer.Source) (sampleInfo, error) {
 	}
 	valid := validUTF8Head(body, truncated)
 	if encoding.IsBinary(body) || (valid && bytes.IndexByte(body, 0) >= 0) {
+		if info, ok := imageInfoOf(body); ok {
+			info.Size = src.Size()
+			return sampleInfo{Codec: "binary", Eol: detectEOL(sample), binary: true, Label: info.Label(), image: &info}, nil
+		}
 		return sampleInfo{Codec: "iso-8859-1", Eol: detectEOL(sample), binary: true, Label: "Binary"}, nil
 	}
 	if !valid {
@@ -211,6 +219,19 @@ func readLargeDocument(path string, disk diskState, spec largeSpec) (*Document, 
 	}
 	geom := spec.Geom
 	geom.Skip = info.Skip
+	if info.image != nil {
+		// An image is not text: the document holds its summary and the header's
+		// dimensions, and the UI reads the file to draw it. It is never indexed as
+		// lines.
+		_ = src.Close()
+		return newImageDocument(path, disk, *info.image), nil
+	}
+	if info.binary {
+		// A binary file stays a summary however large it is. Indexing it as text
+		// would build a line index no reader can use and would keep the file open.
+		_ = src.Close()
+		return binaryDocument(path, disk), nil
+	}
 	buf, err := buffer.OpenLarge(src, geom)
 	if err != nil {
 		_ = src.Close()

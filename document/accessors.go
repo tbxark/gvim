@@ -55,6 +55,10 @@ func (d *Document) SetPreview(preview bool) { d.preview = preview }
 // SetBinary sets whether d is a file that is not text.
 func (d *Document) SetBinary(binary bool) { d.binary = binary }
 
+// SetImage replaces the image facts of d, or clears them with nil. A reload may
+// turn a text document into an image or the other way around.
+func (d *Document) SetImage(info *ImageInfo) { d.image = info }
+
 // Label returns the display-name override for an unnamed buffer, or "".
 func (d *Document) Label() string { return d.label }
 

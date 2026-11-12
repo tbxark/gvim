@@ -61,7 +61,7 @@ func (r SaveResult) Err() error { return r.err }
 // The job checks the disk state of path, as a save to the document's own file does.
 func (d *Document) PlanSave(path string, o Settings) SaveJob {
 	job := SaveJob{Doc: d, Name: d.Name(), Path: path, Expect: d.Disk, CheckDisk: true}
-	if d.binary {
+	if d.binary || d.image != nil {
 		job.err = fmt.Errorf("save %s: %w", path, ErrBinary)
 		return job
 	}

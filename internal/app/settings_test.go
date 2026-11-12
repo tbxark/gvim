@@ -75,6 +75,9 @@ func TestDefaultConfigGivesFreshViewDefaults(t *testing.T) {
 	v.StatusBar = want.StatusBar
 	v.Explorer.Width = want.Explorer.Width
 	v.UIIcons = want.UIIcons
+	// image_protocol has a config default ("auto") while DefaultViewOptions leaves
+	// the field empty; the empty value reads as auto at runtime.
+	v.ImageProtocol = want.ImageProtocol
 	if !reflect.DeepEqual(v, want) {
 		t.Errorf("Deps.View = %+v\nwant       %+v", v, want)
 	}

@@ -240,10 +240,11 @@ func TestRemoteLargeDocumentWindowHighlighting(t *testing.T) {
 	}
 }
 
-// TestRemoteLargeReadOnlyDocumentStaysReadOnly: highlighting a binary remote large
-// document (opened read-only) only reads cached windows; it never writes, never makes
-// a whole-file read, and the read-only flag is unchanged.
-func TestRemoteLargeReadOnlyDocumentStaysReadOnly(t *testing.T) {
+// TestRemoteLargeBinaryIsAReadOnlySummary: a binary remote large file is not a
+// windowed text document at all. It opens as the read-only summary, so there is no
+// line index to highlight, no window to load and no whole-file read; the bytes are
+// read only through the bounded hex range.
+func TestRemoteLargeBinaryIsAReadOnlySummary(t *testing.T) {
 	t.Parallel()
 	data := append([]byte("binary\x00content\n"), remoteHighlightContent(300000, 21)...)
 	access := &remoteHighlightAccess{data: data}
@@ -258,29 +259,38 @@ func TestRemoteLargeReadOnlyDocumentStaysReadOnly(t *testing.T) {
 		t.Fatalf("OpenFile: %v", err)
 	}
 	doc := ed.Active()
-	if doc == nil || !doc.AsyncLarge() || !doc.ReadOnly() {
-		t.Fatalf("document = %v, async %v, read-only %v; want a read-only windowed remote large file",
-			doc, doc != nil && doc.AsyncLarge(), doc != nil && doc.ReadOnly())
+	if doc == nil || doc.AsyncLarge() || doc.Large() || !doc.Binary() || !doc.ReadOnly() {
+		t.Fatalf("document = %v, large %v, async %v, binary %v, read-only %v; want a binary summary",
+			doc, doc != nil && doc.Large(), doc != nil && doc.AsyncLarge(), doc != nil && doc.Binary(), doc != nil && doc.ReadOnly())
 	}
-	for {
-		if _, ok := doc.TakePendingLargeWindow(); !ok {
-			break
-		}
+	if _, ok := doc.TakePendingLargeWindow(); ok {
+		t.Fatal("a binary summary recorded a large-file window")
 	}
 	reads, bytes := access.counts()
+	// The open probes the head through the same bounded RangeAccess the text path
+	// uses; it must not read the whole file (or a full remote window).
+	if bytes > document.LargeSampleSize || bytes >= int64(len(data)) || access.whole != 0 {
+		t.Fatalf("the binary open read ranges %d/%d bytes (whole %d), want at most the %d-byte sample",
+			reads, bytes, access.whole, document.LargeSampleSize)
+	}
 	cache := New()
 	_ = cache.LineSpans(doc, 0)
 	if r, b := access.counts(); r != reads || b != bytes {
-		t.Fatalf("highlighting a read-only remote large file performed remote I/O: reads %d->%d bytes %d->%d",
+		t.Fatalf("highlighting a binary summary performed remote I/O: reads %d->%d bytes %d->%d",
 			reads, r, bytes, b)
-	}
-	if _, ok := doc.TakePendingLargeWindow(); ok {
-		t.Fatal("highlighting a read-only remote large file recorded a window miss")
 	}
 	if !doc.ReadOnly() || access.whole != 0 {
 		t.Fatalf("read-only %v, whole-file reads %d; want read-only true and no whole-file read", doc.ReadOnly(), access.whole)
 	}
+	got, err := doc.ReadBinaryRange(context.Background(), 0, 4)
+	if err != nil || string(got) != "bina" {
+		t.Fatalf("ReadBinaryRange = %q, %v; want the bounded remote bytes", got, err)
+	}
+	if readsAfter, bytesAfter := access.counts(); readsAfter != reads+1 || bytesAfter != bytes+4 || access.whole != 0 {
+		t.Fatalf("hex read added ranges %d/%d bytes (whole %d); want one 4-byte range",
+			readsAfter-reads, bytesAfter-bytes, access.whole)
+	}
 	if res := ed.Do("insert_char", map[string]any{"text": "x"}); res.Err == nil {
-		t.Fatal("an edit of the read-only remote large document succeeded")
+		t.Fatal("an edit of the binary summary succeeded")
 	}
 }

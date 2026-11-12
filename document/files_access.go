@@ -74,6 +74,8 @@ func loadDocument(path string, spec loadSpec) (*Document, error) {
 // edits, or "".
 func (d *Document) openNote() string {
 	switch {
+	case d.image != nil:
+		return " (image file, read-only)"
 	case d.binary:
 		return " (binary file, read-only)"
 	case d.readOnly:

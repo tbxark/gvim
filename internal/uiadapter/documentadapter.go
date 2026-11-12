@@ -1,7 +1,10 @@
 package uiadapter
 
 import (
+	"context"
+
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/highlight"
@@ -91,6 +94,39 @@ func (d documentAdapter) HasPath() bool {
 // untitled buffer. The Save As prompt is prefilled with it.
 func (d documentAdapter) FilePath() string {
 	return d.doc.Path
+}
+
+// LocalImage reports whether the document's file can be read from this machine
+// for the terminal's image protocol. A remote document (non-nil FileAccess)
+// keeps the text summary: its bytes live on the host of the authority.
+func (d documentAdapter) LocalImage() bool {
+	return d.doc.FileAccess() == nil
+}
+
+// Image reports the image an image document holds, and the path and stat the
+// viewer sends the pixels from. The root reads both through optional interfaces,
+// so a text document answers false and is painted as text.
+func (d documentAdapter) Image() (document.ImageInfo, bool) { return d.doc.Image() }
+
+// ImageStat is the size and modification time of an image document's file when
+// its tab opened. The viewer records them with the transmission; the picture is
+// read again only when the tab is closed and reopened, not when the file changes.
+func (d documentAdapter) ImageStat() (size, mtime int64) { return d.doc.ImageStat() }
+
+// Binary reports whether the document is a non-text file. Images also report
+// true; the root checks Image before it offers the hex view.
+func (d documentAdapter) Binary() bool { return d.doc.Binary() }
+
+// IsImage reports whether the document is an image. It lets the root keep the
+// image viewer and the hex view apart even though both are non-text files.
+func (d documentAdapter) IsImage() bool { return d.doc.IsImage() }
+
+// BinaryStat is the binary file's size and modification time when it opened.
+func (d documentAdapter) BinaryStat() (size, mtime int64) { return d.doc.BinaryStat() }
+
+// ReadBinaryRange reads a bounded window of a binary document for the hex view.
+func (d documentAdapter) ReadBinaryRange(ctx context.Context, off, n int64) ([]byte, error) {
+	return d.doc.ReadBinaryRange(ctx, off, n)
 }
 
 // Top is the first visible line of the viewport.

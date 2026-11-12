@@ -40,6 +40,8 @@ func (m *Model) fixAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "extract_tab_to_new_workspace":
 		m.notice = extractTabNotice
 		return nil, true
+	case "toggle_hex_view":
+		return m.toggleHexView(), true
 	}
 	return nil, false
 }

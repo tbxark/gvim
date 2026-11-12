@@ -72,20 +72,20 @@ func TestGitFindFileOpensTheChosenFile(t *testing.T) {
 	}
 }
 
-func TestGitFindFileGermanCommandsAndNotices(t *testing.T) {
+func TestGitFindFileChineseFallsBackToEnglish(t *testing.T) {
 	r := findRig(t, rigOpts{
-		locale: "de",
+		locale: "zh-CN",
 		script: repoWith("a\x00b\x00"),
 	})
 	commands := map[string]string{}
 	for _, c := range r.host.Commands["git_find_file"] {
 		commands[c.ID] = c.Title
 	}
-	if got := commands["git_find_file.find"]; got != "Git Datei Finden" {
-		t.Errorf("German find title = %q, want Git Datei Finden", got)
+	if got := commands["git_find_file.find"]; got != "Git Find File" {
+		t.Errorf("Chinese find title = %q, want the English fallback", got)
 	}
-	if got := commands["git_find_file.reload"]; got != "Git Datei Finden: Neu laden" {
-		t.Errorf("German reload title = %q, want Git Datei Finden: Neu laden", got)
+	if got := commands["git_find_file.reload"]; got != "Git Find File: Reload" {
+		t.Errorf("Chinese reload title = %q, want the English fallback", got)
 	}
 }
 

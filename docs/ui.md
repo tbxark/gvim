@@ -613,6 +613,13 @@ end of the right group when none is). A clickable item keeps its hit target and 
 The large-file chip ("LARGE 42%") is a gvim extension, not a Fresh element: it leads the right
 group.
 
+The binary-view switch is another gvim extension: a binary document's summary shows a
+clickable `[Hex]` chip at the start of the right group, and its hex dump shows
+`[Summary]` in the same place. It follows the document rather than the configured
+element lists, so a custom status bar that omits `{read_only}` keeps the switch. Text
+and image documents show no chip. The palette's **Toggle Hex View** row remains the
+keyboard and command-palette entry, with no default key binding.
+
 **Squeeze rule (Fresh's).** The right group is sized first and dropped from its end, right-most
 element first, but `min(floor(2W/5), 40)` cells stay for the left group and the first right
 element survives while the row has at least 15 cells. The left group is elided at its tail: the

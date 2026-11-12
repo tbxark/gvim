@@ -514,9 +514,9 @@ gvim.plugins.export {
 	}
 }
 
-func TestGitGutterNavigationUsesGermanTranslations(t *testing.T) {
+func TestGitGutterNavigationFallsBackToEnglishInChinese(t *testing.T) {
 	r := startRig(t, rigOpts{
-		locale:  "de",
+		locale:  "zh-CN",
 		plugins: []string{"git_gutter"},
 		buffers: []rigBuffer{{gutterFile, "a\nb\nc\n"}},
 		script: func(o *plugintest.FakeOS) {
@@ -527,7 +527,7 @@ func TestGitGutterNavigationUsesGermanTranslations(t *testing.T) {
 	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Keine Änderungen" {
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "No changes" {
 		t.Fatalf("no changes notice = %v", got)
 	}
 	r.edit(gutterFile, "a\nB\nc\n")
@@ -537,13 +537,13 @@ func TestGitGutterNavigationUsesGermanTranslations(t *testing.T) {
 	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Änderung 1/1" {
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Change 1/1" {
 		t.Fatalf("change notice = %v", got)
 	}
 	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Änderung 1/1 [umgebrochen]" {
+	if got := r.h.NoticeTexts(); len(got) == 0 || got[len(got)-1] != "Change 1/1 [wrapped]" {
 		t.Fatalf("wrapped notice = %v", got)
 	}
 }

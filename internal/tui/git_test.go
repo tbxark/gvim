@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,6 +32,19 @@ func collect(cmd tea.Cmd) []tea.Msg {
 	if b, ok := msg.(tea.BatchMsg); ok {
 		var out []tea.Msg
 		for _, c := range b {
+			out = append(out, collect(c)...)
+		}
+		return out
+	}
+	// tea.Sequence's message type is unexported, so flatten any slice of
+	// tea.Cmd, the shape Batch and Sequence both use.
+	if v := reflect.ValueOf(msg); v.Kind() == reflect.Slice {
+		var out []tea.Msg
+		for i := range v.Len() {
+			c, ok := v.Index(i).Interface().(tea.Cmd)
+			if !ok {
+				return []tea.Msg{msg}
+			}
 			out = append(out, collect(c)...)
 		}
 		return out

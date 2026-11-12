@@ -419,6 +419,7 @@ func (m *workspaceManager) buildWorkspace(ctx context.Context, id string) (*work
 	m.mu.Unlock()
 	rt.model.SetWorkspaceOwner(ws.File.StableID, generation)
 	rt.model.SetWorkspacePort(m)
+	rt.model.SetHostedWorkspace(true)
 	rt.model.SetWorkspaceLabel(ws.File.Label)
 	rt.model.AddWorkspaceCommands()
 	restoreRegistryLayout(rt, ws)

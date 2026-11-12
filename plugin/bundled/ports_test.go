@@ -154,7 +154,7 @@ func TestTabActions(t *testing.T) {
 	}
 }
 
-func TestTabActionsGermanCommands(t *testing.T) {
+func TestTabActionsChineseFallsBackToEnglish(t *testing.T) {
 	t.Parallel()
 	src, err := fs.ReadFile(bundled.FS, "plugins/tab_actions/init.lua")
 	if err != nil {
@@ -167,26 +167,26 @@ func TestTabActionsGermanCommands(t *testing.T) {
 	h := plugintest.New(t, plugintest.Files{
 		"tab_actions/init.lua":              string(src),
 		"tab_actions/tab_actions.i18n.json": string(i18n),
-	}, plugintest.Options{Locale: "de", Timeout: 200 * time.Millisecond})
+	}, plugintest.Options{Locale: "zh-CN", Timeout: 200 * time.Millisecond})
 	h.Start()
 	var got []string
 	for _, c := range h.Host.Commands["tab_actions"] {
 		got = append(got, c.ID+"="+c.Title)
 	}
 	want := []string{
-		"tab_actions.close_all=Alle Tabs schließen",
-		"tab_actions.close_others=Andere Tabs schließen",
-		"tab_actions.close_to_left=Tabs links schließen",
-		"tab_actions.close_to_right=Tabs rechts schließen",
-		"tab_actions.move_to_left=Tab nach links",
-		"tab_actions.move_to_right=Tab nach rechts",
+		"tab_actions.close_all=Close All Tabs",
+		"tab_actions.close_others=Close Other Tabs",
+		"tab_actions.close_to_left=Close Tabs To Left",
+		"tab_actions.close_to_right=Close Tabs To Right",
+		"tab_actions.move_to_left=Move Tab To Left",
+		"tab_actions.move_to_right=Move Tab To Right",
 	}
 	if !slices.Equal(got, want) {
-		t.Fatalf("German commands = %v, want %v", got, want)
+		t.Fatalf("Chinese commands = %v, want the English fallbacks %v", got, want)
 	}
 }
 
-func TestGotoWithSelectionGermanCommand(t *testing.T) {
+func TestGotoWithSelectionChineseFallsBackToEnglish(t *testing.T) {
 	t.Parallel()
 	src, err := fs.ReadFile(bundled.FS, "plugins/goto_with_selection/init.lua")
 	if err != nil {
@@ -199,11 +199,11 @@ func TestGotoWithSelectionGermanCommand(t *testing.T) {
 	h := plugintest.New(t, plugintest.Files{
 		"goto_with_selection/init.lua":                      string(src),
 		"goto_with_selection/goto_with_selection.i18n.json": string(i18n),
-	}, plugintest.Options{Locale: "de", Timeout: 200 * time.Millisecond})
+	}, plugintest.Options{Locale: "zh-CN", Timeout: 200 * time.Millisecond})
 	h.Start()
 	cmds := h.Host.Commands["goto_with_selection"]
-	if len(cmds) != 1 || cmds[0].Title != "Zur Zeile mit Auswahl" {
-		t.Fatalf("German goto command = %+v, want Zur Zeile mit Auswahl", cmds)
+	if len(cmds) != 1 || cmds[0].Title != "Go to Line with Selection" {
+		t.Fatalf("Chinese goto command = %+v, want the English fallback", cmds)
 	}
 }
 

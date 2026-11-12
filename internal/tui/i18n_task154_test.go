@@ -7,14 +7,14 @@ import (
 )
 
 // TestTask154AuthorityRemoteStrings checks the new authority/remote/trust extraction:
-// Fresh-mapped trust labels render German while the gvim-only SSH/remote/plugin strings
+// Fresh-mapped trust labels render Chinese while the gvim-only SSH/remote/plugin strings
 // fall back to English, and the language-server plural keys select .one/.other. Not
 // parallel: locale.
 func TestTask154AuthorityRemoteStrings(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
-	if got := uiText("gvim.status.trusted", "Trusted"); got != "Vertraut" {
-		t.Errorf("German trust status = %q, want Fresh's translation", got)
+	if got := uiText("gvim.status.trusted", "Trusted"); got != "已信任" {
+		t.Errorf("Chinese trust status = %q, want Fresh's translation", got)
 	}
 	if got := uiText("gvim.notice.trusted", "Workspace trusted — project tooling may run processes"); got == "gvim.notice.trusted" {
 		t.Errorf("trust notice leaked the key")

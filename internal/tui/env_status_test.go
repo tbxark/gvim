@@ -41,7 +41,7 @@ func (f *fakeEnvPort) ClearEnv() error                     { f.mutations++; retu
 // mutation), never prints the activation snippet, strips Cf/invalid UTF-8 from names, and
 // keeps an already-active environment shown active after trust revocation. Not parallel.
 func TestEnvStatusSegment(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(2), 80, 20)
 	if _, ok := m.envStatusSegment(); ok {

@@ -1571,6 +1571,7 @@ func settingsFor(opts Options, cfg config.Config) tui.Settings {
 		ExplorerShowIgnored: cfg.ExplorerShowIgnored,
 		UIIcons:             cfg.UIIcons,
 		UIIconsFont:         cfg.UIIconsFont,
+		UIImageProtocol:     cfg.UIImageProtocol,
 		ConfigFile:          opts.Config,
 		FoldBuffer:          cfg.ContentsFoldBuffer(),
 		ContentsFollow:      cfg.ContentsFollow(),

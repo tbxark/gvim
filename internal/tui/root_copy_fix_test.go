@@ -118,16 +118,16 @@ func TestCopyPathStatusUsesTheActiveLocale(t *testing.T) {
 	}
 }
 
-// TestCopyPathNoticeUsesTheEmbeddedGermanCatalogue checks the shipped de catalogue at
-// the root notice: copying a path renders Fresh's German clipboard.copied_path text.
+// TestCopyPathNoticeUsesTheEmbeddedChineseCatalogue checks the shipped zh-CN catalogue at
+// the root notice: copying a path renders Fresh's Chinese clipboard.copied_path text.
 // Not parallel: it changes and restores the process locale.
-func TestCopyPathNoticeUsesTheEmbeddedGermanCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+func TestCopyPathNoticeUsesTheEmbeddedChineseCatalogue(t *testing.T) {
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	ed := &copyEditor{docEditor: newDocEditor("/ws/src/main.go", false), text: "/ws/src/main.go"}
 	m := newRevertModel(t, ed)
 	rootPaletteRun(m, "copy_file_path")
-	if want := "Pfad kopiert: /ws/src/main.go"; m.notice != want {
-		t.Fatalf("de notice = %q, want %q", m.notice, want)
+	if want := "已复制路径：/ws/src/main.go"; m.notice != want {
+		t.Fatalf("zh-CN notice = %q, want %q", m.notice, want)
 	}
 }

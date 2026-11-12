@@ -5,11 +5,12 @@
 // The catalogues are embedded from i18n/locales/*.json and keyed like Fresh's
 // (refs/fresh/.../locales/en.json): "clipboard.copied", "terminal.no_terminal_open".
 // Where gvim has a string of its own that Fresh does not name, the key lives under
-// "gvim." in the same file. i18n/locales/en.json is the source of truth; the other
-// locale files are generated from Fresh's translations by tools/i18n_import.py and
-// contain only the keys whose English wording matches Fresh (the rest fall back to
-// English at runtime). Register installs or replaces a locale table for tests and
-// callers; embedded files are loaded lazily on first use.
+// "gvim." in the same file. i18n/locales/en.json is the source of truth and
+// i18n/locales/zh-CN.json is generated from Fresh's translations by
+// tools/i18n_import.py; the Chinese catalogue contains only the keys whose English
+// wording matches Fresh (the rest fall back to English at runtime). Register installs
+// or replaces a locale table for tests and callers; embedded files are loaded lazily
+// on first use.
 //
 // Lookup order is the active locale, each shorter tag of it (zh-Hant-CN -> zh-Hant -> zh),
 // then English, then the key itself. A missing translation therefore reads as a key rather
@@ -25,33 +26,21 @@ import (
 	"sync"
 )
 
-// DefaultLocale is the fallback locale and the one catalogue embedded in the binary.
+// DefaultLocale is the fallback locale. English is the source catalogue and is
+// always embedded; Simplified Chinese is the one translated catalogue.
 const DefaultLocale = "en"
 
 // Language is one language the editor offers.
 type Language struct {
-	Code    string // the catalogue code, such as "pt-BR" or "zh-CN"
-	English string // the English name, such as "Portuguese (Brazil)"
-	Native  string // the language's own name, such as "Português (Brasil)"
+	Code    string // the catalogue code, "en" or "zh-CN"
+	English string // the English name, such as "Chinese (Simplified)"
+	Native  string // the language's own name, such as "简体中文"
 }
 
-// locales are the languages Fresh ships and gvim's Settings page offers. The names are
-// Fresh's (fresh-editor/src/i18n.rs locale_display_name).
+// locales are the languages gvim ships and its Settings page offers: English and
+// Simplified Chinese.
 var locales = []Language{
-	{"bg", "Bulgarian", "Български"},
-	{"cs", "Czech", "Čeština"},
-	{"de", "German", "Deutsch"},
 	{"en", "English", "English"},
-	{"es", "Spanish", "Español"},
-	{"fr", "French", "Français"},
-	{"it", "Italian", "Italiano"},
-	{"ja", "Japanese", "日本語"},
-	{"ko", "Korean", "한국어"},
-	{"pt-BR", "Portuguese (Brazil)", "Português (Brasil)"},
-	{"ru", "Russian", "Русский"},
-	{"th", "Thai", "ไทย"},
-	{"uk", "Ukrainian", "Українська"},
-	{"vi", "Vietnamese", "Tiếng Việt"},
 	{"zh-CN", "Chinese (Simplified)", "简体中文"},
 }
 
@@ -69,9 +58,11 @@ func Find(code string) (Language, bool) {
 }
 
 // Normalize turns an environment or config locale into a catalogue code: it strips an
-// encoding or modifier suffix (pt_BR.UTF-8 -> pt-BR, de_DE@euro -> de), maps "_" to "-",
+// encoding or modifier suffix (zh_CN.UTF-8 -> zh-CN, de_DE@euro -> de), maps "_" to "-",
 // matches a known locale, and otherwise falls back to the primary language subtag
-// (en_US -> en). "" is returned for the C and POSIX locales and for an empty tag.
+// (en_US -> en). A Simplified Chinese region maps to zh-CN; a Hant/TW/HK/MO tag
+// keeps its own code and falls back to English, because the shipped catalogue is
+// Simplified only. "" is returned for the C and POSIX locales and for an empty tag.
 func Normalize(tag string) string {
 	t := strings.TrimSpace(tag)
 	if i := strings.IndexAny(t, ".@"); i >= 0 {
@@ -90,16 +81,42 @@ func Normalize(tag string) string {
 			return l.Code
 		}
 	}
-	lang := strings.ToLower(strings.SplitN(t, "-", 2)[0])
+	parts := strings.Split(t, "-")
+	lang := strings.ToLower(parts[0])
 	if lang == "" || lang == "c" || lang == "posix" {
 		return ""
 	}
 	for _, l := range locales {
 		if strings.ToLower(strings.SplitN(l.Code, "-", 2)[0]) == lang {
+			// The shipped Chinese catalogue is Simplified. Do not treat a
+			// Traditional Chinese tag as a match for it: that would silently change
+			// the user's script. Other Chinese variants keep their own code and fall
+			// back through the lookup chain to English.
+			if lang == "zh" && !simplifiedChinese(parts[1:]) {
+				return strings.Join(parts, "-")
+			}
 			return l.Code
 		}
 	}
 	return lang
+}
+
+// simplifiedChinese reports whether the subtags name the Simplified Chinese
+// script or a region that uses it by default.
+func simplifiedChinese(subtags []string) bool {
+	for _, part := range subtags {
+		switch strings.ToLower(part) {
+		case "hant", "tw", "hk", "mo":
+			return false
+		}
+	}
+	for _, part := range subtags {
+		switch strings.ToLower(part) {
+		case "hans", "cn", "sg":
+			return true
+		}
+	}
+	return true
 }
 
 // Resolve is the locale the editor starts in. A config locale other than "" or "auto" wins

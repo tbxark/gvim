@@ -7,10 +7,10 @@ import (
 )
 
 // TestTask223PasteStrings checks the extracted batch-paste and remote-finder strings:
-// German shows the English fallback (gvim-only keys) and the counts/suffix compose
+// Chinese shows the English fallback (gvim-only keys) and the counts/suffix compose
 // byte-identically. Not parallel: locale.
 func TestTask223PasteStrings(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	if got := pasteStopNotice("Paste skipped", 3); got != "Paste skipped; 3 item(s) of this paste were already pasted" {
 		t.Errorf("paste stop notice = %q", got)

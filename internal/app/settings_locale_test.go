@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/tbxark/gvim/config"
@@ -34,29 +35,58 @@ func TestSettingsLocaleAppliesLive(t *testing.T) {
 	var applied []string
 	hook := func(locale string) { applied = append(applied, locale) }
 	cfg := config.Defaults()
-	cfg.Locale = "pt-BR"
+	cfg.Locale = "zh-CN"
 	s := newSettingsService("", Options{}, editor.New(editor.Options{}), func() bool { return true }, cfg, nil,
 		settingsRuntime{localeApply: hook})
 	s.Apply(tui.SettingsChange{})
-	if got := i18n.Locale(); got != "pt-BR" {
-		t.Fatalf("i18n locale = %q, want pt-BR", got)
+	if got := i18n.Locale(); got != "zh-CN" {
+		t.Fatalf("i18n locale = %q, want zh-CN", got)
 	}
-	if len(applied) != 1 || applied[0] != "pt-BR" {
-		t.Fatalf("plugin runtime locale hooks = %v, want pt-BR", applied)
+	if len(applied) != 1 || applied[0] != "zh-CN" {
+		t.Fatalf("plugin runtime locale hooks = %v, want zh-CN", applied)
 	}
-	if it := localeItem(t, s.Snapshot()); it.Value != "pt-BR" || it.Kind != "enum" {
+	if it := localeItem(t, s.Snapshot()); it.Value != "zh-CN" || it.Kind != "enum" {
 		t.Fatalf("snapshot locale row = %+v", it)
 	}
 
 	// "auto" resolves from the environment at apply time.
-	t.Setenv("LANG", "de_DE.UTF-8")
+	t.Setenv("LANG", "zh_CN.UTF-8")
 	cfg.Locale = ""
 	s = newSettingsService("", Options{}, editor.New(editor.Options{}), func() bool { return true }, cfg, nil, settingsRuntime{})
 	s.Apply(tui.SettingsChange{})
-	if got := i18n.Locale(); got != "de" {
-		t.Fatalf("i18n locale from LANG = %q, want de", got)
+	if got := i18n.Locale(); got != "zh-CN" {
+		t.Fatalf("i18n locale from LANG = %q, want zh-CN", got)
 	}
 	if it := localeItem(t, s.Snapshot()); it.Value != "auto" {
 		t.Fatalf("snapshot locale row after auto = %+v", it)
+	}
+}
+
+// TestLocalePickerPersistsThroughSettings checks the Select Locale command's persistence
+// path: the choice goes through the Settings port so the config, the i18n package and
+// the plugin runtime hook all move together.
+func TestLocalePickerPersistsThroughSettings(t *testing.T) {
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_MESSAGES", "")
+	t.Setenv("LANG", "")
+	t.Cleanup(func() { i18n.SetLocale("en") })
+
+	var applied []string
+	cfg := config.Defaults()
+	s := newSettingsService("", Options{Config: filepath.Join(t.TempDir(), "config.json")}, editor.New(editor.Options{}), func() bool { return true }, cfg, nil,
+		settingsRuntime{localeApply: func(locale string) { applied = append(applied, locale) }})
+	change, err := s.Save([]tui.SettingEdit{{Key: "locale", Value: "zh-CN"}}, tui.SettingsLayerUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Apply(change)
+	if got := localeItem(t, change.Snapshot); got.Value != "zh-CN" {
+		t.Fatalf("saved locale row = %+v, want zh-CN", got)
+	}
+	if got := i18n.Locale(); got != "zh-CN" {
+		t.Fatalf("i18n locale = %q, want zh-CN", got)
+	}
+	if len(applied) != 1 || applied[0] != "zh-CN" {
+		t.Fatalf("plugin runtime locale hooks = %v, want zh-CN", applied)
 	}
 }

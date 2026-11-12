@@ -24,6 +24,7 @@ func (d *Document) AdoptFile(text string, fresh *Document) {
 	d.Disk = fresh.Disk
 	d.Codec = fresh.Codec
 	d.encoding = fresh.encoding
+	d.image = fresh.image
 	// A binary tab whose file became text is text now. It stays read-only, since it was
 	// opened that way, and toggle_read_only can make it editable.
 	d.binary = fresh.binary

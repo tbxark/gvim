@@ -50,10 +50,10 @@ func TestWelcomeManifestAndCommands(t *testing.T) {
 	}
 }
 
-func TestWelcomeGermanCommandsAndNotices(t *testing.T) {
+func TestWelcomeChineseCommandsAndNotices(t *testing.T) {
 	t.Parallel()
 	r := startRig(t, rigOpts{
-		locale:  "de",
+		locale:  "zh-CN",
 		plugins: []string{"welcome"},
 		buffers: []rigBuffer{{"/work/a.go", "package a\n"}},
 		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
@@ -62,17 +62,17 @@ func TestWelcomeGermanCommandsAndNotices(t *testing.T) {
 	for _, c := range r.host.Commands["welcome"] {
 		commands[c.ID] = c.Title
 	}
-	if got := commands["welcome.say_hello"]; got != "Plugin-Demo: Hallo sagen" {
-		t.Errorf("German say_hello title = %q, want Plugin-Demo: Hallo sagen", got)
+	if got := commands["welcome.say_hello"]; got != "插件演示: 问候" {
+		t.Errorf("Chinese say_hello title = %q, want 插件演示: 问候", got)
 	}
-	if got := commands["welcome.open_help"]; got != "Plugin-Demo: Hilfe oeffnen" {
-		t.Errorf("German open_help title = %q, want Plugin-Demo: Hilfe oeffnen", got)
+	if got := commands["welcome.open_help"]; got != "插件演示: 打开帮助" {
+		t.Errorf("Chinese open_help title = %q, want 插件演示: 打开帮助", got)
 	}
 	if err := r.h.Run("welcome.say_hello", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastNoticeText(r.h); !strings.Contains(got, "Begruessung an der Cursorposition eingefuegt") {
-		t.Errorf("notice = %q, want German greeting notice", got)
+	if got := lastNoticeText(r.h); !strings.Contains(got, "已在光标位置插入问候语") {
+		t.Errorf("notice = %q, want Chinese greeting notice", got)
 	}
 }
 

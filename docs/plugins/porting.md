@@ -61,8 +61,8 @@ Widgets: Fresh's declarative widget API has a read-mostly v1 here (see
 (text, number, dropdown, radio, dual list and wrappers) and there are no floating/dock
 placement controls.
 
-Not provided at all (and not stubbed): the translated editor catalogues (the `locale`
-setting, resolution and the English catalogue landed; plugin texts are translated; see
+Not provided at all (and not stubbed): Fresh's other editor catalogues (gvim ships English and
+Simplified Chinese, with the `locale` setting and resolution; plugin texts are translated; see
 [api-core.md](api-core.md#gvimi18n) and [i18n.md](../i18n.md)), project-local plugins, a trust store,
 synthetic buffer-group tabs and per-panel views of one buffer, a terminal API, Fresh's window and
 authority runtimes, the package manager, the HTTP client API and `render_line`. The tier-1c
@@ -597,8 +597,8 @@ project detection and the trust-gated restore, and reuses the native LSP actions
   Start/Restart LSP Server, Show LSP Status and the copy-install row;
 * Fresh prechecks `dotnet --version` and caches the answer; the port runs `dotnet restore` directly
   and reports an exec error, which also avoids trusting a local-machine `which` in a remote workspace;
-* Fresh's translated restore status strings are imported into csharp_support.i18n.json across
-  all 15 locales (round 83); gvim-specific command and help strings use their English fallback; the
+* Fresh's translated restore status strings were imported into csharp_support.i18n.json across
+  Fresh's locale set (round 83); gvim-specific command and help strings use their English fallback; the
   plugin registers two commands (Fresh has none) and no keys/settings.
 
 Tests: `plugin/bundled/csharp_support_test.go` covers the command table/no bindings, nearest-project
@@ -630,7 +630,7 @@ primitive for this content. The port (`plugin/bundled/plugins/clangd_support/`, 
 * has no `lsp/custom_notification` handling (`textDocument/clangd.fileStatus`, `$/memoryUsage`), so
   clangd's file-status line never reaches gvim's status row;
 * registers the same three user commands as Fresh, no keys and no settings; Fresh's command and
-  status translation catalogue is imported across all 15 locales (round 84).
+  status translation catalogue was imported across Fresh's locale set (round 84).
 
 Tests: `plugin/bundled/clangd_support_test.go` covers the command table/no bindings, source→header and
 header→source switches (single match, picker choice), no-match/unsupported/no-active-file statuses,
@@ -733,8 +733,8 @@ same gvim actions/buffer APIs; the differences are:
 * the example comment is language-aware (`--`, `#`, or `//`) instead of Fresh's hard-coded `//`, so
   it is valid in more than C-like files;
 * the clock is `os.date("%H:%M:%S")` (local 24-hour time) rather than the runtime's locale
-  `toLocaleTimeString`; Fresh's command and status catalogue is imported into welcome.i18n.json
-  across all 15 locales (round 85);
+  `toLocaleTimeString`; Fresh's command and status catalogue was imported into welcome.i18n.json
+  across Fresh's locale set (round 85);
 * Fresh's only load-time feedback is `debug` output; gvim's port logs the same debug line and
   deliberately sets no status row.
 

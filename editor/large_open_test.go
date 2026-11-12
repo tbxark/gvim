@@ -244,7 +244,7 @@ func TestLoadFullFuncRefusesOverTheLimit(t *testing.T) {
 	}
 }
 
-func TestLargeBinarySampleIsReadOnly(t *testing.T) {
+func TestLargeBinarySampleOpensAsSummary(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name    string
@@ -258,13 +258,13 @@ func TestLargeBinarySampleIsReadOnly(t *testing.T) {
 		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, d := openLarge(t, largeOptions(), tt.content)
-			if !d.Large() || !d.Binary() || !d.ReadOnly() {
+			if d.Large() || !d.Binary() || !d.ReadOnly() {
 				t.Fatalf("large = %v, binary = %v, read-only = %v", d.Large(), d.Binary(), d.ReadOnly())
 			}
 			if d.Encoding() != "Binary" {
 				t.Errorf("Encoding() = %q", d.Encoding())
 			}
-			if !strings.HasPrefix(e.Status(), largeLimitsHint+" Binary file: read-only. Large file (") {
+			if e.Status() != "Opened big.txt (binary file, read-only)" {
 				t.Errorf("status = %q", e.Status())
 			}
 			if r := e.Do("insert_char", map[string]any{"text": "x"}); !errors.Is(r.Err, ErrReadOnly) {

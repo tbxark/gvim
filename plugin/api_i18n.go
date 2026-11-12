@@ -13,7 +13,7 @@ import (
 //
 //	gvim.i18n.t(key, vars?) -> string     the current locale, then English, then the key
 //	gvim.i18n.translate(key, vars?)       the same function
-//	gvim.i18n.locale() -> string          the editor's locale ("en" today)
+//	gvim.i18n.locale() -> string          the editor's locale ("en" or "zh-CN")
 //
 // A plugin ships a <plugin>.i18n.json next to its entry: a JSON object of locale -> key ->
 // text, keyed the way Fresh's plugin i18n files are ("cmd.*", "status.*", "prompt.*"), with
@@ -22,8 +22,8 @@ import (
 // translation reads as a key, not as an empty label). Command titles and descriptions that
 // start with % are translated when the command is registered ("%cmd.open").
 //
-// The editor is English-only today; the locale is a runtime setting so an app-wide i18n can
-// pass the user's choice without changing a plugin API.
+// The editor ships English and Simplified Chinese catalogues; the locale is a runtime
+// setting so the current choice reaches the plugin without changing its API.
 
 // maxI18nValue bounds one translated text.
 const maxI18nValue = 4096

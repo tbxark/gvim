@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-func TestLocalesOffersFreshSet(t *testing.T) {
+func TestLocalesOffersEnglishAndSimplifiedChinese(t *testing.T) {
 	t.Parallel()
 	got := Locales()
-	if len(got) != 15 {
-		t.Fatalf("Locales() = %d entries, want the 15 Fresh locales", len(got))
+	if len(got) != 2 {
+		t.Fatalf("Locales() = %d entries, want en and zh-CN", len(got))
 	}
 	seen := map[string]bool{}
 	for _, l := range got {
@@ -21,11 +21,17 @@ func TestLocalesOffersFreshSet(t *testing.T) {
 		}
 		seen[l.Code] = true
 	}
-	if !seen["pt-BR"] || !seen["zh-CN"] || !seen["en"] {
-		t.Fatalf("locales = %v, want pt-BR, zh-CN and en", got)
+	if !seen["zh-CN"] || !seen["en"] {
+		t.Fatalf("locales = %v, want en and zh-CN", got)
 	}
 	if l, ok := Find("en"); !ok || l.English != "English" {
 		t.Fatalf("Find(en) = %+v, %v", l, ok)
+	}
+	if l, ok := Find("zh-CN"); !ok || l.Native != "简体中文" {
+		t.Fatalf("Find(zh-CN) = %+v, %v", l, ok)
+	}
+	if _, ok := Find("de"); ok {
+		t.Fatal("Find accepted the removed German locale")
 	}
 	if _, ok := Find("xx"); ok {
 		t.Fatal("Find accepted an unknown locale")
@@ -42,12 +48,15 @@ func TestNormalize(t *testing.T) {
 		{"POSIX", ""},
 		{"en", "en"},
 		{"en_US.UTF-8", "en"},
-		{"pt_BR.UTF-8", "pt-BR"},
+		{"zh_CN.UTF-8", "zh-CN"},
 		{"zh_CN", "zh-CN"},
-		{"de_DE@euro", "de"},
-		{"ja_JP.UTF-8", "ja"},
-		{"fr", "fr"},
-		{"pt-BR", "pt-BR"},
+		{"zh_SG.UTF-8", "zh-CN"},
+		{"zh-Hans", "zh-CN"},
+		{"zh_TW.UTF-8", "zh-TW"},
+		{"zh-Hant", "zh-Hant"},
+		{"zh-HK", "zh-HK"},
+		{"de_DE.UTF-8", "de"},
+		{"zh-CN", "zh-CN"},
 		{"xx-YY", "xx"},
 	}
 	for _, tt := range tests {
@@ -69,13 +78,13 @@ func TestResolve(t *testing.T) {
 		want   string
 	}{
 		{"no config and no environment", "", nil, "en"},
-		{"config locale wins", "de", map[string]string{"LC_ALL": "fr_FR.UTF-8"}, "de"},
-		{"config auto reads the environment", "auto", map[string]string{"LANG": "pt_BR.UTF-8"}, "pt-BR"},
+		{"config locale wins", "zh-CN", map[string]string{"LC_ALL": "fr_FR.UTF-8"}, "zh-CN"},
+		{"config auto reads the environment", "auto", map[string]string{"LANG": "zh_CN.UTF-8"}, "zh-CN"},
 		{"LC_ALL wins over LANG", "", map[string]string{"LC_ALL": "zh_CN.UTF-8", "LANG": "de_DE.UTF-8"}, "zh-CN"},
-		{"LC_MESSAGES comes second", "", map[string]string{"LC_MESSAGES": "ja_JP.UTF-8", "LANG": "de_DE.UTF-8"}, "ja"},
+		{"LC_MESSAGES comes second", "", map[string]string{"LC_MESSAGES": "en_US.UTF-8", "LANG": "de_DE.UTF-8"}, "en"},
 		{"C and POSIX fall back to English", "", map[string]string{"LANG": "C"}, "en"},
 		{"an unknown config locale is kept for the fallback chain", "xx", nil, "xx"},
-		{"a config tag is normalised", "pt_br", nil, "pt-BR"},
+		{"a config tag is normalised", "zh_cn", nil, "zh-CN"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -107,11 +116,11 @@ func TestTTranslatesAndFallsBack(t *testing.T) {
 	if got := T("en", "clipboard.copied_path", nil); got != "Copied path: %{path}" {
 		t.Fatalf("missing var = %q, want the placeholder kept", got)
 	}
-	// The active locale is used for the empty locale; German is now embedded from
+	// The active locale is used for the empty locale; Chinese is now embedded from
 	// Fresh's translations, so the extracted key is translated.
-	SetLocale("de")
-	if got := T("", "clipboard.copied", nil); got != "Kopiert" {
-		t.Fatalf("T with the active locale = %q, want the embedded German text", got)
+	SetLocale("zh-CN")
+	if got := T("", "clipboard.copied", nil); got != "已复制" {
+		t.Fatalf("T with the active locale = %q, want the embedded Chinese text", got)
 	}
 	// A gvim-only key has no translation: it falls back to English.
 	if got := T("", "gvim.terminal.capture_on", nil); got != "Keyboard capture ON - all keys go to terminal (F9 to toggle)" {
@@ -127,13 +136,10 @@ func TestPluralCategories(t *testing.T) {
 		want   string
 	}{
 		{"en", 0, "other"}, {"en", 1, "one"}, {"en", 2, "other"},
-		{"de", 1, "one"}, {"es", 3, "other"},
-		{"fr", 0, "one"}, {"fr", 1, "one"}, {"fr", 2, "other"},
-		{"pt-BR", 1, "one"}, {"pt-BR", 2, "other"},
-		{"ja", 1, "other"}, {"zh-CN", 5, "other"}, {"ko", 1, "other"}, {"th", 2, "other"}, {"vi", 1, "other"},
+		{"zh-CN", 0, "other"}, {"zh-CN", 1, "other"}, {"zh-CN", 5, "other"},
+		{"ja", 1, "other"}, {"ko", 1, "other"}, {"th", 2, "other"}, {"vi", 1, "other"},
 		{"cs", 1, "one"}, {"cs", 3, "few"}, {"cs", 5, "other"},
 		{"ru", 1, "one"}, {"ru", 21, "one"}, {"ru", 2, "few"}, {"ru", 14, "many"}, {"ru", 5, "many"},
-		{"uk", 3, "few"}, {"uk", 11, "many"},
 	}
 	for _, tt := range tests {
 		if got := PluralCategory(tt.locale, tt.n); got != tt.want {
@@ -211,9 +217,9 @@ func TestRegisterAndShorterTagFallback(t *testing.T) {
 
 func TestSetLocaleNormalises(t *testing.T) {
 	t.Cleanup(func() { SetLocale("en") })
-	SetLocale("pt_BR.UTF-8")
-	if got := Locale(); got != "pt-BR" {
-		t.Fatalf("Locale() = %q, want pt-BR", got)
+	SetLocale("zh_CN.UTF-8")
+	if got := Locale(); got != "zh-CN" {
+		t.Fatalf("Locale() = %q, want zh-CN", got)
 	}
 	SetLocale("")
 	if got := Locale(); got != "en" {

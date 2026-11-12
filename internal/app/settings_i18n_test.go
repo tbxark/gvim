@@ -8,7 +8,7 @@ import (
 )
 
 // TestSettingsLabelsUseTheCatalogue checks the extracted settings labels: English
-// keeps the schema names the page has always shown, and German uses Fresh's translated
+// keeps the schema names the page has always shown, and Chinese uses Fresh's translated
 // row labels for the rows mapped to settings.field.* while gvim-only rows and section
 // titles fall back to English (never the bare key). Not parallel: it changes and
 // restores the process locale.
@@ -29,19 +29,19 @@ func TestSettingsLabelsUseTheCatalogue(t *testing.T) {
 		t.Fatalf("English theme label = %q/%q, want the schema names", item.Name, item.Section)
 	}
 
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
-	de := port.Snapshot()
-	if item := findItem(t, de, "editor.auto_close"); item.Name != "Automatisches Schließen" {
-		t.Errorf("German auto_close label = %q, want the Fresh translation", item.Name)
+	zh := port.Snapshot()
+	if item := findItem(t, zh, "editor.auto_close"); item.Name != "自动闭合" {
+		t.Errorf("Chinese auto_close label = %q, want the Fresh translation", item.Name)
 	}
-	if item := findItem(t, de, "editor.whitespace_show"); item.Name != "Leerzeichen anzeigen" {
-		t.Errorf("German whitespace_show label = %q, want the Fresh translation", item.Name)
+	if item := findItem(t, zh, "editor.whitespace_show"); item.Name != "显示空白字符" {
+		t.Errorf("Chinese whitespace_show label = %q, want the Fresh translation", item.Name)
 	}
 	// A gvim-only row and a section title have no translation: the English fallback,
 	// not the key.
-	if item := findItem(t, de, "theme"); item.Name != "theme" || item.Section != "Interface" {
-		t.Errorf("German unmapped label = %q/%q, want the English fallback", item.Name, item.Section)
+	if item := findItem(t, zh, "theme"); item.Name != "theme" || item.Section != "Interface" {
+		t.Errorf("Chinese unmapped label = %q/%q, want the English fallback", item.Name, item.Section)
 	}
 }
 
@@ -71,17 +71,17 @@ func TestStructuredSettingsLabelsFallBackToEnglish(t *testing.T) {
 	if got := settingsLanguageTitle("go"); got != "Languages · go" {
 		t.Fatalf("English language title = %q", got)
 	}
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	if got := settingsPage("language_servers", "Language Servers"); got != "Language Servers" {
-		t.Errorf("German page label = %q, want the English fallback", got)
+		t.Errorf("Chinese page label = %q, want the English fallback", got)
 	}
 	if got := settingsLanguageTitle("go"); got != "Languages · go" {
-		t.Errorf("German language title = %q, want the English fallback", got)
+		t.Errorf("Chinese language title = %q, want the English fallback", got)
 	}
 	if got := settingsLanguagePart("Formatter"); got != "Formatter" {
-		t.Errorf("German language part = %q, want the English fallback", got)
+		t.Errorf("Chinese language part = %q, want the English fallback", got)
 	}
 	if got := settingsNote("does_not_exist", "note"); got != "note" {
-		t.Errorf("German unknown note = %q, want the English fallback", got)
+		t.Errorf("Chinese unknown note = %q, want the English fallback", got)
 	}
 }

@@ -7,10 +7,10 @@ import (
 )
 
 // TestWorkspaceNoticesUseTheCatalogue checks the extracted workspace close/notice strings:
-// German shows the English fallback (gvim-only keys), the running-terminal summary and the
+// Chinese shows the English fallback (gvim-only keys), the running-terminal summary and the
 // close question compose byte-identically. Not parallel: locale.
 func TestWorkspaceNoticesUseTheCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	summary := workspaceRunningSummary([]WorkspaceRunningTerminal{{Name: "bash"}, {Name: "claude", Agent: "claude"}})
 	if summary != "2 running terminals: bash, claude (agent claude)" {

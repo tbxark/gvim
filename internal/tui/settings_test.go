@@ -41,6 +41,7 @@ func TestSettingsRowsShowTheEffectiveValues(t *testing.T) {
 		"explorer_show_ignored=on",
 		"ui_icons=nerd",
 		"ui_icons_font=JetBrainsMono Nerd Font Mono",
+		"image_protocol=auto",
 		"config_file=/home/u/.config/gvim/config.json",
 	}
 	sameLines(t, "rows", rowsOf(settingsRows(testSettings())), want)

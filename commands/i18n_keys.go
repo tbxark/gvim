@@ -50,6 +50,7 @@ var gvimCommandKeys = map[string]string{
 	"terminal_tab_previous":      "gvim.command.terminal_tab_previous",
 	"terminal_tab_rename":        "gvim.command.terminal_tab_rename",
 	"toggle_diagnostics_panel":   "gvim.command.toggle_diagnostics_panel",
+	"toggle_hex_view":            "gvim.command.toggle_hex_view",
 }
 
 // gvimCommandDescKeys is the description half of the table.
@@ -94,4 +95,5 @@ var gvimCommandDescKeys = map[string]string{
 	"terminal_tab_previous":      "gvim.command.terminal_tab_previous_desc",
 	"terminal_tab_rename":        "gvim.command.terminal_tab_rename_desc",
 	"toggle_diagnostics_panel":   "gvim.command.toggle_diagnostics_panel_desc",
+	"toggle_hex_view":            "gvim.command.toggle_hex_view_desc",
 }

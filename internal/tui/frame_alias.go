@@ -80,6 +80,7 @@ const (
 	statusSegmentLSP      = frame.StatusSegmentLSP
 	statusSegmentUpdate   = frame.StatusSegmentUpdate
 	statusSegmentTrust    = frame.StatusSegmentTrust
+	statusSegmentHexView  = frame.StatusSegmentHexView
 
 	welcomeBlank      = frame.WelcomeBlank
 	welcomeTitleRow   = frame.WelcomeTitleRow

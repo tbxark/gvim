@@ -8,7 +8,7 @@ import (
 )
 
 // TestLSPRemoteRootNoticeCatalogue: the remote root_markers degradation notice is
-// rendered by the TUI catalogue in English and falls back to the English text in German
+// rendered by the TUI catalogue in English and falls back to the English text in Chinese
 // instead of leaking a raw key or an English string from the port.
 func TestLSPRemoteRootNoticeCatalogue(t *testing.T) {
 	notice := LSPNotice{
@@ -20,9 +20,9 @@ func TestLSPRemoteRootNoticeCatalogue(t *testing.T) {
 	if got := lspNoticeText(notice); !strings.Contains(got, "permission denied") || !strings.Contains(got, "using the workspace root") {
 		t.Fatalf("English notice = %q", got)
 	}
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	if got := lspNoticeText(notice); got != "Remote LSP root_markers scan failed: permission denied; using the workspace root" {
-		t.Fatalf("German fallback notice = %q", got)
+		t.Fatalf("Chinese fallback notice = %q", got)
 	}
 }

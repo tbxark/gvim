@@ -408,8 +408,8 @@ configuration/root detection; there is no server-request event for Roslyn's
 open-file restore covers the common case); the disable action is delegated to the controlled native
 LSP action above (a popup/tab switch or language mismatch is refused before the port-level mute);
 Fresh's `dotnet --version`
-precheck is replaced by running restore and reporting a start error; and the plugin ships only English
-i18n strings.
+precheck is replaced by running restore and reporting a start error; and Fresh's i18n strings are
+imported while gvim-only strings fall back to English.
 
 **clangd_support** (reduced Fresh port): the C/C++ clangd helper. **Clangd: Switch Source/Header**
 opens the counterpart file for the active C-family buffer; Fresh asks clangd for it with the
@@ -440,8 +440,9 @@ the time is the local `HH:MM:SS` clock. It binds no key and registers no setting
 (`default_enabled: false`) so it does not add demo rows to the default palette. Reductions (also in
 porting.md): the demo comment chooses its line-comment prefix from the active buffer's language
 (`--` for Lua/SQL, `#` for Python/Ruby/shell/YAML/TOML/Makefile/Dockerfile, `//` otherwise) instead
-of Fresh's fixed `//`; the greeting/time/comment strings are English-only rather than Fresh's 15
-locales; and Fresh's debug-only load message is not reproduced (gvim has no equivalent hidden
+of Fresh's fixed `//`; Fresh's translated greeting/time/comment strings are imported, while
+gvim-only strings fall back to English; and Fresh's debug-only load message is not reproduced
+(gvim has no equivalent hidden
 status).
 
 **welcome_screen** (bounded, reduced port of Fresh's `plugins/welcome_screen.ts`): an opt-in

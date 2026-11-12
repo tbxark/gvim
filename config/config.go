@@ -109,6 +109,15 @@ const (
 	UIIconsNerd  = "nerd"
 )
 
+// Image protocols accepted by image_protocol. Auto asks the terminal when the first
+// image tab opens and falls back to a text summary; kitty trusts it without asking;
+// off never draws an image.
+const (
+	UIImageProtocolAuto  = "auto"
+	UIImageProtocolKitty = "kitty"
+	UIImageProtocolOff   = "off"
+)
+
 // DefaultPluginTimeout is the plugin_timeout_ms default. The plugin host applies the
 // same default when it is given no timeout.
 const DefaultPluginTimeout = 500 * time.Millisecond
@@ -176,7 +185,7 @@ type ProcessLimits struct {
 type Config struct {
 	Theme                  string // theme value: a bundled name, builtin://name, a user-dir relative path, or file://; default "dark"
 	Keymap                 string // keymap name as written in a file; empty when no file sets one
-	Locale                 string // UI locale code ("pt-BR"); empty means automatic (LC_ALL/LC_MESSAGES/LANG, then en)
+	Locale                 string // UI locale code ("zh-CN"); empty means automatic (LC_ALL/LC_MESSAGES/LANG, then en)
 	TabSize                int    // columns per tab stop, default 4
 	InsertSpaces           bool   // insert spaces for Tab, default true
 	LineEnding             string // "auto", "lf", "crlf" or "cr"; default "auto"
@@ -222,6 +231,7 @@ type Config struct {
 	CursorStyle             string // "block", "bar" or "underline"; default "block"
 	UIIcons                 string // "auto", "plain" or "nerd" glyphs for interface controls; default "auto"
 	UIIconsFont             string // font family the terminal uses, for ui_icons "auto"; default empty
+	UIImageProtocol         string // image_protocol: "auto", "kitty" or "off"; default "auto"
 
 	// Terminal is the terminal section: the shell override, close_on_exit,
 	// scrollback_lines and mouse_forwarding (see terminal.go).
@@ -333,6 +343,7 @@ func Defaults() Config {
 		LSPEnabled:              true,
 		CursorStyle:             CursorStyleBlock,
 		UIIcons:                 UIIconsAuto,
+		UIImageProtocol:         UIImageProtocolAuto,
 
 		ExplorerShowHidden: true,
 		PluginTimeout:      DefaultPluginTimeout,
@@ -844,6 +855,15 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return fmt.Errorf("must be %q, %q or %q, got %q", UIIconsAuto, UIIconsPlain, UIIconsNerd, s)
 		}
 		c.UIIcons = s
+	case "image_protocol":
+		s, err := decodeString(raw)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains([]string{UIImageProtocolAuto, UIImageProtocolKitty, UIImageProtocolOff}, s) {
+			return fmt.Errorf("must be %q, %q or %q, got %q", UIImageProtocolAuto, UIImageProtocolKitty, UIImageProtocolOff, s)
+		}
+		c.UIImageProtocol = s
 	case "ui_icons_font":
 		s, err := decodeString(raw)
 		if err != nil {

@@ -38,6 +38,7 @@ type Settings struct {
 	ExplorerShowIgnored bool
 	UIIcons             string // the ui_icons setting: "auto", "plain" or "nerd"; empty reads as auto
 	UIIconsFont         string // the ui_icons_font setting
+	UIImageProtocol     string // the image_protocol setting: "auto", "kitty" or "off"; empty reads as auto
 	IconsMode           string // the icon set in use, "plain" or "nerd", after "auto" is resolved
 	IconsWhy            string // why that set: the setting, the font or the terminal
 	ConfigFile          string
@@ -71,12 +72,22 @@ func settingsRows(s Settings) []list.Row {
 		{Left: "explorer_show_ignored", Right: onOff(s.ExplorerShowIgnored)},
 		{Left: settingsIconsKey, Right: iconsSettingText(s, iconModeOf(s))},
 		{Left: "ui_icons_font", Right: orNone(s.UIIconsFont)},
+		{Left: "image_protocol", Right: imageProtocolText(s.UIImageProtocol)},
 		{Left: "config_file", Right: orNone(s.ConfigFile)},
 	}
 }
 
 // settingsIconsKey is the row of the icon setting.
 const settingsIconsKey = "ui_icons"
+
+// imageProtocolText is the image_protocol value as the settings list shows it: an
+// empty value reads as "auto", the runtime default.
+func imageProtocolText(value string) string {
+	if value == "" {
+		return "auto"
+	}
+	return value
+}
 
 // iconModeOf is the icon set in use. An empty or unknown name is plain.
 func iconModeOf(s Settings) icons.Mode {
@@ -965,8 +976,7 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 			m.notice = "Settings: " + d.err.Error()
 			return cmd, true
 		}
-		m.applySettingsChange(d.change)
-		return cmd, true
+		return tea.Batch(cmd, m.applySettingsChange(d.change)), true
 	case settingsEditMsg:
 		if d.page.Active() {
 			return d.page.openEdit(d.key), true
@@ -1035,17 +1045,22 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 // explorer toggles that the config now sets. Only the settings named in Live are
 // applied; the Restart names are announced in one notice, because gvim does not
 // hot-reload the parts of itself that read them at startup.
-func (m *Model) applySettingsChange(change SettingsChange) {
+func (m *Model) applySettingsChange(change SettingsChange) tea.Cmd {
 	m.resetLiveGrepResume()
-	m.util.settings = change.Settings
 	if m.util.settingsPort != nil {
 		// The editor is owned by the update loop, so its setters run here and not
 		// in the command that wrote and reloaded the file.
 		m.util.settingsPort.Apply(change)
 	}
+	var cmds []tea.Cmd
 	for _, key := range change.Live {
-		m.applyLiveSetting(key, change)
+		if cmd := m.applyLiveSetting(key, change); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
+	// The live settings are pushed to the editor before the summary is written, so
+	// an option's own side effect never replaces the save/reload notice.
+	m.util.settings = change.Settings
 	var notices []string
 	switch {
 	case change.Layer != "":
@@ -1065,10 +1080,11 @@ func (m *Model) applySettingsChange(change SettingsChange) {
 		notices = append(notices, "Settings: no changes")
 	}
 	m.notice = strings.Join(notices, "; ")
+	return tea.Batch(cmds...)
 }
 
 // applyLiveSetting applies one setting whose new value takes effect now.
-func (m *Model) applyLiveSetting(key string, change SettingsChange) {
+func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 	v := change.View
 	switch key {
 	case "theme":
@@ -1087,6 +1103,8 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) {
 			m.util.settings.IconsMode = change.UIIconsMode
 			m.util.settings.IconsWhy = change.IconsWhy
 		}
+	case "image_protocol":
+		return m.applyImageProtocol(v.ImageProtocol)
 	case "editor.show_menu_bar":
 		m.hideMenuBar = !change.Settings.MenuBar
 	case "editor.menu_bar_mnemonics":
@@ -1159,6 +1177,7 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) {
 	// painting, the layout, the mouse and the find bar, so they only need the
 	// option copied: the options a language can override stay in the editor.
 	m.view.opts = copyViewOption(m.view.opts, v, key)
+	return nil
 }
 
 // copyViewOption returns opts with the one display option named by key taken

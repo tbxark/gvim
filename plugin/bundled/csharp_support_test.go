@@ -63,10 +63,10 @@ func TestCSharpManifestAndCommands(t *testing.T) {
 	}
 }
 
-func TestCSharpRestoreUsesGermanTranslations(t *testing.T) {
+func TestCSharpRestoreUsesChineseTranslations(t *testing.T) {
 	t.Parallel()
 	r := startRig(t, rigOpts{
-		locale:  "de",
+		locale:  "zh-CN",
 		plugins: []string{"csharp_support"},
 		buffers: []rigBuffer{{"/work/proj/src/a.cs", "class A {}\n"}},
 		script: func(o *plugintest.FakeOS) {
@@ -83,8 +83,8 @@ func TestCSharpRestoreUsesGermanTranslations(t *testing.T) {
 	if got := csRestoreCalls(r, "/work/proj"); got != 1 {
 		t.Fatalf("restore calls = %d (runs %v)", got, r.os.Runs())
 	}
-	if got := lastNoticeText(r.h); !strings.Contains(got, "NuGet-Wiederherstellung") {
-		t.Errorf("status = %q, want German restore completion notice", got)
+	if got := lastNoticeText(r.h); !strings.Contains(got, "NuGet恢复已完成") {
+		t.Errorf("status = %q, want Chinese restore completion notice", got)
 	}
 }
 

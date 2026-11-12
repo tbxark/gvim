@@ -52,8 +52,9 @@ type RevertResult struct {
 // document and an untitled one are refused with ErrNoDocument and ErrNoPath. A read-only
 // document is planned like any other, because a revert changes the buffer from the file and
 // not the file; the revert action itself still refuses it. A modified document is refused
-// with ErrUnsaved unless force is set, and the plan it returns then has Modified set. The
-// refusals are also the tab's status.
+// with ErrUnsaved unless force is set, and the plan it returns then has Modified set. An
+// image is refused with ErrImage: its picture is read when the tab opens, so closing and
+// reopening is what reloads it. The refusals are also the tab's status.
 func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 	d := e.Active()
 	var err error
@@ -62,6 +63,10 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 		err = ErrNoDocument
 	case d.Path == "":
 		err = ErrNoPath
+	case d.IsImage():
+		// An image is not reloaded under the viewer: closing and reopening its tab
+		// is what reads the file again, the way auto-revert leaves it alone.
+		err = fmt.Errorf("revert %s: %w", d.Name(), ErrImage)
 	}
 	if err != nil {
 		e.setError(err)
@@ -284,6 +289,7 @@ func (e *Editor) swapFile(d, fresh *Document) {
 	d.SetEncodingLabel(fresh.EncodingLabel())
 	d.SetReadOnly(fresh.ReadOnly())
 	d.SetBinary(fresh.Binary())
+	d.SetImage(fresh.ImagePtr())
 	d.MetaDirty = false
 	d.Sel = nil
 	d.Block = nil

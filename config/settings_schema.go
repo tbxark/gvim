@@ -102,11 +102,10 @@ const (
 	SectionMouse      = "Mouse"
 )
 
-// localeChoices are the Settings page's UI language choices: Fresh's 15 locales and
-// "auto" (detect from the environment, the default).
+// localeChoices are the Settings page's UI language choices: English, Simplified
+// Chinese and "auto" (detect from the environment, the default).
 var localeChoices = []string{
-	"auto", "bg", "cs", "de", "en", "es", "fr", "it", "ja", "ko",
-	"pt-BR", "ru", "th", "uk", "vi", "zh-CN",
+	"auto", "en", "zh-CN",
 }
 
 // settingsTable is the Settings UI's schema, in section order. It covers the
@@ -136,6 +135,11 @@ var settingsTable = []Setting{
 	{Path: []string{"ui_icons_font"}, Section: SectionInterface, Kind: SettingString,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: func(c Config) string { return c.UIIconsFont }, encode: encodeString(true)},
+	{Path: []string{"image_protocol"}, Section: SectionInterface, Kind: SettingEnum,
+		Choices: []string{UIImageProtocolAuto, UIImageProtocolKitty, UIImageProtocolOff},
+		Layers:  LayerUser | LayerProject, Apply: ApplyLive,
+		value:  func(c Config) string { return c.UIImageProtocol },
+		encode: encodeEnum([]string{UIImageProtocolAuto, UIImageProtocolKitty, UIImageProtocolOff})},
 	{Path: []string{"editor", "show_menu_bar"}, Section: SectionInterface, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ShowMenuBar }), encode: encodeBool},

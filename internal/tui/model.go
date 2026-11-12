@@ -237,6 +237,12 @@ type Model struct {
 	fix fixState
 	// large is the state of the root for documents in large file mode (see large.go).
 	large largeState
+	// img is the host terminal's image-graphics state and the transmissions made
+	// (see imagecap.go and imageview.go).
+	img imageState
+	// hexViews holds the read-only hex state of binary tabs, keyed by file path
+	// (see hexview.go). A path with no entry is showing its summary.
+	hexViews map[string]*hexView
 	// largeWindows loads windows of a remote windowed large document (see
 	// large_windows.go). Nil for a local session.
 	largeWindows LargeWindowLoader
@@ -340,6 +346,7 @@ func New(deps Deps) *Model {
 		view:            newViewState(viewOptionsOf(deps.View)),
 		largeWindows:    deps.LargeWindows,
 		hostFocused:     true,
+		img:             imageProtocolOf(viewOptionsOf(deps.View).ImageProtocol),
 	}
 	m.view.languages = deps.Languages
 	// The inlay-hints toggle starts from the configured display option; the Toggle
@@ -577,6 +584,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.emitHostFocusEvent("window_blurred")
 	}
+	if cmd, ok := m.imageMessage(msg); ok {
+		return m, cmd
+	}
 	if forced, ok := msg.(updateForcedMsg); ok {
 		m.applyUpdateStatus(forced.status)
 		return m, nil
@@ -723,6 +733,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.plug.pumpPending = false
 		cmd = tea.Batch(cmd, m.pumpAfter(func() {}))
 	}
+	// An image tab that was just opened needs its picture read once. This runs after
+	// the update, so the read never blocks an update; a command does the file I/O.
+	cmd = tea.Batch(cmd, m.imageReleaseClosed())
+	cmd = tea.Batch(cmd, m.imageQueue())
+	cmd = tea.Batch(cmd, m.hexReleaseClosedCmd())
+	cmd = tea.Batch(cmd, m.hexQueue())
 	return next, cmd
 }
 
@@ -811,6 +827,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(overlayCmd, fixCmd)
 	}
 	overlayCmd = tea.Batch(overlayCmd, fixCmd)
+	if hexCmd, taken := m.hexMessage(msg); taken {
+		return m, tea.Batch(overlayCmd, hexCmd)
+	}
 	if taken, cmd := m.routeMenu(msg); taken {
 		return m, tea.Batch(overlayCmd, cmd)
 	}
@@ -2438,6 +2457,11 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 		}
 		return nil
 	}
+	if _, on := m.activeHex(); on {
+		if cmd, handled := m.hexFallbackKey(kp, text); handled {
+			return cmd
+		}
+	}
 	if text != "" {
 		if doc := m.ed.Active(); doc != nil && isDocReadOnly(doc) && k.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper) == 0 {
 			switch text {
@@ -2525,6 +2549,9 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 		}
 	}
 	if c, ok := m.explorerAction(cmd.Action); ok {
+		return c
+	}
+	if c, ok := m.hexAction(cmd.Action); ok {
 		return c
 	}
 	if m.explorerFocus && clipboardActions[cmd.Action] {
@@ -2891,6 +2918,15 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		}
 		return m.plugStatusClick(t.Index)
 	case hitEditorText, hitGutter, hitScrollbarTrack:
+		if h, ok := m.hexAtPane(t.Pane); ok {
+			m.focusPane(t.Pane)
+			m.focusEditor()
+			if t.Kind == hitScrollbarTrack {
+				m.hexScrollTo(t.Pane, mo.Y)
+			}
+			_ = h
+			return nil
+		}
 		m.pressPane(t.Pane, mo.X, mo.Y, count)
 	case hitSplitBorder:
 		m.pressBorder(t.Index)
@@ -3097,6 +3133,11 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			delta = wheelRows
 		}
 		if delta != 0 {
+			if leaves := m.layout().Panes; t.Pane >= 0 && t.Pane < len(leaves) {
+				if m.hexPaneWheel(t.Pane, delta) {
+					return nil
+				}
+			}
 			m.scrollPane(t.Pane, delta)
 		}
 	}
@@ -3383,6 +3424,8 @@ func (m *Model) statusView() statusView {
 	s := statusView{Message: m.ed.Status(), EOL: "LF", Encoding: "UTF-8", Language: "Text"}
 	if m.notice != "" {
 		s.Message = m.notice
+	} else if notice := m.hexNotice(); notice != "" {
+		s.Message = notice
 	}
 	s.Trust, s.TrustWarn = m.trustStatus()
 	s.DiagSlot, s.Diags = m.lspShowsDiags(), m.lspDiagCounts()
@@ -3407,6 +3450,13 @@ func (m *Model) statusView() statusView {
 		s.EOL = doc.LineEnding()
 		s.Encoding = doc.Encoding()
 		s.Language = m.languageFor(doc.Name())
+		if isBinaryDoc(doc) {
+			if h, ok := m.activeHex(); ok && h.on {
+				s.HexView = uiText("gvim.status.binary_summary", "Summary")
+			} else {
+				s.HexView = uiText("gvim.status.binary_hex", "Hex")
+			}
+		}
 		if ro, ok := doc.(interface{ ReadOnly() bool }); ok {
 			s.ReadOnly = ro.ReadOnly()
 		}
@@ -3535,6 +3585,69 @@ func (m *Model) View() tea.View {
 	}
 	m.viewTerminal(&v)
 	return v
+}
+
+// imageQueue returns the commands the viewer starts after an update: the
+// capability query the first time an image tab is opened, and the read of a
+// picture the terminal does not have yet. It runs at the end of Update, before the
+// frame: the text summary is painted while the read is in flight, and the
+// placeholders are painted only after the upload's Raw message has landed.
+//
+// Nothing is started while no image tab is open, so a session of text files never
+// sends a graphics query.
+func (m *Model) imageQueue() tea.Cmd {
+	if m.ed == nil {
+		return nil
+	}
+	if m.img.off || m.img.localOnly {
+		return nil
+	}
+	type imageTarget struct {
+		path string
+		doc  Document
+	}
+	var targets []imageTarget
+	seen := make(map[string]bool)
+	for _, pane := range m.layout().Panes {
+		doc := m.paneDoc(pane)
+		if doc == nil {
+			continue
+		}
+		path, ok := m.imagePathOf(doc)
+		if !ok || path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		targets = append(targets, imageTarget{path: path, doc: doc})
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	if !m.img.probed && !m.img.arming {
+		// The first image tab asks the terminal once. It is not part of Init, so a
+		// session of text files, and a test that counts Init's commands, is unaffected.
+		m.img.arming = true
+		return func() tea.Msg { return imageProbeArmMsg{} }
+	}
+	if !m.img.imageEnabled() {
+		return nil
+	}
+	if m.img.pending == nil {
+		m.img.pending = make(map[int]bool)
+	}
+	var cmds []tea.Cmd
+	for _, target := range targets {
+		// imageID allocates the id (and says whether the file changed since it was
+		// sent). An upload in flight is not queued twice.
+		size, mtime := m.imageStatOf(target.doc)
+		id, send := m.img.imageID(target.path, size, mtime)
+		if !send || m.img.pending[id] {
+			continue
+		}
+		m.img.pending[id] = true
+		cmds = append(cmds, imageSendCmd(target.path, id))
+	}
+	return tea.Batch(cmds...)
 }
 
 // paint draws the frame into a new grid. The editor pane fills the body to the
@@ -3682,6 +3795,10 @@ func (m *Model) caret() (x, y int, ok bool) {
 	}
 	doc := m.ed.Active()
 	if doc == nil || m.tabFocus {
+		return 0, 0, false
+	}
+	if _, ok := m.activeHex(); ok {
+		// The hex dump has no text caret: the terminal cursor stays hidden.
 		return 0, 0, false
 	}
 	l := m.layout()

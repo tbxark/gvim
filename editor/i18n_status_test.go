@@ -38,21 +38,21 @@ func TestClipStatusUsesTheActiveLocale(t *testing.T) {
 	}
 }
 
-// TestClipStatusUsesTheEmbeddedGermanCatalogue checks the shipped translation files:
-// with the embedded de catalogue active, the extracted clipboard statuses show Fresh's
-// German text without any test registration. It is not parallel because it changes the
-// process locale, and it restores English.
-func TestClipStatusUsesTheEmbeddedGermanCatalogue(t *testing.T) {
-	i18n.SetLocale("de")
+// TestClipStatusUsesTheEmbeddedChineseCatalogue checks the shipped translation files:
+// with the embedded zh-CN catalogue active, the extracted clipboard statuses show
+// Fresh's Chinese text without any test registration. It is not parallel because it
+// changes the process locale, and it restores English.
+func TestClipStatusUsesTheEmbeddedChineseCatalogue(t *testing.T) {
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	e := clipEditor(t, "one")
 	e.Do("copy", nil)
-	if got := e.Status(); got != "Zeile kopiert" {
-		t.Fatalf("de copy status = %q, want the embedded German line copy", got)
+	if got := e.Status(); got != "已复制行" {
+		t.Fatalf("zh-CN copy status = %q, want the embedded Chinese line copy", got)
 	}
 	e.Do("paste", map[string]any{"text": "x"})
-	if got := e.Status(); got != "Eingefügt" {
-		t.Fatalf("de paste status = %q, want the embedded German paste", got)
+	if got := e.Status(); got != "已粘贴" {
+		t.Fatalf("zh-CN paste status = %q, want the embedded Chinese paste", got)
 	}
 	// Switching back to English renders the source text again on the next action.
 	i18n.SetLocale("en")

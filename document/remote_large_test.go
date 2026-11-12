@@ -168,9 +168,10 @@ func TestReadRemoteLargeDocumentWindowedEditable(t *testing.T) {
 	if status := d.OpenStatus(); !strings.Contains(status, "remote large file (windowed)") || strings.Contains(status, "read-only") {
 		t.Fatalf("open status = %q, want the editable windowed reason", status)
 	}
-	// Whole-file reads were never used; every byte came from RangeAccess windows.
-	if reads, _ := access.counts(); reads == 0 {
-		t.Fatal("no windowed read was made")
+	// The open probes only the head, then the windowed source reads its first
+	// window: neither path may fetch the whole file.
+	if reads, bytes := access.counts(); reads < 2 || bytes >= int64(len(access.data)) {
+		t.Fatalf("open ranges = %d, bytes = %d; want a head probe then bounded windows, never the whole file", reads, bytes)
 	}
 }
 

@@ -39,8 +39,8 @@ func TestEmbeddedLocaleFiles(t *testing.T) {
 	for _, lang := range Locales() {
 		want[lang.Code] = true
 	}
-	if got := len(want); got != 15 {
-		t.Fatalf("Locales() has %d languages, want the 15 Fresh locales", got)
+	if got := len(want); got != 2 {
+		t.Fatalf("Locales() has %d languages, want en and zh-CN", got)
 	}
 	files := embeddedLocales(t)
 	if len(files) != len(want) {
@@ -58,7 +58,7 @@ func TestEmbeddedLocaleFiles(t *testing.T) {
 	}
 	// The size stays bounded: the catalogue is the extracted inventory (the command and
 	// menu classes are the bulk), not Fresh's full 1.9k-key file. The measured key+value
-	// text is about 522 KiB; the cap leaves room for the rest of the extraction but keeps
+	// text is about 97 KiB; the cap leaves room for the rest of the extraction but keeps
 	// a careless full import from silently bloating the binary.
 	var total int
 	for code, table := range files {
@@ -179,12 +179,12 @@ func TestLocaleCoverage(t *testing.T) {
 	}
 }
 
-// TestCoverageFor checks the public coverage report against the embedded German file.
+// TestCoverageFor checks the public coverage report against the embedded Chinese file.
 // It is not parallel: it reads the runtime catalogue table, which tests may replace.
 func TestCoverageFor(t *testing.T) {
-	cov := CoverageFor("de")
-	if cov.Locale != "de" || cov.Total == 0 || cov.Translated == 0 || cov.Translated < len(FreshMap()) {
-		t.Fatalf("CoverageFor(de) = %+v, want the mapped German keys", cov)
+	cov := CoverageFor("zh-CN")
+	if cov.Locale != "zh-CN" || cov.Total == 0 || cov.Translated == 0 || cov.Translated < len(FreshMap()) {
+		t.Fatalf("CoverageFor(zh-CN) = %+v, want the mapped Chinese keys", cov)
 	}
 	if len(cov.Missing) != cov.Total-cov.Translated {
 		t.Errorf("missing = %d, want %d", len(cov.Missing), cov.Total-cov.Translated)
@@ -215,14 +215,14 @@ func TestValidateCatalogueRejects(t *testing.T) {
 		table  map[string]string
 		want   string
 	}{
-		{"unknown key", "de", map[string]string{"gvim.not.in.english": "x"}, "not in the English catalogue"},
-		{"placeholder mismatch", "de", map[string]string{"clipboard.copied_path": "Pfad: %{datei}"}, "do not match English"},
-		{"malformed placeholder", "de", map[string]string{"clipboard.copied_path": "Pfad: %{path"}, "unterminated placeholder"},
-		{"bad placeholder name", "de", map[string]string{"gvim.terminal.no_file_at": "x %{a-b}"}, "not allowed"},
-		{"empty value", "de", map[string]string{"clipboard.copied": ""}, "empty value"},
-		{"oversized value", "de", map[string]string{"clipboard.copied": strings.Repeat("x", maxValue+1)}, "over the"},
-		{"plural category the locale does not use", "ja", map[string]string{pluralBase + ".one": "x"}, "plural category"},
-		{"foreign plural category", "ru", map[string]string{pluralBase + ".zero": "x"}, "plural category"},
+		{"unknown key", "zh-CN", map[string]string{"gvim.not.in.english": "x"}, "not in the English catalogue"},
+		{"placeholder mismatch", "zh-CN", map[string]string{"clipboard.copied_path": "路径：%{datei}"}, "do not match English"},
+		{"malformed placeholder", "zh-CN", map[string]string{"clipboard.copied_path": "路径：%{path"}, "unterminated placeholder"},
+		{"bad placeholder name", "zh-CN", map[string]string{"gvim.terminal.no_file_at": "x %{a-b}"}, "not allowed"},
+		{"empty value", "zh-CN", map[string]string{"clipboard.copied": ""}, "empty value"},
+		{"oversized value", "zh-CN", map[string]string{"clipboard.copied": strings.Repeat("x", maxValue+1)}, "over the"},
+		{"plural category the locale does not use", "zh-CN", map[string]string{pluralBase + ".one": "x"}, "plural category"},
+		{"foreign plural category", "zh-CN", map[string]string{pluralBase + ".zero": "x"}, "plural category"},
 		{"unknown locale", "xx", map[string]string{"clipboard.copied": "Kopiert"}, "not one of the shipped locales"},
 	}
 	for _, tt := range tests {
@@ -246,8 +246,7 @@ func TestValidateCatalogueRejects(t *testing.T) {
 		table  map[string]string
 	}{
 		{"en", map[string]string{pluralBase + ".one": "one", pluralBase + ".other": "other"}},
-		{"ru", map[string]string{pluralBase + ".few": "few", pluralBase + ".many": "many"}},
-		{"ja", map[string]string{pluralBase + ".other": "other"}},
+		{"zh-CN", map[string]string{pluralBase + ".other": "other"}},
 	} {
 		if errs := ValidateCatalogue(tt.locale, tt.table); len(errs) > 0 {
 			t.Errorf("ValidateCatalogue(%s) rejected a valid table: %v", tt.locale, errs)
@@ -260,49 +259,49 @@ func TestValidateCatalogueRejects(t *testing.T) {
 func TestValidateCatalogueJSONRejectsDuplicateKeys(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"clipboard.copied": "A", "clipboard.copied": "B"}`)
-	errs := ValidateCatalogueJSON("de", data)
+	errs := ValidateCatalogueJSON("zh-CN", data)
 	if len(errs) == 0 || !strings.Contains(errs[0].Error(), "duplicate key") {
 		t.Fatalf("duplicate keys = %v, want a duplicate-key error", errs)
 	}
-	if errs := ValidateCatalogueJSON("de", []byte(`["not", "an", "object"]`)); len(errs) == 0 {
+	if errs := ValidateCatalogueJSON("zh-CN", []byte(`["not", "an", "object"]`)); len(errs) == 0 {
 		t.Fatal("a JSON array was accepted")
 	}
-	if errs := ValidateCatalogueJSON("de", []byte(`{"clipboard.copied": 3}`)); len(errs) == 0 {
+	if errs := ValidateCatalogueJSON("zh-CN", []byte(`{"clipboard.copied": 3}`)); len(errs) == 0 {
 		t.Fatal("a non-string value was accepted")
 	}
 }
 
 // TestEmbeddedTranslationsAndFallback checks the embedded catalogues through the
-// public API: German translates the mapped keys, a gvim-only key and an unknown key
+// public API: Chinese translates the mapped keys, a gvim-only key and an unknown key
 // fall back to English, and a regional tag resolves to its language.
 func TestEmbeddedTranslationsAndFallback(t *testing.T) {
 	SetLocale("en")
 	t.Cleanup(func() { SetLocale("en") })
-	if got := T("de", "clipboard.copied", nil); got != "Kopiert" {
-		t.Errorf("T(de, clipboard.copied) = %q, want the embedded German", got)
+	if got := T("zh-CN", "clipboard.copied", nil); got != "已复制" {
+		t.Errorf("T(zh-CN, clipboard.copied) = %q, want the embedded Chinese", got)
 	}
-	if got := T("de", "clipboard.copied_path", map[string]any{"path": "/ws/a.go"}); got != "Pfad kopiert: /ws/a.go" {
-		t.Errorf("interpolated German = %q", got)
+	if got := T("zh-CN", "clipboard.copied_path", map[string]any{"path": "/ws/a.go"}); got != "已复制路径：/ws/a.go" {
+		t.Errorf("interpolated Chinese = %q", got)
 	}
 	// gvim-only: no translation, English text.
-	if got := T("de", "gvim.terminal.capture_on", nil); !strings.HasPrefix(got, "Keyboard capture ON") {
-		t.Errorf("gvim-only German = %q, want the English fallback", got)
+	if got := T("zh-CN", "gvim.terminal.capture_on", nil); !strings.HasPrefix(got, "Keyboard capture ON") {
+		t.Errorf("gvim-only Chinese = %q, want the English fallback", got)
 	}
 	// Unknown locale and unknown key fall back.
 	if got := T("xx", "clipboard.copied", nil); got != "Copied" {
 		t.Errorf("unknown locale = %q, want English", got)
 	}
-	if got := T("de", "gvim.never.defined", nil); got != "gvim.never.defined" {
+	if got := T("zh-CN", "gvim.never.defined", nil); got != "gvim.never.defined" {
 		t.Errorf("unknown key = %q, want the key", got)
 	}
 	// A regional tag finds the language file through the chain.
-	if got := T("de-AT", "clipboard.copied", nil); got != "Kopiert" {
-		t.Errorf("T(de-AT) = %q, want the German fallback", got)
+	if got := T("zh-CN-Hans", "clipboard.copied", nil); got != "已复制" {
+		t.Errorf("T(zh-CN-Hans) = %q, want the Chinese fallback", got)
 	}
 	// The active locale drives the empty-locale form.
-	SetLocale("de")
-	if got := T("", "clipboard.pasted", nil); got != "Eingefügt" {
-		t.Errorf("active de pasted = %q", got)
+	SetLocale("zh-CN")
+	if got := T("", "clipboard.pasted", nil); got != "已粘贴" {
+		t.Errorf("active zh-CN pasted = %q", got)
 	}
 }
 
@@ -315,11 +314,7 @@ func TestPluralCategoriesPerLocale(t *testing.T) {
 		want   []string
 	}{
 		{"en", []string{"one", "other"}},
-		{"de", []string{"one", "other"}},
-		{"fr", []string{"one", "other"}},
-		{"cs", []string{"few", "one", "other"}},
-		{"ru", []string{"few", "many", "one", "other"}},
-		{"ja", []string{"other"}},
+		{"zh-CN", []string{"other"}},
 	}
 	for _, tt := range tests {
 		allowed := allowedCategories(tt.locale)

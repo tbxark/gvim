@@ -7,10 +7,10 @@ import (
 )
 
 // TestTask129ChromeFallsBackToEnglish checks extracted plugin/theme/agent/project-search
-// strings render their English text in German (gvim-only keys, never the bare key), and
+// strings render their English text in Chinese (gvim-only keys, never the bare key), and
 // guards that every referenced key is in the English catalogue.
 func TestTask129ChromeFallsBackToEnglish(t *testing.T) {
-	i18n.SetLocale("de")
+	i18n.SetLocale("zh-CN")
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	if got := uiText("gvim.plugin_manager.cannot_reload", "No plugin can be reloaded"); got != "No plugin can be reloaded" {
 		t.Errorf("plugin notice = %q", got)
