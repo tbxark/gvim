@@ -81,7 +81,6 @@ type ViewOptions struct {
 	Explorer          explorer.Options
 	MenuBarMnemonics  bool // editor.menu_bar_mnemonics, default true
 	SmoothScroll      bool // editor.smooth_scroll, default true
-	UseTerminalBG     bool // editor.use_terminal_bg, default false
 	SetWindowTitle    bool // editor.set_window_title, default true
 	TerminalAutoTitle bool // editor.terminal_auto_title, default true
 	// editor.animations, editor.cursor_jump_animation, editor.viewport_edge_fade
@@ -99,7 +98,6 @@ type ViewOptions struct {
 	// Language-server display.
 
 	EnableInlayHints           bool // editor.enable_inlay_hints, default true
-	EnableSemanticTokensFull   bool // editor.enable_semantic_tokens_full, default false
 	DiagnosticsInlineText      bool // editor.diagnostics_inline_text, default false
 	CompletionPopupAutoShow    bool // editor.completion_popup_auto_show, default false
 	QuickSuggestions           bool // editor.quick_suggestions, default true

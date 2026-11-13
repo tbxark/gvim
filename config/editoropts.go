@@ -83,7 +83,6 @@ type EditorOptions struct {
 	Search                 SearchDefaults  // search
 	ShowTilde              bool            // show_tilde: "~" on rows past the end of the file, default true
 	NerdFontIcons          bool            // nerd_font_icons, default false
-	UseTerminalBG          bool            // use_terminal_bg, default false
 	SetWindowTitle         bool            // set_window_title, default true
 	TerminalAutoTitle      bool            // terminal_auto_title, default true
 	// Rulers is rulers: 1-based columns that carry a vertical ruler. Default none (nil).
@@ -131,7 +130,6 @@ type EditorOptions struct {
 	QuickSuggestionsDelayMS    int  // quick_suggestions_delay_ms, default 150
 	SuggestOnTriggerCharacters bool // suggest_on_trigger_characters, default true
 	EnableInlayHints           bool // enable_inlay_hints, default true
-	EnableSemanticTokensFull   bool // enable_semantic_tokens_full, default false
 	DiagnosticsInlineText      bool // diagnostics_inline_text, default false
 
 	// Mouse.
@@ -396,7 +394,6 @@ var editorOptions = []option{
 	boolOpt("show_horizontal_scrollbar", "show_horizontal_scrollbar", func(c *Config) *bool { return &c.ShowHorizontalScrollbar }),
 	boolOpt("show_tilde", "", func(c *Config) *bool { return &c.ShowTilde }),
 	boolOpt("nerd_font_icons", "", func(c *Config) *bool { return &c.NerdFontIcons }),
-	boolOpt("use_terminal_bg", "", func(c *Config) *bool { return &c.UseTerminalBG }),
 	boolOpt("set_window_title", "", func(c *Config) *bool { return &c.SetWindowTitle }),
 	boolOpt("terminal_auto_title", "", func(c *Config) *bool { return &c.TerminalAutoTitle }),
 	enumOpt("cursor_style", "cursor_style",
@@ -456,7 +453,6 @@ var editorOptions = []option{
 	intOpt("quick_suggestions_delay_ms", "", 0, 0, func(c *Config) *int { return &c.QuickSuggestionsDelayMS }),
 	boolOpt("suggest_on_trigger_characters", "", func(c *Config) *bool { return &c.SuggestOnTriggerCharacters }),
 	boolOpt("enable_inlay_hints", "", func(c *Config) *bool { return &c.EnableInlayHints }),
-	boolOpt("enable_semantic_tokens_full", "", func(c *Config) *bool { return &c.EnableSemanticTokensFull }),
 	boolOpt("diagnostics_inline_text", "", func(c *Config) *bool { return &c.DiagnosticsInlineText }),
 
 	// Mouse.

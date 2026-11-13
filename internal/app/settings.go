@@ -126,7 +126,6 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 		},
 		MenuBarMnemonics:  cfg.MenuBarMnemonics,
 		SmoothScroll:      cfg.SmoothScroll,
-		UseTerminalBG:     cfg.UseTerminalBG,
 		SetWindowTitle:    cfg.SetWindowTitle,
 		TerminalAutoTitle: cfg.TerminalAutoTitle,
 
@@ -135,7 +134,6 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 		MouseHoverDelayMS:     cfg.MouseHoverDelayMS,
 
 		EnableInlayHints:           cfg.EnableInlayHints,
-		EnableSemanticTokensFull:   cfg.EnableSemanticTokensFull,
 		DiagnosticsInlineText:      cfg.DiagnosticsInlineText,
 		CompletionPopupAutoShow:    cfg.CompletionPopupAutoShow,
 		QuickSuggestions:           cfg.QuickSuggestions,
