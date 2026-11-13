@@ -52,7 +52,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
-Almost none of them binds a default key (Fresh's presets use most chords): `flash` binds `alt+j` (Flash: Jump), `merge_conflict` binds `alt+m` (Start Resolution) and `ctrl+alt+c` (Next Conflict), and `markdown_source` takes Enter, Tab and Shift+Tab in Markdown buffers. For the others, bind one yourself, with
+Almost none of them binds a default key (Fresh's presets use most chords): `flash` binds `alt+j` (Flash: Jump; while it is enabled this replaces the built-in `alt+j` that toggles the Utility Dock, with no warning, because plugin bindings layer over the preset and only your own keybindings win), `merge_conflict` binds `alt+m` (Start Resolution) and `ctrl+alt+c` (Next Conflict), and `markdown_source` takes Enter, Tab and Shift+Tab in Markdown buffers. For the others, bind one yourself, with
 `gvim.keymap.set("ctrl+alt+j", "flash.jump")` in your `init.lua`, or in `config.json`:
 
 ```json
@@ -903,7 +903,7 @@ folds are indentation folds, so a heading usually opens none to fold.
 pattern, every visible match in every window gets a label, and typing a label jumps there (Backspace
 shortens the pattern, Enter jumps to the nearest match, Esc or any other key ends it). Labels follow
 flash.nvim: the nearest matches get the most comfortable keys, and a letter that is also the next
-character after a match is not used. The plugin binds `alt+j` to **Flash: Jump** while it is enabled.
+character after a match is not used. The plugin binds `alt+j` to **Flash: Jump** while it is enabled, replacing the built-in `alt+j` Utility Dock toggle.
 
 **vi_mode**: vi-style modal editing: normal, insert, visual (character, line, block) and operator-pending
 modes, counts, operators with motions and text objects, registers, marks, `.` repeat, and `:` commands.

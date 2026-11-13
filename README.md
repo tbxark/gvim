@@ -27,7 +27,7 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
   - **Git Blame**: inline commit author, age, and summary on the cursor line, commit details popup, and parent revision blame.
   - **Git Log**: commit history browser with commit diff previews.
   - **Review Diff (Audit Mode)**: list staged, unstaged, and untracked changes, view unified diffs, and navigate hunks across files.
-  - Git Log, Review Diff, Merge conflict resolution, Compare Files and Flash Jump are bundled plugins that are **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in `config.json` (see `docs/plugins/bundled.md`). Its keys (`Alt+J` for Flash, `Alt+M` / `Ctrl+Alt+C` for Merge) apply once it is on. Git Gutter and Git Blame are on.
+  - Git Log, Review Diff, Merge conflict resolution, Compare Files and Flash Jump are bundled plugins that are **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in `config.json` (see `docs/plugins/bundled.md`). Its keys (`Alt+J` for Flash, which then replaces the built-in `Alt+J` Utility Dock toggle; `Alt+M` / `Ctrl+Alt+C` for Merge) apply once it is on. Git Gutter and Git Blame are on.
 
 - **Multi-Modal Fast Search**
   - **Quick Open (`Ctrl+P`)**: fuzzy file search, line jump (`:line`), relative line jump (`:+N` / `:-N`), buffer list (`#`), and command palette (`>`).
@@ -125,7 +125,7 @@ grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integrati
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / Previous open buffer (notebook-friendly) |
 | `Ctrl+Shift+Space` / `Alt+Shift+Space` | Smart expand / shrink selection (word → brackets → line → block) |
 | `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
-| `Alt+J` | Flash Jump (2-character on-screen jump motion; needs the `flash` plugin) |
+| `Alt+J` | Flash Jump (2-character on-screen jump motion; needs the `flash` plugin, and while it is on it replaces the built-in `Alt+J` that toggles the Utility Dock) |
 | `Ctrl+Shift+M` | Toggle Diagnostics Drawer (problems panel) |
 | `F8` / `Shift+F8` | Next / Previous diagnostic error or warning |
 | `Alt+Z` / `Alt+Shift+Z` | Toggle fold at cursor / Fold all blocks |
@@ -150,7 +150,7 @@ grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integrati
 | Action | Description |
 |---|---|
 | `Go to Definition` | Jump to symbol definition (`F12`; `Ctrl+.` in the `macos` keymap) |
-| `LSP: Peek Definition` | In-place definition preview card without switching tabs (`Alt+F12`; `Ctrl+Alt+.` in the `macos` keymap) |
+| `Alt+F12` | In-place definition preview card without switching tabs (the `lsp_peek_definition` action; `Ctrl+Alt+.` in the `macos` keymap; not a palette row) |
 | `Find References` | Open references list with preview tabs (`Shift+F12`) |
 | `Go to Implementation` | Jump to implementation (`Ctrl+F12`) |
 | `Show Hover Info` | Show hover documentation popup (`Alt+K`) |
@@ -172,7 +172,7 @@ The symbol, call-hierarchy, outline and breadcrumb rows (`Go to LSP Symbol` thro
 | `Git: Show Commit` | Show commit details popup for cursor line |
 | `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
 | `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
-| `Merge: Conflict Resolution` | Jump between conflict markers (`Alt+M` mode or `Ctrl+Alt+C`) |
+| `Merge: Start Resolution`, `Merge: Next Conflict`, `Merge: Previous Conflict`, ... | Resolve conflict markers (`Alt+M` mode or `Ctrl+Alt+C`; needs the `merge_conflict` plugin) |
 
 ### Scrollbar Overview Ruler
 The right vertical scrollbar track acts as a real-time overview ruler:
@@ -183,7 +183,7 @@ The right vertical scrollbar track acts as a real-time overview ruler:
 Allows scanning long files and spotting issues at a glance without having to scroll through thousands of lines.
 
 ### Sticky Scroll
-When scrolling down into long functions, classes, or code blocks, the top row of the editor pane automatically pins the enclosing declaration header (e.g. `func (m *Model) paintPanes(...) {`), ensuring you never lose your place while reading code. Can be toggled on or off via the `toggle_sticky_scroll` action.
+When scrolling down into long functions, classes, or code blocks, the top row of the editor pane automatically pins the enclosing declaration header (e.g. `func (m *Model) paintPanes(...) {`), ensuring you never lose your place while reading code. Toggled by the `toggle_sticky_scroll` action, which has no default key and no palette row: bind a key to it in your keybindings.
 
 ### Pager Mode (`gvim -R` / `git diff | gvim`)
 When viewing read-only buffers or piped input, single-key pager shortcuts activate:
