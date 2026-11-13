@@ -4879,7 +4879,8 @@ for parity status.
     current tab (not Fresh's synthetic single-tab group) and its panel buffers are also visible
     as tabs; the toolbar is a hint row, not clickable buttons; the log is a styled buffer whose
     cursor is the selection (a line decoration tints it), not a described List widget; the
-    detail is raw `git show` text carrying plugin decorations, not a host diff-background layer;
+    detail is raw `git show` text carrying plugin decorations, and the host diff syntax adds
+    full-row `editor.diff_*_bg` backgrounds;
     there is no HEAD watcher (`r` refreshes). The diff streams with disk caching and the Fresh
     caps; the port has no default key bindings. `docs/plugins/bundled.md`.
 43. **Bundled-plugin default policy is memory-bound.** 9 of the 22 bundled plugins are

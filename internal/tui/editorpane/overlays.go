@@ -173,8 +173,7 @@ func (f frame) markOverlays(i int, raw []rune, ln *line) {
 	}
 	cells := ln.cells
 	f.dx.reps = f.dx.reps[:0]
-	var tail grid.Style
-	hasTail := false
+	tail, hasTail := ln.tail, ln.hasTail
 	if h.row != nil {
 		if st, ok := h.row(i); ok {
 			f.applyLook(cells, 0, len(cells), st)
@@ -319,7 +318,12 @@ func (f frame) paintRowTail(g *grid.Grid, ln line, y, end int, cur bool) {
 		return
 	}
 	base := f.styles.Text
-	if cur && f.styles.CurrentLine.BG != nil {
+	switch {
+	case ln.diffAdd && f.styles.DiffAdd.BG != nil:
+		base = PatchStyle(base, f.styles.DiffAdd)
+	case ln.diffRemove && f.styles.DiffRemove.BG != nil:
+		base = PatchStyle(base, f.styles.DiffRemove)
+	case cur && f.styles.CurrentLine.BG != nil:
 		base = withBackground(base, f.styles.CurrentLine)
 	}
 	g.Fill(end, f.w-1, y, PatchStyle(base, ln.tail))
@@ -334,7 +338,12 @@ func (f frame) paintVirtualText(g *grid.Grid, ln line, i, y, end, skip int, cur 
 		return
 	}
 	base := f.styles.Text
-	if cur && f.styles.CurrentLine.BG != nil {
+	switch {
+	case ln.diffAdd && f.styles.DiffAdd.BG != nil:
+		base = PatchStyle(base, f.styles.DiffAdd)
+	case ln.diffRemove && f.styles.DiffRemove.BG != nil:
+		base = PatchStyle(base, f.styles.DiffRemove)
+	case cur && f.styles.CurrentLine.BG != nil:
 		base = withBackground(base, f.styles.CurrentLine)
 	}
 	x := end

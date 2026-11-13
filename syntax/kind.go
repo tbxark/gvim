@@ -37,6 +37,11 @@ const (
 	KindLink
 	KindQuote
 	KindStrike
+	// KindDiffAdd and KindDiffRemove mark added and removed lines of a unified
+	// diff. Their colors are the theme's diff backgrounds; the editor also paints
+	// the background across the rest of the row.
+	KindDiffAdd
+	KindDiffRemove
 
 	// KindCount is the number of kinds, KindPlain included.
 	KindCount
@@ -82,6 +87,8 @@ var kinds = [KindCount]kindInfo{
 	KindLink:           {name: "link", themeKey: theme.SyntaxFunction, attrs: AttrUnderline},
 	KindQuote:          {name: "quote", themeKey: theme.SyntaxComment},
 	KindStrike:         {name: "strike", themeKey: theme.SyntaxComment, attrs: AttrStrike},
+	KindDiffAdd:        {name: "diff-add"},
+	KindDiffRemove:     {name: "diff-remove"},
 }
 
 // String returns a short lowercase name for k, for logs and tests.

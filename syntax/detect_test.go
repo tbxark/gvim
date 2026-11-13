@@ -18,6 +18,8 @@ func TestDetectLanguage(t *testing.T) {
 		{name: "shebang with version suffix", filename: "build", content: "#!/usr/local/bin/python3.11\n", want: "Python"},
 		{name: "env -S shebang", filename: "x", content: "#!/usr/bin/env -S python3 -u\n", want: "Python"},
 		{name: "shell shebang via analyse", filename: "", content: "#!/bin/sh\necho hi\n", want: "Bash"},
+		{name: "unified diff with Go content", filename: "", content: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-package a\n+package b\n", want: "Diff"},
+		{name: "plain unified diff", filename: "", content: "--- old.txt\n+++ new.txt\n@@ -1 +1 @@\n-old\n+new\n", want: "Diff"},
 		{name: "unknown interpreter falls back", filename: "tool", content: "#!/usr/bin/env zzqx\nhi\n", want: "fallback"},
 		{name: "unknown extension falls back", filename: "notes.zzqx", content: "plain words here\n", want: "fallback"},
 		{name: "empty name and content falls back", filename: "", content: "", want: "fallback"},

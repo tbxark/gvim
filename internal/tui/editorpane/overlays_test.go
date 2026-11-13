@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // The cells asserted below sit after the gutter of a document with fewer than 100 lines,
@@ -117,6 +118,87 @@ func TestOverlayRowStyleFillsEveryRowOfALine(t *testing.T) {
 	for _, tc := range tests {
 		if got := bgOf(cellAt(t, g, tc.x, tc.y)); got != tc.want {
 			t.Errorf("cell (%d,%d) bg = %v, want %v", tc.x, tc.y, got, tc.want)
+		}
+	}
+}
+
+func TestDiffLinesFillTheirFullRow(t *testing.T) {
+	d := newDoc("context", "-removed", "+added", "context")
+	d.spans = map[int][]syntax.Span{
+		1: {{Start: 0, End: 8, Kind: syntax.KindDiffRemove}},
+		2: {{Start: 0, End: 6, Kind: syntax.KindDiffAdd}},
+	}
+	add, remove := cGreen, cRed
+	g := Pane{
+		Doc: d,
+		Styles: Styles{
+			Syntax:     [numKinds]grid.Style{syntax.KindPlain: {BG: cBlue}},
+			DiffAdd:    grid.Style{BG: add},
+			DiffRemove: grid.Style{BG: remove},
+		},
+	}.Render(20, 4)
+	for x := textX; x < 19; x++ {
+		if got := bgOf(cellAt(t, g, x, 1)); got != remove {
+			t.Errorf("removed line cell %d bg = %v, want %v", x, got, remove)
+		}
+		if got := bgOf(cellAt(t, g, x, 2)); got != add {
+			t.Errorf("added line cell %d bg = %v, want %v", x, got, add)
+		}
+	}
+	for x := textX; x < textX+len("context"); x++ {
+		if got := bgOf(cellAt(t, g, x, 0)); got != cBlue {
+			t.Errorf("context line cell %d bg = %v, want the editor bg", x, got)
+		}
+		if got := bgOf(cellAt(t, g, x, 3)); got != cBlue {
+			t.Errorf("other context line cell %d bg = %v, want the editor bg", x, got)
+		}
+	}
+}
+
+func TestCurrentLineKeepsTheDiffRowBackground(t *testing.T) {
+	d := newDoc("-removed", "+added")
+	d.cursor = buffer.Pos{Line: 1}
+	d.spans = map[int][]syntax.Span{
+		0: {{Start: 0, End: 8, Kind: syntax.KindDiffRemove}},
+		1: {{Start: 0, End: 6, Kind: syntax.KindDiffAdd}},
+	}
+	g := Pane{
+		Doc:         d,
+		CurrentLine: true,
+		Styles: Styles{
+			CurrentLine: grid.Style{BG: cGray},
+			DiffAdd:     grid.Style{BG: cGreen},
+			DiffRemove:  grid.Style{BG: cRed},
+		},
+	}.Render(20, 2)
+	for x := textX; x < 19; x++ {
+		if got := bgOf(cellAt(t, g, x, 0)); got != cRed {
+			t.Errorf("removed line cell %d bg = %v, want %v", x, got, cRed)
+		}
+		if got := bgOf(cellAt(t, g, x, 1)); got != cGreen {
+			t.Errorf("caret line cell %d bg = %v, want the diff add background %v", x, got, cGreen)
+		}
+	}
+}
+
+func TestCurrentLineTintReturnsWithoutDiffBackgrounds(t *testing.T) {
+	d := newDoc("-removed", "+added")
+	d.cursor = buffer.Pos{Line: 1}
+	d.spans = map[int][]syntax.Span{
+		0: {{Start: 0, End: 8, Kind: syntax.KindDiffRemove}},
+		1: {{Start: 0, End: 6, Kind: syntax.KindDiffAdd}},
+	}
+	g := Pane{
+		Doc:         d,
+		CurrentLine: true,
+		Styles:      Styles{CurrentLine: grid.Style{BG: cGray}},
+	}.Render(20, 2)
+	for x := textX; x < 19; x++ {
+		if got := bgOf(cellAt(t, g, x, 0)); got != nil {
+			t.Errorf("non-caret diff line cell %d bg = %v, want none", x, got)
+		}
+		if got := bgOf(cellAt(t, g, x, 1)); got != cGray {
+			t.Errorf("caret diff line cell %d bg = %v, want the current-line tint %v", x, got, cGray)
 		}
 	}
 }

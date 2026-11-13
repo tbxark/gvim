@@ -45,7 +45,14 @@ func SelectionHTML(doc Document, st Styles, text string) (html string, ok bool) 
 			closeSpan()
 			cur = k
 			if k != syntax.KindPlain {
-				fmt.Fprintf(&b, "<span style=\"%s\">", kindCSS(st.Syntax[k], fg))
+				css := kindCSS(st.Syntax[k], fg)
+				switch k {
+				case syntax.KindDiffAdd:
+					css += cssBackground(st.DiffAdd, bg)
+				case syntax.KindDiffRemove:
+					css += cssBackground(st.DiffRemove, bg)
+				}
+				fmt.Fprintf(&b, "<span style=\"%s\">", css)
 				open = true
 			}
 		}
@@ -138,6 +145,15 @@ func kindCSS(st grid.Style, def string) string {
 		css += "text-decoration:underline;"
 	}
 	return css
+}
+
+// cssBackground is the background declaration of a diff row, or "" when the role
+// has no colour.
+func cssBackground(st grid.Style, def string) string {
+	if st.BG == nil {
+		return ""
+	}
+	return "background-color:" + cssColor(st.BG, def) + ";"
 }
 
 // cssColor is c as #rrggbb, or def for the terminal default (nil).

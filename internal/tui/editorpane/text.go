@@ -90,6 +90,9 @@ type line struct {
 	// column, and dispToSrc the reverse. They are nil outside the composed page view.
 	srcToDisp []int
 	dispToSrc []int
+	// diffAdd and diffRemove say that the line is an added or removed line of a
+	// unified diff. The whole row takes the matching theme background.
+	diffAdd, diffRemove bool
 	// Soft breaks (rows_extra.go): lead[k] is the added cells at the start of row k, and
 	// prefix[k]/prefixStyle[k] are its prefix text and style.
 	lead        []int
@@ -190,9 +193,16 @@ func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, 
 			spans = f.doc.LineSpans(i)
 		}
 		kinds := kindsPerRune(text, spans)
+		ln.diffAdd, ln.diffRemove = diffLineKind(kinds)
 		// The helpers below read the window's offset from the frame.
 		f.off, f.cut = off, cut
 		ln.cells = expandCells(raw, kinds, f.selectedIn(i), f.tab)
+		if ln.diffAdd || ln.diffRemove {
+			// The whole diff line is one run, so a long line does not need one
+			// spanless cell per blank to paint its background.
+			ln.tail = f.diffStyle(ln)
+			ln.hasTail = true
+		}
 		f.markOccurrences(i, raw, ln.cells)
 		f.markMatches(i, raw, ln.cells)
 		f.markDiagnostics(i, raw, ln.cells)
@@ -201,6 +211,33 @@ func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, 
 		f.markConceals(i, raw, &ln)
 	}
 	return ln
+}
+
+// diffLineKind reports whether the kinds of a line mark it as an added or a
+// removed line of a unified diff. A line has one role; the first non-plain kind
+// decides it.
+func diffLineKind(kinds []syntax.Kind) (add, remove bool) {
+	for _, k := range kinds {
+		switch k {
+		case syntax.KindDiffAdd:
+			return true, false
+		case syntax.KindDiffRemove:
+			return false, true
+		case syntax.KindPlain:
+		default:
+			return false, false
+		}
+	}
+	return false, false
+}
+
+// diffStyle is the background of a diff row. A theme without the key has none,
+// and keeps the editor background.
+func (f frame) diffStyle(ln line) grid.Style {
+	if ln.diffAdd {
+		return f.styles.DiffAdd
+	}
+	return f.styles.DiffRemove
 }
 
 // SpanWindower is implemented by a Document that lexes a piece of a very long line. The pane

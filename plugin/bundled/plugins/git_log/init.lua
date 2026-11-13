@@ -27,8 +27,8 @@
 --   * The log list is a styled buffer whose cursor is the selection, tinted with a line
 --     decoration, not a described List widget; Fresh's enter/select event plumbing is
 --     replaced by the cursor_moved event (debounced like Fresh's select).
---   * The detail is raw "git show" text with per-line decorations for +/- backgrounds and
---     header colours; gvim paints no .diff diff-background layer for an ordinary buffer.
+--   * The detail is raw "git show" text with per-line decorations for +/- backgrounds,
+--     header colours and the host diff syntax's full-row `editor.diff_*_bg` backgrounds.
 --   * No HEAD watcher: r refreshes (Fresh has the same manual refresh; it watches nothing
 --     for this view either).
 --   * A historical file view takes its language from a small extension map: Lua has no
@@ -92,8 +92,8 @@ local STYLE = {
   ref_remote = { fg = "syntax.function", bold = true },
   ref_tag = { fg = "syntax.constant", bold = true },
   ref_head = { fg = "syntax.keyword", bold = true },
-  diff_add = { fg = "diagnostic.info_fg", bg = "editor.diff_add_bg", extend = true },
-  diff_remove = { fg = "diagnostic.error_fg", bg = "editor.diff_remove_bg", extend = true },
+  diff_add = { fg = "diagnostic.info_fg" },
+  diff_remove = { fg = "diagnostic.error_fg" },
   diff_hunk = { fg = "syntax.type", bold = true },
   selection = { bg = "editor.selection_bg" },
 }

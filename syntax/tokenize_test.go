@@ -72,16 +72,18 @@ func TestClassifyTokenTypes(t *testing.T) {
 
 func TestKindThemeKeys(t *testing.T) {
 	tests := map[Kind]string{
-		KindPlain:    "",
-		KindKeyword:  "keyword",
-		KindString:   "string",
-		KindComment:  "comment",
-		KindFunction: "function",
-		KindType:     "type",
-		KindVariable: "variable",
-		KindConstant: "constant",
-		KindOperator: "operator",
-		KindNumber:   "constant",
+		KindPlain:      "",
+		KindKeyword:    "keyword",
+		KindString:     "string",
+		KindComment:    "comment",
+		KindFunction:   "function",
+		KindType:       "type",
+		KindVariable:   "variable",
+		KindConstant:   "constant",
+		KindOperator:   "operator",
+		KindNumber:     "constant",
+		KindDiffAdd:    "",
+		KindDiffRemove: "",
 
 		KindAttribute: "constant",
 		KindBuiltin:   "variable_builtin",
@@ -198,6 +200,106 @@ func TestTokenizeNilLexerIsPlain(t *testing.T) {
 	for _, s := range spans[0] {
 		if s.Kind != KindPlain {
 			t.Fatalf("fallback lexer produced %v", s.Kind)
+		}
+	}
+}
+
+func TestTokenizeDiffMarksEveryChangedLine(t *testing.T) {
+	t.Parallel()
+	text := []string{
+		"diff --git a/a.go b/a.go",
+		"index 111..222 100644",
+		"--- a/a.go",
+		"+++ b/a.go",
+		"@@ -1,4 +1,4 @@",
+		" package a",
+		"-old",
+		"+new",
+		"+extra",
+		"+++ not a file header",
+		"--- not a file header",
+		"---not a file header",
+		"diff --git a/b.go b/b.go",
+		"--- a/b.go",
+		"+++ b/b.go",
+		"@@ -1 +1 @@",
+		"-old b",
+		"+new b",
+	}
+	spans, err := Tokenize(lexers.Get("diff"), text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconstruct(t, text, spans)
+	want := []Kind{
+		KindKeyword, KindKeyword, KindPlain, KindPlain, KindKeyword,
+		KindPlain, KindDiffRemove, KindDiffAdd, KindDiffAdd, KindDiffAdd,
+		KindDiffRemove, KindDiffRemove, KindKeyword, KindPlain, KindPlain,
+		KindKeyword, KindDiffRemove, KindDiffAdd,
+	}
+	for i, k := range want {
+		if got := kindsOf(spans[i]); len(got) != 1 || got[0] != k {
+			t.Errorf("line %d kinds = %v, want [%v]", i, got, k)
+		}
+	}
+}
+
+func TestDiffWindowInsideAHunkKeepsChangedLines(t *testing.T) {
+	t.Parallel()
+	text := []string{
+		" context",
+		"-old",
+		"+new",
+		"diff --git a/b.go b/b.go",
+		"--- a/b.go",
+		"+++ b/b.go",
+		"@@ -1 +1 @@",
+		"-old b",
+		"+new b",
+	}
+	spans, err := tokenize(lexers.Get("diff"), text, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconstruct(t, text, spans)
+	want := []Kind{
+		KindPlain, KindDiffRemove, KindDiffAdd, KindKeyword, KindPlain,
+		KindPlain, KindKeyword, KindDiffRemove, KindDiffAdd,
+	}
+	for i, k := range want {
+		if got := kindsOf(spans[i]); len(got) != 1 || got[0] != k {
+			t.Errorf("line %d kinds = %v, want [%v]", i, got, k)
+		}
+	}
+}
+
+func TestTokenizeTruncatedHunkStopsAtTheNextFile(t *testing.T) {
+	t.Parallel()
+	text := []string{
+		"@@ -1,3 +1,3 @@",
+		"-old",
+		"+new",
+		"",
+		"+still a hunk line",
+		"diff --git a/b.go b/b.go",
+		"--- a/b.go",
+		"+++ b/b.go",
+		"@@ -1 +1 @@",
+		"-old b",
+		"+new b",
+	}
+	spans, err := Tokenize(lexers.Get("diff"), text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconstruct(t, text, spans)
+	want := [][]Kind{
+		{KindKeyword}, {KindDiffRemove}, {KindDiffAdd}, nil, {KindDiffAdd},
+		{KindKeyword}, {KindPlain}, {KindPlain}, {KindKeyword}, {KindDiffRemove}, {KindDiffAdd},
+	}
+	for i, wantKinds := range want {
+		if got := kindsOf(spans[i]); !slices.Equal(got, wantKinds) {
+			t.Errorf("line %d kinds = %v, want %v", i, got, wantKinds)
 		}
 	}
 }

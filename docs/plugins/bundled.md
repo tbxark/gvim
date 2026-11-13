@@ -189,8 +189,8 @@ action toggles it. The detail scroll position is remembered per commit via
 porting.md): the group is a layout of splits of the current tab and the panel buffers are also visible
 as tabs; the layout supports fixed-height leaves (`{type="fixed",height=1}`), so Fresh's one-row
 toolbar renders as one row (the split border can leave it a row off); the log is a styled buffer
-whose cursor is the selection (a line decoration tints it), not a described List widget; the detail is raw git-show text carrying plugin decorations,
-not a host `.diff` background layer; there is no HEAD watcher (r refreshes, as Fresh's view).
+whose cursor is the selection (a line decoration tints it), not a described List widget; the detail is raw git-show text carrying plugin decorations, and
+the host's diff syntax paints added and removed rows in the theme's `editor.diff_*_bg` colours; there is no HEAD watcher (r refreshes, as Fresh's view).
 Enter on a detail row opens the commit's historical blob (`git show <sha>:<file>`) as a read-only
 virtual buffer, as Fresh does, so the detail rows are not line targets: a target opens the
 working-tree file at a line, which is wrong for any commit that is not HEAD and cannot point at a

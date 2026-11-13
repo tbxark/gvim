@@ -66,6 +66,7 @@ func TestStdinLanguage(t *testing.T) {
 		{"name wins", Options{StdinName: "notes.md", Stdin: []byte("x")}, "markdown"},
 		{"go by name", Options{StdinName: "main.go"}, "go"},
 		{"shebang sniff", Options{Stdin: []byte("#!/bin/bash\necho hi\n")}, "bash"},
+		{"git diff sniff", Options{Stdin: []byte("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n")}, "diff"},
 		{"plain words", Options{Stdin: []byte("just some words in a row\n")}, ""},
 		{"empty", Options{}, ""},
 	}

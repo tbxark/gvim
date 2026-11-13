@@ -1,10 +1,12 @@
 package editorpane
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
@@ -41,6 +43,32 @@ func TestSelectionHTMLColoursTheSelectedSyntax(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "<pre style=\"background-color:"+cssColor(st.Text.BG, "")) {
 		t.Errorf("html does not start with the editor background: %s", got)
+	}
+}
+
+func TestSelectionHTMLPaintsDiffRows(t *testing.T) {
+	st := htmlStyles(t)
+	st.DiffAdd = grid.Style{BG: color.RGBA{G: 255, A: 255}}
+	st.DiffRemove = grid.Style{BG: color.RGBA{R: 255, A: 255}}
+	doc := &fakeDoc{
+		lines:    []string{"+added", "-removed"},
+		selected: true,
+		anchor:   buffer.Pos{},
+		head:     buffer.Pos{Line: 1, Col: 8},
+		spans: map[int][]syntax.Span{
+			0: {{Start: 0, End: 6, Kind: syntax.KindDiffAdd}},
+			1: {{Start: 0, End: 8, Kind: syntax.KindDiffRemove}},
+		},
+	}
+	got, ok := SelectionHTML(doc, st, "+added\n-removed")
+	if !ok {
+		t.Fatal("no html")
+	}
+	if !strings.Contains(got, "background-color:#00ff00") {
+		t.Errorf("html has no added-row background: %s", got)
+	}
+	if !strings.Contains(got, "background-color:#ff0000") {
+		t.Errorf("html has no removed-row background: %s", got)
 	}
 }
 

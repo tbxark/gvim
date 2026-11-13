@@ -38,6 +38,9 @@ type Styles struct {
 	DiagError, DiagWarning, DiagInfo, DiagHint grid.Style
 	// Decor are the foregrounds of guides, bracket highlights and the fold placeholder.
 	Decor DecorStyles
+	// DiffAdd and DiffRemove are the backgrounds of added and removed lines of a
+	// unified diff. Only BG is used.
+	DiffAdd, DiffRemove grid.Style
 }
 
 // NewStyles returns the pane styles for th. The text and gutter roles come from
@@ -70,11 +73,13 @@ func NewStyles(th theme.Theme) Styles {
 		DiagInfo:       tagged(chrome.DiagInfo, "diagnostic", "info_fg", "", ""),
 		DiagHint:       tagged(chrome.DiagHint, "diagnostic", "hint_fg", "", ""),
 		Decor:          newDecorStyles(chrome.Decor, text, tagged(chrome.Gutter, "editor", "line_number_fg", "editor", "line_number_bg")),
+		DiffAdd:        style.TaggedStyle(grid.Style{BG: style.Color(th, "editor", "diff_add_bg")}, "", "", "editor", "diff_add_bg"),
+		DiffRemove:     style.TaggedStyle(grid.Style{BG: style.Color(th, "editor", "diff_remove_bg")}, "", "", "editor", "diff_remove_bg"),
 	}
 	for k := range st.Syntax {
 		kind := syntax.Kind(k)
 		st.Syntax[k] = text
-		if kind == syntax.KindPlain {
+		if kind == syntax.KindPlain || kind == syntax.KindDiffAdd || kind == syntax.KindDiffRemove {
 			continue
 		}
 		st.Syntax[k].FG = syntaxFG(th, kind, text.FG)

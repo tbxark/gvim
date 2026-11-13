@@ -105,6 +105,10 @@ func Classify(t chroma.TokenType) Kind {
 		switch t {
 		case chroma.GenericHeading, chroma.GenericSubheading:
 			return KindKeyword
+		case chroma.GenericInserted:
+			return KindDiffAdd
+		case chroma.GenericDeleted:
+			return KindDiffRemove
 		}
 		return KindPlain
 	}
@@ -130,6 +134,9 @@ func Detect(filename string, content []byte) chroma.Lexer {
 			return l
 		}
 	}
+	if looksLikeUnifiedDiff(content) {
+		return lexers.Get("diff")
+	}
 	if l := shebangLexer(content); l != nil {
 		return l
 	}
@@ -143,6 +150,21 @@ func Detect(filename string, content []byte) chroma.Lexer {
 		}
 	}
 	return lexers.Fallback
+}
+
+// looksLikeUnifiedDiff reports whether content looks like a unified diff,
+// before the content analyser is tried. Chroma's analyser can mistake a diff
+// whose added or removed text is Go, C, or another language for that language,
+// and then loses the diff's per-line roles.
+func looksLikeUnifiedDiff(content []byte) bool {
+	first, rest, _ := bytes.Cut(content, []byte("\n"))
+	first = bytes.TrimSuffix(first, []byte("\r"))
+	if !bytes.HasPrefix(first, []byte("diff --git ")) &&
+		!bytes.HasPrefix(first, []byte("--- ")) {
+		return false
+	}
+	return bytes.Contains(rest, []byte("\n@@ ")) ||
+		bytes.HasPrefix(rest, []byte("@@ "))
 }
 
 // shebangLexer returns the lexer for the interpreter on a "#!" first line, or

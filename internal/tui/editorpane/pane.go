@@ -842,8 +842,13 @@ func (f frame) paintLineRow(g *grid.Grid, rows []rowInfo, i int, rd rowDesc, y i
 	if rd.last {
 		end = f.paintFoldPlaceholder(g, i, y, end, cur)
 	}
-	if cur && f.styles.CurrentLine.BG != nil {
-		g.Fill(end, f.textRight(), y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
+	switch {
+	case ln.diffAdd && f.styles.DiffAdd.BG != nil:
+		g.Fill(end, f.textRight(), y, f.styles.DiffAdd)
+	case ln.diffRemove && f.styles.DiffRemove.BG != nil:
+		g.Fill(end, f.textRight(), y, f.styles.DiffRemove)
+	case cur && f.styles.CurrentLine.BG != nil:
+		g.Fill(end, f.textRight(), y, f.styles.CurrentLine)
 	}
 	f.paintRowTail(g, ln, y, end, cur)
 	f.paintBlockVirtual(g, i, y, end, widthAll)
@@ -898,6 +903,16 @@ func (f frame) style(c cell, cur bool) grid.Style {
 	if int(c.kind) < len(f.styles.Syntax) {
 		st = f.styles.Syntax[c.kind]
 	}
+	diffBG := false
+	if c.kind == syntax.KindDiffAdd && f.styles.DiffAdd.BG != nil {
+		st.BG = f.styles.DiffAdd.BG
+		st.BGKey = f.styles.DiffAdd.BGKey
+		diffBG = true
+	} else if c.kind == syntax.KindDiffRemove && f.styles.DiffRemove.BG != nil {
+		st.BG = f.styles.DiffRemove.BG
+		st.BGKey = f.styles.DiffRemove.BGKey
+		diffBG = true
+	}
 	switch {
 	case c.match == matchCurrent:
 		st = f.styles.CurrentMatch
@@ -910,7 +925,7 @@ func (f frame) style(c cell, cur bool) grid.Style {
 		if fg := repairedFG(st.FG, st.BG); fg != nil {
 			st.FG = fg
 		}
-	case cur && f.styles.CurrentLine.BG != nil:
+	case cur && f.styles.CurrentLine.BG != nil && !diffBG:
 		st = withBackground(st, f.styles.CurrentLine)
 	}
 	if c.ws {

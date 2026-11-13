@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
@@ -26,6 +27,16 @@ func TestNewStylesKeepsTheTextBackgroundOnEverySyntaxKind(t *testing.T) {
 	}
 	if st.Selection.BG != (color.RGBA{R: 23, G: 51, B: 90, A: 255}) {
 		t.Errorf("selection bg = %v", st.Selection.BG)
+	}
+	if st.DiffAdd.BG != (color.RGBA{R: 22, G: 47, B: 33, A: 255}) {
+		t.Errorf("diff add bg = %v, want the dark theme's diff_add_bg", st.DiffAdd.BG)
+	}
+	if st.DiffRemove.BG != (color.RGBA{R: 57, G: 36, B: 39, A: 255}) {
+		t.Errorf("diff remove bg = %v, want the dark theme's diff_remove_bg", st.DiffRemove.BG)
+	}
+	if st.DiffAdd.BGKey != style.KeyIDFor("editor", "diff_add_bg") ||
+		st.DiffRemove.BGKey != style.KeyIDFor("editor", "diff_remove_bg") {
+		t.Errorf("diff background keys = %d/%d", st.DiffAdd.BGKey, st.DiffRemove.BGKey)
 	}
 }
 
@@ -159,6 +170,8 @@ func TestSyntaxStylesCarryAttributesAndFallbacks(t *testing.T) {
 		{syntax.KindStrongEmphasis, [4]bool{true, true, false, false}},
 		{syntax.KindLink, [4]bool{false, false, true, false}},
 		{syntax.KindStrike, [4]bool{false, false, false, true}},
+		{syntax.KindDiffAdd, [4]bool{}},
+		{syntax.KindDiffRemove, [4]bool{}},
 		{syntax.KindKeyword, [4]bool{}},
 		{syntax.KindPlain, [4]bool{}},
 	}
