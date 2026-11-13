@@ -62,7 +62,7 @@ type Config struct {
 	MaxSessions, MaxPanes, MaxSockets, MaxSocketDirs int
 }
 
-// Session is one discovered sessions. SocketOnly rows come from a socket whose
+// Session is one discovered session. SocketOnly rows come from a socket whose
 // server was not queried (commands off) or is gone: the session list is unknown.
 type Session struct {
 	Socket  string // the server socket path

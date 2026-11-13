@@ -19,7 +19,7 @@ import (
 	"github.com/tbxark/gvim/trust"
 )
 
-// Processes of the plugin OS (AMENDMENTS C16). Every child runs in its own process group so a
+// Processes of the plugin OS. Every child runs in its own process group so a
 // signal reaches the whole tree it started. Run waits for the child and returns its
 // captured output; Start returns a Proc that streams output in batches of at most 64 KiB or
 // 20 ms, takes stdin through a bounded queue that never blocks the caller, and ends with an
@@ -45,7 +45,8 @@ type osProc struct {
 	exited   atomic.Bool
 	timedOut atomic.Bool
 	termOnce sync.Once
-	quit     chan struct{} // closed by Terminate: output is discarded from then on
+	quitOnce sync.Once
+	quit     chan struct{} // closed by Terminate and Shutdown: output is discarded from then on
 	done     chan struct{} // closed when the child is reaped and its output was read
 	res      hostos.ProcResult
 
@@ -339,6 +340,13 @@ func (o *pluginOS) Start(ctx context.Context, argv []string, opts hostos.ProcOpt
 	}
 	if err != nil {
 		closeAll()
+		if stdinPipe != nil {
+			// A launch that failed before cmd.Start (Shutdown ran) never closed the pipe.
+			_ = stdinPipe.Close()
+			if f, ok := cmd.Stdin.(*os.File); ok {
+				_ = f.Close()
+			}
+		}
 		return nil, err
 	}
 	p.out = make(chan osChunk, 16)
@@ -534,10 +542,14 @@ func (p *osProc) killGroupAfterGrace() {
 	_ = signalProc(p.cmd.Process, "KILL")
 }
 
+// discardOutput makes the readers drop their output from now on, so none of them stays
+// blocked on a channel nobody reads.
+func (p *osProc) discardOutput() { p.quitOnce.Do(func() { close(p.quit) }) }
+
 // Terminate implements hostos.Proc.
 func (p *osProc) Terminate(grace time.Duration) {
 	p.termOnce.Do(func() {
-		close(p.quit)
+		p.discardOutput()
 		p.killGroup("TERM")
 		time.AfterFunc(grace, p.killGroupAfterGrace)
 	})

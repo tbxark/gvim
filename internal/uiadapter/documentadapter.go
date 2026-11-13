@@ -84,6 +84,10 @@ func (d documentAdapter) MemoChanges(compute func() (bar, scroll map[int]bool)) 
 	return d.doc.MemoChanges(compute)
 }
 
+// ReadOnly reports whether the document refuses edits, for the [RO] mark of the
+// status row.
+func (d documentAdapter) ReadOnly() bool { return d.doc.ReadOnly() }
+
 // HasPath reports whether the document has a file on disk. Save and revert need
 // it, and an unnamed buffer has none.
 func (d documentAdapter) HasPath() bool {

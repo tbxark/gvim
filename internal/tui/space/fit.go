@@ -140,21 +140,28 @@ func Wrap(s string, w, maxRows int) []string {
 // the right of the caret and gives the rest to the text before it, so the end of
 // what was just typed is always visible and the caret never leaves the room.
 func Window(value string, pos, room int) (shown string, caret int) {
+	start, end := WindowRange(value, pos, room)
+	runes := []rune(value)
+	pos = min(max(pos, start), end)
+	return string(runes[start:end]), ansi.StringWidth(string(runes[start:pos]))
+}
+
+// WindowRange is Window as the rune range [start, end) of value that it shows, for a
+// caller that paints the runes one by one (a selection style) and needs their indices.
+// The range is empty when room is not positive.
+func WindowRange(value string, pos, room int) (start, end int) {
 	runes := []rune(value)
 	pos = min(max(pos, 0), len(runes))
 	if room <= 0 {
-		return "", 0
+		return 0, 0
 	}
 	cellOf := func(r rune) int { return ansi.StringWidth(string(r)) }
-	total, before := 0, 0
-	for i, r := range runes {
-		if i < pos {
-			before += cellOf(r)
-		}
+	total := 0
+	for _, r := range runes {
 		total += cellOf(r)
 	}
 	if total+1 <= room {
-		return value, before
+		return 0, len(runes)
 	}
 	// right is the cells kept after the caret, left the cells before it.
 	right, end := 0, pos
@@ -167,5 +174,32 @@ func Window(value string, pos, room int) (shown string, caret int) {
 		left += cellOf(runes[start-1])
 		start--
 	}
-	return string(runes[start:end]), left
+	return start, end
+}
+
+// IsBidi reports whether r is a bidirectional control or mark: the embeddings and
+// overrides U+202A to U+202E, the isolates U+2066 to U+2069, the left-to-right and
+// right-to-left marks U+200E and U+200F, and the Arabic letter mark U+061C. They are
+// zero-width, so painted they reorder the text around them (a spoofed file name).
+func IsBidi(r rune) bool {
+	switch {
+	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		return true
+	}
+	return r == 0x200E || r == 0x200F || r == 0x061C
+}
+
+// StripBidi removes the bidirectional controls (see IsBidi) from s and keeps every other
+// rune, including the zero-width joiner that emoji sequences need. It returns s itself
+// when there is nothing to remove.
+func StripBidi(s string) string {
+	if !strings.ContainsFunc(s, IsBidi) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if IsBidi(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
@@ -25,16 +26,16 @@ func TestPlaceBox(t *testing.T) {
 		anchor Point
 		w, h   int
 		fw, fh int
-		want   rect
+		want   space.Rect
 	}{
-		{"below the anchor", Point{4, 2}, 10, 3, 80, 24, rect{4, 3, 10, 3}},
-		{"flips above when there is no room below", Point{4, 22}, 10, 3, 80, 24, rect{4, 19, 10, 3}},
-		{"clamps right edge into the frame", Point{75, 5}, 10, 3, 80, 24, rect{69, 6, 10, 3}},
-		{"clamps left edge", Point{-3, 5}, 10, 3, 80, 24, rect{1, 6, 10, 3}},
-		{"a narrow frame keeps no margin", Point{-3, 5}, 10, 3, 30, 24, rect{0, 6, 10, 3}},
-		{"a wide frame keeps two cells of margin", Point{-3, 5}, 10, 3, 140, 24, rect{2, 6, 10, 3}},
-		{"stays off the last row", Point{4, 20}, 10, 3, 80, 24, rect{4, 17, 10, 3}},
-		{"a box too tall for the frame stays below the menu bar", Point{1, 1}, 10, 30, 80, 24, rect{1, 1, 10, 30}},
+		{"below the anchor", Point{4, 2}, 10, 3, 80, 24, space.Rect{X: 4, Y: 3, W: 10, H: 3}},
+		{"flips above when there is no room below", Point{4, 22}, 10, 3, 80, 24, space.Rect{X: 4, Y: 19, W: 10, H: 3}},
+		{"clamps right edge into the frame", Point{75, 5}, 10, 3, 80, 24, space.Rect{X: 69, Y: 6, W: 10, H: 3}},
+		{"clamps left edge", Point{-3, 5}, 10, 3, 80, 24, space.Rect{X: 1, Y: 6, W: 10, H: 3}},
+		{"a narrow frame keeps no margin", Point{-3, 5}, 10, 3, 30, 24, space.Rect{X: 0, Y: 6, W: 10, H: 3}},
+		{"a wide frame keeps two cells of margin", Point{-3, 5}, 10, 3, 140, 24, space.Rect{X: 2, Y: 6, W: 10, H: 3}},
+		{"stays off the last row", Point{4, 20}, 10, 3, 80, 24, space.Rect{X: 4, Y: 17, W: 10, H: 3}},
+		{"a box too tall for the frame stays below the menu bar", Point{1, 1}, 10, 30, 80, 24, space.Rect{X: 1, Y: 1, W: 10, H: 30}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -213,13 +214,13 @@ second note line`, items(12))
 	if p.top == 0 || len(p.noteLines) != 2 {
 		t.Fatalf("test needs a scrolled popup with two note lines: top=%d notes=%d", p.top, len(p.noteLines))
 	}
-	x := p.box.x + 2
-	for y := p.box.y + 1; y <= p.box.y+len(p.noteLines); y++ {
+	x := p.box.X + 2
+	for y := p.box.Y + 1; y <= p.box.Y+len(p.noteLines); y++ {
 		if cmd := p.update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}); cmd != nil || !p.Active() {
 			t.Fatalf("click on note row %d chose an item or closed popup", y)
 		}
 	}
-	y := p.box.y + len(p.noteLines) + p.rows
+	y := p.box.Y + len(p.noteLines) + p.rows
 	want := p.top + p.rows - 1
 	cmd := p.update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	if cmd == nil {
@@ -266,8 +267,23 @@ func TestDrawScrollsToKeepHighlightVisible(t *testing.T) {
 		t.Fatalf("after moving to row 5 the highlight is not drawn:\n%s", strings.Join(rows, "\n"))
 	}
 	for k := range p.rows {
-		if got, ok := p.rowAt(p.box.x+3, p.box.y+1+k); !ok || got != p.top+k {
+		if got, ok := p.rowAt(p.box.X+3, p.box.Y+1+k); !ok || got != p.top+k {
 			t.Fatalf("window row %d is not the click target of the row painted there", p.top+k)
 		}
+	}
+}
+
+// boxWidth is the width of a popup box with title and items in a frame fw cells wide.
+func boxWidth(title string, items []Item, fw int) int {
+	return boxWidthNote(title, "", items, fw)
+}
+
+func TestShowDropsTheNoteOfAnEarlierShowNote(t *testing.T) {
+	p := New(style.Overlay{})
+	p.ShowNote(Point{1, 0}, "Actions", "a note", items(3))
+	p.Show(Point{1, 0}, "Plain", items(3))
+	p.Draw(grid.New(60, 12))
+	if len(p.noteLines) != 0 || p.note != "" {
+		t.Fatalf("Show kept the note of the earlier ShowNote: note=%q lines=%v", p.note, p.noteLines)
 	}
 }

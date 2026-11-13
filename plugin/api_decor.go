@@ -12,7 +12,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.decor and the Namespace handle (FINAL 5.7, AMENDMENTS C4, C13, C23).
+// gvim.decor and the Namespace handle.
 //
 //	local ns = gvim.decor.namespace("blame")
 //	ns:set(buf, items, {version = tok}) -> true | nil, err
@@ -87,7 +87,10 @@ func activationFromLua(v lua.LValue) (pluginapi.Activation, error) {
 
 // scopeFromLua reads an optional scope {start_line=, end_line=}.
 func scopeFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
-	v := t.RawGetString("scope")
+	v := lua.LValue(lua.LNil)
+	if t != nil {
+		v = t.RawGetString("scope")
+	}
 	if v == lua.LNil {
 		d.ScopeStart, d.ScopeEnd = 0, -1
 		return nil
@@ -107,7 +110,10 @@ func scopeFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
 
 // prefixFromLua reads an optional soft-break prefix {text=, style=}.
 func prefixFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
-	v := t.RawGetString("prefix")
+	v := lua.LValue(lua.LNil)
+	if t != nil {
+		v = t.RawGetString("prefix")
+	}
 	if v == lua.LNil {
 		return nil
 	}
@@ -220,7 +226,7 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 	}
 	kind, ok := decorKinds[string(name)]
 	if !ok {
-		return d, fmt.Errorf("unknown kind %q (highlight, line, eol, gutter, scroll, replace)", string(name))
+		return d, fmt.Errorf("unknown kind %q", string(name))
 	}
 	d.Kind = kind
 	o := bufTableOpts{t: t}
@@ -295,7 +301,9 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 				}
 			}
 			d.ComposeOnly = o.boolean("compose_only", false)
-			d.Activation, _ = activationFromLua(t.RawGetString("activation"))
+			if d.Activation, err = activationFromLua(t.RawGetString("activation")); err != nil {
+				return d, err
+			}
 			if err = scopeFromLua(t, &d); err != nil {
 				return d, err
 			}
@@ -372,7 +380,7 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 	return d, err
 }
 
-// installDecor installs decorations: gvim.decor and the Namespace handle (stage S15).
+// installDecor installs decorations: gvim.decor and the Namespace handle.
 func installDecor(e *apiEnv) {
 	p := e.p
 	e.provides("decor")
@@ -404,7 +412,7 @@ func installDecor(e *apiEnv) {
 	methods := e.kind(kindNamespace).methods
 	self := func(L *lua.LState) *namespace { return checkObject(L, 1, kindNamespace).(*namespace) }
 	// version reads opts.version (argument n): absent means no check. A malformed token is
-	// returned as an error (AMENDMENTS C4), like b:edit does.
+	// returned as an error, like b:edit does.
 	version := func(L *lua.LState, n int) (*pluginapi.Version, error) {
 		o := bufTableOpts{t: bufOptTable(L, n)}
 		return bufParseVersion(o.get("version"))
@@ -542,8 +550,12 @@ func installDecor(e *apiEnv) {
 		if c.Set {
 			d.GutterStyle.FG = c
 		}
-		d.Activation, _ = activationFromLua(o.get("activation"))
-		_ = scopeFromLua(o.t, &d)
+		if d.Activation, err = activationFromLua(o.get("activation")); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
+		if err = scopeFromLua(o.t, &d); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
 		if o.err != "" {
 			return bufRet(L, invalidErr("%s", o.err))
 		}
@@ -569,9 +581,16 @@ func installDecor(e *apiEnv) {
 		if tv := L.Get(4); tv != lua.LNil {
 			d.Text = clipText(L.CheckString(4), decorMaxVirtualText)
 		}
-		d.Style, _ = styleFromLua(o.get("style"))
-		d.Activation, _ = activationFromLua(o.get("activation"))
-		_ = scopeFromLua(o.t, &d)
+		var err error
+		if d.Style, err = styleFromLua(o.get("style")); err != nil {
+			return bufRet(L, invalidErr("style: %v", err))
+		}
+		if d.Activation, err = activationFromLua(o.get("activation")); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
+		if err = scopeFromLua(o.t, &d); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
 		if o.err != "" {
 			return bufRet(L, invalidErr("%s", o.err))
 		}
@@ -580,11 +599,20 @@ func installDecor(e *apiEnv) {
 	e.set(area, "add_soft_break", func(L *lua.LState) int {
 		o := optsOf(L, 3)
 		d := pluginapi.Decoration{Kind: pluginapi.DecorSoftBreak, ComposeOnly: o.boolean("compose_only", false)}
-		d.Pos, _ = posFromLua(L.Get(2))
+		var err error
+		if d.Pos, err = posFromLua(L.Get(2)); err != nil {
+			return bufRet(L, invalidErr("soft break position: %s", err))
+		}
 		d.Indent = o.integer("indent", 0)
-		_ = prefixFromLua(o.t, &d)
-		d.Activation, _ = activationFromLua(o.get("activation"))
-		_ = scopeFromLua(o.t, &d)
+		if err = prefixFromLua(o.t, &d); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
+		if d.Activation, err = activationFromLua(o.get("activation")); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
+		if err = scopeFromLua(o.t, &d); err != nil {
+			return bufRet(L, invalidErr("%v", err))
+		}
 		if o.err != "" {
 			return bufRet(L, invalidErr("%s", o.err))
 		}
@@ -593,7 +621,10 @@ func installDecor(e *apiEnv) {
 	e.set(area, "set_cursor_line_overlay", func(L *lua.LState) int {
 		o := optsOf(L, 3)
 		d := pluginapi.Decoration{Kind: pluginapi.DecorCursorLine}
-		d.Style, _ = styleFromLua(L.Get(2))
+		var err error
+		if d.Style, err = styleFromLua(L.Get(2)); err != nil {
+			return bufRet(L, invalidErr("style: %v", err))
+		}
 		if o.err != "" {
 			return bufRet(L, invalidErr("%s", o.err))
 		}
@@ -602,9 +633,12 @@ func installDecor(e *apiEnv) {
 	e.set(area, "set_scrollbar_markers_in_range", func(L *lua.LState) int {
 		o := optsOf(L, 4)
 		d := pluginapi.Decoration{Kind: pluginapi.DecorScroll}
-		d.Range, _ = rangeFromLua(L.Get(2))
-		if c, err := colorFromLua(L.Get(3)); err == nil {
-			d.Color = c
+		var err error
+		if d.Range, err = rangeFromLua(L.Get(2)); err != nil {
+			return bufRet(L, invalidErr("range: %s", err))
+		}
+		if d.Color, err = colorFromLua(L.Get(3)); err != nil {
+			return bufRet(L, invalidErr("color: %v", err))
 		}
 		if o.err != "" {
 			return bufRet(L, invalidErr("%s", o.err))
@@ -654,7 +688,7 @@ func installDecor(e *apiEnv) {
 			Range:       pluginapi.Range{From: pluginapi.Pos{Line: start}, To: pluginapi.Pos{Line: end}},
 			Collapsed:   o.boolean("collapsed", false),
 			Placeholder: clipText(optString(&o, "placeholder"), decorMaxVirtualText),
-			Kind:        clipText(optString(&o, "fold_kind"), 64),
+			Kind:        clipText(optString(&o, "kind"), 64),
 		}
 		expect, verr := bufParseVersion(o.get("version"))
 		if verr != nil {
@@ -669,7 +703,10 @@ func installDecor(e *apiEnv) {
 		o := optsOf(L, 3)
 		buf := pluginapi.BufferID(checkID(L, 1, kindBuffer))
 		list := L.CheckTable(2)
-		n := min(list.Len(), maxPluginRangeCount)
+		n := list.Len()
+		if n > maxPluginRangeCount {
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "too many folding ranges (max %d)", maxPluginRangeCount))
+		}
 		ranges := make([]pluginapi.FoldRange, 0, n)
 		for i := 1; i <= n; i++ {
 			row, ok := list.RawGetInt(i).(*lua.LTable)
@@ -685,6 +722,9 @@ func installDecor(e *apiEnv) {
 				Collapsed:   ro.boolean("collapsed", false),
 				Placeholder: clipText(optString(&ro, "placeholder"), decorMaxVirtualText),
 				Kind:        clipText(optString(&ro, "kind"), 64),
+			}
+			if ro.err != "" {
+				return bufRet(L, invalidErr("range %d: %s", i, ro.err))
 			}
 			ranges = append(ranges, fr)
 		}

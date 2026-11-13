@@ -14,9 +14,12 @@
 --
 -- gvim additions (Fresh's plugin has only Go to LSP Symbol; the definition/implementation/
 -- type-definition jumping is a core action there, and gvim keeps its native Go to Definition
--- rows): three list commands for the symbol under the cursor that use the same Finder
--- location list as find_references - LSP: Show Definitions / Show Implementations / Show Type
--- Definitions. One result jumps directly, several open the list with preview tabs.
+-- rows): list commands that use the same Finder location list as find_references - LSP: Show
+-- Definitions / Show Implementations / Show Type Definitions for the symbol under the cursor,
+-- LSP: Workspace Symbols, LSP: Incoming Calls / Outgoing Calls (call sites), LSP: Document
+-- Outline (the same list as Go to LSP Symbol), and LSP: Show Breadcrumbs / Breadcrumbs
+-- Outline (the symbols enclosing the caret). One result jumps directly, several open the
+-- list with preview tabs.
 --
 -- Fresh preselects the smallest symbol enclosing the cursor and previews it. gvim's picker has
 -- no initial-selected-index option, so the port approximates this user-visible behavior by
@@ -32,7 +35,6 @@ local t = gvim.i18n.t
 local NS = gvim.decor.namespace("lsp_symbol_nav")
 local MATCH_STYLE = { fg = "search.match_fg", bg = "search.match_bg", bold = true }
 local MAX_SYMBOLS = 2000
-local MAX_SCORE_ITEMS = 2000
 
 -- Fresh's getKindLabel: the LSP symbol kind number as a short word.
 local KIND_LABELS = {
@@ -56,6 +58,21 @@ local function buffer_state()
   end
   local path = buf:path()
   if not path or path == "" then
+    return nil
+  end
+  return buf, path
+end
+
+-- ready_buffer returns the current file buffer and its path when it can ask a language
+-- server; otherwise it tells the user why and returns nil.
+local function ready_buffer()
+  local buf, path = buffer_state()
+  if not buf then
+    gvim.notify(t("status.no_file"))
+    return nil
+  end
+  if not buf:language() then
+    gvim.notify(t("status.no_language"))
     return nil
   end
   return buf, path
@@ -154,7 +171,6 @@ local function parse_symbols(result, buf)
   for _, symbol in ipairs(symbols) do
     attach_symbol_line(buf, symbol)
   end
-  symbols = symbols
   return symbols
 end
 
@@ -279,30 +295,33 @@ local function open_symbol_finder(buf, symbols)
   return pick, err
 end
 
-local function goto_lsp_symbol()
-  local buf, path = buffer_state()
+-- document_symbols asks the server for the symbols of the current buffer. It tells the user
+-- and returns nil when the buffer cannot be asked, the request failed or there are none.
+local function document_symbols()
+  local buf, path = ready_buffer()
   if not buf then
-    gvim.notify(t("status.no_file"))
-    return
-  end
-  local language = buf:language()
-  if not language then
-    gvim.notify(t("status.no_language"))
-    return
+    return nil
   end
   local result, err = gvim.lsp.request("textDocument/documentSymbol", {
     textDocument = { uri = gvim.path.to_uri(path) },
   }, { buf = buf })
   if result == nil and err then
     gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
-    return
+    return nil
   end
   local symbols = parse_symbols(result, buf)
   if #symbols == 0 then
     gvim.notify(t("status.no_symbols"))
-    return
+    return nil
   end
-  open_symbol_finder(buf, symbols)
+  return buf, path, symbols
+end
+
+local function goto_lsp_symbol()
+  local buf, _, symbols = document_symbols()
+  if buf then
+    open_symbol_finder(buf, symbols)
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -326,13 +345,8 @@ end
 
 local function show_locations(kind)
   local spec = LOCATION_KINDS[kind]
-  local buf, path = buffer_state()
+  local buf, path = ready_buffer()
   if not buf then
-    gvim.notify(t("status.no_file"))
-    return
-  end
-  if not buf:language() then
-    gvim.notify(t("status.no_language"))
     return
   end
   local pos = buf:cursor()
@@ -435,13 +449,8 @@ local function parse_workspace_symbols(result)
 end
 
 local function show_workspace_symbols()
-  local buf, path = buffer_state()
+  local buf = ready_buffer()
   if not buf then
-    gvim.notify(t("status.no_file"))
-    return
-  end
-  if not buf:language() then
-    gvim.notify(t("status.no_language"))
     return
   end
   local result, err = gvim.lsp.request("workspace/symbol", {
@@ -469,13 +478,8 @@ end
 -- Call Hierarchy (Incoming / Outgoing calls)
 -- ---------------------------------------------------------------------------
 local function show_call_hierarchy(direction)
-  local buf, path = buffer_state()
+  local buf, path = ready_buffer()
   if not buf then
-    gvim.notify(t("status.no_file"))
-    return
-  end
-  if not buf:language() then
-    gvim.notify(t("status.no_language"))
     return
   end
   local pos = buf:cursor()
@@ -513,9 +517,11 @@ local function show_call_hierarchy(direction)
     for _, c in ipairs(calls_result) do
       if #items >= MAX_SYMBOLS then break end
       local target = direction == "incoming" and c.from or c.to
-      local uri = target and target.uri
+      -- fromRanges are call sites inside the caller: the other end of an incoming call, but
+      -- the file of the prepared item for an outgoing one (target is the callee there).
+      local uri = direction == "incoming" and target and target.uri or root_item.uri
       local ranges = c.fromRanges
-      if type(uri) == "string" and type(ranges) == "table" and #ranges > 0 then
+      if type(target) == "table" and type(uri) == "string" and type(ranges) == "table" and #ranges > 0 then
         local target_path = gvim.path.from_uri(uri)
         if target_path and target_path ~= "" then
           for _, rng in ipairs(ranges) do
@@ -590,32 +596,24 @@ local function collect_enclosing_symbols(symbols, cursor_line)
   return matches
 end
 
-local function show_breadcrumbs()
-  local buf, path = buffer_state()
+-- enclosing_symbols returns the current buffer, its path and the symbols that contain the
+-- caret, outermost first. It tells the user and returns nil when there are none.
+local function enclosing_symbols()
+  local buf, path, symbols = document_symbols()
   if not buf then
-    gvim.notify(t("status.no_file"))
-    return
-  end
-  local language = buf:language()
-  if not language then
-    gvim.notify(t("status.no_language"))
-    return
-  end
-  local result, err = gvim.lsp.request("textDocument/documentSymbol", {
-    textDocument = { uri = gvim.path.to_uri(path) },
-  }, { buf = buf })
-  if result == nil and err then
-    gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
-    return
-  end
-  local symbols = parse_symbols(result, buf)
-  if #symbols == 0 then
-    gvim.notify(t("status.no_symbols"))
-    return
+    return nil
   end
   local enclosing = collect_enclosing_symbols(symbols, buf:cursor().line)
   if #enclosing == 0 then
     gvim.notify(t("status.no_enclosing_symbol"))
+    return nil
+  end
+  return buf, path, enclosing
+end
+
+local function show_breadcrumbs()
+  local buf, _, enclosing = enclosing_symbols()
+  if not buf then
     return
   end
   local parts = {}
@@ -640,45 +638,19 @@ gvim.command.register {
 }
 
 local function open_breadcrumbs_picker()
-  local buf, path = buffer_state()
+  local buf, path, enclosing = enclosing_symbols()
   if not buf then
-    gvim.notify(t("status.no_file"))
-    return
-  end
-  local language = buf:language()
-  if not language then
-    gvim.notify(t("status.no_language"))
-    return
-  end
-  local result, err = gvim.lsp.request("textDocument/documentSymbol", {
-    textDocument = { uri = gvim.path.to_uri(path) },
-  }, { buf = buf })
-  if result == nil and err then
-    gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
-    return
-  end
-  local symbols = parse_symbols(result, buf)
-  if #symbols == 0 then
-    gvim.notify(t("status.no_symbols"))
-    return
-  end
-  local enclosing = collect_enclosing_symbols(symbols, buf:cursor().line)
-  if #enclosing == 0 then
-    gvim.notify(t("status.no_enclosing_symbol"))
     return
   end
   local items = {}
   for i, s in ipairs(enclosing) do
-    local label = kind_label(s.kind)
     items[#items + 1] = {
       path = path,
       line = s.start_line,
       col = s.name_col or 0,
-      label = string.format("%d. [%s] %s", i, label, s.name),
-      detail = string.format("Line %d", s.start_line + 1),
+      text = string.format("%d. [%s] %s", i, kind_label(s.kind), s.name),
     }
   end
-  finder.read_snippets(items)
   finder.open_locations {
     title = t("panel.breadcrumbs_title", { count = #items }),
     footer = t("panel.help"),

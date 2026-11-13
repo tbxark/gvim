@@ -225,87 +225,32 @@ func TestLocalWriteStream(t *testing.T) {
 	}
 }
 
-// TestLocalWriteStreamNoFollowSymlink is the local counterpart of the copy-safe stream.
-func TestLocalWriteStreamNoFollowSymlink(t *testing.T) {
+// TestWriteStreamWithALongFileName: the temporary name carries the target's name, so a name
+// near the 255-byte limit must not make the streamed save fail, locally or over SSH.
+func TestWriteStreamWithALongFileName(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "real.txt")
-	link := filepath.Join(dir, "link.txt")
-	writeLocal(t, target, "old target\n")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
+	path := filepath.Join(dir, strings.Repeat("a", 250)+".txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Skipf("the filesystem takes no 254-byte file name: %v", err)
 	}
-	slot := authority.Local(authority.LocalOptions{})
-	defer func() { _ = slot.Close() }()
-	ctx := context.Background()
-	streamer := authority.NoFollowWriteStreams(slot.Files())
-	if streamer == nil {
-		t.Fatal("the local backend has no NoFollowWriteStreamer")
-	}
-	s, err := streamer.WriteStreamNoFollow(ctx, link, hostos.WriteOptions{Atomic: true})
-	if err != nil {
-		t.Fatalf("local WriteStreamNoFollow: %v", err)
-	}
-	if err := s.Write(ctx, []byte("new link content\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := s.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink != 0 {
-		t.Fatalf("local no-follow stream followed the link (link mode %v, %v)", fi.Mode(), err)
-	}
-	if got, _ := os.ReadFile(link); string(got) != "new link content\n" {
-		t.Fatalf("local destination entry = %q", got)
-	}
-	if got, _ := os.ReadFile(target); string(got) != "old target\n" {
-		t.Fatalf("local no-follow stream changed the link target: %q", got)
-	}
-	if temps := streamTemps(t, dir); len(temps) != 0 {
-		t.Fatalf("local temporary files left after no-follow commit: %v", temps)
-	}
-}
-
-// TestLocalWriteStreamNoFollowDirectoryLink: local os.Rename already replaces a symlink
-// entry; assert the source directory is untouched for parity with SSH.
-func TestLocalWriteStreamNoFollowDirectoryLink(t *testing.T) {
-	dir := t.TempDir()
-	realdir := filepath.Join(dir, "realdir")
-	if err := os.Mkdir(realdir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	linkdir := filepath.Join(dir, "linkdir")
-	if err := os.Symlink(realdir, linkdir); err != nil {
-		t.Fatal(err)
-	}
-	slot := authority.Local(authority.LocalOptions{})
-	defer func() { _ = slot.Close() }()
-	ctx := context.Background()
-	s, err := authority.NoFollowWriteStreams(slot.Files()).WriteStreamNoFollow(ctx, linkdir, hostos.WriteOptions{Atomic: true})
-	if err != nil {
-		t.Fatalf("local WriteStreamNoFollow: %v", err)
-	}
-	if err := s.Write(ctx, []byte("file entry\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := s.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if fi, err := os.Lstat(linkdir); err != nil || fi.Mode()&os.ModeSymlink != 0 || fi.IsDir() {
-		t.Fatalf("local no-follow destination link not replaced by a file: mode %v, %v", fi.Mode(), err)
-	}
-	if entries, err := os.ReadDir(realdir); err != nil || len(entries) != 0 {
-		t.Fatalf("local no-follow stream wrote into the linked directory: %v, %v", entries, err)
-	}
-}
-
-// TestSSHFilesHasNoCopySafeStream: the SSH backend deliberately does NOT advertise the
-// no-follow copy-safe stream. There is no portable remote rename verified to replace a
-// destination link atomically without a check-then-remove fallback, so plugin fs.copy must
-// return unsupported on SSH rather than risk losing or following a target. The capability
-// must be absent at the type assertion, before any copy can open a stream.
-func TestSSHFilesHasNoCopySafeStream(t *testing.T) {
-	a := fsSlot(t)
-	if got := authority.NoFollowWriteStreams(a.Files()); got != nil {
-		t.Fatalf("the SSH backend advertised NoFollowWriteStreamer: %T", got)
+	local := authority.Local(authority.LocalOptions{})
+	defer func() { _ = local.Close() }()
+	for name, slot := range map[string]*authority.Authority{"local": local, "ssh": fsSlot(t)} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s, err := authority.WriteStreams(slot.Files()).WriteStream(ctx, path, hostos.WriteOptions{Atomic: true})
+			if err != nil {
+				t.Fatalf("WriteStream: %v", err)
+			}
+			if err := s.Write(ctx, []byte("new "+name)); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if err := s.Commit(ctx); err != nil {
+				t.Fatalf("commit: %v", err)
+			}
+			if got, _ := os.ReadFile(path); string(got) != "new "+name {
+				t.Fatalf("content = %q", got)
+			}
+		})
 	}
 }

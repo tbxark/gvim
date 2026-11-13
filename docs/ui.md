@@ -13,7 +13,7 @@ All spacing is whole terminal cells and comes from `internal/tui/space`:
 
 - `PadX` (1): horizontal padding inside a bar, a card or a menu, on both sides of
   the text. Text never touches a border or a screen edge.
-- `Margin(w)` (and `ListMargin(w)`, which is the same rule): the gap between a
+- `Margin(w)`: the gap between a
   floating surface and the left and right screen edge. It is 0 below 60 columns, 1
   up to 139, and 2 from 140. A floating surface never docks to an edge when the
   frame has room for the gap.
@@ -184,7 +184,7 @@ query.
   highlights the named line, and shows a placeholder for a binary, empty or unreadable
   file; a file longer than the head or the twelve lines kept ends with `…`. A narrower
   frame drops the column and keeps the full-width list. The preview is plain text: it has
-  no syntax colours and does not scroll (see §4.5 of `docs/parity.md`).
+  no syntax colours and does not scroll (see the finder row of [parity.md](parity.md)).
 **Editor line expansion.** `Ctrl+L` grows the selection to whole lines: with no selection it takes
 the caret line including its newline, repeated presses walk one line further, and an upward
 selection squares off over the lines it covers. With multiple carets every caret's line selection

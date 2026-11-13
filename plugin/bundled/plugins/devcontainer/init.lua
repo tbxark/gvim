@@ -50,11 +50,12 @@ local function clip(s, limit)
   if #s <= limit then
     return s
   end
-  local cut = s:sub(1, limit)
-  while #cut > 0 and cut:byte(-1) >= 128 do
-    cut = cut:sub(1, #cut - 1)
+  -- Back up to a character boundary: the byte after the cut must not continue a character.
+  local cut = limit
+  while cut > 0 and s:byte(cut + 1) >= 0x80 and s:byte(cut + 1) < 0xC0 do
+    cut = cut - 1
   end
-  return cut .. "…"
+  return s:sub(1, cut) .. "…"
 end
 
 local function scalar(v)
@@ -62,8 +63,6 @@ local function scalar(v)
     return clip(v, MAX_VALUE)
   elseif type(v) == "number" or type(v) == "boolean" then
     return tostring(v)
-  elseif v == nil or v == json.null then
-    return nil
   end
   return nil
 end
@@ -311,10 +310,10 @@ local function read_if_exists(path)
   end
   local decoded, derr = json.decode_jsonc(text)
   if decoded == nil then
-    return nil, derr, path
+    return nil, derr
   end
   if type(decoded) ~= "table" then
-    return nil, "the top level is not an object", path
+    return nil, "the top level is not an object"
   end
   return decoded
 end

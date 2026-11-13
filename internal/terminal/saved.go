@@ -12,29 +12,42 @@ const (
 	MaxSearchQueryBytes     = 512
 )
 
-// SavedState is the terminal dock state that survives an editor restart: the
-// dock's open flag and directory, the pane width the transcript was captured at,
-// the newest transcript rows as text, the launch record of the terminal that
-// produced them (the agent metadata), and whether a process was running at the
-// capture (Live). Running processes do not survive the restart. A tab that was
-// live at the capture is restored read-only/dead and may be revived the first time
-// the user dives into it (switches to or focuses the tab) when
-// terminal.restore_live is on: Fresh's model starts a fresh PTY then, with the
-// recorded agent-resume/launch argv precedence gated by terminal.resume_agents. A
-// tab that was already exited at the capture (Live false — the default for an old
-// record and for every tab that was not running) is never spawned automatically:
-// it comes back read-only/dead with its exit marker, and only an explicit Restart
-// starts anything.
+// SavedState is the terminal dock state that survives an editor restart: every dock
+// tab as a SavedTab, the active tab's index and the dock's scrollback-search query
+// history. Running processes do not survive the restart. A tab that was live at the
+// capture (SavedTab.Live) is restored read-only/dead and may be revived the first time
+// the user dives into it (switches to or focuses the tab) when terminal.restore_live
+// is on: Fresh's model starts a fresh PTY then, with the recorded agent-resume/launch
+// argv precedence gated by terminal.resume_agents. A tab that was already exited at the
+// capture (Live false) is never spawned automatically: it comes back read-only/dead with
+// its exit marker, and only an explicit Restart starts anything.
 type SavedState struct {
-	Version int      `json:"version"`
-	Open    bool     `json:"open,omitempty"`
-	Cwd     string   `json:"cwd,omitempty"`
-	Width   int      `json:"width,omitempty"`
-	Rows    []string `json:"rows,omitempty"`
+	Version int `json:"version"`
+	// SearchHistory is the dock's scrollback-search query history (oldest first,
+	// newest last): Fresh keeps its search prompt history per window and persists it
+	// with the workspace, and gvim's dock mirrors that for its pager. It is
+	// bounded/cleaned on load, and it never starts a process; it only restores what
+	// the search input recalls.
+	SearchHistory []string `json:"search_history,omitempty"`
+	// Tabs holds every dock terminal tab, and ActiveTab is the index of the active one.
+	Tabs      []SavedTab `json:"tabs,omitempty"`
+	ActiveTab int        `json:"active_tab,omitzero"`
+}
+
+// SavedTab is one terminal tab in a saved dock: its open flag and directory, the pane
+// width the transcript was captured at, the newest transcript rows as text, the launch
+// record of the terminal that produced them (the agent metadata) and how its process
+// ended. A restored tab is read-only and dead until the user restarts it. Name is
+// display-only.
+type SavedTab struct {
+	Name  string   `json:"name,omitempty"`
+	Open  bool     `json:"open,omitempty"`
+	Cwd   string   `json:"cwd,omitempty"`
+	Width int      `json:"width,omitempty"`
+	Rows  []string `json:"rows,omitempty"`
 	// LaunchArgv is the command the terminal was started with, ResumeArgv the argv
-	// that rejoins its agent session, Agent the configured agent name and
-	// Ephemeral that it was a session terminal (Run Agent). Empty fields mean a
-	// plain shell and keep the older records readable.
+	// that rejoins its agent session, Agent the configured agent name and Ephemeral
+	// that it was a session terminal (Run Agent). Empty fields mean a plain shell.
 	LaunchArgv []string `json:"launch_argv,omitempty"`
 	ResumeArgv []string `json:"resume_argv,omitempty"`
 	Agent      string   `json:"agent,omitempty"`
@@ -42,71 +55,25 @@ type SavedState struct {
 	// LaunchDir is the directory the launched program was started in. Cwd is the
 	// terminal's current directory (the shell's last OSC 7 report); an agent's
 	// internal chdir must not move a later restart or resume away from the chosen
-	// launch directory, so the two are kept apart. Additive: an older record has no
-	// launch_dir and keeps its cwd as the launch directory on restore.
+	// launch directory, so the two are kept apart.
 	LaunchDir string `json:"launch_dir,omitempty"`
 	// Source is the durable external identity of a discovered session (for example
 	// "tmux:default/work"), so a repeated import can find the tab that already
-	// attaches it. Additive; empty for a configured agent or a plain shell.
+	// attaches it. Empty for a configured agent or a plain shell.
 	Source string `json:"source,omitempty"`
-	// Live records whether a process was running when the state was captured. It is
-	// additive and optional (an old record has no live flag and is treated as
-	// exited, so it restores exactly as before); a live-at-capture tab may be
-	// revived on the user's first dive into it, an exited one never is.
+	// Live records whether a process was running when the tab was captured. A
+	// live-at-capture tab may be revived on the user's first dive into it, an exited
+	// one never is.
 	Live bool `json:"live,omitempty"`
+	// Screen is the bounded styled snapshot of the visible screen at the capture; a
+	// restored tab paints it above the new shell after a revive, giving the saved
+	// screen its styles back instead of plain rows. See SavedScreen for the bounds.
+	Screen *SavedScreen `json:"screen,omitempty"`
 	// Title is the terminal title the child last set with OSC 0/2 (cleaned and
-	// bounded); empty for a child that never set one. It is additive: an old record
-	// has none and keeps its derived tab label.
+	// bounded); empty for a child that never set one.
 	Title string `json:"title,omitempty"`
-	// ExitCode is the child's exit code when the record was captured from a
-	// terminal whose process had exited (ExitKnown says the code was observed).
-	// It is additive: an old record has none and keeps the plain "(exited)" state.
-	ExitCode  int  `json:"exit_code,omitempty"`
-	ExitKnown bool `json:"exit_known,omitempty"`
-	// SearchHistory is the dock's scrollback-search query history (oldest first,
-	// newest last): Fresh keeps its search prompt history per window and persists it
-	// with the workspace, and gvim's dock mirrors that for its pager. Additive and
-	// optional: an older record has none (an empty history) and is bounded/cleaned on
-	// load. It never starts a process; it only restores what the search input recalls.
-	SearchHistory []string `json:"search_history,omitempty"`
-	// Screen is the bounded styled snapshot of the visible screen at the capture.
-	// It is additive and optional (an old record has none and restores the plain
-	// text transcript exactly as before); a restored tab paints the snapshot above
-	// the new shell after a revive, giving the saved screen its styles back instead
-	// of plain rows. See SavedScreen for the bounds.
-	Screen *SavedScreen `json:"screen,omitempty"`
-	// Tabs holds every dock terminal tab when the dock had more than the one the
-	// top-level fields describe. The top-level fields mirror the active tab, so a
-	// reader that does not know Tabs still restores that tab; a reader that does
-	// uses Tabs and ActiveTab and ignores the mirror. The field is additive and
-	// optional (an older record has no tabs and restores exactly as before).
-	Tabs      []SavedTab `json:"tabs,omitempty"`
-	ActiveTab int        `json:"active_tab,omitzero"`
-}
-
-// SavedTab is one terminal tab in a saved dock. Its fields mirror SavedState's
-// transcript and launch record; a restored tab is read-only and dead until the
-// user restarts it, exactly like a single saved terminal. Names are display-only.
-type SavedTab struct {
-	Name       string   `json:"name,omitempty"`
-	Open       bool     `json:"open,omitempty"`
-	Cwd        string   `json:"cwd,omitempty"`
-	Width      int      `json:"width,omitempty"`
-	Rows       []string `json:"rows,omitempty"`
-	LaunchArgv []string `json:"launch_argv,omitempty"`
-	ResumeArgv []string `json:"resume_argv,omitempty"`
-	Agent      string   `json:"agent,omitempty"`
-	Ephemeral  bool     `json:"ephemeral,omitempty"`
-	LaunchDir  string   `json:"launch_dir,omitempty"`
-	Source     string   `json:"source,omitempty"`
-	// Live mirrors SavedState.Live for this tab: a process was running when the tab
-	// was captured. Absent means exited (the old-record meaning).
-	Live bool `json:"live,omitempty"`
-	// Screen mirrors SavedState.Screen for this tab.
-	Screen *SavedScreen `json:"screen,omitempty"`
-	// Title mirrors SavedState.Title for this tab.
-	Title string `json:"title,omitempty"`
-	// ExitCode and ExitKnown mirror SavedState: how this tab's process ended.
+	// ExitCode is the child's exit code when the tab was captured from a terminal
+	// whose process had exited (ExitKnown says the code was observed).
 	ExitCode  int  `json:"exit_code,omitempty"`
 	ExitKnown bool `json:"exit_known,omitempty"`
 }

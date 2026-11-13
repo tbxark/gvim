@@ -23,12 +23,12 @@ func TestChromeHoverFollowsTheMotion(t *testing.T) {
 	m.explorerOpen = true
 	l := m.layout()
 
-	tab := firstRun(l.Strip.Runs, hitTab)
+	tab := firstRun(l.Strip.Runs, frame.HitTab)
 	if tab.W == 0 {
 		t.Fatalf("strip runs = %+v, want a tab", l.Strip.Runs)
 	}
 	m.Update(tea.MouseMotionMsg{X: tab.X + 1, Y: l.StripY})
-	if m.stripHover.Kind != hitTab || m.stripHover.Index != tab.Index {
+	if m.stripHover.Kind != frame.HitTab || m.stripHover.Index != tab.Index {
 		t.Fatalf("strip hover = %+v, want the tab at %d", m.stripHover, tab.X)
 	}
 	if cell := m.paint().At(tab.X+1, l.StripY); !cell.Style.Underline {
@@ -40,7 +40,7 @@ func TestChromeHoverFollowsTheMotion(t *testing.T) {
 		t.Fatalf("status runs = %+v, want the line ending", l.Status)
 	}
 	m.Update(tea.MouseMotionMsg{X: seg.X + 1, Y: l.StatusY})
-	if m.statusHover.Kind != hitStatusSegment || m.statusHover.Index != seg.Index {
+	if m.statusHover.Kind != frame.HitStatusSegment || m.statusHover.Index != seg.Index {
 		t.Fatalf("status hover = %+v, want the line ending segment", m.statusHover)
 	}
 	if cell := m.paint().At(seg.X+1, l.StatusY); !cell.Style.Underline {

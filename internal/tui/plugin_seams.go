@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -178,25 +179,12 @@ func (m *Model) plugViewStateDropOwner(plugin string) {
 // setWindowFocus gives the focused leaf to n (nil: no focused pane) and raises the
 // tier-1c-C window events: active_window_changed when the window changed, focus_gained
 // when the editor gets a focused body pane back.
-func (m *Model) setWindowFocus(n *splitNode) {
+func (m *Model) setWindowFocus(n *split.Node) {
 	prev := m.splits.Focus
 	if prev == n {
 		return
 	}
-	// Read the old window's id without allocating one: the previous focus may be the
-	// internal split node a new split just made (its id is gone), and IDOf would give it
-	// a fresh id and burn the one the new pane should get.
-	prevID := uint64(0)
-	if prev != nil {
-		prevID = prev.ID
-	}
-	curID := uint64(0)
-	if n != nil {
-		curID = m.splits.IDOf(n)
-	}
 	m.splits.Focus = n
-	_ = prevID
-	_ = curID
 	// The focus announcer owns the window/buffer hooks; it diffs the announced focus so a
 	// split change fires exactly one active_window_changed/focus_gained, and a switch forces
 	// the announcement.

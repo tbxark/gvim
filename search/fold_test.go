@@ -6,27 +6,6 @@ import (
 	"testing"
 )
 
-func TestFoldsASCII(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		q    Query
-		text string
-		want bool
-	}{
-		{"ascii, ignoring case", Query{Text: "Needle"}, "a needle", true},
-		{"case sensitive", Query{Text: "Needle", CaseSensitive: true}, "a needle", false},
-		{"non-ASCII text", Query{Text: "needle"}, "a néedle needle", false},
-		{"non-ASCII query", Query{Text: "日本語"}, "abc", false},
-		{"empty query", Query{}, "abc", false},
-	}
-	for _, tt := range tests {
-		if got := foldsASCII(tt.q, tt.text); got != tt.want {
-			t.Errorf("%s: foldsASCII = %v, want %v", tt.name, got, tt.want)
-		}
-	}
-}
-
 // TestFoldedLiteralMatchesTheRegexp checks that the folded search finds exactly the
 // matches of the (?i) regexp it replaces, whole-word candidates and overlaps included.
 func TestFoldedLiteralMatchesTheRegexp(t *testing.T) {

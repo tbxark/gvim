@@ -8,7 +8,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Handle kinds that are identified by a host id and cached per state (D7): the same id
+// Handle kinds that are identified by a host id and cached per state: the same id
 // always gives the same userdata, so `a == b` and table keys work.
 const (
 	kindBuffer = "Buffer"
@@ -44,15 +44,17 @@ type handleKind struct {
 }
 
 // kind returns the handle kind name, creating its locked metatable on first use. API
-// stages add methods with `e.kind("Buffer").methods.RawSetString(...)`.
+// files add methods with `e.kind("Buffer").methods.RawSetString(...)`.
 func (p *plugin) kind(name string) *handleKind {
 	if k := p.kinds[name]; k != nil {
 		return k
 	}
 	L := p.L
 	k := &handleKind{name: name, cached: name == kindBuffer || name == kindWindow}
-	k.methods = L.NewTable()
-	k.mt = L.NewTable()
+	// L.NewTable() reserves a 32-slot array and a 32-entry hash: far more than a method table
+	// or a metatable of five fields needs, in every state, for every kind.
+	k.methods = L.CreateTable(0, 8)
+	k.mt = L.CreateTable(0, 6)
 	if k.cached {
 		methods := k.methods
 		k.mt.RawSetString("__index", L.NewFunction(func(L *lua.LState) int {
@@ -194,12 +196,11 @@ func checkObject(L *lua.LState, n int, kind string) any {
 	return nil
 }
 
-// installHandleKinds gives the cached kinds their S2 methods: `valid`. The rest of the
-// Buffer and Window methods belong to the API stages that own those areas.
+// installHandleKinds gives the cached kinds their `valid` method. The rest of the Buffer
+// and Window methods belong to the API files that own those areas (api_buf.go, api_win.go).
 func installHandleKinds(e *apiEnv) {
 	p := e.p
 	for _, name := range []string{kindBuffer, kindWindow} {
-		name := name
 		p.kind(name).methods.RawSetString("valid", e.fn(func(L *lua.LState) int {
 			id := checkID(L, 1, name)
 			ok := p.handleValid(name, id)

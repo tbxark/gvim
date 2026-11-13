@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"io"
 	"sync"
@@ -31,18 +30,9 @@ func (fw *FrameWriter) WriteFrame(typ byte, payload []byte) error {
 	if len(payload) > MaxPayload {
 		return ErrFrameTooLarge
 	}
-	header := make([]byte, 5)
-	binary.BigEndian.PutUint32(header[:4], uint32(len(payload)))
-	header[4] = typ
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
-	if err := writeAll(fw.w, header); err != nil {
-		return err
-	}
-	if len(payload) == 0 {
-		return nil
-	}
-	return writeAll(fw.w, payload)
+	return WriteFrame(fw.w, typ, payload)
 }
 
 // WriteJSON writes a frame whose payload is the JSON of v.

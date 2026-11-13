@@ -155,6 +155,20 @@ func (w *remoteEnvWatch) Replan(detectors []config.EnvDetector) {
 	}
 }
 
+// Reconnected re-arms the watch on the restored carrier and re-captures the
+// environment once: the watches armed on the dropped carrier see nothing more, and an
+// env input may have changed during the outage. Safe on a nil watcher.
+func (w *remoteEnvWatch) Reconnected() {
+	if w == nil {
+		return
+	}
+	w.refresh()
+	select {
+	case w.replan <- struct{}{}:
+	default:
+	}
+}
+
 func (w *remoteEnvWatch) run() {
 	defer w.wg.Done()
 	backoff := remoteWatchRetryMin
@@ -185,10 +199,7 @@ func (w *remoteEnvWatch) run() {
 			if !sleepContext(w.ctx, backoff) {
 				return
 			}
-			backoff *= 2
-			if backoff > remoteWatchRetryMax {
-				backoff = remoteWatchRetryMax
-			}
+			backoff = nextBackoff(backoff)
 			continue
 		}
 		backoff = remoteWatchRetryMin

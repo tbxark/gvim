@@ -513,16 +513,6 @@ func indexOptions(name func(option) string) map[string]option {
 	return m
 }
 
-// EditorKeys returns the names of the editor.* options gvim knows, sorted.
-func EditorKeys() []string {
-	keys := make([]string, 0, len(editorOptions))
-	for _, o := range editorOptions {
-		keys = append(keys, o.key)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
 // statusBarElementNames are the elements editor.status_bar.left and .right accept,
 // without their braces. They are Fresh's StatusBarElement names (fresh-editor-core
 // config.rs TryFrom<String>). The list is repeated here because the config package
@@ -669,8 +659,7 @@ func isSection(key string) bool { return slices.Contains(sections, key) }
 // None of them is stored.
 var fileOnlyKeys = []string{
 	"$schema", "version", "self_update",
-	"open_last_workspace", "sidebar", "file_browser", "clipboard",
-	"universal_lsp",
+	"open_last_workspace", "sidebar", "file_browser",
 	"warnings", "packages", "menu",
 }
 

@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/pluginpanel"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
@@ -38,7 +39,7 @@ type pluginPanels struct {
 	// collapsed is the folded state of the sidebar sections, by panel.
 	collapsed map[pluginapi.PanelID]bool
 	// restore is the sidebar section state a restored session left for the
-	// sections to pick up when they mount (R9-4, sidebar_state.go). It is nil when
+	// sections to pick up when they mount (see sidebar_state.go). It is nil when
 	// there is nothing to restore.
 	restore *pluginSidebarRestore
 	// announced is the last (window, buffer) focus the announcer emitted.
@@ -125,8 +126,7 @@ func (m *Model) pluginActiveBuffer() pluginapi.BufferID {
 }
 
 // plugPanelsScopeSync takes the keyboard from a panel that no longer belongs on screen
-// (its buffer moved away) and refreshes the editor-wide chrome snapshot when a panel of
-// editor scope changed. It is cheap and runs on the update loop.
+// (its buffer moved away). It is cheap and runs on the update loop.
 func (m *Model) plugPanelsScopeSync() {
 	ps := &m.plug.panels
 	if ps.focus != 0 {
@@ -160,7 +160,12 @@ func (m *Model) plugPanelsBufferClosed(id pluginapi.BufferID) {
 // newMountedPanel builds a mounted panel from a mount spec (the shared-runtime editor-chrome
 // install reuses it, so a carried section is built exactly like a mounted one).
 func newMountedPanel(m *Model, id pluginapi.PanelID, owner string, o pluginapi.WidgetMount) *mountedPanel {
-	opts := pluginpanel.Options{
+	return &mountedPanel{id: id, owner: owner, mount: o, panel: pluginpanel.New(o.Panel, panelOptions(m, o))}
+}
+
+// panelOptions is the pluginpanel configuration of a mount spec.
+func panelOptions(m *Model, o pluginapi.WidgetMount) pluginpanel.Options {
+	return pluginpanel.Options{
 		Chrome:         m.styles.Overlay,
 		Resolve:        m.widgetColor,
 		Title:          o.Title,
@@ -169,7 +174,6 @@ func newMountedPanel(m *Model, id pluginapi.PanelID, owner string, o pluginapi.W
 		Page:           o.Page,
 		AutoFocusFirst: o.AutoFocusFirst,
 	}
-	return &mountedPanel{id: id, owner: owner, mount: o, panel: pluginpanel.New(o.Panel, opts)}
 }
 
 // ---- Host: mount, update, unmount, commands, mutations
@@ -181,6 +185,9 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 	m := h.model()
 	if id == 0 {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a panel id is not 0")
+	}
+	if old := m.plug.panels.get(id); old != nil && old.owner != plugin {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "panel %d belongs to a different plugin", id)
 	}
 	if o.Placement == "" {
 		o.Placement = pluginapi.PlacementFloat
@@ -236,12 +243,21 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 		return pluginapi.Errf(pluginapi.CodeInvalid, "scope must be \"window\", \"editor\" or \"buffer\", not %q", string(o.Scope))
 	}
 	if old := m.plug.panels.get(id); old != nil {
-		old.owner, old.mount, old.scopeBuffer = plugin, o, scopeBuffer
+		relayout := old.mount.Placement != o.Placement || old.mount.Rows != o.Rows
+		old.mount, old.scopeBuffer = o, scopeBuffer
+		old.panel.SetOptions(panelOptions(m, o))
 		old.panel.Update(o.Panel)
 		if old.mount.Scope == pluginapi.ScopeEditor {
 			m.noteEditorChromeChanged()
 		}
 		m.plugPanelsScopeSync()
+		if o.Placement == pluginapi.PlacementSidebar && !m.explorerOpen && m.tree != nil {
+			m.explorerOpen = true
+			relayout = true
+		}
+		if relayout {
+			m.syncViewport()
+		}
 		if o.Focus {
 			m.focusPluginPanel(id)
 		}
@@ -253,7 +269,6 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 	if o.Placement == pluginapi.PlacementSidebar {
 		if !m.explorerOpen && m.tree != nil {
 			m.explorerOpen = true
-			m.syncViewport()
 		}
 		m.syncViewport()
 	}
@@ -345,8 +360,7 @@ func (h *pluginHost) WidgetMutate(id pluginapi.PanelID, mu pluginapi.WidgetMutat
 }
 
 // plugPanelsGone is OwnerGone for the panels: every panel the plugin mounted goes.
-func (m *Model) plugPanelsGone(plugin string, gen uint64) {
-	_ = gen
+func (m *Model) plugPanelsGone(plugin string) {
 	hadEditor := false
 	for _, id := range append([]pluginapi.PanelID(nil), m.plug.panels.order...) {
 		mp := m.plug.panels.get(id)
@@ -569,7 +583,7 @@ func (m *Model) windowOfBuffer(id pluginapi.BufferID) int {
 // paintPluginPanels paints the floating and buffer panels, and the bodies of the sidebar
 // sections. The sidebar sections' headers are painted by paintSidebar; the bodies are drawn
 // here so the panel state stays in one place.
-func (m *Model) paintPluginPanels(g *grid.Grid, l layout) {
+func (m *Model) paintPluginPanels(g *grid.Grid, l frame.Layout) {
 	for _, id := range m.plug.panels.order {
 		mp := m.plug.panels.get(id)
 		if mp == nil || !m.panelVisible(mp) {
@@ -600,7 +614,7 @@ func (m *Model) paintPluginPanels(g *grid.Grid, l layout) {
 }
 
 // paintPluginSection paints the body of one sidebar section.
-func (m *Model) paintPluginSection(g *grid.Grid, l layout, mp *mountedPanel) {
+func (m *Model) paintPluginSection(g *grid.Grid, l frame.Layout, mp *mountedPanel) {
 	sec, ok := m.pluginSidebarSection(mp)
 	if !ok || sec.Collapsed || sec.Rows() == 0 {
 		mp.rect = pluginpanel.Rect{}
@@ -746,12 +760,12 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 	// unmounts it, and its body is the panel.
 	t := m.layout().Hit(mo.X, mo.Y)
 	switch t.Kind {
-	case hitSidebarHeader:
+	case frame.HitSidebarHeader:
 		// The root owns every section header now: a press starts a height drag/fold
 		// gesture and a release folds a section that did not move. Falling through lets
 		// the root's click routing run; the panel keeps the close button and body below.
 		return nil, false
-	case hitSidebarClose:
+	case frame.HitSidebarClose:
 		mp := m.pluginSectionAt(t.Section)
 		if mp == nil {
 			return nil, false
@@ -761,7 +775,7 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 			m.unmountPanel(mp.id)
 		}
 		return nil, true
-	case hitSidebarRow, hitSidebarBody:
+	case frame.HitSidebarRow, frame.HitSidebarBody:
 		mp := m.pluginSectionAt(t.Section)
 		if mp == nil {
 			return nil, false

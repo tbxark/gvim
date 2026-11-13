@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/theme"
 )
@@ -106,7 +107,7 @@ func newTOCModel(t *testing.T, ed *tocEditor, cfg *MarkdownTOC) *Model {
 
 // contentsSection is the Contents section's place in the frame, if it is on
 // screen.
-func contentsSection(l layout) (sidebar.Section, bool) {
+func contentsSection(l frame.Layout) (sidebar.Section, bool) {
 	for _, sec := range l.Sections {
 		if sec.Kind == sidebar.KindContents {
 			return sec, true
@@ -483,11 +484,11 @@ func TestContentsFoldsIntoTheLayout(t *testing.T) {
 	}
 	// A press on the contents header row is a sidebar header target, not the
 	// explorer's body any more.
-	if got := l.Hit(4, cs.HeaderY); got.Kind != hitSidebarHeader || got.Section != 1 {
+	if got := l.Hit(4, cs.HeaderY); got.Kind != frame.HitSidebarHeader || got.Section != 1 {
 		t.Fatalf("hit on the contents header = %+v, want the sidebar header of section 1", got)
 	}
 	// A press on a contents row is a sidebar row target with the row offset.
-	if got := l.Hit(4, cs.BodyTop+1); got.Kind != hitSidebarRow || got.Section != 1 || got.Index != 1 {
+	if got := l.Hit(4, cs.BodyTop+1); got.Kind != frame.HitSidebarRow || got.Section != 1 || got.Index != 1 {
 		t.Fatalf("hit on contents row 1 = %+v, want a sidebar row", got)
 	}
 }

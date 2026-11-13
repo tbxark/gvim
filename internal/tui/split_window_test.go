@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
 )
 
 // windowKeys binds the chords that run the pane, window and previous-tab actions.
@@ -131,9 +133,9 @@ func TestSwitchToPreviousTabSeesATabClick(t *testing.T) {
 	f := newMultiFake(3, 3)
 	m := newSplitModelKeys(t, f, 80, 24, windowKeys)
 	l := m.layout()
-	var tab2 *run
+	var tab2 *frame.Run
 	for i := range l.Strip.Runs {
-		if r := l.Strip.Runs[i]; r.Kind == hitTab && r.Index == 2 {
+		if r := l.Strip.Runs[i]; r.Kind == frame.HitTab && r.Index == 2 {
 			tab2 = &r
 		}
 	}

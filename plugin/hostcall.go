@@ -17,7 +17,7 @@ func (r *Runtime) pauseSlice() func() {
 
 // hostGuard is the Host the API installers see. It forwards every call and, for the heavy
 // ones (edits, big reads, searches, decoration bulk writes, action runs), pauses the slice
-// clock so a slow editor operation is not charged to the plugin (AMENDMENTS C10). Light
+// clock so a slow editor operation is not charged to the plugin. Light
 // calls (Buffer, Cursors, ...) are not paused. The hard deadline is never paused.
 type hostGuard struct {
 	pluginapi.Host

@@ -105,8 +105,7 @@ func TestViVisualBlock(t *testing.T) {
 }
 
 // TestViVisualKeepsTheWantedColumn: j and k in visual mode aim at the column the head was
-// moved to by a horizontal move, not at the clamped column of the short line it crossed
-// (S22-3).
+// moved to by a horizontal move, not at the clamped column of the short line it crossed.
 func TestViVisualKeepsTheWantedColumn(t *testing.T) {
 	t.Parallel()
 	const text = "abcdef ghi\nxy\n\n0123456789 abc\nlast line here"

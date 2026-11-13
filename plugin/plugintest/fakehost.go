@@ -289,7 +289,7 @@ func (f *FakeHost) Holds(name string) bool { return f.HoldSet[name] || f.modeHol
 // Actions returns ActionList.
 func (f *FakeHost) Actions() []string { return append([]string(nil), f.ActionList...) }
 
-// ---------- buffers (read side; the edit side is stage S6's fake_buf.go) ----------
+// ---------- buffers (read side; the edit side is fake_buf.go) ----------
 
 // AddBuffer appends a buffer with the text to the tabs and activates it when it is the
 // first. The language is guessed from the extension. It returns the id.

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"image/color"
 	"slices"
 	"strings"
@@ -273,5 +274,26 @@ func TestFoldRequestStopsAfterAFailure(t *testing.T) {
 	lt.drain(lt.m.lspDataArm(lspDataFolds))
 	if port.foldCalls != first {
 		t.Fatalf("fold requests = %d after the failure, want %d", port.foldCalls, first)
+	}
+}
+
+// TestDataErrorBlamesTheLanguageOfTheDocumentAsked checks that a failed refresh stops the
+// refreshes of the language of the document it was asked for, not of the tab that is
+// active when the reply arrives.
+func TestDataErrorBlamesTheLanguageOfTheDocumentAsked(t *testing.T) {
+	port := newFakeLSP("go", "python")
+	lt := newLSPTest(t, port,
+		&lspTab{path: "/p/a.go", lines: []string{"package a"}},
+		&lspTab{path: "/p/b.py", lines: []string{"x = 1"}},
+	)
+	lt.ed.active = 1
+	err := errors.New("unsupported")
+	lt.feed(lspHintsDoneMsg{path: "/p/a.go", err: err})
+	lt.feed(lspTokensDoneMsg{path: "/p/a.go", err: err})
+	lt.feed(lspFoldsDoneMsg{path: "/p/a.go", err: err})
+	for name, errs := range map[string]map[string]string{"hints": lt.m.lsp.hintErr, "tokens": lt.m.lsp.tokenErr, "folds": lt.m.lsp.foldErr} {
+		if errs["go"] == "" || errs["python"] != "" {
+			t.Errorf("%s errors = %v, want only go", name, errs)
+		}
 	}
 }

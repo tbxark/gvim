@@ -210,8 +210,8 @@ local function md_enter()
 end
 
 -- Tab: a blank unordered/checkbox item indents four spaces and cycles its bullet
--- forward; an ordered item or a marked item with content takes four spaces; everything
--- else goes to the editor's insert_tab action.
+-- forward; any other line of a Markdown buffer takes four spaces at the caret. Everything
+-- that is not a Markdown source edit goes to the editor's insert_tab action.
 local function md_tab()
   local buf = active_buffer()
   if not buf then

@@ -219,32 +219,7 @@ func (s *settingsService) Validate(key, value string) error {
 	if !ok {
 		return fmt.Errorf("unknown setting %q", key)
 	}
-	raw, err := setting.Encode(value)
-	if err != nil {
-		return err
-	}
-	switch key {
-	case "theme":
-		var name string
-		if err := json.Unmarshal(raw, &name); err != nil {
-			return err
-		}
-		if _, err := s.loadTheme(name); err != nil {
-			return fmt.Errorf("theme %q: %w", name, err)
-		}
-	case "keymap":
-		var name string
-		if err := json.Unmarshal(raw, &name); err != nil {
-			return err
-		}
-		if _, err := keybindings.Keymap(name); err != nil {
-			return fmt.Errorf("keymap %q: %w", name, err)
-		}
-	}
-	if diags := config.ValidateEdits([]config.Edit{{Path: setting.Path, Raw: raw}}, false); len(diags) > 0 {
-		return errors.New(diags[0].String())
-	}
-	return nil
+	return s.validateSetting(setting, value, false)
 }
 
 // Save writes the edits to the layer and reloads the config, returning what the
@@ -711,7 +686,7 @@ func readLayerFile(path string) (map[string]json.RawMessage, error) {
 	return object, nil
 }
 
-// rawAt returns the JSON at path inside object.
+// layerRawAt returns the JSON at path inside object.
 func layerRawAt(object map[string]json.RawMessage, path []string) (json.RawMessage, bool) {
 	if len(path) == 0 {
 		return nil, false
@@ -730,7 +705,7 @@ func layerRawAt(object map[string]json.RawMessage, path []string) (json.RawMessa
 	return layerRawAt(next, path[1:])
 }
 
-// objectAt returns the JSON object at path inside object.
+// layerObjectAt returns the JSON object at path inside object.
 func layerObjectAt(object map[string]json.RawMessage, path []string) (map[string]json.RawMessage, bool) {
 	raw, ok := layerRawAt(object, path)
 	if !ok {

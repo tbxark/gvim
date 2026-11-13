@@ -2,7 +2,7 @@ package tui
 
 import "github.com/tbxark/gvim/pluginapi"
 
-// Virtual buffers (stage S18, FINAL X10): the scratch tabs a plugin owns. The editor port
+// Virtual buffers: the scratch tabs a plugin owns. The editor port
 // makes and fills them (CreateBuffer, SetContent, ...); this file keeps who owns which, so
 // that unloading a plugin closes the virtual buffers it made, and tells the language-server
 // sync to leave them alone.
@@ -53,11 +53,10 @@ func (h *pluginHost) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferID,
 	return id, nil
 }
 
-// plugVirtualGone closes the virtual buffers that the plugin (at generation gen) made, as
-// the tab's close does, and without asking: a virtual buffer is never modified. A reload
-// starts a new generation, which makes its buffers again when it needs them.
-func (m *Model) plugVirtualGone(plugin string, gen uint64) {
-	_ = gen
+// plugVirtualGone closes the virtual buffers that the plugin made, as the tab's close
+// does, and without asking: a virtual buffer is never modified. A reload starts a new
+// generation, which makes its buffers again when it needs them.
+func (m *Model) plugVirtualGone(plugin string) {
 	var ids []pluginapi.BufferID
 	for id, owner := range m.plug.virtual.owner {
 		if owner == plugin {

@@ -273,7 +273,6 @@ func (a *Authority) ReconnectWithPassword(ctx context.Context, password string) 
 	return a.Reconnect(ctx)
 }
 
-// Close releases the backend.
 // Connecting reports whether a reconnect is dialing right now (false for local/healthy).
 func (a *Authority) Connecting() bool {
 	if r, ok := a.remote.(interface{ Connecting() bool }); ok {
@@ -328,6 +327,7 @@ func (a *Authority) ReconnectWithAnswers(ctx context.Context, answers []string) 
 	return a.Reconnect(ctx)
 }
 
+// Close releases the backend.
 func (a *Authority) Close() error {
 	if a.remote == nil {
 		return nil

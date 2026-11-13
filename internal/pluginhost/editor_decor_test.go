@@ -124,7 +124,7 @@ func TestDecorDroppedWhenTheBufferIsReplaced(t *testing.T) {
 	apptest.Must(t, os.WriteFile(path, []byte("one\ntwo\n"), 0o644))
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(path))
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	id := pe.ActiveBuffer()
 	st := pe.DecorStore()
 	apptest.Must(t, st.Set(uint64(id), "p", "a", []decorations.Item{hlItem(0, 0, 0, 2), {Kind: decorations.Gutter, FromLine: 1, Text: "+"}}))
@@ -149,7 +149,7 @@ func TestDecorOnALargeDocumentIsDroppedByAnEdit(t *testing.T) {
 	if !ed.Active().Large() {
 		t.Fatal("the document is not large")
 	}
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	id := pe.ActiveBuffer()
 	st := pe.DecorStore()
 	apptest.Must(t, st.Set(uint64(id), "p", "a", []decorations.Item{hlItem(200, 1, 200, 4), {Kind: decorations.Gutter, FromLine: 100, Text: "+"}}))

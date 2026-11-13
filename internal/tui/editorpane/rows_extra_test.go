@@ -2,6 +2,7 @@ package editorpane
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
@@ -218,5 +219,54 @@ func TestExtraRowsWrapAtThePaneEdge(t *testing.T) {
 	p.Doc = doc
 	if _, y, ok := p.Caret(20, 4); !ok || y != 2 {
 		t.Fatalf("caret row = %d, %v; want 2", y, ok)
+	}
+}
+
+// TestExtraRowOverlaysPaintFromTheRowStartAndBackToBack checks that an overlay that starts
+// at the row's first byte, or right where the one before it ends, is painted.
+func TestExtraRowOverlaysPaintFromTheRowStartAndBackToBack(t *testing.T) {
+	p := Pane{
+		Doc: newDoc("abc"),
+		ExtraRows: extraAt(map[int]ExtraRows{0: {Above: []ExtraRow{{
+			Text: "abcdef",
+			Overlays: []ExtraTextOverlay{
+				{Start: 0, End: 2, Style: grid.Style{FG: cRed}},
+				{Start: 2, End: 4, Style: grid.Style{FG: cBlue}},
+			},
+		}}}}),
+	}
+	g := p.Render(20, 3)
+	for x, want := range []color.Color{cRed, cRed, cBlue, cBlue} {
+		if got := cellAt(t, g, textX+x, 0).Style.FG; got != want {
+			t.Errorf("cell %d FG = %v, want %v", x, got, want)
+		}
+	}
+	if got := cellAt(t, g, textX+4, 0).Style.FG; got == cRed || got == cBlue {
+		t.Errorf("cell past the overlays FG = %v, want the row's own", got)
+	}
+}
+
+// TestExtrasForDoesNotReorderTheHookSlices checks that sorting the rows of a line leaves
+// the slices the hook returned as they were, so a plugin that keeps and reuses them is
+// not reordered under it.
+func TestExtrasForDoesNotReorderTheHookSlices(t *testing.T) {
+	above := []ExtraRow{{Text: "late", Priority: 5}, {Text: "early", Priority: 1}}
+	below := []ExtraRow{{Text: "b2", Priority: 2}, {Text: "b1", Priority: 1}}
+	p := Pane{
+		Doc: newDoc("abc"),
+		ExtraRows: func(int) ExtraRows {
+			return ExtraRows{Above: above, Below: below}
+		},
+	}
+	f, ok := p.newFrame(40, 6)
+	if !ok {
+		t.Fatal("no frame")
+	}
+	ex := f.extrasFor(0)
+	if len(ex.Above) != 2 || ex.Above[0].Text != "early" || ex.Below[0].Text != "b1" {
+		t.Fatalf("rows = %+v / %+v, want them in priority order", ex.Above, ex.Below)
+	}
+	if above[0].Text != "late" || below[0].Text != "b2" {
+		t.Fatalf("the hook slices were reordered: %+v / %+v", above, below)
 	}
 }

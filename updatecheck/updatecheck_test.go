@@ -166,14 +166,11 @@ func TestCheckDebounces(t *testing.T) {
 	if !c.Due() {
 		t.Fatal("a fresh stamp path is not due")
 	}
-	if _, err := c.CheckIfDue(context.Background()); err != nil {
+	if _, err := c.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if c.Due() {
 		t.Fatal("due right after the check")
-	}
-	if rel, err := c.CheckIfDue(context.Background()); err != nil || rel != nil {
-		t.Fatalf("CheckIfDue within the interval = %+v, %v", rel, err)
 	}
 	if *count != 1 {
 		t.Fatalf("requests = %d, want 1", *count)
@@ -263,5 +260,23 @@ func TestLastSurvivesTheStamp(t *testing.T) {
 	}
 	if _, _, ok := old.Last(); !ok {
 		t.Fatal("a timestamp-only stamp should still be readable")
+	}
+}
+
+// TestCheckRedirectKeepsTheTransportPolicy: a redirect target is held to the same
+// policy as the configured URL, so an https feed cannot bounce the check to plain http.
+func TestCheckRedirectKeepsTheTransportPolicy(t *testing.T) {
+	for target, wantErr := range map[string]bool{
+		"https://example.com/latest": false,
+		"http://127.0.0.1:8080/x":    false,
+		"http://example.com/latest":  true,
+	} {
+		req, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := checkRedirect(req, nil); (err != nil) != wantErr {
+			t.Errorf("checkRedirect(%q) = %v, want error %v", target, err, wantErr)
+		}
 	}
 }

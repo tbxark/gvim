@@ -6,18 +6,17 @@
 // the area back to a buffer position for the mouse.
 //
 // The package is pure. A Pane is a value built for one frame. Render returns a
-// grid, and Caret, Hit, PosAt, ScrollTopFor, RevealTop and BodyRows answer from
+// grid, and Caret, Hit, PosAt, ScrollTopFor, RevealView and BodyRows answer from
 // the same geometry as Render. Nothing is read or written outside the arguments,
 // and there is no tea import. Coordinates are pane-local: column 0 is the pane's
 // left edge (the first gutter column), and row 0 is the first body row. The root
 // model adds the explorer columns and the body top before it calls in.
 //
-// Soft wrap follows the legacy rule (internal/tui/wrap.go, derived from the
-// legacy screens). With Wrap on, a buffer line wider than the wrap width takes
-// several rows, and the wrap width is the text area less two columns (or Opts.WrapColumn
-// when that is smaller), with the rows after the first indented as the line is when
-// Opts.WrapIndent is set. With Wrap
-// off, each line is one row, and the window moves by display columns (Left).
+// Soft wrap follows the break rule in wrap.go. With Wrap on, a buffer line wider than the
+// wrap width takes several rows, and the wrap width is the text area less two columns (or
+// Opts.WrapColumn when that is smaller), with the rows after the first indented as the line
+// is when Opts.WrapIndent is set. With Wrap off, each line is one row, and the window moves
+// by display columns (Left).
 // The caret and the mouse both work in display rows, but the editor moves and
 // scrolls by buffer lines.
 package editorpane
@@ -265,8 +264,7 @@ type Hit struct {
 }
 
 // Gutter sizes. The number field is at least three digits wide, and it widens
-// by one once the line count has three digits (from 100 lines), as the legacy
-// gutter does (legacy at 200 lines: "  88 │" at 200 lines).
+// by one once the line count has three digits (from 100 lines).
 const (
 	gutterMinDigits = 3
 	gutterSeparator = 3 // " │ " after the number field
@@ -473,7 +471,7 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	if f.pageOn {
 		f.wrapW = f.pageMeasure
 	} else {
-		f.wrapW = (w - f.gutter) - 2 // the legacy wrap width: text area less two
+		f.wrapW = (w - f.gutter) - 2 // the text area less two
 	}
 	if windowed(p.Doc) {
 		f.win, _ = p.Doc.(LineWindower)
@@ -1030,28 +1028,16 @@ func (p Pane) BodyRows(w, h int) int {
 	return f.h
 }
 
-// RevealTop returns the top line that puts the caret's display row inside a w by h
-// pane, counting the wrapped rows of each line. A caret already on screen keeps
-// the pane's top. A caret above the window takes its own line. A caret below takes
-// the fewest lines that fit above it, so the scroll is as short as it can be.
-func (p Pane) RevealTop(w, h int) int {
-	return p.RevealTopMargin(w, h, 0)
-}
-
-// RevealTopMargin is RevealTop that also keeps margin display rows between the caret
-// row and the top or bottom of the body, as the scroll-off setting asks. The margin
-// is at most half the body, and it gives way at the start and the end of the
-// document, where there is no text to show beyond the caret. The view moves by whole
-// lines, so a wrapped line at the edge can leave a little more than margin rows.
-func (p Pane) RevealTopMargin(w, h, margin int) int {
-	top, _ := p.RevealView(w, h, margin)
-	return top
-}
-
-// RevealView is RevealTopMargin that also returns the display rows of the top line to
-// scroll off (Pane.TopRow). The view moves by rows inside a wrapped line only when the
-// line is taller than the body, so that the caret's row can be shown; every other view
-// starts at the first row of its top line.
+// RevealView returns the top line that puts the caret's display row inside a w by h pane,
+// counting the wrapped rows of each line, and the display rows of that line to scroll off
+// (Pane.TopRow). A caret already on screen keeps the pane's top. A caret above the window
+// takes its own line. A caret below takes the fewest lines that fit above it. margin keeps
+// that many display rows between the caret row and the top or bottom of the body, as the
+// scroll-off setting asks: it is at most half the body, and it gives way at the start and the
+// end of the document. The view moves by whole lines, so a wrapped line at the edge can leave
+// a little more than margin rows. It moves by rows inside a wrapped line only when the line is
+// taller than the body, so that the caret's row can be shown; every other view starts at the
+// first row of its top line.
 func (p Pane) RevealView(w, h, margin int) (top, row int) {
 	f, ok := p.newFrame(w, h)
 	if !ok {
@@ -1417,22 +1403,6 @@ func (p Pane) ScrollTopFor(w, h, row int) int {
 		return line
 	}
 	return min(top, max(lines-h, 0))
-}
-
-// Thumb returns the first body row and the length in rows of the scrollbar
-// thumb for the current top line in a pane h rows tall. It is meaningful when
-// the document is taller than the pane.
-func (p Pane) Thumb(h int) (start, length int) {
-	if p.Doc == nil || h <= 0 {
-		return 0, 0
-	}
-	lines := max(p.Doc.LineCount(), 1)
-	display := max(DisplayLines(p.Doc), lines)
-	top := min(max(p.Top, 0), lines-1)
-	if p.Fillers != nil {
-		return thumbOf(p.Fillers.Total(lines), h, p.Fillers.BlockStart(top)+max(p.TopRow, 0))
-	}
-	return thumbOf(display, h, top)
 }
 
 // thumb is the scrollbar thumb of the frame: its first body row and length.

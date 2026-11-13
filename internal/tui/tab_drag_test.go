@@ -5,18 +5,20 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
 )
 
 // tabRun returns the run of the name of tab i.
-func tabRun(t *testing.T, m *Model, i int) run {
+func tabRun(t *testing.T, m *Model, i int) frame.Run {
 	t.Helper()
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTab && r.Index == i {
+		if r.Kind == frame.HitTab && r.Index == i {
 			return r
 		}
 	}
 	t.Fatalf("no run for tab %d", i)
-	return run{}
+	return frame.Run{}
 }
 
 // pastMidpoint is a column inside tab to, on the side away from tab from. A drag
@@ -106,9 +108,9 @@ func TestTabDragLeavingTheStripRowDoesNotReorder(t *testing.T) {
 func TestDraggingACloseButtonDoesNotMoveTheTab(t *testing.T) {
 	m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt")
 	y := m.layout().StripY
-	var closeRun run
+	var closeRun frame.Run
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTabClose && r.Index == 0 {
+		if r.Kind == frame.HitTabClose && r.Index == 0 {
 			closeRun = r
 		}
 	}

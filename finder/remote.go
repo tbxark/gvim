@@ -132,15 +132,6 @@ func skipDirName(name string) bool {
 	return false
 }
 
-// StartRemote begins enumerating the remote workspace root in the background and returns
-// at once. It fills the same Index type as Start, so the palette needs no remote-aware
-// code: while loading it polls, and an error leaves the partial list usable.
-func StartRemote(ctx context.Context, fs RemoteFS, root string) *Index {
-	return startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
-		return EnumerateRemote(ctx, fs, root, Options{}, emit)
-	})
-}
-
 // Idle returns an index that is finished, has no files and is safe to read: a remote
 // launch uses it before its authority slot is connected, so no local enumeration ever
 // starts in the meantime.

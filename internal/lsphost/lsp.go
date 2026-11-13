@@ -1,9 +1,3 @@
-// Package lsphost is the language-server host of the app: it implements the TUI's
-// LSPSession over the multi-server manager. It builds the effective server table
-// from the built-in catalogue and the config, keeps one manager per workspace
-// root, converts the protocol's UTF-16 positions to the editor's rune positions,
-// queues server-initiated workspace edits for the root to apply, and lists the
-// configured servers for the status popup.
 package lsphost
 
 import (
@@ -67,31 +61,6 @@ type ExternalLocationOpener func(ctx context.Context, req ExternalLocationReques
 // externalLocationTimeout bounds one external URI resolution (the opener has its own
 // smaller process timeout too).
 const externalLocationTimeout = 10 * time.Second
-
-// New returns the language-server port for the servers of the config, or
-// nil when no server is configured, so that no LSP feature is on. It is the
-// explicit-server form used by tests: each server is one that starts on its own.
-// NewFor is the config form, with the built-in table and the universal servers.
-func New(servers map[string]config.LSPServer) tui.LSPSession {
-	if len(servers) == 0 {
-		return nil
-	}
-	plan := lspPlan{
-		servers:   make(map[string][]manager.ServerConfig),
-		info:      make(map[string]tui.LSPServerInfo),
-		auto:      make(map[string]bool),
-		startable: make(map[string]bool),
-	}
-	for lang, s := range servers {
-		cfg := serverConfig(s, manager.Spec{})
-		cfg.AutoStart = true
-		plan.servers[lang] = []manager.ServerConfig{cfg}
-		plan.info[lang] = tui.LSPServerInfo{State: tui.LSPServerOn, Language: lang, Command: cfg.Command[0]}
-		plan.auto[lang] = true
-		plan.startable[lang] = true
-	}
-	return newPort(plan, true, nil)
-}
 
 // newPort builds the port for the plan. lspEnabled is the lsp_enabled master
 // switch; it is false when the workspace is untrusted, and then no server starts
@@ -421,13 +390,17 @@ func (p *lspPort) markerAt(ctx context.Context, checker func(context.Context, st
 		return false, err
 	}
 	p.mu.Lock()
-	if len(p.rootCacheOrder) >= remoteRootCacheSize {
-		old := p.rootCacheOrder[0]
-		p.rootCacheOrder = p.rootCacheOrder[1:]
-		delete(p.rootCache, old)
+	if _, cached := p.rootCache[cacheKey]; !cached {
+		// An expired entry is refreshed in place: listing its key again would let
+		// the eviction below drop the fresh entry early.
+		if len(p.rootCacheOrder) >= remoteRootCacheSize {
+			old := p.rootCacheOrder[0]
+			p.rootCacheOrder = p.rootCacheOrder[1:]
+			delete(p.rootCache, old)
+		}
+		p.rootCacheOrder = append(p.rootCacheOrder, cacheKey)
 	}
 	p.rootCache[cacheKey] = remoteRootCacheEntry{ok: ok, at: time.Now()}
-	p.rootCacheOrder = append(p.rootCacheOrder, cacheKey)
 	p.mu.Unlock()
 	return ok, nil
 }
@@ -881,6 +854,36 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 		}
 	}
 	return out, nil
+}
+
+// checkWorkspaceEdit reports why workspaceEdit would refuse edit: an unsupported document
+// change or text edit. It reads no document, so the workspace/applyEdit handler can run
+// it on a server's read goroutine.
+func checkWorkspaceEdit(edit *protocol.WorkspaceEdit) error {
+	if len(edit.DocumentChanges) > 0 {
+		for _, dc := range edit.DocumentChanges {
+			switch change := dc.(type) {
+			case *protocol.TextDocumentEdit:
+				for _, el := range change.Edits {
+					if _, err := plainTextEdit(el); err != nil {
+						return err
+					}
+				}
+			case *protocol.CreateFile, *protocol.RenameFile, *protocol.DeleteFile:
+			default:
+				return fmt.Errorf("lsp: unsupported document change %T", dc)
+			}
+		}
+		return nil
+	}
+	for _, edits := range edit.Changes {
+		for _, el := range textEdits(edits) {
+			if _, err := plainTextEdit(el); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // textEdits wraps the plain text edits of a changes map.
@@ -1354,10 +1357,9 @@ func (p *lspPort) locations(path string, at buffer.Pos, feature manager.Feature,
 	h := hs[0]
 	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
 	defer cancel()
-	var locs []protocol.Location
-	locs, askErr := ask(ctx, h.Client(), lsp.PathURI(path), rec.lines.toLSP(at))
-	if askErr != nil {
-		return nil, askErr
+	locs, err := ask(ctx, h.Client(), lsp.PathURI(path), rec.lines.toLSP(at))
+	if err != nil {
+		return nil, err
 	}
 	target := ExternalLocationRequest{
 		Language: rec.lang,
@@ -1437,7 +1439,7 @@ func (p *lspPort) handleNamed(path, language, name string) (*manager.Handle, boo
 		return nil, false
 	}
 	mgr := p.managerFor(rec.root)
-	for _, h := range mgr.Handles(rec.lang) {
+	for _, h := range mgr.Handles(language) {
 		if h.Name() == name {
 			return h, true
 		}
@@ -1618,8 +1620,13 @@ func (p *lspPort) newManagerLocked(root string) *manager.Manager {
 
 // enqueueEdit is the workspace/applyEdit handler: it queues the edit and answers
 // the server at once. It runs on a server's read goroutine, so it does no IO and
-// waits for nothing; the root drains the queue and applies the edits.
-func (p *lspPort) enqueueEdit(language string, params protocol.ApplyWorkspaceEditParams) bool {
+// waits for nothing; the root drains the queue and applies the edits. An edit the
+// port cannot convert is refused here (the server is told it was not applied)
+// instead of being dropped when the queue drains.
+func (p *lspPort) enqueueEdit(language string, params protocol.ApplyWorkspaceEditParams) (bool, string) {
+	if err := checkWorkspaceEdit(&params.Edit); err != nil {
+		return false, err.Error()
+	}
 	label := ""
 	if params.Label != nil {
 		label = *params.Label
@@ -1627,7 +1634,7 @@ func (p *lspPort) enqueueEdit(language string, params protocol.ApplyWorkspaceEdi
 	p.mu.Lock()
 	p.pending = append(p.pending, pendingEdit{language: language, edit: params.Edit, label: label})
 	p.mu.Unlock()
-	return true
+	return true, ""
 }
 
 // SetSpawnEnv installs the active project environment's set-only overlay for
@@ -1643,10 +1650,7 @@ func (p *lspPort) SetSpawnEnv(overlay func() []string) {
 func (p *lspPort) SetSpawnGate(gate func(ctx context.Context, argv []string, cwd, pathValue string) error) {
 	p.mu.Lock()
 	p.spawnGate = gate
-	managers := make([]*manager.Manager, 0, len(p.managers))
-	for _, mgr := range p.managers {
-		managers = append(managers, mgr)
-	}
+	managers := slices.Collect(maps.Values(p.managers))
 	p.mu.Unlock()
 	for _, mgr := range managers {
 		mgr.SetGate(gate)
@@ -1712,10 +1716,7 @@ func (p *lspPort) SetAutoStartGate(gate func() bool) {
 func (p *lspPort) SetSpawner(start func(context.Context, lsp.Config) (*lsp.Client, error)) {
 	p.mu.Lock()
 	p.spawner = start
-	managers := make([]*manager.Manager, 0, len(p.managers))
-	for _, mgr := range p.managers {
-		managers = append(managers, mgr)
-	}
+	managers := slices.Collect(maps.Values(p.managers))
 	p.mu.Unlock()
 	for _, mgr := range managers {
 		mgr.SetSpawner(start)
@@ -1729,10 +1730,7 @@ func (p *lspPort) SetSpawner(start func(context.Context, lsp.Config) (*lsp.Clien
 // between servers.
 func (p *lspPort) RestartAfterReconnect(ctx context.Context) (int, error) {
 	p.mu.Lock()
-	managers := make([]*manager.Manager, 0, len(p.managers))
-	for _, mgr := range p.managers {
-		managers = append(managers, mgr)
-	}
+	managers := slices.Collect(maps.Values(p.managers))
 	p.mu.Unlock()
 	total := 0
 	var errs []error

@@ -7,6 +7,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/session"
 )
 
@@ -353,7 +354,7 @@ func TestDualRefusals(t *testing.T) {
 	m2.splits.comparing = false
 	// More than one pane already.
 	m3, _ := dualModel(t)
-	m3.splitFocused(sideBySide)
+	m3.splitFocused(split.SideBySide)
 	runAction(t, m3, "markdown_mode_dual")
 	if !strings.Contains(m3.notice, "single pane") {
 		t.Fatalf("notice = %q, want the single-pane refusal", m3.notice)
@@ -378,7 +379,7 @@ func TestDualRefusesLargeDocuments(t *testing.T) {
 func TestSplitPanesIndependentMarkdownViewModes(t *testing.T) {
 	t.Parallel()
 	m, _ := dualModel(t)
-	m.splitFocused(sideBySide)
+	m.splitFocused(split.SideBySide)
 	leaves := m.splits.Root.Leaves()
 	if len(leaves) != 2 {
 		t.Fatalf("panes = %d, want 2", len(leaves))

@@ -205,12 +205,12 @@ func TestEnumerateAllIncludesHiddenAndIgnored(t *testing.T) {
 func TestIndexCapsAtMaxFiles(t *testing.T) {
 	var x Index
 	for i := range MaxFiles {
-		if !x.add(fmt.Sprintf("f%05d", i)) {
-			t.Fatalf("add %d refused below the cap", i)
+		if !x.addFor(0, fmt.Sprintf("f%05d", i)) {
+			t.Fatalf("addFor %d refused below the cap", i)
 		}
 	}
-	if x.add("overflow") {
-		t.Fatal("add accepted a file past MaxFiles")
+	if x.addFor(0, "overflow") {
+		t.Fatal("addFor accepted a file past MaxFiles")
 	}
 	files, _ := x.Snapshot()
 	if len(files) != MaxFiles || !x.Truncated() {

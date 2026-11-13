@@ -62,3 +62,10 @@ func (b *Buffer) GridSkip() int64 { return b.big.g.skip }
 
 // Stores is the number of open large buffers counted by the budget.
 func (p *PageBudget) Stores() int { return int(p.stores.Load()) }
+
+// len returns the number of cached pages.
+func (pc *pageCache) len() int {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	return pc.lru.Len()
+}

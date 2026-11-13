@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -23,7 +24,7 @@ func TestPluginStatusItemNamedEnvStaysPlugin(t *testing.T) {
 	l := e.m.layout()
 	x := -1
 	for _, r := range l.Status {
-		if r.Kind == hitStatusPlugin && strings.Contains(r.Text, "plugin env") {
+		if r.Kind == frame.HitStatusPlugin && strings.Contains(r.Text, "plugin env") {
 			x = r.X
 		}
 	}
@@ -34,7 +35,7 @@ func TestPluginStatusItemNamedEnvStaysPlugin(t *testing.T) {
 	// plugin item even though its ID matches the native segment's ID.
 	index := -1
 	for i, r := range l.Status {
-		if r.Kind == hitStatusPlugin && strings.Contains(r.Text, "plugin env") {
+		if r.Kind == frame.HitStatusPlugin && strings.Contains(r.Text, "plugin env") {
 			index = r.Index
 		}
 		_ = i

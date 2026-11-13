@@ -12,22 +12,13 @@ import (
 // its length, so Lookup refuses a longer name before the search.
 const maxLanguageName = 32
 
-// plainLanguage reports whether a lexer name stands for "no language".
-func plainLanguage(name string) bool {
-	switch strings.ToLower(name) {
-	case "fallback", "plaintext", "text only":
-		return true
-	}
-	return false
-}
-
 // Languages returns the names of the languages that have a lexer, sorted without
 // regard to case. The plain-text lexers are left out: plain text is the absence of
 // a language. A name from the list is accepted by Lookup.
 func Languages() []string {
 	var names []string
 	for _, n := range lexers.Names(false) {
-		if !plainLanguage(n) {
+		if !IsPlain(n) {
 			names = append(names, n)
 		}
 	}
@@ -50,7 +41,7 @@ func Lookup(name string) (string, bool) {
 		return "", false
 	}
 	canonical := lx.Config().Name
-	if canonical == "" || plainLanguage(canonical) {
+	if canonical == "" || IsPlain(canonical) {
 		return "", false
 	}
 	return canonical, true

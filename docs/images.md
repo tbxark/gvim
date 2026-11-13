@@ -10,7 +10,10 @@ escape sequence.
 
 `png`, `jpeg`, `gif` and `webp` files are image documents (see
 `document/image.go`). The header alone is read, through `image.DecodeConfig`, so
-opening a very large picture does not decode it. The document is read-only and its
+opening a very large picture does not decode it. A JPEG whose metadata (EXIF, XMP, ICC
+profiles) pushes the frame header past the first 64 KiB is still recognised: the probe
+walks the marker segments and reads more of the file, up to 4 MiB in all; a JPEG whose frame
+header lies beyond that is not shown as a picture. The document is read-only and its
 text is a short summary, so the tab strip, the status row and the pane geometry
 need no special case:
 
@@ -111,7 +114,7 @@ protocol changes from unavailable to available.
 
 | File | Role |
 |---|---|
-| `document/image.go` | `ImageInfo`, `imageInfoOf`, `imageDocument`, `Image`, `ImageStat` |
+| `document/image.go` | `ImageInfo`, `imageInfoOf`, `newImageDocument`, `Image`, `ImageStat` |
 | `document/binary.go` | the non-image binary summary and its bounded `ReadBinaryRange` |
 | `document/document.go` | the image branch of `readDocument`, before the binary one |
 | `document/large.go` | a large image stays an image, not a windowed binary |

@@ -12,7 +12,6 @@ import (
 // at path only when the document is still at expect. It is the version-checked
 // form the root's multi-file edit helper uses for a workspace edit.
 func (a *Editor) ApplyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error {
-	a.edited()
 	return a.ed.ApplyLSPEditsExpect(path, edits, expect)
 }
 

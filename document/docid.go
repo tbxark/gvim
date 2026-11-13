@@ -24,7 +24,7 @@ func (v Version) IsZero() bool { return v == Version{} }
 // docSeam is the per-document state of the plugin seams: its id, its buffer
 // generation and the change tracking. It is a field of Document.
 type docSeam struct {
-	Id  DocID
+	ID  DocID
 	Gen uint64
 	// obs is the buffer observer while changes are tracked, else nil.
 	Obs func(buffer.Change)
@@ -38,7 +38,7 @@ var genCounter atomic.Uint64
 
 // ID returns the id of the document. It is 0 until an Editor has adopted the
 // document, which happens when it enters a tab.
-func (d *Document) ID() DocID { return d.seam.Id }
+func (d *Document) ID() DocID { return d.seam.ID }
 
 // Gen returns the generation of the document's buffer: a number from a
 // process-wide counter, starting at 1, that changes whenever the Buffer is
@@ -56,7 +56,7 @@ func (d *Document) Version() Version {
 	return Version{Gen: d.Gen(), Ver: d.Buffer.Version()}
 }
 
-// setBuffer makes b the document's buffer. It is the only place that replaces
+// SetBuffer makes b the document's buffer. It is the only place that replaces
 // the Buffer object: it starts a new generation, moves the change observer to b
 // and reports one coarse change, so whoever tracks the text drops its state.
 func (d *Document) SetBuffer(b *buffer.Buffer) {

@@ -76,3 +76,44 @@ func TestRestoreHotExitWithNothingUnsavedOpensNoTabs(t *testing.T) {
 		t.Fatalf("tabs = %v, want none", names)
 	}
 }
+
+// TestRestoreHotExitAppliesTheSavedActiveTab checks the saved active tab wins when it
+// is one of the tabs that come back, even though other saved tabs are not opened.
+func TestRestoreHotExitAppliesTheSavedActiveTab(t *testing.T) {
+	apptest.IsolateConfig(t)
+	dir := t.TempDir()
+	sessDir := filepath.Join(dir, "session")
+	clean := filepath.Join(dir, "clean.txt")
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+	for _, path := range []string{clean, first, second} {
+		apptest.Must(t, os.WriteFile(path, []byte("on disk\n"), 0o644))
+	}
+	stash1, err := session.StashContent(sessDir, "first unsaved\n")
+	apptest.Must(t, err)
+	stash2, err := session.StashContent(sessDir, "second unsaved\n")
+	apptest.Must(t, err)
+	files := []session.FileState{
+		{Path: clean},
+		{Path: first, StashFile: stash1},
+		{Path: second, StashFile: stash2},
+	}
+	for _, tt := range []struct {
+		name   string
+		active int
+		want   string
+	}{
+		{"hot tab", 2, second},
+		{"clean tab falls back to the first hot tab", 0, first},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ed := apptest.NewSessionEditor()
+			if failed := RestoreHotExit(ed, sessDir, session.Session{Active: tt.active, Files: files}); len(failed) != 0 {
+				t.Fatalf("RestoreHotExit failed = %v", failed)
+			}
+			if got := ed.Active().Path; got != tt.want {
+				t.Fatalf("active tab = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

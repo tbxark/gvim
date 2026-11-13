@@ -1,6 +1,6 @@
 package tui
 
-// Pane-layout persistence (task-102): capture the split tree into the session
+// Pane-layout persistence: capture the split tree into the session
 // format without touching the editor, and restore it over the editor's restored
 // tabs. The split package owns the tree/session conversion and the validation; this
 // file owns the tab<->file identity rules, which are the same rules restore uses to

@@ -2,5 +2,5 @@
   "name": "tab_actions",
   "version": "1.0.0",
   "description": "Close the other tabs, the tabs to the right or left, or all tabs; move the active tab",
-  "api": 1
+  "api": 2
 }

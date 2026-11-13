@@ -23,7 +23,6 @@
     "status.commit_ready": "Commit %{hash} | Up/Down: navigate | RET: open file | q: back",
     "status.failed_open_details": "Failed to open commit details",
     "status.hash_copied": "Copied: %{short} (%{full})",
-    "status.hash_display": "Hash: %{hash}",
     "status.git_error": "Git log error: %{error}",
     "status.error_fetching_diff": "Error fetching diff: %{error}",
     "status.file_loading": "Loading %{file} at %{hash}...",
@@ -35,13 +34,14 @@
     "panel.commits_header": "Commits:",
     "panel.no_commits": "  No commits found",
     "panel.log_hint": "%{count} commits in %{scope} | j/k: move  RET: detail  Tab: pane  y: hash  r: refresh  q: close",
-    "panel.detail_hint": "%{hash} %{subject} | j/k: scroll  RET: open file  Tab: log  y: hash  r: refresh  q: close",
     "panel.scope_repo": "the repository",
     "panel.scope_file": "this file",
-    "panel.loading": "  Loading commit %{hash}...",
     "panel.select": "  Select a commit to see its diff",
     "panel.truncated": "  [diff truncated at %{lines} lines: use git show -- <path> for the rest]",
     "panel.omitted_header": "  [%{count} large file(s) omitted from the diff (over %{lines} changed lines):",
-    "panel.omitted_footer": "   run git show %{hash} -- <path> to view them]"
+    "panel.omitted_footer": "   run git show %{hash} -- <path> to view them]",
+    "panel.mode_log": "-- GIT LOG --",
+    "panel.mode_detail": "-- GIT LOG DETAIL --",
+    "panel.mode_file": "-- GIT FILE --"
   }
 }

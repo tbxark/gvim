@@ -14,7 +14,6 @@ func TestNotApplicableCommandsSayWhy(t *testing.T) {
 		action string
 		why    string
 	}{
-		{"detach", "no server"},
 		{"update_fresh", "does not update itself"},
 		{"open_update_log", "does not update itself"},
 		{"trigger_wave_animation", "easter egg"},
@@ -33,6 +32,26 @@ func TestNotApplicableCommandsSayWhy(t *testing.T) {
 				t.Fatalf("notice = %q, want it to say %q", m.notice, tt.why)
 			}
 		})
+	}
+}
+
+// TestDetachActionLeavesTheDaemon checks that Fresh's detach action is the daemon detach: a
+// hosted editor drops its client, and an unhosted one says it is not attached (it never
+// claims that gvim has no server).
+func TestDetachActionLeavesTheDaemon(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, newFakeEditor("x"), nil, 80, 24)
+	if cmd := rootPaletteRun(m, "detach"); cmd != nil {
+		t.Fatal("detach started a command")
+	}
+	if m.notice != "Not attached to a daemon" {
+		t.Fatalf("notice without a daemon = %q", m.notice)
+	}
+	detached := false
+	m.detach = func() { detached = true }
+	rootPaletteRun(m, "detach")
+	if !detached || m.notice != "Detached from the daemon" {
+		t.Fatalf("detached %v, notice %q", detached, m.notice)
 	}
 }
 

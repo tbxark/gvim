@@ -55,7 +55,7 @@ func TestStatusRowIsTheConfiguredElementLists(t *testing.T) {
 			t.Errorf("status row %q paints %q although the configured lists do not name it", row, gone)
 		}
 	}
-	if got := m.layout().Hit(1, m.layout().StatusY); got.Kind != hitStatusSegment {
+	if got := m.layout().Hit(1, m.layout().StatusY); got.Kind != frame.HitStatusSegment {
 		t.Errorf("hit on the configured row = %+v", got)
 	}
 }
@@ -94,10 +94,10 @@ func TestEmptyConfiguredStatusRowPaintsNothing(t *testing.T) {
 func TestMessagesElementOpensTheWarningsList(t *testing.T) {
 	m := statusViewModel(t, nil)
 	m.notes.keep("a warning from the test")
-	var messages *run
+	var messages *frame.Run
 	l := m.layout()
 	for i := range l.Status {
-		if l.Status[i].Kind == hitStatusSegment && l.Status[i].Index == frame.StatusSegmentMessages {
+		if l.Status[i].Kind == frame.HitStatusSegment && l.Status[i].Index == frame.StatusSegmentMessages {
 			messages = &l.Status[i]
 		}
 	}
@@ -131,9 +131,9 @@ func TestTerminalRestartElementRestartsTheDock(t *testing.T) {
 		t.Fatalf("exited dock: {terminal_restart} = %q", got)
 	}
 	l := m.layout()
-	var restart *run
+	var restart *frame.Run
 	for i := range l.Status {
-		if l.Status[i].Kind == hitStatusSegment && l.Status[i].Index == frame.StatusSegmentTerminalRestart {
+		if l.Status[i].Kind == frame.HitStatusSegment && l.Status[i].Index == frame.StatusSegmentTerminalRestart {
 			restart = &l.Status[i]
 		}
 	}

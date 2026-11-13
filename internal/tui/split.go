@@ -9,6 +9,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -64,10 +65,10 @@ func (m *Model) splitAction(action string) {
 	switch action {
 	case "split_horizontal":
 		m.focusEditor()
-		m.splitFocused(stacked)
+		m.splitFocused(split.Stacked)
 	case "split_vertical":
 		m.focusEditor()
-		m.splitFocused(sideBySide)
+		m.splitFocused(split.SideBySide)
 	case "next_split", "next_pane":
 		m.focusEditor()
 		m.moveFocus(1)
@@ -105,7 +106,7 @@ func (m *Model) splitAction(action string) {
 // splitFocused splits the focused pane in direction dir. The new pane is the second
 // child, shows the same tab at the same top, and takes the focus. A pane too small to
 // hold two children is not split.
-func (m *Model) splitFocused(dir splitDir) {
+func (m *Model) splitFocused(dir split.Dir) {
 	if msg := m.trySplit(dir); msg != "" {
 		m.notice = msg
 	}
@@ -113,7 +114,7 @@ func (m *Model) splitFocused(dir splitDir) {
 
 // trySplit is splitFocused that returns the reason a split did not happen, or "" when it
 // did, instead of showing it.
-func (m *Model) trySplit(dir splitDir) string {
+func (m *Model) trySplit(dir split.Dir) string {
 	if !m.hasDocument() {
 		return noDocumentNotice
 	}
@@ -122,7 +123,7 @@ func (m *Model) trySplit(dir splitDir) string {
 	m.splits.maximized = false
 	fp := m.layout().FocusedPane()
 	extent := fp.W
-	if dir == stacked {
+	if dir == split.Stacked {
 		extent = fp.H
 	}
 	if extent < minSplitExtent {
@@ -132,8 +133,8 @@ func (m *Model) trySplit(dir splitDir) string {
 	f := m.splits.Focus
 	f.Dir = dir
 	// The first child is the pane as it was, so it keeps the window id.
-	f.A = &splitNode{Tab: f.Tab, Top: f.Top, ID: f.ID}
-	f.B = &splitNode{Tab: f.Tab, Top: f.Top}
+	f.A = &split.Node{Tab: f.Tab, Top: f.Top, ID: f.ID}
+	f.B = &split.Node{Tab: f.Tab, Top: f.Top}
 	f.ID = 0
 	m.setWindowFocus(f.B)
 	m.splits.comparing = false
@@ -182,7 +183,7 @@ func (m *Model) focusPane(i int) {
 // focusLeaf gives the focus to the leaf n. The leaf that loses the focus keeps the tab
 // and the top it had. The leaf that takes the focus shows its own tab, scrolled to its
 // own top.
-func (m *Model) focusLeaf(n *splitNode) {
+func (m *Model) focusLeaf(n *split.Node) {
 	if n == m.splits.Focus {
 		return
 	}
@@ -217,18 +218,18 @@ func (m *Model) keepFocused() {
 
 // splitInput gives the layout the split tree and the state of each leaf in reading
 // order. The focused leaf shows the active tab at the editor's viewport top.
-func (m *Model) splitInput() (*splitNode, []leafInfo) {
+func (m *Model) splitInput() (*split.Node, []split.LeafInfo) {
 	leaves := m.splits.Root.Leaves()
-	infos := make([]leafInfo, len(leaves))
+	infos := make([]split.LeafInfo, len(leaves))
 	for i, n := range leaves {
 		if n != m.splits.Focus {
-			infos[i] = leafInfo{Tab: n.Tab, Top: n.Top}
+			infos[i] = split.LeafInfo{Tab: n.Tab, Top: n.Top}
 			if doc := m.docAt(n.Tab); doc != nil {
 				infos[i].Lines = displayLines(doc)
 			}
 			continue
 		}
-		infos[i] = leafInfo{Tab: m.activeTab(), Focused: true}
+		infos[i] = split.LeafInfo{Tab: m.activeTab(), Focused: true}
 		if doc := m.ed.Active(); doc != nil {
 			infos[i].Top = doc.Top()
 			infos[i].Lines = displayLines(doc)
@@ -253,7 +254,7 @@ func (m *Model) docAt(i int) Document {
 }
 
 // leafDoc returns the document that leaf n shows.
-func (m *Model) leafDoc(n *splitNode) Document {
+func (m *Model) leafDoc(n *split.Node) Document {
 	if n == m.splits.Focus {
 		return m.ed.Active()
 	}
@@ -361,7 +362,7 @@ func (m *Model) scrollPane(i, delta int) {
 }
 
 // paneDoc returns the document that pane p shows.
-func (m *Model) paneDoc(p splitPane) Document {
+func (m *Model) paneDoc(p split.Pane) Document {
 	if p.Focused {
 		return m.ed.Active()
 	}
@@ -370,7 +371,7 @@ func (m *Model) paneDoc(p splitPane) Document {
 
 // paneFor returns the editor pane that paints p with doc. The find bar's highlights
 // go to the focused pane only, because they belong to the active document.
-func (m *Model) paneFor(p splitPane, doc Document) editorpane.Pane {
+func (m *Model) paneFor(p split.Pane, doc Document) editorpane.Pane {
 	pane := m.paneGeometry(p, doc)
 	if p.Focused {
 		pane.Highlights = paneHighlights(m.findLineHighlights())
@@ -381,7 +382,7 @@ func (m *Model) paneFor(p splitPane, doc Document) editorpane.Pane {
 // paneGeometry is the editor pane of paneFor without the search highlights. The
 // geometry does not depend on them, and building them searches the document, so
 // the caret, viewport and press paths use this one.
-func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
+func (m *Model) paneGeometry(p split.Pane, doc Document) editorpane.Pane {
 	pane := editorpane.Pane{
 		Doc: doc, Top: p.Top, Styles: m.panes, TabSize: m.tabSize,
 		Diagnostics: m.lspSpans(doc),
@@ -405,8 +406,15 @@ func (m *Model) overviewRulerMarks(pane editorpane.Pane, doc Document) editorpan
 		return pane
 	}
 	path := docPath(doc)
-	var marks []editorpane.TrackMark
-	if ds := m.lsp.diags[path]; len(ds) > 0 {
+	ds := m.lsp.diags[path]
+	if len(ds) == 0 {
+		return pane
+	}
+	// The marks only change with the published set (a new slice) or the theme, so they
+	// are kept until one of them does.
+	c := &m.rulerMarks
+	if c.path != path || c.n != len(ds) || c.first != &ds[0] || c.themeGen != m.themeGen {
+		marks := make([]editorpane.TrackMark, 0, len(ds))
 		for _, d := range ds {
 			st := pane.Styles.DiagError
 			switch d.Severity {
@@ -423,11 +431,21 @@ func (m *Model) overviewRulerMarks(pane editorpane.Pane, doc Document) editorpan
 				Style: st,
 			})
 		}
+		*c = rulerMarkCache{path: path, first: &ds[0], n: len(ds), themeGen: m.themeGen, marks: marks}
 	}
-	if len(marks) > 0 {
-		pane.TrackMarks = append(pane.TrackMarks, marks...)
-	}
+	pane.TrackMarks = append(pane.TrackMarks, c.marks...)
 	return pane
+}
+
+// rulerMarkCache is the overview marks of the last document that had diagnostics, and
+// what they were built from: the document, the published set (its first element and
+// length) and the theme generation.
+type rulerMarkCache struct {
+	path     string
+	first    *Diagnostic
+	n        int
+	themeGen uint64
+	marks    []editorpane.TrackMark
 }
 
 // focusedBodyRows is the number of text rows of the focused pane, which is the
@@ -444,8 +462,8 @@ func (m *Model) focusedBodyRows() int {
 
 // revealCaretVisual scrolls the focused pane so that the caret's display row is on
 // screen. The editor counts buffer lines, and a wrapped line takes several rows, so
-// its own reveal can leave the caret below the body. The top it moves to is the one
-// the pane paints with (editorpane.RevealTop), so the caret, the hit map and the
+// its own reveal can leave the caret below the body. The view it moves to is the one
+// the pane paints with (editorpane.RevealView), so the caret, the hit map and the
 // paint agree on the row. margin is the rows kept between the caret row and the edge
 // of the body, and it is 0 for a caret that did not move by the keyboard.
 func (m *Model) revealCaretVisual(margin int) {
@@ -532,7 +550,7 @@ func (m *Model) paneHitIn(i, x, y int) (p editorpane.Pane, hit editorpane.Hit, t
 // document is left blank. A pane that shows an image file draws the picture over
 // the placeholder cells when the terminal supports it; otherwise the text summary
 // of the document is painted the usual way.
-func (m *Model) paintPanes(g *grid.Grid, l layout) {
+func (m *Model) paintPanes(g *grid.Grid, l frame.Layout) {
 	for i, p := range l.Panes {
 		doc := m.paneDoc(p)
 		if doc == nil || p.W <= 0 || p.H <= 0 {
@@ -556,7 +574,7 @@ func (m *Model) paintPanes(g *grid.Grid, l layout) {
 // can show pictures and the picture has reached it; otherwise the caller paints the
 // text pane, so the summary is shown while the upload is in flight and when the
 // terminal cannot draw images at all.
-func (m *Model) imagePane(p splitPane, doc Document, placement int) (*grid.Grid, bool) {
+func (m *Model) imagePane(p split.Pane, doc Document, placement int) (*grid.Grid, bool) {
 	img, ok := doc.(imageDoc)
 	if !ok || !m.img.imageEnabled() {
 		return nil, false
@@ -578,7 +596,7 @@ func (m *Model) imagePane(p splitPane, doc Document, placement int) (*grid.Grid,
 
 // paintStickyScroll displays a sticky header on the top row of the pane showing
 // the enclosing function or scope declaration when scrolled down into a body.
-func (m *Model) paintStickyScroll(g *grid.Grid, p splitPane, doc Document) {
+func (m *Model) paintStickyScroll(g *grid.Grid, p split.Pane, doc Document) {
 	if !m.stickyScroll || p.Top <= 0 || p.W <= 10 || p.H <= 2 {
 		return
 	}
@@ -624,7 +642,7 @@ func (m *Model) splitCell() grid.Style {
 }
 
 // drawBorders paints the lines between panes in cell.
-func drawBorders(g *grid.Grid, borders []splitBorder, cell grid.Style) {
+func drawBorders(g *grid.Grid, borders []split.Border, cell grid.Style) {
 	for _, b := range borders {
 		if b.Vertical {
 			for y := b.Y; y < b.Y+b.H; y++ {

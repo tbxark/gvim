@@ -62,7 +62,7 @@ local function load_files()
     return
   end
   if truncated then
-    gvim.notify(t("status.showing_first", { shown = tostring(#out), total = tostring(#out) }))
+    gvim.notify(t("status.showing_first", { shown = tostring(#out) }))
   end
   return repo.root, out
 end

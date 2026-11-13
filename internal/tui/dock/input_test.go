@@ -1,6 +1,9 @@
 package dock
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -452,5 +455,52 @@ func TestHoverInTheScrollbackUsesTheAbsoluteRow(t *testing.T) {
 	start := strings.Index("see src/a.go", "src")
 	if !g.At(start, 1).Style.Underline {
 		t.Fatal("the scrollback link is not underlined")
+	}
+}
+
+// A release that is not forwarded (Shift held at the release) still ends the held
+// button, so later buttonless motion is not reported as a drag.
+func TestUnforwardedReleaseClearsTheHeldButton(t *testing.T) {
+	t.Parallel()
+	p, term := livePanel(t, "hello")
+	term.mouse = true
+	p.Mouse(clickAt(1, 1, 0, tea.MouseLeft), scrollLayout(), 1)
+	if p.pressed == 0 {
+		t.Fatal("setup: the forwarded press did not hold the button")
+	}
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 1, Y: 1, Button: tea.MouseLeft, Mod: tea.ModShift}), scrollLayout(), 1)
+	if p.pressed != 0 {
+		t.Fatalf("pressed = %d after the release, want 0", p.pressed)
+	}
+}
+
+func TestResolveLinkTilde(t *testing.T) {
+	t.Parallel()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	seen := func(want ...string) func(string) bool {
+		return func(path string) bool { return slices.Contains(want, path) }
+	}
+	tests := []struct {
+		name, token string
+		stat        func(string) bool
+		want        string
+		ok          bool
+	}{
+		{"home file", "~/a.md", seen(filepath.Join(home, "a.md")), filepath.Join(home, "a.md"), true},
+		{"home itself", "~", seen(home), home, true},
+		{"a tilde name is relative to the terminal cwd", "~a.md", seen("/term/~a.md"), "/term/~a.md", true},
+		{"a tilde name is not read as home", "~a.md", seen(filepath.Join(home, "~a.md")), "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := resolveLink(tt.token, "/term", "/root", tt.stat)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("resolveLink(%q) = %q, %v; want %q, %v", tt.token, got, ok, tt.want, tt.ok)
+			}
+		})
 	}
 }

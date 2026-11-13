@@ -52,6 +52,8 @@ func NewMirrorDocument(owner *Document) (*Document, error) {
 	d.Disk = owner.Disk
 	d.SetSaved(owner.Saved)
 	d.MetaDirty = owner.MetaDirty
+	d.binary = owner.binary
+	d.image = owner.ImagePtr()
 	d.Status = "Mirror of another workspace: read-only until focused"
 	return d, nil
 }
@@ -100,6 +102,8 @@ func (d *Document) SyncMirrorFrom(owner *Document) error {
 	d.Disk = owner.Disk
 	d.SetSaved(owner.Saved)
 	d.MetaDirty = owner.MetaDirty
+	d.binary = owner.binary
+	d.image = owner.ImagePtr()
 	d.readOnly = true
 	return nil
 }

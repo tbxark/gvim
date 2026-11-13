@@ -2,7 +2,7 @@ package pattern
 
 import "testing"
 
-// The speed floor of the spec (AMENDMENTS C6) for a 10 MiB subject:
+// The speed floor of the spec for a 10 MiB subject:
 // Find("TODO") <= 20 ms, Find("%s+$") <= 150 ms. Run with
 //
 //	go test ./plugin/pattern -bench . -benchtime 5x

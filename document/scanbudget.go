@@ -37,7 +37,7 @@ func newScanBudget(b *buffer.Buffer) *scanBudget {
 	return &scanBudget{Lines: ScanLinesCap, Bytes: ScanBytesBudget}
 }
 
-// take charges line of b to the budget before the line is read, and reports whether
+// Take charges line of b to the budget before the line is read, and reports whether
 // the scan may read it. The charge is the stored length of the line, which the buffer
 // knows without reading it. A refused scan stays refused.
 func (s *scanBudget) Take(b *buffer.Buffer, line int) bool {
@@ -57,7 +57,7 @@ func (s *scanBudget) Take(b *buffer.Buffer, line int) bool {
 	return true
 }
 
-// exhausted reports whether the budget refused a line.
+// Exhausted reports whether the budget refused a line.
 func (s *scanBudget) Exhausted() bool { return s != nil && s.Spent }
 
 // indexUnfinished reports whether b is a large buffer whose line index is incomplete,

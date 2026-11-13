@@ -16,7 +16,7 @@ import (
 //
 // gvim.settings.define(schema) declares the plugin's settings. The effective value of a
 // key is its default, overridden by plugins.<name>.settings.<key> of the user config, and
-// (AMENDMENTS C11) overridden again by the project config only for keys declared
+// overridden again by the project config only for keys declared
 // project = true. Every value is type-checked; a bad value keeps the one below it and logs
 // a warning. Project settings are untrusted input: a plugin must never use one as a command
 // line, a path to delete, a URL or shell text without validating it.
@@ -113,7 +113,7 @@ func (s *settingSpec) check(v any) (any, error) {
 	return nil, fmt.Errorf("unknown type")
 }
 
-// luaValue converts a canonical setting value to Lua (a fresh table for lists).
+// settingLua converts a canonical setting value to Lua (a fresh table for lists).
 func (p *plugin) settingLua(s *settingSpec, v any) lua.LValue {
 	switch x := v.(type) {
 	case bool:
@@ -293,8 +293,8 @@ func installSettings(e *apiEnv) {
 		p.data.settings = st
 		p.addCleanup(func() { p.data.settings = nil })
 
-		live := L.NewTable()
-		mt := L.NewTable()
+		live := L.CreateTable(0, 0)
+		mt := L.CreateTable(0, 4)
 		mt.RawSetString("__index", L.NewFunction(func(L *lua.LState) int {
 			key, ok := L.Get(2).(lua.LString)
 			if cur := p.data.settings; ok && cur != nil {

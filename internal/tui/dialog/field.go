@@ -3,9 +3,9 @@ package dialog
 import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 )
 
 // field is the one-line text input of a dialog. The textinput model does the
@@ -60,24 +60,51 @@ func (f *field) clearPrefill(replace bool) {
 	}
 }
 
+// fieldPasteMsg is the result of the clipboard read that Ctrl+V starts: raw is what the
+// input model's paste command returned, which only the input model can read.
+type fieldPasteMsg struct{ raw tea.Msg }
+
 // key edits the text with one key press. It returns the clipboard read that Ctrl+V starts.
+// An untouched prefill is kept until the read arrives, so a failed or empty read leaves it.
 func (f *field) key(kp tea.KeyPressMsg) tea.Cmd {
-	f.clearPrefill(replacesPrefill(kp))
-	var cmd tea.Cmd
-	f.in, cmd = f.in.Update(kp)
-	if tea.Key(kp).Keystroke() != "ctrl+v" {
-		return nil
+	if tea.Key(kp).Keystroke() == "ctrl+v" {
+		return func() tea.Msg { return fieldPasteMsg{raw: textinput.Paste()} }
 	}
-	return cmd
+	f.clearPrefill(replacesPrefill(kp))
+	f.in, _ = f.in.Update(kp)
+	return nil
 }
 
 // update passes any other message to the input model. A paste replaces an
-// untouched prefill as typing does.
+// untouched prefill as typing does: a bracketed paste, and the clipboard text a
+// Ctrl+V read.
 func (f *field) update(msg tea.Msg) {
-	if p, ok := msg.(tea.PasteMsg); ok {
-		f.clearPrefill(p.Content != "")
+	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		f.clearPrefill(msg.Content != "")
+	case fieldPasteMsg:
+		f.pasteRead(msg.raw)
+		return
 	}
 	f.in, _ = f.in.Update(msg)
+}
+
+// pasteRead gives the input model the clipboard read of Ctrl+V. The text goes in at the
+// caret; when the field held an untouched prefill and the text changed the value, the
+// prefill is replaced by that text, as typing replaces it.
+func (f *field) pasteRead(raw tea.Msg) {
+	before := []rune(f.in.Value())
+	pos := min(f.in.Position(), len(before))
+	f.in, _ = f.in.Update(raw)
+	after := []rune(f.in.Value())
+	if !f.untouched || len(after) == len(before) {
+		return
+	}
+	f.untouched = false
+	if n := len(after) - len(before); n > 0 && pos+n <= len(after) {
+		f.in.SetValue(string(after[pos : pos+n]))
+		f.in.CursorEnd()
+	}
 }
 
 // draw paints the field on row y across w cells starting at x, and scrolls the
@@ -86,13 +113,8 @@ func (f *field) update(msg tea.Msg) {
 func (f *field) draw(g *grid.Grid, x, y, w int, st grid.Style) (int, bool) {
 	f.in.SetWidth(w)
 	g.Fill(x, x+w, y, st)
-	runes := []rune(f.in.Value())
-	pos := min(f.in.Position(), len(runes))
-	start := 0
-	for start < pos && ansi.StringWidth(string(runes[start:pos])) >= w {
-		start++
-	}
-	g.Put(x, y, x+w, string(runes[start:]), st)
-	caret := x + ansi.StringWidth(string(runes[start:pos]))
+	shown, col := space.Window(f.in.Value(), f.in.Position(), w)
+	g.Put(x, y, x+w, shown, st)
+	caret := x + col
 	return caret, caret < x+w
 }

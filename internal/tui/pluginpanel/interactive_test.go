@@ -1,6 +1,7 @@
 package pluginpanel
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -178,6 +179,28 @@ func TestRadioGroup(t *testing.T) {
 	}
 }
 
+// TestEnterAndSpaceReportActivate checks that Enter and Space on a radio group or a number
+// field report "activate" (the mouse's event) with the current value, not a "change".
+func TestEnterAndSpaceReportActivate(t *testing.T) {
+	widgets := []pluginapi.Widget{
+		{Kind: pluginapi.WidgetRadio, Key: "r", Options: []string{"x", "y"}},
+		{Kind: pluginapi.WidgetNumber, Key: "n", Number: 5, Integer: true},
+	}
+	for _, w := range widgets {
+		for _, name := range []string{"enter", "space"} {
+			p, _ := interactivePanel(w)
+			res := p.HandleKey(Key{Name: name})
+			if len(res.Events) != 1 || res.Events[0].Event != "activate" || res.Events[0].Widget != w.Key {
+				t.Fatalf("%s on %s = %+v, want one activate event", name, w.Key, res.Events)
+			}
+		}
+	}
+	p, _ := interactivePanel(widgets[0])
+	if ev := widgetEventOf(t, p.HandleKey(Key{Name: "enter"}), "activate"); ev.Index != 0 || ev.Value != "x" {
+		t.Fatalf("radio activate = %+v, want the current option", ev)
+	}
+}
+
 func TestDualListIncluded(t *testing.T) {
 	w := pluginapi.Widget{Kind: pluginapi.WidgetDualList, Key: "dl", Options: []string{"a", "b"}, Included: []string{"a"}}
 	p, g := interactivePanel(w)
@@ -308,7 +331,7 @@ func TestWrapperKinds(t *testing.T) {
 func TestPageModeScrollsContent(t *testing.T) {
 	children := make([]pluginapi.Widget, 0, 12)
 	for i := 0; i < 12; i++ {
-		children = append(children, pluginapi.Widget{Kind: pluginapi.WidgetLabel, Text: "row" + itoa(i)})
+		children = append(children, pluginapi.Widget{Kind: pluginapi.WidgetLabel, Text: "row" + strconv.Itoa(i)})
 	}
 	root := pluginapi.Widget{Kind: pluginapi.WidgetCol, Children: children}
 	no := false

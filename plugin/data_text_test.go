@@ -90,6 +90,7 @@ func TestUTF8(t *testing.T) {
 		{"offset forward", `T.spy(utf8.offset("héllo", 3), utf8.offset("héllo", 1), utf8.offset("héllo", 6), utf8.offset("héllo", 7))`, "4 1 7 nil"},
 		{"offset backward", `T.spy(utf8.offset("héllo", -1), utf8.offset("héllo", -4), utf8.offset("héllo", -6))`, "6 2 nil"},
 		{"offset zero", `T.spy(utf8.offset("héllo", 0, 3), utf8.offset("héllo", 0, 4))`, "2 4"},
+		{"offset zero default", `T.spy(utf8.offset("héllo", 0))`, "7"},
 		{"offset continuation", `T.spy(pcall(utf8.offset, "héllo", 1, 3))`, "~initial position is a continuation byte"},
 		{"codes", `local t = {} for p, c in utf8.codes("hé!") do t[#t + 1] = p .. ":" .. c end T.spy(table.concat(t, " "))`, "1:104 2:233 4:33"},
 		{"codes invalid", `T.spy(pcall(function() for _ in utf8.codes("a\255") do end end))`, "~invalid UTF-8 code"},

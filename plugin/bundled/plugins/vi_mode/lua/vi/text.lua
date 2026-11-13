@@ -268,9 +268,4 @@ function M.split(s)
   end
 end
 
--- escape_re quotes the characters of s that RE2 reads as syntax.
-function M.escape_re(s)
-  return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?%{%}%|\\]", "\\%0"))
-end
-
 return M

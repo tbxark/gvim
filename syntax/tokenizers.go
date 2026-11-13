@@ -51,6 +51,12 @@ func tokenizeDiff(text []string, inside bool) [][]Span {
 	oldLeft, newLeft := 0, 0
 	for i, line := range text {
 		if line == "" {
+			// Tools that strip trailing whitespace write a blank context line as "".
+			if inHunk {
+				oldLeft--
+				newLeft--
+				inHunk = oldLeft > 0 || newLeft > 0
+			}
 			continue
 		}
 		k := KindPlain

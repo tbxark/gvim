@@ -24,7 +24,7 @@ func TestActiveTabBoundariesMatch(t *testing.T) {
 			if got := g.At(r.X+1, 0).Text; got != " " {
 				t.Errorf("tab %d: cell after divider = %q, want padding", r.Index, got)
 			}
-			if hit := frame.StripHit(s.Runs, r.X+1); hit.Kind != frame.HitTab || hit.Index != r.Index {
+			if hit, ok := runAt(s.Runs, r.X+1); !ok || hit.Kind != frame.HitTab || hit.Index != r.Index {
 				t.Errorf("tab %d: padding hit = %+v", r.Index, hit)
 			}
 		}
@@ -32,4 +32,14 @@ func TestActiveTabBoundariesMatch(t *testing.T) {
 	if len(boundaries) != 2 || boundaries[0].Text != "│" || boundaries[1].Text != "│" || boundaries[0].Style != boundaries[1].Style {
 		t.Fatalf("boundaries = %+v, want matching vertical lines", boundaries)
 	}
+}
+
+// runAt returns the strip run covering column x.
+func runAt(runs []frame.Run, x int) (frame.Run, bool) {
+	for _, r := range runs {
+		if x >= r.X && x < r.X+r.W {
+			return r, true
+		}
+	}
+	return frame.Run{}, false
 }

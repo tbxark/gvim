@@ -8,7 +8,6 @@
     "suggestion.new_file_desc": "This path does not exist yet",
     "status.opened": "Opened %{path}",
     "status.not_found": "No such path: %{path}",
-    "status.cancelled": "Path completion cancelled",
-    "status.loaded": "Path completion plugin loaded"
+    "status.cancelled": "Path completion cancelled"
   }
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -170,7 +171,7 @@ func TestScanExternalClaudeNewestSessionsBound(t *testing.T) {
 	t.Parallel()
 	h := newHistoryHome(t)
 	for i := 0; i < 4; i++ {
-		name := "00000000-0000-0000-0000-00000000000" + itoa(i)
+		name := "00000000-0000-0000-0000-00000000000" + strconv.Itoa(i)
 		path := h.claudeFile(t, "bucket", name, `{"type":"user","cwd":"/w","sessionId":"`+name+`"}`)
 		h.setModTime(t, path)
 	}
@@ -210,6 +211,30 @@ func TestScanExternalCodexStore(t *testing.T) {
 	tool := report.Tools[1]
 	if tool.ID != ExternalCodex || !tool.Installed || tool.Count != 1 {
 		t.Fatalf("Codex tool = %+v", tool)
+	}
+}
+
+func TestScanExternalCodexEntryBoundKeepsNewestDays(t *testing.T) {
+	t.Parallel()
+	h := newHistoryHome(t)
+	// The store is date-sharded, so name order is time order: a walk that hits the
+	// entry bound must have visited the newest days first.
+	for _, day := range []string{"01", "02", "03"} {
+		name := "2026-01-" + day + "T00-00-00-0000000" + day[1:] + "-2222-3333-4444-555555555555"
+		path := h.codexFile(t, "2026/01/"+day, name,
+			`{"type":"session_meta","payload":{"id":"0000000`+day[1:]+`-2222-3333-4444-555555555555","cwd":"/w`+day+`","originator":"codex_cli_rs"}}`)
+		h.setModTime(t, path)
+	}
+	report := scanFixture(t, h, func(o *ExternalOptions) { o.MaxEntries = 6 })
+	if !report.Truncated {
+		t.Fatalf("report = %+v, want a truncated walk", report)
+	}
+	var cwds []string
+	for _, row := range report.Sessions {
+		cwds = append(cwds, row.CWD)
+	}
+	if !slices.Equal(cwds, []string{"/w03", "/w02"}) {
+		t.Fatalf("cwds = %v, want the newest two days", cwds)
 	}
 }
 
@@ -260,12 +285,12 @@ func TestScanExternalCancelsBetweenFiles(t *testing.T) {
 
 func TestSafeSessionID(t *testing.T) {
 	t.Parallel()
-	for _, id := range []string{"abc", "A-b_c.d", "0123456789abcdef"} {
+	for _, id := range []string{"abc", "A-b_c.d", "0123456789abcdef", "a-"} {
 		if !safeSessionID(id) {
 			t.Fatalf("safeSessionID(%q) = false", id)
 		}
 	}
-	for _, id := range []string{"", "with space", "semi;colon", "slash/child", "dollar$", "$(x)", "line" + newline + "break", strings.Repeat("a", maxExternalIDBytes+1)} {
+	for _, id := range []string{"", "-flag", "--resume", "with space", "semi;colon", "slash/child", "dollar$", "$(x)", "line" + newline + "break", strings.Repeat("a", maxExternalIDBytes+1)} {
 		if safeSessionID(id) {
 			t.Fatalf("safeSessionID(%q) = true", id)
 		}

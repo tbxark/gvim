@@ -107,8 +107,9 @@ func TestNewWindowPositions(t *testing.T) {
 		{13, buffer.Pos{Line: 43, Col: 0}},
 		{15, buffer.Pos{Line: 43, Col: 2}}, // end of the text
 	}
+	cur := newOffsetPos(d.text, buffer.Pos{Line: d.first})
 	for _, tt := range tests {
-		if got := d.pos(tt.off); got != tt.want {
+		if got := cur.pos(tt.off); got != tt.want {
 			t.Errorf("pos(%d) = %v, want %v", tt.off, got, tt.want)
 		}
 	}

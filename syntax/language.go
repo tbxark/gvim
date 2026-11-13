@@ -4,15 +4,19 @@ import "strings"
 
 // IsPlain reports whether a lexer name stands for "no language".
 func IsPlain(name string) bool {
-	return name == "fallback" || name == "plaintext" || name == "text only"
+	switch strings.ToLower(name) {
+	case "fallback", "plaintext", "text only":
+		return true
+	}
+	return false
 }
 
 // FileLanguage returns the language of the file at path as the highlighter names
 // it, in lower case ("go" for main.go), or "" for plain text. It reads the name
 // only.
 func FileLanguage(path string) string {
-	if n := strings.ToLower(Detect(path, nil).Config().Name); n != "" && !IsPlain(n) {
-		return n
+	if n := Detect(path, nil).Config().Name; n != "" && !IsPlain(n) {
+		return strings.ToLower(n)
 	}
 	return ""
 }

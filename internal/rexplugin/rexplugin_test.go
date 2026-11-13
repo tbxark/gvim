@@ -249,19 +249,76 @@ func TestUninstallLeavesAFileItDidNotWrite(t *testing.T) {
 func TestWithBlockReplacesAndRemoves(t *testing.T) {
 	const block = beginMarker + "\nold\n" + endMarker + "\n"
 	const next = beginMarker + "\nnew\n" + endMarker + "\n"
-	if got := withBlock("keep\n"+block, next); got != "keep\n"+next {
+	must := func(got string, err error) string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := must(withBlock("keep\n"+block, next)); got != "keep\n"+next {
 		t.Errorf("withBlock replacement = %q", got)
 	}
-	if got := withBlock("", block); got != block {
+	if got := must(withBlock("", block)); got != block {
 		t.Errorf("withBlock on empty = %q", got)
 	}
-	if got := withBlock("keep\n", block); got != "keep\n\n"+block {
+	if got := must(withBlock("keep\n", block)); got != "keep\n\n"+block {
 		t.Errorf("withBlock append = %q", got)
 	}
-	if got := withoutBlock("keep\n\n" + block + "after\n"); got != "keep\nafter\n" {
+	if got := must(withoutBlock("keep\n\n" + block + "after\n")); got != "keep\nafter\n" {
 		t.Errorf("withoutBlock = %q", got)
 	}
-	if got := withoutBlock("keep\n"); got != "keep\n" {
+	if got := must(withoutBlock("keep\n")); got != "keep\n" {
 		t.Errorf("withoutBlock without a block = %q", got)
+	}
+}
+
+// Markers that are not one begin followed by one end are refused, so a stray marker
+// never makes the replace swallow the user's text around it.
+func TestUnbalancedMarkersAreRefused(t *testing.T) {
+	const block = beginMarker + "\nold\n" + endMarker + "\n"
+	for name, content := range map[string]string{
+		"stray begin before a block": "keep\n" + beginMarker + "\nuser text\n" + block,
+		"begin without end":          "keep\n" + beginMarker + "\nuser text\n",
+		"end without begin":          "keep\n" + endMarker + "\n",
+		"end before begin":           endMarker + "\nuser text\n" + beginMarker + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := withBlock(content, block); err == nil {
+				t.Error("withBlock accepted unbalanced markers")
+			}
+			if _, err := withoutBlock(content); err == nil {
+				t.Error("withoutBlock accepted unbalanced markers")
+			}
+		})
+	}
+}
+
+func TestInstallLeavesAnUnbalancedConfigUntouched(t *testing.T) {
+	home := isolate(t)
+	configPath := filepath.Join(home, ".config", "rex", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := "keep\n" + beginMarker + "\nuser text\n"
+	if err := os.WriteFile(configPath, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var calls [][]string
+	if _, err := (Installer{Rex: fakeRex(&calls, ""), Bin: "/bin/gvim"}).Install(); err == nil {
+		t.Fatal("Install accepted unbalanced markers")
+	}
+	if got := readText(t, configPath); got != broken {
+		t.Errorf("init.lua = %q, want it untouched", got)
+	}
+	plugin := filepath.Join(home, ".config", "rex", "plugins", "gvim", "init.lua")
+	if _, err := os.Stat(plugin); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused install wrote the plugin (err = %v)", err)
+	}
+	if _, err := (Installer{Rex: fakeRex(&calls, ""), Bin: "/bin/gvim"}).Uninstall(); err == nil {
+		t.Fatal("Uninstall accepted unbalanced markers")
+	}
+	if got := readText(t, configPath); got != broken {
+		t.Errorf("init.lua after Uninstall = %q, want it untouched", got)
 	}
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Watchers of the plugin OS (AMENDMENTS C16). A watcher is fsnotify, non-recursive: a
+// Watchers of the plugin OS. A watcher is fsnotify, non-recursive: a
 // directory reports changes of its entries, a file reports changes of itself. Events are
 // coalesced per path over a debounce window before they reach the plugin.
 

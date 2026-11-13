@@ -284,7 +284,7 @@ type Manager struct {
 	// applyEdit answers a server's workspace/applyEdit request. It gets the
 	// language of the requesting server ("" for a universal one). It is read and
 	// set under mu.
-	applyEdit func(language string, params protocol.ApplyWorkspaceEditParams) bool
+	applyEdit func(language string, params protocol.ApplyWorkspaceEditParams) (applied bool, failureReason string)
 	// timeout bounds each step. NewManager sets it to managerTimeout.
 	timeout time.Duration
 	// spawnEnv, when set, is the active project environment's set-only overlay for
@@ -459,23 +459,24 @@ func (m *Manager) preflightServer(language string, cfg ServerConfig) error {
 	return m.gateSpawn(ctx, language, cfg, gateArgv, pathValue)
 }
 
-// effectivePath returns the PATH the child resolves bare names through: the first
-// PATH entry of its environment (the process's own comes first, then the overlay), as
-// the C library and Go runtime read environment variables.
+// effectivePath returns the PATH the child resolves bare names through: the last PATH
+// entry of its environment (the process's own comes first, then the overlay and the
+// server's configured entries), because os/exec keeps the last of duplicate keys.
 func effectivePath(entries []string) string {
+	path := ""
 	for _, kv := range entries {
 		if k, v, ok := strings.Cut(kv, "="); ok && k == "PATH" {
-			return v
+			path = v
 		}
 	}
-	return ""
+	return path
 }
 
 // SetApplyEdit installs the handler for a server's workspace/applyEdit request.
 // The manager hands it to every client it starts; the handler answers on the
 // client's read goroutine and must only enqueue the edit. Set it before the first
 // Open.
-func (m *Manager) SetApplyEdit(apply func(language string, params protocol.ApplyWorkspaceEditParams) bool) {
+func (m *Manager) SetApplyEdit(apply func(language string, params protocol.ApplyWorkspaceEditParams) (applied bool, failureReason string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.applyEdit = apply
@@ -483,14 +484,14 @@ func (m *Manager) SetApplyEdit(apply func(language string, params protocol.Apply
 
 // applyEditHandler returns the handler for a server of language. m.mu must not be
 // held.
-func (m *Manager) applyEditHandler(language string) func(protocol.ApplyWorkspaceEditParams) bool {
+func (m *Manager) applyEditHandler(language string) func(protocol.ApplyWorkspaceEditParams) (bool, string) {
 	m.mu.Lock()
 	apply := m.applyEdit
 	m.mu.Unlock()
 	if apply == nil {
 		return nil
 	}
-	return func(params protocol.ApplyWorkspaceEditParams) bool { return apply(language, params) }
+	return func(params protocol.ApplyWorkspaceEditParams) (bool, string) { return apply(language, params) }
 }
 
 // Open sends didOpen for the document at path with its full text, starting the

@@ -322,14 +322,10 @@ func TestTabsTitleDuplicatesDisambiguated(t *testing.T) {
 func TestTabsRestoredAgentTitle(t *testing.T) {
 	t.Parallel()
 	var notices []string
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{
-			{Name: "build", Open: true, Rows: []string{"old build"}},
-			{Open: true, Rows: []string{"old agent"}, Agent: "claude", LaunchArgv: []string{"claude", "--session-id", "s1"}},
-		},
-		ActiveTab: 1,
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "build", Open: true, Rows: []string{"old build"}},
+		{Open: true, Rows: []string{"old agent"}, Agent: "claude", LaunchArgv: []string{"claude", "--session-id", "s1"}},
+	}, ActiveTab: 1}
 	tabs, _ := newTestTabs(t, &notices)
 	tabs.Restore(st)
 	if got := tabs.TabNames(); got[0] != "build (exited)" || got[1] != "claude (exited)" {
@@ -807,5 +803,45 @@ func TestTabsClosedWhileStartingClosesTheShell(t *testing.T) {
 	tabs.Update(cmd())
 	if len(starter.terms) != 1 || !starter.terms[0].closed {
 		t.Fatal("the shell of the closed tab is still running")
+	}
+}
+
+// ExitedFlags returns the exited state of every tab (tests and the strip).
+func (t *Tabs) ExitedFlags() []bool {
+	out := make([]bool, len(t.tabs))
+	for i := range t.tabs {
+		out[i] = t.tabs[i].Exited()
+	}
+	return out
+}
+
+// stripLabel is tab i's strip label.
+func (t *Tabs) stripLabel(i int) string { return t.stripLabels()[i] }
+
+// TestRestoreDropsAnInFlightDrag checks that restoring tabs (which closes the old ones)
+// also ends a strip drag that referred to the old tabs.
+func TestRestoreDropsAnInFlightDrag(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	tabs.drag = tabDrag{from: 0, startX: 3, x: 9, on: true, active: true}
+	tabs.Restore(terminal.SavedState{})
+	if tabs.drag != (tabDrag{}) {
+		t.Fatalf("drag = %+v after Restore, want none", tabs.drag)
+	}
+}
+
+// TestLaunchShellClearsExited checks that starting the plain shell over an exited one
+// leaves the panel not exited while the start is in flight, as launching a program does.
+func TestLaunchShellClearsExited(t *testing.T) {
+	t.Parallel()
+	p := newTestPanel(t, &fakeStarter{term: newFakeTerm()})
+	p.exited = true
+	if cmd := p.launchShell("/ws"); cmd == nil {
+		t.Fatal("launchShell started nothing")
+	}
+	if p.Exited() {
+		t.Fatal("the panel still reports exited while its new shell starts")
 	}
 }

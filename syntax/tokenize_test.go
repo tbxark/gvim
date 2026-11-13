@@ -273,6 +273,38 @@ func TestDiffWindowInsideAHunkKeepsChangedLines(t *testing.T) {
 	}
 }
 
+func TestTokenizeDiffBlankContextLineCountsTowardTheHunk(t *testing.T) {
+	t.Parallel()
+	// Tools that strip trailing whitespace write a blank context line as "".
+	text := []string{
+		"--- a.txt",
+		"+++ a.txt",
+		"@@ -1,3 +1,3 @@",
+		" a",
+		"",
+		" c",
+		"--- b.txt",
+		"+++ b.txt",
+		"@@ -1 +1 @@",
+		"-x",
+		"+y",
+	}
+	spans, err := Tokenize(lexers.Get("diff"), text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconstruct(t, text, spans)
+	want := [][]Kind{
+		{KindPlain}, {KindPlain}, {KindKeyword}, {KindPlain}, nil, {KindPlain},
+		{KindPlain}, {KindPlain}, {KindKeyword}, {KindDiffRemove}, {KindDiffAdd},
+	}
+	for i, wantKinds := range want {
+		if got := kindsOf(spans[i]); !slices.Equal(got, wantKinds) {
+			t.Errorf("line %d kinds = %v, want %v", i, got, wantKinds)
+		}
+	}
+}
+
 func TestTokenizeTruncatedHunkStopsAtTheNextFile(t *testing.T) {
 	t.Parallel()
 	text := []string{
@@ -406,5 +438,31 @@ func TestHighlighterLexErrorFallsBackToPlain(t *testing.T) {
 		if s.Kind != KindPlain {
 			t.Fatalf("error fallback produced kind %v", s.Kind)
 		}
+	}
+}
+
+func TestNumbersFixupKeepsTheTextAfterABlank(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		toks []chroma.Token
+	}{
+		{"blank after the literal", []chroma.Token{{Type: chroma.Text, Value: "0x1F rest"}}},
+		{"token longer than a run", []chroma.Token{{Type: chroma.Text, Value: "0x1F" + strings.Repeat("_", maxNumberRun) + "tail"}}},
+		{"second token holds a blank", []chroma.Token{{Type: chroma.LiteralNumberInteger, Value: "0"}, {Type: chroma.Text, Value: "x1F rest"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var want, got strings.Builder
+			for _, tok := range tt.toks {
+				want.WriteString(tok.Value)
+			}
+			for _, tok := range numbers(goNumber)(tt.toks) {
+				got.WriteString(tok.Value)
+			}
+			if got.String() != want.String() {
+				t.Errorf("text = %q, want %q", got.String(), want.String())
+			}
+		})
 	}
 }

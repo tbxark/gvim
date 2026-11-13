@@ -26,18 +26,11 @@ func (a *Editor) AutoSaveDue(now time.Time) bool {
 	return a.ed.AutoSaveDue(now)
 }
 
-// AutoSave saves the modified, named documents when a save is due. The error joins
-// the failures of the documents that did not save. It runs the writes on the caller's
-// goroutine, so the root uses PlanAutoSave, ApplyAutoSave and a command instead.
-func (a *Editor) AutoSave(now time.Time) error {
-	return a.ed.AutoSave(now)
-}
-
 // PlanAutoSave prepares the auto-save at now, as editor.PlanAutoSave does, and marks
 // the gate as writing when there is a save to run. While a plan is writing, it plans
 // nothing and records no time, so the next tick plans again.
 func (a *Editor) PlanAutoSave(now time.Time) []editor.SaveJob {
-	if a.saves != nil && a.saves.writing {
+	if a.writePending() {
 		return nil
 	}
 	jobs := a.ed.PlanAutoSave(now)

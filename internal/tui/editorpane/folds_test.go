@@ -132,3 +132,18 @@ func TestFoldMarkersNeedAFoldingDocument(t *testing.T) {
 		t.Errorf("marker = %q on a document with no folds", got)
 	}
 }
+
+func TestPluginFoldsDoNotReorderTheDocumentsRanges(t *testing.T) {
+	// The document returns its cached slice, which the caller must not change. The
+	// merge with the plugin ranges sorts, so it must not do that in the document's slice.
+	ranges := make([]fold.Range, 1, 4)
+	ranges[0] = fold.Range{Start: 2, End: 3}
+	d := foldDoc{fakeDoc: newDoc("a", "b", "\tc", "\td", "e"), ranges: ranges}
+	p := Pane{Doc: d, PluginFolds: func() ([]fold.Range, map[int]bool, map[int]string) {
+		return []fold.Range{{Start: 0, End: 1}}, nil, nil
+	}}
+	p.Render(20, 5)
+	if got := d.ranges[0]; got != (fold.Range{Start: 2, End: 3}) {
+		t.Errorf("the document's first range = %+v after the pane merged plugin folds, want {2 3}", got)
+	}
+}

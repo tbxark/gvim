@@ -23,12 +23,11 @@ func withSmallVirtualQuotas(t *testing.T, perPlugin, all, bytesPerPlugin, allByt
 
 // TestVirtualBufferBudgetBoundsAHog: a plugin that fills virtual buffers with text is
 // stopped by the byte budget of its own, however often it runs again, and the budget is
-// not shared with other plugins' buffers the way an editor-wide count would be (S18-1,
-// S18-2).
+// not shared with other plugins' buffers the way an editor-wide count would be.
 func TestVirtualBufferBudgetBoundsAHog(t *testing.T) {
 	withSmallVirtualQuotas(t, 64, 256, 4<<20, 64<<20)
 	ed := editor.New(editor.Options{})
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	big := strings.Repeat("a", 1024*1024)
 	hog := func() {
 		for range 100 {

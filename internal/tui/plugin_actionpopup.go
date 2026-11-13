@@ -31,8 +31,11 @@ type pluginActionPopupData struct {
 	action string
 }
 
-// pluginActionPopupTag says the action popup of wait tok closed without a choice.
-type pluginActionPopupTag struct{ tok pluginapi.Token }
+// pluginActionPopupTag says the action popup id of wait tok closed without a choice.
+type pluginActionPopupTag struct {
+	tok pluginapi.Token
+	id  uint64
+}
 
 // ShowActionPopup shows a message with action buttons. The result is Values{action id} of
 // the chosen button, or Values{nil} when the popup closed without one.
@@ -88,7 +91,7 @@ func (o *pluginActionPopupOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	}
 	if cmd == nil {
 		// A click outside closed it: no action was chosen.
-		cmd = doneCmd(prompt.Done{Tag: pluginActionPopupTag{tok: o.tok}})
+		cmd = doneCmd(prompt.Done{Tag: pluginActionPopupTag{tok: o.tok, id: o.id}})
 	}
 	return nil, cmd
 }
@@ -100,7 +103,7 @@ func (o *pluginActionPopupOverlay) Draw(g *grid.Grid) {
 }
 func (o *pluginActionPopupOverlay) Active() bool { return !o.closed && o.p.Active() }
 func (o *pluginActionPopupOverlay) Dismiss() {
-	o.dismissed(prompt.Done{Tag: pluginActionPopupTag{tok: o.tok}})
+	o.dismissed(prompt.Done{Tag: pluginActionPopupTag{tok: o.tok, id: o.id}})
 }
 
 // AlertOverlay marks the action popup as an alert: the plugin waits for the chosen
@@ -109,9 +112,9 @@ func (*pluginActionPopupOverlay) AlertOverlay() {}
 
 // pluginActionPopupDone resolves the wait of an action popup that closed without a choice,
 // and reports the result to the plugins.
-func (m *Model) pluginActionPopupDone(t pluginapi.Token) tea.Cmd {
-	m.plugEmit("action_popup_result", map[string]any{"popup": uint64(0), "action": nil})
-	return m.plugFinish(pluginapi.Completion{Token: t, Values: []any{nil}})
+func (m *Model) pluginActionPopupDone(tag pluginActionPopupTag) tea.Cmd {
+	m.plugEmit("action_popup_result", map[string]any{"popup": tag.id, "action": nil})
+	return m.plugFinish(pluginapi.Completion{Token: tag.tok, Values: []any{nil}})
 }
 
 // pluginActionChosen resolves the wait of an action popup whose button was chosen. It

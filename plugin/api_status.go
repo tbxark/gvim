@@ -9,7 +9,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.ui.statusbar.item and the StatusItem handle (stage S14). The items of a plugin are
+// gvim.ui.statusbar.item and the StatusItem handle. The items of a plugin are
 // published to the host as a whole set (Host.SetStatusItems), at most QuotaStatusItems of
 // them. A click on an item runs its on_click function as a hidden command named by
 // pluginapi.StatusClickAction, so the host needs no handle on the function.
@@ -71,7 +71,7 @@ func installStatus(e *apiEnv) {
 	ui := e.area("ui")
 	sb, _ := ui.RawGetString("statusbar").(*lua.LTable)
 	if sb == nil {
-		sb = e.L.NewTable()
+		sb = e.L.CreateTable(0, 1)
 		ui.RawSetString("statusbar", sb)
 	}
 

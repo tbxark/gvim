@@ -1214,6 +1214,19 @@ func TestDiagnosticsAreClearedByAnEmptyEvent(t *testing.T) {
 	}
 }
 
+func TestDroppedDiagnosticsForgetTheirPublishedVersion(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"abc"}})
+	lt.open()
+	lt.feed(lspDiagsMsg{events: []DiagnosticsEvent{{Path: "/p/a.go", Version: 3, Versioned: true, Items: []Diagnostic{
+		{Start: buffer.Pos{}, End: buffer.Pos{Col: 1}, Severity: 1},
+	}}}})
+	lt.m.lspDropDiags("/p/a.go")
+	if _, ok := lt.m.lsp.diagVersion["/p/a.go"]; ok {
+		t.Fatal("the version of a dropped document's diagnostics was kept")
+	}
+}
+
 func TestLSPRestartReopensTheDocument(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
@@ -1529,3 +1542,5 @@ func TestLSPLoadedReadOnlyUsesReadOnlyOpen(t *testing.T) {
 		t.Fatalf("gotos = %v", lt.ed.gotos)
 	}
 }
+
+func (e *lspEd) QuitNeedsConfirm() bool { return false }

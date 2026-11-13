@@ -320,9 +320,11 @@ type chrome struct {
 	muted    grid.Style    // the empty-list message
 }
 
-// Palette is the open command palette. Use New to make one.
+// nextPaletteToken numbers palette instances, so a late result of a closed palette
+// carries a token no newly opened palette has.
 var nextPaletteToken atomic.Uint64
 
+// Palette is the open command palette. Use New to make one.
 type Palette struct {
 	// token is this palette instance's generation. Preview commands stamp it, and a
 	// closed palette's late result carries a token no newly opened palette has.
@@ -1012,8 +1014,9 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 	if !msg.Loading || p.opts.Files == nil {
 		return nil
 	}
-	seq := msg.Seq
-	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return fileTickMsg{Token: p.token, Seq: seq, Owner: p.owner} })
+	// The tick runs off the update goroutine, so it carries copies, never p's fields.
+	tick := fileTickMsg{Token: p.token, Seq: msg.Seq, Owner: p.owner}
+	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return tick })
 }
 
 // rowsFor returns the rows the query matches in its command, line or buffer

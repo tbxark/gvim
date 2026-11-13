@@ -9,8 +9,6 @@
 package list
 
 import (
-	"github.com/tbxark/gvim/i18n"
-
 	"slices"
 	"strings"
 	"unicode"
@@ -40,10 +38,14 @@ const DefaultPage = 8
 
 // Hint is the footer of a list that runs a row. It names the keys the list
 // takes. A list that runs nothing shows ReadOnlyHint, and a list can set its own.
-var (
-	Hint         = i18nHint("gvim.list.hint", "Type to filter, Up/Down move, Enter run, Esc close")
-	ReadOnlyHint = i18nHint("gvim.list.read_only_hint", "Type to filter, Up/Down move, Esc close")
-)
+func Hint() string {
+	return listText("gvim.list.hint", "Type to filter, Up/Down move, Enter run, Esc close")
+}
+
+// ReadOnlyHint is the footer of a list that runs nothing.
+func ReadOnlyHint() string {
+	return listText("gvim.list.read_only_hint", "Type to filter, Up/Down move, Esc close")
+}
 
 // Row is one row of a View. A header row names a group and cannot be chosen.
 // Left is the main text, such as an action or a setting, and Right is the
@@ -129,19 +131,11 @@ func New(title string, rows []Row, chrome style.Overlay, run func(*View, Row) te
 	return v
 }
 
-// box returns the box of a list in a w by h frame, and the number of item rows
-// it holds. The title is on the top border and the hint on the bottom one, so the
-// box has a filter row and the items inside them. An empty box means the frame is
-// too small to show the list.
-func box(w, h int) (space.Rect, int) {
-	return boxFor(w, h, MaxHeight)
-}
-
-// boxFor is box for a list of n rows: a box that is not taller than its rows
-// need, so two rows do not sit in a box of 28.
-func boxFor(w, h, n int) (space.Rect, int) { return boxSized(w, h, n, 0) }
-
-// boxSized is boxFor for a list that may be maxW cells wide; zero is MaxWidth.
+// boxSized returns the box of a list of n rows in a w by h frame, and the number of item
+// rows it holds. The title is on the top border and the hint on the bottom one, so the
+// box has a filter row and the items inside them. The box is not taller than its rows
+// need, and at most maxW cells wide; zero is MaxWidth. An empty box means the frame is too
+// small to show the list.
 func boxSized(w, h, n, maxW int) (space.Rect, int) {
 	if maxW == 0 {
 		maxW = MaxWidth
@@ -154,11 +148,11 @@ func boxSized(w, h, n, maxW int) (space.Rect, int) {
 }
 
 // Centred returns a box of at most bw by bh cells, centred in a w by h frame and
-// kept space.ListMargin cells inside the left and right edge and one row inside the
+// kept space.Margin cells inside the left and right edge and one row inside the
 // top and bottom. A frame too small for a box with a title row and one body row
 // gives an empty rectangle.
 func Centred(w, h, bw, bh int) space.Rect {
-	bw, bh = min(bw, w-2*space.ListMargin(w)), min(bh, h-2)
+	bw, bh = min(bw, w-2*space.Margin(w)), min(bh, h-2)
 	if bw < 12 || bh < 3 {
 		return space.Rect{}
 	}
@@ -406,7 +400,7 @@ func (v *View) cursor(int, int) (int, int, bool) {
 	if v.Box.W == 0 {
 		return 0, 0, false
 	}
-	labelX := v.Box.X + 2 + ansi.StringWidth(filterLabel)
+	labelX := v.Box.X + 2 + ansi.StringWidth(filterLabel())
 	room := v.Box.X + v.Box.W - 2 - labelX
 	if room < 0 {
 		return 0, 0, false
@@ -415,7 +409,7 @@ func (v *View) cursor(int, int) (int, int, bool) {
 }
 
 // filterLabel is the text before the filter on the filter row.
-var filterLabel = listText("gvim.list.filter_label", "Filter: ")
+func filterLabel() string { return listText("gvim.list.filter_label", "Filter: ") }
 
 // draw paints the box over g. It records the box and the page size, so the keys
 // and the mouse use what is on screen. The box has the border and title of the
@@ -433,10 +427,11 @@ func (v *View) draw(g *grid.Grid) {
 	}
 	v.keepVisible()
 	ov := v.chrome
+	label := filterLabel()
 	ov.PaintBox(g, box.X, box.Y, box.W, box.H, v.Title)
 	end := box.X + box.W - 2 // text stops before the padding cell at the right border
 	filterY := box.Y + 1
-	labelX := box.X + 2 + g.Put(box.X+2, filterY, end, filterLabel, ov.Muted)
+	labelX := box.X + 2 + g.Put(box.X+2, filterY, end, label, ov.Muted)
 	g.Put(labelX, filterY, end, space.Tail(string(v.filter), end-labelX), ov.Box)
 
 	for k := range rows {
@@ -498,9 +493,9 @@ func (v *View) footer() string {
 	case v.Hint != "":
 		return v.Hint
 	case v.run == nil:
-		return ReadOnlyHint
+		return ReadOnlyHint()
 	}
-	return Hint
+	return Hint()
 }
 
 // fitText shortens a row's text to room cells, with the list's own cut when it has one.
@@ -533,9 +528,3 @@ func (v *View) Close() { v.active = false }
 
 // Cursor returns the caret in the filter text.
 func (v *View) Cursor(w, h int) (int, int, bool) { return v.cursor(w, h) }
-
-// i18nHint keeps the exported hint constants English and lets callers... no: the hint
-// text is user-visible chrome, so resolve it through the catalogue with the English
-// fallback at package init. A locale change needs a restart for these two hints (they
-// are constants of the shared list chrome); the row strings resolve per open.
-func i18nHint(key, english string) string { return i18n.TOr("", key, english, nil) }

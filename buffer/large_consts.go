@@ -2,9 +2,7 @@ package buffer
 
 import "errors"
 
-// Limits shared by the buffer, the editor guards and UI messages. Large file
-// mode is not wired in yet; the constants live here so later API signatures
-// compile from the start.
+// Limits shared by the buffer, the editor guards and UI messages.
 const (
 	// MaxMaterialize is the largest text Text and Range return in large file
 	// mode. Anything bigger is refused (ErrOverCap).

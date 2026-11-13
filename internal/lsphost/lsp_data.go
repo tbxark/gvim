@@ -116,17 +116,7 @@ func hintParts(label protocol.InlayHintLabel) []string {
 
 // hintText renders an inlay hint label, which is a string or a list of parts.
 func hintText(label protocol.InlayHintLabel) string {
-	switch v := label.(type) {
-	case protocol.String:
-		return string(v)
-	case protocol.InlayHintLabelPartSlice:
-		parts := make([]string, 0, len(v))
-		for _, part := range v {
-			parts = append(parts, part.Value)
-		}
-		return strings.Join(parts, "")
-	}
-	return ""
+	return strings.Join(hintParts(label), "")
 }
 
 // SemanticTokens returns the semantic tokens of the document's lines
@@ -210,12 +200,7 @@ func applySemanticTokenEdits(data []uint32, edits []protocol.SemanticTokensEdit)
 	for _, edit := range edits {
 		start := min(int(edit.Start), len(out))
 		del := min(int(edit.DeleteCount), len(out)-start)
-		out = append(out[:start], out[start+del:]...)
-		if len(edit.Data) > 0 {
-			rest := slices.Clone(out[start:])
-			out = append(out[:start], edit.Data...)
-			out = append(out, rest...)
-		}
+		out = slices.Replace(out, start, start+del, edit.Data...)
 	}
 	return out
 }
@@ -395,10 +380,7 @@ func (s *pullSet) cancelAll() {
 // not hammer it.
 func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
 	p.mu.Lock()
-	mgrs := make([]*manager.Manager, 0, len(p.managers))
-	for _, mgr := range p.managers {
-		mgrs = append(mgrs, mgr)
-	}
+	mgrs := slices.Collect(maps.Values(p.managers))
 	docCount := len(p.docs)
 	cache := p.wsPull
 	p.mu.Unlock()
@@ -529,10 +511,7 @@ func mergeWorkspaceDiagnostics(published, pulled map[string][]protocol.Diagnosti
 // pull reported (the source says which). A file with both keeps its published set.
 func (p *lspPort) WorkspaceDiagnostics() []tui.FileDiagnostics {
 	p.mu.Lock()
-	mgrs := make([]*manager.Manager, 0, len(p.managers))
-	for _, mgr := range p.managers {
-		mgrs = append(mgrs, mgr)
-	}
+	mgrs := slices.Collect(maps.Values(p.managers))
 	p.mu.Unlock()
 
 	published := make(map[string][]protocol.Diagnostic)

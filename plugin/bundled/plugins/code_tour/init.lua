@@ -268,10 +268,10 @@ local function panel_spec()
   end
   local prose = wrap_prose(step and step.explanation or "")
   local title_runs = {
-    { text = tour.manifest.title, style = { fg = "syntax.keyword", bold = true } },
+    { text = tour.manifest.title, fg = "syntax.keyword", bold = true },
   }
   if tour.drift then
-    title_runs[#title_runs + 1] = { text = "   " .. tour.drift, style = { fg = "syntax.comment", italic = true } }
+    title_runs[#title_runs + 1] = { text = "   " .. tour.drift, fg = "syntax.comment", italic = true }
   end
   local children = {
     { kind = "label", runs = title_runs },

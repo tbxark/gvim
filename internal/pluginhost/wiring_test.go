@@ -18,11 +18,11 @@ import (
 // newTestWiring builds the wiring of a session with no config and no keymap preset.
 func newTestWiring(t *testing.T, o Options) *Wiring {
 	t.Helper()
-	return New(config.Config{}, editor.New(editor.Options{}), func(*editor.Document) {}, o)
+	return New(config.Config{}, editor.New(editor.Options{}), o)
 }
 
 // TestNewWiringIsCreatedForNoPlugins: --no-plugins still creates the runtime, with its
-// loader disabled, so the manager can say why nothing is loaded (FINAL 4.4).
+// loader disabled, so the manager can say why nothing is loaded.
 func TestNewWiringIsCreatedForNoPlugins(t *testing.T) {
 	apptest.IsolateConfig(t)
 	tests := []struct {

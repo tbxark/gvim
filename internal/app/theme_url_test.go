@@ -154,3 +154,21 @@ func TestBuildRuntimeURLThemeOfflineFallsBack(t *testing.T) {
 	}
 	defer rt.close()
 }
+
+// A redirect off the transport policy (plain http beyond loopback) is refused
+// before it is followed.
+func TestFetchThemeURLBodyRefusesInsecureRedirect(t *testing.T) {
+	var reached atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Store(true)
+		http.Redirect(w, r, "http://example.com/cool.json", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	_, err := fetchThemeURLBody(context.Background(), srv.URL+"/cool.json")
+	if err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("redirect to plain http = %v, want a transport policy refusal", err)
+	}
+	if !reached.Load() {
+		t.Fatal("the loopback server was never asked")
+	}
+}

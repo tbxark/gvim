@@ -26,7 +26,7 @@
 // (tab_size, insert_spaces, show_whitespace, ...) keep working as aliases of the
 // nested keys. When one file sets both spellings of an option, the nested one
 // wins. Across layers the later layer wins whichever spelling it uses. Fresh keys
-// that gvim has no use for (clipboard, terminal, ...) are accepted and
+// that gvim has no use for (sidebar, packages, ...) are accepted and
 // ignored, so a Fresh config file loads without diagnostics. See editoropts.go
 // for the editor options and language.go for the per-language settings and the
 // resolver Config.EditorFor.
@@ -52,8 +52,8 @@
 // servers that run alongside those of every language (Fresh's universal servers).
 // The other fields Fresh writes for a server (name, env, language_id_overrides,
 // initialization_options, only_features, except_features, process_limits) are kept
-// and handed to the server; process_limits is parsed but not enforced, because
-// gvim is pure Go and sets no rlimits (docs/lsp.md). The project layer's lsp key
+// and handed to the server; process_limits is applied on Linux only (docs/lsp.md). The
+// project layer's lsp key
 // may only turn servers on or off and name their root markers and feature filters:
 // a field that chooses or shapes the program is refused with a diagnostic.
 //
@@ -504,24 +504,15 @@ func CacheDir() (string, error) {
 	return filepath.Join(base, "gvim"), nil
 }
 
-// MoveLegacyFile renames oldPath to newPath when the new file does not exist yet
-// and the old one does. It is the one-time move of a state file that left the
-// config directory; a failure is reported to the caller, which then simply starts
-// without the old file.
-func MoveLegacyFile(oldPath, newPath string) error {
-	if _, err := os.Stat(newPath); err == nil {
-		return nil
+// themeIsURL reports whether raw is an http(s) URL string, the theme form that
+// makes the editor fetch over the network.
+func themeIsURL(raw json.RawMessage) bool {
+	s, err := decodeString(raw)
+	if err != nil {
+		return false
 	}
-	if _, err := os.Stat(oldPath); err != nil {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.Rename(oldPath, newPath); err != nil {
-		return err
-	}
-	return nil
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")
 }
 
 // defaultUserFile returns the default user config file path.
@@ -533,33 +524,20 @@ func defaultUserFile() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
-// ProjectFile returns the nearest .gvim/config.json at or above root. ok is
-// false when no such file exists between root and the filesystem root. err is
-// non-nil only when root cannot be made absolute.
+// ProjectFile returns root/.gvim/config.json when it is a regular file. Only
+// the workspace root is consulted: a parent directory's file never applies. ok
+// is false when the file does not exist. err is non-nil only when root cannot
+// be made absolute.
 func ProjectFile(root string) (path string, ok bool, err error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return "", false, fmt.Errorf("config: project root: %w", err)
 	}
-	path, ok = findUp(abs, isRegularFile)
-	return path, ok, nil
-}
-
-// findUp checks dir/.gvim/config.json, then the same file in each parent
-// directory, and returns the first that isFile reports as present. It stops
-// after dir reaches the filesystem root, where filepath.Dir returns its input.
-func findUp(dir string, isFile func(string) bool) (string, bool) {
-	for {
-		candidate := filepath.Join(dir, ".gvim", "config.json")
-		if isFile(candidate) {
-			return candidate, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
+	path = filepath.Join(abs, ".gvim", "config.json")
+	if !isRegularFile(path) {
+		return "", false, nil
 	}
+	return path, true, nil
 }
 
 func isRegularFile(path string) bool {
@@ -665,6 +643,11 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			// The UI language is a user preference; a repository choosing it would be a
 			// surprise, so the project layer is refused like keymap.
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set locale: the UI language is a user preference, so set it in the user config"})
+			continue
+		case key == "theme" && l == layerProject && themeIsURL(keys[key]):
+			// A URL theme makes the editor fetch from a host the repository chose, so only
+			// the user file names one. A plain theme name stays allowed.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set theme to a URL: a repository must not choose a host gvim fetches from, so set it in the user config"})
 			continue
 		case key == "plugin_timeout_ms" && l == layerProject:
 			if err := cfg.lowerPluginTimeout(keys[key]); err != nil {
@@ -833,10 +816,6 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		if trimmed := bytes.TrimSpace(raw); string(trimmed) != "{}" {
 			return fmt.Errorf("custom keybinding maps are not supported; put the keys in keybindings")
 		}
-	case "daemon":
-		if diags := c.setDaemon(raw); len(diags) > 0 {
-			return errors.New(diags[0].Message)
-		}
 	case "plugin_timeout_ms":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil {
@@ -906,12 +885,6 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		c.Formatters = formatters
 	case "check_for_updates", "update_check_url", "update_command":
 		return c.setUpdate(key, raw)
-	case "terminal":
-		// The flat setters are the user layer: a project file never comes here,
-		// see applyFile, which checks the terminal object against its layer.
-		if diags := c.setTerminal(raw, layerUser, ""); len(diags) > 0 {
-			return errors.New(diags[0].Message)
-		}
 	default:
 		if slices.Contains(fileOnlyKeys, key) {
 			return nil // a Fresh key that gvim has no use for
@@ -945,7 +918,7 @@ var boolKeys = map[string]func(*Config) *bool{
 
 // lspEntry is one language server entry, as Fresh writes it. gvim keeps every field:
 // the program, its environment and initialization options, the feature filters and the
-// process limits (parsed but not enforced). auto_start and "enabled" are pointers so the
+// process limits. auto_start and "enabled" are pointers so the
 // code can tell "set" from "unset".
 type lspEntry struct {
 	Command     string           `json:"command"`

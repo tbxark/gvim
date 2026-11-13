@@ -384,15 +384,15 @@ func TestCompareTabsAreMarkedAsAPair(t *testing.T) {
 	for _, tab := range m.stripTabs() {
 		labels = append(labels, frame.StripLabel(tab))
 	}
-	if len(labels) != 3 || !strings.HasPrefix(labels[1], comparePairMark+" ") || !strings.HasPrefix(labels[2], modifiedMark+" "+comparePairMark+" ") {
+	if len(labels) != 3 || !strings.HasPrefix(labels[1], frame.ComparePairMark+" ") || !strings.HasPrefix(labels[2], frame.ModifiedMark+" "+frame.ComparePairMark+" ") {
 		t.Errorf("labels = %q, want the two compared tabs marked as a pair, the unsaved one also with its dot", labels)
 	}
-	if strings.Contains(labels[0], comparePairMark) {
+	if strings.Contains(labels[0], frame.ComparePairMark) {
 		t.Errorf("the tab outside the comparison is marked: %q", labels[0])
 	}
 	runAction(t, m, "compare_close")
 	for _, tab := range m.stripTabs() {
-		if strings.Contains(frame.StripLabel(tab), comparePairMark) {
+		if strings.Contains(frame.StripLabel(tab), frame.ComparePairMark) {
 			t.Errorf("label %q is still marked after the view closed", frame.StripLabel(tab))
 		}
 	}

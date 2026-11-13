@@ -84,7 +84,7 @@ func (d *Document) openNote() string {
 	return ""
 }
 
-// openStatus is the status row text after the document was opened: "Opened NAME" and
+// OpenStatus is the status row text after the document was opened: "Opened NAME" and
 // the reason it refuses edits, if it does, or the notice of a large document.
 func (d *Document) OpenStatus() string {
 	if d.large != nil {

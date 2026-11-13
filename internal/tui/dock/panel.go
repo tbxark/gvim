@@ -196,7 +196,7 @@ func (p *Panel) SetFocus(v bool) {
 		// keeps swallowing keys (a restored transcript keeps its read-only view, it
 		// just no longer has a search open).
 		if p.scroll.typing {
-			_ = p.cancelSearchInput()
+			p.closeSearchInput()
 		}
 		// A restored transcript is the whole dock until it is restarted, so it
 		// keeps its read-only view when the focus leaves.
@@ -266,7 +266,7 @@ func (p *Panel) Hide() {
 	}
 	p.focus = false
 	if p.scroll.typing {
-		_ = p.cancelSearchInput()
+		p.closeSearchInput()
 	}
 	// A restored tab has no shell: its read-only transcript view is all it shows.
 	if !p.restored {
@@ -398,30 +398,6 @@ func (p *Panel) relaunch(dir string) tea.Cmd {
 	return p.launchProgram(dir, launch.Argv, record, launch.Ephemeral)
 }
 
-// StartAgent starts a configured agent preset in the dock. It reports whether the
-// name is a configured agent; a miss is a status notice. The session terminal is
-// ephemeral and records the launch and resume argv, so Restart can rejoin it.
-func (p *Panel) StartAgent(name string) (tea.Cmd, bool) {
-	for _, agent := range p.effects.Agents {
-		if agent.Name != name {
-			continue
-		}
-		dir := ""
-		if p.host.RootDir != nil {
-			dir = p.host.RootDir()
-		}
-		record := terminal.Launch{Argv: agent.Argv, Agent: agent.Name, ResumeArgv: agent.ResumeArgv, Ephemeral: true}
-		p.open = true
-		p.focus = false
-		return p.launchProgram(dir, record.Argv, record, true), true
-	}
-	p.notice = dockText("gvim.dock.no_agent", "No terminal agent is configured under that name.")
-	return nil, false
-}
-
-// Agents returns the configured agent presets, in config order.
-func (p *Panel) Agents() []Agent { return p.effects.Agents }
-
 // Launch returns the program the tab's terminal was started with, empty for the
 // plain shell. It is read-only and bounded the way a start or save bounds it; the
 // record is what a restart replays and what the tab strip titles a terminal with
@@ -453,23 +429,7 @@ func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ep
 	if p.starting {
 		return nil
 	}
-	old := p.term
-	p.term = nil
-	p.starting = true
-	p.notice = ""
-	// A new shell has its own exit to come: forget the old status/marker (the
-	// marker itself is already in the prior transcript when a restart captured it).
-	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
-	p.autoExitScroll = false
-	p.dir = dir
-	if p.launchDir == "" {
-		// Keep the recorded program's chosen launch directory as provenance/fallback
-		// across restarts; the cwd (p.dir / the saved Cwd) is what a restart uses.
-		p.launchDir = dir
-	}
-	p.scroll = scrollState{}
-	p.restored = false
-	p.exited = false
+	old := p.beginStart(dir)
 	rec = rec.Clean()
 	rec.Argv = append([]string(nil), argv...)
 	rec.Ephemeral = ephemeral
@@ -494,9 +454,26 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 		p.notice = noTerminalsNotice()
 		return nil
 	}
+	old := p.beginStart(dir)
+	cols, rows := p.contentSize()
+	starter := p.starter
+	return func() tea.Msg {
+		if old != nil {
+			_ = old.Close()
+		}
+		t, err := starter.Start(dir, cols, rows)
+		return startedMsg{term: t, err: err, cols: cols, rows: rows}
+	}
+}
+
+// beginStart is the state change both launches share: the shell the dock holds
+// is detached (the caller closes it in its command) and the start is marked in
+// flight, in dir. It returns the detached shell, or nil.
+func (p *Panel) beginStart(dir string) Terminal {
 	old := p.term
 	p.term = nil
 	p.starting = true
+	p.exited = false
 	p.notice = ""
 	// A new shell has its own exit to come: forget the old status/marker (the
 	// marker itself is already in the prior transcript when a restart captured it).
@@ -510,15 +487,7 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 	}
 	p.scroll = scrollState{}
 	p.restored = false
-	cols, rows := p.contentSize()
-	starter := p.starter
-	return func() tea.Msg {
-		if old != nil {
-			_ = old.Close()
-		}
-		t, err := starter.Start(dir, cols, rows)
-		return startedMsg{term: t, err: err, cols: cols, rows: rows}
-	}
+	return old
 }
 
 // contentSize is the size of the shell's screen in the frame as it is now. It is
@@ -639,7 +608,6 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			// saving or pressing Ctrl+Space. A dock without layout rows waits for Sync.
 			p.autoExitScroll = !p.effects.CloseOnExit
 			if p.effects.CloseOnExit {
-				p.autoExitScroll = false
 				// terminal.close_on_exit: the dock goes away with its shell
 				// instead of keeping the last screen as scrollback. The release
 				// is IO, so it runs in a command, not in Update.
@@ -670,11 +638,11 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.noticeOf(nothingToCopyNotice())
 			return nil, true
 		}
-		p.noticeOf(copiedSelectionNotice())
 		if p.host.Copy == nil {
 			p.noticeOf(noClipboardNotice())
 			return nil, true
 		}
+		p.noticeOf(copiedSelectionNotice())
 		return p.host.Copy(msg.text), true
 	case linkMissMsg:
 		p.noticeOf(linkMissNotice(msg.token))
@@ -892,11 +860,15 @@ func (p *Panel) Sync() tea.Cmd {
 		}
 		return search
 	}
-	p.maybeShowExitScrollback()
+	show := p.maybeShowExitScrollback()
 	t, gen := p.term, p.gen
 	var cmds []tea.Cmd
 	if search != nil {
 		cmds = append(cmds, search)
+	}
+	if show != nil {
+		// The view's first history fetch is marked pending, so it must run here.
+		cmds = append(cmds, show)
 	}
 	// One wait is in flight at a time. It returns at the next screen change, or at
 	// the exit until the exit is seen. The exit is watched apart from the output, so
@@ -956,14 +928,4 @@ func waitEvent(t Terminal, gen int, live, watchExit bool) tea.Cmd {
 			return msg
 		}
 	}
-}
-
-// Press gives the dock the focus when a left press lands in its rows. It reports
-// whether the press was in the dock, so the caller takes no other action for it.
-func (p *Panel) Press(l frame.Layout, y int) bool {
-	if !l.DockOn || y < l.DockY || y >= l.DockY+l.DockH {
-		return false
-	}
-	p.focusDock()
-	return true
 }

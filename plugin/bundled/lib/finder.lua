@@ -317,17 +317,6 @@ function Finder:fill(picker, query, items)
   self:show_rows(picker, ranked)
 end
 
--- selected returns the current row's source item (nil when none).
-function Finder:selected()
-  if self.picker then
-    local ok, item = pcall(function() return self.picker:selected() end)
-    if ok and type(item) == "table" then
-      return item.item
-    end
-  end
-  return self.selected_item
-end
-
 -- close closes the picker programmatically and reports the close reason once.
 function Finder:close()
   if not self.open_ then
@@ -390,7 +379,7 @@ function M.new(opts)
   f.custom_filter = opts.filter
   f.max_results = math.min(opts.max_results or M.MAX_RESULTS, M.MAX_RESULTS)
   f.on_select, f.on_move, f.on_close = opts.on_select, opts.on_move, opts.on_close
-  f.on_rows = opts.on_rows or opts.on_results
+  f.on_rows = opts.on_rows
   return f
 end
 
@@ -513,8 +502,9 @@ end
 
 -- open_locations shows a list of {path, line (0-based), col (0-based byte), text}. Moving the
 -- selection opens a preview tab at the location; Enter commits (the preview tab is closed and
--- the file opened for real); Esc closes the preview. Bounded: MAX_RESULTS rows, each file read
--- once at most MAX_LOCATION_BYTES, at most MAX_LOCATION_FILES reads.
+-- the file opened for real); Esc closes the preview. Returns the finder (finder:close() closes
+-- the list and the preview tab) or nil, err. Bounded: MAX_RESULTS rows, each file read once at
+-- most MAX_LOCATION_BYTES, at most MAX_LOCATION_FILES reads.
 function M.open_locations(opts)
   opts = opts or {}
   local items = opts.items or {}
@@ -593,7 +583,11 @@ function M.open_locations(opts)
       end
     end,
   }
-  return finder:open { title = opts.title, footer = opts.footer, placeholder = opts.placeholder }
+  local pick, err = finder:open { title = opts.title, footer = opts.footer, placeholder = opts.placeholder }
+  if not pick then
+    return nil, err
+  end
+  return finder
 end
 
 -- read_snippets fills item.text from the source files for location rows that do not have

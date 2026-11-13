@@ -40,7 +40,7 @@ func diskStateOf(path string) diskState {
 // directories, so a remote directory is caught when the read fails.
 func (s diskState) Dir() bool { return s.dir }
 
-// sameAs reports whether s and o describe the same file state.
+// SameAs reports whether s and o describe the same file state.
 func (s diskState) SameAs(o diskState) bool {
 	return s.Exists == o.Exists && s.Size == o.Size && s.Mtime.Equal(o.Mtime)
 }

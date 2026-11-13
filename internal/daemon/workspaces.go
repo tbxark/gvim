@@ -7,9 +7,8 @@ package daemon
 // <encoded-canonical-root>.<stable-id>.json, a stable_id minted once and adopted from the
 // file on restore, and atomic writes. Registry v2 keys a workspace by (canonical root,
 // stable id), so several co-tenant workspaces may share one root (Fresh's extracted tabs
-// model); a v1 file (one workspace per root) still loads unchanged and is rewritten as v2
-// only by a later save - its stable id, and therefore its session directory, is kept.
-// Dedup is by identical stable id only (a stale duplicate file with the same identity keeps
+// model); an older file (one workspace per root) does not load and the registry starts
+// without it. Dedup is by identical stable id only (a stale duplicate file with the same identity keeps
 // the freshest copy); different identities under one root are distinct workspaces. The
 // file carries identity and the session layout; the per-workspace session directory
 // (sessions/<stable-id>/) keeps the stashes and the terminal record, which is
@@ -37,9 +36,8 @@ import (
 )
 
 // WorkspaceVersion is the registry file format version. Version 2 allows several workspaces
-// per canonical root (co-tenant workspaces); a version-1 file (one workspace per root)
-// still loads unchanged. A file with a newer version is refused, never read as this
-// version and never rewritten.
+// per canonical root (co-tenant workspaces). A file with another version is refused, never
+// read as this version; a newer one is also never rewritten.
 const WorkspaceVersion = 2
 
 // ErrWorkspaceVersionTooNew reports a registry file written by a newer gvim.
@@ -59,8 +57,7 @@ type WorkspaceFile struct {
 	Root string `json:"root"`
 	// AuthoritySpec is the canonical remote target of a workspace bound to a remote
 	// authority (the daemon jump-box mode): a user@host[:port]:path or ssh://... target
-	// text. Empty means a local workspace; registry v2 files written before this field
-	// load as local. One workspace is one backend.
+	// text. Empty means a local workspace. One workspace is one backend.
 	AuthoritySpec string `json:"authority_spec,omitempty"`
 	// LastFocusedAt is when the workspace was last the active one, in Unix
 	// milliseconds. It orders the root groups and the workspaces inside a root, and
@@ -365,8 +362,7 @@ func coTenantLabelTaken(label string, entries []Workspace, root string) bool {
 
 // Save writes the workspace file atomically and returns the stored entry. A workspace
 // without a stable id is refused: identity is never minted by a save (Create does that).
-// Save never rewrites a file it did not read as this version; specifically it refuses to
-// save over a stable-id file whose current version is newer.
+// Save refuses to save over a stable-id file whose current version is newer.
 func (r *Registry) Save(w Workspace) (Workspace, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -384,8 +380,6 @@ func (r *Registry) saveLocked(w Workspace) (Workspace, error) {
 	if w.File.Version > WorkspaceVersion {
 		return Workspace{}, fmt.Errorf("%w: %d", ErrWorkspaceVersionTooNew, w.File.Version)
 	}
-	// A load of an older file (registry v1) is saved as the current version: the stable
-	// id, and therefore the session directory, is unchanged, only the format is upgraded.
 	w.File.Version = WorkspaceVersion
 	if w.File.Label == "" {
 		if w.File.AuthoritySpec != "" {
@@ -466,7 +460,7 @@ func (r *Registry) UpdateLayout(id string, layout *session.Session) (Workspace, 
 }
 
 // Remove deletes the workspace's registry file. The per-workspace session directory is
-// data and is kept: use RemoveSessionData for an explicit discard.
+// data and is kept, so closing a workspace never loses unsaved text by accident.
 func (r *Registry) Remove(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -481,16 +475,6 @@ func (r *Registry) Remove(id string) error {
 		return fmt.Errorf("workspace: remove %s: %w", w.Path, err)
 	}
 	return nil
-}
-
-// RemoveSessionData deletes the per-workspace session directory. It is separate from
-// Remove so closing a workspace never loses unsaved text by accident.
-func (r *Registry) RemoveSessionData(id string) error {
-	dir, err := r.SessionDir(id)
-	if err != nil {
-		return err
-	}
-	return os.RemoveAll(dir)
 }
 
 // SessionDir is the per-workspace session directory (sessions/<stable-id>), where the
@@ -626,9 +610,8 @@ func validateStableID(id string) error {
 	return nil
 }
 
-// readWorkspaceFile reads and validates one registry file. Version 1 (one workspace per
-// root) and version 2 (co-tenant workspaces) load; a newer version is an error and the file
-// is never modified. The version is upgraded only when the workspace is saved again.
+// readWorkspaceFile reads and validates one registry file. Only the current version
+// loads; a newer version is an error and the file is never modified.
 func readWorkspaceFile(path string) (WorkspaceFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -641,12 +624,9 @@ func readWorkspaceFile(path string) (WorkspaceFile, error) {
 	if file.Version > WorkspaceVersion {
 		return WorkspaceFile{}, fmt.Errorf("%w: %d (%s)", ErrWorkspaceVersionTooNew, file.Version, path)
 	}
-	if file.Version < 1 {
-		return WorkspaceFile{}, fmt.Errorf("workspace: invalid version %d", file.Version)
+	if file.Version < WorkspaceVersion {
+		return WorkspaceFile{}, fmt.Errorf("workspace: unsupported version %d", file.Version)
 	}
-	// Version 1 files (one workspace per canonical root) are registry v1; they keep
-	// loading unchanged and are rewritten as version 2 by the next save, keeping the
-	// stable id and therefore the workspace's session directory.
 	if file.Root == "" {
 		return WorkspaceFile{}, errors.New("workspace: root is empty")
 	}

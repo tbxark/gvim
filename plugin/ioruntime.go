@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,9 +16,9 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// This file is the runtime-level part of the IO areas (stage S8): the plugin-level waits
+// This file is the runtime-level part of the IO areas: the plugin-level waits
 // timers, watchers and processes are built on, the set of live processes Stop kills, and
-// the name-keyed state store with its serial writer (AMENDMENTS C21 item 2).
+// the name-keyed state store with its serial writer.
 
 // ioRuntime is the IO state of one Runtime. It lives on the runtime, not on a plugin
 // generation, so state writes and process bookkeeping survive reloads.
@@ -26,7 +27,7 @@ type ioRuntime struct {
 	states map[string]*stateEntry
 	procs  map[*process]struct{}
 
-	// The workspace-scoped state target (#19b): one versioned file for every plugin's
+	// The workspace-scoped state target: one versioned file for every plugin's
 	// gvim.state instead of the editor-wide per-plugin files. Empty path keeps the old
 	// behavior byte-identical.
 	wsPath     string
@@ -34,9 +35,30 @@ type ioRuntime struct {
 	wsDirty    bool
 	wsArmed    bool
 	wsBusy     bool
-	// wsSeq invalidates a queued write when a newer write (or the Stop flush) owns the
-	// file; a stale Work skips its write instead of overwriting newer content.
-	wsSeq atomic.Uint64
+	// wsSeq is the latest write sequence per file. A queued write is invalidated when a
+	// newer write (or the Stop flush) of the same file owns it; a stale Work skips its
+	// write instead of overwriting newer content. A workspace switch does not bump it: the
+	// writes of the file it leaves are still the newest ones for that file.
+	wsSeqMu sync.Mutex
+	wsSeq   map[string]uint64
+}
+
+// wsNextSeq claims the next write sequence of path.
+func (io *ioRuntime) wsNextSeq(path string) uint64 {
+	io.wsSeqMu.Lock()
+	defer io.wsSeqMu.Unlock()
+	if io.wsSeq == nil {
+		io.wsSeq = map[string]uint64{}
+	}
+	io.wsSeq[path]++
+	return io.wsSeq[path]
+}
+
+// wsStale reports whether a newer write of path claimed a sequence after seq.
+func (io *ioRuntime) wsStale(path string, seq uint64) bool {
+	io.wsSeqMu.Lock()
+	defer io.wsSeqMu.Unlock()
+	return io.wsSeq[path] != seq
 }
 
 // io returns the IO state of the runtime, creating it (and the stop hook) on first use.
@@ -397,7 +419,7 @@ func (e *stateEntry) flush() {
 	}
 }
 
-// ---------- workspace-scoped state (#19b slice)
+// ---------- workspace-scoped state
 
 // queueWorkspaceWrite writes one snapshot of a workspace state namespace to path. Used when
 // a namespace is left: the content captured at the switch is written to ITS file, whereas
@@ -418,7 +440,11 @@ func (io *ioRuntime) queueWorkspaceWrite(path string, data []byte) {
 		}
 	})
 	osys := r.os
+	seq := io.wsNextSeq(path)
 	r.work = append(r.work, pluginapi.Work{Token: tok, Ctx: context.Background(), Run: func(ctx context.Context) pluginapi.Completion {
+		if io.wsStale(path, seq) {
+			return pluginapi.Completion{Token: tok} // a newer write of the file owns it
+		}
 		if err := writeStateFile(ctx, osys, path, data, nil, nil); err != nil {
 			return pluginapi.Completion{Token: tok, Err: errString(err)}
 		}
@@ -440,7 +466,6 @@ func (io *ioRuntime) wsSwitch(path string, st *WorkspaceState, readOnly bool) {
 	}
 	io.wsPath, io.wsReadOnly = path, readOnly
 	io.wsDirty, io.wsArmed, io.wsBusy = false, false, false
-	io.wsSeq.Add(1)
 	io.states = map[string]*stateEntry{}
 	io.seedWorkspace(st)
 }
@@ -524,8 +549,8 @@ func (io *ioRuntime) wsWrite() {
 	}
 	io.wsDirty = false
 	io.wsBusy = true
-	seq := io.wsSeq.Add(1)
 	path, osys := io.wsPath, r.os
+	seq := io.wsNextSeq(path)
 	tok := r.newToken()
 	r.expectRuntime(tok, func(c pluginapi.Completion) {
 		io.wsBusy = false
@@ -537,7 +562,7 @@ func (io *ioRuntime) wsWrite() {
 		}
 	})
 	r.work = append(r.work, pluginapi.Work{Token: tok, Ctx: context.Background(), Run: func(ctx context.Context) pluginapi.Completion {
-		if io.wsSeq.Load() != seq {
+		if io.wsStale(path, seq) {
 			return pluginapi.Completion{Token: tok} // a newer write (flush) owns the file
 		}
 		if err := writeStateFile(ctx, osys, path, data, nil, nil); err != nil {
@@ -570,7 +595,7 @@ func (io *ioRuntime) wsFlush() {
 	if io.wsPath == "" || io.wsReadOnly || !io.wsDirty {
 		return
 	}
-	io.wsSeq.Add(1)
+	io.wsNextSeq(io.wsPath)
 	io.wsArmed, io.wsBusy, io.wsDirty = false, false, false
 	data := io.wsSnapshot()
 	if len(data) == 0 || len(data) > maxStateFile {

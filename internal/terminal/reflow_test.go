@@ -10,7 +10,12 @@ import (
 func linesOf(rows ...string) []Line {
 	out := make([]Line, len(rows))
 	for i, s := range rows {
-		out[i] = cellsFromText(s)
+		runes := []rune(s)
+		cells := make([]Cell, len(runes))
+		for j, r := range runes {
+			cells[j] = Cell{Rune: r}
+		}
+		out[i] = Line{Cells: cells}
 	}
 	return out
 }
@@ -84,17 +89,5 @@ func TestReflowLinesNeverSplitsAWideGlyph(t *testing.T) {
 				t.Fatalf("a lone continuation cell in %+v", row.Cells)
 			}
 		}
-	}
-}
-
-func TestReflowRowsText(t *testing.T) {
-	t.Parallel()
-	got := ReflowRows([]string{"abcdef", "x"}, 6, 2)
-	want := []string{"ab", "cd", "ef", "x"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("rows = %q, want %q", got, want)
-	}
-	if got := ReflowRows(nil, 6, 2); got != nil {
-		t.Fatalf("empty rows = %q", got)
 	}
 }

@@ -14,18 +14,12 @@ import (
 )
 
 // installState installs persistent state and the well-known directories: gvim.state and
-// gvim.dirs (FINAL 5.1). State lives in memory under the plugin's name, so it survives a
+// gvim.dirs. State lives in memory under the plugin's name, so it survives a
 // reload; the writer chain in ioruntime.go persists it behind the scenes.
 func installState(e *apiEnv) {
 	p, r := e.p, e.r
 	st := e.area("state")
 	entry := func() *stateEntry { return r.io().state(p.name) }
-	fail := func(L *lua.LState, err error) int {
-		v, s := errTuple(err)
-		L.Push(v)
-		L.Push(s)
-		return 2
-	}
 	checkKey := func(L *lua.LState) string {
 		k := L.CheckString(1)
 		if k == "" || len(k) > maxStateKey || !utf8.ValidString(k) {
@@ -58,17 +52,17 @@ func installState(e *apiEnv) {
 		}
 		v, err := p.fromLua(L.Get(2))
 		if err != nil {
-			return fail(L, err)
+			return bufRet(L, err)
 		}
 		if err := checkJSON(v, 0); err != nil {
-			return fail(L, err)
+			return bufRet(L, err)
 		}
 		raw, err := json.Marshal(v)
 		if err != nil {
-			return fail(L, pluginapi.Errf(pluginapi.CodeInvalid, "%v", err))
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeInvalid, "%v", err))
 		}
 		if err := entry().set(k, raw); err != nil {
-			return fail(L, err)
+			return bufRet(L, err)
 		}
 		L.Push(lua.LTrue)
 		return 1

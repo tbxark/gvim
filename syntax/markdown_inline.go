@@ -123,7 +123,7 @@ func (p *mdInline) emphasis(i, hi int, base Kind, flush func(int), seg *int) (in
 	if open, _ := flanking(s, i, i+n, hi, c); !open {
 		return 0, false
 	}
-	j := closingRun(s, i, n, hi, c)
+	j := p.closingRun(i, n, hi, c)
 	if j < 0 {
 		return 0, false
 	}
@@ -145,10 +145,32 @@ func (p *mdInline) emphasis(i, hi int, base Kind, flush func(int), seg *int) (in
 	return j + use, true
 }
 
+// closerKey names a search for a closing run: the opener, the end of the text and the mark.
+type closerKey struct {
+	i, hi int
+	c     byte
+}
+
 // closingRun returns the index of the run of c that closes the run of n at i, or -1. A run
 // that can only open starts a nested span, which is skipped with its own closer, so
-// that "**a *b* c**" is closed by the last run and not by the "*" after "b".
-func closingRun(s string, i, n, hi int, c byte) int {
+// that "**a *b* c**" is closed by the last run and not by the "*" after "b". The answers
+// are kept: without that, a line of openers that never close, such as "*.go *.md *.js", is
+// searched in time exponential in their number.
+func (p *mdInline) closingRun(i, n, hi int, c byte) int {
+	key := closerKey{i, hi, c}
+	if k, ok := p.closers[key]; ok {
+		return k
+	}
+	k := p.searchClosingRun(i, n, hi, c)
+	if p.closers == nil {
+		p.closers = make(map[closerKey]int)
+	}
+	p.closers[key] = k
+	return k
+}
+
+func (p *mdInline) searchClosingRun(i, n, hi int, c byte) int {
+	s := p.s
 	for j := i + n; j < hi; {
 		switch s[j] {
 		case '\\':
@@ -169,7 +191,7 @@ func closingRun(s string, i, n, hi int, c byte) int {
 				return j
 			}
 			if opens {
-				if k := closingRun(s, j, m, hi, c); k >= 0 {
+				if k := p.closingRun(j, m, hi, c); k >= 0 {
 					j = k + min(m, runLength(s, k, hi, c))
 					continue
 				}

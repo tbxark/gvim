@@ -114,6 +114,9 @@ func (s *remoteWindowSource) ReadAt(p []byte, off int64) (int, error) {
 	read := 0
 	for read < len(p) {
 		pos := off + int64(read)
+		if pos >= s.size {
+			return read, io.EOF
+		}
 		index := pos / RemoteWindowSize
 		e, ok := s.windows[index]
 		if !ok {
@@ -306,14 +309,15 @@ func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, s
 	// needs no line index, and the source would eagerly fetch a 1 MiB window only
 	// to throw it away; text still opens the source below. The probe itself is
 	// bounded to the same 64 KiB sample the local large path reads.
-	head, truncated, err := readRemoteHead(ctx, access, path, disk.Size, largeSampleSize)
+	head, _, err := readRemoteHead(ctx, access, path, disk.Size, largeSampleSize)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	if info, ok := imageInfoOf(head); ok {
-		if truncated {
-			info.Size = disk.Size
-		}
+	more := func(n int64) ([]byte, error) {
+		b, _, err := readRemoteHead(ctx, access, path, disk.Size, n)
+		return b, err
+	}
+	if info, ok := imageInfoOfHead(head, disk.Size, more); ok {
 		d := newImageDocument(path, disk, info)
 		d.access = spec.Access
 		return d, nil
@@ -375,9 +379,6 @@ func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, s
 		Size: src.Size(), EstLine: spec.LargeConf.EstLine, Batch: spec.LargeConf.Batch,
 		Mtime: mtimeNano(disk), Skip: info.Skip, StashDir: spec.LargeConf.StashDir,
 		RemoteWindowed: true,
-	}
-	if info.binary {
-		d.readOnly, d.binary = true, true
 	}
 	return d, nil
 }

@@ -48,12 +48,7 @@ func TestRestartKeepsTheTranscriptAndTheCwd(t *testing.T) {
 func TestRestoredTranscriptIsReadOnlyAndDead(t *testing.T) {
 	t.Parallel()
 	p := newTestPanel(t, &fakeStarter{term: newFakeTerm()})
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion,
-		Open:    true,
-		Cwd:     "/restored",
-		Rows:    []string{"old output", "second row"},
-	})
+	p.Restore(terminal.SavedTab{Open: true, Cwd: "/restored", Rows: []string{"old output", "second row"}})
 	if !p.Restored() || !p.Scrolling() || !p.Open() {
 		t.Fatalf("restored %v scrolling %v open %v, want a shown read-only transcript", p.Restored(), p.Scrolling(), p.Open())
 	}
@@ -95,10 +90,7 @@ func TestRestoredTranscriptIsReadOnlyAndDead(t *testing.T) {
 func TestRestoredTranscriptCanBeSelectedAndSearched(t *testing.T) {
 	t.Parallel()
 	p := newTestPanel(t, &fakeStarter{term: newFakeTerm()})
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Rows: []string{"old one", "old two"},
-	})
+	p.Restore(terminal.SavedTab{Open: true, Rows: []string{"old one", "old two"}})
 	// Drag over both restored rows and copy the flow.
 	p.Mouse(clickAt(0, 1, 0, tea.MouseLeft), scrollLayout(), 1)
 	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 3, Y: 2, Button: tea.MouseLeft}), scrollLayout(), 1)
@@ -132,7 +124,7 @@ func TestSavedStateBoundsAndCleansTheTranscript(t *testing.T) {
 	p.dir = "/saved"
 	term.history = []string{"old \x1b[31mred\x1b[0m", "row-2"}
 	st := p.SavedState()
-	if st.Version != terminal.SavedStateVersion || !st.Open || st.Cwd != "/saved" {
+	if !st.Open || st.Cwd != "/saved" {
 		t.Fatalf("saved state = %+v", st)
 	}
 	if st.Width != 80 {
@@ -192,10 +184,7 @@ func TestRestoredTranscriptReflowsToTheContentWidth(t *testing.T) {
 		Focus:       func() {},
 	})
 	p.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Width: 20,
-		Rows: []string{"abcdefghijklmnopqrst"},
-	})
+	p.Restore(terminal.SavedTab{Open: true, Width: 20, Rows: []string{"abcdefghijklmnopqrst"}})
 	p.Sync()
 	if !p.reflowed {
 		t.Fatal("the restored transcript was not marked rewrapped")
@@ -233,11 +222,7 @@ func TestSavedCwdIsCleanedAndBounded(t *testing.T) {
 	var tabs Tabs
 	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	tabs.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Cwd:  "/restored\x00\x1b",
-		Rows: []string{"out"},
-	})
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Cwd: "/restored\x00\x1b", Rows: []string{"out"}}}})
 	if got := tabs.tabs[0].dir; got != "/restored" {
 		t.Fatalf("restored cwd = %q, want the cleaned value", got)
 	}
@@ -257,10 +242,7 @@ func TestReflowReRunsCommittedSearch(t *testing.T) {
 		Focus:       func() {},
 	})
 	p.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Width: width,
-		Rows: []string{"alpha beta gamma delta", "epsilon beta zeta"},
-	})
+	p.Restore(terminal.SavedTab{Open: true, Width: width, Rows: []string{"alpha beta gamma delta", "epsilon beta zeta"}})
 	p.Sync()
 	p.scroll.search = "beta"
 	for _, msg := range messages(p.searchCmd("beta", false, false)) {

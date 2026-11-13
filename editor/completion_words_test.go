@@ -211,3 +211,25 @@ func TestBufferWordCompletionsOtherBufferLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestBufferWordCompletionsWindowStart: the line numbers of the caret and the viewport are
+// absolute, so the window that starts below line 0 ranks words by their real distance.
+func TestBufferWordCompletionsWindowStart(t *testing.T) {
+	t.Parallel()
+	snap := WordSnapshot{
+		Lines: []string{
+			"", "", "", "", "", "", "",
+			"fooBefore",
+			"foo",
+			"",
+			"fooAfter",
+		},
+		StartLine: 100, CursorLine: 108, CursorCol: 3, Prefix: "foo",
+		ViewportTop: 100, ViewportBottom: 110,
+	}
+	got := candidateTexts(BufferWordCompletions(snap))
+	want := []string{"fooBefore", "fooAfter"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("candidates = %v, want %v (the nearer line first)", got, want)
+	}
+}

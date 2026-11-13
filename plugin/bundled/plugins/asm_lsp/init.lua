@@ -146,7 +146,7 @@ local function config_toml(assembler, arch)
   return table.concat(lines, "\n")
 end
 
-local function create_config(buf, assembler, arch)
+local function create_config(assembler, arch)
   local path = project_config_path()
   -- Exclusive create (gvim.fs.write {exclusive = true}): the existence check at offer
   -- time races anything else that creates this project file. The create-new maps to the
@@ -228,7 +228,7 @@ local function offer_config(buf, force)
   end
   for _, known in ipairs(ASSEMBLERS) do
     if chosen == known then
-      create_config(buf, chosen, arch)
+      create_config(chosen, arch)
       return
     end
   end
@@ -336,7 +336,7 @@ gvim.command.register({
 })
 
 gvim.on("after_file_open", function(ev)
-  offer_config(gvim.buf.get(ev.buf))
+  offer_config(ev.buf)
 end)
 
 -- Files opened before the plugin finished loading (CLI arguments, session restore) never

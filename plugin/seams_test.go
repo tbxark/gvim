@@ -84,3 +84,18 @@ func TestSeamsLuaSurface(t *testing.T) {
 		t.Fatalf("split wrapper notices = %q", notices)
 	}
 }
+
+// TestOpenFileInSplitResult pins the result shape the docs describe: the Buffer, as
+// gvim.buf.open returns it (not a leading true).
+func TestOpenFileInSplitResult(t *testing.T) {
+	host := plugintest.NewFakeHost()
+	host.SetFile("/w/x.go", "x")
+	h := cmd(t, "", `
+local b, err = gvim.buf.open_file_in_split("/w/x.go", {direction = "below"})
+T.spy(tostring(b), tostring(err))`, plugintest.Options{Host: host})
+	settleBuffers(h, host)
+	got := spy(h)
+	if len(got) != 1 || got[0] != "Buffer(1) nil" {
+		t.Fatalf("spy = %q (log %v)", got, h.LogText(""))
+	}
+}

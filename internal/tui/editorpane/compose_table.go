@@ -13,11 +13,9 @@ import (
 // the source separator row becomes the mid border (├─┼─┤), and the frame sits at
 // the page measure. Column widths come from all of the table's rows once per
 // text version (stable while scrolling; recomputed on edit), and the separator's
-// colon markers choose the alignment. Top and bottom border rows would be
-// display rows that no source line owns; the appended-row model belongs to the
-// shared page-view extra-row hook (internal/tui/editorpane/rows_extra.go), so the
-// top/bottom borders are a documented residual until that hook lands. The
-// source separator row is the mid border, which is a source row.
+// colon markers choose the alignment. The top and bottom border rows are display
+// rows that no source line owns: PageViewTableBorders adds them through the page-view
+// extra-row hook. The source separator row is the mid border, which is a source row.
 // See docs/markdown.md.
 
 // tableColumnWidths is the layout of one table: the widths of its columns and
@@ -221,46 +219,7 @@ func (f frame) tableCellSegments(li int, tl syntax.TableLine, layout tableColumn
 // cells, breaking after the last space that fits (the space ends the row) and
 // cutting a word that has no space to break at.
 func wrapCellSegments(content []tableCellRune, width int) [][]tableCellRune {
-	if len(content) == 0 {
-		return [][]tableCellRune{{}}
-	}
-	var out [][]tableCellRune
-	start := 0
-	for start < len(content) {
-		used := 0
-		end := start
-		lastSpace := -1
-		for end < len(content) {
-			w := ansi.StringWidth(string(content[end].r))
-			if used+w > width && end > start {
-				// The space just met ends the row; a word boundary behind it takes
-				// the break; a word longer than the row is cut.
-				if content[end].r == ' ' {
-					out = append(out, content[start:end])
-					start = end + 1
-				} else if lastSpace > start {
-					out = append(out, content[start:lastSpace])
-					start = lastSpace + 1
-				} else {
-					out = append(out, content[start:end])
-					start = end
-				}
-				for start < len(content) && content[start].r == ' ' {
-					start++
-				}
-				goto nextRow
-			}
-			used += w
-			if content[end].r == ' ' {
-				lastSpace = end
-			}
-			end++
-		}
-		out = append(out, content[start:])
-		break
-	nextRow:
-	}
-	return out
+	return wrapRuneRows(content, width, func(c tableCellRune) rune { return c.r })
 }
 
 // tableContinuationRow builds visual row k (k >= 1) of a wrapped table row: the

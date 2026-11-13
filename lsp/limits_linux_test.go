@@ -26,7 +26,11 @@ func TestPlanLimitsCgroupAndPidMove(t *testing.T) {
 			t.Errorf("note = %q, want %q", plan.Note, want)
 		}
 	}
-	dir := filepath.Join(base, fmt.Sprintf("gvim-lsp-%d", os.Getpid()))
+	dirs, _ := filepath.Glob(filepath.Join(base, "gvim-lsp-*"))
+	if len(dirs) != 1 {
+		t.Fatalf("cgroups = %v, want one", dirs)
+	}
+	dir := dirs[0]
 	total, err := totalMemoryMB()
 	if err != nil {
 		t.Fatalf("totalMemoryMB: %v", err)
@@ -82,5 +86,48 @@ func TestParseMemTotal(t *testing.T) {
 	}
 	if _, err := parseMemTotal(strings.NewReader("MemFree: 1 kB\n")); err == nil {
 		t.Fatal("a meminfo without MemTotal parsed")
+	}
+}
+
+// TestPlanLimitsGivesEachServerItsOwnCgroup: two servers never share a cgroup, so the
+// limits of the later one do not replace the earlier one's, and Release removes only its
+// own.
+func TestPlanLimitsGivesEachServerItsOwnCgroup(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv(cgroupBaseEnv, base)
+	mem, other := uint32(50), uint32(20)
+	a := PlanLimits(ProcessLimits{Enabled: true, MaxMemoryPercent: &mem})
+	b := PlanLimits(ProcessLimits{Enabled: true, MaxMemoryPercent: &other})
+	if a.Release == nil || b.Release == nil {
+		t.Fatalf("plans = %+v, %+v, want both to release a cgroup", a, b)
+	}
+	dirs, _ := filepath.Glob(filepath.Join(base, "gvim-lsp-*"))
+	if len(dirs) != 2 {
+		t.Fatalf("cgroups = %v, want one per server", dirs)
+	}
+	total, err := totalMemoryMB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		data, err := os.ReadFile(filepath.Join(dir, "memory.max"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[strings.TrimSpace(string(data))] = true
+	}
+	if len(seen) != 2 || !seen[fmt.Sprint(memoryLimitBytes(50, total))] || !seen[fmt.Sprint(memoryLimitBytes(20, total))] {
+		t.Fatalf("memory.max values = %v, want both servers' limits", seen)
+	}
+	// The fake cgroup is a plain directory, so its control files go first; a real cgroup
+	// directory is removed as it is.
+	for _, dir := range dirs {
+		_ = os.Remove(filepath.Join(dir, "memory.max"))
+	}
+	a.Release()
+	b.Release()
+	if left, _ := filepath.Glob(filepath.Join(base, "gvim-lsp-*")); len(left) != 0 {
+		t.Fatalf("cgroups left after Release: %v", left)
 	}
 }

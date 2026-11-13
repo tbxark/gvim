@@ -346,7 +346,7 @@ func bigText(n int, at ...int) string {
 }
 
 // TestMergeConflictOnABigBuffer: the cost of an event does not depend on the size of the
-// buffer. AMENDMENTS C22: fewer than 2000 lines read per event on 150 000 lines.
+// buffer. fewer than 2000 lines read per event on 150 000 lines.
 func TestMergeConflictOnABigBuffer(t *testing.T) {
 	t.Parallel()
 	const n = 150_000

@@ -156,8 +156,6 @@ local function indent_width(s)
   end
   return w
 end
-M.indent_width = indent_width
-M.indent_string = indent_string
 
 -- shift moves the lines first..last by amount shift widths (positive: right). Blank lines
 -- are not indented.

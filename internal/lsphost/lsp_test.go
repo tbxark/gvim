@@ -219,8 +219,8 @@ func TestServerApplyEditIsQueuedAndDrained(t *testing.T) {
 	t.Parallel()
 	port := newPort(lspPlan{}, true, nil)
 	label := "organize"
-	if !port.enqueueEdit("go", protocol.ApplyWorkspaceEditParams{Label: &label, Edit: protocol.WorkspaceEdit{}}) {
-		t.Fatal("the queue refused an edit")
+	if applied, reason := port.enqueueEdit("go", protocol.ApplyWorkspaceEditParams{Label: &label, Edit: protocol.WorkspaceEdit{}}); !applied {
+		t.Fatalf("the queue refused an edit: %s", reason)
 	}
 	edits := port.WorkspaceEdits()
 	if len(edits) != 1 || edits[0].Label != "organize" {
@@ -228,6 +228,25 @@ func TestServerApplyEditIsQueuedAndDrained(t *testing.T) {
 	}
 	if again := port.WorkspaceEdits(); len(again) != 0 {
 		t.Fatalf("the queue kept %d edits after a drain", len(again))
+	}
+}
+
+// TestServerApplyEditRefusesAnUnconvertibleEdit checks a server-initiated edit the port
+// cannot convert is answered as not applied instead of being queued and dropped.
+func TestServerApplyEditRefusesAnUnconvertibleEdit(t *testing.T) {
+	t.Parallel()
+	port := newPort(lspPlan{}, true, nil)
+	bad := protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
+		&protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: "file:///p/a.go"}},
+			Edits:        []protocol.TextDocumentEditElement{&protocol.SnippetTextEdit{}},
+		},
+	}}
+	if applied, reason := port.enqueueEdit("go", protocol.ApplyWorkspaceEditParams{Edit: bad}); applied || reason == "" {
+		t.Fatalf("an unsupported edit: applied=%v reason=%q, want a refusal with a reason", applied, reason)
+	}
+	if edits := port.WorkspaceEdits(); len(edits) != 0 {
+		t.Fatalf("drained = %+v, want nothing queued", edits)
 	}
 }
 

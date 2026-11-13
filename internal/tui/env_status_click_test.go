@@ -6,21 +6,22 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/trust"
 )
 
 // envStatusRun finds the status row's env segment: it is a plugin-style Extra item
 // (HitStatusPlugin) whose text carries the cached environment name.
-func envStatusRun(t *testing.T, m *Model) run {
+func envStatusRun(t *testing.T, m *Model) frame.Run {
 	t.Helper()
 	for _, r := range m.layout().Status {
-		if r.Kind == hitStatusPlugin && strings.Contains(r.Text, "direnv") {
+		if r.Kind == frame.HitStatusPlugin && strings.Contains(r.Text, "direnv") {
 			return r
 		}
 	}
 	t.Fatalf("no env status run in %+v", m.layout().Status)
-	return run{}
+	return frame.Run{}
 }
 
 // TestEnvStatusClickTrustEntry checks the real mouse path: on an untrusted workspace a
@@ -77,7 +78,7 @@ func TestEnvStatusClickFailures(t *testing.T) {
 	for i, it := range items {
 		if it.ID == "env" {
 			found = true
-			if _, ok := m.statusExtraItem(i); !ok || !it.Clickable {
+			if _, ok := m.statusExtraEntryAt(i); !ok || !it.Clickable {
 				t.Fatalf("env item %d is not clickable: %+v", i, it)
 			}
 		}

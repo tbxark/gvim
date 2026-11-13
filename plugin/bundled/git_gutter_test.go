@@ -77,7 +77,7 @@ func TestGitGutterMarks(t *testing.T) {
 }
 
 // The plugin loads after the file opened: the runtime replays the open and the activation
-// to it (AMENDMENTS C21 4), and the two together mark the file once, with one git call.
+// to it, and the two together mark the file once, with one git call.
 func TestGitGutterMarksAFileThatWasOpenBeforeTheLoad(t *testing.T) {
 	r := gutterRig(t, "a\nb\n", "a\nB\n")
 	r.emit("after_file_open", gutterFile, map[string]any{"replay": true})

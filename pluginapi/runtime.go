@@ -148,7 +148,7 @@ type GrepHit struct {
 	Text      string
 }
 
-// Services is passed in plugin.Options and implemented in internal/app. A nil
+// Services is passed in plugin.Options and implemented in internal/pluginhost. A nil
 // Services makes every method CodeUnsupported (Width falls back to the rune count).
 type Services interface {
 	Width(s string) int                                                              // display cells; sync, O(len(s)), UI goroutine
@@ -158,8 +158,8 @@ type Services interface {
 	Fuzzy(ctx context.Context, query string, items []string, limit int) []FuzzyMatch // inside a Work; stops early (nil) when ctx is done
 	Grep(ctx context.Context, r GrepRequest) ([]GrepHit, error)                      // inside a Work
 	Decode(encoding string, data []byte) (string, error)                             // sync, data <= 16 MiB (encoding)
-	GitRoot(dir string) (string, bool)                                               // gitx.FindRoot; sync-cheap, called in a Work
-	GitBranch(root string) (string, error)                                           // gitx.Branch;   called in a Work
+	GitRoot(dir string) (string, bool)                                               // gitstate.FindRoot; sync-cheap, called in a Work
+	GitBranch(root string) (string, error)                                           // gitstate.Branch; called in a Work
 	ValidateChord(chord string) error                                                // keymap.ValidateChord; sync, cheap; nil when chord can be bound
 	DiscoverAgents(ctx context.Context) (AgentReport, error)                         // bounded read-only session discovery; inside a Work
 }

@@ -18,7 +18,7 @@ var clockBase = time.Now()
 // clock (Options.Now) so tests can drive it.
 func installOSLib(p *plugin) {
 	L := p.L
-	t := L.NewTable()
+	t := L.CreateTable(0, 4)
 	t.RawSetString("time", p.goFn(func(L *lua.LState) int { return p.osTime(L) }))
 	t.RawSetString("clock", p.goFn(func(L *lua.LState) int {
 		L.Push(lua.LNumber(time.Since(clockBase).Seconds()))

@@ -14,7 +14,7 @@ import (
 // operations and the async open/save/revert. Buffers are the FakeBuffer values of fakehost.go
 // (AddBuffer, Buffers); everything else a buffer needs lives in bufState, kept in Ext["buf"].
 //
-// The fake follows the position rules of AMENDMENTS C24, which the real editor adapter
+// The fake follows the position rules which the real editor adapter
 // follows too: lines and columns are 0-based, columns are byte offsets and round down to a
 // rune start, a column past the end of a line clamps to the line end, a line past the last
 // clamps to the end of the document (no newline added), and positions are never an error.

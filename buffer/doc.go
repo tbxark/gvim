@@ -27,7 +27,7 @@
 // large mode does for its caller.
 //
 // The two modes are one type on purpose: the mode is part of Buffer's identity,
-// not a layer above it. Buffer.big is read by thirteen files, and the history,
+// not a layer above it. Buffer.big is read by most files of the package, and the history,
 // observer and seam methods all branch on it. A split into two packages was
 // considered and rejected: it would need a new operation and notification
 // boundary, and the mode would still be part of what a Buffer is.

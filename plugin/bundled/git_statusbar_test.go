@@ -151,7 +151,7 @@ func TestGitStatusbarHiddenWhereThereIsNoRepository(t *testing.T) {
 	}
 }
 
-// Without a git binary the editor's own reader answers (AMENDMENTS C28).
+// Without a git binary the editor's own reader answers.
 func TestGitStatusbarWithoutTheBinary(t *testing.T) {
 	svc := &plugintest.FakeServices{GitRoots: map[string]string{"/w": "/w"}, Branches: map[string]string{"/w": "trunk"}}
 	r := statusbarRig(t, rigOpts{noGit: true, services: svc})

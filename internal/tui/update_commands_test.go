@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/theme"
 )
@@ -142,7 +143,7 @@ func TestUpdateSegmentClick(t *testing.T) {
 		return UpdateStatus{Current: "0.4.1", Latest: "0.4.2", Available: true}
 	}})
 	m.Update(updateCheckedMsg{info: &UpdateInfo{Version: "0.4.2"}})
-	if cmd := m.statusSegmentClick(statusSegmentUpdate); cmd != nil {
+	if cmd := m.statusSegmentClick(frame.StatusSegmentUpdate); cmd != nil {
 		t.Fatalf("the update click returned a command: %v", cmd)
 	}
 	if len(m.overlays) == 0 {

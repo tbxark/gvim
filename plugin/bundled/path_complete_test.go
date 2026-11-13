@@ -172,6 +172,24 @@ func TestPathCompleteSuggestions(t *testing.T) {
 	}
 }
 
+// A symlink to a directory completes as a directory (trailing slash); a symlink to a file
+// and a broken link stay plain names.
+func TestPathCompleteSymlinks(t *testing.T) {
+	t.Parallel()
+	host, os := pathHost(t)
+	os.SetSymlink("/work/ldir", "/work/cmd")
+	os.SetSymlink("/work/lfile", "/work/beta.txt")
+	os.SetSymlink("/work/lbroken", "/work/nowhere")
+	h := startPathComplete(t, host, os)
+	in := runPrompt(t, h)
+	in.Input.OnChange("l")
+	h.Settle()
+	want := []string{"ldir/", "lbroken", "lfile", "New file: l"}
+	if got := suggestionTexts(h); !slicesEqual(got, want) {
+		t.Errorf("OnChange(\"l\") = %v, want %v", got, want)
+	}
+}
+
 func TestPathCompleteCapAndHidden(t *testing.T) {
 	t.Parallel()
 	host, os := pathHost(t)

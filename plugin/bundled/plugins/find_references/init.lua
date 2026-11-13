@@ -148,14 +148,9 @@ local function show_references()
     items = items,
     max_results = shown,
     on_jump = jump_to,
-    on_move = function()
-      if not current then
-        return
-      end
-    end,
     on_close = function(reason)
       current = nil
-      if reason == "cancelled" or reason == "programmatic" then
+      if reason == "cancelled" then
         gvim.notify(t("status.closed"))
       end
     end,

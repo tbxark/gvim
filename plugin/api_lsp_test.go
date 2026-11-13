@@ -209,7 +209,7 @@ func TestLSPRequestAllowedMethods(t *testing.T) {
 }
 
 // TestLSPRequestParamsKeepEmptyArrays: json.array({}) in the params reaches the host as an
-// empty array and a plain empty table as an object (S23-1).
+// empty array and a plain empty table as an object.
 func TestLSPRequestParamsKeepEmptyArrays(t *testing.T) {
 	host := lspHost(true)
 	cmd(t, bufShow, `gvim.lsp.request("textDocument/codeAction", {
@@ -230,7 +230,7 @@ func TestLSPRequestParamsKeepEmptyArrays(t *testing.T) {
 }
 
 // TestLSPRequestResultKeepsNullsAndEmptyArrays: a null inside a result is json.null, so an
-// array keeps its length, and an empty array stays an array when encoded again (S23-1).
+// array keeps its length, and an empty array stays an array when encoded again.
 func TestLSPRequestResultKeepsNullsAndEmptyArrays(t *testing.T) {
 	host := lspHost(true)
 	host.LSP().Reply = func(plugintest.LSPCall) (any, string) {

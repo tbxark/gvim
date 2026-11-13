@@ -154,9 +154,7 @@ func (f fileOps) Copy(_ context.Context, src, dstDir string, c expl.Conflict) (s
 	if err != nil {
 		return "", classify(err)
 	}
-	if result.Warning != "" {
-		f.warn.set(result.Warning)
-	}
+	f.warn.set(result.Warning)
 	return dst, nil
 }
 

@@ -71,10 +71,6 @@ type geometry struct {
 	prevEnd     int
 }
 
-// layoutFor places the palette in a w by h frame. It is the plain mode: no toolbar and
-// no preview column.
-func layoutFor(w, h int) geometry { return layoutForMode(w, h, layoutMode{}) }
-
 // layoutForMode places the palette in a w by h frame. It is a pure function of the size
 // and the mode, so painting and hit testing read the same numbers. The card docks to the
 // last row of the frame and keeps a margin from the left and right edges (space.Margin),
@@ -296,13 +292,13 @@ func (p *Palette) paintRow(g *grid.Grid, geo geometry, y int, r row, selected bo
 		g.Put(geo.keysX, y, geo.keysEnd, r.keys, base)
 	}
 	if geo.descW > 0 && r.desc != "" {
-		g.Put(geo.descX, y, geo.descX+geo.descW, truncate(r.desc, geo.descW), faint(base))
+		g.Put(geo.descX, y, geo.descX+geo.descW, space.End(r.desc, geo.descW), faint(base))
 	}
 	if geo.srcOK && r.source != "" {
 		// Right-aligned so the last character is at the end of the list columns, never
 		// left of srcX.
 		x := max(geo.listEnd-ansi.StringWidth(r.source), geo.srcX)
-		g.Put(x, y, geo.listEnd, truncate(r.source, geo.listEnd-x), faint(base))
+		g.Put(x, y, geo.listEnd, space.End(r.source, geo.listEnd-x), faint(base))
 	}
 }
 
@@ -377,14 +373,6 @@ func (p *Palette) drawInput(g *grid.Grid, y, x0, w int) {
 func (p *Palette) mode() commands.Mode {
 	mode, _ := commands.ParseQuery(p.input.Value())
 	return mode
-}
-
-// truncate shortens s to at most w cells, ending with "…" when it is cut.
-func truncate(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	return space.End(s, w)
 }
 
 // faint returns st with the faint attribute, for the secondary columns and the

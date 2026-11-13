@@ -152,3 +152,15 @@ func TestHeaderSharedRowUsesTheNotchCorners(t *testing.T) {
 		t.Fatalf("top header = %q, want ┌ .. ┐", top.Text)
 	}
 }
+
+// The Diagnostics section has no close button, so its header has no close column for the
+// hit map to report.
+func TestDiagnosticsHeaderHasNoCloseButton(t *testing.T) {
+	h := HeaderFor(32, icons.Plain, HeaderSpec{Kind: KindDiagnostics, Several: true})
+	if h.Close != -1 {
+		t.Errorf("close at %d, want -1", h.Close)
+	}
+	if strings.Contains(h.Text, "×") {
+		t.Errorf("header %q draws a close button", h.Text)
+	}
+}

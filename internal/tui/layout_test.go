@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/menubar"
 )
 
 // The numbers below are the blueprint section 4 values at the sample widths. The
@@ -26,12 +28,12 @@ var sampleWidths = []struct {
 var sampleHeights = []int{15, 20, 24, 30, 40}
 
 // layoutFor is frame.ComputeLayout with a readable name for the tests.
-func layoutFor(w, h int, in layoutInput) layout {
+func layoutFor(w, h int, in frame.Input) frame.Layout {
 	return frame.ComputeLayout(w, h, in)
 }
 
 // paintRow paints the runs on a w-wide row and returns the row's text.
-func paintRow(w int, runs []run) string {
+func paintRow(w int, runs []frame.Run) string {
 	g := grid.New(w, 1)
 	for _, r := range runs {
 		g.Put(r.X, 0, w, r.Text, grid.Style{})
@@ -49,7 +51,7 @@ func TestExplorerWidthAtSampleWidths(t *testing.T) {
 
 func TestExplorerWidthIsClamped(t *testing.T) {
 	tests := []struct{ w, override, want int }{
-		{100, 38, 38},  // the M23 drag: 29 to 38
+		{100, 38, 38},  // a drag: 29 to 38
 		{100, 2, 16},   // below the floor
 		{100, 200, 60}, // above the ceiling
 		{40, 200, 20},  // the upper bound is W-20
@@ -64,7 +66,7 @@ func TestExplorerWidthIsClamped(t *testing.T) {
 
 func TestEditorColumnsAtSampleWidths(t *testing.T) {
 	for _, g := range sampleWidths {
-		l := layoutFor(g.w, 30, layoutInput{ExplorerOpen: true, Lines: 4})
+		l := layoutFor(g.w, 30, frame.Input{ExplorerOpen: true, Lines: 4})
 		if l.EditorX != g.explorer {
 			t.Errorf("W=%d: editorX = %d, want E = %d", g.w, l.EditorX, g.explorer)
 		}
@@ -90,7 +92,7 @@ func TestGutterWidthWidensWithDigits(t *testing.T) {
 
 func TestRowBandsAtSampleHeights(t *testing.T) {
 	for _, h := range sampleHeights {
-		l := layoutFor(100, h, layoutInput{})
+		l := layoutFor(100, h, frame.Input{})
 		if l.BodyTop != 3 || l.BodyBottom != h-3 || l.StatusY != h-1 {
 			t.Errorf("H=%d: body %d..%d status %d", h, l.BodyTop, l.BodyBottom, l.StatusY)
 		}
@@ -99,10 +101,10 @@ func TestRowBandsAtSampleHeights(t *testing.T) {
 
 func TestScrollbarShowsOnlyWhenContentOverflows(t *testing.T) {
 	const h = 15 // body rows 3..12, so 10 rows
-	if layoutFor(80, h, layoutInput{Lines: 10}).Scrollbar {
+	if layoutFor(80, h, frame.Input{Lines: 10}).Scrollbar {
 		t.Error("10 lines in 10 rows show a scrollbar")
 	}
-	if !layoutFor(80, h, layoutInput{Lines: 11}).Scrollbar {
+	if !layoutFor(80, h, frame.Input{Lines: 11}).Scrollbar {
 		t.Error("11 lines in 10 rows do not show a scrollbar")
 	}
 }
@@ -119,7 +121,7 @@ func TestExplorerTitleButtonsFollowTheTitle(t *testing.T) {
 		{30, 25, 27},
 	}
 	for _, tt := range tests {
-		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(tt.e)})
+		l := layoutFor(100, 30, frame.Input{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(tt.e)})
 		if l.Ex != tt.e || l.ExReloadX != tt.reload || l.ExCloseX != tt.closeX {
 			t.Errorf("E=%d: buttons at %d and %d (E %d), want %d and %d",
 				tt.e, l.ExReloadX, l.ExCloseX, l.Ex, tt.reload, tt.closeX)
@@ -128,7 +130,7 @@ func TestExplorerTitleButtonsFollowTheTitle(t *testing.T) {
 }
 
 func TestExplorerHiddenHasNoColumns(t *testing.T) {
-	l := layoutFor(100, 30, layoutInput{})
+	l := layoutFor(100, 30, frame.Input{})
 	if l.ExplorerOpen || l.Ex != 0 || l.ExReloadX != -1 || l.ExCloseX != -1 {
 		t.Fatalf("hidden explorer: open %v ex %d buttons %d and %d",
 			l.ExplorerOpen, l.Ex, l.ExReloadX, l.ExCloseX)
@@ -139,7 +141,7 @@ func TestExplorerHiddenHasNoColumns(t *testing.T) {
 }
 
 func TestTabStripStartsAfterTheExplorer(t *testing.T) {
-	l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, Tabs: []TabInfo{{Name: "a.txt"}}})
+	l := layoutFor(100, 30, frame.Input{ExplorerOpen: true, Tabs: []TabInfo{{Name: "a.txt"}}})
 	if got := l.Strip.Runs[0]; got.X != 32 || got.Text != "  a.txt " {
 		t.Fatalf("first tab run = %+v", got)
 	}
@@ -147,16 +149,16 @@ func TestTabStripStartsAfterTheExplorer(t *testing.T) {
 
 func TestTabStripOverflowsNarrowRows(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go"}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go"}}
-	wide := layoutFor(100, 30, layoutInput{Tabs: tabs})
+	wide := layoutFor(100, 30, frame.Input{Tabs: tabs})
 	if wide.Strip.Overflow {
 		t.Error("four tabs at W=100 overflow")
 	}
-	narrow := layoutFor(20, 30, layoutInput{Tabs: tabs})
+	narrow := layoutFor(20, 30, frame.Input{Tabs: tabs})
 	if !narrow.Strip.Overflow {
 		t.Fatal("four tabs at W=20 do not overflow")
 	}
 	for _, r := range narrow.Strip.Runs {
-		if r.Kind == hitTabNew || r.Kind == hitTabScrollBefore || r.Kind == hitTabScrollAfter {
+		if r.Kind == frame.HitTabNew || r.Kind == frame.HitTabScrollBefore || r.Kind == frame.HitTabScrollAfter {
 			continue
 		}
 		if r.X < 1 || r.X+r.W > 19-3 {
@@ -166,41 +168,40 @@ func TestTabStripOverflowsNarrowRows(t *testing.T) {
 }
 
 func TestMenuLabelsJoinWhileExplorerHasFocus(t *testing.T) {
-	plain := paintRow(80, frame.MenuRuns(false))
-	if strings.Contains(plain, "Explorer") {
-		t.Errorf("menu without focus shows Explorer: %q", plain)
+	if labels := menubar.Labels(false); slices.Contains(labels, "Explorer") {
+		t.Errorf("menu without focus shows Explorer: %v", labels)
 	}
-	focused := paintRow(80, frame.MenuRuns(true))
-	if !strings.Contains(focused, "Explorer") || !strings.HasPrefix(focused, " File") {
-		t.Errorf("menu with focus = %q", focused)
+	focused := menubar.Labels(true)
+	if !slices.Contains(focused, "Explorer") || focused[0] != "File" {
+		t.Errorf("menu with focus = %v", focused)
 	}
 }
 
 func TestGateReplacesTheWholeFrame(t *testing.T) {
 	gated := []struct{ w, h int }{{7, 10}, {8, 2}, {1, 1}}
 	for _, c := range gated {
-		if l := layoutFor(c.w, c.h, layoutInput{}); !l.Gated {
+		if l := layoutFor(c.w, c.h, frame.Input{}); !l.Gated {
 			t.Errorf("%dx%d is not gated", c.w, c.h)
 		}
 	}
-	if l := layoutFor(8, 3, layoutInput{}); l.Gated {
+	if l := layoutFor(8, 3, frame.Input{}); l.Gated {
 		t.Fatal("8x3 is gated, but it is a sample size above the gate")
 	}
-	if got := layoutFor(3, 1, layoutInput{}).Hit(0, 0); got.Kind != hitNone {
+	if got := layoutFor(3, 1, frame.Input{}).Hit(0, 0); got.Kind != frame.HitNone {
 		t.Fatalf("hit under the gate = %+v", got)
 	}
 }
 
 // statusRow paints the status row alone on a w-wide row, as the status bar does.
-func statusRow(w int, s statusView) string {
-	return paintRow(w, layoutFor(w, 3, layoutInput{Status: s}).Status)
+func statusRow(w int, s frame.StatusView) string {
+	return paintRow(w, layoutFor(w, 3, frame.Input{Status: s}).Status)
 }
 
 func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
 	// Blueprint section 4.5 hand checks. Fresh's default list puts the diagnostics
 	// counter on the left, after the cursor position, so the right block is the
 	// language cluster and then the palette hint.
-	s := statusView{Position: "Ln 1, Col 1", EOL: "LF", Encoding: "ASCII", Language: "Text", Diags: frame.DiagCounts{Warnings: 2}, Lines: 4}
+	s := frame.StatusView{Position: "Ln 1, Col 1", EOL: "LF", Encoding: "ASCII", Language: "Text", Diags: frame.DiagCounts{Warnings: 2}, Lines: 4}
 	tests := []struct {
 		w     int
 		right string // the right block, from its first cell to the edge
@@ -219,7 +220,7 @@ func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
 }
 
 func TestStatusLeftGroupKeepsItsPosition(t *testing.T) {
-	s := statusView{Position: "Ln 3, Col 7", Message: "Saved", Lines: 4, EOL: "LF"}
+	s := frame.StatusView{Position: "Ln 3, Col 7", Message: "Saved", Lines: 4, EOL: "LF"}
 	row := statusRow(100, s)
 	if !strings.HasPrefix(row, " Local  Ln 3, Col 7") {
 		t.Errorf("status row = %q", row)
@@ -230,12 +231,12 @@ func TestStatusLeftGroupKeepsItsPosition(t *testing.T) {
 }
 
 func TestStatusPaletteSegmentIsClickable(t *testing.T) {
-	l := layoutFor(100, 30, layoutInput{Status: statusView{Position: "Ln 1, Col 1", Lines: 1}})
+	l := layoutFor(100, 30, frame.Input{Status: frame.StatusView{Position: "Ln 1, Col 1", Lines: 1}})
 	last := l.Status[len(l.Status)-1]
-	if last.Kind != hitStatusPalette {
+	if last.Kind != frame.HitStatusPalette {
 		t.Fatalf("last status run kind = %v", last.Kind)
 	}
-	if got := l.Hit(last.X, l.StatusY); got.Kind != hitStatusPalette {
+	if got := l.Hit(last.X, l.StatusY); got.Kind != frame.HitStatusPalette {
 		t.Errorf("hit on palette segment = %+v", got)
 	}
 }

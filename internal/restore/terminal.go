@@ -23,8 +23,8 @@ import (
 // largest record boundTerminalState can produce: at most 16 tabs (per transcript
 // 500 rows / 1 MiB cleaned text, JSON at most 2x; a 512 KiB serialized screen; argv
 // at most 64 entries / 4096 bytes each / 32 KiB text per list, JSON at most 6x;
-// labels 256 bytes) plus the 100x512 search history and the mirrored top-level
-// record; TestBoundedStateFitsTheReaderCap checks the worst case stays under it.
+// labels 256 bytes) plus the 100x512 search history;
+// TestBoundedStateFitsTheReaderCap checks the worst case stays under it.
 // SaveTerminal also measures the exact encoded size and refuses to write over the
 // cap (keeping the previous record). It is a variable only so tests can exercise
 // the cap without writing 64 MiB.
@@ -89,7 +89,7 @@ func SaveTerminal(dir string, st terminal.SavedState) error {
 	// callers: a direct SaveTerminal cannot write a record larger than LoadTerminal
 	// (or the documented bounds) would accept.
 	st = boundTerminalState(st)
-	if !st.Open && len(st.Rows) == 0 && len(st.Tabs) == 0 {
+	if len(st.Tabs) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("terminal: remove %s: %w", terminalFileName, err)
 		}
@@ -140,9 +140,9 @@ func readTerminalFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-// terminalProtectMarker is created when an unreadable terminal record cannot be
-// quarantined (for example the directory is not writable). Its presence makes
-// SaveTerminal refuse to write or remove the record, so a later normal exit can
+// terminalProtectMarkerSuffix is appended to the record's name to give the marker file
+// created when an unreadable terminal record cannot be quarantined (for example the
+// directory is not writable). Its presence makes SaveTerminal refuse to write or remove the record, so a later normal exit can
 // never silently destroy the unreadable original; the user is told to inspect it.
 const terminalProtectMarkerSuffix = ".protected"
 
@@ -175,13 +175,6 @@ func saveDisabledReason(dir string) string {
 	saveDisabledMu.Lock()
 	defer saveDisabledMu.Unlock()
 	return saveDisabledDirs[dir]
-}
-
-// resetSaveProtectionForTest clears the in-memory block for a test directory.
-func resetSaveProtectionForTest(dir string) {
-	saveDisabledMu.Lock()
-	defer saveDisabledMu.Unlock()
-	delete(saveDisabledDirs, dir)
 }
 
 // TerminalRecordProtected reports when a save must not touch a record: either the
@@ -351,32 +344,41 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	if err := json.Unmarshal(data, &st); err != nil {
 		return terminal.SavedState{}, false, fmt.Errorf("terminal: decode %s: %w", terminalFileName, err)
 	}
-	if st.Version != terminal.SavedStateVersion || (len(st.Rows) == 0 && len(st.Tabs) == 0) {
+	if st.Version != terminal.SavedStateVersion || len(st.Tabs) == 0 {
 		return terminal.SavedState{}, false, nil
 	}
 	st = boundTerminalState(st)
-	return st, len(st.Rows) > 0 || len(st.Tabs) > 0, nil
+	return st, len(st.Tabs) > 0, nil
+}
+
+// stripControls replaces invalid UTF-8 and drops control characters.
+func stripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, ""))
+}
+
+// cutUTF8 cuts s to at most maxBytes bytes on a rune boundary.
+func cutUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := s[:maxBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut
 }
 
 // boundSavedText cleans one saved display label/string: invalid UTF-8 is replaced,
 // control characters are dropped, outer space is trimmed and the result is cut on a
 // rune boundary at max bytes.
 func boundSavedText(text string, maxBytes int) string {
-	text = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, strings.ToValidUTF8(text, ""))
-	text = strings.TrimSpace(text)
-	if len(text) <= maxBytes {
-		return text
-	}
-	cut := text[:maxBytes]
-	for len(cut) > 0 && !utf8.ValidString(cut) {
-		cut = cut[:len(cut)-1]
-	}
-	return strings.TrimSpace(cut)
+	text = stripControls(text)
+	return strings.TrimSpace(cutUTF8(strings.TrimSpace(text), maxBytes))
 }
 
 // boundSavedArgv bounds a launch/resume argv list: the first at most
@@ -393,13 +395,7 @@ func boundSavedArgv(argv []string) []string {
 	total := 0
 	for _, arg := range argv[:min(len(argv), maxSavedArgvEntries)] {
 		arg = strings.ToValidUTF8(arg, "")
-		if len(arg) > maxSavedArgvArgBytes {
-			cut := arg[:maxSavedArgvArgBytes]
-			for len(cut) > 0 && !utf8.ValidString(cut) {
-				cut = cut[:len(cut)-1]
-			}
-			arg = cut
-		}
+		arg = cutUTF8(arg, maxSavedArgvArgBytes)
 		if total+len(arg) > maxSavedArgvTotalBytes {
 			break
 		}
@@ -412,7 +408,7 @@ func boundSavedArgv(argv []string) []string {
 	return out
 }
 
-// boundSavedLaunch bounds the launch-record strings of one state/tab.
+// boundSavedLaunch bounds the launch-record strings of one tab.
 func boundSavedLaunch(name, agent, source, launchDir, title string, launchArgv, resumeArgv []string) (string, string, string, string, string, []string, []string) {
 	return boundSavedText(name, maxSavedLabelBytes),
 		boundSavedText(agent, maxSavedLabelBytes),
@@ -432,14 +428,7 @@ func boundSavedLaunch(name, agent, source, launchDir, title string, launchArgv, 
 // ends up with neither rows nor the open flag is dropped; the active index is
 // clamped. It is pure value processing: no IO and no process.
 func boundTerminalState(st terminal.SavedState) terminal.SavedState {
-	st.Title = terminal.CleanTitle(st.Title)
 	st.SearchHistory = boundSearchHistory(st.SearchHistory)
-	st.Cwd = boundTerminalDir(st.Cwd)
-	// The mirrored top-level launch record is bounded like a tab's.
-	_, st.Agent, st.Source, st.LaunchDir, _, st.LaunchArgv, st.ResumeArgv =
-		boundSavedLaunch("", st.Agent, st.Source, st.LaunchDir, "", st.LaunchArgv, st.ResumeArgv)
-	st.Rows = boundTerminalRows(st.Rows)
-	st.Screen = st.Screen.Bounded()
 	if len(st.Tabs) > maxSavedTerminalTabs {
 		st.Tabs = st.Tabs[len(st.Tabs)-maxSavedTerminalTabs:]
 	}
@@ -472,24 +461,9 @@ func boundSearchHistory(queries []string) []string {
 	out := make([]string, 0, min(len(queries), terminal.MaxSearchHistoryEntries))
 	start := max(len(queries)-terminal.MaxSearchHistoryEntries, 0)
 	for _, query := range queries[start:] {
-		query = strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
-				return -1
-			}
-			return r
-		}, strings.ToValidUTF8(query, ""))
-		query = strings.TrimSpace(query)
-		if query == "" {
-			continue
+		if query = boundSavedText(query, terminal.MaxSearchQueryBytes); query != "" {
+			out = append(out, query)
 		}
-		if len(query) > terminal.MaxSearchQueryBytes {
-			cut := query[:terminal.MaxSearchQueryBytes]
-			for len(cut) > 0 && !utf8.ValidString(cut) {
-				cut = cut[:len(cut)-1]
-			}
-			query = strings.TrimSpace(cut)
-		}
-		out = append(out, query)
 	}
 	return out
 }
@@ -498,21 +472,8 @@ func boundSearchHistory(queries []string) []string {
 // It is deliberately not POSIX-only: a local Windows path is a legitimate saved
 // cwd (OSC 7 itself is POSIX-only and is cleaned in the terminal package).
 func boundTerminalDir(dir string) string {
-	dir = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, strings.ToValidUTF8(dir, ""))
-	dir = strings.TrimSpace(dir)
-	if len(dir) <= maxSavedTerminalDirBytes {
-		return dir
-	}
-	cut := dir[:maxSavedTerminalDirBytes]
-	for len(cut) > 0 && !utf8.ValidString(cut) {
-		cut = cut[:len(cut)-1]
-	}
-	return cut
+	dir = stripControls(dir)
+	return cutUTF8(strings.TrimSpace(dir), maxSavedTerminalDirBytes)
 }
 
 // boundTerminalRows applies the saved-transcript bounds and strips control

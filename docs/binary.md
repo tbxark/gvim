@@ -69,7 +69,8 @@ The viewer is a bounded window, not a buffer copy:
 
 The open path probes at most the first 64 KiB before it reads a whole file. A
 binary head becomes the summary immediately; a picture head becomes an image
-document. A small file is still checked whole before text decoding, so a NUL or a
+document (a JPEG whose frame header lies past the 64 KiB head is searched for in up
+to 4 MiB of its marker segments, see [images.md](images.md)). A small file is still checked whole before text decoding, so a NUL or a
 control byte after the probe keeps the old binary result. A binary file never
 enters large-file mode, whatever its size; its summary is the whole document.
 

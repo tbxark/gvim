@@ -46,3 +46,16 @@ func TestPreviewSanitizesC1AndFormatText(t *testing.T) {
 		t.Fatalf("highlight runs past the match")
 	}
 }
+
+// TestMatchTextSanitizesFormatRunes: a result row never carries bidi or zero-width
+// runes of the matched line, and its bold span stays on the readable match.
+func TestMatchTextSanitizesFormatRunes(t *testing.T) {
+	t.Parallel()
+	text, from, to := matchText(Match{Line: 1, Col: 7, Len: 3, Text: "func \u202efoo\u200b() {"})
+	if text != "func foo() {" {
+		t.Fatalf("text = %q", text)
+	}
+	if got := text[from:to]; got != "foo" {
+		t.Fatalf("match span = %q (%d..%d), want foo", got, from, to)
+	}
+}

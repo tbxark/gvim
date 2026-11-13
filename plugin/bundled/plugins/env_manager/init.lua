@@ -1,4 +1,4 @@
--- Environment Manager (task-62 reduced port of Fresh's env-manager).
+-- Environment Manager (a reduced port of Fresh's env-manager).
 --
 -- Detection, the trust gate, capture and spawn application all live in the host
 -- (config env.detectors + the env package + gvim.env). This plugin decides only
@@ -52,12 +52,12 @@ local function refresh_status()
   local d, a = detected(), active()
   local text
   if a then
-    text = tostring(a.name) .. " ✓"
+    text = t("statusbar.active", { name = tostring(a.name) })
   elseif d then
     if trusted() then
       text = tostring(d.name)
     else
-      text = tostring(d.name) .. " (locked)"
+      text = t("statusbar.locked", { name = tostring(d.name) })
     end
   else
     text = t("statusbar.system")

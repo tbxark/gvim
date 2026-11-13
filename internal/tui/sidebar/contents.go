@@ -325,9 +325,6 @@ func (c *Contents) SelectedPos() int { return c.selected }
 // Scroll is the first visible position.
 func (c *Contents) Scroll() int { return c.scroll }
 
-// ViewRows is the body rows the section last had.
-func (c *Contents) ViewRows() int { return c.viewRows }
-
 // SetViewRows records the body rows the layout gave the section. It is the page
 // size of Page and the window of Draw.
 func (c *Contents) SetViewRows(n int) {
@@ -672,14 +669,10 @@ func (c *Contents) SetScroll(n int) {
 	c.clampScroll()
 }
 
-// clampScroll keeps the window over the rows.
+// clampScroll keeps the window over the rows: it never starts so late that the rows
+// from there on leave part of the window blank.
 func (c *Contents) clampScroll() {
-	if c.scroll < 0 {
-		c.scroll = 0
-	}
-	if rows := len(c.entries); c.scroll > rows {
-		c.scroll = rows
-	}
+	c.scroll = min(max(c.scroll, 0), max(len(c.entries)-max(c.viewRows, 1), 0))
 }
 
 // Draw paints the section's body into its place in the column, which starts at
@@ -702,15 +695,13 @@ func (c *Contents) Draw(dst *grid.Grid, x, width int, sec Section, ic icons.Mode
 	}
 	c.clampScroll()
 	if len(c.entries) == 0 {
-		msg, faint := "(no headings)", true
+		msg := "(no headings)"
 		if c.stale {
 			msg = "(the file is too large for an outline)"
 		}
-		style := body
-		if faint {
-			style.Faint = true
-		}
-		dst.Put(x+1+space.PadX, sec.BodyTop, right-space.PadX, msg, style)
+		faint := body
+		faint.Faint = true
+		dst.Put(x+1+space.PadX, sec.BodyTop, right-space.PadX, msg, faint)
 		return
 	}
 	end := right - 1 - space.PadX

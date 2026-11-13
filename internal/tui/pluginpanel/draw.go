@@ -87,11 +87,17 @@ func (p *Panel) Draw(g *grid.Grid, r Rect) {
 // row is never half painted over the frame.
 func (p *Panel) drawPage(g *grid.Grid, x, y, w, h int) {
 	contentH := max(measureHeight(p.spec.Root), h)
-	scratch := grid.New(w, contentH)
+	scratch := p.scratch
+	if scratch == nil || scratch.Width() != w || scratch.Height() != contentH {
+		scratch = grid.New(w, contentH)
+		p.scratch = scratch
+	} else {
+		scratch.Reset()
+	}
 	pt := &painter{g: scratch, p: p}
 	pt.node(p.spec.Root, 0, 0, w, contentH)
 	p.contentRows = contentH
-	p.pageTop = clamp(p.pageTop, 0, max(contentH-h, 0))
+	p.pageTop = space.Clamp(p.pageTop, 0, max(contentH-h, 0))
 	// Blit the visible window: runs of styled cells, wide graphemes kept whole.
 	for row := 0; row < h; row++ {
 		src := p.pageTop + row
@@ -145,9 +151,7 @@ func sameCellStyle(a, b grid.Style) bool {
 	return sameCellColor(a.FG, b.FG) && sameCellColor(a.BG, b.BG)
 }
 
-func sameCellColor(a, b interface {
-	RGBA() (uint32, uint32, uint32, uint32)
-}) bool {
+func sameCellColor(a, b color.Color) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
@@ -416,21 +420,15 @@ func measureWidth(w pluginapi.Widget) int {
 	case pluginapi.WidgetDropdown:
 		n := 0
 		for _, o := range w.Options {
-			n = max(n, ansi.StringWidth(o))
+			n = max(n, ansi.StringWidth(Sanitize(o)))
 		}
 		return max(n+6, 10)
 	case pluginapi.WidgetNumber:
-		return ansi.StringWidth(w.Label) + 8
-	case pluginapi.WidgetRadio:
+		return ansi.StringWidth(Sanitize(w.Label)) + 8
+	case pluginapi.WidgetRadio, pluginapi.WidgetDualList:
 		n := 0
 		for _, o := range w.Options {
-			n = max(n, ansi.StringWidth(o)+5)
-		}
-		return n
-	case pluginapi.WidgetDualList:
-		n := 0
-		for _, o := range w.Options {
-			n = max(n, ansi.StringWidth(o)+5)
+			n = max(n, ansi.StringWidth(Sanitize(o))+5)
 		}
 		return n
 	case pluginapi.WidgetLabeledSection, pluginapi.WidgetComponent, pluginapi.WidgetOverlay,
@@ -578,14 +576,6 @@ func (p *Panel) focusedStyle(base grid.Style) grid.Style {
 	return st
 }
 
-// elide cuts text to w cells with an ellipsis.
-func elide(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	return ansi.Truncate(s, w, "…")
-}
-
 // ---- leaves ----
 
 func (pt *painter) label(node pluginapi.Widget, x, y, wd int) {
@@ -596,12 +586,12 @@ func (pt *painter) label(node pluginapi.Widget, x, y, wd int) {
 			if cx >= x+wd {
 				break
 			}
-			text := elide(Sanitize(r.Text), x+wd-cx)
+			text := space.End(Sanitize(r.Text), x+wd-cx)
 			cx += pt.g.Put(cx, y, x+wd, text, pt.p.runStyle(base, r.Style))
 		}
 		return
 	}
-	pt.g.Put(x, y, x+wd, elide(Sanitize(pt.p.value(node)), wd), base)
+	pt.g.Put(x, y, x+wd, space.End(Sanitize(pt.p.value(node)), wd), base)
 }
 
 func (pt *painter) raw(node pluginapi.Widget, x, y, wd, h int) {
@@ -610,7 +600,7 @@ func (pt *painter) raw(node pluginapi.Widget, x, y, wd, h int) {
 			break
 		}
 		base := pt.p.styleOf(node)
-		pt.g.Put(x, y+i, x+wd, elide(Sanitize(r.Text), wd), pt.p.runStyle(base, r.Style))
+		pt.g.Put(x, y+i, x+wd, space.End(Sanitize(r.Text), wd), pt.p.runStyle(base, r.Style))
 	}
 }
 
@@ -627,7 +617,7 @@ func (pt *painter) hintBar(node pluginapi.Widget, x, y, wd int) {
 		if i > 0 {
 			cx += pt.g.Put(cx, y, x+wd, "  ", base)
 		}
-		cx += pt.g.Put(cx, y, x+wd, elide(Sanitize(r.Text), x+wd-cx), pt.p.runStyle(base, r.Style))
+		cx += pt.g.Put(cx, y, x+wd, space.End(Sanitize(r.Text), x+wd-cx), pt.p.runStyle(base, r.Style))
 	}
 }
 
@@ -661,7 +651,7 @@ func (pt *painter) button(node pluginapi.Widget, x, y, wd int) {
 		base = pt.p.focusedStyle(base)
 	}
 	text := "[" + Sanitize(node.Label) + "]"
-	pt.g.Put(x, y, x+wd, elide(text, wd), base)
+	pt.g.Put(x, y, x+wd, space.End(text, wd), base)
 	if !node.Disabled {
 		pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y, W: min(measureWidth(node), wd), H: 1}, kind: hitButton, focusIdx: fi})
 	}
@@ -690,7 +680,7 @@ func (pt *painter) toggle(node pluginapi.Widget, x, y, wd int) {
 	if node.Label != "" {
 		text += " " + Sanitize(node.Label)
 	}
-	pt.g.Put(x, y, x+wd, elide(text, wd), base)
+	pt.g.Put(x, y, x+wd, space.End(text, wd), base)
 	pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y, W: min(measureWidth(node), wd), H: 1}, kind: hitToggle, focusIdx: fi})
 }
 
@@ -715,7 +705,7 @@ func (pt *painter) list(node pluginapi.Widget, x, y, wd, h int) {
 	top := windowTop(sel, rows, len(items))
 	pt.p.lastVisibleRows = max(rows, 1)
 	if len(items) == 0 {
-		pt.g.Put(x, y, x+wd, elide("(empty)", wd), pt.p.chrome.Muted)
+		pt.g.Put(x, y, x+wd, space.End("(empty)", wd), pt.p.chrome.Muted)
 		return
 	}
 	for k := 0; k < rows; k++ {
@@ -742,14 +732,14 @@ func (pt *painter) list(node pluginapi.Widget, x, y, wd, h int) {
 		if it.Checked {
 			text = "[x] " + text
 		}
-		cx := x + pt.g.Put(x, y+k, x+wd, elide(text, wd), st)
+		cx := x + pt.g.Put(x, y+k, x+wd, space.End(text, wd), st)
 		if it.Detail != "" && cx < x+wd {
 			detail := pt.p.chrome.Muted
 			if i == sel {
 				detail = st
 				detail.Faint = true
 			}
-			pt.g.Put(cx+2, y+k, x+wd, elide(Sanitize(it.Detail), x+wd-cx-2), detail)
+			pt.g.Put(cx+2, y+k, x+wd, space.End(Sanitize(it.Detail), x+wd-cx-2), detail)
 		}
 		pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y + k, W: wd, H: 1}, kind: hitListRow, focusIdx: fi, index: i, disabled: it.Disabled, path: widgetPath(pt.p, fi)})
 	}
@@ -807,7 +797,7 @@ func (pt *painter) tree(node pluginapi.Widget, x, y, wd, h int) {
 	}
 	pt.p.lastVisibleRows = max(rows, 1)
 	if len(vis) == 0 {
-		pt.g.Put(x, y, x+wd, elide("(empty)", wd), pt.p.chrome.Muted)
+		pt.g.Put(x, y, x+wd, space.End("(empty)", wd), pt.p.chrome.Muted)
 		return
 	}
 	sel := pt.p.selected(node)
@@ -858,14 +848,14 @@ func (pt *painter) tree(node pluginapi.Widget, x, y, wd, h int) {
 			}
 			cx += pt.g.Put(cx, y+k, x+wd, chip+" ", st)
 		}
-		cx += pt.g.Put(cx, y+k, x+wd, elide(Sanitize(vn.node.Text), x+wd-cx), st)
+		cx += pt.g.Put(cx, y+k, x+wd, space.End(Sanitize(vn.node.Text), x+wd-cx), st)
 		if vn.node.Detail != "" && cx < x+wd {
 			detail := pt.p.chrome.Muted
 			if vn.index == sel {
 				detail = st
 				detail.Faint = true
 			}
-			pt.g.Put(cx+2, y+k, x+wd, elide(Sanitize(vn.node.Detail), x+wd-cx-2), detail)
+			pt.g.Put(cx+2, y+k, x+wd, space.End(Sanitize(vn.node.Detail), x+wd-cx-2), detail)
 		}
 		pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y + k, W: wd, H: 1}, kind: hitTreeRow, focusIdx: fi, index: vn.index, path: widgetPath(pt.p, fi)})
 		if vn.children {

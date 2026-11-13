@@ -87,10 +87,8 @@ loads the config, passes it to the TUI through `tui.Deps.Trust` (see
 `~/.local/state/gvim` on Unix (macOS included), and `os.UserConfigDir()/gvim/state` on Windows.
 It holds the files gvim writes for itself (this store, the recent list, the plugin toggles and
 the update stamp), never the configuration: `config.Dir()` keeps what the user writes
-(`config.json`, `init.lua`, `plugins`, `themes`). A store left in the config directory by an
-older build is moved there once; when the move fails the store keeps reading and writing the
-legacy file in place (the next launch retries the move), so a recorded decision is never lost.
-The store stays a per-user file and is never written inside a workspace, because a repository
+(`config.json`, `init.lua`, `plugins`, `themes`). gvim does not read a trust store from the
+config directory. The store stays a per-user file and is never written inside a workspace, because a repository
 must not be able to vouch for itself. Keys are workspace roots
 made canonical with `filepath.EvalSymlinks`, so a symlinked spelling and its target share
 a decision. The store is written through `atomicfile` (temp file, sync, rename), so a
@@ -120,8 +118,8 @@ Start/Restart LSP Server still works, and the user's file is not modified).
 **Config keys.** Fresh has no configuration key for the trust policy: the store is the only
 state, and the level is surfaced through the status bar element and the plugin snapshot.
 gvim adds no key either. There is nothing to set: open the dialog and decide. (Fresh's
-`env.detectors` markers feed its trust scan; gvim has no env activation, so its marker
-list is fixed in `trust/markers.go`.)
+`env.detectors` markers feed its trust scan; gvim derives the environment markers of
+`trust/markers.go` from the same built-in detector list as activation, see "Environments".)
 
 ## 3. Enforcement in gvim: the mapping
 
@@ -131,7 +129,8 @@ list is fixed in `trust/markers.go`.)
 | Project plugins, plugin settings | Via the project layer skip: a project cannot turn a plugin off or set a project setting. gvim discovers no plugins from the workspace itself (plugins come from the binary, the user config dir and `--plugin`), so there is nothing else to gate. | **Enforced** via the config layer. |
 | Explicit executables inside the workspace | Enforced by the spawn gate (`trust.DecideSpawn`, wired through the workspace authority's one-shots/long-running children/terminal, the plugin OS and the LSP manager): an executable that resolves inside the root is refused, lexically and through symlinks, and a bare name is resolved against the child's effective PATH first. See §3.1. | **Enforced.** |
 | LSP auto-start | `lsp_enabled` is forced off for the session when the workspace is not Trusted, so no server starts on its own (the LSP pill shows `LSP (off)`); Start/Restart LSP Server still starts one, as Fresh's manual start does in a restricted workspace. The user's config file is not changed. | **Enforced.** |
-| Environment activation, devcontainers, tasks | gvim has none of these features. | Not applicable. |
+| Environment activation | Host-gated on Trusted (`gvim.env.set` refuses otherwise); see "Environments". | **Enforced.** |
+| Devcontainer and task running | gvim has no task runner and no container authority (the `devcontainer` plugin only reads the config). | Not applicable. |
 | Blocked | Blocked now denies every spawn (terminals, shell/formatter jobs, LSP starts, git/find spawns, plugin processes) in addition to the Restricted restrictions. | **Enforced** by the spawn gate. |
 
 Why the project layer is gated: it is the one place in gvim where a repository's file can
@@ -139,7 +138,10 @@ name a program to run. The project `.gvim/config.json` can set `formatters`, who
 the editor runs on Format Buffer, and it can disable plugins and set project plugin
 settings. gvim already refuses the most dangerous project keys unconditionally
 (AMENDMENTS C11: project files cannot set keybindings/keymap, cannot name an LSP command,
-can only *disable* a plugin and only *lower* `plugin_timeout_ms`). Trust is the logical
+can only *disable* a plugin and only *lower* `plugin_timeout_ms`; a project `theme` that is a
+URL is refused too, because a repository must not choose a host gvim fetches from). The project
+file is read only at `<workspace root>/.gvim/config.json`; a parent directory's file never
+applies. Trust is the logical
 extension: the whole project layer waits for the user's decision. Under **Trusted** those
 C11 restrictions still hold — trusting a folder opens its configuration, not the ability
 to choose programs it should not.
@@ -181,9 +183,9 @@ editor shell/formatter runner and the integrated terminal; `internal/pluginhost`
 it before every plugin `gvim.proc.run/spawn`; `lsp/manager` runs it in `launch` before
 `lsp.Start`, so auto-start, manual Start/Restart and universal servers are all covered.
 Only the local backend is gated: a remote launch (`authority` SSH) keeps the
-coarse rule in the app (untrusted remote → remote commands denied) because a remote trust
-store is deferred to #21; its helper filesystem runs commands on the remote host, where a
-remote path policy would be a different decision.
+coarse rule in the app (untrusted remote → remote commands denied; the decision itself is
+recorded per remote target in the same store) because its helper filesystem runs commands on
+the remote host, where a remote path policy would be a different decision.
 
 **Resolution of the executed program.** A gate decision is only as good as the binary that
 actually starts, and Go's `exec.Command` resolves a bare name with the *parent* environment

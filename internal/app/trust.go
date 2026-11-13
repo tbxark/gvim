@@ -19,7 +19,10 @@ var newTrustStore = trust.DefaultStore
 // update goroutine reads the state; the commands that write the store run off
 // it, so the two sides take a lock.
 type trustController struct {
-	prepareMu    sync.Mutex
+	prepareMu sync.Mutex
+	// writeMu orders the store writes of concurrent decisions. It is held across the
+	// write, never by State, so a slow store does not block the update goroutine.
+	writeMu      sync.Mutex
 	transition   uint64
 	prepareTrust func(trust.State) error
 	mu           sync.Mutex
@@ -126,16 +129,23 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 			return state, err
 		}
 	}
+	recordKey, root := c.recordKey, c.state.Root
+	c.mu.Unlock()
+	// The store write is file IO: it runs outside c.mu, which State takes on the
+	// update goroutine. writeMu keeps concurrent decisions in call order.
+	c.writeMu.Lock()
 	var err error
-	if c.recordKey != "" {
-		err = c.store.SetRecord(c.recordKey, level)
+	if recordKey != "" {
+		err = c.store.SetRecord(recordKey, level)
 	} else {
-		err = c.store.Set(c.state.Root, level)
+		err = c.store.Set(root, level)
 	}
+	c.mu.Lock()
 	c.state.Level = level
 	c.state.Decided = true
 	state := c.state
 	c.mu.Unlock()
+	c.writeMu.Unlock()
 	c.notify(state)
 	return state, err
 }

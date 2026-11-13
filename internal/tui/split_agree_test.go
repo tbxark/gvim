@@ -2,6 +2,8 @@ package tui
 
 import (
 	"testing"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
 )
 
 // checkFrame checks that the layout and the hit map of m agree in the current frame.
@@ -30,12 +32,12 @@ func checkFrame(t *testing.T, m *Model, f *multiFake, label string) {
 			}
 			got := l.Hit(x, y)
 			if len(lines) == 1 {
-				if got.Kind != hitSplitBorder || got.Index != lines[0] {
+				if got.Kind != frame.HitSplitBorder || got.Index != lines[0] {
 					t.Fatalf("%s: hit(%d, %d) = %+v on line %d, want a split border", label, x, y, got, lines[0])
 				}
 				continue
 			}
-			if i := owners[0]; got.Pane != i || got.Kind == hitSplitBorder || got.Kind == hitNone {
+			if i := owners[0]; got.Pane != i || got.Kind == frame.HitSplitBorder || got.Kind == frame.HitNone {
 				t.Fatalf("%s: hit(%d, %d) = %+v in pane %d, want that pane", label, x, y, got, i)
 			}
 		}

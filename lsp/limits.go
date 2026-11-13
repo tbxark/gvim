@@ -28,6 +28,10 @@ type LimitPlan struct {
 	WrapMemoryKB uint64
 	// AfterStart runs with the child pid once cmd.Start returned; the cgroup move.
 	AfterStart func(pid int) error
+	// Release frees what the plan made for this one server (its cgroup). The caller runs
+	// it once the child has exited, or when it will not start one. It is nil when the
+	// plan made nothing.
+	Release func()
 	// Note says what applies, or why nothing does. Empty without configured limits.
 	Note string
 	// Applied reports that at least one configured limit took effect.

@@ -21,7 +21,7 @@ var ErrEmptyPath = errors.New("empty path")
 // it even with force set, because force only allows overwriting a file on disk.
 var ErrAlreadyOpen = errors.New("file already open in another tab")
 
-// rename makes path the file name of the buffer. The buffer is no longer
+// Rename makes path the file name of the buffer. The buffer is no longer
 // untitled, and the lexer name is cleared because it depended on the old name.
 func (d *Document) Rename(path string) {
 	if d.Path != path {
@@ -31,7 +31,7 @@ func (d *Document) Rename(path string) {
 	d.untitled = 0
 }
 
-// followDisk records the state of the file at path after the document has been
+// FollowDisk records the state of the file at path after the document has been
 // moved there, so a move does not read as an outside change. A move across
 // devices copies the file and gives it a new modification time, so the recorded
 // state is replaced only when the file still holds the saved text, the bytes
@@ -45,9 +45,11 @@ func (d *Document) Rename(path string) {
 // taken before the read, as readDocument does, so a change between the two shows
 // as a difference on save.
 func (d *Document) FollowDisk(path string) {
-	if !d.Disk.Exists || d.large != nil {
+	if !d.Disk.Exists || d.large != nil || d.binary || d.access != nil {
 		// A large document is never read here: its file is too big, and its text is not
-		// held. The record stays, so a move that kept the size and the time of the file
+		// held. Neither is a binary or image document, whose text is a summary of the
+		// file, nor a document with a file access, whose file is not on the local disk.
+		// The record stays, so a move that kept the size and the time of the file
 		// reads as no change, and any other move reads as an outside change on save.
 		return
 	}

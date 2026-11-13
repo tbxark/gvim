@@ -15,7 +15,7 @@ column: the explorer column runs beside it to the status row, and the panes stop
 above it. The shell's PTY is sized to the editor column, so showing or resizing the
 explorer resizes the shell, and its rows are re-wrapped on a width change like any
 other resize (`docs/ui.md` §1 has the chrome rows).
-The parity row and the remaining rounds live in `docs/parity.md`.
+The terminal parity row and the open gaps live in [parity.md](parity.md).
 
 ## Two views: live and scrollback
 
@@ -84,13 +84,13 @@ restored, pending preview answers dropped), so no hidden input outlives the focu
 The history is **dock-wide**, like Fresh's per-window search prompt history: every
 tab in the dock shares it (a query committed in one tab is recalled in another),
 and it survives tab switches, tab closes and a shell restart. It is also
-persisted: `Tabs.SavedState` writes it as the additive, bounded `search_history`
+persisted: `Tabs.SavedState` writes it as the bounded `search_history`
 field of the terminal record (at most 100 queries of at most 512 bytes each; the
 loader cleans controls/invalid UTF-8, trims, skips empty entries and keeps the
 newest 100), and a full session restore installs it again — restoring history
 starts no process and has no PTY side effect, exactly like the rest of the
-read-only terminal state. An old record without the field restores an empty
-history; the format version stays 1. Residuals: only the pager search queries are
+read-only terminal state. A record without the field restores an empty
+history. Residuals: only the pager search queries are
 persisted (Fresh persists the other prompt histories too), the history rides the
 per-workspace terminal record so daemon workspaces keep separate histories, and it
 is restored only on the full session-restore path (not `--no-restore`/hot-exit
@@ -204,7 +204,7 @@ done on a Windows 10 1809+ / Windows 11 host:
 8. close and reopen gvim with session restore on: the saved transcript returns
    `Scrollback (restored)`, read-only, and its transcript reflow behaves as on
    Unix.
-Record the pass in `docs/parity.md`; until then the Windows row reads unverified.
+Record the pass in [parity.md](parity.md); until then the Windows row reads unverified.
 
 ## Terminal tabs
 
@@ -340,32 +340,28 @@ background tabs' exited markers current.
   history (x/vt keeps none), so only the visible frame and the marker are there; a
   running alt-screen program still gets the plain `The alternate screen has no
   scrollback.` refusal.
-- **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
-  launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
-  plus the additive `title` (OSC 0/2), `exit_code`/`exit_known` pair for an exited
-  tab and its transcript) plus the active index; an old record without the exit pair restores
-  exactly as before (`exited`, status unknown, and no marker is invented) and the
-  marker line is an ordinary bounded transcript row, so the record format stays
-  version 1; the top-level fields keep mirroring the active tab, so a
-  reader that predates tabs restores that one tab exactly as before, and a record
-  without `tabs` restores as one terminal. The format version stays 1. `cwd` is the
+- **Persistence.** `terminal.json` (format version 1, the only version read) holds only
+  `version`, `search_history`, `tabs` and `active_tab`; there are no top-level
+  per-terminal fields, and a record without `tabs` holds no terminal. Each tab has a
+  name, open flag, cwd, launch_dir, width, the transcript rows, the
+  launch/resume/agent/ephemeral record, the `title` (OSC 0/2), the `exit_code`/
+  `exit_known` pair for an exited tab and the `live` flag. A tab without the exit
+  pair is exited with an unknown status and no marker is invented; the marker line is
+  an ordinary bounded transcript row. `cwd` is the
   terminal's last reported directory (OSC 7) and `launch_dir` the directory a
-  recorded program was started in; both are additive and bounded/cleaned on load
-  (4096 bytes, control characters stripped), and an older record without
-  `launch_dir` falls back to its `cwd`, so the format stays migration-safe. A
+  recorded program was started in; both are bounded/cleaned on load
+  (4096 bytes, control characters stripped). A
   restart, resume or dive starts in the saved `cwd` (Fresh's respawn rule);
   `launch_dir` is only the fallback when a record never reported a directory. Bounds:
-  at most 16 tabs, each with the existing per-transcript bound (500 rows / 1 MiB,
-  trailing blanks trimmed, control characters stripped); the read/decode is capped
+  at most 16 tabs; each transcript is captured as the newest 500 rows / 256 KiB and the
+  loader accepts at most 500 rows / 1 MiB (trailing blanks trimmed, control characters
+  stripped); the read/decode is capped
   at 64 MiB first (see Persistence), and only then are these bounds applied, so a
   corrupt file cannot make the loader keep more than the bounded record. The
   order of the `tabs` array, not the tab
   names, is the saved tab order, and the active index tells which tab is shown on
-  restore, so a reorder survives an editor restart. The record also gains an
-  additive `live` flag per tab (and mirrored at the top level): whether a process
-  was running at the capture. It is optional, the format version stays 1, and an
-  older record without it is exited, so migration keeps the pre-live-restore
-  behavior. A dormant live-restored tab that is saved again keeps its live flag
+  restore, so a reorder survives an editor restart. The `live` flag records whether a
+  process was running at the capture; a tab without it is exited. A dormant live-restored tab that is saved again keeps its live flag
   (saving never turns a pending revive into a dead tab), so a restore/extract
   cycle can still revive it on the first dive. **Restore itself never starts a process**: every restored tab comes
   back as the read-only transcript the record describes, with its saved name and
@@ -396,9 +392,8 @@ background tabs' exited markers current.
   bidi overrides/isolates, zero-width/direction marks, BOMs and soft hyphens dropped;
   invalid UTF-8 dropped; combining marks kept as readable text; outer space trimmed) and
   bounded to 256 runes, and an empty payload (a title reset) clears it. OSC 1 only sets the icon name and deliberately does not change the title.
-  The title is additive in the saved record: a `title` per tab and mirrored at the
-  top level, so a restored tab keeps its recorded title and re-saves it even
-  without a live shell; an old record has no `title` and keeps its derived label.
+  The title is saved per tab, so a restored tab keeps its recorded title and re-saves it even
+  without a live shell; a tab without a `title` keeps its derived label.
   The visible effect is the tab label, following Fresh's
   `combine_terminal_title`: an explicit rename wins; otherwise the terminal's live
   foreground command and the recorded or live OSC title are combined as
@@ -420,11 +415,8 @@ background tabs' exited markers current.
   The strip's duplicate disambiguation and cell-budget truncation still apply, and
   an untrusted title is cleaned again before painting/combining, and the tab-label
   sanitizer also drops Cf format characters from launch names and explicit renames.
-  The record format
-  stays version 1, old readers ignore the field, old records without a title keep
-  exactly their old command/default label, and a corrupt/overlong title is cleaned
-  again on load.
-- **Screen snapshot.** Next to the text rows the record carries an optional
+  A corrupt/overlong title is cleaned again on load.
+- **Screen snapshot.** Next to the text rows a tab carries an optional
   `screen` object: a bounded, **styled** snapshot of the backing-file remainder —
   the visible screen, a styled history window above it, the cursor and the
   alternate-screen flag. Cells keep the rune, foreground/background as
@@ -435,10 +427,9 @@ background tabs' exited markers current.
   as the visible frame (with its styles and cursor, no history); a corrupt record
   that carries both `alt` and a history window is ignored whole, and the restored
   read-only transcript paints the alt frame unchanged (a revived shell starts on
-  its own main screen rather than replaying the alt program). It is additive and omitted when
-  there is nothing to keep — the format stays version 1 and an old record
-  restores the plain text transcript exactly as before (absent fields mean no
-  styles/cursor/history/alt). Bounds: at most 200 visible rows and 512 columns,
+  its own main screen rather than replaying the alt program). It is omitted when
+  there is nothing to keep, and a tab without it restores the plain text transcript
+  (absent fields mean no styles/cursor/history/alt). Bounds: at most 200 visible rows and 512 columns,
   at most 200 history rows, and 512 KiB for the serialized snapshot; trailing
   blank cells are trimmed, control characters become spaces, invalid colours are
   dropped and the history window is trimmed oldest-first on load/capture, so a
@@ -588,17 +579,18 @@ absent.
 
 The dock's transcript survives an editor restart through the session directory:
 `restore.SaveTerminal` writes `terminal.json` next to the session file (and
-removes it when the dock has neither a shell nor a transcript). It holds a version,
-the dock's open flag, its directory (the shell's last OSC 7 directory, else the
-start directory), the pane width the transcript was captured at, and the newest
-transcript rows: the prior transcript, the bounded history window and the live
-screen rows, as text with trailing blanks trimmed and control characters stripped,
-capped at 500 rows / 256 KiB (the loader re-applies the same bounds and ignores a
-version it does not know). It also carries the optional bounded, styled visible
+removes it when the dock has no tabs). It holds a version, the active tab index and
+one entry per tab: its open flag, its directory (the shell's last OSC 7 directory,
+else the start directory), the pane width the transcript was captured at, and the
+newest transcript rows (the prior transcript, the bounded history window and the
+live screen rows, as text with trailing blanks trimmed and control characters
+stripped), captured at 500 rows / 256 KiB per tab; the loader accepts at most
+500 rows / 1 MiB per tab and ignores a version it does not know. A tab also carries
+the optional bounded, styled visible
 screen snapshot described under Terminal tabs (a restore overlays it on the
-matching text tail, and an old record without it keeps the text-only transcript),
-and an additive `search_history` array: the dock-wide pager search queries, at
-most 100 of at most 512 bytes, cleaned on both write and load; an old record
+matching text tail, and a tab without it keeps the text-only transcript),
+and the record carries the `search_history` array: the dock-wide pager search queries, at
+most 100 of at most 512 bytes, cleaned on both write and load; a record
 without it restores an empty history and history restore never starts a process.
 When a **mixed extraction** carries dock terminal tabs into another workspace,
 the dock-wide search history migrates with them: a new co-tenant's terminal record
@@ -621,7 +613,7 @@ field is cleaned/capped again (an oversized or control-laden `search_history` is
 reduced to 100×512, so it cannot smuggle control bytes or grow the in-memory
 history). **`SaveTerminal` bounds its generic entry point with the same rules
 before encoding** (at most 16 tabs; per transcript 500 rows cleaned first then
-capped at 1 MiB of text, so JSON escaping is at most 2×; each styled screen
+capped at 1 MiB of text by the loader's bound (the dock captures at most 256 KiB), so JSON escaping is at most 2×; each styled screen
 hard-capped at 512 KiB of serialized JSON; each argv at most 64 entries, 4096
 bytes per argument and 32 KiB of argument text, JSON-escaped at most 6×; labels
 at most 256 bytes; history 100×512), and the worst-case bounded state is covered
@@ -719,7 +711,7 @@ argv** when `terminal.resume_agents` is on (the default), else the recorded
 **launch argv**, else the plain configured shell. Following Fresh's respawn, the
 restart/resume starts in the terminal's **last reported OSC 7 cwd**; the Run
 Agent dialog's chosen directory is saved as `launch_dir` and is only the fallback
-when the record never reported a cwd (the migration for old records). This means
+when the record never reported a cwd. This means
 a program that changes directory is resumed in that directory, like Fresh; the
 chosen launch dir stays persisted as provenance. Plain shell tabs use the same
 live-directory-first rule.
@@ -906,8 +898,7 @@ conversation appears on the next explicit scan (Ctrl+R), and a transcript row sa
 a conversation exists, not that a process runs. Codex's resume is inexact
 (newest-in-cwd), and its desktop-app sessions are not offered. Sub-agent Claude
 transcripts are not listed, and a transcript whose records carry no cwd cannot be
-imported. Everything is local only: no remote-machine stores. Registry v1 still
-stores one workspace per canonical root and
+imported. Everything is local only: no remote-machine stores. The workspace registry
 has no initial-terminal-launch field, so a second tmux session sharing a directory
 gets its own attach tab in the shared workspace but not its own workspace (layout
 and files are shared; per-session workspaces need a source identity in the
@@ -1147,7 +1138,7 @@ These are known gaps, not bugs:
   Claude Code/Codex transcript scanner share one picker (see Agent discovery and
   Run Agent), the Run Agent dialog has a per-launch directory choice, and Import
   creates a workspace for a session's directory. Still open: an imported workspace
-  cannot carry the attach argv yet (registry v1 has no initial-terminal-launch
+  cannot carry the attach argv yet (the registry has no initial-terminal-launch
   field), dock/agent rows outside the picker, scanning of GNU screen/zellij and
   remote machines, live-session detection for transcripts (a row is a
   conversation, not a running process), and any agent identity beyond the

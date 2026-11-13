@@ -20,7 +20,7 @@ func titleTabs(t *testing.T, tabs []terminal.SavedTab) *Tabs {
 	for i := range tabs {
 		tabs[i].Live = true
 	}
-	dock.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Tabs: tabs})
+	dock.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs})
 	return &dock
 }
 

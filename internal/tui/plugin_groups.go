@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -140,10 +141,7 @@ func (h *pluginHost) CreateBufferGroup(plugin string, id pluginapi.BufferGroupID
 	var walk func(node *pluginapi.BufferGroupLayout, win pluginapi.WinID) error
 	walk = func(node *pluginapi.BufferGroupLayout, win pluginapi.WinID) error {
 		if node.Leaf != nil {
-			if err := h.mountGroupLeaf(g, *node.Leaf, win); err != nil {
-				return err
-			}
-			return nil
+			return h.mountGroupLeaf(g, *node.Leaf, win)
 		}
 		dir := "right"
 		if node.Dir == "v" {
@@ -172,7 +170,7 @@ func (h *pluginHost) CreateBufferGroup(plugin string, id pluginapi.BufferGroupID
 		return walk(node.Second, newWin)
 	}
 	if err := walk(&o.Layout, start); err != nil {
-		h.CloseBufferGroup(id)
+		h.closeGroupPanels(g)
 		return err
 	}
 	ps.byID[id] = g
@@ -326,6 +324,19 @@ func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
 		return
 	}
 	m.plugEmit("buffer_group_closed", map[string]any{"group": uint64(id), "name": g.name})
+	h.closeGroupPanels(g)
+	delete(ps.byID, id)
+	for i, got := range ps.order {
+		if got == id {
+			ps.order = append(ps.order[:i:i], ps.order[i+1:]...)
+			break
+		}
+	}
+}
+
+// closeGroupPanels closes the windows of g's panels and the panel buffers the group created.
+func (h *pluginHost) closeGroupPanels(g *mountedGroup) {
+	m := h.model()
 	for _, p := range g.panels {
 		if p.window != 0 {
 			if local, err := m.pluginResolveWindow(p.window); err == nil {
@@ -339,13 +350,6 @@ func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
 			if _, ok := h.ed().Buffer(p.buffer); ok {
 				_ = h.Close(p.buffer, true)
 			}
-		}
-	}
-	delete(ps.byID, id)
-	for i, got := range ps.order {
-		if got == id {
-			ps.order = append(ps.order[:i:i], ps.order[i+1:]...)
-			break
 		}
 	}
 }
@@ -364,8 +368,7 @@ func (h *pluginHost) BufferGroupPanels(id pluginapi.BufferGroupID) []pluginapi.B
 }
 
 // plugGroupsGone is OwnerGone for the groups and scroll-sync groups.
-func (m *Model) plugGroupsGone(plugin string, gen uint64) {
-	_ = gen
+func (m *Model) plugGroupsGone(plugin string) {
 	h := m.plug.host
 	ps := &m.plug.groups
 	for _, id := range append([]pluginapi.BufferGroupID(nil), ps.order...) {
@@ -517,13 +520,12 @@ func scrollFollow(anchors []pluginapi.ScrollAnchor, line int, fromLeft bool) int
 	if len(anchors) == 0 {
 		return line
 	}
-	get := func(a pluginapi.ScrollAnchor) (int, int) {
+	at := func(a pluginapi.ScrollAnchor) (int, int) {
 		if fromLeft {
 			return a.Left, a.Right
 		}
 		return a.Right, a.Left
 	}
-	at := func(a pluginapi.ScrollAnchor) (int, int) { return get(a) }
 	firstA, firstB := at(anchors[0])
 	if line <= firstA {
 		return max(firstB-(firstA-line), 0)
@@ -562,7 +564,7 @@ func (m *Model) applyGroupFixedHeights() {
 		return
 	}
 	type fixedPanel struct {
-		leaf   *splitNode
+		leaf   *split.Node
 		height int
 	}
 	var fixed []fixedPanel
@@ -587,12 +589,12 @@ func (m *Model) applyGroupFixedHeights() {
 	if len(panes) != len(leaves) {
 		return
 	}
-	height := make(map[*splitNode]int, len(leaves))
+	height := make(map[*split.Node]int, len(leaves))
 	for i, n := range leaves {
 		height[n] = panes[i].H
 	}
-	var subtreeHeight func(n *splitNode) int
-	subtreeHeight = func(n *splitNode) int {
+	var subtreeHeight func(n *split.Node) int
+	subtreeHeight = func(n *split.Node) int {
 		if n == nil {
 			return 0
 		}
@@ -600,13 +602,13 @@ func (m *Model) applyGroupFixedHeights() {
 			return height[n]
 		}
 		a, b := subtreeHeight(n.A), subtreeHeight(n.B)
-		if n.Dir == stacked {
+		if n.Dir == split.Stacked {
 			return a + b + 1 // the split border row
 		}
 		return max(a, b)
 	}
-	var parentOf func(root, target *splitNode) *splitNode
-	parentOf = func(root, target *splitNode) *splitNode {
+	var parentOf func(root, target *split.Node) *split.Node
+	parentOf = func(root, target *split.Node) *split.Node {
 		if root == nil || root.Leaf() {
 			return nil
 		}
@@ -620,7 +622,7 @@ func (m *Model) applyGroupFixedHeights() {
 	}
 	for _, f := range fixed {
 		parent := parentOf(m.splits.Root, f.leaf)
-		if parent == nil || parent.Dir != stacked {
+		if parent == nil || parent.Dir != split.Stacked {
 			continue
 		}
 		total := subtreeHeight(parent)

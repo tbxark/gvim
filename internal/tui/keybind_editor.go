@@ -99,7 +99,7 @@ type keybindEditor struct {
 	saving     bool
 	active     bool
 	chrome     style.Overlay
-	box        rect
+	box        space.Rect
 }
 
 // The editor is an overlay of the root's stack.
@@ -111,7 +111,7 @@ func (m *Model) openKeybindingEditor() {
 	if l == nil {
 		v := list.New("Keybinding Editor", nil, m.listChrome(), nil)
 		v.Empty = noBindingsText
-		v.Hint = list.ReadOnlyHint
+		v.Hint = list.ReadOnlyHint()
 		m.pushOverlay(v)
 		return
 	}
@@ -535,7 +535,7 @@ func (e *keybindEditor) confirmKey(k tea.Key) tea.Cmd {
 }
 
 // canShowForm reports whether the dialog fits in a box of the size of parent.
-func canShowForm(parent rect) bool {
+func canShowForm(parent space.Rect) bool {
 	return parent.W >= formMinW+4 && parent.H >= formCompactH
 }
 
@@ -1084,17 +1084,17 @@ func (e *keybindEditor) hint(width int) string {
 // border and its key hints on the bottom border. A box with room for formFullH rows spaces
 // the fields out; a shorter one packs them one to a row and leaves out the action's
 // description.
-func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
+func (e *keybindEditor) drawForm(g *grid.Grid, parent space.Rect) {
 	f := e.form
 	// The dialog sits inside the table's border with a cell to spare on every side, so it never
 	// paints over the border or the title. Short or narrow, it packs its fields.
-	inner := rect{X: parent.X + 1, Y: parent.Y + 1, W: parent.W - 2, H: parent.H - 2}
+	inner := space.Rect{X: parent.X + 1, Y: parent.Y + 1, W: parent.W - 2, H: parent.H - 2}
 	w, h := min(inner.W-2, 64), formFullH
 	compact := inner.H-2 < formFullH
 	if compact {
 		h = formCompactH
 	}
-	box := rect{X: inner.X + (inner.W-w)/2, Y: inner.Y + (inner.H-h)/2, W: w, H: h}
+	box := space.Rect{X: inner.X + (inner.W-w)/2, Y: inner.Y + (inner.H-h)/2, W: w, H: h}
 	ov := e.chrome
 	title := "Add binding"
 	if f.orig != nil {

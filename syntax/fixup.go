@@ -2,6 +2,7 @@ package syntax
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -94,9 +95,14 @@ func numbers(re *regexp.Regexp) fixup {
 			for k < len(ends) && ends[k] < len(m) {
 				k++
 			}
-			if rest := ends[k] - len(m); rest > 0 {
-				v := toks[i+k].Value
-				out = append(out, chroma.Token{Type: toks[i+k].Type, Value: v[len(v)-rest:]})
+			// ends counts only the part of a token before a blank or the run limit,
+			// so what is left of the last token is found from where it starts.
+			used := len(m)
+			if k > 0 {
+				used -= ends[k-1]
+			}
+			if v := toks[i+k].Value; used < len(v) {
+				out = append(out, chroma.Token{Type: toks[i+k].Type, Value: v[used:]})
 			}
 			i += k + 1
 		}
@@ -373,7 +379,10 @@ func tomlSpecials(toks []chroma.Token) []chroma.Token {
 
 // cDirectiveRe matches the directives whose line the C lexer paints whole as a
 // preprocessor line, and splits off the name of the directive.
-var cDirectiveRe = regexp.MustCompile(`^(#[ \t]*(?:define|undef|ifdef|ifndef|if|elif|elifdef|elifndef|pragma|error|warning|line))([ \t]+)?`)
+var cDirectiveRe = regexp.MustCompile(`^(#[ \t]*(?:define|undef|ifdef|ifndef|if|elif|elifdef|elifndef|pragma|error|warning|line)\b)([ \t]+)?`)
+
+// cNamingDirectives are the directives whose first operand is a macro name.
+var cNamingDirectives = []string{"define", "undef", "ifdef", "ifndef", "elifdef", "elifndef"}
 
 // cDirectives splits a preprocessor line such as "#define MAX(a, b) ((a) > (b))" in
 // the directive, a keyword, and the rest. The macro name is a function when "(" follows
@@ -404,7 +413,7 @@ func cDirectives(toks []chroma.Token) []chroma.Token {
 			out = append(out, chroma.Token{Type: chroma.Text, Value: m[2]})
 		}
 		name := ""
-		if strings.Contains("define undef ifdef ifndef elifdef elifndef", strings.TrimLeft(directive[1:], " \t")) {
+		if slices.Contains(cNamingDirectives, strings.TrimLeft(directive[1:], " \t")) {
 			name = identifierPrefix(rest)
 		}
 		if name != "" {

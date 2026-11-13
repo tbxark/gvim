@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/plugin/bundled"
 	"github.com/tbxark/gvim/plugin/plugintest"
@@ -233,4 +234,32 @@ func TestDevcontainerSubfolderAndRefresh(t *testing.T) {
 	if !strings.Contains(text, "new-image") || strings.Contains(text, "team-image") {
 		t.Fatalf("refreshed panel = %q", text)
 	}
+}
+
+// An environment value of multibyte characters longer than the display cap is cut at a
+// character boundary, not emptied: the clip used to drop every trailing non-ASCII byte.
+func TestDevcontainerClipKeepsMultibyteValues(t *testing.T) {
+	t.Parallel()
+	host, os := devcontainerHost(t)
+	os.SetFile("/w/.devcontainer/devcontainer.json",
+		`{"name":"Demo Dev","image":"alpine","containerEnv":{"LONG":"`+strings.Repeat("容器", 200)+`"}}`)
+	h := startDevcontainer(t, host, os)
+	if err := h.Run(devcontainerPlugin+".show_info", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	for _, b := range host.Buffers {
+		if !b.Info.Virtual || !strings.Contains(b.Info.Name, "Dev Container: Demo Dev") {
+			continue
+		}
+		for _, line := range b.Lines {
+			if strings.Contains(line, "LONG = 容器") {
+				if !strings.HasSuffix(line, "…") || !utf8.ValidString(line) {
+					t.Fatalf("line = %q", line)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("no clipped env line (notices %v log %v)", h.NoticeTexts(), h.LogText(""))
 }

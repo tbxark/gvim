@@ -144,7 +144,7 @@ func TestDaemonRefusalKeepsUnsavedWork(t *testing.T) {
 	}
 	// Open the file in the daemon's workspace (a daemon launch itself opens no files),
 	// then type an unsaved change.
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Paths: []string{path}}); err != nil {
+	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: path}}}); err != nil {
 		t.Fatal(err)
 	}
 	drainDaemonForText(t, conn, "hello")

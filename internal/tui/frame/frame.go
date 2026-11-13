@@ -22,12 +22,8 @@ import (
 	"github.com/tbxark/gvim/internal/tui/split"
 )
 
-// Geometry from the responsive spec (blueprint section 4). The painter and the
-// hit map both read the Layout computed here. No other file holds a column or
-// row constant for these rows.
-//
-// The overlays (palette, find bar, prompts, dropdown) add their rows in the
-// overlay phase. Their rules are not here yet.
+// Geometry of the frame. The painter and the hit map both read the Layout
+// computed here. No other file holds a column or row constant for these rows.
 const (
 	GateMinWidth  = 8 // section 4.8: below this the frame shows only the gate message
 	GateMinHeight = 3
@@ -42,7 +38,6 @@ const (
 	// stays compact and directly abuts the tabs and the tree.
 	MenuRows = 1
 
-	LabelGap       = 3 // blank cells between menu labels
 	NoNameLabel    = "[No Name]"
 	PaletteHelp    = "Palette: Ctrl+P"
 	diagBlankWidth = 7 // " [E:1] " for one severity and one digit, reserved while the counts are unknown
@@ -57,22 +52,10 @@ const (
 	noticeMinText  = 8 // the least text a band row keeps when an explorer takes the left
 )
 
-// barLabels is the menu bar, in order. "Explorer" joins it while the explorer
-// has focus. The menu bar sub-model takes this list over with the generated
-// menu table.
-func barLabels(explorerFocus bool) []string {
-	labels := []string{"File", "Edit", "View", "Selection", "Go", "LSP"}
-	if explorerFocus {
-		labels = append(labels, "Explorer")
-	}
-	return append(labels, "Help")
-}
-
 // Input is the state the geometry depends on. It is plain data, so
 // ComputeLayout is a pure function of the terminal size and this value.
 type Input struct {
 	ExplorerOpen    bool
-	ExplorerFocus   bool           // "Explorer" joins the menu bar while focus is there
 	ExplorerWidth   explorer.Width // file_explorer.width; the zero value is gvim's automatic width
 	ExplorerSide    explorer.Side  // file_explorer.side: the frame edge the column sits on
 	ExplorerRows    int            // visible tree rows, used by hit testing
@@ -434,11 +417,9 @@ type Layout struct {
 	TextX   int
 	TextW   int
 
-	// The menu labels (section 4.5, row MenuLabelY, empty when the bar is hidden) and
-	// the tab Strip (section 4.6, row stripY). The Strip is placed by placeStrip, which
-	// also gives the scroll position it used.
-	MenuRuns []Run
-	Strip    Strip
+	// The tab Strip (section 4.6, row stripY), placed by placeStrip, which also gives
+	// the scroll position it used. The menu bar's labels belong to the menubar package.
+	Strip Strip
 
 	// The welcome screen (no tab open) replaces the editor pane. welcome holds its
 	// placed lines, and WelcomeOn is true while it shows.
@@ -550,9 +531,6 @@ func ComputeLayout(w, h int, in Input) Layout {
 		l.hideScrollbars()
 	}
 
-	if l.MenuOn {
-		l.MenuRuns = MenuRuns(in.ExplorerFocus)
-	}
 	l.Strip = PlaceStrip(l.EditorX, l.EditorX+l.EditorW, in.Tabs, in.TabFirst, in.IconMode)
 	if in.Welcome {
 		l.WelcomeOn = true
@@ -807,18 +785,6 @@ func (l Layout) InEditor(x int) bool {
 	return x >= l.EditorX && x < l.EditorX+l.EditorW
 }
 
-// MenuRuns places the menu bar labels (section 4.5). A label is shown with
-// three blanks between labels.
-func MenuRuns(explorerFocus bool) []Run {
-	var runs []Run
-	x := 1
-	for i, label := range barLabels(explorerFocus) {
-		runs = append(runs, newRun(x, label, HitMenuLabel, i))
-		x += ansi.StringWidth(label) + LabelGap
-	}
-	return runs
-}
-
 // statusMessageMin is the room, in cells, that plugin items on the left leave to the
 // status message at least.
 const statusMessageMin = 24
@@ -934,10 +900,10 @@ func statusPluginAnchor(k StatusElementKind, right bool) bool {
 }
 
 // statusElementSeg is the segment one element paints, or false when it has nothing to
-// show. The elements gvim does not paint — {warnings}, {update} and plugin tokens —
-// render nothing at all; docs/ui.md says why.
+// show. The elements gvim does not paint — {warnings} and plugin tokens — render
+// nothing at all; docs/ui.md says why.
 func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
-	pad := func(text string) string { return space.Pad(text) }
+	pad := space.Pad
 	switch e.Kind {
 	case StatusElementFilename:
 		if s.Filename == "" {

@@ -231,25 +231,25 @@ func TestDrawPaintsTheSharedCardFrame(t *testing.T) {
 	g := grid.New(80, 24)
 	m.Draw(g)
 	b := m.box
-	right, bottom := b.x+b.w-1, b.y+b.h-1
+	right, bottom := b.X+b.W-1, b.Y+b.H-1
 
-	checkCell(t, g, b.x, b.y, "╭", chrome.Border)
-	checkCell(t, g, right, b.y, "╮", chrome.Border)
-	checkCell(t, g, b.x, bottom, "╰", chrome.Border)
+	checkCell(t, g, b.X, b.Y, "╭", chrome.Border)
+	checkCell(t, g, right, b.Y, "╮", chrome.Border)
+	checkCell(t, g, b.X, bottom, "╰", chrome.Border)
 	checkCell(t, g, right, bottom, "╯", chrome.Border)
-	checkCell(t, g, b.x, b.y+1, "│", chrome.Border)
-	checkCell(t, g, right, b.y+1, "│", chrome.Border)
+	checkCell(t, g, b.X, b.Y+1, "│", chrome.Border)
+	checkCell(t, g, right, b.Y+1, "│", chrome.Border)
 	// No title: the plain rule starts right after the top-left corner.
-	checkCell(t, g, b.x+2, b.y, "─", chrome.Border)
+	checkCell(t, g, b.X+2, b.Y, "─", chrome.Border)
 
-	checkCell(t, g, b.x+2, b.y+1, "C", chrome.Selected) // row 0 is highlighted
+	checkCell(t, g, b.X+2, b.Y+1, "C", chrome.Selected) // row 0 is highlighted
 	disabled := chrome.Box
 	disabled.Faint = true
-	checkCell(t, g, b.x+2, b.y+2, "C", disabled) // row 1: Close Others, disabled
+	checkCell(t, g, b.X+2, b.Y+2, "C", disabled) // row 1: Close Others, disabled
 	// The separator on row 2 is a rule inset by PadX on both sides.
-	sep := b.y + 3
-	checkCell(t, g, b.x+1, sep, " ", chrome.Box)
-	checkCell(t, g, b.x+2, sep, "─", chrome.Box)
+	sep := b.Y + 3
+	checkCell(t, g, b.X+1, sep, " ", chrome.Box)
+	checkCell(t, g, b.X+2, sep, "─", chrome.Box)
 	checkCell(t, g, right-2, sep, "─", chrome.Box)
 	checkCell(t, g, right-1, sep, " ", chrome.Box)
 }
@@ -265,7 +265,7 @@ func TestTheHitTargetOfEveryRowIsTheRowPaintedThere(t *testing.T) {
 	plain := g.Plain()
 	for k := range m.visible() {
 		i := m.first + k
-		y := b.y + 1 + k
+		y := b.Y + 1 + k
 		it := m.items[i]
 		if !it.Separator && !strings.Contains(plain[y], it.Label) {
 			t.Errorf("row %d is not painted on row %d", i, y)
@@ -274,7 +274,7 @@ func TestTheHitTargetOfEveryRowIsTheRowPaintedThere(t *testing.T) {
 		if !it.selectable() {
 			want = -1
 		}
-		for _, x := range []int{b.x + 2, b.x + 3} {
+		for _, x := range []int{b.X + 2, b.X + 3} {
 			if got := m.rowAt(x, y); got != want {
 				t.Errorf("rowAt(%d,%d) = %d, want %d", x, y, got, want)
 			}

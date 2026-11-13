@@ -411,64 +411,24 @@ func TestLoadDiagnosticsOrderUserBeforeProject(t *testing.T) {
 	}
 }
 
-func TestFindUpNearestAncestorWins(t *testing.T) {
-	// Each directory is checked before its parent, so the nearest file wins.
-	present := map[string]bool{
-		filepath.Join("/", "a", ".gvim", "config.json"):      true,
-		filepath.Join("/", "a", "b", ".gvim", "config.json"): true,
-	}
-	got, ok := findUp(filepath.Join("/", "a", "b", "c"), func(p string) bool { return present[p] })
-	if !ok || got != filepath.Join("/", "a", "b", ".gvim", "config.json") {
-		t.Fatalf("findUp = %q, %v; want the nearer /a/b file", got, ok)
-	}
-}
-
-func TestFindUpStopsAtFilesystemRoot(t *testing.T) {
-	// The fake filesystem has a config file only above the start, at the root,
-	// which findUp must still check. It must not look past the root.
-	root := string(filepath.Separator)
-	start := filepath.Join(root, "x", "y", "z")
-	var visited []string
-	got, ok := findUp(start, func(p string) bool {
-		visited = append(visited, filepath.Dir(filepath.Dir(p)))
-		return false
-	})
-	if ok || got != "" {
-		t.Fatalf("findUp = %q, %v; want no file", got, ok)
-	}
-	want := []string{
-		filepath.Join(root, "x", "y", "z"),
-		filepath.Join(root, "x", "y"),
-		filepath.Join(root, "x"),
-		root,
-	}
-	if len(visited) != len(want) {
-		t.Fatalf("visited %v, want %v", visited, want)
-	}
-	for i := range want {
-		if visited[i] != want[i] {
-			t.Fatalf("visited[%d] = %q, want %q (all: %v)", i, visited[i], want[i], visited)
-		}
-	}
-}
-
-func TestProjectFileSearchesUpward(t *testing.T) {
+func TestProjectFileOnlyLooksAtTheRoot(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".gvim", "config.json")
 	writeFile(t, cfgPath, `{}`)
+	got, ok, err := ProjectFile(dir)
+	if err != nil || !ok || got != cfgPath {
+		t.Fatalf("ProjectFile(%q) = %q, %v, %v; want %q", dir, got, ok, err, cfgPath)
+	}
 	deep := filepath.Join(dir, "a", "b", "c")
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := ProjectFile(deep)
-	if err != nil || !ok || got != cfgPath {
-		t.Fatalf("ProjectFile(%q) = %q, %v, %v; want %q", deep, got, ok, err, cfgPath)
+	if got, ok, err := ProjectFile(deep); err != nil || ok {
+		t.Fatalf("ProjectFile(%q) = %q, %v, %v; a parent's file must not apply", deep, got, ok, err)
 	}
 }
 
 func TestProjectFileNoneFound(t *testing.T) {
-	// The temp directory is outside any project that has a .gvim directory.
-	// The search runs to the filesystem root and finds nothing, so ok is false.
 	dir := t.TempDir()
 	got, ok, err := ProjectFile(dir)
 	if err != nil {
@@ -748,27 +708,41 @@ func TestCacheDirIsGvim(t *testing.T) {
 	}
 }
 
-func TestMoveLegacyFile(t *testing.T) {
-	dir := t.TempDir()
-	oldPath := filepath.Join(dir, "old", "state.json")
-	newPath := filepath.Join(dir, "new", "state.json")
-	writeFile(t, oldPath, "old")
-	if err := MoveLegacyFile(oldPath, newPath); err != nil {
-		t.Fatal(err)
+func TestProjectLayerRefusesThemeURL(t *testing.T) {
+	tests := []struct {
+		name, theme string
+		refused     bool
+	}{
+		{"https url", "https://example.test/t.json", true},
+		{"http url", "http://127.0.0.1/t.json", true},
+		{"plain name", "dracula", false},
 	}
-	if data, err := os.ReadFile(newPath); err != nil || string(data) != "old" {
-		t.Fatalf("new file = %q, %v", data, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"theme": "`+tc.theme+`"}`)
+			cfg, diags, err := Load(Options{Root: root, UserFile: filepath.Join(t.TempDir(), "absent.json")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.refused {
+				if cfg.Theme == tc.theme {
+					t.Fatalf("project theme URL applied: %q", cfg.Theme)
+				}
+				if len(diags) != 1 || diags[0].Key != "theme" || !strings.Contains(diags[0].Message, "project config cannot set theme") {
+					t.Fatalf("diagnostics = %v, want the theme refusal", diags)
+				}
+				return
+			}
+			if cfg.Theme != tc.theme || len(diags) != 0 {
+				t.Fatalf("theme = %q, diags = %v; want the name applied", cfg.Theme, diags)
+			}
+		})
 	}
-	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
-		t.Fatalf("old file still exists: %v", err)
-	}
-	// A file already at the new path wins and the old one is left alone.
-	writeFile(t, oldPath, "stale")
-	writeFile(t, newPath, "current")
-	if err := MoveLegacyFile(oldPath, newPath); err != nil {
-		t.Fatal(err)
-	}
-	if data, _ := os.ReadFile(newPath); string(data) != "current" {
-		t.Fatalf("new file overwritten: %q", data)
+	user := filepath.Join(t.TempDir(), "config.json")
+	writeFile(t, user, `{"theme": "https://example.test/t.json"}`)
+	cfg, diags, err := Load(Options{UserFile: user})
+	if err != nil || len(diags) != 0 || cfg.Theme != "https://example.test/t.json" {
+		t.Fatalf("user theme URL = %q, %v, %v; want accepted", cfg.Theme, diags, err)
 	}
 }

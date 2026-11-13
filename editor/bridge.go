@@ -61,7 +61,7 @@ type VirtualOptions = document.VirtualOptions
 
 var absPath = document.AbsPath
 var angleBrackets = document.AngleBrackets
-var asciiWordRune = document.AsciiWordRune
+var asciiWordRune = document.ASCIIWordRune
 var blankPrefix = document.BlankPrefix
 var bracketPairs = document.BracketPairs
 var bracketTarget = document.BracketTarget
@@ -87,8 +87,6 @@ type diskState = document.DiskState
 
 // fileAccess is the document file I/O seam (nil = local filesystem).
 type fileAccess = document.FileAccess
-
-var diskStateOf = document.DiskStateOf
 
 type docExt = document.DocExt
 type edit = document.Edit

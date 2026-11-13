@@ -82,8 +82,8 @@ type sentImage struct {
 type imageSendState int
 
 const (
-	// imageQueued is an entry whose read or upload is still in flight.
-	imageQueued imageSendState = iota
+	// The zero value is an entry whose read or upload is still in flight.
+	_ imageSendState = iota
 	// imageUploaded state means the terminal has the picture.
 	imageUploaded
 	// imageFailed means this file cannot be shown with its current stat. The
@@ -274,6 +274,9 @@ func (m *Model) releaseImages() tea.Cmd {
 // imageReleaseClosed removes the image entries whose files are no longer open as
 // images and returns one raw command that deletes their terminal resources.
 func (m *Model) imageReleaseClosed() tea.Cmd {
+	if len(m.img.sent) == 0 {
+		return nil
+	}
 	open := make(map[string]bool)
 	for _, f := range m.openTabFiles() {
 		if f.image {
@@ -349,7 +352,7 @@ func (m *Model) imageMessage(msg tea.Msg) (tea.Cmd, bool) {
 		// Send the query and start the wait for its reply. The reply itself arrives as
 		// a uv.KittyGraphicsEvent, handled below. CSI 16 t asks for the cell's pixel
 		// size, which the fit uses to keep the aspect ratio.
-		return tea.Batch(tea.Raw(probeSequence()+ansi.WindowOp(ansi.RequestCellSizeWinOp)), probeTimeoutCmd()), true
+		return tea.Batch(tea.Raw(probeSequence()+ansi.WindowOp(16)), probeTimeoutCmd()), true
 	case imageProbeTimeoutMsg:
 		if m.img.probed {
 			return nil, true // the reply beat the timeout

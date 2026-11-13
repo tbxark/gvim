@@ -220,3 +220,32 @@ func TestWidgetPanelMountErrors(t *testing.T) {
 		t.Fatal("an update of an unmounted panel succeeded")
 	}
 }
+
+// TestRemountPanelChecksOwnerAndAppliesChrome checks that mounting an id again is the
+// owner's replace: another plugin is refused and the panel stays, and the owner's new
+// title and closable flag reach the live panel.
+func TestRemountPanelChecksOwnerAndAppliesChrome(t *testing.T) {
+	t.Parallel()
+	m, _ := widgetPanelModel(t)
+	h := m.plug.host
+	if err := h.MountWidgetPanel("p", 7, widgetMountFixture()); err != nil {
+		t.Fatal(err)
+	}
+	intruder := widgetMountFixture()
+	intruder.Title = "Hijacked"
+	if err := h.MountWidgetPanel("other", 7, intruder); err == nil {
+		t.Fatal("another plugin replaced the panel")
+	}
+	mp := m.plug.panels.get(7)
+	if mp.owner != "p" || mp.panel.Title() != "Box" {
+		t.Fatalf("owner %q title %q after the refused replace, want p and Box", mp.owner, mp.panel.Title())
+	}
+	next := widgetMountFixture()
+	next.Title, next.Closable = "Renamed", false
+	if err := h.MountWidgetPanel("p", 7, next); err != nil {
+		t.Fatal(err)
+	}
+	if mp.panel.Title() != "Renamed" || mp.panel.Closable() {
+		t.Fatalf("title %q closable %v after the replace, want Renamed and false", mp.panel.Title(), mp.panel.Closable())
+	}
+}

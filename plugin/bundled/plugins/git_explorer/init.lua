@@ -48,6 +48,7 @@ local settings = gvim.settings.define {
 
 local refresh_in_flight = false
 local refresh_pending = false
+local refresh -- defined below; the watchers call it
 -- One HEAD-directory watcher per root/nested repository, bounded by the discovery repo cap.
 local watchers = {}
 
@@ -167,8 +168,9 @@ end
 -- directory (never a per-entry exists round-trip) and works through the same plugin host
 -- as the editor, so a remote authority sees at most DISCOVERY_MAX_DIRS ReadDir calls. The
 -- time budget and the directory/repo caps stop a slow or huge tree; the result is then
--- partial and a one-time warning says so. Only root-repository HEAD is watched; nested
--- repositories are refreshed by the ordinary file/focus/config events.
+-- partial and a one-time warning says so. The root repository and every discovered regular
+-- nested repository have a .git watcher (see watch_nested_repo); the ordinary
+-- file/focus/config events refresh the rest.
 local MONOREPO_MAX_DEPTH = 3
 local DISCOVERY_MAX_DIRS = 128
 local DISCOVERY_MAX_REPOS = 32
@@ -365,7 +367,7 @@ local function stop_watchers()
   watchers = {}
 end
 
-function refresh()
+refresh = function()
   if refresh_in_flight then
     refresh_pending = true
     return

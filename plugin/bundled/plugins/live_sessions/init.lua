@@ -53,13 +53,13 @@ local function clip(s, limit)
   if #s <= limit then
     return s
   end
-  local cut = s:sub(1, limit)
-  -- The source strings are UTF-8. Drop a partial trailing sequence; removing a whole
-  -- trailing multibyte character is acceptable for a display clip.
-  while #cut > 0 and cut:byte(-1) >= 128 do
-    cut = cut:sub(1, #cut - 1)
+  -- The source strings are UTF-8: back up to a character boundary, so the byte after the
+  -- cut does not continue a character.
+  local cut = limit
+  while cut > 0 and s:byte(cut + 1) >= 0x80 and s:byte(cut + 1) < 0xC0 do
+    cut = cut - 1
   end
-  return cut .. "…"
+  return s:sub(1, cut) .. "…"
 end
 
 local function tool_name(tool)

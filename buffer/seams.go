@@ -6,8 +6,8 @@ import (
 )
 
 // This file holds the methods the rest of the editor can call on any Buffer,
-// whether it is a memory buffer or (in later stages) a large file buffer. A
-// memory buffer answers all of them from its lines, with no behaviour change.
+// whether it is a memory buffer or a large file buffer. A memory buffer answers
+// all of them from its lines.
 
 // IndexInfo describes how much of a document's line index exists.
 type IndexInfo struct {

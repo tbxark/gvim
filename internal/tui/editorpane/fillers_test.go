@@ -49,7 +49,7 @@ func TestFillersRowMapping(t *testing.T) {
 	// Rows: 0 filler, 1 a, 2 b, 3 f, 4 f, 5 c, 6 d, 7 f, 8 e.
 	starts := []int{0, 2, 5, 6, 8} // BlockStart of each line
 	texts := []int{1, 2, 5, 6, 8}  // TextRow of each line
-	blocks := []int{2, 3, 1, 2, 1} // BlockRows of each line
+	blocks := []int{2, 3, 1, 2, 1} // blockRows of each line
 	for line := range lines {
 		if got := fl.BlockStart(line); got != starts[line] {
 			t.Errorf("BlockStart(%d) = %d, want %d", line, got, starts[line])
@@ -57,8 +57,8 @@ func TestFillersRowMapping(t *testing.T) {
 		if got := fl.TextRow(line); got != texts[line] {
 			t.Errorf("TextRow(%d) = %d, want %d", line, got, texts[line])
 		}
-		if got := fl.BlockRows(line); got != blocks[line] {
-			t.Errorf("BlockRows(%d) = %d, want %d", line, got, blocks[line])
+		if got := fl.blockRows(line); got != blocks[line] {
+			t.Errorf("blockRows(%d) = %d, want %d", line, got, blocks[line])
 		}
 	}
 	if got := fl.Total(lines); got != 9 {
@@ -86,9 +86,9 @@ func TestFillersRowMapping(t *testing.T) {
 
 func TestNilFillersAreTheIdentity(t *testing.T) {
 	var fl *Fillers
-	if fl.Total(7) != 7 || fl.BlockStart(3) != 3 || fl.TextRow(3) != 3 || fl.BlockRows(3) != 1 {
+	if fl.Total(7) != 7 || fl.BlockStart(3) != 3 || fl.TextRow(3) != 3 || fl.blockRows(3) != 1 {
 		t.Errorf("nil fillers change the rows: total %d, start %d, text %d, block %d",
-			fl.Total(7), fl.BlockStart(3), fl.TextRow(3), fl.BlockRows(3))
+			fl.Total(7), fl.BlockStart(3), fl.TextRow(3), fl.blockRows(3))
 	}
 	if line, in := fl.LineAt(7, 4); line != 4 || in != 0 {
 		t.Errorf("LineAt(4) = (%d, %d), want (4, 0)", line, in)

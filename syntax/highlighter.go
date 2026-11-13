@@ -8,8 +8,8 @@ import (
 )
 
 // MaxHighlightBytes is the largest buffer, counted as its lines plus one
-// newline each, that Lines lexes. A larger buffer gets plain spans. The value
-// is proposed at 2 MiB; see BenchmarkTokenizeGo for the measured lexing rate.
+// newline each, that Lines lexes. A larger buffer gets plain spans. See
+// BenchmarkTokenizeGo for the measured lexing rate.
 const MaxHighlightBytes = 2 << 20
 
 // Highlighter caches the spans for one buffer. Chroma lexers are stream-based,

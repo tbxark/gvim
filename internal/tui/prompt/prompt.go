@@ -66,7 +66,7 @@ func done(d Done) tea.Cmd {
 }
 
 // ValidateLineCol accepts the input of the go-to-line prompt, "N" or "N:COL",
-// as editor.ParseLineCol reads it. Any other input gets the legacy message.
+// as editor.ParseLineCol reads it. Any other input is rejected with "Not a line number".
 func ValidateLineCol(text string) error {
 	if _, _, ok := editor.ParseLineCol(text); !ok {
 		return lineError{text: text}
@@ -74,8 +74,7 @@ func ValidateLineCol(text string) error {
 	return nil
 }
 
-// lineError is the rejection of a go-to-line input. Its text is the legacy
-// message, which starts with a capital letter.
+// lineError is the rejection of a go-to-line input.
 type lineError struct{ text string }
 
 func (e lineError) Error() string {
@@ -363,7 +362,8 @@ func (l *Line) clickAt(x, y int) {
 	}
 	runes := []rune(l.shown())
 	at, col := l.winStart, l.fieldX
-	for i := l.winStart; i < l.winStop; i++ {
+	// The window is from the last Draw; the text may have changed since.
+	for i := l.winStart; i < min(l.winStop, len(runes)); i++ {
 		w := ansi.StringWidth(string(runes[i]))
 		if x < col+w {
 			at = i
@@ -401,6 +401,7 @@ func (l *Line) CutValue() string {
 	}
 	l.field.SetValue("")
 	l.field.CursorEnd()
+	l.clearSelection() // a selection made while the copy was in flight points past the empty text
 	l.errText = ""
 	if l.onChange != nil {
 		l.onChange("")
@@ -582,6 +583,22 @@ func (l *Line) SetSuggestions(items []Suggestion, selected int) {
 	l.selSuggestion = selected
 }
 
+// fillSuggestion puts the value of suggestion i (its text when it has none) into the
+// field and reports it through onChange.
+func (l *Line) fillSuggestion(i int) {
+	s := l.suggestions[i]
+	value := s.Value
+	if value == "" {
+		value = s.Text
+	}
+	l.field.SetValue(value)
+	l.field.CursorEnd()
+	l.clearSelection()
+	if l.onChange != nil {
+		l.onChange(value)
+	}
+}
+
 // pageSuggestion is Fresh's prompt_page_up/prompt_page_down: move the highlighted
 // suggestion by one visible page (maxSuggestionRows), clamped to the list.
 func (l *Line) pageSuggestion(delta int) tea.Cmd {
@@ -605,17 +622,7 @@ func (l *Line) pageSuggestion(delta int) tea.Cmd {
 		return nil
 	}
 	l.selSuggestion = at
-	s := l.suggestions[at]
-	value := s.Value
-	if value == "" {
-		value = s.Text
-	}
-	l.field.SetValue(value)
-	l.field.CursorEnd()
-	l.clearSelection()
-	if l.onChange != nil {
-		l.onChange(value)
-	}
+	l.fillSuggestion(at)
 	return nil
 }
 
@@ -637,17 +644,7 @@ func (l *Line) cycleSuggestion(delta int) tea.Cmd {
 		return nil
 	}
 	l.selSuggestion = at
-	s := l.suggestions[at]
-	value := s.Value
-	if value == "" {
-		value = s.Text
-	}
-	l.field.SetValue(value)
-	l.field.CursorEnd()
-	l.clearSelection()
-	if l.onChange != nil {
-		l.onChange(value)
-	}
+	l.fillSuggestion(at)
 	return nil
 }
 
@@ -709,7 +706,7 @@ func (l *Line) Draw(g *grid.Grid) {
 	x := space.PadX + g.Put(space.PadX, y, end, l.label+" ", l.styles.label)
 	g.Fill(x, end, y, l.styles.field)
 	runes := []rune(l.shown())
-	start, stop := windowRange(string(runes), l.field.Position(), end-x)
+	start, stop := space.WindowRange(string(runes), l.field.Position(), end-x)
 	l.fieldX, l.fieldY, l.fieldW = x, y, end-x
 	l.winStart, l.winStop, l.drawn = start, stop, x < end
 	selStart, selEnd, hasSel := l.selectionRange()
@@ -720,36 +717,6 @@ func (l *Line) Draw(g *grid.Grid) {
 		}
 		x += g.Put(x, y, end, string(runes[i]), st)
 	}
-}
-
-// windowRange is the rune range space.Window keeps visible for a caret position and a
-// cell budget. Keeping the indices (not just the rendered substring) lets Draw paint the
-// selected runes with the reverse-video selection style.
-func windowRange(value string, pos, room int) (start, end int) {
-	runes := []rune(value)
-	pos = min(max(pos, 0), len(runes))
-	if room <= 0 {
-		return 0, 0
-	}
-	cellOf := func(r rune) int { return ansi.StringWidth(string(r)) }
-	total := 0
-	for _, r := range runes {
-		total += cellOf(r)
-	}
-	if total+1 <= room {
-		return 0, len(runes)
-	}
-	right, stop := 0, pos
-	for stop < len(runes) && right+cellOf(runes[stop]) <= (room-1)/4 {
-		right += cellOf(runes[stop])
-		stop++
-	}
-	left, start := 0, pos
-	for start > 0 && left+cellOf(runes[start-1]) <= room-1-right {
-		left += cellOf(runes[start-1])
-		start--
-	}
-	return start, stop
 }
 
 // maxSuggestionRows is the most suggestion rows drawn at once; the rest scroll.
@@ -801,17 +768,7 @@ func (l *Line) clickSuggestion(x, y int) bool {
 		return true
 	}
 	l.selSuggestion = i
-	s := l.suggestions[i]
-	value := s.Value
-	if value == "" {
-		value = s.Text
-	}
-	l.field.SetValue(value)
-	l.field.CursorEnd()
-	l.clearSelection()
-	if l.onChange != nil {
-		l.onChange(value)
-	}
+	l.fillSuggestion(i)
 	return true
 }
 

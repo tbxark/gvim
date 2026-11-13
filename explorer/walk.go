@@ -34,7 +34,11 @@ func WalkFiles(ctx context.Context, root string, opts WalkOptions, fn func(rel s
 	if err != nil {
 		return fmt.Errorf("explorer: walk %q: %w", root, err)
 	}
-	w := walker{ctx: ctx, root: abs, fsys: osfs.New(abs), opts: opts, fn: fn}
+	skip := make(map[string]bool, len(opts.SkipDirs))
+	for _, s := range opts.SkipDirs {
+		skip[s] = true
+	}
+	w := walker{ctx: ctx, root: abs, fsys: osfs.New(abs), opts: opts, skip: skip, fn: fn}
 	if err := w.dir(nil, nil, true); err != nil {
 		return err
 	}
@@ -46,6 +50,7 @@ type walker struct {
 	root string
 	fsys billy.Filesystem // rooted at root; reads .gitignore files
 	opts WalkOptions
+	skip map[string]bool // opts.SkipDirs as a set
 	fn   func(rel string) bool
 	stop bool // fn returned false
 }
@@ -70,10 +75,6 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
 		rules = slices.Concat(rules, readIgnore(w.fsys, rel))
 		m = gitignore.NewMatcher(rules)
 	}
-	skip := make(map[string]bool, len(w.opts.SkipDirs))
-	for _, s := range w.opts.SkipDirs {
-		skip[s] = true
-	}
 	for _, e := range entries {
 		name := e.Name()
 		if !w.opts.ShowHidden && strings.HasPrefix(name, ".") {
@@ -93,7 +94,7 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
 			continue
 		}
 		if isDir {
-			if skip[name] {
+			if w.skip[name] {
 				continue
 			}
 			if err := w.dir(childRel, rules, false); err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/tbxark/gvim/config"
@@ -351,5 +352,25 @@ func TestPathReturnsTheStoreFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trust.json")
 	if got := NewStore(path).Path(); got != path {
 		t.Fatalf("Path() = %q, want %q", got, path)
+	}
+}
+
+func TestStoreIsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix modes")
+	}
+	store, path := storeAt(t)
+	if err := store.Set(t.TempDir(), Trusted); err != nil {
+		t.Fatal(err)
+	}
+	for p, want := range map[string]os.FileMode{path: 0o600, filepath.Dir(path): 0o700} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The umask can only remove bits, so a stricter mode is fine.
+		if got := info.Mode().Perm(); got&^want != 0 {
+			t.Errorf("%s mode = %o, want no more than %o", p, got, want)
+		}
 	}
 }

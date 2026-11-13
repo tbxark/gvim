@@ -12,16 +12,13 @@
     "status.activating": "Activating %{name} environment...",
     "status.reloading": "Reloading %{name} environment...",
     "status.deactivated": "Environment deactivated - using the system environment",
-    "status.env_active": "Environment active",
     "status.env_active_named": "Environment active (%{name})",
     "status.env_detected": "Detected %{name} (trust: %{trust}). Run \"Env: Activate\" to use it.",
     "status.no_env": "No environment detected (trust: %{trust})",
     "status.untrusted": "The project environment is trusted-gated: trust this workspace first, then activate",
     "status.reload_done": "Reloaded %{name} environment",
-    "statusbar.label": "Environment",
     "statusbar.locked": "%{name} (locked)",
     "statusbar.active": "%{name} ✓",
-    "statusbar.active_unknown": "active",
     "statusbar.system": "system"
   }
 }

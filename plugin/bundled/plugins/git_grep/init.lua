@@ -45,7 +45,6 @@ local case_sensitive = false
 -- The open finder and the repository root it searches (nil while closed).
 local prompt = nil
 local root = nil
-local last_query = ""
 
 local function location()
   local buf = gvim.buf.current()
@@ -116,7 +115,6 @@ end
 -- run_search is the finder's live source: one git grep per query (the picker debounces) and
 -- the first matches, or an empty list after a status line for the error states.
 local function run_search(query)
-  last_query = query
   if query == "" then
     return {}
   end
@@ -159,7 +157,7 @@ local function show_count(shown)
   if not prompt then
     return
   end
-  if last_query == "" then
+  if prompt:query_text() == "" then
     prompt:set_status(t("status.type_to_search"))
   elseif shown == 0 then
     prompt:set_status(t("status.no_matches"))
@@ -179,7 +177,6 @@ local function start_git_grep()
     return
   end
   root = repo.root
-  last_query = ""
   prompt = finder.new {
     title = t("prompt.grep"),
     placeholder = t("prompt.placeholder"),

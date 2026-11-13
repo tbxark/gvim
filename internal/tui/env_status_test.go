@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/i18n"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -108,7 +109,7 @@ func segText(m *Model) string {
 	return ""
 }
 
-func hasStatusItem(items []statusItem, id, text string) bool {
+func hasStatusItem(items []frame.StatusItem, id, text string) bool {
 	for _, it := range items {
 		if it.ID == id && it.Text == text {
 			return true

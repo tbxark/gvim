@@ -131,7 +131,7 @@ type Widget struct {
 	// Dropdown/dual list.
 	Open         bool     // dropdown: the option list is expanded
 	ScrollOffset int      // dropdown: first visible option when open
-	Completions  []string // text: host-drawn candidate list (completion_request events)
+	Completions  []string // text: host-drawn candidate list (picking or dismissing one reports completion_accept / completion_dismiss)
 	Included     []string // dualList: the values initially included
 	// labeledSection and wrappers.
 	Title     string // labeledSection: the legend on the box
@@ -267,7 +267,7 @@ type WidgetMutation struct {
 // and Mouse carry the rest.
 type WidgetEvent struct {
 	Panel   uint64
-	Event   string // "activate" | "toggle" | "select" | "focus" | "value" | "close" | "cancel" | "mouse_click" | "mouse_move" | "mouse_wheel"
+	Event   string // "activate" | "toggle" | "select" | "expand" | "change" | "completion_accept" | "completion_dismiss" | "drag" | "drop" | "dragend" | "focus" | "focus_gained" | "focus_lost" | "cancel" | "mouse_click" | "mouse_move" | "mouse_wheel"
 	Widget  string
 	Index   int
 	Checked bool

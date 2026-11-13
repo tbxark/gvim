@@ -3,6 +3,9 @@ package tui
 import (
 	"slices"
 	"testing"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/space"
 )
 
 // maximizeKeys binds the chord that runs toggle_maximize_split.
@@ -19,10 +22,10 @@ func TestToggleMaximizeShowsOnlyTheFocusedPane(t *testing.T) {
 	if len(l.Panes) != 2 || l.Focus != 1 {
 		t.Fatalf("%d panes with focus %d, want 2 with focus 1", len(l.Panes), l.Focus)
 	}
-	if l.Panes[0].Rect != (rect{}) {
+	if l.Panes[0].Rect != (space.Rect{}) {
 		t.Errorf("the unfocused pane has area %v, want none", l.Panes[0].Rect)
 	}
-	if want := (rect{X: 1, Y: 3, W: 78, H: 19}); l.Panes[1].Rect != want {
+	if want := (space.Rect{X: 1, Y: 3, W: 78, H: 19}); l.Panes[1].Rect != want {
 		t.Errorf("the focused pane is %v, want the whole band %v", l.Panes[1].Rect, want)
 	}
 	if len(l.Borders) != 0 {
@@ -30,7 +33,7 @@ func TestToggleMaximizeShowsOnlyTheFocusedPane(t *testing.T) {
 	}
 
 	runAction(t, m, "toggle_maximize_split")
-	want := []rect{{X: 1, Y: 3, W: 39, H: 19}, {X: 41, Y: 3, W: 38, H: 19}}
+	want := []space.Rect{{X: 1, Y: 3, W: 39, H: 19}, {X: 41, Y: 3, W: 38, H: 19}}
 	if got := paneRects(m.layout()); !slices.Equal(got, want) {
 		t.Errorf("after the second toggle: panes %v, want %v", got, want)
 	}
@@ -46,7 +49,7 @@ func TestMaximizedPaneFollowsTheFocus(t *testing.T) {
 	runAction(t, m, "next_split") // the left pane takes the focus, and is the one shown
 
 	l := m.layout()
-	if l.Focus != 0 || l.Panes[0].Rect != (rect{X: 1, Y: 3, W: 78, H: 19}) || l.Panes[1].Rect != (rect{}) {
+	if l.Focus != 0 || l.Panes[0].Rect != (space.Rect{X: 1, Y: 3, W: 78, H: 19}) || l.Panes[1].Rect != (space.Rect{}) {
 		t.Errorf("after next_split: focus %d, panes %v, want the left pane alone", l.Focus, paneRects(l))
 	}
 }
@@ -74,7 +77,7 @@ func TestMaximizeWithOnePaneSaysSo(t *testing.T) {
 	if m.notice != "Only one split is open" {
 		t.Errorf("notice = %q, want the one split notice", m.notice)
 	}
-	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{X: 1, Y: 3, W: 78, H: 19}}) {
+	if got := paneRects(m.layout()); !slices.Equal(got, []space.Rect{{X: 1, Y: 3, W: 78, H: 19}}) {
 		t.Errorf("panes = %v, want the whole band", got)
 	}
 }
@@ -87,7 +90,7 @@ func TestMaximizedHitMapFollowsThePane(t *testing.T) {
 	// Where the line was, and the cells of the hidden left pane, now belong to the
 	// focused pane.
 	for _, x := range []int{10, 40, 60} {
-		want := hitTarget{Kind: hitEditorText, Index: 2, Pane: 1}
+		want := frame.HitTarget{Kind: frame.HitEditorText, Index: 2, Pane: 1}
 		if got := m.layout().Hit(x, 5); got != want {
 			t.Errorf("hit(%d, 5) = %+v while maximized, want %+v", x, got, want)
 		}

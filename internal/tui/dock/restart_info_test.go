@@ -12,15 +12,11 @@ import (
 func exitedRestartTabs(t *testing.T, effects Effects, launch terminal.Launch, code int, known bool) *Tabs {
 	t.Helper()
 	tabs := liveTestTabs(t, effects, &fakeStarter{term: newFakeTerm()})
-	tabs.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"},
-		LaunchArgv: launch.Argv, ResumeArgv: launch.ResumeArgv, ExitCode: code, ExitKnown: known,
-		Tabs: []terminal.SavedTab{{
-			Name: "shell", Open: true, Rows: []string{"out"}, Live: false,
-			LaunchArgv: launch.Argv, ResumeArgv: launch.ResumeArgv,
-			ExitCode: code, ExitKnown: known,
-		}},
-	})
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "shell", Open: true, Rows: []string{"out"}, Live: false,
+		LaunchArgv: launch.Argv, ResumeArgv: launch.ResumeArgv,
+		ExitCode: code, ExitKnown: known,
+	}}})
 	return tabs
 }
 

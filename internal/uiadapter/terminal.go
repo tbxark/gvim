@@ -15,8 +15,8 @@ import (
 )
 
 // The terminal dock's adapters: a shell from internal/terminal, and the system clipboard
-// that terminal_paste reads. The ui package defines the interfaces; this file is the
-// only place that imports the concrete term package for the dock.
+// that terminal_paste reads. The tui package defines the interfaces; this file is the
+// only place that imports the concrete terminal package for the dock.
 
 // Both adapters satisfy the ports the dock expects.
 var (
@@ -25,9 +25,9 @@ var (
 	_ tui.ClipboardReader = SystemClipboard{}
 )
 
-// clipboardReadTimeout bounds one clipboard read, so a stuck helper cannot hold the
-// paste forever.
-const clipboardReadTimeout = 2 * time.Second
+// clipboardTimeout bounds one clipboard read or write, so a stuck helper cannot hold the
+// paste or the copy forever.
+const clipboardTimeout = 2 * time.Second
 
 // TermStarterOptions are the terminal.shell and terminal.scrollback_lines settings
 // a starter applies to every shell it starts.
@@ -163,12 +163,7 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 				_ = launch.Backend.Close()
 				return nil, err
 			}
-			if s.opts.OSC52 != nil {
-				sess.SetOSC52Handler(s.opts.OSC52)
-			}
-			if s.opts.OSC52Query != nil {
-				sess.SetOSC52QueryHandler(s.opts.OSC52Query)
-			}
+			s.installOSC52(sess)
 			return sess, nil
 		}
 	}
@@ -185,13 +180,18 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 	if err != nil {
 		return nil, err
 	}
+	s.installOSC52(sess)
+	return sess, nil
+}
+
+// installOSC52 sets the clipboard hooks of the options, when there are any, on sess.
+func (s TermStarter) installOSC52(sess *terminal.Session) {
 	if s.opts.OSC52 != nil {
 		sess.SetOSC52Handler(s.opts.OSC52)
 	}
 	if s.opts.OSC52Query != nil {
 		sess.SetOSC52QueryHandler(s.opts.OSC52Query)
 	}
-	return sess, nil
 }
 
 // checkedRemoteDir validates a saved/restarted working directory on a remote
@@ -283,7 +283,7 @@ func (SystemClipboard) Read() (string, error) {
 		if err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), clipboardReadTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), clipboardTimeout)
 		out, err := exec.CommandContext(ctx, path, argv[1:]...).Output()
 		cancel()
 		if err != nil {

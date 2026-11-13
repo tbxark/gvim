@@ -17,13 +17,7 @@ var ErrLargeBuffer = errors.New("search: not available on large buffers")
 // newWindow builds the document for text, which holds the buffer lines from
 // first on, joined by "\n". Positions it returns carry buffer line numbers.
 func newWindow(first int, text string) document {
-	starts := []int{0}
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' {
-			starts = append(starts, i+1)
-		}
-	}
-	return document{text: text, lineStart: starts, first: first}
+	return document{text: text, first: first}
 }
 
 // FindVisible returns the matches of q that touch rows first through last

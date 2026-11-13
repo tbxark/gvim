@@ -91,9 +91,6 @@ type Item struct {
 	Style                            Style
 	Color                            Color
 	Priority                         int
-	// Above puts a virtual line above its line (Kind VirtualLine* picks the side; Above is
-	// kept for the API shape).
-	Above bool
 	// GutterText/GutterStyle draw the virtual-line gutter cell when set.
 	GutterText  string
 	GutterStyle Style
@@ -105,9 +102,6 @@ type Item struct {
 	Indent      int
 	PrefixText  string
 	PrefixStyle Style
-	// Collapsed/Placeholder seed a fold.
-	Collapsed   bool
-	Placeholder string
 	// TextOverlays are styled byte ranges within a virtual line's Text; only the first
 	// TextOverlayCount are used. A fixed array keeps Item comparable (the tests compare
 	// items), and a virtual line has few overlays anyway.
@@ -630,6 +624,7 @@ func (s *Store) ClearRange(doc uint64, owner, ns string, fromLine, toLine int) {
 			if g.owner != owner || g.ns != ns {
 				continue
 			}
+			g.compact()
 			before := g.size()
 			g.items = slices.DeleteFunc(g.items, func(e entry) bool {
 				last := e.lastLine()

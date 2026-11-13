@@ -10,7 +10,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.keymap, gvim.mode, gvim.context and gvim.input (stage S14).
+// gvim.keymap, gvim.mode, gvim.context and gvim.input.
 //
 //   - A binding of the normal editing context goes into the plugin's bindingSet
 //     (bindings.go), which the host layers between the preset and the user's keybindings.

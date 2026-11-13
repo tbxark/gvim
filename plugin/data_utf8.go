@@ -37,7 +37,7 @@ func decodeAt(s string, i int) (r rune, size int, ok bool) {
 
 func installUTF8(e *apiEnv) *lua.LTable {
 	L := e.L
-	t := L.NewTable()
+	t := L.CreateTable(0, 12)
 	t.RawSetString("charpattern", lua.LString("[\x00-\x7F\xC2-\xFD][\x80-\xBF]*"))
 
 	e.set(t, "len", func(L *lua.LState) int {
@@ -111,7 +111,7 @@ func installUTF8(e *apiEnv) *lua.LTable {
 		s := L.CheckString(1)
 		n := checkI64(L, 2)
 		def := int64(1)
-		if n < 0 {
+		if n <= 0 { // 5.3: i defaults to 1 for a positive n, else to #s + 1
 			def = int64(len(s)) + 1
 		}
 		posi := uPosRelat(optI64(L, 3, def), len(s)) - 1 // 0-based
@@ -275,7 +275,7 @@ func toBit(f float64) int32 {
 }
 
 func installBit(e *apiEnv) *lua.LTable {
-	t := e.L.NewTable()
+	t := e.L.CreateTable(0, 6)
 	fold := func(name string, op func(a, b int32) int32) {
 		e.set(t, name, func(L *lua.LState) int {
 			acc := toBit(float64(L.CheckNumber(1)))

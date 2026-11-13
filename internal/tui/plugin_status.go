@@ -7,11 +7,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The plugin items of the status row (stage S14). computeLayout places them with the other
+// The plugin items of the status row. computeLayout places them with the other
 // segments and gives each clickable one a run of kind hitStatusPlugin, so painting and hit
 // testing read the same geometry.
 
@@ -28,7 +29,7 @@ const maxStatusItemCells = 80
 func (h *pluginHost) SetStatusItems(plugin string, items []pluginapi.StatusItem) {
 	st := &h.model().plug.keys.status
 	if len(items) == 0 {
-		h.model().plugStatusGone(plugin, 0)
+		h.model().plugStatusGone(plugin)
 		return
 	}
 	if st.items == nil {
@@ -40,9 +41,8 @@ func (h *pluginHost) SetStatusItems(plugin string, items []pluginapi.StatusItem)
 	st.items[plugin] = slices.Clone(items)
 }
 
-// plugStatusGone drops the status items that the plugin (at generation gen) set.
-func (m *Model) plugStatusGone(plugin string, gen uint64) {
-	_ = gen
+// plugStatusGone drops the status items that the plugin set.
+func (m *Model) plugStatusGone(plugin string) {
 	st := &m.plug.keys.status
 	if _, ok := st.items[plugin]; !ok {
 		return
@@ -54,12 +54,12 @@ func (m *Model) plugStatusGone(plugin string, gen uint64) {
 // plugStatusItems returns the items the status row shows, in the order the layout places
 // them: the active mode's label first, then the plugins' items by priority (higher first;
 // a higher item is dropped last when the row is narrow), ties in registration order.
-func (m *Model) plugStatusItems() []statusItem {
+func (m *Model) plugStatusItems() []frame.StatusItem {
 	if m.plug.rt == nil {
 		return nil
 	}
 	ks := &m.plug.keys
-	var out []statusItem
+	var out []frame.StatusItem
 	if um := m.activeMode(); um != nil {
 		// The mode of the editor shows the label its plugin gave it. The mode of a buffer, which
 		// has no plugin code to draw one, always has a label, and one that does not bind Esc
@@ -75,7 +75,7 @@ func (m *Model) plugStatusItems() []statusItem {
 			}
 		}
 		if text != "" {
-			out = append(out, statusItem{
+			out = append(out, frame.StatusItem{
 				ID: "mode:" + um.info.Name, Plugin: owner, Text: plainCells(text), Prio: math.MaxInt,
 			})
 		}
@@ -83,12 +83,12 @@ func (m *Model) plugStatusItems() []statusItem {
 	first := len(out)
 	for _, p := range ks.status.order {
 		for _, it := range ks.status.items[p] {
-			out = append(out, statusItem{
+			out = append(out, frame.StatusItem{
 				ID: it.ID, Plugin: p, Text: plainCells(it.Text), Right: it.Right, Prio: it.Priority, Clickable: it.Clickable,
 			})
 		}
 	}
-	slices.SortStableFunc(out[first:], func(a, b statusItem) int { return b.Prio - a.Prio })
+	slices.SortStableFunc(out[first:], func(a, b frame.StatusItem) int { return b.Prio - a.Prio })
 	return out
 }
 

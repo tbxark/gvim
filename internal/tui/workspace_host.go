@@ -1,6 +1,6 @@
 package tui
 
-// WorkspaceHost is the daemon's #19a program model: one Bubble Tea program hosts several
+// WorkspaceHost is the daemon's program model: one Bubble Tea program hosts several
 // workspace models and swaps the active one without restarting the program. The app owns
 // the workspace lifecycle; it calls Show from the UI goroutine and Do to marshal work from
 // other goroutines (the daemon's socket handlers) onto the UI goroutine.
@@ -619,11 +619,10 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}))
 			}
 		}
-		if pending != nil {
-			// Queued/Init commands were wrapped with their own source when queued.
-			cmd = tea.Batch(pending, cmd)
-		}
-		return h, cmd
+	}
+	if pending != nil {
+		// Queued/Init commands were wrapped with their own source when queued.
+		cmd = tea.Batch(pending, cmd)
 	}
 	return h, cmd
 }

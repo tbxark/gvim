@@ -151,3 +151,29 @@ func TestIsBinary(t *testing.T) {
 		})
 	}
 }
+
+func TestValidUTF8SampleToleratesOnlyACutCharacter(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sample    []byte
+		truncated bool
+		want      bool
+	}{
+		{"complete", []byte("a\xc3\xa9"), true, true},
+		{"cut two-byte", []byte("a\xc3"), true, true},
+		{"cut three-byte", []byte("a\xe6\x97"), true, true},
+		{"cut but not truncated", []byte("a\xc3"), false, false},
+		{"invalid byte at the end", []byte("ab\xff"), true, false},
+		{"invalid continuation at the end", []byte("ab\xc3\x41"), true, false},
+		{"invalid byte before a cut character", []byte("a\xffb\xc3"), true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := validUTF8Sample(tc.sample, tc.truncated); got != tc.want {
+				t.Errorf("validUTF8Sample(% x, %v) = %v, want %v", tc.sample, tc.truncated, got, tc.want)
+			}
+		})
+	}
+}

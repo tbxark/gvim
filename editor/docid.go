@@ -7,9 +7,9 @@ import (
 // adopt gives d an id, if it has none, and starts observing its buffer when
 // changes are tracked. It is the one place that assigns ids.
 func (e *Editor) adopt(d *Document) {
-	if d.Seam().Id == 0 {
+	if d.Seam().ID == 0 {
 		e.seam.nextID++
-		d.Seam().Id = DocID(e.seam.nextID)
+		d.Seam().ID = DocID(e.seam.nextID)
 	}
 	if e.seam.tracked > 0 && d.Seam().Obs == nil && !d.SharedMirror() {
 		e.observe(d)
@@ -40,7 +40,7 @@ func (e *Editor) setDoc(i int, d *Document) {
 // put in the tab list directly.
 func (e *Editor) adoptAll() {
 	for _, d := range e.docs {
-		if d.Seam().Id == 0 || (e.seam.tracked > 0 && d.Seam().Obs == nil) {
+		if d.Seam().ID == 0 || (e.seam.tracked > 0 && d.Seam().Obs == nil) {
 			e.adopt(d)
 		}
 	}
@@ -50,7 +50,7 @@ func (e *Editor) adoptAll() {
 func (e *Editor) DocByID(id DocID) (*Document, int, bool) {
 	e.adoptAll()
 	for i, d := range e.docs {
-		if d.Seam().Id == id && id != 0 {
+		if d.Seam().ID == id && id != 0 {
 			return d, i, true
 		}
 	}
@@ -61,7 +61,7 @@ func (e *Editor) DocByID(id DocID) (*Document, int, bool) {
 func (e *Editor) ActiveID() DocID {
 	e.adoptAll()
 	if d := e.Active(); d != nil {
-		return d.Seam().Id
+		return d.Seam().ID
 	}
 	return 0
 }
@@ -71,7 +71,7 @@ func (e *Editor) DocIDs() []DocID {
 	e.adoptAll()
 	ids := make([]DocID, len(e.docs))
 	for i, d := range e.docs {
-		ids[i] = d.Seam().Id
+		ids[i] = d.Seam().ID
 	}
 	return ids
 }

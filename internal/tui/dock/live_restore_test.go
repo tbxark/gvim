@@ -29,19 +29,16 @@ func liveTestTabs(t *testing.T, effects Effects, starter *fakeStarter) *Tabs {
 // liveSavedState is a two-tab restore: tab 0 was live (an agent with a resume
 // record), tab 1 was already exited.
 func liveSavedState() terminal.SavedState {
-	return terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, ActiveTab: 0,
-		Tabs: []terminal.SavedTab{
-			{
-				Name: "agent", Open: true, Cwd: "/work", LaunchDir: "/chosen",
-				Rows:       []string{"agent transcript"},
-				LaunchArgv: []string{"claude", "--session-id", "s1"},
-				ResumeArgv: []string{"claude", "--resume", "s1"},
-				Agent:      "claude", Live: true,
-			},
-			{Name: "build", Open: true, Rows: []string{"build transcript"}, Live: false},
+	return terminal.SavedState{Version: terminal.SavedStateVersion, ActiveTab: 0, Tabs: []terminal.SavedTab{
+		{
+			Name: "agent", Open: true, Cwd: "/work", LaunchDir: "/chosen",
+			Rows:       []string{"agent transcript"},
+			LaunchArgv: []string{"claude", "--session-id", "s1"},
+			ResumeArgv: []string{"claude", "--resume", "s1"},
+			Agent:      "claude", Live: true,
 		},
-	}
+		{Name: "build", Open: true, Rows: []string{"build transcript"}, Live: false},
+	}}
 }
 
 // finishStart runs a tea command (a tabStartedMsg) through Update.
@@ -199,14 +196,14 @@ func TestTabsRestoreCapturesLiveFlag(t *testing.T) {
 	starter := &fakeStarter{term: newFakeTerm()}
 	tabs := liveTestTabs(t, Effects{RestoreLive: true, ResumeAgents: true}, starter)
 	startTab(t, tabs)
-	if st := tabs.SavedState(); !st.Tabs[0].Live || !st.Live {
+	if st := tabs.SavedState(); !st.Tabs[0].Live || !activeSaved(st).Live {
 		t.Fatalf("a running tab captured dead: %+v", st)
 	}
 	// Exiting the tab captures it dead.
 	if _, ok := tabs.Update(exitMsg{gen: tabs.tabs[0].gen}); !ok {
 		t.Fatal("the exit message was not taken")
 	}
-	if st := tabs.SavedState(); st.Tabs[0].Live || st.Live {
+	if st := tabs.SavedState(); st.Tabs[0].Live || activeSaved(st).Live {
 		t.Fatalf("an exited tab captured live: %+v", st)
 	}
 }
@@ -238,14 +235,10 @@ func TestDockShowKeepsARestoredTranscriptReadOnly(t *testing.T) {
 	t.Parallel()
 	starter := &fakeStarter{term: newFakeTerm()}
 	tabs := liveTestTabs(t, Effects{RestoreLive: true, ResumeAgents: true}, starter)
-	var st terminal.SavedState
-	st.Version, st.Open, st.Cwd, st.Live = terminal.SavedStateVersion, true, "/work", true
-	st.Rows = []string{"restored output"}
-	st.LaunchArgv, st.ResumeArgv, st.Agent = []string{"claude"}, []string{"claude", "--resume"}, "claude"
-	st.Tabs = []terminal.SavedTab{{
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
 		Name: "agent", Open: true, Cwd: "/work", Rows: []string{"restored output"},
-		LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv, Agent: "claude", Live: true,
-	}}
+		LaunchArgv: []string{"claude"}, ResumeArgv: []string{"claude", "--resume"}, Agent: "claude", Live: true,
+	}}}
 	tabs.Restore(st)
 	tabs.Hide()
 	cmd := tabs.Show()
@@ -268,5 +261,5 @@ func TestDockShowKeepsARestoredTranscriptReadOnly(t *testing.T) {
 		t.Fatal("the restored transcript lost its read-only view across Hide and Show")
 	}
 	// A wheel notch on the transcript scrolls it; there is no shell to forward it to.
-	tabs.Active().wheelMouse(tea.Mouse{Button: tea.MouseWheelUp}, 0, tea.MouseWheelUp)
+	tabs.Active().wheelMouse(tea.Mouse{Button: tea.MouseWheelUp}, 0)
 }

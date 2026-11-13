@@ -490,3 +490,28 @@ func TestServerHelloSendsSizeOutsideLock(t *testing.T) {
 		t.Fatal("Server.Write blocked while Program.Send was pending")
 	}
 }
+
+// negotiatedSize is the size the program is told: the smallest attached client's size
+// (0,0 when no client has sent a valid hello).
+func (s *Server) negotiatedSize() (cols, rows int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sizeLocked()
+}
+
+// A connection that never sends its hello is closed by the server instead of holding
+// its goroutine and descriptor forever.
+func TestServerClosesConnectionWithoutHello(t *testing.T) {
+	old := helloTimeout.Swap(int64(100 * time.Millisecond))
+	t.Cleanup(func() { helloTimeout.Store(old) })
+	srv, _ := startTestServer(t)
+	conn, err := Attach(srv.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("read on a silent connection = %v, want the server to close it (EOF)", err)
+	}
+}

@@ -60,12 +60,7 @@ func liveSavedState(root string, launchArgv, resumeArgv []string) terminal.Saved
 		Rows: []string{"old transcript"}, Live: true,
 		LaunchArgv: launchArgv, ResumeArgv: resumeArgv, Agent: "agent",
 	}
-	return terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: true,
-		Cwd: root, LaunchDir: root, Rows: []string{"old transcript"},
-		LaunchArgv: launchArgv, ResumeArgv: resumeArgv, Agent: "agent",
-		Tabs: []terminal.SavedTab{tab}, ActiveTab: 0,
-	}
+	return terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{tab}, ActiveTab: 0}
 }
 
 // buildLiveRestoreRuntime starts a local runtime from sessDir with cfg, with no
@@ -154,7 +149,6 @@ func TestLocalLiveRestoreOptions(t *testing.T) {
 			sessDir := filepath.Join(t.TempDir(), "session")
 			must(t, session.Save(sessDir, session.Session{Root: root}))
 			st := liveSavedState(root, []string{launch}, []string{resume})
-			st.Live = tt.live
 			st.Tabs[0].Live = tt.live
 			must(t, restore.SaveTerminal(sessDir, st))
 			rt := buildLiveRestoreRuntime(t, root, cfg, sessDir)
@@ -183,10 +177,7 @@ func TestLocalLiveRestoreOldRecordStaysDead(t *testing.T) {
 	cfg := liveRestoreConfig(t, true, true)
 	sessDir := filepath.Join(t.TempDir(), "session")
 	must(t, session.Save(sessDir, session.Session{Root: root}))
-	must(t, restore.SaveTerminal(sessDir, terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Cwd: root, Rows: []string{"old output"},
-	}))
+	must(t, restore.SaveTerminal(sessDir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Cwd: root, Rows: []string{"old output"}}}}))
 	rt := buildLiveRestoreRuntime(t, root, cfg, sessDir)
 	deadline := time.Now().Add(400 * time.Millisecond)
 	diveTerminal(t, rt.model, func() bool { return time.Now().After(deadline) }, "the dive settle")
@@ -215,15 +206,10 @@ func seedLiveWorkspace(t *testing.T, root string) (string, string) {
 		t.Fatal(err)
 	}
 	must(t, session.Save(dir, session.Session{Root: root}))
-	must(t, restore.SaveTerminal(dir, terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: true,
-		Cwd: root, LaunchDir: root, Rows: []string{"old workspace output"},
-		Tabs: []terminal.SavedTab{{
-			Name: "shell", Open: true, Cwd: root, LaunchDir: root,
-			Rows: []string{"old workspace output"}, Live: true,
-		}},
-		ActiveTab: 0,
-	}))
+	must(t, restore.SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "shell", Open: true, Cwd: root, LaunchDir: root,
+		Rows: []string{"old workspace output"}, Live: true,
+	}}, ActiveTab: 0}))
 	return ws.File.StableID, dir
 }
 

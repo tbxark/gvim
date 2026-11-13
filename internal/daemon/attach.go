@@ -1,6 +1,6 @@
 package daemon
 
-// AttachClient connects the current terminal to a daemon: the terminal goes into raw
+// AttachClientTargets connects the current terminal to a daemon: the terminal goes into raw
 // mode, stdin bytes become input frames, output frames are written to stdout, resize
 // signals become resize frames, and a detached/exit frame restores the terminal and
 // returns. It runs in the client process, not in the daemon.
@@ -14,22 +14,11 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
-// AttachClient attaches to the daemon called name and forwards files (which the daemon
-// opens in its editor) after the hello. It blocks until the daemon detaches this client,
-// exits, the connection drops, or ctx is canceled.
-func AttachClient(ctx context.Context, name string, files []string) error {
-	targets := make([]OpenFileTarget, len(files))
-	for i, path := range files {
-		targets[i] = OpenFileTarget{Path: path}
-	}
-	cwd, _ := os.Getwd()
-	return AttachClientTargets(ctx, name, cwd, targets)
-}
-
-// AttachClientTargets is AttachClient for positional launch targets: each target's path
-// is sent as given (relative paths are resolved by the daemon against cwd, the client's
-// working directory) with its 1-based Line/Col. The legacy Paths field is still filled,
-// so an older daemon opens the files without positions.
+// AttachClientTargets attaches to the daemon called name and forwards files (which the
+// daemon opens in its editor) after the hello. Each target's path is sent as given
+// (relative paths are resolved by the daemon against cwd, the client's working directory)
+// with its 1-based Line/Col. It blocks until the daemon detaches this client, exits, the
+// connection drops, or ctx is canceled.
 func AttachClientTargets(ctx context.Context, name, cwd string, files []OpenFileTarget) error {
 	conn, err := Attach(name)
 	if err != nil {
@@ -47,11 +36,7 @@ func AttachClientTargets(ctx context.Context, name, cwd string, files []OpenFile
 		return err
 	}
 	if len(files) > 0 {
-		paths := make([]string, len(files))
-		for i, f := range files {
-			paths[i] = f.Path
-		}
-		if err := fw.WriteJSON(TypeOpenFile, OpenFile{Paths: paths, Cwd: cwd, Files: files}); err != nil {
+		if err := fw.WriteJSON(TypeOpenFile, OpenFile{Cwd: cwd, Files: files}); err != nil {
 			return err
 		}
 	}

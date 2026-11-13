@@ -100,7 +100,10 @@ func parseGitGrepOutput(text string, limit, matchLen int, abs func(rel string) s
 	byPath := map[string]int{}
 	total := 0
 	for _, line := range strings.Split(text, "\n") {
-		if line == "" || total >= limit {
+		if total >= limit {
+			break
+		}
+		if line == "" {
 			continue
 		}
 		m := gitGrepLine.FindStringSubmatch(line)

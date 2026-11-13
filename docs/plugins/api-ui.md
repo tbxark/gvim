@@ -31,7 +31,7 @@ gvim.ui.select(items, opts?) ⏳ -> item, index | nil
 A **prompt suggestion list** can be attached to an open prompt while the user types:
 `gvim.ui.set_prompt_suggestions(items, selected?)` — called from the prompt's
 `on_change = fn(text)` — replaces the list (`100` rows at most; strings or
-`{id, text, description, value, disabled}`). Tab, Shift+Tab and Up/Down move the highlight and fill
+`{text, description, value, disabled}`). Tab, Shift+Tab and Up/Down move the highlight and fill
 the choice's `value` (the `text` when there is none) into the field; Enter still submits. An empty
 list hides it. Without an open plugin prompt the call is `not_found`.
 
@@ -153,7 +153,7 @@ is now a read-only text field). `completions` is a candidate list the host draws
 when it is focused: Up/Down move the highlight, Tab/Enter accept, Esc dismisses. Every edit
 raises a `change` widget event with `value` and `cursor_byte`. A text field needs a `key`.
 
-**Number, dropdown, radio, dual list.** `number` has a seed `value` (also `number`), `min`,
+**Number, dropdown, radio, dual list.** `number` has a seed `value` (a number), `min`,
 `max`, `step`, `integer` and `percent`; Up/Down step, PageUp/PageDown step by ten, Home/End jump
 to the bounds, and each change raises a `change` event with the formatted `value`. `dropdown` has
 `options` and a 1-based `selected_index`; Enter opens the option list, Up/Down move the highlight,
@@ -221,18 +221,19 @@ keep every other widget's state: `setValue` (`value`, optional `cursor_byte` for
 
 The host routes the panel's keys and mouse to the plugin as `widget_event` events (see
 [events.md](events.md)): `activate`, `toggle`, `select`, `expand`, `change` (`value`,
-`cursor_byte`, `index` or `included` depending on the widget), `completion_request`,
-`completion_accept`, `completion_dismiss`, `drag`/`drop`/`dragend`, `focus`, `focus_gained`,
-`focus_lost`, `close`, `cancel` and the mouse events; every event carries `focus_key`, the widget
+`cursor_byte`, `index` or `included` depending on the widget), `completion_accept`,
+`completion_dismiss`, `drag`/`drop`/`dragend`, `focus`, `focus_gained`,
+`focus_lost`, `cancel` and the mouse events (`mouse_click`, `mouse_move`, `mouse_wheel`); every event carries `focus_key`, the widget
 that holds the panel focus afterwards. Plugin key layers (modes and key waits) see a key before
 the host's smart dispatch, so a mode can turn typing into widget commands; the host's dispatch is
 the fallback. A panel with the keyboard swallows keys its widgets do not use, so typing in a panel
 never edits the buffer under it; Escape (or a click outside) gives the keyboard back.
 
 **Caps and sanitisation.** A panel tree is at most 2000 widgets, nested at most 8 deep; a list
-takes 2000 items, a dropdown/radio/dual list 2000 options, a text field 2000 completion
-candidates; one string is 4 KiB, one key 128 bytes, a text field at most 200 editing rows; a
-plugin mounts at most 8 panels (`limit`) and a plugin section asks for at most 100 body rows.
+takes 2000 items, a tree 5000 nodes, a dropdown/radio/dual list 2000 options, a text field 2000
+completion candidates; one string is 4 KiB, one key 128 bytes, a title 120 bytes, a text field at
+most 200 editing rows; a plugin mounts at most 8 panels (`limit`) and a plugin section asks for at
+most 100 body rows.
 Text that reaches the grid is sanitised: control characters become spaces.
 
 ```lua
@@ -257,13 +258,6 @@ end)
 gvim.ui.widget_mutate(id, { kind = "setSelectedIndex", widget_key = "files", index = 2 })
 ```
 
-**Caps and sanitisation.** A panel tree is at most 2000 widgets, nested at most 8 deep; a
-list takes 2000 items, a tree 5000 nodes, one string 4 KiB and one key 128 bytes; a plugin
-mounts at most 8 panels (`limit`), and a plugin section asks for at most 100 body rows. A
-title is at most 120 bytes. Text that reaches the grid is sanitised: control characters
-become spaces.
-
-
 ## Menu bar rows
 
 A plugin can add its own rows to any menu bar dropdown:
@@ -284,6 +278,7 @@ a neighbour that matches nothing appends the row.
 
 The set is whole-set replace per plugin: at most 32 rows in all, and a reload or an unload
 drops the rows of the old generation.
+
 ## The status bar
 
 ```lua
@@ -292,7 +287,8 @@ local item = gvim.ui.statusbar.item { id = "branch", text = "main", align = "rig
 item:set(text)  item:show()  item:hide()  item:remove()
 ```
 
-`id` names the item inside your plugin (a second item with the same id is `conflict`). `align` is
+`id` names the item inside your plugin (optional, default `item1`, `item2`, ...; a second item with
+the same id is `conflict`). `align` is
 `"left"` (between the position and the message) or `"right"` (between the language segment and the
 diagnostics count). Higher `priority` comes first and is dropped last when the row is full. At most 8
 items per plugin, each text at most 80 display cells, one line. `on_click` runs as a hidden command
@@ -371,8 +367,9 @@ ns:set(buf, {
 ### Virtual text surface (tier 1c-A/B, painted)
 
 Beyond the anchored kinds above, a namespace accepts the virtual-text kinds, and convenience
-functions mirror Fresh's names (each takes a `Buffer` first and an `opts` table with
-`namespace` — default `"default"` — `priority`, `version` and the kind-specific fields):
+functions mirror Fresh's names (each takes a `Buffer` first and an optional `opts` table with
+`namespace` — default `"default"` — `priority`, `version` and the kind-specific fields; a bad
+value is `invalid`, and `text_overlays` is read only by the `ns:set` item kind):
 
 ```text
 gvim.decor.add_virtual_line(buf, line, text, opts?)       -- A display row above (default) the line.
@@ -383,7 +380,7 @@ gvim.decor.set_cursor_line_overlay(buf, style, opts?)     -- Tint the caret's ro
 gvim.decor.set_scrollbar_markers_in_range(buf, range, color, opts?) -- A ranged scrollbar mark.
 gvim.decor.clear_decorations(buf?, range?, opts?)         -- Clear a namespace, or its items in a line range.
 gvim.decor.refresh_lines(buf?)                            -- Kept for Fresh's shape; painting is per frame.
-gvim.decor.add_fold(buf, start_line, end_line, opts?)     -- One namespace-scoped folding range.
+gvim.decor.add_fold(buf, start_line, end_line, opts?)     -- One namespace-scoped folding range; opts {collapsed, placeholder, kind, namespace, version}.
 gvim.decor.set_folding_ranges(buf, ranges, opts?)         -- Replace the namespace's folding ranges.
 gvim.decor.clear_folds(buf?, opts?)                       -- Remove them.
 ```

@@ -18,6 +18,10 @@ var ErrUnknownAction = errors.New("unknown action")
 // unsaved edits. Pass the argument force=true to discard them.
 var ErrUnsaved = errors.New("unsaved changes")
 
+// ErrQuitNeedsConfirm is returned by the quit action when Options.ConfirmQuit is set
+// and no tab has unsaved edits: the caller asks the user, then quits with force=true.
+var ErrQuitNeedsConfirm = errors.New("quit needs confirmation")
+
 // ErrNoDocument is returned by Do and by the document methods when no tab is
 // open (Empty reports true). The status message says the same.
 var ErrNoDocument = errors.New("no open document")
@@ -71,8 +75,9 @@ type Options struct {
 
 	// The options below come from the Fresh editor.* config options. The zero value of
 	// each is "off" or 0, so a plain Options{} switches them off; the app sets them from
-	// the config, whose defaults are Fresh's. Except AutoClose, AutoSurround and the large file
-	// options, none of them changes behaviour yet: see the contract for the consumer of each. The two that are not plain values, the
+	// the config, whose defaults are Fresh's. RecoveryEnabled,
+	// AutoRecoverySaveIntervalSecs and AutoRevertPollIntervalMS are carried for the app
+	// and change nothing in the editor itself. The two that are not plain values, the
 	// language resolver and the ephemeral patterns, are set with SetLanguageSettings and
 	// SetEphemeralFilePatterns so that Options stays comparable.
 
@@ -83,8 +88,7 @@ type Options struct {
 	AutoSurround bool
 	// VirtualSpace is editor.virtual_space: VirtualSpaceOff (default), VirtualSpaceBlock or
 	// VirtualSpaceOn. Empty reads as off. Only "on" puts the caret past the end of a
-	// line for now; "block" is accepted and its block-selection half is not built yet
-	// (see virtualspace.go).
+	// line; "block" only lets block selections extend past it (see virtualspace.go).
 	VirtualSpace string
 	// ScrollOffset is editor.scroll_offset (default 3): the lines kept visible above and
 	// below the caret. Zero keeps none.
@@ -98,7 +102,7 @@ type Options struct {
 	// snapshots.
 	SnapshotInterval int
 	// ConfirmQuit is editor.confirm_quit (default false): quit asks even when no buffer
-	// has unsaved edits.
+	// has unsaved edits (see QuitNeedsConfirm).
 	ConfirmQuit bool
 	// AutoCreateEmptyBufferOnLastBufferClose is
 	// editor.auto_create_empty_buffer_on_last_buffer_close (default true): closing the
@@ -462,15 +466,28 @@ func (e *Editor) Save() error {
 // force is true, the editor is marked for quit: Quitting reports true, and the
 // caller should exit. If a list is returned, nothing changes. The caller runs
 // one unsaved-changes dialog per tab (ActivateTab, then Save or CloseTab with
-// force), then calls Quit again. Cancel stops the quit.
+// force), then calls Quit again. Cancel stops the quit. With Options.ConfirmQuit
+// and no unsaved tab, Quit returns nil without marking the quit: the caller asks
+// the user and then calls Quit(true).
 func (e *Editor) Quit(force bool) []Dirty {
 	if !force {
 		if dirty := e.dirtyTabs(); len(dirty) > 0 {
 			return dirty
 		}
+		if e.opts.ConfirmQuit {
+			return nil
+		}
 	}
 	e.quit = true
 	return nil
+}
+
+// QuitNeedsConfirm reports Options.ConfirmQuit: a quit with nothing unsaved still
+// asks the user first (Fresh's editor.confirm_quit). Unsaved tabs are asked about by
+// the unsaved-changes dialog instead, so a caller checks this only when none is
+// modified, and quits with Quit(true) once the user agrees.
+func (e *Editor) QuitNeedsConfirm() bool {
+	return e.opts.ConfirmQuit
 }
 
 // Quitting reports whether a quit has been granted by Quit or the quit action.

@@ -9,8 +9,7 @@ import (
 )
 
 // gvim.ui declarative widget panels and sidebar sections (plugin API tier 1a). The spec is
-// plain Lua data: a widget tree of row, col, label, text, raw, hintBar, spacer, divider,
-// button, toggle, list and tree nodes. The host validates and paints it, keeps the state of
+// plain Lua data: a widget tree of the kinds in widgetKinds. The host validates and paints it, keeps the state of
 // keyed widgets, routes the keys and the mouse of the panel and reports what the user did as
 // widget_events.
 //
@@ -226,9 +225,7 @@ func panelMountFromLua(L *lua.LState, specIdx, optsIdx int, sidebar bool) (plugi
 	o := bufTableOpts{t: t}
 	m := pluginapi.WidgetMount{Panel: spec, Closable: o.boolean("closable", true)}
 	switch scope, _ := o.str("scope"); scope {
-	case "":
-		m.Scope = pluginapi.ScopeWindow
-	case "window":
+	case "", "window":
 		m.Scope = pluginapi.ScopeWindow
 	case "editor":
 		m.Scope = pluginapi.ScopeEditor
@@ -324,7 +321,7 @@ func panelSpecFromLua(v lua.LValue) (pluginapi.WidgetPanel, error) {
 	return p, nil
 }
 
-// widgetKinds are the kinds of the v1 widget subset.
+// widgetKinds are the widget kinds a spec may use.
 var widgetKinds = map[string]pluginapi.WidgetKind{
 	"row":     pluginapi.WidgetRow,
 	"col":     pluginapi.WidgetCol,
@@ -407,7 +404,9 @@ func widgetFromLua(v lua.LValue, depth int, n *int) (pluginapi.Widget, error) {
 	w.Percent = o.boolean("percent", false)
 	w.Open = o.boolean("open", false)
 	w.ScrollOffset = o.integer("scroll_offset", 0)
-	w.Number = floatNumber(&o, "value", 0)
+	if _, isText := o.get("value").(lua.LString); !isText { // a string value is the text seed
+		w.Number = floatNumber(&o, "value", 0)
+	}
 	w.Min = floatNumber(&o, "min", 0)
 	w.Max = floatNumber(&o, "max", 0)
 	w.Step = floatNumber(&o, "step", 0)
@@ -487,6 +486,13 @@ func widgetTextFromLua(t *lua.LTable, w *pluginapi.Widget) error {
 	if o.err != "" {
 		return invalidErr("%s", o.err)
 	}
+	if style, ok := t.RawGetString("style").(*lua.LTable); ok {
+		st, err := styleFromLua(style)
+		if err != nil {
+			return invalidErr("style: %s", err)
+		}
+		w.Style = st
+	}
 	runs := t.RawGetString("runs")
 	if runs == lua.LNil {
 		runs = t.RawGetString("entries")
@@ -507,13 +513,6 @@ func widgetTextFromLua(t *lua.LTable, w *pluginapi.Widget) error {
 			return invalidErr("run %d: %s", i, err)
 		}
 		w.Runs = append(w.Runs, run)
-	}
-	if style, ok := t.RawGetString("style").(*lua.LTable); ok {
-		st, err := styleFromLua(style)
-		if err != nil {
-			return invalidErr("style: %s", err)
-		}
-		w.Style = st
 	}
 	return nil
 }
@@ -672,7 +671,7 @@ func widgetNodesFromLuaTable(list *lua.LTable) ([]pluginapi.WidgetNode, error) {
 	return out, nil
 }
 
-// widgetListFields reads the options/completions/included lists and the extra node fields.
+// widgetListFields reads the options, completions and included lists.
 func widgetListFields(t *lua.LTable, w *pluginapi.Widget) error {
 	var err error
 	if w.Options, err = stringArrayField(t, "options"); err != nil {

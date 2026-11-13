@@ -14,6 +14,15 @@ import (
 	"github.com/tbxark/gvim/session"
 )
 
+// recoverCrash is restoreCrash plus the removal of the copy when every file was restored.
+func recoverCrash(ed *editor.Editor, dir string) ([]Unrestored, int) {
+	failed, n, spent := restoreCrash(ed, dir)
+	if spent {
+		_ = ClearRecovery(dir)
+	}
+	return failed, n
+}
+
 func TestRecoveryWriterStashesOnlyUnsavedTextOnce(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.txt")

@@ -11,7 +11,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// installPath installs the pure path helpers of gvim.path (FINAL 5.8). They follow the
+// installPath installs the pure path helpers of gvim.path. They follow the
 // path syntax of the platform the editor runs on and never touch the filesystem.
 func installPath(e *apiEnv) {
 	t := e.area("path")
@@ -48,10 +48,7 @@ func installPath(e *apiEnv) {
 	e.set(t, "relative", func(L *lua.LState) int {
 		rel, err := filepath.Rel(L.CheckString(1), L.CheckString(2))
 		if err != nil {
-			v, s := errTuple(pluginapi.Errf(pluginapi.CodeInvalid, "%v", err))
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeInvalid, "%v", err))
 		}
 		L.Push(lua.LString(rel))
 		return 1
@@ -65,10 +62,7 @@ func installPath(e *apiEnv) {
 	e.set(t, "to_uri", func(L *lua.LState) int {
 		uri, err := pathToURI(L.CheckString(1))
 		if err != nil {
-			v, s := errTuple(err)
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, err)
 		}
 		L.Push(lua.LString(uri))
 		return 1
@@ -76,10 +70,7 @@ func installPath(e *apiEnv) {
 	e.set(t, "from_uri", func(L *lua.LState) int {
 		p, err := uriToPath(L.CheckString(1))
 		if err != nil {
-			v, s := errTuple(err)
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, err)
 		}
 		L.Push(lua.LString(p))
 		return 1

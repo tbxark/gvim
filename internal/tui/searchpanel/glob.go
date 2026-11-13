@@ -100,6 +100,11 @@ func globRegexp(pattern string) (string, error) {
 				return "", fmt.Errorf("empty character class")
 			}
 			b.WriteString("[")
+			if class[0] == '!' {
+				// "[!x]" negates, as "[^x]" does; the "!" is not a member.
+				b.WriteByte('^')
+				class = class[1:]
+			}
 			for k := 0; k < len(class); k++ {
 				switch ch := class[k]; ch {
 				case '\\', ']':
@@ -112,7 +117,8 @@ func globRegexp(pattern string) (string, error) {
 			b.WriteString("]")
 			i += end + 1
 		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
+			// QuoteMeta works on bytes, so the bytes of a multi-byte rune stay together.
+			b.WriteString(regexp.QuoteMeta(pattern[i : i+1]))
 		}
 	}
 	return b.String(), nil

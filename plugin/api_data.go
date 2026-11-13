@@ -22,7 +22,7 @@ type dataState struct {
 	arrayMT *lua.LTable    // metatable that marks a table as a json array
 }
 
-// installData installs the data libraries (stage S9): the globals json, re, utf8 and bit
+// installData installs the data libraries: the globals json, re, utf8 and bit
 // (also reachable as gvim.json, ...), gvim.text, gvim.time, gvim.theme, gvim.diff,
 // gvim.settings and gvim.config.
 func installData(e *apiEnv) {
@@ -49,10 +49,7 @@ func installData(e *apiEnv) {
 
 // errReturn pushes `nil, "<code>: <msg>"` for err and returns the number of results.
 func errReturn(L *lua.LState, err error) int {
-	v, s := errTuple(err)
-	L.Push(v)
-	L.Push(s)
-	return 2
+	return bufRet(L, err)
 }
 
 // limitErr is a CodeLimit error.

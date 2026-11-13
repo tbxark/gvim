@@ -12,12 +12,12 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.ui prompts, pickers and popups, and gvim.clipboard (FINAL 5.6, stage S13).
+// gvim.ui prompts, pickers and popups, and gvim.clipboard.
 //
 //	gvim.ui.input(opts) ⏳ -> string | nil           nil: cancelled with Esc
 //	gvim.ui.confirm(msg, opts?) ⏳ -> boolean        Esc answers false
 //	gvim.ui.choose(msg, choices) ⏳ -> id | nil
-//	gvim.ui.select(items, opts?) ⏳ -> item, index | nil     index is 1-based (AMENDMENTS C24)
+//	gvim.ui.select(items, opts?) ⏳ -> item, index | nil     index is 1-based
 //	gvim.ui.picker(spec) -> Picker                   p:open() p:set_items(items) p:set_title(s)
 //	                                                 p:set_footer(s) p:set_status(s) p:query()
 //	                                                 p:selected() p:close() p:is_open()
@@ -1022,7 +1022,7 @@ func installPopup(e *apiEnv, ui *lua.LTable, st *uiState) {
 // ---------- installUI ----------
 
 // installUI installs gvim.ui (input, confirm, choose, select, picker, popup, focus, size)
-// and gvim.clipboard. The status bar items of gvim.ui.statusbar belong to stage S14.
+// and gvim.clipboard. The status bar items of gvim.ui.statusbar are in api_status.go.
 func installUI(e *apiEnv) {
 	r := e.r
 	ui := e.area("ui")

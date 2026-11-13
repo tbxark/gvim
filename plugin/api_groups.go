@@ -16,15 +16,14 @@ import (
 //	gvim.buf.set_group_title(id, { {text=, panel=}, ... }) -> true | nil, err
 //	gvim.buf.set_panel_visible(id, panel, visible) -> true | nil, err
 //	gvim.buf.focus_panel(id, panel) -> true | nil, err
-//	gvim.buf.close_group(id) -> true
+//	gvim.buf.close_group(id) -> true | nil, err
 //	gvim.buf.group_panels(id) -> { {name=, buf=, window=, visible=}, ... }
 //	gvim.win.create_scroll_sync(id, left, right) -> true | nil, err
 //	gvim.win.set_scroll_sync_anchors(id, { {left, right}, ... }) -> true | nil, err
-//	gvim.win.remove_scroll_sync(id) -> true
+//	gvim.win.remove_scroll_sync(id) -> true | nil, err
 //
 // A layout is Fresh's JSON: a leaf is {"type":"scrollable","id":"name"} or
-// {"type":"fixed","id":"name","height":n} (the fixed height is accepted and ignored: the
-// split ratios place panels in gvim); a split is
+// {"type":"fixed","id":"name","height":n} (the host keeps the leaf that many rows high); a split is
 // {"type":"split","direction":"h"|"v","ratio":0.5,"first":...,"second":...}. A leaf may take
 // "bufferId" to show an existing buffer; otherwise the host makes a read-only panel buffer
 // the group owns. There is no synthetic group tab yet, so the title segments are stored for
@@ -152,10 +151,7 @@ func installGroups(e *apiEnv) {
 			panels = p.r.guard.BufferGroupPanels(id)
 		}
 		if panels == nil {
-			v, msg := errTuple(pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id))
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id))
 		}
 		out := L.CreateTable(len(panels), 0)
 		for _, panel := range panels {

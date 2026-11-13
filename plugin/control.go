@@ -18,7 +18,7 @@ func infoN(format string, a ...any) []pluginapi.Notice {
 	return []pluginapi.Notice{{Text: fmt.Sprintf(format, a...)}}
 }
 
-// doControl runs a lifecycle request at depth 0 (FINAL 4.6). The sources it needs are
+// doControl runs a lifecycle request at depth 0. The sources it needs are
 // read, and compiled, in Work; everything that changes plugins happens when that Work's
 // completion is delivered, so a failing reload never touches the running version.
 func (r *Runtime) doControl(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.Notice) {
@@ -120,8 +120,7 @@ func (r *Runtime) ctlReload(name string) ([]pluginapi.Work, []pluginapi.Notice) 
 }
 
 // reloadScanned replaces the running plugin name by the freshly read candidate nc.
-// Nothing is touched unless the new source reads and compiles in every file (AMENDMENTS
-// C21 1): a syntax error anywhere keeps the running version and says which file.
+// Nothing is touched unless the new source reads and compiles in every file: a syntax error anywhere keeps the running version and says which file.
 func (r *Runtime) reloadScanned(name string, nc *candidate, verb string) {
 	switch {
 	case nc.name != name:
@@ -133,7 +132,7 @@ func (r *Runtime) reloadScanned(name string, nc *candidate, verb string) {
 	case !nc.enabled:
 		r.abortReload(name, "the plugin is disabled")
 	default:
-		deps, why := r.replace(nc, func(b *batch) {
+		why := r.replace(nc, func(b *batch) {
 			if it := b.by[name]; it != nil && it.st == itemOK {
 				text := fmt.Sprintf("Plugin '%s' %s", name, verb)
 				if n := len(b.items) - 1; n > 0 {
@@ -142,7 +141,6 @@ func (r *Runtime) reloadScanned(name string, nc *candidate, verb string) {
 				r.say(pluginapi.LevelInfo, text)
 			}
 		})
-		_ = deps
 		if why != "" {
 			r.abortReload(name, why)
 		}
@@ -157,16 +155,16 @@ func (r *Runtime) abortReload(name, why string) {
 // replace stops the dependants and the old version of nc.name, then loads nc and starts the
 // dependants again, in dependency order. why is non-empty, and nothing has changed, when nc
 // cannot load because of a dependency.
-func (r *Runtime) replace(nc *candidate, done func(*batch)) (dependants []string, why string) {
+func (r *Runtime) replace(nc *candidate, done func(*batch)) (why string) {
 	l := &r.ld
-	dependants = r.loadedDependants(nc.name)
+	dependants := r.loadedDependants(nc.name)
 	set := []*candidate{nc}
 	for _, n := range dependants {
 		set = append(set, l.byName[n])
 	}
 	set = append(set, r.stoppedDependants(nc.name)...)
 	if _, blocked := planOrder(set, r.depLookup); blocked[nc] != "" {
-		return nil, blocked[nc]
+		return blocked[nc]
 	}
 	// Dependants stop before what they depend on, the last started first.
 	names := slices.Clone(dependants)
@@ -178,7 +176,7 @@ func (r *Runtime) replace(nc *candidate, done func(*batch)) (dependants []string
 	b := r.newBatch(false, done)
 	r.prepare(b, set)
 	b.advance()
-	return dependants, ""
+	return ""
 }
 
 // ---------- enable and disable ----------
@@ -220,7 +218,7 @@ func (r *Runtime) ctlEnable(name string) ([]pluginapi.Work, []pluginapi.Notice) 
 			r.say(pluginapi.LevelError, fmt.Sprintf("plugin '%s': %s", name, statusText(nc.err)))
 			return
 		}
-		_, why := r.replace(nc, func(b *batch) {
+		why := r.replace(nc, func(b *batch) {
 			if it := b.by[name]; it != nil && it.st == itemOK {
 				r.say(pluginapi.LevelInfo, fmt.Sprintf("Plugin '%s' enabled", name))
 			}

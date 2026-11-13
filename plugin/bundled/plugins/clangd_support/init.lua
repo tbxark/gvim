@@ -89,9 +89,11 @@ local function candidate_dirs(path)
     add(gvim.path.join(root, "include"))
     add(gvim.path.join(root, "src"))
   end
-  if buffer_dir and buffer_dir ~= "" then
-    add(gvim.path.join(dir_name(buffer_dir), "include"))
-    add(gvim.path.join(dir_name(buffer_dir), "src"))
+  -- The parent of the buffer's directory only counts while it is still inside the workspace.
+  local parent = buffer_dir and buffer_dir ~= "" and dir_name(buffer_dir) or ""
+  if parent ~= "" and root and root ~= "" and (parent == root or parent:sub(1, #root + 1) == root .. "/") then
+    add(gvim.path.join(parent, "include"))
+    add(gvim.path.join(parent, "src"))
   end
   return dirs
 end

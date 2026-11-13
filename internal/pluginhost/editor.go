@@ -14,7 +14,7 @@ import (
 	"github.com/tbxark/gvim/syntax"
 )
 
-// Limits of one Edit call (AMENDMENTS C18): the edits, and the bytes they insert plus
+// Limits of one Edit call: the edits, and the bytes they insert plus
 // remove. The runtime checks the inserted half and the count before it calls; the removed
 // half is only known here, where the ranges meet the text.
 const (
@@ -29,14 +29,9 @@ const (
 // buffer's own positions are rune columns). It is a separate type from editorAdapter
 // because the two ports have SetCursor methods of different signatures.
 //
-// Every mutating method marks the syntax spans of the document it changed as stale
-// (editorAdapter.editedDoc), which also covers a document that is not the active tab:
-// a split pane can show it. The virtual-buffer methods are in pluginvirtual.go.
+// The virtual-buffer methods are in editorvirtual.go.
 type pluginEditor struct {
-	pluginapi.Unsupported
 	ed *editor.Editor
-	// markEdited marks the syntax spans of a document stale for an edit made here.
-	markEdited func(*editor.Document)
 	// langs remembers the language detected from a file name, so ListBuffers does not
 	// match the name against every lexer on each call.
 	langs map[string]string
@@ -46,8 +41,8 @@ type pluginEditor struct {
 
 var _ pluginapi.BufferEditor = (*pluginEditor)(nil)
 
-func newPluginEditor(ed *editor.Editor, markEdited func(*editor.Document)) *pluginEditor {
-	p := &pluginEditor{ed: ed, markEdited: markEdited, langs: map[string]string{}}
+func newPluginEditor(ed *editor.Editor) *pluginEditor {
+	p := &pluginEditor{ed: ed, langs: map[string]string{}}
 	p.trackDecorations()
 	return p
 }
@@ -87,7 +82,7 @@ func closedErr(id pluginapi.BufferID) error {
 	return pluginapi.Errf(pluginapi.CodeClosed, "buffer %d is closed", id)
 }
 
-// bufPos converts an API position to the buffer position the rules of C24 give: a negative
+// bufPos converts an API position to the buffer position the position rules give: a negative
 // line is the first, a line at or past the end is the end of the document, a column past the
 // end of the line is the line end, and a column inside a UTF-8 sequence rounds down to the
 // start of its character. Positions are never an error.
@@ -376,7 +371,6 @@ func (p *pluginEditor) Edit(id pluginapi.BufferID, edits []pluginapi.Edit, o plu
 		opts.Expect = &editor.Version{Gen: o.Expect.Gen, Ver: o.Expect.Ver}
 	}
 	err = p.ed.ApplyEdits(editor.DocID(id), list, opts)
-	p.markEdited(d)
 	if errors.Is(err, editor.ErrStale) {
 		return pluginapi.Errf(pluginapi.CodeStale, "buffer %d changed (version %s, expected %s)", id, versionOf(d), o.Expect)
 	}
@@ -395,12 +389,10 @@ func cursorMode(m pluginapi.CursorMode) editor.CursorMode {
 
 // UndoGroup runs fn so that every edit it makes is one undo step.
 func (p *pluginEditor) UndoGroup(id pluginapi.BufferID, fn func() error) error {
-	d, err := p.doc(id)
-	if err != nil {
+	if _, err := p.doc(id); err != nil {
 		return err
 	}
-	err = p.ed.Group(editor.DocID(id), fn)
-	p.markEdited(d)
+	err := p.ed.Group(editor.DocID(id), fn)
 	return err
 }
 
@@ -415,12 +407,10 @@ func (p *pluginEditor) Redo(id pluginapi.BufferID) error {
 }
 
 func (p *pluginEditor) history(id pluginapi.BufferID, step func(editor.DocID) (bool, error), what string) error {
-	d, err := p.doc(id)
-	if err != nil {
+	if _, err := p.doc(id); err != nil {
 		return err
 	}
 	ok, err := step(editor.DocID(id))
-	p.markEdited(d)
 	if err != nil {
 		return editorErr(err)
 	}
@@ -433,15 +423,13 @@ func (p *pluginEditor) history(id pluginapi.BufferID, step func(editor.DocID) (b
 // SetLanguage sets the language of the document; "" goes back to the one the file name
 // gives.
 func (p *pluginEditor) SetLanguage(id pluginapi.BufferID, lang string) error {
-	d, err := p.doc(id)
-	if err != nil {
+	if _, err := p.doc(id); err != nil {
 		return err
 	}
 	if lang != "" && !knownLanguage(lang) {
 		return unknownLanguage(lang)
 	}
-	err = p.ed.SetLanguageID(editor.DocID(id), lang)
-	p.markEdited(d)
+	err := p.ed.SetLanguageID(editor.DocID(id), lang)
 	return editorErr(err)
 }
 

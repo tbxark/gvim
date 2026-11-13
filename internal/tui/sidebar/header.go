@@ -26,6 +26,7 @@ type HeaderSpec struct {
 	// native title of the kind.
 	Title string
 	// NoClose hides the close button: a plugin section that is not closable has none.
+	// The Diagnostics section never has one.
 	NoClose bool
 }
 
@@ -116,8 +117,9 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 		return h
 	}
 
-	// A plugin section that cannot be closed has no ×: the rule runs to the corner.
-	if spec.NoClose {
+	// The Diagnostics section and a plugin section that cannot be closed have no ×: the
+	// rule runs to the corner.
+	if spec.NoClose || spec.Kind == KindDiagnostics {
 		if width <= headWidth {
 			h.Text = ansi.Truncate(headText, max(width, 0), "")
 			return h

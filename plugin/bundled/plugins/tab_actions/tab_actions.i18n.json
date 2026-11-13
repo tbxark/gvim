@@ -11,8 +11,7 @@
     "cmd.move_to_left": "Move Tab To Left",
     "cmd.move_to_left_desc": "Move active tab to the left in the current split",
     "cmd.move_to_right": "Move Tab To Right",
-    "cmd.move_to_right_desc": "Move active tab to the right in the current split",
-    "status.plugin_loaded": "Tab actions plugin loaded"
+    "cmd.move_to_right_desc": "Move active tab to the right in the current split"
   },
   "de": {
     "cmd.close_others": "Andere Tabs schließen",
@@ -26,7 +25,6 @@
     "cmd.move_to_left": "Tab nach links",
     "cmd.move_to_left_desc": "Aktiven Tab im Split nach links verschieben",
     "cmd.move_to_right": "Tab nach rechts",
-    "cmd.move_to_right_desc": "Aktiven Tab im Split nach rechts verschieben",
-    "status.plugin_loaded": "Tab actions Plugin geladen"
+    "cmd.move_to_right_desc": "Aktiven Tab im Split nach rechts verschieben"
   }
 }

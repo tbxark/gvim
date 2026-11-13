@@ -1,6 +1,6 @@
 // Package popup is the anchored list popup of gvim: a titled box of items placed
-// beside a cell of the frame. The remote indicator menu uses it now, and LSP hover
-// and completion will use it in P4.
+// beside a cell of the frame. The remote indicator menu, the plugin action popup and
+// the signature help use it.
 //
 // A popup takes the keys and mouse input of the overlay stack while it is open.
 // Up, Down, PageUp, PageDown, Home and End move the highlight, Enter and a left
@@ -74,15 +74,7 @@ type Popup struct {
 	sel       int // the highlighted item
 	top       int // the first item shown
 	rows      int // item rows in the last draw
-	box       rect
-}
-
-// rect is a block of cells: x and y are the top-left corner, w and h the size.
-type rect struct{ x, y, w, h int }
-
-// contains reports whether the cell (x, y) lies inside r.
-func (r rect) contains(x, y int) bool {
-	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
+	box       space.Rect
 }
 
 // New returns a closed popup painted with the shared overlay frame: the box, the
@@ -99,9 +91,10 @@ func (p *Popup) Show(anchor Point, title string, items []Item) {
 	p.open = true
 	p.anchor = anchor
 	p.title = title
+	p.note = ""
 	p.items = slices.Clone(items)
 	p.sel, p.top, p.rows = 0, 0, 0
-	p.box = rect{}
+	p.box = space.Rect{}
 }
 
 // ShowNote opens the popup like Show with a message block shown above the items: the
@@ -164,7 +157,7 @@ func (p *Popup) update(msg tea.Msg) tea.Cmd {
 		if i, ok := p.rowAt(m.X, m.Y); ok {
 			return p.choose(i)
 		}
-		if !p.box.contains(m.X, m.Y) {
+		if !p.box.Contains(m.X, m.Y) {
 			p.open = false
 		}
 	case tea.MouseMotionMsg:
@@ -233,10 +226,10 @@ func (p *Popup) keepVisible() {
 // its highlighted row.
 func (p *Popup) rowAt(x, y int) (int, bool) {
 	b := p.box
-	if !b.contains(x, y) || y <= b.y+len(p.noteLines) || y > b.y+len(p.noteLines)+p.rows || x <= b.x || x >= b.x+b.w-1 {
+	if !b.Contains(x, y) || y <= b.Y+len(p.noteLines) || y > b.Y+len(p.noteLines)+p.rows || x <= b.X || x >= b.X+b.W-1 {
 		return 0, false
 	}
-	i := p.top + (y - b.y - 1 - len(p.noteLines))
+	i := p.top + (y - b.Y - 1 - len(p.noteLines))
 	if i < 0 || i >= len(p.items) {
 		return 0, false
 	}
@@ -251,7 +244,7 @@ func (p *Popup) rowAt(x, y int) (int, bool) {
 // edges. It never covers the menu bar's label row.
 func (p *Popup) Draw(g *grid.Grid) {
 	if !p.open || g.Width() < minBoxWidth || g.Height() < borderRows+1 {
-		p.box = rect{}
+		p.box = space.Rect{}
 		return
 	}
 	w, h := g.Width(), g.Height()
@@ -263,12 +256,12 @@ func (p *Popup) Draw(g *grid.Grid) {
 
 	chrome := p.chrome
 	b := p.box
-	chrome.PaintBox(g, b.x, b.y, b.w, b.h, p.title)
-	inner, end := b.x+1+space.PadX, b.x+b.w-1-space.PadX
+	chrome.PaintBox(g, b.X, b.Y, b.W, b.H, p.title)
+	inner, end := b.X+1+space.PadX, b.X+b.W-1-space.PadX
 	for i, line := range p.noteLines {
-		g.Put(inner, b.y+1+i, end, line, chrome.Box)
+		g.Put(inner, b.Y+1+i, end, line, chrome.Box)
 	}
-	itemTop := b.y + 1 + len(p.noteLines)
+	itemTop := b.Y + 1 + len(p.noteLines)
 	if len(p.items) == 0 {
 		g.Put(inner, itemTop, end, "No items", chrome.Muted)
 		return
@@ -283,7 +276,7 @@ func (p *Popup) Draw(g *grid.Grid) {
 		if i == p.sel {
 			st = chrome.Selected
 		}
-		g.Fill(b.x+1, b.x+b.w-1, y, st)
+		g.Fill(b.X+1, b.X+b.W-1, y, st)
 		x := inner + g.Put(inner, y, end, space.End(p.items[i].Label, end-inner), st)
 		if d := p.items[i].Detail; d != "" {
 			detail := chrome.Muted
@@ -302,13 +295,9 @@ func visibleRows(n, h int) int {
 	return min(max(n, 1), maxRows, max(h-borderRows, 1))
 }
 
-// boxWidth is the width of a popup box with title and items in a frame fw cells wide.
-func boxWidth(title string, items []Item, fw int) int {
-	return boxWidthNote(title, "", items, fw)
-}
-
-// boxWidthNote is boxWidth plus the width want of a note block: the note wraps, so it
-// only asks the box to be wide enough for a readable line of it (at most half the frame).
+// boxWidthNote is the width of a popup box with title and items in a frame fw cells wide,
+// plus a note block: the note wraps, so it only asks the box to be wide enough for a
+// readable line of it (at most half the frame).
 func boxWidthNote(title, note string, items []Item, fw int) int {
 	body := 0
 	for _, it := range items {
@@ -377,7 +366,7 @@ func wrapNote(note string, width int) []string {
 // The box goes on the row below the anchor, or above it when it does not fit there,
 // and it is moved to stay inside the frame, space.Margin from the left and right edges
 // and from the bottom row when there is room. It never covers the menu bar's label row.
-func placeBox(anchor Point, w, h, fw, fh int) rect {
+func placeBox(anchor Point, w, h, fw, fh int) space.Rect {
 	m := space.Margin(fw)
 	if fw < w+2*m {
 		m = 0
@@ -390,7 +379,7 @@ func placeBox(anchor Point, w, h, fw, fh int) rect {
 	}
 	y = min(y, fh-h-m)
 	y = max(y, 1)
-	return rect{x: x, y: y, w: w, h: h}
+	return space.Rect{X: x, Y: y, W: w, H: h}
 }
 
 // maxTextWidth is the widest a row of wrapped text is made, however wide the frame: longer

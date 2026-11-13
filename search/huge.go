@@ -31,7 +31,7 @@ func (sp hugeSpan) text(s *buffer.Snapshot, i, runes, lo, hi int) (first int, te
 // starts in another window is left to that window, so no match is returned twice.
 func hugeMatches(i, first int, text string, re *regexp.Regexp, q Query, lo, hi int) []Match {
 	d := newWindow(i, text)
-	cur := posCursor{d: d}
+	cur := newOffsetPos(d.text, buffer.Pos{Line: d.first})
 	var out []Match
 	for _, loc := range d.locate(re, q) {
 		start := cur.pos(loc[0])

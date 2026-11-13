@@ -2,8 +2,7 @@
 
 Status: design record for the package reorganization (`master`, after the layout move).
 This file describes the package tree, what each package is for, and the import rules the
-compiler and `tools/import_rules_check.sh` enforce. `migration/ARCH-v4.md` is the
-earlier proposal-only record and is superseded by this file where they disagree.
+compiler and `tools/import_rules_check.sh` enforce.
 
 The goal of the layout is that a reader (or a coding agent) can tell from the import path
 what a package is responsible for, where a new file belongs, and which direction a
@@ -40,6 +39,7 @@ internal/                       private executable shell (no top-level package i
   filewatch/                    fsnotify watcher (explorer reloads, project switches)
   daemon/                       attach/detach socket host and the workspace registry
   agentdiscover/                read-only tmux and agent-transcript session discovery
+  rexplugin/                    `gvim rex install/uninstall`: writes the Rex config plugin
   uitest/                       test-only in-process UI harness
 
 <top level>                     TUI-free engine, shared libraries and services
@@ -88,9 +88,9 @@ internal/cli → main (root package)
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
 | R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal`, `internal/daemon` (it runs the TUI program over a client socket) and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
 | R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `i18n`, `plugin/bundled`, `plugin/pattern`, `outline`, `updatecheck`, `internal/agentdiscover`, `internal/tui/textsafe`. (`lsp/manager` sits above `lsp` and may import it.) |
-| R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`, `document` and `atomicfile`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. `authority` imports only `trust` and `plugin/hostos`. `env` imports only `config` and `trust`. `internal/daemon` imports only `config` and `session`. |
+| R4 | Engine direction. `document` imports only `buffer`, `search`, `syntax`, `textlayout`, `fold`, `diff`, `encoding`, `atomicfile` and `shellcmd`. `editor` may import `document` but does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor` or `document`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`, `document` and `atomicfile`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. `authority` imports only `trust` and `plugin/hostos`. `env` imports only `config` and `trust`. `internal/daemon` imports only `config` and `session`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
-| R6 | `internal/cli` imports only `internal/app`, `internal/configview`, `authority` (the top-level remote-spec parser it classifies targets with) and `syntax` (and cobra). |
+| R6 | `internal/cli` imports only `internal/app`, `internal/configview`, `internal/rexplugin`, `authority` (the top-level remote-spec parser it classifies targets with) and `syntax` (and cobra). |
 | R7 | Only the root main package and `internal/cli` import `internal/app`; only the root main package imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
 | R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `lsp/lsptest`, `internal/uitest`, `internal/apptest`. |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
@@ -126,11 +126,12 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 
 | Package | Role | May import |
 |---|---|---|
-| `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`, remote targets through `authority`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `syntax`, `authority`, cobra, stdlib |
+| `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`, remote targets through `authority`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `internal/rexplugin`, `syntax`, `authority`, cobra, stdlib |
 | `internal/configview` | Backs `gvim config show`, `gvim config paths`: renders the effective config as JSON and reports config file locations. | `config`, `internal/keybindings`, `keymap`, `theme` |
+| `internal/rexplugin` | Backs `gvim rex install` and `gvim rex uninstall`: writes the Rex configuration plugin and the managed block in Rex's `init.lua`. | `atomicfile`, stdlib |
 | `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
 | `internal/agentdiscover` | Read-only discovery of terminal sessions that already exist outside gvim: the tmux socket walk, bounded `list-sessions`/`list-panes` parsing, agent pane name matches and qualified attach argv. TUI-free; the runner and an `AllowCommands` trust gate are injected. | stdlib only; a scan never starts or attaches a session; see `docs/terminal.md` Agent discovery |
-| `internal/daemon` | The daemon MVP (#18a): the socket protocol and lifecycle, the hosted editor's socket IO, the attach client that forwards this terminal to a daemon, and the workspace registry. | `config`, `session`, charm, stdlib |
+| `internal/daemon` | The daemon: the socket protocol and lifecycle, the hosted editor's socket IO, the attach client that forwards this terminal to a daemon, and the workspace registry. | `config`, `session`, charm, stdlib |
 | `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
 | `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
 | `internal/lsphost` | Language-server port: managers, document sync, diagnostics polling, server catalogue. | `lsp`, `lsp/manager`, engine packages, `pluginapi`, `tui` |
@@ -152,7 +153,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `document` | One open file: text, cursor/carets, selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data. Remote large files load through `remote_large.go`: a 1 MiB-aligned, 8-window LRU `buffer.WindowSource` over the authority's `RangeAccess`, read-only, with `TakePendingLargeWindow`/`LoadLargeWindow` for the root. | The model half of the old `editor` god package; imports `buffer`/`search`/`syntax`/`textlayout`/`fold`/`diff`/`encoding`/`atomicfile`, never `editor`, `session` or `internal/`. |
 | `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document`, `atomicfile`, `shellcmd` and the engine leaves; no UI. `editor/bridge.go` still aliases the moved names for consumers. |
 | `search` | Find, scan, replace and range search over `buffer` lines. | `visible.go` is the visible-window search (renamed from a misleading name). |
-| `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, style table from a theme. | |
+| `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, and the mapping of token kinds to the theme's syntax keys (`kind.go`). | |
 | `fold` | Indentation fold ranges. | Small leaf used by `editor`. |
 | `diff` | Line diff (go-diff) into hunks; used by the compare view and plugin services. | |
 | `encoding` | Decoding/encoding detection and conversion (UTF-8/16, charsets via `x/text`). | |
@@ -172,7 +173,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `gitstate` | Git work-tree root, branch and per-file status with go-git. | |
 | `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins, and the top-level `locale`. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md); a project `locale` is refused (a user preference). |
 | `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; embedded locale JSON in `i18n/locales/` (English source of truth, Fresh import); see `docs/i18n.md`. |
-| `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy, executable-content marker scan and the spawn gate (`DecideSpawn`, docs/trust.md §3.1). | TUI-free; store at `config.StateDir()/trust.json` through `atomicfile` (never inside a workspace; one-time move from the config dir; see [files.md](files.md)); the app gates the config project layer on the level and wires the same live level into the authority, plugin OS and LSP manager spawn paths. |
+| `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy, executable-content marker scan and the spawn gate (`DecideSpawn`, docs/trust.md §3.1). | TUI-free; store at `config.StateDir()/trust.json` through `atomicfile` (never inside a workspace; see [files.md](files.md)); the app gates the config project layer on the level and wires the same live level into the authority, plugin OS and LSP manager spawn paths. |
 | `updatecheck` | The release check behind the status element `{update}`: feed fetch with a transport policy (https, or http on loopback), version comparison (semver-ish, prereleases), a 64 KiB body/8 s bound and a daily debounce stamp. | Leaf, stdlib only; the app runs it in a `tea.Cmd` at startup and the frame paints `Update: vX.Y.Z`; gvim has no self-update (docs/settings.md). |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |
@@ -199,7 +200,7 @@ still large internally, so a reader can find a feature without grepping by memor
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
 | plugin host | `plugin_*.go`, plus the plugin host files `plugin_panels.go` (widget panels and sidebar sections), `plugin_menus.go` (menu bar rows), `plugin_actionpopup.go` (action popups) and `plugin_themes.go` (theme-file APIs), `plugin_groups.go` (buffer groups and scroll sync), `plugin_folds.go` (plugin folding ranges), `plugin_seams.go` (split labels and window state) | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua, the declarative panels/sections, menus, action popups and prompt suggestions |
 | overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | keybinding editor, help/settings/tour/notices/pickers; the list/box machinery lives in `tui/list` |
-| frame glue | `frame_alias.go`, `welcome.go`, `footer.go` | aliases into the `tui/frame` geometry kit, welcome screen, footer hints |
+| frame glue | `welcome.go` | welcome screen; the root uses the `tui/frame` geometry types directly |
 | view / display | `view.go`, `view_render.go` | display settings and per-document view settings |
 | find glue | `find_route.go`, `find_highlight.go`, `find_mouse.go` | controller between the find bar and the editor |
 | save / files / watch | `root_revert_fix.go`, `save.go`, `watch_reload.go`, `autosave.go`, `files_revert.go`, `files_recovery.go`, `files_overwrite.go` | save/save-as planning, auto-save tick, disk polling, reload, recovery copies |
@@ -233,6 +234,7 @@ styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
 menu table), `explorer` (file-tree panel), `palette` (command palette overlay), `find`
 (find bar), `prompt` (bottom-row prompts), `browser` (file/folder browser), `picker`
 (plugin list picker), `popup` (anchored list popup), `ctxmenu` (right-click menu),
+`searchpanel` (project search and replace panel; docs/keybindings.md),
 `dialog` (modal dialogs), `dock` (the terminal dock panel: PTY lifecycle, input/paste,
 resize/exit, capture, paint), `pluginpanel` (the declarative widget panel of the plugin
 API: layout, paint, hit-testing, focus and key/mouse state, the interactive widget kinds and
@@ -273,7 +275,7 @@ One package with two storage modes: an in-memory model (`buffer.go`, `history.go
 `snapshot.go`, edits and observers) and a disk-backed large mode (`lines_tree.go` and the
 `large_*.go` files: source, index, pages, overlay, writes, rebase, budget). `Buffer.big`
 selects the mode; every public method handles both. The split into two packages was
-considered and rejected (see `migration/ARCH-v4.md` history and `buffer/doc.go`).
+considered and rejected (see `buffer/doc.go`).
 
 ### 4.5 `plugin`
 
@@ -343,7 +345,7 @@ Next (tracked as follow-up work; each keeps build + tests green):
    model-driven (`keybind_editor_test.go`) and need a harness rewrite against the new
    types. The plugin host and LSP UI remain last.
 2. Finish the editor split tail: move the `editor` model tests into `document`, then delete
-   the alias bridge (`editor/bridge.go` + `document/export.go`, ~413 lines) by retargeting
+   the alias bridge (`editor/bridge.go` + `document/export.go`, ~385 lines) by retargeting
    the ~165 consumer references; tighten `document`'s exported surface to accessors.
 3. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction; optional keybinding
    editor extraction (`tui/keybindeditor`, needs its test harness rewritten).
@@ -362,14 +364,13 @@ file when each step lands.
   (`python3 commands/gen/generate.py refs/fresh`) and
   `internal/tui/menubar/menu_table_gen.go` (`python3 tools/gen_menus.py --check`).
 
-## 8. Daemon mode (#18a MVP)
+## 8. Daemon mode
 
-Fresh can host its editor in a daemon and attach terminals to it; gvim's first
-slice (round 12) implements the lifecycle and the client transport, not yet the
-workspace model (#19).
+Fresh can host its editor in a daemon and attach terminals to it; gvim implements the
+lifecycle and the client transport here and the workspace registry and switching in 8.1.
 
-- **Launch.** `gvim --daemon [NAME]` runs the ordinary editor runtime in the
-  foreground (the MVP does not fork) and listens on a Unix socket under the user
+- **Launch.** `gvim --daemon[=NAME]` runs the ordinary editor runtime in the
+  foreground (it does not fork) and listens on a Unix socket under the user
   cache directory, mode 0600 in a 0700 directory. The socket name defaults to a
   per-root name (`slug(basename)+8-hex hash(root)`); `NAME` overrides it. A
   live daemon for the same name refuses a second listener; a stale socket file is
@@ -422,7 +423,7 @@ workspace model (#19).
   stash and is reported by the session notice, while a disconnected start restores nothing
   and skips its capture so the saved session survives for the next start. Direct remote
   launches still keep no local session.
-- **Attach.** `gvim -a [NAME]` (or `--attach`) dials the socket, sends a hello
+- **Attach.** `gvim -a` (or `--attach[=NAME]`) dials the socket, sends a hello
   with the protocol version, the terminal size and any named files as an open-file
   frame, puts the terminal in raw mode, and forwards input bytes, output frames,
   resize signals and SIGWINCH. A detached/exit frame restores the terminal. Several
@@ -463,18 +464,19 @@ workspace model (#19).
   multi-client protocol.
 
 - **Protocol.** Length-prefixed frames: a 4-byte big-endian length (at most 1 MiB),
-  a type byte and the payload. Client frames: hello (JSON cols/rows/args), input
-  (raw terminal bytes), resize (JSON cols/rows), detach, open-file (JSON paths),
+  a type byte and the payload. Client frames: hello (JSON version/cols/rows), input
+  (raw terminal bytes), resize (JSON cols/rows), detach, open-file (JSON cwd and
+  files, each with a path and an optional 1-based line/column),
   ping. Server frames: output (raw ANSI), notice (text), detached, pong, exit.
   Unknown or malformed frames drop only that client.
 
-### 8.1 Workspace registry (#19a, landed round 13)
+### 8.1 Workspace registry
 
-The registry is the workspace store on top of the round-12 daemon ownership model. It
+The registry is the workspace store on top of the daemon ownership model. It
 mirrors Fresh's workspace cache: one durable file per workspace, no central list. Registry
 v2 allows several CO-TENANT workspaces over one canonical root (Fresh's extracted-tab
-windows, labels "proj", "proj (2)", ...); a registry v1 file (one workspace per root)
-still loads unchanged.
+windows, labels "proj", "proj (2)", ...). Only the current file version (2) is read; a file
+of any other version is skipped with a diagnostic and never modified.
 
 - **Location and name.** `<user data dir>/gvim/workspaces/<encoded-canonical-root>.<stable-id>.json`
   (`GVIM_WORKSPACE_DIR` overrides the directory for tests). The canonical root is
@@ -483,21 +485,21 @@ still loads unchanged.
   share one root. The encoded root is one percent-encoded
   file-name component (a deterministic sha256 name when it would exceed one filename); the
   `root` recorded inside the file stays authoritative.
-- **Schema v1/v2** (`daemon.WorkspaceFile`): `version`, `stable_id` (minted once with crypto/rand
-  at creation, adopted from the file on restore, used as the per-workspace session directory
-  name - so a v1 -> v2 migration never moves or loses the session directory), `label`,
+- **Schema** (`daemon.WorkspaceFile`, `WorkspaceVersion = 2`): `version`, `stable_id` (minted once
+  with crypto/rand at creation, adopted from the file on restore, used as the per-workspace
+  session directory name), `label`,
   `root`, `last_focused_at` (unix milliseconds) and `layout` (the existing
-  `session.Session` layout; nil until captured). Version 2 is the current format (co-tenant
-  workspaces); version 1 files load as before and a later save rewrites them as version 2.
+  `session.Session` layout; nil until captured). Version 2 is the only format read (it
+  allows co-tenant workspaces); a file with an older version is rejected as unsupported and
+  one with a newer version is rejected as too new, and neither is rewritten.
   A co-tenant's empty label gets Fresh's precedence - the root basename, then "basename (2)",
   "basename (3)", ... counted from the workspaces already at the root, skipping a numbered
   label a rename took. The per-workspace session directory `workspaces/sessions/<stable-id>/`
   holds the stashes and the terminal record (`terminal.SavedState`, its own versioned schema,
   owned by the terminal/dock layer: saved and loaded with `restore.SaveTerminal`/
-  `restore.LoadTerminal`). The workspace file never embeds the terminal record, and old
-  workspace files load unchanged. Version 2 gained the additive authority_spec field: the
-  canonical remote target text of a workspace bound to a remote authority (empty = local);
-  old files load as local, a file whose spec contains control characters is refused by the
+  `restore.LoadTerminal`). The workspace file never embeds the terminal record. The
+  authority_spec field holds the canonical remote target text of a workspace bound to a
+  remote authority (empty = local); a file whose spec contains control characters is refused by the
   scan with a diagnostic, and a remote workspace's root is normalized remotely (cleaned
   POSIX path, never stat'ed on this host).
 - **Registry API** (`internal/daemon/workspaces.go`): `WorkspaceDir`, `OpenRegistry(dir)`,
@@ -507,7 +509,7 @@ still loads unchanged.
   `Create` (returns the freshest existing workspace of a known root), `CreateCoTenant`
   (always mints a new workspace over the root - extraction's path), `CreateWithAuthority` and `DiscoverWithAuthority` (the daemon jump-box foreground: a workspace keyed by remote root and canonical spec, reused on restart; the root is normalized without local IO), `Save`, `Rename`,
   `Touch`, `UpdateLayout`, `Remove` (deletes only the registry file — session data
-  is kept), `RemoveSessionData` (explicit discard) and `SessionDir` (creates the
+  is kept) and `SessionDir` (creates the
   per-workspace session directory). `Workspace.Materialized`/`Active` are runtime flags, never
   persisted.
 - **Durability.** Saves are atomic: temp file in the same directory (0600), write, fsync,
@@ -517,8 +519,8 @@ still loads unchanged.
   diagnostic and never modified or deleted; corrupt files are likewise skipped, not deleted.
   The registry tests cover CRUD, stable-id durability across reopen, canonical-root and
   symlink keys, co-tenants sharing a root with independent layouts and session directories,
-  Fresh label precedence, root-grouped ordering, duplicate-stable-id dedup, v1-file loading
-  and migration on save (stable id and session directory kept), discovery of a co-tenanted
+  Fresh label precedence, root-grouped ordering, duplicate-stable-id dedup, refusal of
+  unsupported-version files, discovery of a co-tenanted
   root (freshest foreground, all others dormant), future-version refusal/no-overwrite,
   corrupt-file skipping, atomicity/no temp leftovers, rename/touch/layout persistence, close
   keeping session data, safe encoded names and the directory override, plus authority-spec
@@ -530,8 +532,7 @@ still loads unchanged.
   the active id and each entry's id/label/root/materialized/active) or a notice. The server
   exposes them through `Server.OnWorkspaceRequest`; a daemon without a workspace layer answers
   with a notice, a malformed request is a notice too, and the connection survives either.
-  `Hello.Workspace` names the workspace to attach to (empty means the current
-  foreground one; the round-12 attach path still ignores it). `Registry.Discover(root)` is
+  `Registry.Discover(root)` is
   the daemon-start view: the launch root's freshest workspace is the foreground one (created
   only when the root has none) and every other registry entry - including the other
   co-tenants of the same root - is an inert descriptor. Registry.DiscoverWithAuthority is
@@ -560,8 +561,8 @@ still loads unchanged.
   a switcher list, root-then-label prompts, and a hand-written `WS <label>` status item.
   The workspace protocol frames drive the same manager (workspace_list/select/new/close/
   rename answer with the list and the active id; errors are notices). An open-file request
-  carries the client's cwd and either the legacy bare `paths` or the positional `files`
-  (path + 1-based line/column): relative paths resolve against the client's cwd, and the
+  carries the client's cwd and the positional `files` (path + 1-based line/column):
+  relative paths resolve against the client's cwd, and the
   position reaches the editor. A path open in a materialized workspace switches to that
   workspace; a path open in a *dormant* workspace is detected from its saved layout, then
   that workspace is materialized and activated asynchronously with the file focused (a
@@ -578,7 +579,7 @@ still loads unchanged.
   repeat import of the same root starts its own attach tab in the one workspace of that
   root: the workspace layout/files are shared, the selected session survives as a terminal
   tab (the model asks the dock to find a tab by the launch's Source and focuses it instead
-  of duplicating), because registry v1 has no per-session workspace identity or
+  of duplicating), because the registry has no per-session workspace identity or
   initial-launch record yet.
 - **Workspace-scoped async ownership (landed safety slice).** Every built workspace model
   gets a palette.Owner {workspace stable id, model generation}; the app's workspace
@@ -977,8 +978,7 @@ still loads unchanged.
   writes through it too: see the remote-project-replace bullet). Reveal/follow and
   re-expansion of unloaded ancestors work by reloading the waypoint directories and
   revealing the path in the new listing. Gaps vs Fresh's remote explorer (which runs the
-  full file tree over the authority): drag/move (a drag between directories) is not wired,
-  the clipboard has no undo/partial-cleanup UI, remote git marks stay inert, a
+  full file tree over the authority): the clipboard has no undo/partial-cleanup UI, remote git marks stay inert, a
   directory symlink is shown as a directory (its target is listed through the symlink path),
   and a create/rename existence check has a check-to-write race (the FileMutations surface
   has no exclusive create/rename). Remote .gitignore files are read once per listing (the
@@ -1011,7 +1011,7 @@ still loads unchanged.
   document-identity MRU is already saved by the normal session writer (`Session.MRU`, additive
   `[]MruFile {Path, Label}`). Two paths wrote a session without it and now carry it too: the
   crash-recovery copy (`restore.RecoveryWriter`) records the active tab and the MRU order limited
-  to the unsaved documents it stashes, plus the label of a pathless buffer, so `recoverCrash`
+  to the unsaved documents it stashes, plus the label of a pathless buffer, so `restoreCrash`
   restores the pre-crash completion/dabbrev order through the same `applySessionMru` mapping; and
   every workspace-extraction path (single/multi-tab/mixed into a new co-tenant, and a transfer
   into a dormant existing workspace) writes the source editor's MRU order restricted to the moved
@@ -1087,7 +1087,7 @@ still loads unchanged.
   resolves (missing/mismatched/ambiguous pane file) falls back to one pane and never a
   wrong file. Capture is a pure model read (`m.SplitState()`) from the snapshot step,
   restore happens right after `tui.New` in the shared build path (so daemon workspace
-  materialization and restart restore panes), legacy files load unchanged, hot-exit restore
+  materialization and restart restore panes), a layout-less file restores one pane, hot-exit restore
   skips it, and remote launches keep the empty session plan (no local/remote path mapping
   yet, #21).
 - **Capture is snapshot-and-write (landed).** The UI goroutine takes a consistent in-memory
@@ -1260,10 +1260,10 @@ still loads unchanged.
   `internal/pluginhost/shared_test.go` (config-key diff asks for exactly one pump),
   `internal/tui/plugin_waits_shared_test.go` (wait stays with A across a switch, duplicate
   token refused, close cancels with a notice, B's waits untouched).
-- **Extract tab to a co-tenant workspace (landed with registry v2).** The tab context
+- **Extract tab to a co-tenant workspace.** The tab context
   menu's "Extract to New Workspace" (and the palette row "Extract tab to new workspace")
   moves the active file tab into a NEW workspace over the SAME project root, matching
-  Fresh's `extract_tab_to_new_workspace`: registry v2's `CreateCoTenant` mints a fresh stable id
+  Fresh's `extract_tab_to_new_workspace`: the registry's `CreateCoTenant` mints a fresh stable id
   and Fresh's numbered label (`proj`, `proj (2)`, ...), so the source and the extracted
   workspace are independent runtimes and session directories over one root. The UI
   goroutine captures the tab (path, cursor/top, page-view flags, virtual column, unsaved
@@ -1277,8 +1277,7 @@ still loads unchanged.
   records the source workspace without the extracted tab, so switching back never
   resurrects a duplicate. The report is "Extracted <name> into workspace <label>".
   Only the large-file overlay and the no-file-path (welcome screen) cases are still refused;
-  the tab is left untouched on every refusal. Round 16 (this slice) adds three variants on
-  top of that path, with the same transfer-first, switch-second, close-last ordering and
+  the tab is left untouched on every refusal. Four variants build on that path, with the same transfer-first, switch-second, close-last ordering and
   the same exact notices:
   - **Extract into an EXISTING workspace over the same root** (palette "Extract tab to
     workspace…" + target picker): a gvim extension — Fresh only creates new co-tenants.
@@ -1313,7 +1312,7 @@ still loads unchanged.
     the active tab) after acceptance. A tab that changed mid-action is skipped (its text
     is still in the target; the report says how many closed), a refused switch discards
     the just-created co-tenant and moves nothing.
-  - **Mixed file+terminal multi-selection (round 18, task-193; gvim extension).**
+  - **Mixed file+terminal multi-selection (gvim extension).**
     Fresh's only extract action still moves a single tab (file tabs and terminal tabs
     dispatch to the same action); the mixed selection builds on the gvim multi-select
     extension above. The palette "Extract tabs to workspace…" picker now lists the
@@ -1337,7 +1336,7 @@ still loads unchanged.
     append), then the switch is queued and accepted, then the sources close; an
     acceptance failure stops with "N of M tabs transferred, sources kept", and a
     source tab that changed meanwhile is skipped and counted in the report. The same
-    ordering guarantees as round 16 hold throughout (transfer accepted -> queued
+    ordering guarantees as the variants above hold throughout (transfer accepted -> queued
     switch accepted -> source close), and Update does no I/O (capture on the UI
     goroutine, disk/materialization in the tea command, conflict detection in the
     command). Limits/residuals: a large-file overlay, a welcome tab or any tab that
@@ -1354,9 +1353,7 @@ still loads unchanged.
   reports the new label on the status row (the protocol answer stays the list only).
   Fresh's separate diff_nav plugin is unrelated; the per-tab "Extract to New Workspace"
   item also appears in Fresh's tab context menu.
-- **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
-  v2 still records no authority), full Fresh window-scope chrome/focus announcer per
-  registration (task-141), sharing the runtime with remote/authority workspaces, byte-budget
+- **Remainder (not shipped).** Sharing the plugin runtime with remote/authority workspaces, byte-budget
   and per-runtime instance-state bounds beyond the workspace count for
   warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
@@ -1372,5 +1369,3 @@ still loads unchanged.
   of-a-file semantics (there is no such Fresh action; the multi-select picker is the
   bounded substitute). The target picker is a plain list: no drag-and-drop between
   workspaces and no cross-workspace undo, same as the rest of the workspace UI.
-  Multi-client dispatch (the round-12 daemon hosts exactly one attached client) stays
-  open.

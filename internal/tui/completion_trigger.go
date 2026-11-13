@@ -66,21 +66,18 @@ func (m *Model) completionTyped(c *lspCompletion, text string) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
-	wordChars := m.docLanguageSettings(doc).WordCharacters
-	if !editor.IsWordRune(r, wordChars) {
+	if !editor.IsWordRune(r, m.docLanguageSettings(doc).WordCharacters) {
 		return nil, false
 	}
 	// Apply the insertion exactly as the normal typing path does, so multi-cursor
 	// edits and undo behave the same; the character is in the document afterwards.
 	insert := m.dispatch(Command{Action: "insert_char", Args: map[string]any{"text": text}})
 	at := doc.Cursor()
-	line := doc.Line(at.Line)
-	prefix := editor.CompletionPrefix(line, at.Col, wordChars)
+	prefix, wordStart := m.completionWord(doc, at)
 	if prefix == "" {
 		m.closeCompletion(c)
 		return insert, true
 	}
-	wordStart := buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
 	if !m.refilterCompletion(c, prefix, wordStart, at) {
 		// Nothing left to show: dismiss and ask once, which may fill the list again
 		// (local words first, then the server) for the new prefix.
@@ -108,14 +105,17 @@ func (m *Model) completionBackspace(c *lspCompletion) (tea.Cmd, bool) {
 		m.closeCompletion(c)
 		return del, true
 	}
-	wordChars := m.docLanguageSettings(doc).WordCharacters
-	prefix := editor.CompletionPrefix(doc.Line(at.Line), at.Col, wordChars)
-	wordStart := buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
+	prefix, wordStart := m.completionWord(doc, at)
 	if !m.refilterCompletion(c, prefix, wordStart, at) {
 		m.closeCompletion(c)
-		return del, true
 	}
 	return del, true
+}
+
+// completionWord is the word prefix of doc that ends at at, and where that word starts.
+func (m *Model) completionWord(doc Document, at buffer.Pos) (prefix string, start buffer.Pos) {
+	prefix = editor.CompletionPrefix(doc.Line(at.Line), at.Col, m.docLanguageSettings(doc).WordCharacters)
+	return prefix, buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
 }
 
 // refilterCompletion rebuilds c's shown rows from the COMPLETE candidate pool

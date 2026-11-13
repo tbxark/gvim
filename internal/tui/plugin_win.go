@@ -8,7 +8,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Windows for plugins (FINAL X9, AMENDMENTS C23). A window is a leaf of the split tree.
+// Windows for plugins. A window is a leaf of the split tree.
 // Its id is splitNode.id, which stays with the pane through splits, closes and focus
 // changes. Every change goes through trySplit, focusLeaf and closeFocused, so the tab
 // bookkeeping (tabRemoved, reconcileTabs, the focused leaf taking its tab from the
@@ -17,17 +17,12 @@ import (
 // maxVisibleRows is the most rows Host.VisibleRows lists.
 const maxVisibleRows = 500
 
-// plugWinGone is called when a plugin is unloaded. The windows a plugin opened are closed
-// by the runtime (api_win.go keeps the list: the Host calls carry no plugin, so the ui
-// cannot tell whose window a split is), so there is nothing to drop here.
-func (m *Model) plugWinGone(plugin string, gen uint64) { _, _ = plugin, gen }
-
 func closedWindow(id pluginapi.WinID) error {
 	return pluginapi.Errf(pluginapi.CodeClosed, "window %d is closed", id)
 }
 
 // windowLeaves returns the leaves in reading order after giving each a window id.
-func (m *Model) windowLeaves() []*splitNode {
+func (m *Model) windowLeaves() []*split.Node {
 	leaves := m.splits.Root.Leaves()
 	for _, n := range leaves {
 		m.splits.IDOf(n)
@@ -36,7 +31,7 @@ func (m *Model) windowLeaves() []*splitNode {
 }
 
 // splitByID returns the leaf with window id, or nil.
-func (m *Model) splitByID(id uint64) *splitNode {
+func (m *Model) splitByID(id uint64) *split.Node {
 	for _, n := range m.windowLeaves() {
 		if n.ID == id {
 			return n
@@ -46,7 +41,7 @@ func (m *Model) splitByID(id uint64) *splitNode {
 }
 
 // leafTab is the tab leaf n shows; the focused leaf shows the active tab.
-func (m *Model) leafTab(n *splitNode) int {
+func (m *Model) leafTab(n *split.Node) int {
 	if n == m.splits.Focus {
 		return m.activeTab()
 	}
@@ -188,12 +183,12 @@ func (h *pluginHost) SplitWindow(w pluginapi.WinID, o pluginapi.SplitOptions) (p
 	if src == nil {
 		return 0, closedWindow(w)
 	}
-	var dir splitDir
+	var dir split.Dir
 	switch o.Dir {
 	case "right":
-		dir = sideBySide
+		dir = split.SideBySide
 	case "below":
-		dir = stacked
+		dir = split.Stacked
 	default:
 		return 0, pluginapi.Errf(pluginapi.CodeInvalid, "split dir must be \"right\" or \"below\", got %q", o.Dir)
 	}
@@ -216,7 +211,7 @@ func (h *pluginHost) SplitWindow(w pluginapi.WinID, o pluginapi.SplitOptions) (p
 // splitNew splits leaf src in direction dir and returns the id of the new leaf. tab, when
 // not negative, is the tab the new leaf shows. The leaf that had the focus has it again at
 // the end, unless o.Focus.
-func (m *Model) splitNew(src *splitNode, dir splitDir, o pluginapi.SplitOptions, tab int) (uint64, error) {
+func (m *Model) splitNew(src *split.Node, dir split.Dir, o pluginapi.SplitOptions, tab int) (uint64, error) {
 	prev := m.splits.Focus
 	prevID := m.splits.IDOf(prev)
 	if src != prev {
@@ -287,7 +282,7 @@ func (h *pluginHost) ScrollWindow(w pluginapi.WinID, line int, center bool) erro
 }
 
 // windowRows is the number of text rows of leaf n.
-func (m *Model) windowRows(n *splitNode) int {
+func (m *Model) windowRows(n *split.Node) int {
 	i := slices.Index(m.splits.Root.Leaves(), n)
 	l := m.layout()
 	if i < 0 || i >= len(l.Panes) {
@@ -306,8 +301,8 @@ func (m *Model) windowRows(n *splitNode) int {
 // of each split follows the number of windows on its two sides.
 func (h *pluginHost) Equalize() error {
 	m := h.model()
-	var walk func(n *splitNode)
-	walk = func(n *splitNode) {
+	var walk func(n *split.Node)
+	walk = func(n *split.Node) {
 		if n.Leaf() {
 			return
 		}
@@ -324,7 +319,7 @@ func (h *pluginHost) Equalize() error {
 
 // windowsAlong counts the windows of the subtree n that sit in a row along dir: the
 // sum over a split of the same direction, the larger side over a split across it.
-func windowsAlong(n *splitNode, dir splitDir) int {
+func windowsAlong(n *split.Node, dir split.Dir) int {
 	if n.Leaf() {
 		return 1
 	}

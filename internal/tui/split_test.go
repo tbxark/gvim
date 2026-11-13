@@ -15,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -53,7 +54,7 @@ func TestStickyScrollPaintsHeader(t *testing.T) {
 			{Start: 0, End: 4},
 		},
 	}
-	p := splitPane{
+	p := split.Pane{
 		X: 0, Y: 1, W: 80, H: 20, Top: 2,
 	}
 	m.paintStickyScroll(g, p, doc)
@@ -97,6 +98,44 @@ func TestOverviewRulerMarksWithDiagnostics(t *testing.T) {
 	}
 	if pane.TrackMarks[0].From != 10 || pane.TrackMarks[1].From != 25 {
 		t.Fatalf("track marks = %+v, want lines 10 and 25", pane.TrackMarks)
+	}
+}
+
+// TestOverviewRulerMarksFollowTheSetAndTheTheme checks that the cached marks are rebuilt
+// when a new set is published for the document and when the theme changes, and that the
+// caller's own marks are kept.
+func TestOverviewRulerMarksFollowTheSetAndTheTheme(t *testing.T) {
+	m := New(Deps{})
+	doc := &fakePathDoc{fakeDoc: &fakeDoc{lines: make([]string, 100)}, path: "/work/a.go"}
+	set := func(lines ...int) {
+		ds := make([]Diagnostic, len(lines))
+		for i, l := range lines {
+			ds[i] = Diagnostic{Start: buffer.Pos{Line: l}, End: buffer.Pos{Line: l}, Severity: editorpane.SeverityError}
+		}
+		m.lsp.diags = map[string][]Diagnostic{"/work/a.go": ds}
+	}
+	marks := func() []editorpane.TrackMark {
+		pane := editorpane.Pane{Styles: m.panes, TrackMarks: []editorpane.TrackMark{{From: 1, To: 1}}}
+		return m.overviewRulerMarks(pane, doc).TrackMarks
+	}
+	set(10, 25)
+	if got := marks(); len(got) != 3 || got[0].From != 1 || got[1].From != 10 || got[2].From != 25 {
+		t.Fatalf("marks = %+v, want the pane's own mark and lines 10 and 25", got)
+	}
+	// The same set again gives the same marks, and a published one replaces them.
+	if got := marks(); len(got) != 3 {
+		t.Fatalf("marks on the second call = %+v", got)
+	}
+	set(40)
+	if got := marks(); len(got) != 2 || got[1].From != 40 {
+		t.Fatalf("marks after a new set = %+v, want line 40", got)
+	}
+	// A theme change rebuilds them with the new styles.
+	m.panes.DiagError = grid.Style{Bold: true}
+	m.rebuildStyles()
+	m.panes.DiagError = grid.Style{Italic: true}
+	if got := marks(); len(got) != 2 || !got[1].Style.Italic {
+		t.Fatalf("marks after a theme change = %+v, want the new error style", got)
 	}
 }
 
@@ -159,6 +198,8 @@ func (f *multiFake) Tabs() []TabInfo {
 
 func (f *multiFake) Status() string { return "" }
 
+func (f *multiFake) QuitNeedsConfirm() bool { return false }
+
 func (f *multiFake) SetCursor(p buffer.Pos, _ bool) { f.doc().cursor = p }
 
 func (f *multiFake) ExtendSelection(p buffer.Pos, _ editor.Unit) { f.doc().cursor = p }
@@ -213,7 +254,7 @@ func newSplitModel(t *testing.T, f *multiFake, w, h int) *Model {
 
 // panesOf returns the panes of the layout, and fails the test when there are fewer
 // than n of them.
-func panesOf(t *testing.T, m *Model, n int) []splitPane {
+func panesOf(t *testing.T, m *Model, n int) []split.Pane {
 	t.Helper()
 	ps := m.layout().Panes
 	if len(ps) < n {

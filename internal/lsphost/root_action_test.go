@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/lsp"
@@ -102,6 +103,28 @@ func TestRemoteRootMarkersCache(t *testing.T) {
 	_, _ = port.Open(workspace+"/sub/c.go", "go", "package c\n")
 	if calls != 2 {
 		t.Fatalf("marker checks after SetRoot = %d, want the cache cleared", calls)
+	}
+}
+
+// TestRemoteRootMarkersCacheRefreshKeepsOneOrderEntry: an expired answer is refreshed in
+// place. Listing its key a second time would let a later eviction drop the fresh entry.
+func TestRemoteRootMarkersCacheRefreshKeepsOneOrderEntry(t *testing.T) {
+	port := NewFor(config.Defaults()).(*lspPort)
+	checker := func(context.Context, string, []string) (bool, error) { return true, nil }
+	markers := []string{"go.mod"}
+	if _, err := port.markerAt(context.Background(), checker, "/remote/ws", markers, "go.mod"); err != nil {
+		t.Fatal(err)
+	}
+	key := "/remote/ws\x00go.mod"
+	port.rootCache[key] = remoteRootCacheEntry{ok: true, at: time.Now().Add(-2 * remoteRootCacheTTL)}
+	if _, err := port.markerAt(context.Background(), checker, "/remote/ws", markers, "go.mod"); err != nil {
+		t.Fatal(err)
+	}
+	if len(port.rootCacheOrder) != 1 {
+		t.Fatalf("cache order = %v, want the key once", port.rootCacheOrder)
+	}
+	if time.Since(port.rootCache[key].at) > remoteRootCacheTTL {
+		t.Fatal("the expired entry was not refreshed")
 	}
 }
 

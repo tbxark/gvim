@@ -333,7 +333,7 @@ gvim.command.register{ name = "hang", run = function() while true do end end }`,
 }
 
 // Debounce timers are in-flight Work: a plugin cannot hold more than QuotaWork of them, and
-// the events beyond the quota are delivered at once (S7-2).
+// the events beyond the quota are delivered at once.
 func TestDebounceTimersAreBoundedByWorkQuota(t *testing.T) {
 	t.Run("many subscriptions", func(t *testing.T) {
 		h := start(t, gv+`
@@ -391,7 +391,7 @@ func TestEventIdleAfterMS(t *testing.T) {
 			}
 		})
 	}
-	t.Run("the period number, not ms, starts a new period (S14-3)", func(t *testing.T) {
+	t.Run("the period number, not ms, starts a new period", func(t *testing.T) {
 		h := start(t, gv+`gvim.on("idle", function(e) T.spy("idle", e.ms) end, { after_ms = 100 })`)
 		// Jitter: the first ms of each short pause is larger than the last of the one before.
 		for _, e := range []struct{ ms, period int }{{105, 1}, {107, 2}, {100, 3}, {103, 4}, {203, 4}, {304, 4}} {
@@ -453,7 +453,7 @@ gvim.command.register{ name = "active", run = function() T.spy("active", sub:act
 	})
 }
 
-// AMENDMENTS C25: before_file_save carries source = "manual" | "autosave" | "api".
+// before_file_save carries source = "manual" | "autosave" | "api".
 func TestBeforeFileSaveSourceField(t *testing.T) {
 	h := start(t, gv+`
 gvim.on("before_file_save", function(e)
@@ -481,7 +481,7 @@ end)`)
 	}
 }
 
-// AMENDMENTS C25: only hot events are droppable under the cascade cap; lifecycle events go
+// only hot events are droppable under the cascade cap; lifecycle events go
 // to the next Drain.
 func TestHotEventsDroppedLifecycleKept(t *testing.T) {
 	const n = 1500
@@ -531,8 +531,8 @@ gvim.command.register{ name = "count", run = function() T.spy(n) end }`, plugint
 	})
 }
 
-// A plugin event handler that keeps re-emitting its own event is never dropped (C25), but
-// the runaway plugin is struck and finally suspended (S7-3).
+// A plugin event handler that keeps re-emitting its own event is never dropped, but
+// the runaway plugin is struck and finally suspended.
 func TestSelfFeedingPluginEventIsStruck(t *testing.T) {
 	h := start(t, gv+`
 gvim.on("t:a", function() gvim.emit("t:a") end)
@@ -571,7 +571,7 @@ gvim.on("buffer_changed", function(e)
   T.spy(tostring(e.buf), #texts, table.concat(texts, ","), e.version, tostring(e.undo == true), tostring(e.overflow == true), e.edits == nil)
 end)`
 
-// AMENDMENTS C25: buffer_changed coalesces by concatenation for one subscription and buffer.
+// buffer_changed coalesces by concatenation for one subscription and buffer.
 func TestBufferChangedCoalescesByConcatenation(t *testing.T) {
 	t.Run("one invocation with the edits in arrival order, undo OR-ed, latest version", func(t *testing.T) {
 		h := start(t, changedProbe)
@@ -636,7 +636,7 @@ end)`)
 	})
 }
 
-// AMENDMENTS C25: more than 256 records or 256 KiB of text makes the merged event overflow.
+// more than 256 records or 256 KiB of text makes the merged event overflow.
 func TestBufferChangedOverflowOnLargePayload(t *testing.T) {
 	many := func(n int) []string {
 		out := make([]string, n)
@@ -769,7 +769,7 @@ gvim.on("post_command", function(e) T.spy("post", e.action) end)`)
 	})
 }
 
-// AMENDMENTS C25: shutdown handlers run in Stop, 200 ms for all plugins, min(50 ms,
+// shutdown handlers run in Stop, 200 ms for all plugins, min(50 ms,
 // remaining) each, without yielding.
 func TestShutdownHandlersRunInStopWithin200msTotal(t *testing.T) {
 	t.Run("a hanging handler does not stop the others", func(t *testing.T) {

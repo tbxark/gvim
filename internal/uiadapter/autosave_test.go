@@ -20,8 +20,8 @@ import (
 )
 
 // TestAutoSaveAdapterWritesTheModifiedFileOnSchedule checks the editor adapter's
-// auto-save methods: a save is due at once, a save writes the modified file, and the
-// next one is due only after the interval.
+// auto-save methods: a save is due at once, a planned save writes the modified file, and
+// the next one is due only after the interval.
 func TestAutoSaveAdapterWritesTheModifiedFileOnSchedule(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "a.txt")
@@ -37,7 +37,12 @@ func TestAutoSaveAdapterWritesTheModifiedFileOnSchedule(t *testing.T) {
 	if !a.AutoSaveDue(now) {
 		t.Fatal("auto-save is not due before its first save")
 	}
-	apptest.Must(t, a.AutoSave(now))
+	jobs := a.PlanAutoSave(now)
+	results := make([]editor.SaveResult, len(jobs))
+	for i, j := range jobs {
+		results[i] = j.Run()
+	}
+	apptest.Must(t, a.ApplyAutoSave(results))
 	data, err := os.ReadFile(path)
 	apptest.Must(t, err)
 	if !strings.HasPrefix(string(data), "xabc") {

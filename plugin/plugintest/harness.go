@@ -307,6 +307,27 @@ func (h *Harness) Advance(d time.Duration) {
 	h.Settle()
 }
 
+// AdvanceHold moves the manual clock forward like Advance and resolves the timers that
+// became due, but returns the Work they queued instead of running it, so a test can change
+// the runtime before the Work runs (RunWork runs it later).
+func (h *Harness) AdvanceHold(d time.Duration) []pluginapi.Work {
+	h.T.Helper()
+	h.now = h.now.Add(d)
+	sort.SliceStable(h.timers, func(i, j int) bool { return h.timers[i].due.Before(h.timers[j].due) })
+	var held []pluginapi.Work
+	for len(h.timers) > 0 && !h.timers[0].due.After(h.now) {
+		t := h.timers[0]
+		h.timers = h.timers[1:]
+		if t.ctx.Err() != nil {
+			continue
+		}
+		h.RT.Resolve(pluginapi.Completion{Token: t.tok})
+		work, _ := h.RT.Drain(100 * time.Millisecond)
+		held = append(held, work...)
+	}
+	return held
+}
+
 // Now is the manual clock.
 func (h *Harness) Now() time.Time { return h.now }
 

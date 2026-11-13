@@ -11,6 +11,18 @@ import (
 	"github.com/tbxark/gvim/buffer/buffertest"
 )
 
+// findNext is FindNext with the window size as a parameter, so tests can make
+// every window boundary matter.
+func findNext(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, window int) (Match, bool, bool, error) {
+	m, found, scanned, _, err := findNextSpan(s, q, from, dir, maxBytes, window, defaultHuge, Cursor{})
+	return m, found, scanned, err
+}
+
+// findNextAt is FindNextAt with the window size as a parameter.
+func findNextAt(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, window int, at Cursor) (Match, bool, bool, Cursor, error) {
+	return findNextSpan(s, q, from, dir, maxBytes, window, defaultHuge, at)
+}
+
 // positions lists every position to start a search from in text: each column
 // of each line, the end of each line, and a few positions past the end.
 func positions(text string) []buffer.Pos {

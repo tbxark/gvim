@@ -37,6 +37,9 @@ type Document struct {
 	Block *blockState
 	// selHistory records previous selections for ShrinkSelection.
 	selHistory []buffer.Selection
+	// selHistoryAt is the selection the last ExpandSelection or ShrinkSelection left. A
+	// different selection means the history is stale (see dropStaleSelHistory).
+	selHistoryAt buffer.Selection
 	// Top is the index of the first line shown in the editor pane.
 	Top int
 	// seen is the caret as ensureVisible last saw it. The scroll-off margin
@@ -218,7 +221,7 @@ func splitLineEnding(data string) (text, eol string) {
 	return strings.ReplaceAll(data, "\r\n", "\n"), eol
 }
 
-// setSaved records text as the saved state. Every assignment of d.saved goes through
+// SetSaved records text as the saved state. Every assignment of d.saved goes through
 // it, so that what is cached against the saved text (MemoChanges) is dropped.
 func (d *Document) SetSaved(text string) {
 	d.Saved = text
@@ -351,7 +354,7 @@ func (d *Document) LinesChangedSinceSave() []int {
 	if d.large != nil {
 		return nil
 	}
-	saved := d.SavedLines()
+	saved := d.SavedLinesShared()
 	var changed []int
 	for i := range d.Buffer.Lines() {
 		if i >= len(saved) || d.Buffer.Line(i) != saved[i] {
@@ -398,7 +401,7 @@ func (d *Document) Modified() bool {
 	return d.Dirty() || d.holdsStash()
 }
 
-// dirty reports whether saving d would write something: edits to the text, or a new
+// Dirty reports whether saving d would write something: edits to the text, or a new
 // encoding or line ending. A stash that is held does not count, since the text on
 // screen is not it.
 func (d *Document) Dirty() bool {
@@ -464,13 +467,16 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	// larger than the sample must not be loaded into memory just to learn that its
 	// text cannot be shown: GetBinaryRange later reads the hex dump in windows.
 	// The full read still checks the whole file, so a NUL after the sample keeps
-	// the old behaviour for small text-shaped files.
+	// the old behaviour for small text-shaped files. A probe that fails (a local
+	// file that disappeared after the stat) falls through to the whole read, which
+	// turns it into the usual empty buffer.
 	if disk.Exists {
-		if head, truncated, err := readHead(path, spec.Access, disk.Size, largeSampleSize); err == nil {
-			if info, ok := imageInfoOf(head); ok {
-				if truncated {
-					info.Size = disk.Size
-				}
+		if head, _, err := readHead(path, spec.Access, disk.Size, largeSampleSize); err == nil {
+			more := func(n int64) ([]byte, error) {
+				b, _, err := readHead(path, spec.Access, disk.Size, n)
+				return b, err
+			}
+			if info, ok := imageInfoOfHead(head, disk.Size, more); ok {
 				d := newImageDocument(path, disk, info)
 				d.access = spec.Access
 				return d, nil
@@ -480,9 +486,6 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 				d.access = spec.Access
 				return d, nil
 			}
-		} else if spec.Access == nil && errors.Is(err, fs.ErrNotExist) {
-			// A local file that disappeared between the stat and the probe falls
-			// through to the whole read, which turns it into the usual empty buffer.
 		}
 	}
 	var data []byte
@@ -511,7 +514,7 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	if info, ok := imageInfoOf(data); ok {
-		d := imageDocument(path, data, disk, info)
+		d := newImageDocument(path, disk, info)
 		d.access = spec.Access
 		return d, nil
 	}
@@ -596,7 +599,7 @@ func (d *Document) fileText(text string) string {
 	return text
 }
 
-// tidyForSave applies the save-time options to the buffer, so the text written
+// TidyForSave applies the save-time options to the buffer, so the text written
 // is the text the buffer holds afterwards. The edits form one undo step. The
 // caret and selection are kept inside the text they were on. A large document is
 // tidied only when its index is complete, because the last line is not known before,
@@ -626,17 +629,7 @@ func (d *Document) TidyForSave(o Settings) {
 		// The edit is the newest undo group now, so a multi-caret record is stale.
 		d.LastMulti = nil
 	}
-	if caret := d.Buffer.Clamp(d.Cursor); caret != d.Cursor {
-		d.Cursor = caret
-		d.Want = -1
-	}
-	if d.Sel != nil {
-		d.Sel.Anchor = d.Buffer.Clamp(d.Sel.Anchor)
-		d.Sel.Head = d.Cursor
-		if d.Sel.Anchor == d.Sel.Head {
-			d.Sel = nil
-		}
-	}
+	d.ClampToText()
 }
 
 // trimTrailingWhitespace removes the trailing spaces and tabs of every line.
@@ -662,7 +655,7 @@ func (d *Document) ensureFinalNewline() {
 	d.Buffer.Insert(d.Buffer.End(), "\n")
 }
 
-// move places the cursor at p. With extend set, the selection is grown from
+// Move places the cursor at p. With extend set, the selection is grown from
 // its existing anchor, or started at the old cursor. Otherwise it is cleared.
 // A caret move ends the current undo group, so text typed afterwards starts a
 // new step even inside the same wall-clock bucket.
@@ -682,7 +675,7 @@ func (d *Document) Move(p buffer.Pos, extend bool) {
 	d.Sel.Head = p
 }
 
-// deleteSelection removes the selected text and leaves the cursor where it
+// DeleteSelection removes the selected text and leaves the cursor where it
 // began. It reports whether anything was removed.
 func (d *Document) DeleteSelection() bool {
 	if !d.HasSelection() {

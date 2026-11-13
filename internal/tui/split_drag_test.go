@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/space"
 )
 
 // pressDrag presses the left button at (x1, y1), moves it to (x2, y2) and releases it, as a
@@ -18,41 +21,41 @@ func TestPressOnABorderDragsItsRatio(t *testing.T) {
 	tests := []struct {
 		name     string
 		setup    []string
-		press    [2]int // the press, on the line
-		move     [2]int // where the pointer goes before the release
-		ratio    int    // the ratio of the root split after the drag
-		line     rect   // the line after the drag
+		press    [2]int     // the press, on the line
+		move     [2]int     // where the pointer goes before the release
+		ratio    int        // the ratio of the root split after the drag
+		line     space.Rect // the line after the drag
 		vertical bool
 	}{
 		{
 			name:  "a vertical line follows the pointer to the left",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{20, 5},
-			ratio: 25, line: rect{X: 20, Y: 3, W: 1, H: 19}, vertical: true,
+			ratio: 25, line: space.Rect{X: 20, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a vertical line follows the pointer to the right",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{60, 5},
-			ratio: 77, line: rect{X: 60, Y: 3, W: 1, H: 19}, vertical: true,
+			ratio: 77, line: space.Rect{X: 60, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a line dragged past the right edge stops at 90 percent",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{79, 5},
-			ratio: 90, line: rect{X: 70, Y: 3, W: 1, H: 19}, vertical: true,
+			ratio: 90, line: space.Rect{X: 70, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a line dragged past the left edge stops at 10 percent",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{0, 5},
-			ratio: 10, line: rect{X: 9, Y: 3, W: 1, H: 19}, vertical: true,
+			ratio: 10, line: space.Rect{X: 9, Y: 3, W: 1, H: 19}, vertical: true,
 		},
 		{
 			name:  "a stacked line follows the pointer up",
 			setup: []string{"split_horizontal"},
 			press: [2]int{10, 12}, move: [2]int{10, 8},
-			ratio: 28, line: rect{X: 1, Y: 8, W: 78, H: 1}, vertical: false,
+			ratio: 28, line: space.Rect{X: 1, Y: 8, W: 78, H: 1}, vertical: false,
 		},
 	}
 	for _, tt := range tests {
@@ -74,7 +77,7 @@ func TestPressOnABorderDragsItsRatio(t *testing.T) {
 			if len(l.Borders) != 1 || l.Borders[0].Rect != tt.line || l.Borders[0].Vertical != tt.vertical {
 				t.Fatalf("lines = %+v, want one at %v", l.Borders, tt.line)
 			}
-			if got := l.Hit(tt.line.X, tt.line.Y); got.Kind != hitSplitBorder {
+			if got := l.Hit(tt.line.X, tt.line.Y); got.Kind != frame.HitSplitBorder {
 				t.Errorf("hit on the moved line = %+v, want a split border", got)
 			}
 			m.Update(tea.MouseReleaseMsg(tea.Mouse{X: tt.move[0], Y: tt.move[1], Button: tea.MouseLeft}))

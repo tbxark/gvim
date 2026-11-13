@@ -202,3 +202,20 @@ func TestScanSkipsYAMLFrontMatter(t *testing.T) {
 		t.Fatalf("unclosed fence headings = %+v, want Title", open)
 	}
 }
+
+// The line that closes front matter is not the text of a setext heading, whichever
+// fence closes it.
+func TestScanFrontMatterClosingLineIsNoSetextText(t *testing.T) {
+	t.Parallel()
+	for _, closer := range []string{"---", "..."} {
+		heads := Scan([]string{"---", "title: Foo", closer, "---", "# Real"})
+		if len(heads) != 1 || heads[0].Title != "Real" {
+			t.Errorf("closed by %q: headings = %+v, want only Real", closer, heads)
+		}
+	}
+	// A setext heading right after the front matter still counts.
+	heads := Scan([]string{"---", "a: b", "...", "Title", "---"})
+	if len(heads) != 1 || heads[0].Title != "Title" || heads[0].Level != 2 {
+		t.Errorf("headings = %+v, want the setext Title", heads)
+	}
+}

@@ -15,7 +15,7 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
   - Windowed streaming for large files (100+ MiB) without allocating the whole file into memory.
 
 - **Semantic Navigation & LSP**
-  - Go to Definition, Implementation, and Type Definition.
+  - Go to Definition and Implementation; Type Definition lists come from the `lsp_navigation` plugin.
   - Find References with an interactive preview picker.
   - Document Symbols (`Go to LSP Symbol`) with automatic enclosing-symbol preselection.
   - Hover documentation and diagnostics filtering.
@@ -27,10 +27,11 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
   - **Git Blame**: inline commit author, age, and summary on the cursor line, commit details popup, and parent revision blame.
   - **Git Log**: commit history browser with commit diff previews.
   - **Review Diff (Audit Mode)**: list staged, unstaged, and untracked changes, view unified diffs, and navigate hunks across files.
+  - Git Log, Review Diff, Merge conflict resolution, Compare Files and Flash Jump are bundled plugins that are **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in `config.json` (see `docs/plugins/bundled.md`). Its keys (`Alt+J` for Flash, `Alt+M` / `Ctrl+Alt+C` for Merge) apply once it is on. Git Gutter and Git Blame are on.
 
 - **Multi-Modal Fast Search**
   - **Quick Open (`Ctrl+P`)**: fuzzy file search, line jump (`:line`), relative line jump (`:+N` / `:-N`), buffer list (`#`), and command palette (`>`).
-  - **Live Grep (`Alt+A`)**: project-wide search with scopes for files, open buffers, terminal transcripts, and LSP diagnostics (`Alt+D`), exportable to a quickfix list (`Alt+Q` / `Alt+M`).
+  - **Live Grep (`Alt+/`)**: project-wide search with scopes for files, open buffers, terminal transcripts, and LSP diagnostics (`Alt+D`), exportable to a quickfix list (`Alt+Q` / `Alt+M`).
   - **In-File Find & Replace**: case-sensitive (`Alt+C`), whole-word (`Alt+W`), regex (`Alt+R`), and match counter.
   - **Flash Jump**: two-character on-screen jump motion for instant cursor movement.
 
@@ -124,17 +125,17 @@ grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integrati
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / Previous open buffer (notebook-friendly) |
 | `Ctrl+Shift+Space` / `Alt+Shift+Space` | Smart expand / shrink selection (word → brackets → line → block) |
 | `Alt+Left` / `Alt+Right` | Navigate Back / Forward in position history |
-| `Alt+J` | Flash Jump (2-character on-screen jump motion) |
+| `Alt+J` | Flash Jump (2-character on-screen jump motion; needs the `flash` plugin) |
 | `Ctrl+Shift+M` | Toggle Diagnostics Drawer (problems panel) |
 | `F8` / `Shift+F8` | Next / Previous diagnostic error or warning |
-| `Alt+Z` / `Alt+Shift+Z` | Toggle fold at cursor / Fold all blocks (`Ctrl+K Ctrl+0` / `Ctrl+K Ctrl+J`) |
+| `Alt+Z` / `Alt+Shift+Z` | Toggle fold at cursor / Fold all blocks |
 | `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D` | Jump to next / previous Git diff change (hunk) |
 | `Ctrl+]` | Jump to matching bracket |
 | `Ctrl+L` | Expand line selection across all carets |
-| `Ctrl+W v` / `Ctrl+W s` | Split window vertically / horizontally |
-| `Ctrl+W w` / `Ctrl+W h/j/k/l` | Switch active split pane |
-| `Ctrl+W c` / `Ctrl+W q` | Close current split pane |
-| `Alt+` `` | Toggle terminal dock |
+| `Ctrl+\` / `Alt+\` | Split right / split below |
+| `Alt+]` / `Alt+[` | Switch to next / previous split pane |
+| `Alt+Shift+W` | Close current split pane |
+| `` Alt+` `` | Open a terminal in the dock |
 
 ### Code Search & Inspection
 | Key | Action |
@@ -148,11 +149,11 @@ grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integrati
 ### LSP & Semantics
 | Action | Description |
 |---|---|
-| `LSP: Go to Definition` | Jump to symbol definition (`F12` / `Ctrl+.`) |
-| `LSP: Peek Definition` | In-place definition preview card without switching tabs (`Alt+F12` / `Ctrl+Alt+.`) |
-| `LSP: Find References` | Open references list with preview tabs (`Shift+F12`) |
-| `LSP: Go to Implementation` | Jump to implementation (`Ctrl+F12`) |
-| `LSP: Hover` | Show hover documentation popup (`Alt+K`) |
+| `Go to Definition` | Jump to symbol definition (`F12`; `Ctrl+.` in the `macos` keymap) |
+| `LSP: Peek Definition` | In-place definition preview card without switching tabs (`Alt+F12`; `Ctrl+Alt+.` in the `macos` keymap) |
+| `Find References` | Open references list with preview tabs (`Shift+F12`) |
+| `Go to Implementation` | Jump to implementation (`Ctrl+F12`) |
+| `Show Hover Info` | Show hover documentation popup (`Alt+K`) |
 | `Go to LSP Symbol` | Fuzzy-find document symbols with enclosing-symbol preselected |
 | `LSP: Workspace Symbols` | Fuzzy-find symbols across the whole workspace |
 | `LSP: Incoming / Outgoing Calls` | Call Hierarchy: explore callers and callees |
@@ -160,6 +161,8 @@ grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integrati
 | `LSP: Show Breadcrumbs` | Display enclosing symbol scope path (`Class > Method`) |
 | `LSP: Breadcrumbs Outline` | Interactive enclosing scope hierarchy picker to jump to parent function/class |
 | `List Bookmarks` | Interactive bookmarks picker (jump between slots 0–9) |
+
+The symbol, call-hierarchy, outline and breadcrumb rows (`Go to LSP Symbol` through `LSP: Breadcrumbs Outline`) come from the bundled `lsp_navigation` plugin, which is off by default.
 
 ### Git & Review
 | Action | Description |
@@ -188,11 +191,11 @@ When viewing read-only buffers or piped input, single-key pager shortcuts activa
 |---|---|
 | `Space` / `b` | Page Down / Page Up |
 | `j` / `k` | Scroll Down / Up by line |
-| `d` / `u` | Half-page scroll down / up |
+| `d` / `u` | Scroll the view down / up one line |
 | `g` / `G` | Jump to start / end of document |
 | `/` | Open in-file search bar |
 | `n` / `N` | Next / Previous search match |
-| `q` | Quit / Close viewer tab |
+| `q` | Quit |
 
 ### Markdown Modes
 | Action | Description |
@@ -213,4 +216,4 @@ For architecture records, design documentation, and internal specifications, see
 - [`docs/settings.md`](docs/settings.md) — Configuration schema, JSONC persistence, and live settings
 - [`docs/themes.md`](docs/themes.md) — Theme specification, color roles, and customization
 - [`docs/terminal.md`](docs/terminal.md) — Pseudo-terminal dock and scrollback model
-- [`docs/parity.md`](docs/parity.md) — Live Fresh parity audit matrix and objective record
+- [`docs/parity.md`](docs/parity.md) — Fresh parity matrix, deliberate differences and open gaps

@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+// CapturingKeys reports whether the grid records theme-key ids.
+func (g *Grid) CapturingKeys() bool { return g.keys != nil }
+
+// ReleaseKeys stops recording and frees the capture buffer.
+func (g *Grid) ReleaseKeys() { g.keys = nil }
+
 // TestKeyCaptureOffByDefault checks that attribution is opt-in: without
 // CaptureKeys nothing is recorded and KeysAt stays zero.
 func TestKeyCaptureOffByDefault(t *testing.T) {
@@ -82,5 +88,27 @@ func TestCaptureDoesNotChangeRendering(t *testing.T) {
 	}
 	if !reflect.DeepEqual(plain.Lines(), captured.Lines()) {
 		t.Error("capture changed the SGR output")
+	}
+}
+
+// TestResetBlanksTheGrid checks that Reset returns every cell to a blank default one and
+// clears the key capture, so a surface can be reused for the next frame.
+func TestResetBlanksTheGrid(t *testing.T) {
+	t.Parallel()
+	g := New(4, 2)
+	g.CaptureKeys()
+	st := Style{FGKey: 7, BGKey: 9, Bold: true}
+	g.Put(0, 0, 4, "ab", st)
+	g.Put(0, 1, 4, "你", st)
+	g.Reset()
+	for y := range 2 {
+		for x := range 4 {
+			if c := g.At(x, y); c.Text != " " || c.Style != (Style{}) {
+				t.Fatalf("cell (%d, %d) = %+v after Reset, want a blank default cell", x, y, c)
+			}
+			if fg, bg := g.KeysAt(x, y); fg != 0 || bg != 0 {
+				t.Fatalf("cell (%d, %d) keeps keys %d/%d after Reset", x, y, fg, bg)
+			}
+		}
 	}
 }

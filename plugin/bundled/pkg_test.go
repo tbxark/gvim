@@ -181,3 +181,32 @@ func TestPkgShowsNativeThemeDetails(t *testing.T) {
 		}
 	}
 }
+
+// A description that is all multibyte characters must be cut at a character boundary, not
+// emptied: the clip used to drop every trailing non-ASCII byte.
+func TestPkgClipKeepsMultibyteDescriptions(t *testing.T) {
+	t.Parallel()
+	files := pkgFiles(t)
+	files["gamma/plugin.json"] = `{"name":"gamma","version":"1.0.0","description":"` + strings.Repeat("插件", 100) + `"}`
+	files["gamma/init.lua"] = `local gvim = require "gvim"`
+	h := plugintest.New(t, files, plugintest.Options{Timeout: 2 * time.Second, EventBudget: 5 * time.Second})
+	h.Host.FakeTheme().Themes = []string{"dark"}
+	h.Start()
+	if err := h.Run(pkgPlugin+".list", nil); err != nil {
+		t.Fatal(err)
+	}
+	picker := h.Host.UI().Last("picker")
+	if picker == nil {
+		t.Fatalf("no package picker (log %v)", h.LogText(""))
+	}
+	for _, it := range picker.Picker.Items {
+		if !strings.Contains(it.Text, "gamma") {
+			continue
+		}
+		if !strings.HasPrefix(it.Detail, "插件插件") || !strings.HasSuffix(it.Detail, "…") || len(it.Detail) < 290 {
+			t.Fatalf("gamma detail = %q", it.Detail)
+		}
+		return
+	}
+	t.Fatal("no gamma row")
+}

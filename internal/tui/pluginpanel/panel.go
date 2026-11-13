@@ -12,11 +12,14 @@ package pluginpanel
 
 import (
 	"image/color"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -38,14 +41,7 @@ const (
 )
 
 // Rect is a block of frame cells: X, Y is the top-left corner, W and H the size.
-type Rect struct {
-	X, Y, W, H int
-}
-
-// Contains reports whether the cell (x, y) lies inside r.
-func (r Rect) Contains(x, y int) bool {
-	return r.W > 0 && r.H > 0 && x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
-}
+type Rect = space.Rect
 
 // Key is one decoded key press in the form the panel handles. Name is the canonical key
 // name of the key alone: "tab", "enter", "space", "escape", "up", "down", "left", "right",
@@ -184,6 +180,7 @@ type Panel struct {
 	// page mode: pageTop is the first content row shown, contentRows the content height of
 	// the last draw.
 	pageTop     int
+	scratch     *grid.Grid // the page surface, kept between frames of the same size
 	contentRows int
 	// overlays are the transient paint-on-top regions of the last draw (the option list of
 	// an open dropdown, the completion candidates of a focused text field).
@@ -305,6 +302,14 @@ func (p *Panel) Update(spec pluginapi.WidgetPanel) {
 	p.setSpec(spec)
 }
 
+// SetOptions applies the mount-derived options of a replaced mount: the title, frame,
+// closable flag, page mode and first-focus rule. The chrome and color resolver stay as
+// they were. Call it before Update so the first-focus rule applies to the new spec.
+func (p *Panel) SetOptions(o Options) {
+	p.title, p.framed, p.closable, p.page = o.Title, o.Framed, o.Closable, o.Page
+	p.autoFocus = o.AutoFocusFirst == nil || *o.AutoFocusFirst
+}
+
 // Dragging reports whether a tree row drag is in progress in this panel.
 func (p *Panel) Dragging() bool { return p.drag != nil }
 
@@ -340,9 +345,22 @@ func validateWidget(w pluginapi.Widget, depth int, n *int) error {
 	if len(w.Key) > MaxKey {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a widget key is longer than %d bytes", MaxKey)
 	}
-	for _, s := range []string{w.Text, w.Label} {
+	for _, s := range []string{w.Text, w.Label, w.Placeholder} {
 		if len(s) > MaxString {
 			return pluginapi.Errf(pluginapi.CodeLimit, "widget text is longer than %d bytes", MaxString)
+		}
+	}
+	if len(w.Title) > MaxTitle {
+		return pluginapi.Errf(pluginapi.CodeLimit, "a widget title is longer than %d bytes", MaxTitle)
+	}
+	for _, list := range [][]string{w.Options, w.Completions, w.Included} {
+		if len(list) > MaxItems {
+			return pluginapi.Errf(pluginapi.CodeLimit, "a control takes at most %d options", MaxItems)
+		}
+		for _, s := range list {
+			if len(s) > MaxString {
+				return pluginapi.Errf(pluginapi.CodeLimit, "an option is longer than %d bytes", MaxString)
+			}
 		}
 	}
 	for _, r := range w.Runs {
@@ -424,15 +442,19 @@ func validateWidget(w pluginapi.Widget, depth int, n *int) error {
 	return nil
 }
 
-// Sanitize replaces the control characters of a plugin string with spaces: a cell written
-// to the terminal must not carry an escape sequence.
+// Sanitize replaces the control characters of a plugin string with spaces and removes the
+// bidirectional controls: a cell written to the terminal must not carry an escape
+// sequence, and a plugin string must not reorder the text around it.
 func Sanitize(s string) string {
-	if !strings.ContainsFunc(s, unicode.IsControl) {
+	if !strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || space.IsBidi(r) }) {
 		return s
 	}
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		switch {
+		case unicode.IsControl(r):
 			return ' '
+		case space.IsBidi(r):
+			return -1
 		}
 		return r
 	}, s)
@@ -539,7 +561,7 @@ func (p *Panel) setText(w pluginapi.Widget, text string, cursor int) {
 		return
 	}
 	in.text, in.haveText = text, true
-	in.cursor = clamp(cursor, 0, len(text))
+	in.cursor = space.Clamp(cursor, 0, len(text))
 	if in.selStart > len(text) {
 		in.selStart = len(text)
 	}
@@ -551,7 +573,7 @@ func (p *Panel) setText(w pluginapi.Widget, text string, cursor int) {
 // textCursor returns the caret byte offset of a text field, clamped to its content.
 func (p *Panel) textCursor(w pluginapi.Widget) int {
 	if in := p.inst[w.Key]; in != nil && in.haveText {
-		return clamp(in.cursor, 0, len(in.text))
+		return space.Clamp(in.cursor, 0, len(in.text))
 	}
 	return len(w.Text)
 }
@@ -648,7 +670,7 @@ func (p *Panel) collect(w pluginapi.Widget, path string, depth int) {
 		p.focusables = append(p.focusables, focusRef{key: w.Key, path: path, kind: w.Kind})
 	}
 	for i, c := range w.Children {
-		child := path + "/" + itoa(i)
+		child := path + "/" + strconv.Itoa(i)
 		p.collect(c, child, depth+1)
 	}
 }
@@ -707,34 +729,12 @@ func widgetAt(root pluginapi.Widget, path string) (pluginapi.Widget, bool) {
 		if i == 0 {
 			return pluginapi.Widget{}, false
 		}
-		n := atoi(rest[:i])
-		if n < 0 || n >= len(cur.Children) {
+		n, err := strconv.Atoi(rest[:i])
+		if err != nil || n >= len(cur.Children) {
 			return pluginapi.Widget{}, false
 		}
 		cur = cur.Children[n]
 		rest = rest[i:]
 	}
 	return cur, true
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
-}
-
-func atoi(s string) int {
-	n := 0
-	for i := 0; i < len(s); i++ {
-		n = n*10 + int(s[i]-'0')
-	}
-	return n
 }

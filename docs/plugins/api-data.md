@@ -39,7 +39,8 @@ string metatable is locked.
   a long default-comparator sort notices the time budget.
 
 String concatenation (`s = s .. s`) cannot be bounded: a loop that doubles a string is stopped by the
-heap guard (a slice that grows the heap by 256 MiB is cancelled and counts as a strike).
+heap guard (a slice that grows the heap by 128 MiB is cancelled and counts as a strike, see
+[limits.md](limits.md#time-budgets)).
 
 ## gvim.json
 

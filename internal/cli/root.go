@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tbxark/gvim/internal/app"
+	"github.com/tbxark/gvim/internal/configview"
 )
 
 // Runner starts gvim with the parsed options and returns when it stops. The
@@ -37,10 +38,6 @@ type exitError struct {
 func (e *exitError) Error() string { return e.err.Error() }
 
 func (e *exitError) Unwrap() error { return e.err }
-
-// keymapNames lists the built-in keymaps for help text and completion. Names
-// are checked by app.Options.Validate.
-var keymapNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 
 // daemonDefaultName is the NoOptDefVal of --daemon/-a: it marks a flag given with no
 // NAME, which means the per-root default socket name.
@@ -232,7 +229,7 @@ command drops this client and leaves the editor running.`,
 	flags.StringVarP(&attachName, "attach", "a", "", "attach this terminal to a running daemon; use `--attach=NAME` (or `-a=NAME`) for a named daemon, `-a` alone for this workspace's default")
 	flags.Lookup("attach").NoOptDefVal = daemonDefaultName
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return keymapNames, cobra.ShellCompDirectiveNoFileComp
+		return configview.KeymapNames(), cobra.ShellCompDirectiveNoFileComp
 	})
 
 	root.AddCommand(newVersionCommand(), newConfigCommand(&configPath, &keymapName, &themeName), newGrammarCommand(), newRexCommand())

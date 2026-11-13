@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 )
 
@@ -113,8 +114,8 @@ func TestStatusBarSegmentsOpenTheirChoosers(t *testing.T) {
 		index int
 		title string
 	}{
-		{"line ending", statusSegmentEOL, "Select Line Ending"},
-		{"encoding", statusSegmentEncoding, "Select Encoding"},
+		{"line ending", frame.StatusSegmentEOL, "Select Line Ending"},
+		{"encoding", frame.StatusSegmentEncoding, "Select Encoding"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -122,9 +123,9 @@ func TestStatusBarSegmentsOpenTheirChoosers(t *testing.T) {
 			ed := newFakeEditor("abc")
 			m := newTestModel(t, ed, newFakeTree(3), 100, 30)
 			l := m.layout()
-			var click *run
+			var click *frame.Run
 			for i, r := range l.Status {
-				if r.Kind == hitStatusSegment && r.Index == tt.index {
+				if r.Kind == frame.HitStatusSegment && r.Index == tt.index {
 					click = &l.Status[i]
 				}
 			}

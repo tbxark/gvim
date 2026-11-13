@@ -102,22 +102,22 @@ local YIELD_EVERY = 2000
 local MAX_PASSES = 3
 
 -- RENDER_VLINES switches the full Fresh rendering on: the old content of deleted
--- lines as virtual rows above the seam. The tier-1c decoration store and Lua
--- names are here (1c-A), but painting them is the remaining host increment, so
--- the plugin asks the host before using them. Everything else (line
--- backgrounds, word emphasis, gutter, scrollbar) works with the older kinds, so
--- until the host reports paint support the reduced Fresh view is shown.
+-- lines as virtual rows above the seam. A host that does not paint virtual rows
+-- reports false here; everything else (line backgrounds, word emphasis, gutter,
+-- scrollbar) works with the older kinds, so the reduced Fresh view is shown then.
 local RENDER_VLINES = gvim.has("decor_virtual_paint") == true
 
 -- State: one entry per buffer. The mode and the per-buffer enable override live
--- in the host's window state when 1c-C is available (get_window_state), so they
--- survive a plugin reload; the in-memory fields are the fallback and mirror.
+-- in the host's window state (get_window_state), so they survive a plugin reload;
+-- the in-memory fields mirror them.
 local states = {}
 local enabled = gvim.state.get("live_diff.enabled", false) == true
 local default_override = gvim.state.get("live_diff.default_mode")
 local last_branch = gvim.state.get("live_diff.last_branch")
 local watchers = {}       -- watch key -> watcher
 local watched_repos = {}  -- directory of a file -> git directory | false
+local repo_missed_at = {} -- directory of a file -> monotonic ms of the last miss, while it is false
+local REPO_RETRY_MS = 30000 -- a directory that was no repository is looked at again after this
 local notice_buffers = {} -- buffer id -> the last degraded notice it got
 local similarity_threshold = 0.95 -- refined pairs at or above this stay "modified"
 local REFRESH_AFTER_MS = 5000 -- an activated buffer asks git again when its reference is older
@@ -206,9 +206,6 @@ local function default_mode()
 end
 
 local function read_window_state(b, key)
-  if not gvim.buf.get_window_state then
-    return nil
-  end
   local ok, value = pcall(gvim.buf.get_window_state, b, key)
   if ok then
     return value
@@ -217,9 +214,6 @@ local function read_window_state(b, key)
 end
 
 local function write_window_state(b, key, value)
-  if not gvim.buf.set_window_state then
-    return
-  end
   pcall(gvim.buf.set_window_state, b, key, value)
 end
 
@@ -513,8 +507,8 @@ local function refine_hunks(hunks, new_lines)
         for i = 1, h.newCount do
           local old_line = h.oldLines[i]
           local new_line = new_lines[h.newStart + i] or ""
+          local new_ranges, old_ranges = compute_word_diff(old_line, new_line)
           if line_similarity(old_line, new_line) >= similarity_threshold then
-            local new_ranges, old_ranges = compute_word_diff(old_line, new_line)
             if #old_ranges > 0 then
               out[#out + 1] = {
                 kind = "removed", newStart = h.newStart + i - 1, newCount = 0,
@@ -526,7 +520,6 @@ local function refine_hunks(hunks, new_lines)
               oldLines = {}, wordRanges = { new_ranges },
             }
           else
-            local new_ranges, old_ranges = compute_word_diff(old_line, new_line)
             local removed = {
               kind = "removed", newStart = h.newStart + i - 1, newCount = 0,
               oldLines = { old_line },
@@ -655,7 +648,7 @@ local function clear(st, b)
     ns_vline:set(b, {})
   end
   st.painted, st.hunks, st.last_key = false, {}, ""
-  st.last_text = nil
+  st.last_version = nil
 end
 
 -- notify_once shows a status message once per buffer and key, so a degraded
@@ -668,7 +661,7 @@ local function notify_once(st, key, message)
   gvim.notify(message)
 end
 
--- paint_hunk adds the gutter, scrollbar and background items of one hunk.
+-- paint_hunks adds the gutter, scrollbar and background items of one hunk.
 local function paint_hunks(st, b, hunks, new_lines, detail, version)
   local gutter, scroll, overlay, vlines = {}, {}, {}, {}
   local dropped_words = false
@@ -824,7 +817,7 @@ local watch_file
 -- drop_reference forces the next recompute to fetch the old side again.
 local function drop_reference(st)
   st.reload_ref = true
-  st.last_text = nil
+  st.last_version = nil
   st.last_key = ""
 end
 
@@ -863,9 +856,9 @@ local function recompute(b, st)
   if st.reload_ref or st.ref_key ~= key or st.ref_text == nil then
     st.reload_ref = false
     -- A refreshed reference can change the diff even when the buffer text did
-    -- not; do not let the unchanged-text skip below hide it (Fresh does the
+    -- not; do not let the unchanged-version skip below hide it (Fresh does the
     -- same with lastBufferText).
-    st.last_text = nil
+    st.last_version = nil
     local text = fetch_reference(b, st)
     if states[st.id] ~= st or not b:valid() then
       return
@@ -878,6 +871,10 @@ local function recompute(b, st)
     st.ref_key, st.ref_text, st.tracked = key, text, true
     st.checked_at = gvim.time.monotonic_ms()
   end
+  local version = b:version()
+  if version == st.last_version and not st.force and st.last_key ~= "" then
+    return
+  end
   local new_text, terr = b:text()
   if states[st.id] ~= st or not b:valid() then
     return
@@ -889,9 +886,6 @@ local function recompute(b, st)
     else
       debug("%s", tostring(terr))
     end
-    return
-  end
-  if new_text == st.last_text and not st.force and st.last_key ~= "" then
     return
   end
   local new_lines = split_lines(new_text)
@@ -927,7 +921,7 @@ local function recompute(b, st)
     return
   end
   st.hunks = hunks
-  st.last_text = new_text
+  st.last_version = version
   st.last_key = hunks_key
   st.force = false
   if not paint_hunks(st, b, hunks, new_lines, detail, raw.version) then
@@ -1019,7 +1013,7 @@ ensure_state = function(b)
       force = true,
       reload_ref = true,
       painted = false,
-      last_text = nil,
+      last_version = nil,
       last_key = "",
       last_detail = "full",
       checked_at = nil,
@@ -1047,16 +1041,22 @@ watch_git = function(b, st)
     return
   end
   local dir = gvim.path.dirname(path)
+  local now = gvim.time.monotonic_ms()
   if watched_repos[dir] ~= nil then
-    return
+    local missed = repo_missed_at[dir]
+    if watched_repos[dir] or not missed or now - missed < REPO_RETRY_MS then
+      return
+    end
   end
   watched_repos[dir] = false
+  repo_missed_at[dir] = now
   local repo = git.repo(dir)
   if not repo or not repo.head then
     return
   end
   local gitdir = gvim.path.dirname(repo.head)
   watched_repos[dir] = gitdir
+  repo_missed_at[dir] = nil
   if watchers[gitdir] then
     return
   end
@@ -1305,12 +1305,6 @@ gvim.command.register {
 
 -- Events --------------------------------------------------------------------
 
--- optional_event subscribes to an event only when the host knows it, so the
--- plugin works before the 1c-C event catalogue lands.
-local function optional_event(name, fn)
-  pcall(gvim.on, name, fn)
-end
-
 gvim.on("after_file_open", function(ev)
   if not ev.buf then
     return
@@ -1375,31 +1369,28 @@ gvim.on("buffer_changed", function(ev)
   end
 end, { debounce = settings.debounce_ms })
 
-optional_event("path_changed", function()
-  -- A git HEAD move: refresh every head/branch baseline of that repository.
-  for _, st in pairs(states) do
-    if st.mode.kind ~= "disk" then
-      st.reload_ref = true
-    end
-  end
-  for id, st in pairs(states) do
-    local b = gvim.buf.get(id)
-    if b and b:valid() and st.mode.kind ~= "disk" then
-      request(b, { fetch = true })
-    end
+-- A save-as or rename gives the buffer another path, so its baseline is another file.
+gvim.on("path_changed", function(ev)
+  if ev.buf then
+    request(ev.buf, { fetch = true, force = true })
   end
 end)
 
-optional_event("focus_gained", function()
-  for id, st in pairs(states) do
-    local b = gvim.buf.get(id)
-    if b and b:valid() then
-      request(b, { fetch = true })
-    end
+-- Only the focused buffer asks git again: every fetch is a process, and the other buffers
+-- refresh when they are activated (REFRESH_AFTER_MS) or when HEAD moves (watch_git).
+gvim.on("focus_gained", function()
+  local b = gvim.buf.current()
+  local st = b and b:valid() and states[b:info().id]
+  if not st then
+    return
+  end
+  request(b, { fetch = true })
+  if st.mode.kind ~= "disk" then
+    watch_git(b, st) -- a directory that was no repository earlier may be one now
   end
 end)
 
-optional_event("active_window_changed", function()
+gvim.on("active_window_changed", function()
   for id, st in pairs(states) do
     local b = gvim.buf.get(id)
     if b and b:valid() and st.again then

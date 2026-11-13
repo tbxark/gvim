@@ -142,8 +142,7 @@ type Picker struct {
 	open  bool // false once chosen or closed
 	moved int  // ID of the last Moved reported; -1 for none
 
-	w, h int // frame size of the last Draw, for mouse hit tests
-	box  geom
+	box geom // placement of the last Draw, for mouse hit tests
 }
 
 // styles are the grid styles of a picker.
@@ -180,8 +179,9 @@ func New(st style.Styles, o Options) *Picker {
 	p.input.CursorEnd()
 	p.input.Focus() // Draw paints the caret cell
 	p.query = p.input.Value()
+	// The opening rows are the plain list: they answer an empty query only, so a fuzzy
+	// picker with an initial query leaves rowsQuery empty until its ranking arrives.
 	p.rows = p.plainRows()
-	p.rowsQuery = p.query
 	return p
 }
 
@@ -482,10 +482,11 @@ func (p *Picker) reportMoved(ev []Event) []Event {
 // choose closes the picker on row i. A disabled item cannot be chosen, and with no row
 // there is nothing to choose.
 func (p *Picker) choose(i int) []Event {
-	if p.rowsQuery != p.query {
+	if p.fuzzy && p.rowsQuery != p.query {
 		// Enter arrived while a ranking was still in flight: rank the typed query now, so
-		// the choice is the filtered first row and not a stale row of the old query.
-		if p.fuzzy && p.query != "" {
+		// the choice is the filtered first row and not a stale row of the old query. Only a
+		// fuzzy picker ranks; the rows of the others are always the owner's items.
+		if p.query != "" {
 			p.rows = rankItems(p.query, p.items)
 		} else {
 			p.rows = p.plainRows()
@@ -573,9 +574,7 @@ func (p *Picker) Draw(g *grid.Grid) {
 		p.box = geom{}
 		return
 	}
-	w, h := g.Width(), g.Height()
-	p.w, p.h = w, h
-	p.box = p.layoutFor(w, h)
+	p.box = p.layoutFor(g.Width(), g.Height())
 	p.keepVisible()
 	geo := p.box
 
@@ -632,23 +631,23 @@ func (p *Picker) paintRow(g *grid.Grid, geo geom, y int, r row, base grid.Style)
 	}
 	x := geo.left + 2
 	if len(r.hl) == 0 {
-		x += g.Put(x, y, end, truncate(it.Text, end-x), text)
+		x += g.Put(x, y, end, space.End(it.Text, end-x), text)
 	} else {
 		x += p.putMatched(g, x, y, end, it.Text, r.hl, text)
 	}
 	if it.Detail != "" && x+3 < end {
-		g.Put(x+2, y, end, truncate(it.Detail, end-x-2), faint(base))
+		g.Put(x+2, y, end, space.End(it.Detail, end-x-2), faint(base))
 	}
 }
 
 // putMatched writes s clipped to maxX, with the runes at the indexes in hl bold. It
-// returns the cells written. A cut ends with an ellipsis, like truncate.
+// returns the cells written. A cut ends with an ellipsis, like space.End.
 func (p *Picker) putMatched(g *grid.Grid, x, y, maxX int, s string, hl []int, st grid.Style) int {
 	room := maxX - x
 	if room <= 0 {
 		return 0
 	}
-	cut := truncate(s, room)
+	cut := space.End(s, room)
 	orig, shown := []rune(s), []rune(cut)
 	start := x
 	for i, c := range shown {
@@ -685,7 +684,7 @@ func (p *Picker) paintQuery(g *grid.Grid, y, x0 int) {
 	g.Fill(0, w, y, p.st.prompt)
 	runes := []rune(p.input.Value())
 	if len(runes) == 0 && p.placeholder != "" {
-		g.Put(x0+1, y, w, truncate(p.placeholder, w-x0-1), faint(p.st.prompt))
+		g.Put(x0+1, y, w, space.End(p.placeholder, w-x0-1), faint(p.st.prompt))
 	}
 	pos := min(max(p.input.Position(), 0), len(runes))
 	start := 0
@@ -705,17 +704,6 @@ func (p *Picker) paintQuery(g *grid.Grid, y, x0 int) {
 		caret.Reverse = true
 		g.Put(x, y, w, " ", caret)
 	}
-}
-
-// truncate shortens s to at most w cells, ending with an ellipsis when it is cut.
-func truncate(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if ansi.StringWidth(s) <= w {
-		return s
-	}
-	return ansi.Truncate(s, w-1, "") + "…"
 }
 
 // faint returns st with the faint attribute.

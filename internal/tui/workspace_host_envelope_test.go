@@ -613,3 +613,19 @@ func TestQueueForIsBounded(t *testing.T) {
 		t.Fatalf("pending count = %d, want %d", count, hostPendingCap)
 	}
 }
+
+// TestHostQueueWithoutShowStillRuns: work queued in a host call that shows no other
+// workspace belongs to the next Update's batch, as Queue documents, instead of being dropped.
+func TestHostQueueWithoutShowStillRuns(t *testing.T) {
+	t.Parallel()
+	a := newTestModel(t, newFakeEditor("a"), newFakeTree(1), 80, 24)
+	a.SetWorkspaceOwner("ws-a", 1)
+	h := NewWorkspaceHost(a)
+	open := func() tea.Msg { return palette.RunCommandMsg{Action: "open_settings"} }
+
+	_, cmd := h.Update(hostCallMsg{fn: func() { h.QueueFor(a, open) }, state: newHostCallState()})
+	pumpHostCmd(t, h, cmd)
+	if len(a.overlays) != 1 {
+		t.Fatalf("queued work without a Show ran %d time(s), want 1", len(a.overlays))
+	}
+}

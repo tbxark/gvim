@@ -516,6 +516,39 @@ func TestDiagnosticsPanelCancelClearsState(t *testing.T) {
 	}
 }
 
+// The plugin is on by default: while its panel is closed it must not keep the hot cursor_moved
+// event computed for every cursor move.
+func TestDiagnosticsPanelFollowsTheCursorOnlyWhileOpen(t *testing.T) {
+	t.Parallel()
+	host, a, _ := diagHost(t)
+	host.LSP().Diags[a] = []pluginapi.DiagnosticInfo{diag(0, 0, "error", "boom", "gopls")}
+	h := startDiagPanel(t, host)
+	if h.RT.Wants("cursor_moved") {
+		t.Fatal("cursor_moved is subscribed while the panel was never opened")
+	}
+	if err := h.Run(diagPlugin+".show_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !h.RT.Wants("cursor_moved") {
+		t.Fatal("cursor_moved is not subscribed while the panel is open")
+	}
+	if err := h.Run(diagPlugin+".toggle_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	if h.RT.Wants("cursor_moved") {
+		t.Error("cursor_moved is still subscribed after the panel closed")
+	}
+	if err := h.Run(diagPlugin+".show_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	fp := mountedPanel(t, h)
+	h.Host.UnmountWidgetPanel(fp.ID)
+	emitWidget(h, fp.ID, map[string]any{"event": "cancel"})
+	if h.RT.Wants("cursor_moved") {
+		t.Error("cursor_moved is still subscribed after the host closed the panel")
+	}
+}
+
 // TestDiagnosticsPanelCollapsesDuplicates: Fresh's Finder keeps one entry per id; a server
 // that publishes the same diagnostic twice lists it once and the count agrees.
 func TestDiagnosticsPanelCollapsesDuplicates(t *testing.T) {

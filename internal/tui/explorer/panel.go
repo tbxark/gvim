@@ -13,7 +13,6 @@
 package explorer
 
 import (
-	"errors"
 	"image/color"
 	"path/filepath"
 	"slices"
@@ -29,7 +28,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
-// Tree is the subset of *explorer.Tree the panel uses. ui.ExplorerTree has all of
+// Tree is the subset of *explorer.Tree the panel uses. tui.ExplorerTree has all of
 // these methods, so the root passes its tree through unchanged.
 type Tree interface {
 	Root() string
@@ -51,27 +50,6 @@ type AsyncToggleTree interface {
 	ToggleCmd(path string) tea.Cmd
 }
 
-// ReadOnlyTree is a Tree whose directory cannot be changed from the editor. The panel
-// refuses New File, New Directory, Rename, Delete and the clipboard actions with one
-// explicit notice.
-type ReadOnlyTree interface {
-	ReadOnly() bool
-}
-
-// NoClipboardTree is a writable Tree that cannot cut, copy or paste entries (a remote
-// workspace: subtree transfer through the authority is not implemented). New File, New
-// Directory, Rename and Delete stay available.
-type NoClipboardTree interface {
-	ClipboardDisabled() bool
-}
-
-// ErrClipboardDisabled is the notice of a cut/copy/paste on a tree without clipboard
-// operations.
-var ErrClipboardDisabled = errors.New("copying or moving remote entries is not available yet")
-
-// ErrReadOnlyTree is the notice of a file operation on a read-only tree.
-var ErrReadOnlyTree = errors.New("remote file explorer is read-only: remote file operations are not available yet")
-
 // toggleCmd toggles path: in a command for an async tree, synchronously otherwise.
 func (p Panel) toggleCmd(path string) tea.Cmd {
 	if at, ok := p.tree.(AsyncToggleTree); ok {
@@ -83,33 +61,14 @@ func (p Panel) toggleCmd(path string) tea.Cmd {
 	return nil
 }
 
-// readOnly reports whether the tree refuses file operations.
-func (p Panel) readOnly() bool {
-	ro, ok := p.tree.(ReadOnlyTree)
-	return ok && ro.ReadOnly()
-}
-
-// clipboardDisabled reports whether the tree refuses the clipboard actions.
-func (p Panel) clipboardDisabled() bool {
-	ro, ok := p.tree.(NoClipboardTree)
-	return ok && ro.ClipboardDisabled()
-}
-
-// refuseReadOnly returns the notice command for a file operation on a read-only tree.
-func refuseReadOnly() tea.Cmd { return emit(ErrorMsg{Err: ErrReadOnlyTree}) }
-
-// refuseClipboard returns the notice command for an unavailable clipboard action.
-func refuseClipboard() tea.Cmd { return emit(ErrorMsg{Err: ErrClipboardDisabled}) }
-
 // Geometry is the panel's place in the frame. The root takes it from the layout:
 // X is the panel's first column, Width the layout's explorer width, Top the title
 // row (the tab strip row), Bottom the bottom border row, and Focused reports
 // whether the panel has keyboard focus, which shows the selection marker.
 //
-// X and Right place the column: the zero value is the left edge of the frame,
-// which is where the explorer has always been. With Right set the panel sits
-// against the frame's right edge and its grip is the left border, the side the
-// editor is on.
+// X and Right place the column: the zero value is the left edge of the frame. With
+// Right set the panel sits against the frame's right edge and its grip is the left
+// border, the side the editor is on.
 type Geometry struct {
 	X       int // the panel's first column
 	Width   int
@@ -149,10 +108,8 @@ type RowDecor struct {
 	NameColor color.Color
 }
 
-// The rows of the panel are the rows of its Geometry: the title is row Top and
-// the tree body starts at Top+1 (blueprint section 4.1). The body ends above
-// Bottom.
-const wheelRows = 3 // rows one wheel notch scrolls (blueprint section 3.2)
+// wheelRows is the number of rows one wheel notch scrolls (blueprint section 3.2).
+const wheelRows = 3
 
 // Messages the panel sends. The root receives them through its Update.
 type (
@@ -252,18 +209,6 @@ func (p Panel) Update(msg tea.Msg, g Geometry) (Panel, tea.Cmd) {
 func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	if p.tree == nil {
 		return p, nil, false
-	}
-	if p.readOnly() {
-		switch action {
-		case "file_explorer_new_file", "file_explorer_new_directory", "file_explorer_rename", "file_explorer_delete", "cut", "paste":
-			return p, refuseReadOnly(), true
-		}
-	}
-	if p.clipboardDisabled() {
-		switch action {
-		case "cut", "paste":
-			return p, refuseClipboard(), true
-		}
 	}
 	var cmd tea.Cmd
 	switch action {
@@ -542,7 +487,7 @@ func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, 
 		if x >= end {
 			return
 		}
-		name := space.Name(part.Name, end-x)
+		name := space.Name(space.StripBidi(part.Name), end-x)
 		dst.Put(x, y, end, name, nameStyle)
 		x += ansi.StringWidth(name)
 		if x < end {
@@ -551,7 +496,7 @@ func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, 
 		}
 	}
 	if x < end {
-		dst.Put(x, y, end, space.Name(r.Name, end-x), nameStyle)
+		dst.Put(x, y, end, space.Name(space.StripBidi(r.Name), end-x), nameStyle)
 	}
 }
 

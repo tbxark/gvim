@@ -644,3 +644,42 @@ func (s *fakeSSH) probeAgent(sc *ssh.ServerConn) {
 	s.agentErr, s.agentSigners = err, pks
 	s.mu.Unlock()
 }
+
+// TestSSHLongRunningWaitIsIdempotent: a second Wait returns the first one's result
+// instead of starting another reaper that nothing would finish.
+func TestSSHLongRunningWaitIsIdempotent(t *testing.T) {
+	srv := newFakeSSH(t)
+	a := srv.connect(t, authority.SSHOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p, err := a.LongRunning().Start(ctx, []string{"sleeper"}, hostos.ProcOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer p.Terminate(50 * time.Millisecond)
+	p.CloseStdin()
+	for i := range 3 {
+		res, err := p.Wait(ctx)
+		if err != nil || res.Code != 0 {
+			t.Fatalf("wait %d = %+v, %v", i, res, err)
+		}
+	}
+}
+
+// TestSSHRefusesEmptyArgv: a command with no program is an error, not a bare cd.
+func TestSSHRefusesEmptyArgv(t *testing.T) {
+	srv := newFakeSSH(t)
+	a := srv.connect(t, authority.SSHOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	o := hostos.ProcOptions{Cwd: "/x"}
+	if _, err := a.OneShot().Run(ctx, nil, o); err == nil {
+		t.Error("Run with an empty argv succeeded")
+	}
+	if _, err := a.LongRunning().Start(ctx, nil, o); err == nil {
+		t.Error("Start with an empty argv succeeded")
+	}
+	if got := authority.RemoteCommand(nil, "/x", nil); got != "" {
+		t.Errorf("RemoteCommand(nil) = %q, want no command", got)
+	}
+}

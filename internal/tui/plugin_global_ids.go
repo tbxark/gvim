@@ -1,6 +1,6 @@
 package tui
 
-// Editor-global plugin ids (R19). A daemon plugin runtime is shared by every local
+// Editor-global plugin ids. A daemon plugin runtime is shared by every local
 // workspace, but each workspace model has its own split-tree window ids and its own editor
 // adapter buffer ids, so the same number can name different things in two workspaces. The
 // plugin API therefore exposes packed ids: the workspace's sequence in the high bits and

@@ -24,7 +24,7 @@ import (
 // traversal, so a symbolic link swapped in mid-walk cannot lead out of the tree), processes
 // in their own process groups, fsnotify watchers (pluginos_proc.go, pluginos_watch.go).
 //
-// Every method is safe for concurrent use (AMENDMENTS C16): the plugin runtime calls the IO
+// Every method is safe for concurrent use: the plugin runtime calls the IO
 // methods from Work goroutines, so the process and watcher tables sit behind mu, which is
 // never held across an IO call.
 type pluginOS struct {
@@ -238,8 +238,11 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo h
 	if serr == nil && existing.IsDir() {
 		return pluginapi.Errf(pluginapi.CodeIO, "%s: is a directory", p)
 	}
+	if serr == nil && !existing.Mode().IsRegular() {
+		return pluginapi.Errf(pluginapi.CodeIO, "%s: not a regular file", p)
+	}
 	if wo.Append {
-		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_APPEND, mode)
+		f, err := openRegular(p, os.O_WRONLY|os.O_CREATE|os.O_APPEND, mode)
 		if err != nil {
 			return mapErr(err, p)
 		}
@@ -247,11 +250,14 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo h
 		return mapErr(errors.Join(err, f.Close()), p)
 	}
 	if !wo.Atomic {
-		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		f, err := openRegular(p, os.O_WRONLY|os.O_CREATE, mode)
 		if err != nil {
 			return mapErr(err, p)
 		}
-		_, err = f.Write(data)
+		err = f.Truncate(0) // after the file type check: O_TRUNC would act on a device first
+		if err == nil {
+			_, err = f.Write(data)
+		}
 		return mapErr(errors.Join(err, f.Close()), p)
 	}
 	// Atomic: a temporary file in the same directory, then rename over the target. A
@@ -259,6 +265,10 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo h
 	target := p
 	if real, err := filepath.EvalSymlinks(p); err == nil {
 		target = real
+	} else if li, lerr := os.Lstat(p); lerr == nil && li.Mode()&fs.ModeSymlink != 0 {
+		// A dangling link has no file to replace, and renaming over it would replace the
+		// link itself: refuse.
+		return pluginapi.Errf(pluginapi.CodeIO, "%s: a dangling symbolic link cannot be replaced atomically", p)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".gvim-*.tmp")
 	if err != nil {
@@ -288,6 +298,24 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo h
 		return mapErr(ontarget(err, p), p)
 	}
 	return nil
+}
+
+// openRegular opens p for writing without blocking on a FIFO (O_NONBLOCK: a write-only
+// open of a FIFO with no reader fails instead of waiting) and refuses anything but a
+// regular file, which also covers a file swapped for a FIFO after the caller's check.
+func openRegular(p string, flag int, mode fs.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(p, flag|syscall.O_NONBLOCK, mode)
+	if err != nil {
+		return nil, err
+	}
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		_ = f.Close()
+		if err == nil {
+			err = pluginapi.Errf(pluginapi.CodeIO, "%s: not a regular file", p)
+		}
+		return nil, err
+	}
+	return f, nil
 }
 
 // ontarget rewrites an error of the temporary file of an atomic write so that it names the
@@ -420,12 +448,16 @@ func (o *pluginOS) refuseProtected(p string) error {
 	return nil
 }
 
-// Rename implements hostos.OS. Across file systems it copies and removes.
+// Rename implements hostos.OS. An existing destination is a conflict, on the same file
+// system and across file systems alike (where it copies and removes, and Copy refuses one).
 func (o *pluginOS) Rename(ctx context.Context, from, to string) error {
 	if err := ctxErr(ctx); err != nil {
 		return err
 	}
 	a, b := o.abs(from), o.abs(to)
+	if _, err := os.Lstat(b); err == nil {
+		return pluginapi.Errf(pluginapi.CodeConflict, "%s: already exists", b)
+	}
 	err := os.Rename(a, b)
 	if err == nil || !errors.Is(err, syscall.EXDEV) {
 		return mapErr(err, a)
@@ -702,6 +734,7 @@ func (o *pluginOS) Shutdown() {
 	o.mu.Unlock()
 	for _, p := range procs {
 		p.killGroup("KILL")
+		p.discardOutput()
 	}
 	for _, w := range watches {
 		w.Stop()

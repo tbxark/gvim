@@ -32,8 +32,8 @@ func TestIconModeKeepsEveryButtonInPlace(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}
 	for _, w := range []int{20, 30, 60, 100} {
 		for override := 15; override <= 40; override++ {
-			plain := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(override)})
-			nerd := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(override), IconMode: icons.Nerd})
+			plain := layoutFor(w, 30, frame.Input{Tabs: tabs, ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(override)})
+			nerd := layoutFor(w, 30, frame.Input{Tabs: tabs, ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(override), IconMode: icons.Nerd})
 			if plain.ExReloadX != nerd.ExReloadX || plain.ExCloseX != nerd.ExCloseX {
 				t.Fatalf("w=%d ex=%d: buttons at %d,%d (nerd) and %d,%d (plain)",
 					w, plain.Ex, nerd.ExReloadX, nerd.ExCloseX, plain.ExReloadX, plain.ExCloseX)
@@ -55,7 +55,7 @@ func TestNarrowExplorerHidesButtonsInNerdMode(t *testing.T) {
 	t.Parallel()
 	// The reload button needs 17 columns and the close button 19, as in plain mode.
 	for _, tt := range []struct{ ex, reload, closeX int }{{16, -1, -1}, {17, 16, -1}, {18, 16, -1}, {19, 16, 18}, {30, 25, 27}} {
-		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(tt.ex), IconMode: icons.Nerd})
+		l := layoutFor(100, 30, frame.Input{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(tt.ex), IconMode: icons.Nerd})
 		if l.Ex != tt.ex || l.ExReloadX != tt.reload || l.ExCloseX != tt.closeX {
 			t.Errorf("E=%d: buttons at %d and %d, want %d and %d", tt.ex, l.ExReloadX, l.ExCloseX, tt.reload, tt.closeX)
 		}
@@ -85,7 +85,7 @@ func TestIconModeDrawsTheChosenSet(t *testing.T) {
 		}
 		closes := 0
 		for _, r := range l.Strip.Runs {
-			if r.Kind == hitTabClose {
+			if r.Kind == frame.HitTabClose {
 				closes++
 				if got := cell(r.X, l.StripY); got != mode.Glyph(icons.Close) {
 					t.Errorf("%v: tab close cell %q", mode, got)
@@ -114,7 +114,7 @@ func TestNerdTabsShowTheFileIcon(t *testing.T) {
 		t.Errorf("close button of the first tab moved by %d cells, want 2", got)
 	}
 	for _, r := range pl.Strip.Runs {
-		if got := plain.paint().At(r.X, pl.StripY).Text; r.Kind == hitTab && strings.Contains(got, want) {
+		if got := plain.paint().At(r.X, pl.StripY).Text; r.Kind == frame.HitTab && strings.Contains(got, want) {
 			t.Errorf("plain tab shows the file icon at %d", r.X)
 		}
 	}
@@ -129,8 +129,8 @@ func TestNerdTabScrollMarkersAndFoldMarks(t *testing.T) {
 	s := frame.PlaceStrip(0, 30, tabs, 1, icons.Nerd)
 	var left, right bool
 	for _, r := range s.Runs {
-		left = left || (r.Kind == hitTabScrollBefore && r.Text == icons.Nerd.Glyph(icons.ScrollLeft))
-		right = right || (r.Kind == hitTabScrollAfter && r.Text == icons.Nerd.Glyph(icons.ScrollRight))
+		left = left || (r.Kind == frame.HitTabScrollBefore && r.Text == icons.Nerd.Glyph(icons.ScrollLeft))
+		right = right || (r.Kind == frame.HitTabScrollAfter && r.Text == icons.Nerd.Glyph(icons.ScrollRight))
 	}
 	if !left || !right {
 		t.Errorf("scroll markers: left %v right %v, want both in the nerd set", left, right)
@@ -151,13 +151,13 @@ func TestNerdModeClicksHitTheButtons(t *testing.T) {
 	m := iconModel(t, "nerd")
 	l := m.layout()
 	for _, r := range l.Strip.Runs {
-		if r.Kind != hitTabClose {
+		if r.Kind != frame.HitTabClose {
 			continue
 		}
-		if got := l.Hit(r.X, l.StripY); got.Kind != hitTabClose || got.Index != r.Index {
+		if got := l.Hit(r.X, l.StripY); got.Kind != frame.HitTabClose || got.Index != r.Index {
 			t.Errorf("close of tab %d at %d hit as %+v", r.Index, r.X, got)
 		}
-		if got := l.Hit(r.X-1, l.StripY); got.Kind != hitTab {
+		if got := l.Hit(r.X-1, l.StripY); got.Kind != frame.HitTab {
 			t.Errorf("cell left of the close of tab %d hit as %+v", r.Index, got)
 		}
 	}

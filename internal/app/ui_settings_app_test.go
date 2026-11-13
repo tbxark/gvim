@@ -66,7 +66,7 @@ func TestSwitchKeymapKeepsTheConfigKeybindings(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
 	cfg.Keybindings = json.RawMessage(`{"bindings":[{"key":"s","modifiers":["ctrl"],"action":"noop","when":"normal"}]}`)
-	switchTo := switchKeymapFor(cfg)
+	switchTo := switchKeymapWith(func() config.Config { return cfg })
 	km, err := switchTo("emacs")
 	if err != nil || km == nil {
 		t.Fatalf("switch to emacs = %v, %v; want a keymap", km, err)

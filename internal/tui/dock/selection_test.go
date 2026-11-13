@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/terminal"
 )
 
 // captureCopy gives the panel a clipboard writer that records the copied text.
@@ -399,5 +401,29 @@ func TestTripleClickSelectionDragExtendsWholeRows(t *testing.T) {
 	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 2, Y: 2, Button: tea.MouseLeft}), scrollLayout(), 1)
 	if got := copySelectionText(t, p); got != "hello world\nrow-2" {
 		t.Fatalf("row drag copied %q, want both whole rows", got)
+	}
+}
+
+// A restored transcript has no shell: dragging below its last row and copying must
+// not reach for the missing session.
+func TestCopySelectionPastTheEndOfARestoredTranscriptNeedsNoShell(t *testing.T) {
+	t.Parallel()
+	var p Panel
+	p.SetHost(Host{
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 4 },
+		Focus:       func() {},
+	})
+	p.Restore(terminal.SavedTab{Rows: []string{"old output"}})
+	if p.term != nil || !p.Scrolling() {
+		t.Fatal("setup: want a restored read-only view without a shell")
+	}
+	p.Mouse(clickAt(0, 1, 0, tea.MouseLeft), scrollLayout(), 1)
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 3, Button: tea.MouseLeft}), scrollLayout(), 1)
+	if !p.Selection() {
+		t.Fatal("the drag did not select")
+	}
+	if got := copySelectionText(t, &p); got != "old output" {
+		t.Fatalf("copied %q, want the transcript row", got)
 	}
 }

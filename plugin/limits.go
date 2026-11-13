@@ -15,7 +15,7 @@ import (
 // plugin i18n and all-files diagnostics surfaces of tier 1a.
 const APIVersion = 2
 
-// Size limits (AMENDMENTS C5). Every Go function that allocates in proportion to its
+// Size limits. Every Go function that allocates in proportion to its
 // arguments computes the final size before allocating and raises beyond these caps.
 // Sizes use int64 arithmetic and division, never an unchecked multiplication.
 const (
@@ -29,7 +29,7 @@ const (
 	MaxDateFormat = 1024
 )
 
-// Limits of data handed to the host (FINAL 2.4).
+// Limits of data handed to the host.
 const (
 	maxHostNodes = 1_000_000 // nodes in a table passed to the host
 	maxHostDepth = 32        // depth of such a table
@@ -39,7 +39,7 @@ const (
 	maxHandles   = 10_000    // cached Buffer/Window handles per state
 )
 
-// Quotas, counted per plugin (FINAL 2.4). Exceeding one returns `nil, "limit: ..."`.
+// Quotas, counted per plugin. Exceeding one returns `nil, "limit: ..."`.
 const (
 	QuotaSubscriptions = 256
 	QuotaCommands      = 512
@@ -64,12 +64,12 @@ const maxArrayIndex = 1 << 20
 
 func init() { lua.MaxArrayIndex = maxArrayIndex }
 
-// maxCoDepth bounds nested coroutine resumes per state (AMENDMENTS C9), like the C stack
+// maxCoDepth bounds nested coroutine resumes per state, like the C stack
 // limit of reference Lua. Together with CallStackSize it bounds the worst-case memory of
 // runaway pcall/wrap recursion.
 const maxCoDepth = 190
 
-// Time budgets (FINAL 2.4, D16).
+// Time budgets.
 const (
 	DefaultTimeout   = 500 * time.Millisecond // plugin_timeout_ms
 	MaxTimeout       = 60 * time.Second

@@ -12,17 +12,12 @@ import (
 	"unicode/utf8"
 )
 
-// RunArgs runs argv in dir with no shell, with input on its standard input, and returns
-// its standard output with CRLF breaks turned into LF and its exit code. timeout bounds
-// the run. Unlike Run, a non-zero exit code is not an error: the caller decides what it
-// means (git grep, for instance, exits 1 for no matches). err is non-nil for a start
-// failure, a timeout, or output that is not UTF-8.
-func RunArgs(dir string, argv []string, input string, timeout time.Duration) (stdout string, exitCode int, err error) {
-	return RunArgsEnv(dir, argv, input, timeout, nil)
-}
-
-// RunArgsEnv is RunArgs with extra environment entries appended to the
-// inherited environment (the active project environment's set-only overlay).
+// RunArgsEnv runs argv in dir with no shell, with input on its standard input and extra
+// environment entries appended to the inherited environment (the active project
+// environment's set-only overlay). It returns the standard output with CRLF breaks turned
+// into LF and the exit code. timeout bounds the run. Unlike Run, a non-zero exit code is
+// not an error: the caller decides what it means (git grep, for instance, exits 1 for no
+// matches). err is non-nil for a start failure, a timeout, or output that is not UTF-8.
 func RunArgsEnv(dir string, argv []string, input string, timeout time.Duration, extraEnv []string) (stdout string, exitCode int, err error) {
 	if len(argv) == 0 {
 		return "", 0, errors.New("shell command: empty argument list")
@@ -36,9 +31,8 @@ func RunArgsEnv(dir string, argv []string, input string, timeout time.Duration, 
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 	cmd.WaitDelay = time.Second
-	var out, stderr bytes.Buffer
+	var out bytes.Buffer
 	cmd.Stdout = &out
-	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	if errors.Is(runErr, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
 		runErr = nil

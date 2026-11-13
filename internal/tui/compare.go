@@ -9,6 +9,7 @@ import (
 	"github.com/tbxark/gvim/diff"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -24,9 +25,9 @@ func (m *Model) openCompare(left, right int) bool {
 		m.notice = name + " is too large to compare"
 		return false
 	}
-	a, b := &splitNode{Tab: left}, &splitNode{Tab: right}
+	a, b := &split.Node{Tab: left}, &split.Node{Tab: right}
 	m.splits.owned = nil
-	m.splits.Root = &splitNode{Dir: sideBySide, A: a, B: b}
+	m.splits.Root = &split.Node{Dir: split.SideBySide, A: a, B: b}
 	m.splits.Focus = nil
 	m.splits.comparing = true
 	m.focusLeaf(a)
@@ -57,7 +58,7 @@ func (m *Model) compareStep(forward bool) {
 		m.notice = m.sameTextNotice()
 		return
 	}
-	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
+	nodes := [2]*split.Node{m.splits.Root.A, m.splits.Root.B}
 	docs := [2]Document{m.leafDoc(nodes[0]), m.leafDoc(nodes[1])}
 	side := 0
 	if m.splits.Focus == nodes[1] {
@@ -252,7 +253,7 @@ func (m *Model) compareSideOf(tab int) int {
 // stronger one, a "~", "-" or "+" in the gutter, a mark in the scrollbar column, and the
 // filler rows that keep the two sides level. A pane that is not a side of the compare view
 // is returned as it is.
-func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane {
+func (m *Model) compareDecor(p split.Pane, pane editorpane.Pane) editorpane.Pane {
 	side := m.compareSideOf(p.Tab)
 	if side < 0 {
 		return pane
@@ -262,7 +263,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 		return pane
 	}
 	if !p.Focused {
-		pane.TopRow = [2]*splitNode{m.splits.Root.A, m.splits.Root.B}[side].TopRow
+		pane.TopRow = [2]*split.Node{m.splits.Root.A, m.splits.Root.B}[side].TopRow
 		// The sides pan together: this one shows the columns the focused one shows.
 		if fp, doc := m.layout().FocusedPane(), m.ed.Active(); doc != nil && fp.Focused {
 			left, _ := m.paneGeometry(fp, doc).HScroll(fp.W, fp.H)
@@ -294,7 +295,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 		pseudo := line == n-1 && n > 1 && pane.Doc.Line(line) == "" // the empty text after a final newline
 		return line >= 0 && line < n && !pseudo
 	}
-	looks := lookTable(func(line int) compareLook {
+	looks := func(line int) compareLook {
 		if l, ok := hunkLooks[line]; ok {
 			return l
 		}
@@ -302,7 +303,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 			return lookModified
 		}
 		return lookNone
-	})
+	}
 	bg := map[compareLook]grid.Style{}
 	for look, key := range map[compareLook]string{lookRemoved: "diff_remove_bg", lookAdded: "diff_add_bg", lookModified: "diff_modify_bg"} {
 		if c := style.Color(m.theme, "editor", key); c != nil {
@@ -316,7 +317,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 		if inner != nil {
 			st, found = inner(line)
 		}
-		if b, ok := bg[looks.at(line)]; ok {
+		if b, ok := bg[looks(line)]; ok {
 			return editorpane.PatchStyle(st, b), true
 		}
 		return st, found
@@ -346,7 +347,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 	}
 	gutter, scroll := pane.Gutter, pane.ScrollMarks
 	pane.Gutter = func(line int) (editorpane.GutterMark, bool) {
-		if mk, ok := marks[looks.at(line)]; ok {
+		if mk, ok := marks[looks(line)]; ok {
 			return editorpane.GutterMark{Text: mk.text, Style: grid.Style{FG: mk.fg}}, true
 		}
 		if gutter != nil {
@@ -355,7 +356,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 		return editorpane.GutterMark{}, false
 	}
 	pane.ScrollMarks = func(line int) (editorpane.ScrollMark, bool) {
-		if mk, ok := marks[looks.at(line)]; ok {
+		if mk, ok := marks[looks(line)]; ok {
 			return editorpane.ScrollMark{Style: grid.Style{FG: mk.fg}}, true
 		}
 		if scroll != nil {
@@ -365,11 +366,6 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 	}
 	return pane
 }
-
-// lookTable gives the look of a line of one side.
-type lookTable func(line int) compareLook
-
-func (t lookTable) at(line int) compareLook { return t(line) }
 
 // compareEnds says how the two sides of the compare view end their lines.
 type compareEnds struct {
@@ -400,7 +396,7 @@ func (m *Model) compareSpans(pane *editorpane.Pane, side int, partner map[int]in
 		key = "diff_add_highlight_bg"
 	}
 	c := style.Color(m.theme, "editor", key)
-	doc, other := pane.Doc, m.leafDoc([2]*splitNode{m.splits.Root.A, m.splits.Root.B}[1-side])
+	doc, other := pane.Doc, m.leafDoc([2]*split.Node{m.splits.Root.A, m.splits.Root.B}[1-side])
 	if c == nil || doc == nil || other == nil {
 		return
 	}
@@ -442,7 +438,7 @@ func (m *Model) syncCompare() {
 	if !ok || doc == nil {
 		return
 	}
-	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
+	nodes := [2]*split.Node{m.splits.Root.A, m.splits.Root.B}
 	side := 0
 	switch m.splits.Focus {
 	case nodes[1]:
@@ -503,7 +499,7 @@ func (m *Model) largeTabIn(i, j int) string {
 // file mode, or "" when there is none. A document can become large after the view
 // opened, by a reload of its file.
 func (m *Model) largeCompared() string {
-	for _, n := range []*splitNode{m.splits.Root.A, m.splits.Root.B} {
+	for _, n := range []*split.Node{m.splits.Root.A, m.splits.Root.B} {
 		if doc := m.leafDoc(n); doc != nil && isLargeDoc(doc) {
 			return doc.Name()
 		}
@@ -523,7 +519,7 @@ func (m *Model) compareSwitch() {
 	}
 	st, ok := m.compareState()
 	from := m.ed.Active()
-	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
+	nodes := [2]*split.Node{m.splits.Root.A, m.splits.Root.B}
 	side := 0
 	if m.splits.Focus == nodes[1] {
 		side = 1

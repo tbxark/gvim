@@ -140,16 +140,10 @@ func TestRestoredExitStatusAndMarkerOrder(t *testing.T) {
 			{Rune: 'o', Fg: "#ff0000"}, {Rune: 'u'}, {Rune: 't'},
 		}}},
 	}
-	state := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false,
-		Rows:     []string{"out", terminalExitMarker},
-		Screen:   screen,
-		ExitCode: 4, ExitKnown: true,
-		Tabs: []terminal.SavedTab{{
-			Name: "t", Open: true, Rows: []string{"out", terminalExitMarker},
-			Screen: screen, ExitCode: 4, ExitKnown: true,
-		}},
-	}
+	state := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "t", Open: true, Rows: []string{"out", terminalExitMarker},
+		Screen: screen, ExitCode: 4, ExitKnown: true,
+	}}}
 	var tabs Tabs
 	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
@@ -169,7 +163,7 @@ func TestRestoredExitStatusAndMarkerOrder(t *testing.T) {
 	if !st.Tabs[0].ExitKnown || st.Tabs[0].ExitCode != 4 {
 		t.Fatalf("re-saved exit status = %+v", st.Tabs[0])
 	}
-	if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
+	if n := strings.Count(strings.Join(activeSaved(st).Rows, "\n"), terminalExitMarker); n != 1 {
 		t.Fatalf("restored re-save wrote %d markers", n)
 	}
 	// A restart from the restored read-only tab keeps the marker once, above the
@@ -187,12 +181,12 @@ func TestRestoredExitStatusAndMarkerOrder(t *testing.T) {
 		t.Fatal("the restored tab did not restart")
 	}
 	after := tabs.SavedState()
-	if n := strings.Count(strings.Join(after.Rows, "\n"), terminalExitMarker); n != 1 {
-		t.Fatalf("restart from a restored tab wrote %d markers: %q", n, after.Rows)
+	if n := strings.Count(strings.Join(activeSaved(after).Rows, "\n"), terminalExitMarker); n != 1 {
+		t.Fatalf("restart from a restored tab wrote %d markers: %q", n, activeSaved(after).Rows)
 	}
 
 	// An old record: no exit status, no invented marker.
-	old := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"}}
+	old := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out"}}}}
 	var oldTabs Tabs
 	oldTabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	oldTabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
@@ -204,7 +198,7 @@ func TestRestoredExitStatusAndMarkerOrder(t *testing.T) {
 	if got := oldPanel.exitedTitle(); got != "Terminal (exited)" {
 		t.Fatalf("old-record exited title = %q", got)
 	}
-	if st := oldTabs.SavedState(); st.ExitKnown || len(st.Rows) != 1 || st.Rows[0] != "out" {
+	if st := oldTabs.SavedState(); activeSaved(st).ExitKnown || len(activeSaved(st).Rows) != 1 || activeSaved(st).Rows[0] != "out" {
 		t.Fatalf("old record gained exit state: %+v", st)
 	}
 	_ = color.RGBA{}
@@ -275,10 +269,7 @@ func TestExitMarkerNotDuplicatedAfterRestore(t *testing.T) {
 	screen := &terminal.SavedScreen{Cols: 3, Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
 		{Rune: 'o'}, {Rune: 'u'}, {Rune: 't'},
 	}}}}
-	state := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false,
-		Rows: []string{"out", terminalExitMarker}, Screen: screen,
-	}
+	state := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out", terminalExitMarker}, Screen: screen}}}
 	var tabs Tabs
 	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
@@ -291,8 +282,8 @@ func TestExitMarkerNotDuplicatedAfterRestore(t *testing.T) {
 		t.Fatalf("restored last row = %q, %v", got, ok)
 	}
 	st := tabs.SavedState()
-	if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
-		t.Fatalf("restored re-save marker count = %d (%q)", n, st.Rows)
+	if n := strings.Count(strings.Join(activeSaved(st).Rows, "\n"), terminalExitMarker); n != 1 {
+		t.Fatalf("restored re-save marker count = %d (%q)", n, activeSaved(st).Rows)
 	}
 }
 
@@ -489,11 +480,11 @@ func TestAltScreenExitRestartAndRestoreKeepOneMarker(t *testing.T) {
 	var tabs Tabs
 	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	tabs.Restore(st)
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{st}})
 	restored := tabs.SavedState()
-	joined = strings.Join(restored.Rows, "\n")
+	joined = strings.Join(activeSaved(restored).Rows, "\n")
 	if n := strings.Count(joined, terminalExitMarker); n != 1 || !strings.Contains(joined, "alt frame") {
-		t.Fatalf("restored alt rows = %q", restored.Rows)
+		t.Fatalf("restored alt rows = %q", activeSaved(restored).Rows)
 	}
 	if !tabs.Restored() {
 		t.Fatal("the restored alt record is not read-only")

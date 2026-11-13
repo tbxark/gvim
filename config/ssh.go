@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 )
 
 // SSHConfig is the ssh section: host-key verification policy, host-key algorithm
@@ -11,10 +10,9 @@ import (
 // extensions; Fresh delegates SSH to the system ssh(1)). The policy is user-layer only:
 // a repository cannot choose how its host keys are verified.
 type SSHConfig struct {
-	// KnownHostsPolicy is "strict" (default), "accept-new" or "off". Strict refuses an
-	// unknown host; accept-new records a first-seen host key in known_hosts after a clear
-	// notice and always refuses a changed key; "off" is accepted by the parser but the
-	// transport refuses it at dial (host keys are always verified).
+	// KnownHostsPolicy is "strict" (default) or "accept-new". Strict refuses an unknown
+	// host; accept-new records a first-seen host key in known_hosts after a clear notice
+	// and always refuses a changed key. There is no "off": host keys are always verified.
 	KnownHostsPolicy string
 	// HostKeyAlgorithms is the ordered server host-key algorithm preference. Empty uses
 	// the transport's safe default (ed25519, ECDSA, RSA-SHA2). An unknown name is a
@@ -58,11 +56,13 @@ func (c *Config) setSSHKey(key string, raw json.RawMessage) error {
 			return err
 		}
 		switch s {
-		case "strict", "accept-new", "off":
+		case "strict", "accept-new":
 			c.SSH.KnownHostsPolicy = s
 			return nil
+		case "off":
+			return errors.New("\"off\" is not supported: host keys are always verified, so use \"strict\" or \"accept-new\"")
 		default:
-			return fmt.Errorf("must be \"strict\", \"accept-new\" or \"off\" (off is refused at connect: host keys are always verified)")
+			return errors.New("must be \"strict\" or \"accept-new\"")
 		}
 	case "host_key_algorithms":
 		if isNull(raw) {

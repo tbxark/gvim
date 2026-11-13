@@ -108,7 +108,7 @@ func (c *Cache) context() int {
 	return defaultContextBytes
 }
 
-// Window returns the syntax spans of line i of the large document doc. The lexer runs
+// window returns the syntax spans of line i of the large document doc. The lexer runs
 // over a window of lines around i, and the result is kept while the text has the
 // same version, so scrolling inside the window and moving the caret lex nothing.
 // A line too long to be painted whole has none. It returns nil when no lexer matched
@@ -231,15 +231,4 @@ func (c *Cache) Windowed(doc *editor.Document) bool {
 		c.sized, c.sizedOK, c.big = ver, true, n > windowedBytes
 	}
 	return c.big
-}
-
-// Generation reports how many actions that may have edited the text the cache has
-// seen. The spans are current for the generation they were lexed at, so a caller can
-// tell a refresh from the stale state the action left. It is for the tests of the
-// adapters that mark the spans stale.
-func (c *Cache) Generation() uint64 {
-	if c == nil {
-		return 0
-	}
-	return c.gen
 }

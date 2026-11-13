@@ -22,6 +22,9 @@ type Editor struct {
 	// saves records whether a planned auto-save is writing. See autosave.go. It is
 	// nil in a zero adapter, and then nothing is refused.
 	saves *autoSaveGate
+	// hotExit makes a plain Quit grant the quit while tabs are modified: with
+	// editor.hot_exit on, the session save at exit stashes their text.
+	hotExit bool
 }
 
 // SetViewport sizes the editor pane.
@@ -29,18 +32,16 @@ func (a *Editor) SetViewport(rows, cols int) {
 	a.ed.SetViewport(rows, cols)
 }
 
-// Do runs one editor action. The UI also sends actions whose feature is not
-// built yet (the palette, the menu and the find bar). Those come back as
+// Do runs one editor action. The UI also sends actions the editor does not know
+// (from the palette, the menu and the find bar). Those come back as
 // ErrUnknownAction without reaching the editor, so the status row keeps the
-// editor's own message. Every action may change the text, so the syntax spans
-// of the active document are marked stale first. A save is refused while a
-// planned write is pending, because its result is not yet recorded.
+// editor's own message. A save is refused while a planned write is pending,
+// because its result is not yet recorded.
 func (a *Editor) Do(act editor.Action, args map[string]any) editor.Result {
-	a.edited()
 	if !editor.IsAction(act) {
 		return editor.Result{Err: fmt.Errorf("%w: %s", editor.ErrUnknownAction, act)}
 	}
-	if a.saves != nil && a.saves.writing && (act == "save" || act == "save_as" || act == "save_all") {
+	if a.writePending() && (act == "save" || act == "save_as" || act == "save_all") {
 		return editor.Result{Err: errAutoSaveWriting}
 	}
 	return a.ed.Do(act, args)
@@ -118,13 +119,8 @@ func (a *Editor) RunRevert(p editor.RevertPlan) editor.RevertResult {
 }
 
 // ApplyRevert puts the read text into the planned document, on the editor's goroutine. The
-// text of a tab that is not active may change too, so every span cache is marked stale, as
-// EndShell does.
+// text of a tab that is not active may change too.
 func (a *Editor) ApplyRevert(p editor.RevertPlan, r editor.RevertResult) error {
-	a.spans.Edited()
-	for _, c := range a.others {
-		c.Edited()
-	}
 	return a.ed.ApplyRevert(p, r)
 }
 
@@ -146,31 +142,6 @@ func (a *Editor) markWriting(err error) {
 	if a.saves != nil && err == nil {
 		a.saves.writing = true
 	}
-}
-
-// edited marks the syntax spans stale for an edit to the active document. The
-// active document's text may be cached in the shared cache, and it may also be
-// cached in its split-pane cache from the time it was not active. Both are marked,
-// so a split pane never shows spans from before the edit. A nil cache is ignored.
-func (a *Editor) edited() {
-	a.spans.Edited()
-	if doc := a.ed.Active(); doc != nil {
-		a.others[doc].Edited()
-	}
-}
-
-// MarkEdited marks the syntax spans of d stale for an edit made through the plugin port.
-// The document need not be the active tab: a split pane can show a tab that is not, and
-// that pane's cache is marked too. The shared cache belongs to the active document, so it
-// is only marked when d is that one.
-func (a *Editor) MarkEdited(d *editor.Document) {
-	if d == nil {
-		return
-	}
-	if d == a.ed.Active() {
-		a.spans.Edited()
-	}
-	a.others[d].Edited()
 }
 
 // Active returns the active document, or nil when no tab is open. The nil is a
@@ -229,13 +200,8 @@ func (a *Editor) BeginShell(act editor.Action, args map[string]any) (editor.Shel
 	return a.ed.BeginShell(act, args)
 }
 
-// EndShell applies the output of a shell job. A replace can change a tab that is
-// not active, so every span cache is marked stale, not only the active one's.
+// EndShell applies the output of a shell job.
 func (a *Editor) EndShell(job editor.ShellJob, out string, runErr error) editor.Result {
-	a.spans.Edited()
-	for _, c := range a.others {
-		c.Edited()
-	}
 	return a.ed.EndShell(job, out, runErr)
 }
 
@@ -254,22 +220,17 @@ func (a *Editor) FindMatches(q search.Query) ([]search.Match, error) {
 func (a *Editor) SearchRange() (buffer.Selection, bool) { return a.ed.SearchRange() }
 
 // ReplaceMatch replaces the match m of q with repl as one undo step, and returns
-// the inserted text. The editor checks the read-only flag. The syntax spans are
-// marked stale first, because the text changes.
+// the inserted text. The editor checks the read-only flag.
 func (a *Editor) ReplaceMatch(q search.Query, repl string, m search.Match) (string, error) {
-	a.edited()
 	return a.ed.ReplaceMatch(q, repl, m)
 }
 
 // ReplaceMatches replaces every match of q with repl as one undo step, and
 // returns how many it replaced. The editor checks the read-only flag.
 func (a *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
-	a.edited()
 	return a.ed.ReplaceMatches(q, repl)
 }
 
-// Tabs maps the editor's tabs to the tab strip entries. The path is carried too, so the
-// root can watch the folders of the open tabs and reload the tabs whose files change.
 // ApplyCompletionAtCarets accepts one completion at every caret of the document at path
 // as one atomic edit. See editor.Editor.ApplyCompletionAtCarets; the TUI's multi-cursor
 // completion accept path uses it.
@@ -291,6 +252,11 @@ func (a *Editor) RecentTabIndices() []int {
 	return a.ed.RecentTabIndices()
 }
 
+// QuitNeedsConfirm reports whether a clean quit still asks (editor.confirm_quit).
+func (a *Editor) QuitNeedsConfirm() bool { return a.ed.QuitNeedsConfirm() }
+
+// Tabs maps the editor's tabs to the tab strip entries. The path is carried too, so the
+// root can watch the folders of the open tabs and reload the tabs whose files change.
 func (a *Editor) Tabs() []tui.TabInfo {
 	tabs := a.ed.Tabs()
 	out := make([]tui.TabInfo, len(tabs))
@@ -475,10 +441,15 @@ func (a *Editor) CloseNeedsConfirm(i int) (bool, error) {
 	return a.ed.CloseNeedsConfirm(i)
 }
 
+// SetHotExit sets the hot-exit quit policy: with it on, a plain Quit is granted
+// even when tabs are modified, because the session save at exit keeps their text.
+func (a *Editor) SetHotExit(on bool) { a.hotExit = on }
+
 // Quit lists the tabs with unsaved edits, in tab order. With none, the editor
-// is marked for quit and the list is nil.
+// is marked for quit and the list is nil. With hot exit on and no force, the quit
+// is granted (nil) and the modified tabs stay modified.
 func (a *Editor) Quit(force bool) []editor.Dirty {
-	return a.ed.Quit(force)
+	return a.ed.Quit(force || a.hotExit)
 }
 
 // SetContext sets how many bytes of lines above the lines shown the lexer is given

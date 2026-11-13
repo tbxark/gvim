@@ -4,16 +4,20 @@
 //
 // Matching uses the standard library regexp package (RE2), so no cgo is
 // involved. Literal queries are escaped with regexp.QuoteMeta. Whole-word
-// matching follows the legacy Fresh editor, which wraps the pattern in \b and
-// judges word characters by Unicode rules (see isWordRune).
+// matching has Fresh's meaning, the match of \b(?:P)\b, with word characters judged by
+// Unicode rules (see isWordRune). RE2's \b is ASCII only, so the boundaries are tested here
+// instead of by wrapping the pattern. A literal query rescans one rune past a rejected
+// candidate, which is what the wrapped pattern finds; a regex query only drops the
+// leftmost matches that are not whole words, so an alternative the wrapped pattern would
+// have backtracked to (ab|abc on "abc") is not tried.
 package search
 
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"regexp/syntax"
-	"sort"
 	"strings"
 	"sync"
 	"unicode"
@@ -93,11 +97,7 @@ func run(b *buffer.Buffer, q Query) (result, error) {
 		return result{}, err
 	}
 	d := newDocument(b)
-	r := result{doc: d, re: re}
-	for _, loc := range d.locate(re, q) {
-		r.hits = append(r.hits, d.hit(loc))
-	}
-	return r, nil
+	return result{doc: d, re: re, hits: d.hits(re, q)}, nil
 }
 
 // compileCacheSize is how many compiled queries are kept. The find bar asks for the
@@ -155,12 +155,12 @@ func compileQuery(q Query) (*regexp.Regexp, error) {
 	if !q.Regex {
 		pattern = regexp.QuoteMeta(pattern)
 	}
-	// "m" makes ^ and $ match at line breaks, as in the legacy editor.
+	// "m" makes ^ and $ match at line breaks, as in Fresh.
 	flags := "m"
 	if !q.CaseSensitive {
 		flags += "i"
 	}
-	// As in the legacy editor, "." crosses lines only when a regex asks for a
+	// As in Fresh, "." crosses lines only when a regex asks for a
 	// newline, so a multi-line query is written as one.
 	if q.Regex && strings.Contains(q.Text, "\n") {
 		flags += "s"
@@ -185,41 +185,38 @@ func compileQuery(q Query) (*regexp.Regexp, error) {
 // the buffer line number of the first line of text: 0 for a whole buffer, more
 // for a window of it (see newWindow).
 type document struct {
-	text      string
-	lineStart []int
-	first     int
+	text  string
+	first int // the document line of the text's first line
 }
 
 func newDocument(b *buffer.Buffer) document {
 	var sb strings.Builder
-	starts := make([]int, b.Lines())
-	for i := range starts {
+	for i := range b.Lines() {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
-		starts[i] = sb.Len()
 		sb.WriteString(b.Line(i))
 	}
-	return document{text: sb.String(), lineStart: starts}
+	return document{text: sb.String()}
 }
 
-// pos converts a byte offset in d.text to a buffer position. Columns count
-// runes, as buffer.Pos does.
-func (d document) pos(off int) buffer.Pos {
-	line := sort.Search(len(d.lineStart), func(i int) bool {
-		return d.lineStart[i] > off
-	}) - 1
-	return buffer.Pos{Line: d.first + line, Col: utf8.RuneCountInString(d.text[d.lineStart[line]:off])}
-}
-
-// hit builds a hit from submatch offsets of d.text. loc[0:2] is the whole match.
-func (d document) hit(loc []int) hit {
-	return hit{
-		Start: d.pos(loc[0]), End: d.pos(loc[1]),
-		start:  loc[0],
-		end:    loc[1],
-		groups: loc,
+// hits returns the matches of q in d, in order, with their positions and offsets.
+func (d document) hits(re *regexp.Regexp, q Query) []hit {
+	locs := d.locate(re, q)
+	if len(locs) == 0 {
+		return nil
 	}
+	cur := newOffsetPos(d.text, buffer.Pos{Line: d.first})
+	out := make([]hit, len(locs))
+	for i, loc := range locs {
+		out[i] = hit{
+			Match:  Match{Start: cur.pos(loc[0]), End: cur.pos(loc[1])},
+			start:  loc[0],
+			end:    loc[1],
+			groups: loc,
+		}
+	}
+	return out
 }
 
 // locate returns the offsets of the matches of q in d, in order, as submatch
@@ -238,65 +235,26 @@ func (d document) locate(re *regexp.Regexp, q Query) [][]int {
 		return kept
 	}
 
-	// A literal has no anchors or \b, so searching from an offset is exact.
-	// After a rejected whole-word candidate, the scan resumes one rune past
-	// its start, so a valid match that overlaps it is still found. This is
-	// what the legacy \b(?:...)\b pattern does.
-	//
-	// A case-insensitive literal is wrapped in (?i), which leaves the regexp
-	// without a literal prefix and about six times slower than strings.Index.
-	// When the query and the text are both ASCII, folding the text to lower
-	// case keeps every offset, and the match is the same as the regexp's.
-	var out [][]int
-	haystack, needle := "", ""
-	fold := foldsASCII(q, d.text)
-	if fold {
-		haystack, needle = strings.ToLower(d.text), strings.ToLower(q.Text)
+	// A literal has no anchors or \b, so the same search as the range functions runs
+	// on it (literalOffsets): after a rejected whole-word candidate it goes on from
+	// where it is, so a valid match that overlaps the candidate is still found, as
+	// Fresh's \b(?:...)\b pattern does.
+	if q.Text == "" {
+		return nil
 	}
-	for pos := 0; pos < len(d.text); {
-		var loc []int
-		if fold {
-			if i := strings.Index(haystack[pos:], needle); i >= 0 {
-				loc = []int{i, i + len(needle)}
-			}
-		} else {
-			loc = re.FindStringIndex(d.text[pos:])
-		}
-		if loc == nil {
-			break
-		}
-		s, e := pos+loc[0], pos+loc[1]
-		if !q.WholeWord || isWholeWord(d.text, s, e) {
-			out = append(out, []int{s, e})
-			pos = e
-			continue
-		}
-		_, size := utf8.DecodeRuneInString(d.text[s:])
-		pos = s + size
+	offs := literalOffsets(q, d.text, math.MaxInt)
+	if len(offs) == 0 {
+		return nil
+	}
+	out := make([][]int, len(offs))
+	for i, o := range offs {
+		out[i] = []int{o[0], o[1]}
 	}
 	return out
 }
 
-// foldsASCII reports whether the literal q can be found in text by folding the
-// text to lower case and using strings.Index: the match must ignore case, and q
-// and text must be ASCII. Outside ASCII the regexp folds more than lower case
-// (the Kelvin sign matches k), so it is left to the regexp.
-func foldsASCII(q Query, text string) bool {
-	return !q.CaseSensitive && q.Text != "" && isASCII(q.Text) && isASCII(text)
-}
-
-// isASCII reports whether s holds only ASCII bytes.
-func isASCII(s string) bool {
-	for i := range len(s) {
-		if s[i] >= utf8.RuneSelf {
-			return false
-		}
-	}
-	return true
-}
-
 // isWholeWord reports whether text[s:e] has word boundaries on both sides,
-// which is the \b test of the legacy \b(?:P)\b pattern. A boundary sits
+// which is the \b test of Fresh's \b(?:P)\b pattern. A boundary sits
 // between two runes when exactly one of them is a word character.
 func isWholeWord(text string, s, e int) bool {
 	return wordBefore(text, s) != wordAt(text, s) && wordBefore(text, e) != wordAt(text, e)
@@ -322,7 +280,7 @@ func wordBefore(text string, i int) bool {
 	return isWordRune(r)
 }
 
-// isWordRune is the word-character rule of the legacy editor, which uses
+// isWordRune is the word-character rule of Fresh, which uses
 // regex_syntax::is_word_character (refs/fresh/crates/fresh-editor-core/src/
 // primitives/word_navigation.rs). That is Alphabetic, Mark, Nd, Pc and
 // Join_Control. Alphabetic is the union of L*, Nl and Other_Alphabetic.

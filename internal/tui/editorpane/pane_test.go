@@ -591,3 +591,37 @@ func TestScrollbarReachesTheEndOfAWrappedFile(t *testing.T) {
 		t.Errorf("a press on the first track row gave top %d, want 0", got)
 	}
 }
+
+// RevealTop returns the top line that puts the caret's display row inside a w by h
+// pane, counting the wrapped rows of each line. A caret already on screen keeps
+// the pane's top. A caret above the window takes its own line. A caret below takes
+// the fewest lines that fit above it, so the scroll is as short as it can be.
+func (p Pane) RevealTop(w, h int) int {
+	return p.RevealTopMargin(w, h, 0)
+}
+
+// RevealTopMargin is RevealTop that also keeps margin display rows between the caret
+// row and the top or bottom of the body, as the scroll-off setting asks. The margin
+// is at most half the body, and it gives way at the start and the end of the
+// document, where there is no text to show beyond the caret. The view moves by whole
+// lines, so a wrapped line at the edge can leave a little more than margin rows.
+func (p Pane) RevealTopMargin(w, h, margin int) int {
+	top, _ := p.RevealView(w, h, margin)
+	return top
+}
+
+// Thumb returns the first body row and the length in rows of the scrollbar
+// thumb for the current top line in a pane h rows tall. It is meaningful when
+// the document is taller than the pane.
+func (p Pane) Thumb(h int) (start, length int) {
+	if p.Doc == nil || h <= 0 {
+		return 0, 0
+	}
+	lines := max(p.Doc.LineCount(), 1)
+	display := max(DisplayLines(p.Doc), lines)
+	top := min(max(p.Top, 0), lines-1)
+	if p.Fillers != nil {
+		return thumbOf(p.Fillers.Total(lines), h, p.Fillers.BlockStart(top)+max(p.TopRow, 0))
+	}
+	return thumbOf(display, h, top)
+}

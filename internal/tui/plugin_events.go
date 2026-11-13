@@ -10,7 +10,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// This file is the events side of the plugin host (FINAL section 6, X5). The root raises
+// This file is the events side of the plugin host. The root raises
 // events from two kinds of place:
 //
 //   - Direct raise sites call plugEmit (or one of the helpers below) where the thing
@@ -58,7 +58,7 @@ var snapEvents = [...]struct {
 }
 
 // changesConsumer is the name under which the root reads the change records of a
-// document: the "events" consumer of AMENDMENTS C13.
+// document: the "events" consumer.
 const changesConsumer = "events"
 
 // maxChangedEdits is the number of change records one buffer_changed event carries; more
@@ -211,12 +211,12 @@ func apiPos(doc Document, p buffer.Pos) pluginapi.Pos {
 // The difference is read once more after a pump that delivered something, so the plugins
 // hear about it in the same Update. It is read once and not until it settles: a handler
 // that reacts to every change by making one is slowed to one round per Update.
-func (m *Model) pluginTail(before pluginSnap, msg tea.Msg) tea.Cmd {
-	_ = msg
+func (m *Model) pluginTail(before pluginSnap) tea.Cmd {
 	p := &m.plug
 	if p.rt == nil {
 		return nil
 	}
+	m.plugDecorSweep()
 	cur := m.plugFill(before.want)
 	m.plugDiff(&before, &cur)
 	if len(p.events) == 0 {
@@ -253,7 +253,7 @@ func (m *Model) pluginViewTail(before pluginSnap) tea.Cmd {
 }
 
 // plugDiff queues the events of the difference between two snapshots. Lifecycle events
-// come first, then text, then caret and selection (FINAL section 6).
+// come first, then text, then caret and selection.
 func (m *Model) plugDiff(before, cur *pluginSnap) {
 	if before.w != cur.w || before.h != cur.h {
 		if before.w != 0 && before.h != 0 {

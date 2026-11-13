@@ -81,8 +81,9 @@ reports the rest; a configured limit is never silently dropped.
 | Linux | a user-delegated cgroup v2 `memory.max` (a percent of `/proc/meminfo` MemTotal); with no delegated cgroup, a `sh -c 'ulimit -v <KB>; exec "$@"'` wrapper around the server | a delegated cgroup v2 `cpu.max` quota (100% = one core); with no cgroup a CPU *percentage* has no rlimit equivalent (an rlimit CPU limit is seconds), so it is recorded as not applied |
 | macOS, Windows | not applied | not applied |
 
-On Linux the editor creates one `gvim-lsp-<pid>` cgroup under the same user-delegated cgroup
-locations Fresh uses (`GVIM_CGROUP_BASE` overrides the base, for tests and unusual delegations),
+On Linux the editor creates one `gvim-lsp-<pid>-<n>` cgroup per started server (so one server's
+limits never replace another's, and the cgroup is removed when the server's client closes) under
+the same user-delegated cgroup locations Fresh uses (`GVIM_CGROUP_BASE` overrides the base, for tests and unusual delegations),
 writes the caps before the start and moves the child into it with `cgroup.procs` right after. A
 missing `sh` with no cgroup leaves only the recorded reason. Elsewhere Go's `os/exec` has no
 pre-exec hook and `syscall.SysProcAttr` has no rlimits, and the platform has no cgroup interface;
@@ -792,7 +793,7 @@ defaults, status listing and tests); the universal-server item is a deliberate r
 not a missing integration. `process_limits` is applied on Linux and, on macOS and Windows, is
 explicitly recorded as unreachable in the server status (see
 [Process limits](#process-limits)). The per-OS limitation and the universal-server decision are
-the remaining R7-5 residuals. See docs/parity.md, backlog #7.
+the remaining LSP gaps listed in [parity.md](parity.md).
 ## The project environment
 
 A language server starts with the active project environment applied: the host adds

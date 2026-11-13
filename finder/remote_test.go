@@ -172,6 +172,15 @@ func TestEnumerateRemoteCancellation(t *testing.T) {
 	}
 }
 
+// StartRemote begins enumerating the remote workspace root in the background and returns
+// at once. It fills the same Index type as Start, so the palette needs no remote-aware
+// code: while loading it polls, and an error leaves the partial list usable.
+func StartRemote(ctx context.Context, fs RemoteFS, root string) *Index {
+	return startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
+		return EnumerateRemote(ctx, fs, root, Options{}, emit)
+	})
+}
+
 // TestStartRemoteStreamsAndBounds checks the asynchronous index streams the remote files
 // and reports completion; a root failure ends loading with the error and no local fallback.
 func TestStartRemoteStreamsAndBounds(t *testing.T) {

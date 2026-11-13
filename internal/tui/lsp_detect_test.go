@@ -553,7 +553,7 @@ func TestStatusRowShowsTheServerState(t *testing.T) {
 	}
 	var found bool
 	for _, r := range frame.StatusRuns(100, lt.m.statusView()) {
-		if r.Kind == hitStatusSegment && r.Index == statusSegmentLSP {
+		if r.Kind == frame.HitStatusSegment && r.Index == frame.StatusSegmentLSP {
 			found = strings.Contains(r.Text, "LSP")
 		}
 	}
@@ -561,7 +561,7 @@ func TestStatusRowShowsTheServerState(t *testing.T) {
 		t.Error("the pill is not a clickable run of the status row")
 	}
 	port.servers = []LSPServerStatus{{Language: "go", Name: "gopls", State: LSPServerRunning}}
-	lt.settle(lt.m.statusSegmentClick(statusSegmentLSP), 3)
+	lt.settle(lt.m.statusSegmentClick(frame.StatusSegmentLSP), 3)
 	if v := overlayList(t, lt.m); len(v.Rows) == 0 {
 		t.Errorf("the LSP status popup has no rows")
 	}

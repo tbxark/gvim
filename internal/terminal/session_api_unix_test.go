@@ -224,6 +224,20 @@ func TestSearchScrollback(t *testing.T) {
 	}
 }
 
+// TestSearchScrollbackIgnoresCaseOfHistoryText checks the case-insensitive literal search
+// against history rows that are not lowercase.
+func TestSearchScrollbackIgnoresCaseOfHistoryText(t *testing.T) {
+	s := startSh(t, "i=1; while [ $i -le 60 ]; do echo Mixed-Case-$i; i=$((i+1)); done; exec sleep 5")
+	waitScrollback(t, s, func(total int) bool { return total >= 30 })
+	matches, _, err := s.SearchScrollbackMode("mixed-case-10", false, false, 10)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("case-insensitive literal = %v, %v; want one match", matches, err)
+	}
+	if matches, _, err := s.SearchScrollbackMode("mixed-case-10", false, true, 10); err != nil || len(matches) != 0 {
+		t.Fatalf("case-sensitive literal = %v, %v; want no match", matches, err)
+	}
+}
+
 // TestSessionTitleFromOSC checks the title the child sets with OSC 0/2: the last
 // one wins, a reset clears it, and OSC 1 (icon name only) does not change it.
 func TestSessionTitleFromOSC(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/keymap"
@@ -17,9 +18,8 @@ import (
 )
 
 // unhandledActions lists the actions that the embedded keymaps bind but the port
-// does not run yet. Pressing their keys shows "Not supported in this port". The
-// list is the gap list from migration/BLUEPRINT.md §1.3. When a handler lands,
-// TestEveryBoundActionRunsOrIsListed fails until its entry is removed here.
+// does not run yet. Pressing their keys shows "Not supported in this port". When a
+// handler lands, TestEveryBoundActionRunsOrIsListed fails until its entry is removed here.
 var unhandledActions = map[string]bool{
 	"file_explorer_search_backspace": true,
 }
@@ -30,9 +30,6 @@ var pluginActions = map[string]bool{
 	"git_gutter.next_change": true,
 	"git_gutter.prev_change": true,
 }
-
-// presetNames are the embedded keymaps. keymap does not export the list.
-var presetNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 
 // probedContexts are the when-clauses a model with no overlay open can reach.
 // Bindings in other contexts (prompt, popup, menu, settings, terminal, and so
@@ -46,7 +43,7 @@ var probedContexts = []keymap.Context{
 func boundActions(t *testing.T) []string {
 	t.Helper()
 	seen := map[string]bool{}
-	for _, name := range presetNames {
+	for _, name := range keybindings.BuiltinKeymaps {
 		km, err := keymap.ByName(name)
 		if err != nil {
 			t.Fatalf("ByName(%q): %v", name, err)

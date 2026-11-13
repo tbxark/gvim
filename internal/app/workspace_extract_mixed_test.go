@@ -24,10 +24,7 @@ func seedDockTerminal(t *testing.T, m *workspaceManager, id, name string) {
 	if sess == nil {
 		t.Fatalf("workspace %s is not materialized", id)
 	}
-	sess.rt.model.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{Name: name, Open: true, Rows: []string{"term out"}}},
-	})
+	sess.rt.model.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: name, Open: true, Rows: []string{"term out"}}}})
 }
 
 // dockTabNames returns the saved names of a workspace dock's tabs.
@@ -187,10 +184,7 @@ func TestMixedExtractConflictBeforeAnyWriteAndCancel(t *testing.T) {
 	if err := session.Save(dir, session.Session{Version: session.Version, Root: root, Files: []session.FileState{{Path: path}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := restore.SaveTerminal(dir, terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{Name: "shell", Open: true, Rows: []string{"target"}}},
-	}); err != nil {
+	if err := restore.SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "shell", Open: true, Rows: []string{"target"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	beforeSession := readFileBytes(t, filepath.Join(dir, "session.json"))
@@ -302,7 +296,7 @@ func TestMixedExtractRefusals(t *testing.T) {
 // record round-trips through the same schema (a regression guard for the mixed path's
 // direct SaveTerminal use).
 func TestMixedExtractEmptyTargetRecordJSONIsValid(t *testing.T) {
-	st := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Tabs: []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}}}}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}}}}
 	data, err := json.Marshal(st)
 	if err != nil || !strings.Contains(string(data), "tabs") {
 		t.Fatalf("terminal record json = %s, %v", data, err)
@@ -382,11 +376,7 @@ func TestMixedExtractMergesSearchHistoryIntoDormantTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := restore.SaveTerminal(dir, terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs:          []terminal.SavedTab{{Name: "existing", Open: true, Rows: []string{"target"}}},
-		SearchHistory: []string{"target-q", "own"},
-	}); err != nil {
+	if err := restore.SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "existing", Open: true, Rows: []string{"target"}}}, SearchHistory: []string{"target-q", "own"}}); err != nil {
 		t.Fatal(err)
 	}
 	cmd, err := m.ExtractMixed(mixedSelection(t, m, path), targetID, false)
@@ -481,10 +471,7 @@ func TestMixedExtractRefusesProtectedTargetRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := restore.SaveTerminal(dir, terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{Name: "existing", Open: true, Rows: []string{"target"}}},
-	}); err != nil {
+	if err := restore.SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "existing", Open: true, Rows: []string{"target"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	recordBefore := readFileBytes(t, filepath.Join(dir, "terminal.json"))

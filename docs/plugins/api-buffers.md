@@ -211,7 +211,7 @@ w:valid() w:buffer() -> Buffer | nil
 w:set_buffer(buf) -> true | nil, err
 w:focus() -> true | nil, err
 w:close() -> true | nil, err                 -- the last window cannot be closed (conflict)
-w:split(opts) -> Window | nil, err           -- opts {dir = "right"|"below", buf = Buffer, ratio = 0.5, before = false, focus = false}
+w:split(opts?) -> Window | nil, err          -- opts {dir = "right"|"below", buf = Buffer, ratio = 0.5, before = false, focus = false}
 w:size() -> { x, y, width, height }          -- the text area, in screen cells
 w:view() -> { top_line, left_col, height, width }
 w:visible() -> { {line, col_from, col_to, wrapped}, ... }
@@ -266,8 +266,8 @@ keeping its buffer and content) and shows it again by splitting a visible panel.
 for the port APIs and does not paint a group tab. Closing the group closes the split windows it
 created and the panel buffers it made; unloading the plugin does the same. Group, panel and
 scroll-sync ids are global, so a call naming one another plugin made answers `closed`. Limits: at most 8
-panels, a layout 4 deep, 64 KiB of layout JSON and 16 title segments. A leaf's
-§ratio§ is the FIRST child's share of its split. Fixed-height leaves are approximate: the split
+panels, a layout 4 deep, 64 KiB of layout JSON and 16 title segments. A split's
+`ratio` is the FIRST child's share of it. Fixed-height leaves are approximate: the split
 border can leave the leaf one row off, a fixed leaf inside a side-by-side split is only as
 exact as the ratio, a height taller than the body is clamped, and a hidden fixed panel's
 height is re-applied when it is shown again. git_log's height-1 toolbar now renders as one row.
@@ -295,13 +295,13 @@ gvim.win.get_split_by_label(label) -> Window | nil
 gvim.win.clear_split_label(win) -> true | nil, err
 gvim.buf.get_window_state(buf, key[, default]) -> value | default
 gvim.buf.set_window_state(buf, key, value) -> true | nil, err   -- nil clears
-gvim.buf.open_file_in_split(path, opts?) ⏳ -> true, Buffer | nil, err
+gvim.buf.open_file_in_split(path, opts?) ⏳ -> Buffer | nil, err
 gvim.buf.focus_split(win) -> true | nil, err
 gvim.buf.close_split(win) -> true | nil, err
 ```
 
 A split label names a window so a plugin can find it again after focus moves or splits; it
-lives on the split (the window keeps it until it closes) and $gvim.win.get_split_by_label$
+lives on the split (the window keeps it until it closes) and `gvim.win.get_split_by_label`
 returns the window handle. Window state is a small JSON-scalar map per plugin and buffer
 (`string`, `number`, `boolean`): it survives a plugin reload in-session, is cleared when the
 buffer closes, and a `nil` value removes one key. `gvim.buf.open_file_in_split` splits the

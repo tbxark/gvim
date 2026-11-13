@@ -24,7 +24,7 @@ func moveItems(rt *fakeRuntime, tok pluginapi.Token) []any {
 	return out
 }
 
-// TestPluginPickerUpdateBeforeTheOpenIsPumped checks S13-1: `p:open(); p:set_items(...)` in
+// TestPluginPickerUpdateBeforeTheOpenIsPumped checks that `p:open(); p:set_items(...)` in
 // one slice reaches the host before the pump has opened the overlay. The update must not be
 // lost and must not fail.
 func TestPluginPickerUpdateBeforeTheOpenIsPumped(t *testing.T) {
@@ -115,7 +115,7 @@ func TestPluginPickerClosedBeforeTheOpenIsPumped(t *testing.T) {
 	}
 }
 
-// TestPluginValidateErrorIsCleaned checks S13-2: the text a validate callback returns is
+// TestPluginValidateErrorIsCleaned checks that the text a validate callback returns is
 // shown in the prompt, so it must not carry control characters into a cell.
 func TestPluginValidateErrorIsCleaned(t *testing.T) {
 	t.Parallel()
@@ -152,7 +152,7 @@ type clipRecorder struct{ writes *[]string }
 func (clipRecorder) Read() (string, error)  { return "", nil }
 func (c clipRecorder) Write(s string) error { *c.writes = append(*c.writes, s); return nil }
 
-// TestPluginClipboardSetIsCoalesced checks S13-3: any number of gvim.clipboard.set calls in a
+// TestPluginClipboardSetIsCoalesced checks that any number of gvim.clipboard.set calls in a
 // slice make one clipboard command, carrying the last text.
 func TestPluginClipboardSetIsCoalesced(t *testing.T) {
 	t.Parallel()
@@ -177,7 +177,7 @@ func TestPluginClipboardSetIsCoalesced(t *testing.T) {
 	}
 }
 
-// TestPluginValidateThatRunsAnActionKeepsTheStack checks S13-5: an action a validator runs
+// TestPluginValidateThatRunsAnActionKeepsTheStack checks that an action a validator runs
 // (goto_line opens a prompt) must not be run while routeOverlay owns the overlay stack, or the
 // prompt it pushed would be overwritten by the write-back.
 func TestPluginValidateThatRunsAnActionKeepsTheStack(t *testing.T) {
@@ -221,7 +221,7 @@ func TestPluginValidateThatRunsAnActionKeepsTheStack(t *testing.T) {
 	}
 }
 
-// TestPluginPickerWithNoRowsReportsNoSelection checks S13-4 end to end: filtering a picker
+// TestPluginPickerWithNoRowsReportsNoSelection checks end to end that filtering a picker
 // down to nothing tells the runtime that nothing is highlighted.
 func TestPluginPickerWithNoRowsReportsNoSelection(t *testing.T) {
 	t.Parallel()

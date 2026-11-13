@@ -33,37 +33,17 @@ func (m *Model) restoreSidebarState(st SidebarState) {
 	if m.tree == nil {
 		return
 	}
-	// A unified SectionRows map is the newer form: it carries every section's
-	// explicit height (including the explorer) and plugin rows by id, and wins over
-	// the legacy per-kind fields. Values are clamped on read, and at most the
-	// plugin-section cap is applied.
-	sectionRowsUsed := len(st.SectionRows) > 0
-	if sectionRowsUsed {
-		if n := clampSectionRows(sidebar.KindExplorer, st.SectionRows["explorer"]); n > 0 {
-			m.explorerRows = n
-		}
-		if n := clampSectionRows(sidebar.KindContents, st.SectionRows["contents"]); n > 0 {
-			m.contents.SetRows(n)
-		}
-		if n := clampSectionRows(sidebar.KindDiagnostics, st.SectionRows["diagnostics"]); n > 0 {
-			m.diag.rows = n
-		}
-		pluginRows := make(map[string]int, min(len(st.SectionRows), maxSessionPluginSections))
-		for key, n := range st.SectionRows {
-			id, ok := strings.CutPrefix(key, "plugin:")
-			if !ok || len(pluginRows) >= maxSessionPluginSections {
-				continue
-			}
-			if rows := clampSectionRows(sidebar.KindPlugin, n); rows > 0 {
-				pluginRows[id] = rows
-			}
-		}
-		// The unified map owns the rows when it is present: the legacy PluginRows are
-		// ignored rather than merged, so a stale legacy value cannot contradict it.
-		if len(pluginRows) == 0 {
-			pluginRows = nil
-		}
-		st.PluginRows = pluginRows
+	// SectionRows carries every section's explicit height: the explorer, Contents and
+	// Diagnostics by name and the plugin sections as "plugin:<id>". Values are clamped on
+	// read, and at most the plugin-section cap is applied.
+	if n := clampSectionRows(sidebar.KindExplorer, st.SectionRows["explorer"]); n > 0 {
+		m.explorerRows = n
+	}
+	if n := clampSectionRows(sidebar.KindContents, st.SectionRows["contents"]); n > 0 {
+		m.contents.SetRows(n)
+	}
+	if n := clampSectionRows(sidebar.KindDiagnostics, st.SectionRows["diagnostics"]); n > 0 {
+		m.diag.rows = n
 	}
 	m.stashPluginSidebarRestore(st)
 	m.explorerCollapsed = st.ExplorerCollapsed
@@ -84,18 +64,24 @@ func (m *Model) restoreSidebarState(st SidebarState) {
 	m.diag.open = st.DiagnosticsOpen
 	m.diag.collapsed = st.DiagnosticsCollapsed
 	m.contents.SetCollapsed(st.ContentsCollapsed)
-	// Legacy heights are read only when the unified SectionRows map is absent, so its
-	// presence is authoritative (docs/sidebar.md).
-	if !sectionRowsUsed {
-		if n := clampSectionRows(sidebar.KindDiagnostics, st.DiagnosticsRows); n > 0 {
-			m.diag.rows = n
+	m.toc.restore = &contentsRestore{open: st.ContentsOpen, collapsed: st.ContentsCollapsed, scroll: st.ContentsScroll}
+}
+
+// pluginRowsOf is the requested rows of the plugin sections in a SectionRows map, by panel
+// id, clamped and bounded by the session cap. It is nil when there are none.
+func pluginRowsOf(sectionRows map[string]int) map[string]int {
+	var out map[string]int
+	for key, n := range sectionRows {
+		id, ok := strings.CutPrefix(key, "plugin:")
+		if !ok || len(out) >= maxSessionPluginSections {
+			continue
 		}
-		if n := clampSectionRows(sidebar.KindExplorer, st.ExplorerRows); n > 0 {
-			m.explorerRows = n
-		}
-		if n := clampSectionRows(sidebar.KindContents, st.ContentsRows); n > 0 {
-			m.contents.SetRows(n)
+		if rows := clampSectionRows(sidebar.KindPlugin, n); rows > 0 {
+			if out == nil {
+				out = make(map[string]int)
+			}
+			out[id] = rows
 		}
 	}
-	m.toc.restore = &contentsRestore{open: st.ContentsOpen, collapsed: st.ContentsCollapsed, scroll: st.ContentsScroll}
+	return out
 }

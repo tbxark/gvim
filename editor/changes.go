@@ -117,7 +117,7 @@ func (e *Editor) observe(d *Document) {
 func (e *Editor) changed(d *Document, c buffer.Change) {
 	d.RingFor().Add(c)
 	for _, l := range e.seam.listeners {
-		l.fn(d.Seam().Id, c)
+		l.fn(d.Seam().ID, c)
 	}
 }
 

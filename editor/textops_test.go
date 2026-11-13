@@ -369,6 +369,10 @@ func TestTransposeChars(t *testing.T) {
 		{"end of the document does nothing", "ab", buffer.Pos{Line: 0, Col: 2}, "ab", buffer.Pos{Line: 0, Col: 2}},
 		{"end of a line does nothing", "ab\ncd", buffer.Pos{Line: 0, Col: 2}, "ab\ncd", buffer.Pos{Line: 0, Col: 2}},
 		{"start of a later line does nothing", "ab\ncd", buffer.Pos{Line: 1, Col: 0}, "ab\ncd", buffer.Pos{Line: 1, Col: 0}},
+		// Columns count runes; a cluster is swapped whole.
+		{"a combining mark stays with its letter", "ae\u0301b", buffer.Pos{Line: 0, Col: 3}, "abe\u0301", buffer.Pos{Line: 0, Col: 4}},
+		{"a combining mark after the caret moves with its letter", "abe\u0301", buffer.Pos{Line: 0, Col: 2}, "ae\u0301b", buffer.Pos{Line: 0, Col: 4}},
+		{"a skin-tone emoji is one character", "a\U0001F44D\U0001F3FDb", buffer.Pos{Line: 0, Col: 3}, "ab\U0001F44D\U0001F3FD", buffer.Pos{Line: 0, Col: 4}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

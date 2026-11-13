@@ -8,7 +8,6 @@
     "cmd.refresh_desc": "Re-read and re-validate the Kubernetes workspace config",
     "status.no_config": "K8s: no .fresh/k8s.json found",
     "status.parse_failed": "K8s: failed to parse %{path}: %{error}",
-    "status.no_targets": "K8s: %{path} has no targets",
     "status.invalid": "K8s: %{count} configuration error(s) in %{path}",
     "status.valid": "K8s: %{targets} target(s) validated from %{path}",
     "status.opened": "K8s: opened %{path}",
@@ -35,7 +34,6 @@
     "panel.wait": "wait timeout: %{value}s",
     "panel.confirm": "confirmCreate: %{value}",
     "panel.vars": "vars: %{value}",
-    "panel.no_value": "(not set)",
     "panel.footer": "Read-only config inspection. This gvim port does not run kubectl, attach to a cluster or manage pods."
   }
 }

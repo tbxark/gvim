@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/textsafe"
 )
 
@@ -433,7 +434,7 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 		}
 		num := fmt.Sprintf("%*d", gutter, lineNo)
 		label := num + " │ " + strings.TrimRight(lines[k], " ")
-		g.Put(geo.prevX, y, geo.prevEnd, truncate(label, geo.prevEnd-geo.prevX), st)
+		g.Put(geo.prevX, y, geo.prevEnd, space.End(label, geo.prevEnd-geo.prevX), st)
 	}
 	if s.data.Truncated && len(lines) < geo.rows {
 		g.Put(geo.prevX, geo.rowsTop+len(lines), geo.prevEnd, previewMore, muted)

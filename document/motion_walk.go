@@ -57,7 +57,7 @@ func (w *clusterWalker) skipASCII(limit int) int {
 	return n
 }
 
-// next returns the next cluster, its length in runes and its terminal width, or ok false
+// Next returns the next cluster, its length in runes and its terminal width, or ok false
 // at the end of the line.
 func (w *clusterWalker) Next() (cluster string, runes, width int, ok bool) {
 	w.fill()

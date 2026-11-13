@@ -57,17 +57,23 @@ type WorkspaceLauncher interface {
 // Discover Agent Sessions row's scan and shows a notice instead.
 func (m *Model) SetAgentDiscoverer(d AgentDiscoverer) { m.discover = d }
 
-var (
-	agentDiscoverNoDaemon       = uiText("gvim.agent_discover.no_daemon", "Import needs a daemon-hosted session: the workspace layer is not available here")
-	agentDiscoverNoQueuedLaunch = uiText("gvim.agent_discover.no_queued_launch", "Import: this daemon build cannot start the session's terminal in the new workspace; the workspace was created - open its terminal and run: ")
-	agentDiscoverNoTmux         = uiText("gvim.agent_discover.no_tmux", "tmux is not running and no Claude Code/Codex transcripts were found")
-	agentDiscoverResumeFailed   = uiText("gvim.agent_discover.resume_failed", "Terminal: could not resume the discovered agent session")
-	agentDiscoverNoSessionID    = uiText("gvim.agent_discover.no_session_id", "Import: the session records no directory")
-)
-
-// The agent-discovery picker chrome is resolved on each use so a live locale change is
-// seen without a restart (the dynamic Import notes above are notices resolved at first
-// use; a restart boundary there is documented in docs/i18n.md).
+// The agent-discovery picker chrome and notices are resolved on each use so a live locale
+// change is seen without a restart.
+func agentDiscoverNoDaemon() string {
+	return uiText("gvim.agent_discover.no_daemon", "Import needs a daemon-hosted session: the workspace layer is not available here")
+}
+func agentDiscoverNoQueuedLaunch() string {
+	return uiText("gvim.agent_discover.no_queued_launch", "Import: this daemon build cannot start the session's terminal in the new workspace; the workspace was created - open its terminal and run: ")
+}
+func agentDiscoverNoTmux() string {
+	return uiText("gvim.agent_discover.no_tmux", "tmux is not running and no Claude Code/Codex transcripts were found")
+}
+func agentDiscoverResumeFailed() string {
+	return uiText("gvim.agent_discover.resume_failed", "Terminal: could not resume the discovered agent session")
+}
+func agentDiscoverNoSessionID() string {
+	return uiText("gvim.agent_discover.no_session_id", "Import: the session records no directory")
+}
 func agentDiscoverTitle() string {
 	return uiText("gvim.agent_discover.title", "Discover Agent Sessions")
 }
@@ -211,7 +217,7 @@ func (o *agentDiscoverOverlay) startExternal(session agentdiscover.ExternalSessi
 	}
 	cmd, ok := o.m.dock.StartProgram(launch, externalTabName(session), session.CWD)
 	if !ok {
-		o.m.notice = agentDiscoverResumeFailed
+		o.m.notice = agentDiscoverResumeFailed()
 		return nil
 	}
 	return cmd
@@ -228,7 +234,7 @@ func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 	}
 	row := o.rows[id]
 	if o.m.workspace == nil {
-		o.m.notice = agentDiscoverNoDaemon
+		o.m.notice = agentDiscoverNoDaemon()
 		return o, nil
 	}
 	var root, label string
@@ -251,7 +257,7 @@ func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 		return o, nil
 	}
 	if root == "" {
-		o.m.notice = agentDiscoverNoSessionID
+		o.m.notice = agentDiscoverNoSessionID()
 		return o, nil
 	}
 	if launcher, ok := o.m.workspace.(WorkspaceLauncher); ok {
@@ -269,7 +275,7 @@ func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 		o.m.notice = uiTextVars("gvim.notice.agent.import_error", "Import: %{error}", map[string]any{"error": err.Error()})
 		return o, nil
 	}
-	o.m.notice = agentDiscoverNoQueuedLaunch + fallback
+	o.m.notice = agentDiscoverNoQueuedLaunch() + fallback
 	return nil, cmd
 }
 
@@ -403,7 +409,7 @@ func discoverStatus(report agentdiscover.Report) string {
 	}
 	if len(report.Sessions) == 0 && len(report.External.Sessions) == 0 {
 		if !report.Installed && !report.External.Installed {
-			return agentDiscoverNoTmux
+			return agentDiscoverNoTmux()
 		}
 		return agentDiscoverNone()
 	}

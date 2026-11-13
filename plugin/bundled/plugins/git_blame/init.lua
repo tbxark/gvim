@@ -252,6 +252,10 @@ local function enable()
     gvim.on("buffer_changed", refresh, { debounce = 500 }),
     gvim.on("buffer_activated", refresh),
     gvim.on("after_file_save", refresh),
+    -- a closed buffer's answers and revision override are of no use to anyone
+    gvim.on("buffer_closed", function(ev)
+      cache[ev.id], view_rev[ev.id], view_path[ev.id] = nil, nil, nil
+    end),
   }
   refresh()
 end
@@ -272,12 +276,12 @@ end
 local function current_entry()
   local b = gvim.buf.current()
   if not b then
-    gvim.notify("No file open to blame")
+    gvim.notify(t("status.no_file"))
     return
   end
   local s = snapshot(b)
   if not s then
-    gvim.notify("No blame information available (not a git file or error)")
+    gvim.notify(t("status.no_blame_info"))
     return
   end
   local e, err = entry_for(b, s.line, s.rev)
@@ -286,11 +290,11 @@ local function current_entry()
   end
   if not e then
     gvim.log.debug("git_blame: %s", tostring(err))
-    gvim.notify("No blame information available (not a git file or error)")
+    gvim.notify(t("status.no_blame_info"))
     return
   end
   if e.uncommitted then
-    gvim.notify("This line is not yet committed")
+    gvim.notify(t("status.not_committed"))
     return
   end
   return e, s
@@ -414,7 +418,7 @@ gvim.command.register {
     end
     local commit = e.commit
     if type(commit) ~= "string" or not commit:match("^[0-9a-fA-F]+$") then
-      gvim.notify("No blame information available (not a git file or error)")
+      gvim.notify(t("status.no_blame_info"))
       return
     end
     local parent, parent_err = parent_revision(b, commit)
@@ -454,7 +458,7 @@ gvim.command.register {
     end
     local b = gvim.buf.current()
     if not b then
-      gvim.notify("No file open to blame")
+      gvim.notify(t("status.no_file"))
       return
     end
     generation = generation + 1

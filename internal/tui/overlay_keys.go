@@ -128,7 +128,7 @@ func (m *Model) runMenuBinding(cmd Command) (tea.Cmd, bool) {
 	case "menu_close":
 		code = tea.KeyEscape
 	default:
-		if m.overlayRealAction(KeyContextMenu, cmd.Action) {
+		if overlayRealAction(cmd.Action) {
 			return m.dispatch(cmd), true
 		}
 		return nil, false
@@ -194,7 +194,7 @@ func (m *Model) overlayKey(k tea.Key) (tea.Cmd, bool) {
 			return nil, false
 		}
 		if cmd, found := exact.ResolveExact(kp, ctx); found {
-			return m.runOverlayAction(ctx, cmd)
+			return m.runOverlayAction(cmd)
 		}
 	}
 	cmd, found := m.keys.Resolve(kp, ctx)
@@ -210,14 +210,14 @@ func (m *Model) overlayKey(k tea.Key) (tea.Cmd, bool) {
 		}
 		return nil, false
 	}
-	return m.runOverlayAction(ctx, cmd)
+	return m.runOverlayAction(cmd)
 }
 
-// runOverlayAction runs one resolved overlay binding. kind says which surface it is: an
+// runOverlayAction runs one resolved overlay binding: an
 // action of the surface's context runs the matching built-in operation, a real model
 // action runs through the model's dispatch (the same dispatch a preset or plugin binding
 // uses), and anything else falls through.
-func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
+func (m *Model) runOverlayAction(cmd Command) (tea.Cmd, bool) {
 	switch cmd.Action {
 	case "noop":
 		return nil, true
@@ -331,7 +331,7 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 	}
 	// A real model action keeps the dispatch a preset or plugin binding would run, so a
 	// user binding in an overlay context to save, a plugin action and so on still runs.
-	if m.overlayRealAction(ctx, cmd.Action) {
+	if overlayRealAction(cmd.Action) {
 		return m.dispatch(cmd), true
 	}
 	return nil, false
@@ -339,7 +339,7 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 
 // overlayRealAction reports whether action is one the model's dispatch answers, as opposed
 // to an overlay operation the surface itself owns.
-func (m *Model) overlayRealAction(ctx KeyContext, action string) bool {
+func overlayRealAction(action string) bool {
 	if !keymapActionKnown(action) {
 		return false
 	}
@@ -348,7 +348,6 @@ func (m *Model) overlayRealAction(ctx KeyContext, action string) bool {
 		// A close key in an overlay context should not close the tab under the overlay.
 		return false
 	}
-	_ = ctx
 	return true
 }
 
@@ -450,12 +449,12 @@ func (m *Model) promptClipboard(cut bool) tea.Cmd {
 // operation's asynchronous result may act, and the permission stays set until
 // finishPromptClip sees that operation report. The caller must have acquired the
 // process-wide permission with promptClipNativeAcquire first.
-func (m *Model) beginPromptClip(op *promptClipOp) (uint64, *promptClipOp) {
+func (m *Model) beginPromptClip(op *promptClipOp) uint64 {
 	m.promptClipToken++
 	m.promptClipPending = true
 	m.promptClipPendingToken = m.promptClipToken
 	m.promptClipOp = op
-	return m.promptClipToken, op
+	return m.promptClipToken
 }
 
 // finishPromptClip clears the pending operation when its result reports. It returns the
@@ -518,7 +517,7 @@ func (m *Model) promptCopy(target promptClipTarget, text string) tea.Cmd {
 		m.notice = uiText("gvim.notice.clipboard.busy", "A clipboard write is still in progress; try again")
 		return nil
 	}
-	token, _ := m.beginPromptClip(op)
+	token := m.beginPromptClip(op)
 	owner := m.workspaceOwner
 	closed := &m.closed
 	m.notice = ""
@@ -568,7 +567,7 @@ func (m *Model) promptCut(line *prompt.Line) tea.Cmd {
 		m.notice = uiText("gvim.notice.clipboard.busy", "A clipboard write is still in progress; try again")
 		return nil
 	}
-	token, _ := m.beginPromptClip(op)
+	token := m.beginPromptClip(op)
 	owner := m.workspaceOwner
 	closed := &m.closed
 	m.notice = ""

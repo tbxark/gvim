@@ -91,9 +91,6 @@ func TestExecutableContentMarkers(t *testing.T) {
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("ExecutableContentMarkers = %v, want %v", got, tt.want)
 			}
-			if has := HasExecutableContent(dir); has != (len(tt.want) > 0) {
-				t.Fatalf("HasExecutableContent = %v, want %v", has, len(tt.want) > 0)
-			}
 		})
 	}
 }

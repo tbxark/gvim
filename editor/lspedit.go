@@ -48,6 +48,16 @@ func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *V
 	if d == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
+	edits := caretPrefixEdits(d, text, wordChars)
+	if err := d.ApplyEditList(edits, EditOptions{Cursor: CursorMap, Expect: expect}, false); err != nil {
+		return 0, err
+	}
+	return len(edits), nil
+}
+
+// caretPrefixEdits returns, for the primary caret and every extra one of d, the edit that
+// replaces the identifier prefix before the caret with text.
+func caretPrefixEdits(d *Document, text, wordChars string) []LSPEdit {
 	positions := make([]buffer.Pos, 0, 1+len(d.Cursors()))
 	positions = append(positions, d.Cursor)
 	for _, c := range d.Cursors() {
@@ -62,14 +72,7 @@ func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *V
 		for start > 0 && IsWordRune(line[start-1], wordChars) {
 			start--
 		}
-		edits = append(edits, LSPEdit{
-			From: buffer.Pos{Line: p.Line, Col: start},
-			To:   p,
-			Text: text,
-		})
+		edits = append(edits, LSPEdit{From: buffer.Pos{Line: p.Line, Col: start}, To: p, Text: text})
 	}
-	if err := d.ApplyEditList(edits, EditOptions{Cursor: CursorMap, Expect: expect}, false); err != nil {
-		return 0, err
-	}
-	return len(edits), nil
+	return edits
 }

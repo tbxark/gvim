@@ -8,7 +8,7 @@ import (
 // ErrNothingSelected is returned by copy and cut when there is no selection.
 var ErrNothingSelected = errors.New("nothing selected")
 
-// insertText types s at the cursor, replacing any selection first.
+// InsertText types s at the cursor, replacing any selection first.
 func (d *Document) InsertText(s string) {
 	d.MaterializeVirtual()
 	d.DeleteSelection()
@@ -20,7 +20,7 @@ func (d *Document) InsertText(s string) {
 	d.Want = -1
 }
 
-// deleteForward removes the selection, or the character after the cursor, or
+// DeleteForward removes the selection, or the character after the cursor, or
 // the line break after the cursor.
 func (d *Document) DeleteForward() {
 	if d.DeleteSelection() {
@@ -33,14 +33,14 @@ func (d *Document) DeleteForward() {
 	d.Buffer.Delete(d.Cursor, next)
 }
 
-// selectAll selects the whole document, leaving the cursor at the end.
+// SelectAll selects the whole document, leaving the cursor at the end.
 func (d *Document) SelectAll() {
 	end := d.Buffer.End()
 	d.Sel = &buffer.Selection{Anchor: buffer.Pos{}, Head: end}
 	d.Cursor = end
 }
 
-// selectWord selects the word the cursor is in or directly after. With no word
+// SelectWord selects the word the cursor is in or directly after. With no word
 // at either place it selects nothing and leaves the cursor in place.
 func (d *Document) SelectWord() {
 	from, to, ok := d.wordAt(d.Cursor)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 )
 
 // TestImageProtocolOf checks the three settings, including the empty value that
@@ -293,7 +294,7 @@ func TestTextDocumentIsNotAnImagePane(t *testing.T) {
 	m := &Model{}
 	m.img = imageProtocolOf("kitty")
 	doc := &textImageShapedDoc{}
-	if _, ok := m.imagePane(splitPane{W: 20, H: 5}, doc, 1); ok {
+	if _, ok := m.imagePane(split.Pane{W: 20, H: 5}, doc, 1); ok {
 		t.Error("imagePane = true for a text document, want the text pane")
 	}
 	if _, ok := m.imagePathOf(doc); ok {
@@ -323,7 +324,7 @@ func TestRemoteImageKeepsTheSummary(t *testing.T) {
 	if path, ok := m.imagePathOf(doc); ok || path != "" {
 		t.Fatalf("imagePathOf(remote) = %q, %v, want no local path", path, ok)
 	}
-	if _, ok := m.imagePane(splitPane{W: 20, H: 5}, doc, 1); ok {
+	if _, ok := m.imagePane(split.Pane{W: 20, H: 5}, doc, 1); ok {
 		t.Error("imagePane = true for a remote image, want the text summary")
 	}
 }
@@ -335,18 +336,18 @@ func TestImagePanelFallsBackWhenDisabled(t *testing.T) {
 	m := &Model{}
 	m.img = imageProtocolOf("off")
 	doc := &imageTestDoc{}
-	if _, ok := m.imagePane(splitPane{W: 20, H: 5}, doc, 1); ok {
+	if _, ok := m.imagePane(split.Pane{W: 20, H: 5}, doc, 1); ok {
 		t.Error("imagePane = true with the protocol off, want the text fallback")
 	}
 	m.img = imageProtocolOf("kitty")
-	if _, ok := m.imagePane(splitPane{W: 20, H: 5}, doc, 1); ok {
+	if _, ok := m.imagePane(split.Pane{W: 20, H: 5}, doc, 1); ok {
 		t.Error("imagePane = true before the upload, want the text fallback")
 	}
 	// With the picture uploaded, the pane draws it.
 	id, _ := m.img.imageID("/pic.png", 0, 0)
 	m.img.markUploaded("/pic.png", id)
 	doc.path = "/pic.png"
-	if _, ok := m.imagePane(splitPane{W: 20, H: 5}, doc, 1); !ok {
+	if _, ok := m.imagePane(split.Pane{W: 20, H: 5}, doc, 1); !ok {
 		t.Error("imagePane = false after the upload, want the picture")
 	}
 }

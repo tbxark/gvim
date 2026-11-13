@@ -20,7 +20,7 @@ var allCodes = map[string]bool{
 }
 
 // installRoot installs the gvim root: api_version version platform has err_code log notify
-// status plugin pos range pos_cmp range_eq. (settings and config: S9; state and dirs: S8.)
+// status plugin pos range pos_cmp range_eq.
 func installRoot(e *apiEnv) {
 	p, g := e.p, e.gvim
 	g.RawSetString("api_version", lua.LNumber(APIVersion))
@@ -58,7 +58,7 @@ func installRoot(e *apiEnv) {
 	})
 
 	// gvim.log.<level>(fmt, ...)
-	logT := e.L.NewTable()
+	logT := e.L.CreateTable(0, 4)
 	for _, lvl := range []string{levelDebug, levelInfo, levelWarn, levelError} {
 		lvl := lvl
 		e.set(logT, lvl, func(L *lua.LState) int {
@@ -87,7 +87,7 @@ func installRoot(e *apiEnv) {
 		return 1
 	})
 
-	pl := e.L.NewTable()
+	pl := e.L.CreateTable(0, 5)
 	pl.RawSetString("name", lua.LString(p.name))
 	pl.RawSetString("dir", lua.LString(p.dir))
 	pl.RawSetString("version", lua.LString(p.version))
@@ -95,10 +95,7 @@ func installRoot(e *apiEnv) {
 	e.set(pl, "on_unload", func(L *lua.LState) int {
 		fn := L.CheckFunction(1)
 		if len(p.unloadFns) >= maxUnloadFns {
-			v, e := errTuple(pluginapi.Errf(pluginapi.CodeLimit, "too many on_unload handlers (%d)", maxUnloadFns))
-			L.Push(v)
-			L.Push(e)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "too many on_unload handlers (%d)", maxUnloadFns))
 		}
 		p.unloadFns = append(p.unloadFns, fn)
 		L.Push(lua.LTrue)

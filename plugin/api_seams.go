@@ -13,7 +13,7 @@ import (
 //	gvim.win.clear_split_label(win) -> true | nil, err
 //	gvim.buf.get_window_state(buf, key[, default]) -> value | default
 //	gvim.buf.set_window_state(buf, key, value) -> true | nil, err   (nil clears)
-//	gvim.buf.open_file_in_split(path, opts?) ⏳ -> true, Buffer | nil, err
+//	gvim.buf.open_file_in_split(path, opts?) ⏳ -> Buffer | nil, err
 //	gvim.buf.focus_split(win) -> true | nil, err
 //	gvim.buf.close_split(win) -> true | nil, err
 //

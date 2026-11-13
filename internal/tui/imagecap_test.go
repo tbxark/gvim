@@ -19,6 +19,7 @@ import (
 	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -515,10 +516,10 @@ func TestImageQueueUploadsAnImageInANonFocusedPane(t *testing.T) {
 	m.img = imageProtocolOf("kitty")
 	// The left pane shows the image tab while the right (focused) pane and the
 	// editor's active tab show text.
-	root := &splitNode{
-		Dir: sideBySide,
-		A:   &splitNode{Tab: 1},
-		B:   &splitNode{Tab: 0},
+	root := &split.Node{
+		Dir: split.SideBySide,
+		A:   &split.Node{Tab: 1},
+		B:   &split.Node{Tab: 0},
 	}
 	m.splits.Root, m.splits.Focus = root, root.B
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

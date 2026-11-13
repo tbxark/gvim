@@ -575,7 +575,7 @@ type queuedEvent struct {
 }
 
 // hotEvents may be dropped by the cascade cap and are computed only while subscribed;
-// every other event is lifecycle and is never dropped (AMENDMENTS C25).
+// every other event is lifecycle and is never dropped.
 var hotEvents = map[string]bool{
 	"cursor_moved": true, "selection_changed": true, "viewport_changed": true,
 	"buffer_changed": true, "buffer_modified": true, "pre_command": true,

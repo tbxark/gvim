@@ -84,3 +84,11 @@ func TestSharedWorkspaceCloseCancelsItsWaits(t *testing.T) {
 		t.Fatal("B's wait was resolved by A's close")
 	}
 }
+
+// waitOwner returns the model that owns t, or nil.
+func (s *PluginShared) waitOwner(t pluginapi.Token) *Model {
+	waits := sharedWaits(s)
+	waitRegistry.mu.Lock()
+	defer waitRegistry.mu.Unlock()
+	return waits[t]
+}

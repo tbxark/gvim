@@ -1,6 +1,6 @@
 package document
 
-// forEachCaret runs step once per caret, in document order. step sees the caret
+// ForEachCaret runs step once per caret, in document order. step sees the caret
 // as d.Cursor, d.Sel and d.want, and primary says whether it is the real primary
 // caret. Carets that meet afterwards are merged.
 func (d *Document) ForEachCaret(step func(primary bool)) {

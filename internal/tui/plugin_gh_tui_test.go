@@ -65,6 +65,25 @@ func TestActionPopupOverlay(t *testing.T) {
 	}
 }
 
+// TestActionPopupDismissCarriesThePopupID checks that a popup closed without a choice
+// reports its own id in action_popup_result, as a chosen action does.
+func TestActionPopupDismissCarriesThePopupID(t *testing.T) {
+	t.Parallel()
+	m, rt := actionPopupModel(t)
+	m.Update(palette.RunCommandMsg{Action: "x.cmd"})
+	_, cmd := m.Update(special(tea.KeyEscape))
+	feedAll(t, m, cmd, 10)
+	var result map[string]any
+	for _, e := range rt.emitted {
+		if e.Name == "action_popup_result" {
+			result = e.Data
+		}
+	}
+	if result == nil || result["popup"] != uint64(3) || result["action"] != nil {
+		t.Fatalf("action_popup_result = %+v, want popup 3 and no action", result)
+	}
+}
+
 // promptModel opens a plugin input prompt from a command.
 func promptModel(t *testing.T) (*Model, *fakeRuntime) {
 	t.Helper()

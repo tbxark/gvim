@@ -117,7 +117,7 @@ func (d *SaveAs) endConfirm() {
 	d.confirming = false
 	d.pending = ""
 	d.field = d.input
-	d.title = "Save As"
+	d.title = dialogText("gvim.dialog.title.save_as", "Save As")
 	d.buttons = saveButtons()
 	d.hover = -1
 	d.focus = 0

@@ -328,11 +328,13 @@ func (s *foldScan) next() (start, end int) {
 
 // offsetPos turns byte offsets of a text into buffer positions. Offsets must be
 // asked for in non-decreasing order: it keeps its place and counts forward, so
-// converting all the offsets costs one pass over the text.
+// converting all the offsets costs one pass over the text. Columns count runes, and
+// a match on the line of the one before it adds only the runes between the two.
 type offsetPos struct {
-	text string
-	off  int
-	at   buffer.Pos
+	text    string
+	off     int
+	at      buffer.Pos
+	counted int64 // runes counted
 }
 
 func newOffsetPos(text string, start buffer.Pos) *offsetPos {
@@ -346,7 +348,9 @@ func (o *offsetPos) pos(off int) buffer.Pos {
 		o.at.Col = 0
 		seg = seg[strings.LastIndexByte(seg, '\n')+1:]
 	}
-	o.at.Col += utf8.RuneCountInString(seg)
+	n := utf8.RuneCountInString(seg)
+	o.counted += int64(n)
+	o.at.Col += n
 	o.off = off
 	return o.at
 }

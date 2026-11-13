@@ -10,7 +10,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Virtual buffers (stage S18): gvim.buf.create and the methods set_content, props_at,
+// Virtual buffers: gvim.buf.create and the methods set_content, props_at,
 // set_read_only, set_mode, set_option and get_option, against the fake host.
 
 // virtualRows runs each row's body with b = the buffer a.go (text "regular") and compares the

@@ -200,6 +200,21 @@ func TestAsmLspNeverAsksAgainForTheProject(t *testing.T) {
 	}
 }
 
+// A file opened after the plugin loaded raises after_file_open with a Buffer handle; the offer
+// must follow it (gvim.buf.get takes an id, not a handle).
+func TestAsmLspOffersOnAfterFileOpen(t *testing.T) {
+	t.Parallel()
+	r := startRig(t, rigOpts{
+		plugins: []string{"asm_lsp"},
+		script:  func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	id := r.host.AddBuffer("/work/b.asm", "section .text\n")
+	r.h.Emit(pluginapi.Event{Name: "after_file_open", Data: map[string]any{"buf": id, "path": "/work/b.asm"}})
+	if asmPopup(r.h) == nil {
+		t.Fatalf("no config offer after after_file_open (log %v)", r.h.LogText(""))
+	}
+}
+
 func TestAsmLspInstallHelpAndActions(t *testing.T) {
 	t.Parallel()
 	r := asmRig(t, "/work/a.asm", "section .text\n", func(o *plugintest.FakeOS) {

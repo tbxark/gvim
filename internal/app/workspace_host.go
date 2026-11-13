@@ -64,8 +64,6 @@ type workspaceManager struct {
 	// commits when it finishes and still owns the sequence).
 	pendingID string
 	cancel    context.CancelFunc
-	// writes are the outstanding asynchronous capture writes, in order.
-	writes []*saveJob
 	// launches are the imported sessions' terminal launches waiting for their
 	// workspace to be materialized and shown (keyed by stable id).
 	launches map[string]tui.WorkspaceLaunch
@@ -177,6 +175,10 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 	m.active = sess.ws.File.StableID
 	if m.shared != nil {
 		m.shared.Label = func(ed *editor.Editor) string {
+			// Called from any workspace's editor, concurrently with a switch that adds or
+			// drops a session.
+			m.mu.Lock()
+			defer m.mu.Unlock()
 			for _, s := range m.sessions {
 				if s.rt != nil && s.rt.ed == ed {
 					return s.ws.File.Label
@@ -376,8 +378,8 @@ func (m *workspaceManager) workspaceOptions(ws daemon.Workspace) (Options, error
 	return opts, nil
 }
 
-// buildWorkspace builds a dormant workspace's runtime. It runs off the UI goroutine: file
-// loads, plugin setup and process start belong to the new runtime, not to the active one.
+// workspaceSessionDir is the session directory of workspace id, or an error when its
+// config turns session saving off.
 func (m *workspaceManager) workspaceSessionDir(id string) (string, error) {
 	ws, ok, err := m.reg.Get(id)
 	if err != nil {
@@ -397,6 +399,8 @@ func (m *workspaceManager) workspaceSessionDir(id string) (string, error) {
 	return m.reg.SessionDir(id)
 }
 
+// buildWorkspace builds a dormant workspace's runtime. It runs off the UI goroutine: file
+// loads, plugin setup and process start belong to the new runtime, not to the active one.
 func (m *workspaceManager) buildWorkspace(ctx context.Context, id string) (*workspaceSession, error) {
 	ws, ok, err := m.reg.Get(id)
 	if err != nil {
@@ -1052,32 +1056,23 @@ func (m *workspaceManager) openFiles(req daemon.OpenFile) {
 	}
 }
 
-// openTargetsFromRequest resolves the request's paths against the client's cwd (a client
-// may attach from another directory) and merges the legacy Paths with the positional
-// Files field. Files wins when both are present; legacy Paths still work unchanged.
+// openTargetsFromRequest resolves the request's files against the client's cwd (a
+// client may attach from another directory).
 func openTargetsFromRequest(req daemon.OpenFile) []workspaceOpenTarget {
 	base := req.Cwd
 	if base == "" {
 		base, _ = os.Getwd()
 	}
 	var out []workspaceOpenTarget
-	resolve := func(path string, line, col int) {
+	for _, f := range req.Files {
+		path := f.Path
 		if path == "" {
-			return
+			continue
 		}
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(base, path)
 		}
-		out = append(out, workspaceOpenTarget{path: filepath.Clean(path), line: line, col: col})
-	}
-	if len(req.Files) > 0 {
-		for _, f := range req.Files {
-			resolve(f.Path, f.Line, f.Col)
-		}
-		return out
-	}
-	for _, path := range req.Paths {
-		resolve(path, 0, 0)
+		out = append(out, workspaceOpenTarget{path: filepath.Clean(path), line: f.Line, col: f.Col})
 	}
 	return out
 }
@@ -1086,16 +1081,23 @@ func openTargetsFromRequest(req daemon.OpenFile) []workspaceOpenTarget {
 // requested position.
 func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 	canonical := canonicalWorkspaceFile(target.path)
-	m.mu.Lock()
-	ownerID := ""
-	for id, s := range m.sessions {
-		if sessionHasPath(s.rt, canonical) {
-			ownerID = id
-			break
+	// The tabs of a runtime are editor state: read them on the UI goroutine, not on the
+	// socket goroutine this runs on.
+	ownerID, active := "", ""
+	if !m.runOnUI(func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for id, s := range m.sessions {
+			if sessionHasPath(s.rt, canonical) {
+				ownerID = id
+				break
+			}
 		}
+		active = m.active
+	}) {
+		m.notify(fmt.Errorf("open %s: the workspace UI is busy; the file was not opened", canonical))
+		return
 	}
-	active := m.active
-	m.mu.Unlock()
 	saved := workspacePosition{}
 	if ownerID == "" {
 		if id, pos, ok := m.dormantOwner(canonical); ok {
@@ -1205,20 +1207,6 @@ func sessionHasPath(rt *runtime, canonical string) bool {
 		}
 	}
 	return false
-}
-
-// closeAll saves and closes every materialized workspace, active first. It runs after the
-// program ended; no UI callbacks are possible, so snapshots are taken here and the writes
-// run in workers. It waits for every write before closing the runtimes, so a quit cannot
-// drop the unsaved text of any workspace.
-// closeAll is the compatibility form of the checked exit save: tests and deferred
-// cleanup call it without an outcome. The daemon's exit path uses closeAllChecked, which
-// returns the durability error; this wrapper only reports it on stderr. The one overall
-// deadline of the checked path supersedes waitWrites' per-job timeout for the exit.
-func (m *workspaceManager) closeAll() {
-	if err := m.closeAllChecked(workspaceExitTimeout); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: workspace save:", err)
-	}
 }
 
 // runDaemonHost serves the daemon with the workspace layer (#19a): one tea program over

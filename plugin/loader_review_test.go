@@ -49,7 +49,7 @@ func symlink(t *testing.T, target, name string) {
 }
 
 // init.lua and single-file plugins may be symlinks (stow, dotfiles repositories); only
-// directory plugins are confined (S10-1).
+// directory plugins are confined.
 func TestSymlinkedInitAndSingleFilePluginsLoad(t *testing.T) {
 	e, cfg := realDiskEnv(t)
 	dots := filepath.Join(filepath.Dir(cfg), "dots")
@@ -99,7 +99,7 @@ func TestMissingInitFileIsSilent(t *testing.T) {
 	}
 }
 
-// A main chunk that parks and never resumes must not hold back everybody else (S10-3).
+// A main chunk that parks and never resumes must not hold back everybody else.
 func TestParkedMainChunkDoesNotWithholdStartupOutput(t *testing.T) {
 	e := newEnv(t)
 	e.user("a_slow.lua", `T.host() T.spy("slow done")`)
@@ -171,7 +171,7 @@ func countOf(list []string, s string) int {
 }
 
 // A reload or enable that was started before a disable must not load the plugin when its
-// Work finishes (S10-4).
+// Work finishes.
 func TestDisableDuringPendingReloadWins(t *testing.T) {
 	e := newEnv(t)
 	e.user("foo.lua", marker("foo"))

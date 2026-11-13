@@ -16,7 +16,7 @@ import (
 // Terminal: Run Agent... starts one of the configured terminal.agents presets in
 // the dock. The action opens a picker of the agent names; choosing one starts the
 // agent's argv and records it as an ephemeral session terminal, so Restart can
-// rejoin it. This is the minimal #20a surface: no workspace/dock-row integration
+// rejoin it. This is the minimal surface: no workspace/dock-row integration
 // yet, and no agent discovery beyond the config list (Fresh's agent data comes
 // from plugins; gvim's comes from terminal.agents).
 
@@ -86,11 +86,7 @@ func (m *Model) openAgentPicker() tea.Cmd {
 	items := make([]picker.Item, len(agents))
 	for i, a := range agents {
 		names[i] = a.Name
-		detail := strings.Join(a.Argv, " ")
-		if len(detail) > 120 {
-			detail = detail[:120]
-		}
-		items[i] = picker.Item{ID: i, Text: a.Name, Detail: detail}
+		items[i] = picker.Item{ID: i, Text: a.Name, Detail: clipDiscoveryText(strings.Join(a.Argv, " "), 120)}
 	}
 	p := picker.New(m.styles, picker.Options{
 		Title:       "Run Agent",

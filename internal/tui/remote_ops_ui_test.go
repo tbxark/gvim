@@ -16,7 +16,7 @@ import (
 )
 
 // remoteCapTree is a writable tree with the clipboard, the remote explorer's capability
-// shape after task-148.
+// shape.
 type remoteCapTree struct {
 	rows     []tree.Row
 	selected int

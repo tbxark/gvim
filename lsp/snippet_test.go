@@ -35,20 +35,3 @@ func TestExpandSnippet(t *testing.T) {
 		})
 	}
 }
-
-func TestIsSnippet(t *testing.T) {
-	for _, tt := range []struct {
-		text string
-		want bool
-	}{
-		{"plain", false},
-		{"$5", true},
-		{"$" + "{1:x}", true},
-		{"\\$5", false},
-		{"cost \\$5 and $" + "{1:x}", true},
-	} {
-		if got := IsSnippet(tt.text); got != tt.want {
-			t.Fatalf("IsSnippet(%q) = %v, want %v", tt.text, got, tt.want)
-		}
-	}
-}

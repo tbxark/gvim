@@ -22,7 +22,7 @@ func RecoveryPath(dir string) string {
 
 // RecoveryWriter keeps a copy of the unsaved text of the open documents in a directory,
 // as a session with one stash file for each document. It is the hot-exit copy that
-// recoverCrash reads after a crash. Plan runs on the editor's goroutine and the
+// RecoverFromCrash reads after a crash. Plan runs on the editor's goroutine and the
 // function it returns does the writes, so the editor is not read from a command.
 type RecoveryWriter struct {
 	ed  *editor.Editor
@@ -170,24 +170,13 @@ func (w *RecoveryWriter) Plan() func() error {
 	}
 }
 
-// recoverCrash puts the unsaved text that a crashed session left in dir back into ed:
+// restoreCrash puts the unsaved text that a crashed session left in dir back into ed:
 // each document is opened, or found if it is open already, and takes the stashed text.
 // It returns the files it could not restore and the number it did. The tab that was
-// active stays active. When all were restored the copy is removed, and the text now
-// lives in the modified buffers. Otherwise the whole directory is moved to dir+".failed",
-// so the writer, which starts again in dir, does not replace the stashes of the files
-// that failed.
-func recoverCrash(ed *editor.Editor, dir string) ([]Unrestored, int) {
-	failed, n, spent := restoreCrash(ed, dir)
-	if spent {
-		_ = ClearRecovery(dir)
-	}
-	return failed, n
-}
-
-// restoreCrash is recoverCrash without the removal of the copy. spent reports that every
-// file was restored, so the copy in dir may go once the text is safe somewhere else. A
-// copy with failures has been moved aside already.
+// active stays active. spent reports that every file was restored, so the copy in dir
+// may go once the text is safe somewhere else. A copy with failures is moved aside to
+// dir+".failed" so the writer, which starts again in dir, does not replace the stashes
+// of the files that failed.
 func restoreCrash(ed *editor.Editor, dir string) (failed []Unrestored, n int, spent bool) {
 	s, ok, err := session.Load(dir)
 	if err != nil || !ok || len(s.Files) == 0 {
@@ -222,7 +211,7 @@ func moveAside(dir string) {
 	}
 }
 
-// clearRecovery empties the copy in dir: a clean exit has nothing to recover.
+// ClearRecovery empties the copy in dir: a clean exit has nothing to recover.
 func ClearRecovery(dir string) error {
 	if _, ok, _ := session.Load(dir); !ok {
 		return nil

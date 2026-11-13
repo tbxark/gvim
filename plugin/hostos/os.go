@@ -50,8 +50,23 @@ type OS interface {
 
 	// Shutdown ends everything the implementation still runs: it sends SIGKILL to the
 	// process group of every live process and stops every watcher. It does not wait
-	// for the processes. Idempotent; Runtime.Stop calls it (AMENDMENTS C16).
+	// for the processes. Idempotent; Runtime.Stop calls it.
 	Shutdown()
+}
+
+// RemoteOS is implemented by an OS whose files and processes live on a remote workspace
+// host. Dirs, LookPath and Getenv still describe the local machine there, so checks built
+// on them (fs.remove's protected directories) do not apply and the plugin runtime refuses
+// the operation instead.
+type RemoteOS interface {
+	OS
+	Remote() bool
+}
+
+// IsRemote reports whether o works on a remote workspace host.
+func IsRemote(o OS) bool {
+	r, ok := o.(RemoteOS)
+	return ok && r.Remote()
 }
 
 // Dirs are the well-known directories handed to gvim.dirs.

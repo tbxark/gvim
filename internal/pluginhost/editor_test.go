@@ -28,7 +28,7 @@ func pluginEditorOver(t *testing.T, texts ...string) (*pluginEditor, *editor.Edi
 		insertText(t, ed, text)
 	}
 	ed.ActivateTab(0)
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	var ids []pluginapi.BufferID
 	for _, b := range pe.ListBuffers() {
 		ids = append(ids, b.ID)
@@ -66,7 +66,7 @@ func TestPluginEditorFindsBufferBySpelling(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(filepath.Join(real, "a.txt")))
 	apptest.Must(t, ed.OpenFile(filepath.Join(link, "b.txt")))
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	ids := map[string]pluginapi.BufferID{}
 	for _, b := range pe.ListBuffers() {
 		ids[filepath.Base(b.Path)] = b.ID
@@ -92,7 +92,7 @@ func TestPluginEditorListsBuffers(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(goFile))
 	ed.Do("new", nil)
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 
 	list := pe.ListBuffers()
 	if len(list) != 2 {
@@ -145,7 +145,7 @@ func TestPluginEditorListsBuffers(t *testing.T) {
 	}
 }
 
-// TestPluginEditorRangeRules checks the position rules of AMENDMENTS C24 on text with a
+// TestPluginEditorRangeRules checks the position rules on text with a
 // multibyte character: columns are bytes, a column inside a character rounds down, a column
 // past the line end clamps to the line end, and a line past the end clamps to the end of the
 // document.
@@ -386,7 +386,7 @@ func TestPluginEditorEditRefusals(t *testing.T) {
 	})
 }
 
-// TestPluginEditorEditByteCap checks both halves of the 8 MiB cap of AMENDMENTS C18: the
+// TestPluginEditorEditByteCap checks both halves of the 8 MiB cap of the
 // bytes an edit inserts and the bytes it removes.
 func TestPluginEditorEditByteCap(t *testing.T) {
 	big := strings.Repeat("x", pluginMaxEditBytes/2+1) // half the cap plus one byte
@@ -419,66 +419,6 @@ func TestPluginEditorEditByteCap(t *testing.T) {
 				t.Fatal("a refused edit changed the buffer")
 			}
 		})
-	}
-}
-
-// TestPluginEditNonActiveDocMarksSpansStale: an edit through the plugin port marks the
-// spans of the document it changed stale, also when that document is not the active tab,
-// and leaves the spans of the other open documents alone.
-func TestPluginEditNonActiveDocMarksSpansStale(t *testing.T) {
-	ed := editor.New(editor.Options{})
-	insertText(t, ed, "first")
-	ed.Do("new", nil)
-	insertText(t, ed, "second")
-	var edited []*editor.Document
-	pe := newPluginEditor(ed, func(d *editor.Document) { edited = append(edited, d) })
-	other := ed.DocAt(0)
-	if ed.Active() == other {
-		t.Fatal("the first tab is active")
-	}
-	marked := func(d *editor.Document) bool {
-		for _, e := range edited {
-			if e == d {
-				return true
-			}
-		}
-		return false
-	}
-
-	id := pluginapi.BufferID(other.ID())
-	edited = nil
-	apptest.Must(t, pe.Edit(id, []pluginapi.Edit{{Range: arange(0, 0, 0, 0), Text: "x"}}, pluginapi.EditOptions{}))
-	if !marked(other) {
-		t.Error("the edited document's spans are not stale")
-	}
-	if marked(ed.Active()) {
-		t.Error("the active document was marked stale by an edit to another tab")
-	}
-
-	// An edit to the active document marks that document.
-	edited = nil
-	active := ed.Active()
-	apptest.Must(t, pe.Edit(pluginapi.BufferID(active.ID()), []pluginapi.Edit{{Range: arange(0, 0, 0, 0), Text: "y"}}, pluginapi.EditOptions{}))
-	if !marked(active) {
-		t.Error("the active document is not marked stale after an edit to it")
-	}
-
-	// The other mutating calls mark the document too (in this order: Redo needs the
-	// Undo before it).
-	for _, c := range []struct {
-		name string
-		call func() error
-	}{
-		{"Undo", func() error { return pe.Undo(id) }},
-		{"Redo", func() error { return pe.Redo(id) }},
-		{"SetLanguage", func() error { return pe.SetLanguage(id, "go") }},
-		{"UndoGroup", func() error { return pe.UndoGroup(id, func() error { return nil }) }},
-	} {
-		edited = nil
-		apptest.Must(t, c.call())
-		if !marked(other) {
-			t.Errorf("%s left the edited document's spans fresh", c.name)
-		}
 	}
 }
 
@@ -534,7 +474,7 @@ func TestPluginEditorReveal(t *testing.T) {
 	}
 	ed.ScrollTo(0)
 	ed.SetCursor(buffer.Pos{}, false)
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	id := pluginapi.BufferID(ed.Active().ID())
 
 	apptest.Must(t, pe.SetCursor(id, apos(60, 0), false, false, false))
@@ -705,7 +645,7 @@ func TestPluginEditorFullTextAndSavedLines(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(path))
 	ed.Do("new", nil)
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	file, untitled := pe.ListBuffers()[0], pe.ListBuffers()[1]
 
 	text, v, err := pe.FullText(file.ID)

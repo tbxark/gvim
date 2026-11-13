@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -132,9 +133,9 @@ func chooseRow(t *testing.T, m *Model, label string) {
 func TestRightClickOnATabOpensTheTabMenu(t *testing.T) {
 	m, _ := newCtxModel(t, "a.txt", "b.txt", "c.txt")
 	l := m.layout()
-	var tab run
+	var tab frame.Run
 	for _, r := range l.Strip.Runs {
-		if r.Kind == hitTab && r.Index == 1 {
+		if r.Kind == frame.HitTab && r.Index == 1 {
 			tab = r
 			break
 		}
@@ -205,9 +206,9 @@ func TestTabMenuClosesTabs(t *testing.T) {
 		t.Run(tt.row, func(t *testing.T) {
 			m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt", "d.txt")
 			l := m.layout()
-			var tab run
+			var tab frame.Run
 			for _, r := range l.Strip.Runs {
-				if r.Kind == hitTab && r.Index == tt.tab {
+				if r.Kind == frame.HitTab && r.Index == tt.tab {
 					tab = r
 					break
 				}

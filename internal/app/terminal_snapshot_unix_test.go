@@ -49,15 +49,10 @@ func seedStyledWorkspace(t *testing.T, root string) (string, string) {
 	if err := session.Save(dir, session.Session{Root: root}); err != nil {
 		t.Fatal(err)
 	}
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: true,
-		Cwd: root, LaunchDir: root, Width: 4, Rows: []string{"HIST", "OLD"}, Screen: styledOldScreen(),
-		Tabs: []terminal.SavedTab{{
-			Name: "shell", Open: true, Cwd: root, LaunchDir: root, Width: 4,
-			Rows: []string{"HIST", "OLD"}, Screen: styledOldScreen(), Live: true,
-		}},
-		ActiveTab: 0,
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "shell", Open: true, Cwd: root, LaunchDir: root, Width: 4,
+		Rows: []string{"HIST", "OLD"}, Screen: styledOldScreen(), Live: true,
+	}}, ActiveTab: 0}
 	if err := restore.SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -100,16 +95,16 @@ func TestWorkspaceDaemonScreenSnapshot(t *testing.T) {
 	if len(st.Tabs) != 1 || !strings.Contains(rowsText(st.Tabs[0].Rows), "OLD") {
 		t.Fatalf("restored state = %+v", st)
 	}
-	if st.Screen == nil || st.Screen.Rows[0].Cells[0].Fg != "#ff0000" {
-		t.Fatalf("restored styled snapshot = %+v", st.Screen)
+	if activeSaved(st).Screen == nil || activeSaved(st).Screen.Rows[0].Cells[0].Fg != "#ff0000" {
+		t.Fatalf("restored styled snapshot = %+v", activeSaved(st).Screen)
 	}
 	// The daemon path carries the rest of the backing-file remainder too: the
 	// styled history row and the saved cursor survive materialization.
-	if len(st.Screen.History) != 1 || !st.Screen.History[0].Cells[0].Bold {
-		t.Fatalf("restored history snapshot = %+v", st.Screen.History)
+	if len(activeSaved(st).Screen.History) != 1 || !activeSaved(st).Screen.History[0].Cells[0].Bold {
+		t.Fatalf("restored history snapshot = %+v", activeSaved(st).Screen.History)
 	}
-	if st.Screen.Cursor != (terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"}) {
-		t.Fatalf("restored cursor = %+v", st.Screen.Cursor)
+	if activeSaved(st).Screen.Cursor != (terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"}) {
+		t.Fatalf("restored cursor = %+v", activeSaved(st).Screen.Cursor)
 	}
 
 	// The dive starts the shell; the snapshot transcript stays above the new output.

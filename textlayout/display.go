@@ -12,22 +12,11 @@ type Span struct {
 }
 
 // IndentWidth returns the display width of the spaces and tabs at the start of
-// line. A tab advances to the next multiple of tabWidth. A tabWidth below one
-// is treated as one.
+// line, as LineIndent measures it. A tab advances to the next multiple of tabWidth.
+// A tabWidth below one is treated as one.
 func IndentWidth(line string, tabWidth int) int {
-	tabWidth = max(tabWidth, 1)
-	col := 0
-	for i := range len(line) {
-		switch line[i] {
-		case ' ':
-			col++
-		case '\t':
-			col = (col/tabWidth + 1) * tabWidth
-		default:
-			return col
-		}
-	}
-	return col
+	width, _ := LineIndent(line, tabWidth)
+	return width
 }
 
 // Occurrences returns the whole-word matches of word in lines. A match must not

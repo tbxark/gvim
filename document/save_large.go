@@ -311,7 +311,7 @@ func writtenOf(r SaveResult) *writtenFile {
 	}
 }
 
-// resetHistoryState drops what refers to the undo history or to places of the text that
+// ResetHistoryState drops what refers to the undo history or to places of the text that
 // a new buffer does not have: the record of the last multi-caret edit, the range the
 // find actions are limited to, and the work that waits for the line index. The jump list
 // and the bookmarks need nothing: every jump clamps its place into the text.
@@ -323,7 +323,7 @@ func (d *Document) ResetHistoryState() {
 	}
 }
 
-// savedStatus is the status after a save: "Saved", or the note of a large document
+// SavedStatus is the status after a save: "Saved", or the note of a large document
 // that has one. The note is used once.
 func (d *Document) SavedStatus() string {
 	if d.large != nil && d.large.SaveNote != "" {

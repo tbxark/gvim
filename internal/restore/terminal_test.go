@@ -12,13 +12,7 @@ import (
 func TestTerminalStateRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	want := terminal.SavedState{
-		Version: terminal.SavedStateVersion,
-		Open:    true,
-		Cwd:     "/work",
-		Width:   120,
-		Rows:    []string{"old output", "second row"},
-	}
+	want := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Cwd: "/work", Width: 120, Rows: []string{"old output", "second row"}}}}
 	if err := SaveTerminal(dir, want); err != nil {
 		t.Fatalf("SaveTerminal: %v", err)
 	}
@@ -26,18 +20,18 @@ func TestTerminalStateRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %+v, %v, %v", got, ok, err)
 	}
-	if got.Version != want.Version || !got.Open || got.Cwd != want.Cwd || got.Width != want.Width || len(got.Rows) != len(want.Rows) {
+	if got.Version != want.Version || !activeSaved(got).Open || activeSaved(got).Cwd != activeSaved(want).Cwd || activeSaved(got).Width != activeSaved(want).Width || len(activeSaved(got).Rows) != len(activeSaved(want).Rows) {
 		t.Fatalf("round trip = %+v, want %+v", got, want)
 	}
-	if strings.Join(got.Rows, "\n") != strings.Join(want.Rows, "\n") {
-		t.Fatalf("rows = %q, want %q", got.Rows, want.Rows)
+	if strings.Join(activeSaved(got).Rows, "\n") != strings.Join(activeSaved(want).Rows, "\n") {
+		t.Fatalf("rows = %q, want %q", activeSaved(got).Rows, activeSaved(want).Rows)
 	}
 }
 
 func TestTerminalStateMissingFile(t *testing.T) {
 	t.Parallel()
 	got, ok, err := LoadTerminal(t.TempDir())
-	if err != nil || ok || len(got.Rows) != 0 {
+	if err != nil || ok || len(activeSaved(got).Rows) != 0 {
 		t.Fatalf("missing terminal state = %+v, %v, %v", got, ok, err)
 	}
 }
@@ -45,7 +39,7 @@ func TestTerminalStateMissingFile(t *testing.T) {
 func TestTerminalStateOfAClosedDockRemovesTheFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"old"}}); err != nil {
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"old"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion}); err != nil {
@@ -59,7 +53,7 @@ func TestTerminalStateOfAClosedDockRemovesTheFile(t *testing.T) {
 func TestTerminalStateVersionMismatchIsIgnored(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion + 1, Open: true, Rows: []string{"future"}}); err != nil {
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion + 1, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"future"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := LoadTerminal(dir); err != nil || ok {
@@ -75,17 +69,17 @@ func TestTerminalStateStripsControlCharactersAndBounds(t *testing.T) {
 		rows = append(rows, "row")
 	}
 	rows = append(rows, "evil \x1b[31mred")
-	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: rows}); err != nil {
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: rows}}}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := LoadTerminal(dir)
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal: %v, %v", ok, err)
 	}
-	if len(got.Rows) > maxSavedTerminalRows {
-		t.Fatalf("loaded %d rows, over the bound %d", len(got.Rows), maxSavedTerminalRows)
+	if len(activeSaved(got).Rows) > maxSavedTerminalRows {
+		t.Fatalf("loaded %d rows, over the bound %d", len(activeSaved(got).Rows), maxSavedTerminalRows)
 	}
-	for _, row := range got.Rows {
+	for _, row := range activeSaved(got).Rows {
 		if strings.ContainsAny(row, "\x1b\x00\n\r") {
 			t.Fatalf("row %q holds control characters", row)
 		}
@@ -101,4 +95,11 @@ func TestTerminalStateCorruptFileIsAnError(t *testing.T) {
 	if _, _, err := LoadTerminal(dir); err == nil {
 		t.Fatal("a corrupt terminal state loaded without an error")
 	}
+}
+
+// resetSaveProtectionForTest clears the in-memory block for a test directory.
+func resetSaveProtectionForTest(dir string) {
+	saveDisabledMu.Lock()
+	defer saveDisabledMu.Unlock()
+	delete(saveDisabledDirs, dir)
 }

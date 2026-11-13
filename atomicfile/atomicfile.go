@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 )
 
 // newFileMode is the mode of a file that a write creates. A file that already
@@ -92,7 +93,7 @@ func writeFileStream(path string, fill func(io.Writer) error, onTemp func(os.Fil
 		return "", err
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".gvim-*")
+	tmp, err := os.CreateTemp(filepath.Dir(target), TempPrefix(filepath.Base(target))+"*")
 	if err != nil {
 		return "", err
 	}
@@ -107,6 +108,30 @@ func writeFileStream(path string, fill func(io.Writer) error, onTemp func(os.Fil
 	}
 	syncDir(filepath.Dir(target))
 	return note, nil
+}
+
+// maxTempBase bounds the part of the target's name that the temporary name keeps: with
+// the dot prefix and the ".gvim-" random suffix it must stay inside the 255-byte limit of
+// a file name.
+const maxTempBase = 200
+
+// TempPrefix is the start of the name of the temporary file a write to a file called
+// name creates next to it: ".NAME.gvim-", with NAME shortened as tempBase does. A
+// caller that looks for the leftovers of an interrupted write matches on it.
+func TempPrefix(name string) string {
+	return "." + tempBase(name) + ".gvim-"
+}
+
+// tempBase shortens name to maxTempBase bytes without cutting a UTF-8 sequence.
+func tempBase(name string) string {
+	if len(name) <= maxTempBase {
+		return name
+	}
+	cut := maxTempBase
+	for cut > 0 && !utf8.RuneStart(name[cut]) {
+		cut--
+	}
+	return name[:cut]
 }
 
 // saveTarget returns the file that a write to path replaces. For a symbolic link

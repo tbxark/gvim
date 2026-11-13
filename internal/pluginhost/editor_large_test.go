@@ -34,7 +34,7 @@ func largeIndexedPluginEditor(t *testing.T, lines int) (*pluginEditor, *editor.D
 	if !d.Large() || !d.Index().Complete {
 		t.Fatal("the document is not large with a complete index")
 	}
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	return pe, d, pe.ListBuffers()[0].ID
 }
 

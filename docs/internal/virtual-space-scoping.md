@@ -55,7 +55,7 @@ line) or `block` (block selections may also use those cells). The engine lives i
 
 ## Tests
 
-`document/virtualspace_test.go`, `document/block_test.go`, `editor/virtualspace_test.go`,
+`editor/virtualspace_test.go`,
 `editor/virtualspace_block_test.go`, `editor/virtualspace_lines_test.go`,
 `editor/block_test.go`, `internal/tui/editorpane/virtual_lines_test.go`,
 `internal/tui/editorpane/virtual_inline_test.go`, `internal/tui/editorpane/virtual_block_test.go`,

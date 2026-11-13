@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.plugins (stage S9):
+// gvim.plugins:
 //
 //	gvim.plugins.list() -> { {name, status, version, source, file, dir, enabled, description, requires}, ... }
 //	gvim.plugins.export(tbl) -> true     expose the FUNCTIONS of tbl to other plugins; any other
@@ -27,7 +27,7 @@ const (
 )
 
 // plainData reports an error when v, as converted by fromLua, holds a Buffer or Window
-// handle: nothing but plain data crosses between plugins (FINAL 5.11).
+// handle: nothing but plain data crosses between plugins.
 func plainData(v any) error {
 	switch x := v.(type) {
 	case pluginapi.BufferID, pluginapi.WinID:

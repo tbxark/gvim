@@ -103,14 +103,13 @@ go run . [DIR] [FILE[:LINE[:COL]]]...           # launch the TUI
 ### Architecture
 
 The design record is `docs/architecture.md` (package table, import rules R1-R16,
-package maps). `migration/` holds the earlier planning records; where they disagree,
-`docs/architecture.md` wins. The shape that needs several files to see:
+package maps). The shape that needs several files to see:
 
 - Three layers. `main.go` (module root, kept there so `go install` works) →
   `internal/cli` (cobra flags and arguments) →
   `internal/app.Run`. `internal/` is the private executable shell (`app` plus the host packages
   `uiadapter`, `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`, the
-  test-only `apptest`, then `configview`, `cli`, `tui`, `terminal`, `filewatch`,
+  test-only `apptest`, then `configview`, `rexplugin`, `cli`, `tui`, `terminal`, `filewatch`,
   `daemon` (the attach/detach socket host and workspace registry), `agentdiscover`
   (tmux and agent-transcript session discovery) and `uitest`). `cmd/gvimdebug` is a
   developer page that runs gvim in a PTY. TUI-free engine and library packages are at the
@@ -129,7 +128,8 @@ package maps). `migration/` holds the earlier planning records; where they disag
   `uiadapter`, `pluginhost` and `configview`. Only `internal/app` and
   `internal/uiadapter` import the TUI sub-packages; `internal/cli` imports `internal/app`
   for `Options`/`Run`, `internal/configview` + `syntax` for the config and grammar
-  commands, and `authority` to classify remote targets.
+  commands, `internal/rexplugin` for the Rex integration commands, and `authority` to
+  classify remote targets.
   `tools/import_rules_check.sh` is the enforcement.
 - `internal/app` is the composition root (`Options`, `Run`, `buildRuntime`, settings,
   logfile, live grep, default formatters, and the remote and daemon-workspace wiring); the

@@ -69,6 +69,25 @@ func TestFakeOSFiles(t *testing.T) {
 	}
 }
 
+// TestFakeOSWalkOrder: like the real Walk, a directory is followed by its content before its
+// next sibling, even when the sibling's name sorts between them as a plain string ("a-b").
+func TestFakeOSWalkOrder(t *testing.T) {
+	f := plugintest.NewFakeOS()
+	f.SetFile("/work/a/x", "1")
+	f.SetFile("/work/a-b", "2")
+	res, err := f.Walk(context.Background(), "/work", hostos.WalkOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rels []string
+	for _, e := range res.Entries {
+		rels = append(rels, e.Rel)
+	}
+	if want := []string{"a", "a/x", "a-b"}; !reflect.DeepEqual(rels, want) {
+		t.Fatalf("Walk = %v, want %v", rels, want)
+	}
+}
+
 func TestFakeOSProcesses(t *testing.T) {
 	ctx := context.Background()
 	f := plugintest.NewFakeOS()
@@ -147,5 +166,79 @@ func TestFakeOSWatch(t *testing.T) {
 	f.FailWatch("/work", pluginapi.Errf(pluginapi.CodeLimit, "too big"))
 	if _, err := f.Watch(context.Background(), "/work", hostos.WatchOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeLimit {
 		t.Fatalf("scripted failure: %v", err)
+	}
+}
+
+// Rename and Copy refuse an existing destination, like the real OS does.
+func TestFakeOSRenameCopyRefuseAnExistingDestination(t *testing.T) {
+	ctx := context.Background()
+	f := plugintest.NewFakeOS()
+	f.SetFile("/work/a", "A")
+	f.SetFile("/work/b", "B")
+	if err := f.Rename(ctx, "/work/a", "/work/b"); pluginapi.CodeOf(err) != pluginapi.CodeConflict {
+		t.Fatalf("Rename onto a file: %v", err)
+	}
+	if err := f.Copy(ctx, "/work/a", "/work/b"); pluginapi.CodeOf(err) != pluginapi.CodeConflict {
+		t.Fatalf("Copy onto a file: %v", err)
+	}
+	if got, _ := f.File("/work/b"); got != "B" {
+		t.Fatalf("destination = %q, want it untouched", got)
+	}
+	if !f.Exists("/work/a") {
+		t.Fatal("the source was moved")
+	}
+}
+
+// A scripted Chunks slice is copied by Start: draining or growing one process's output
+// does not change what the next Start of the same script delivers.
+func TestFakeOSStartDoesNotShareScriptChunks(t *testing.T) {
+	ctx := context.Background()
+	f := plugintest.NewFakeOS()
+	f.Script([]string{"tool"}, plugintest.ProcScript{Chunks: []hostos.ProcChunk{{Data: []byte("one")}, {Data: []byte("two")}}})
+	for range 2 {
+		p, err := f.Start(ctx, []string{"tool"}, hostos.ProcOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for {
+			c, ok := p.Output(ctx)
+			if !ok {
+				break
+			}
+			got = append(got, string(c.Data))
+		}
+		if !reflect.DeepEqual(got, []string{"one", "two"}) {
+			t.Fatalf("output = %v", got)
+		}
+	}
+}
+
+// A symbolic link lists as a symlink with the kind it points to; stat follows it.
+func TestFakeOSSymlinks(t *testing.T) {
+	ctx := context.Background()
+	f := plugintest.NewFakeOS()
+	f.SetFile("/work/dir/x", "x")
+	f.SetSymlink("/work/ld", "/work/dir")
+	f.SetSymlink("/work/lb", "/work/missing")
+	ents, err := f.ReadDir(ctx, "/work", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]hostos.DirEntry{}
+	for _, e := range ents {
+		got[e.Name] = e
+	}
+	if e := got["ld"]; e.Kind != "symlink" || e.TargetKind != "dir" {
+		t.Fatalf("ld = %+v", e)
+	}
+	if e := got["lb"]; e.Kind != "symlink" || e.TargetKind != "" {
+		t.Fatalf("lb = %+v", e)
+	}
+	if st, err := f.Stat(ctx, "/work/ld"); err != nil || st.Kind != "dir" {
+		t.Fatalf("Stat(ld) = %+v, %v", st, err)
+	}
+	if st, err := f.Stat(ctx, "/work/lb"); err != nil || st.Kind != "symlink" {
+		t.Fatalf("Stat(lb) = %+v, %v", st, err)
 	}
 }

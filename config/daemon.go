@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 )
 
@@ -77,15 +76,6 @@ func (c *Config) setDaemon(raw json.RawMessage) (diags []Diagnostic) {
 func validateMaterializedWorkspaces(n int) error {
 	if n < MinMaterializedWorkspaces || n > MaxMaterializedWorkspaces {
 		return fmt.Errorf("must be between %d and %d, got %d", MinMaterializedWorkspaces, MaxMaterializedWorkspaces, n)
-	}
-	return nil
-}
-
-// ValidateMaterializedWorkspaces is the exported check for callers that accept the cap from
-// a non-config source (a test hook, a future flag).
-func ValidateMaterializedWorkspaces(n int) error {
-	if err := validateMaterializedWorkspaces(n); err != nil {
-		return errors.New("daemon.materialized_workspaces: " + err.Error())
 	}
 	return nil
 }

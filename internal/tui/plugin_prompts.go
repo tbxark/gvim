@@ -17,7 +17,7 @@ import (
 )
 
 // The prompts, pickers and popups of the plugin API: gvim.ui.input, confirm, choose,
-// select, picker and popup (FINAL X6).
+// select, picker and popup.
 //
 // A plugin asks through an async Host call (Input, Confirm, OpenPicker, ShowPopup). The
 // call validates, records the wait token in m.plug.waits and defers the opening to the
@@ -38,7 +38,7 @@ import (
 // Owning a wait. The Host calls carry no plugin, so the root does not know whose overlay
 // is whose. The runtime ties every wait to its plugin and runs the wait's cancel (this
 // file's CancelWait, ClosePicker, ClosePopup) when the plugin unloads or its task ends, so
-// OwnerGone has nothing left to close here (plugPromptsGone). The panic chord uses
+// OwnerGone has nothing left to close here. The panic chord uses
 // plugOverlaysCancel.
 
 // pluginUI is the root's state for the overlays that plugins open.
@@ -49,7 +49,7 @@ type pluginUI struct {
 	// only marks the overlay, because routeOverlay writes the stack back when Update returns.
 	busy int
 	// opening holds the pickers whose opening is queued, by picker id. Updates that arrive
-	// before the pump opens the overlay change the pending spec (S13-1: `p:open();
+	// before the pump opens the overlay change the pending spec (`p:open();
 	// p:set_status(...)` must not be lost).
 	opening map[uint64]*pendingPicker
 	// clip is the text of the last gvim.clipboard.set of the slice; clipQueued says a
@@ -422,11 +422,6 @@ func (m *Model) plugOverlaysCancel(why string) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// plugPromptsGone is OwnerGone for this area. There is nothing to do: the runtime cancels
-// the waits of an unloading plugin before it calls OwnerGone, and CancelWait, ClosePicker
-// and ClosePopup have closed the overlays by then.
-func (m *Model) plugPromptsGone(plugin string, gen uint64) { _, _ = plugin, gen }
-
 // plugItem delivers an intermediate item (a query change, a highlight move) of the wait
 // c.Token to the runtime. The wait stays open.
 func (m *Model) plugItem(c pluginapi.Completion) tea.Cmd {
@@ -785,11 +780,9 @@ func (m *Model) pluginAnswer(d prompt.Done) (tea.Cmd, bool) {
 	case pluginPopupTag:
 		return m.plugFinish(pluginapi.Completion{Token: tag.tok, Values: []any{nil}}), true
 	case pluginActionPopupTag:
-		return m.pluginActionPopupDone(tag.tok), true
+		return m.pluginActionPopupDone(tag), true
 	case pluginPickTag:
 		return m.pickOrdered(tag), true
-	case quitDiscardTag:
-		return m.quitDiscardAnswer(d), true
 	case pluginPickRankTag:
 		ov := m.plugPicker(tag.id)
 		if ov == nil {

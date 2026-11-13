@@ -89,7 +89,11 @@ func (m *Model) completionAsked() tea.Cmd {
 		m.notice = noDocumentNotice
 		return nil
 	}
-	src := m.completionSourcesFor(doc)
+	return m.completionAskedFrom(doc, m.completionSourcesFor(doc))
+}
+
+// completionAskedFrom is completionAsked over the sources already captured for doc.
+func (m *Model) completionAskedFrom(doc Document, src completionSources) tea.Cmd {
 	var wordItems []CompletionItem
 	if src.wordsOK {
 		wordItems = mergeBufferWordItems(nil, editor.BufferWordCompletions(src.snapshot))
@@ -221,7 +225,7 @@ func (m *Model) autoCompletionDue(msg completionAutoMsg) tea.Cmd {
 	if src.snapshot.Prefix == "" || (!src.wordsOK && !src.lspWanted) {
 		return nil
 	}
-	return m.completionAsked()
+	return m.completionAskedFrom(doc, src)
 }
 
 // completionReplied merges the server half into the open local list (or opens it
@@ -264,10 +268,8 @@ func (m *Model) completionReplied(r completionReplyMsg) tea.Cmd {
 		reopened := m.lspReply(lspReplyMsg{ask: lspAskCompletion, path: r.path, at: r.at, items: merged})
 		if filtered {
 			if nc := m.lsp.comp; nc != nil {
-				wordChars := m.docLanguageSettings(doc).WordCharacters
 				at := doc.Cursor()
-				prefix := editor.CompletionPrefix(doc.Line(at.Line), at.Col, wordChars)
-				wordStart := buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
+				prefix, wordStart := m.completionWord(doc, at)
 				if !m.refilterCompletion(nc, prefix, wordStart, at) {
 					m.closeCompletion(nc)
 				}
@@ -397,9 +399,6 @@ func (m *Model) wordSnapshot(doc Document) (editor.WordSnapshot, bool) {
 	}
 	top := doc.Top()
 	bottom := top + max(m.layout().EditorRows()-1, 0)
-	if bottom < top {
-		bottom = top
-	}
 	return editor.WordSnapshot{
 		Lines: lines, StartLine: start, CursorLine: cursorLine, CursorCol: at.Col,
 		Prefix: prefix, WordChars: wordChars, PrefixHasUpper: editor.HasUpper(prefix),

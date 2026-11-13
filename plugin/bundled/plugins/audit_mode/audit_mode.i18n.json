@@ -20,10 +20,8 @@
     "status.diff_failed": "Review Diff: cannot read the diff for %{path}: %{error}",
     "status.diff_empty": "Review Diff: no diff for %{path}",
     "status.untracked": "Review Diff: untracked file %{path} (shown as new file)",
-    "status.binary": "Review Diff: binary change for %{path}",
     "status.truncated": "Review Diff: output truncated",
     "status.opened": "Review Diff: opened %{path}",
-    "status.no_location": "Review Diff: this change has no working-tree location to open",
     "status.no_diff": "Review Diff: open a file diff first",
     "status.not_active": "Review Diff: switch to the open diff view before navigating its hunks",
     "status.no_hunks": "Review Diff: this diff has no hunks",
@@ -42,7 +40,6 @@
     "empty.not_repo": "Not inside a git repository",
     "row.status": "%{status}  %{path}",
     "row.stats": "+%{add} -%{del}",
-    "diff.empty": "No diff available for this change.",
     "diff.truncated": "… diff truncated by Review Diff …"
   }
 }

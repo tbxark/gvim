@@ -4,17 +4,14 @@ package app
 // consistent in-memory snapshot of the editor (layout, unsaved buffer texts, large-file
 // overlays, terminal record, find history); the stash files and session JSON are written
 // by a worker, so a switch never waits on disk. Ordering: the writes of one workspace are
-// tracked as jobs, a close waits for the workspace's job, and closeAll waits for every
+// tracked as jobs, a close waits for the workspace's job, and closeAllChecked waits for every
 // job before the runtimes are closed. A crash between a snapshot and its write loses that
 // last capture (documented limitation; the previous session file is intact).
 
 import (
-	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/restore"
@@ -185,6 +182,10 @@ type captureWrite struct {
 	seq  uint64
 }
 
+// captureJobHook, when set, sees every queued capture write. Tests set it to wait for the
+// writes and read their errors; nothing in a running editor keeps the jobs.
+var captureJobHook func(m *workspaceManager, job *saveJob)
+
 // enqueueCapture snapshots the workspace on the UI goroutine and queues its write on the
 // workspace's ordered writer. The write (stash files, session JSON, terminal record,
 // find history and the registry layout update) runs entirely off the UI goroutine.
@@ -215,18 +216,10 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 		close(job.done)
 		return job
 	}
+	if captureJobHook != nil {
+		captureJobHook(m, job)
+	}
 	m.mu.Lock()
-	// Forget the writes that finished cleanly, so a long daemon does not keep one job
-	// per capture; a failed one stays for waitWrites to report.
-	m.writes = slices.DeleteFunc(m.writes, func(j *saveJob) bool {
-		select {
-		case <-j.done:
-			return j.err == nil
-		default:
-			return false
-		}
-	})
-	m.writes = append(m.writes, job)
 	w := m.writers[s.ws.File.StableID]
 	if w == nil {
 		w = &captureWriter{q: make(chan *captureWrite, 16)}
@@ -327,24 +320,4 @@ func (m *workspaceManager) writeSnapshot(s *workspaceSession, snap *captureSnaps
 		}
 	}
 	return nil
-}
-
-// waitWrites waits for every outstanding capture write, up to timeout per job. It reports
-// the errors (a failed save is a lost capture and must be visible).
-func (m *workspaceManager) waitWrites(timeout time.Duration) error {
-	m.mu.Lock()
-	jobs := append([]*saveJob(nil), m.writes...)
-	m.mu.Unlock()
-	var errs []error
-	for _, job := range jobs {
-		select {
-		case <-job.done:
-			if job.err != nil {
-				errs = append(errs, job.err)
-			}
-		case <-time.After(timeout):
-			errs = append(errs, errors.New("workspace: capture write did not finish"))
-		}
-	}
-	return errors.Join(errs...)
 }

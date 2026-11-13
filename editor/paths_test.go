@@ -326,3 +326,27 @@ func TestCloseByPathUnmatchedAndEmpty(t *testing.T) {
 		t.Fatalf("empty CloseByPath err = %v", err)
 	}
 }
+
+// TestCloseByPathActiveGoesToNeighbour: when the closed tab is the active one, the tab that
+// takes its place is the next survivor, as CloseTab picks it, and not the first tab.
+func TestCloseByPathActiveGoesToNeighbour(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	var paths []string
+	e := New(Options{})
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt"} {
+		p := filepath.Join(dir, name)
+		putFile(t, p, name)
+		paths = append(paths, p)
+		if err := e.OpenFile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.ActivateTab(2)
+	if err := e.CloseByPath(paths[2], false); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Active().Path; got != paths[3] {
+		t.Fatalf("active after closing c.txt = %s, want d.txt", filepath.Base(got))
+	}
+}

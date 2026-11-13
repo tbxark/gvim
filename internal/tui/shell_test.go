@@ -10,6 +10,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/dialog"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
@@ -148,6 +149,11 @@ type dialogCall struct {
 
 func (d *fakeDialogs) Unsaved(name string, tag any, _ style.Overlay) Overlay {
 	d.opened = append(d.opened, dialogCall{kind: "unsaved", text: name, tag: tag})
+	return &dialogOverlay{}
+}
+
+func (d *fakeDialogs) Quit(tag any, _ style.Overlay) Overlay {
+	d.opened = append(d.opened, dialogCall{kind: "quit", tag: tag})
 	return &dialogOverlay{}
 }
 
@@ -424,7 +430,7 @@ func TestNilDialogsNoticesInsteadOfOpening(t *testing.T) {
 // tabX returns the first column of tab i in the strip, or -1.
 func tabX(m *Model, i int) int {
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTab && r.Index == i {
+		if r.Kind == frame.HitTab && r.Index == i {
 			return r.X
 		}
 	}
@@ -451,7 +457,7 @@ func TestClickOnTabCloseButtonClosesCleanTab(t *testing.T) {
 	m := shellModel(t, tf, &fakeDialogs{})
 	x := -1
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTabClose && r.Index == 1 {
+		if r.Kind == frame.HitTabClose && r.Index == 1 {
 			x = r.X
 		}
 	}
@@ -516,7 +522,7 @@ func TestExplorerDividerDragResizesWithinBounds(t *testing.T) {
 }
 
 func TestEightyByTwentyFourLayoutDefaultsToThirtyTwoColumns(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{ExplorerOpen: true, Lines: 10})
+	l := layoutFor(80, 24, frame.Input{ExplorerOpen: true, Lines: 10})
 	if l.Ex != 32 || l.EditorX != 32 || l.BodyTop != 3 || l.BodyBottom != 21 || l.StatusY != 23 {
 		t.Fatalf("80x24: ex %d editorX %d body %d-%d status %d",
 			l.Ex, l.EditorX, l.BodyTop, l.BodyBottom, l.StatusY)

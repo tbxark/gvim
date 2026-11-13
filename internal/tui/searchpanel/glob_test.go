@@ -30,6 +30,12 @@ func TestGlobMatching(t *testing.T) {
 		{"[ab].go", "a.go", true},
 		{"[ab].go", "c.go", false},
 		{"[a-c].go", "b.go", true},
+		{"[!a].go", "b.go", true},
+		{"[!a].go", "a.go", false},
+		{"[!a].go", "!.go", true},
+		{"日本*.txt", "日本語.txt", true},
+		{"日本*.txt", "dir/日本.txt", true},
+		{"日本*.txt", "本日.txt", false},
 	}
 	for _, tt := range tests {
 		m, err := parseGlob(tt.glob)

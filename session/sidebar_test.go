@@ -20,11 +20,10 @@ func TestSessionSidebarRoundTrip(t *testing.T) {
 		ExplorerScroll:       3,
 		ContentsOpen:         true,
 		ContentsCollapsed:    true,
-		ContentsRows:         12,
 		ContentsScroll:       1,
 		DiagnosticsOpen:      true,
 		DiagnosticsCollapsed: true,
-		DiagnosticsRows:      6,
+		SectionRows:          map[string]int{"contents": 12, "diagnostics": 6},
 	}
 	if err := Save(dir, Session{Root: "/ws", Explorer: true, Sidebar: want}); err != nil {
 		t.Fatal(err)

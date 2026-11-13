@@ -11,7 +11,7 @@ import (
 // a query with spaces and quotes needs no shell quoting.
 func TestRunArgsKeepsArgumentsLiteral(t *testing.T) {
 	t.Parallel()
-	out, code, err := shellcmd.RunArgs(t.TempDir(), []string{"printf", "%s|", "a b", "c\"d", "$HOME"}, "", 10*time.Second)
+	out, code, err := shellcmd.RunArgsEnv(t.TempDir(), []string{"printf", "%s|", "a b", "c\"d", "$HOME"}, "", 10*time.Second, nil)
 	if err != nil || code != 0 {
 		t.Fatalf("RunArgs: %q, %d, %v", out, code, err)
 	}
@@ -23,7 +23,7 @@ func TestRunArgsKeepsArgumentsLiteral(t *testing.T) {
 // TestRunArgsReturnsTheExitCode: a non-zero exit is a result, not an error.
 func TestRunArgsReturnsTheExitCode(t *testing.T) {
 	t.Parallel()
-	out, code, err := shellcmd.RunArgs(t.TempDir(), []string{"sh", "-c", "printf hi; exit 3"}, "", 10*time.Second)
+	out, code, err := shellcmd.RunArgsEnv(t.TempDir(), []string{"sh", "-c", "printf hi; exit 3"}, "", 10*time.Second, nil)
 	if err != nil {
 		t.Fatalf("RunArgs error = %v, want the exit code", err)
 	}
@@ -34,14 +34,14 @@ func TestRunArgsReturnsTheExitCode(t *testing.T) {
 
 func TestRunArgsFailsOnAStartError(t *testing.T) {
 	t.Parallel()
-	if _, _, err := shellcmd.RunArgs(t.TempDir(), []string{"no-such-command-gvim"}, "", time.Second); err == nil {
+	if _, _, err := shellcmd.RunArgsEnv(t.TempDir(), []string{"no-such-command-gvim"}, "", time.Second, nil); err == nil {
 		t.Fatal("a missing program gave no error")
 	}
 }
 
 func TestRunArgsTimesOut(t *testing.T) {
 	t.Parallel()
-	if _, _, err := shellcmd.RunArgs(t.TempDir(), []string{"sh", "-c", "sleep 5"}, "", 100*time.Millisecond); err == nil {
+	if _, _, err := shellcmd.RunArgsEnv(t.TempDir(), []string{"sh", "-c", "sleep 5"}, "", 100*time.Millisecond, nil); err == nil {
 		t.Fatal("a timed-out command gave no error")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/plugin/bundled"
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -54,6 +55,33 @@ func startAudit(t *testing.T, host *plugintest.FakeHost, os *plugintest.FakeOS) 
 	h := plugintest.New(t, auditFiles(t), plugintest.Options{Host: host, OS: os, Timeout: 2 * time.Second, EventBudget: 5 * time.Second})
 	h.Start()
 	return h
+}
+
+// A picker the host refuses to open is reported and does not leave the plugin thinking a
+// review is open: no refresh runs, and the next review opens normally.
+func TestAuditModeReportsAPickerThatDoesNotOpen(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	h := startAudit(t, host, os)
+	host.UI().Reject = pluginapi.Errf(pluginapi.CodeBusy, "another overlay is open")
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	if got := strings.Join(h.NoticeTexts(), "|"); !strings.Contains(got, "another overlay is open") {
+		t.Fatalf("notices = %q", got)
+	}
+	if runs := os.Runs(); len(runs) != 0 {
+		t.Fatalf("a refresh ran for a picker that never opened: %+v", runs)
+	}
+	host.UI().Reject = nil
+	if err := h.Run(auditPlugin+".review", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	if o := h.Host.UI().Last("picker"); o == nil || !o.Open {
+		t.Fatalf("no review picker after the refusal cleared (notices %v)", h.NoticeTexts())
+	}
 }
 
 func TestAuditModeListsChangesAndOpensDiff(t *testing.T) {
@@ -800,6 +828,29 @@ func TestAuditModeCrossFileReadFailureNotBoundary(t *testing.T) {
 	}
 	got := strings.Join(h.NoticeTexts(), "|")
 	if !strings.Contains(got, "could not read a candidate diff") || strings.Contains(got, "last hunk") {
+		t.Fatalf("failure notices = %q", got)
+	}
+}
+
+// A read failure whose message is all multibyte characters is cut at a character boundary
+// in the notice, not emptied: the clip used to drop every trailing non-ASCII byte.
+func TestAuditModeFailureNoticeKeepsMultibyteError(t *testing.T) {
+	t.Parallel()
+	host, os := auditHost(t)
+	os.SetFile("/w/b.go", "package b\n")
+	os.Rescript(gitArgv("--no-optional-locks", "status", "--porcelain", "-z", "-uall"), plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--numstat", "--"), plugintest.ProcScript{Stdout: "1\t0\ta.go\n1\t0\tb.go\n"})
+	os.Rescript(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--numstat", "--"), plugintest.ProcScript{Stdout: ""})
+	os.Script(gitArgv("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "b.go"), plugintest.ProcScript{Err: pluginapi.Errf(pluginapi.CodeExec, "%s", strings.Repeat("读取失败", 100))})
+	h := startAudit(t, host, os)
+	openAuditDiff(t, h, host)
+	for range 2 {
+		if err := h.Run(auditPlugin+".next_hunk", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := strings.Join(h.NoticeTexts(), "|")
+	if !strings.Contains(got, "读取失败读取失败") || !utf8.ValidString(got) {
 		t.Fatalf("failure notices = %q", got)
 	}
 }

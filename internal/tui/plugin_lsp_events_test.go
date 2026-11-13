@@ -23,7 +23,7 @@ func TestLSPEventsReachPlugins(t *testing.T) {
 	if _, ok := m.lspAction("show_lsp_status", nil); !ok {
 		t.Fatal("show_lsp_status is not an LSP action")
 	}
-	m.pluginTail(pluginSnap{}, nil)
+	m.pluginTail(pluginSnap{})
 	m.pluginPump()
 	// And the error site.
 	m.lspMessage(lspErrMsg{err: errors.New("server exploded")})

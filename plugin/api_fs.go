@@ -14,7 +14,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.fs (FINAL 5.8, AMENDMENTS C16). Every call except watch is awaitable: its Work runs
+// gvim.fs. Every call except watch is awaitable: its Work runs
 // the OS call off the UI goroutine. The limits of the spec are enforced here, so they hold
 // for every OS implementation.
 
@@ -481,6 +481,10 @@ func prepFSRemove(c *awaitCall) ioJob {
 	if !c.optionsDone(1, "remove", o) {
 		return nil
 	}
+	if hostos.IsRemote(c.r.os) {
+		c.Fail(pluginapi.Errf(pluginapi.CodeUnsupported, "remove is unsupported on remote workspaces"))
+		return nil
+	}
 	dirs := c.r.os.Dirs()
 	abs := absPath(dirs.Cwd, path)
 	protected := []string{dirs.Home, dirs.Root, dirs.Config, dirs.Cwd}
@@ -587,10 +591,7 @@ func (w *watcher) onItem(c pluginapi.Completion) {
 		}
 	}
 	if !c.More {
-		w.active = false
-		*w.live--
-		w.cancel()
-		w.p.r.dropWait(w.w)
+		w.stop()
 	}
 }
 
@@ -622,16 +623,10 @@ func installFS(e *apiEnv) {
 			L.ArgError(3, o.bad)
 		}
 		if err := checkPathText(path); err != nil {
-			v, s := errTuple(err)
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, err)
 		}
 		if live >= quotaWatchers {
-			v, s := errTuple(pluginapi.Errf(pluginapi.CodeLimit, "watcher quota (%d)", quotaWatchers))
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "watcher quota (%d)", quotaWatchers))
 		}
 		live++
 		seq++

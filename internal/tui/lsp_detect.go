@@ -204,7 +204,7 @@ func (m *Model) lspFormatted(msg lspFormatMsg) {
 	m.notice = i18n.T("", "format.formatted_with", map[string]any{"formatter": "the language server"})
 }
 
-// diagLine is the worst severity of the diagnostics that start on each line of a
+// diagLines is the worst severity of the diagnostics that start on each line of a
 // document, the lower the number the worse.
 func diagLines(ds []Diagnostic) map[int]int {
 	out := make(map[int]int, len(ds))

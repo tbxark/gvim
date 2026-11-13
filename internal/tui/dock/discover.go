@@ -20,16 +20,6 @@ func (t *Tabs) StartDiscovered(argv []string, name string) (tea.Cmd, bool) {
 	return t.startLaunchRecordAt(terminal.Launch{Argv: argv, ResumeArgv: argv, Ephemeral: true}, name, t.LaunchDir())
 }
 
-// StartAgentChoice starts a configured agent with the user's launch choice.
-// resume runs the agent's resume argv now (a user-initiated rejoin, so it is
-// allowed even with terminal.resume_agents off, which only gates automatic
-// restarts); otherwise the new-session argv runs. The tab is named after the
-// agent and the record keeps both argv lists, so a later Restart follows the
-// configured gate.
-func (t *Tabs) StartAgentChoice(name string, resume bool) (tea.Cmd, bool) {
-	return t.StartAgentChoiceAt(name, resume, t.LaunchDir())
-}
-
 // StartAgentChoiceAt is StartAgentChoice with an explicit start directory: the Run
 // Agent dialog's directory answer. An empty dir falls back to the workspace root.
 func (t *Tabs) StartAgentChoiceAt(name string, resume bool, dir string) (tea.Cmd, bool) {

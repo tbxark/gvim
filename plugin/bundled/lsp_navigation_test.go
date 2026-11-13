@@ -155,6 +155,9 @@ func TestLSPNavigationBreadcrumbsPicker(t *testing.T) {
 	if o == nil {
 		t.Fatal("expected location picker for breadcrumbs outline, got nil")
 	}
+	if len(o.Picker.Items) != 2 || !strings.Contains(o.Picker.Items[1].Detail, "[fn] Start") {
+		t.Errorf("rows = %+v, want the kind and name of each enclosing symbol", o.Picker.Items)
+	}
 }
 
 func TestLSPNavigationBreadcrumbs(t *testing.T) {
@@ -283,6 +286,45 @@ func TestLSPNavigationOutgoingCalls(t *testing.T) {
 	cursors, _ := host.Cursors(host.Buffers[0].Info.ID)
 	if len(cursors) == 0 || cursors[0].Pos.Line != 3 {
 		t.Fatalf("call site cursor = %+v, want line 3", cursors)
+	}
+}
+
+// An outgoing call's fromRanges are call sites in the prepared item's file, not in the callee's.
+func TestLSPNavigationOutgoingCallsListCallSitesInThePreparedFile(t *testing.T) {
+	t.Parallel()
+	host, _ := lspNavHost(t)
+	site := func(line float64) map[string]any {
+		return map[string]any{
+			"start": map[string]any{"line": line, "character": 1.0},
+			"end":   map[string]any{"line": line, "character": 9.0},
+		}
+	}
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		switch c.Method {
+		case "textDocument/prepareCallHierarchy":
+			return []any{map[string]any{"name": "main", "kind": 12.0, "uri": "file:///work/a.go"}}, ""
+		case "callHierarchy/outgoingCalls":
+			return []any{
+				map[string]any{
+					"to":         map[string]any{"name": "helper", "kind": 12.0, "uri": "file:///work/b.go"},
+					"fromRanges": []any{site(3), site(4)},
+				},
+			}, ""
+		}
+		return nil, "unexpected " + c.Method
+	}
+	h := startLSPNav(t, host)
+	if err := h.Run(lspNavPlugin+".show_outgoing_calls", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.CompleteLSP()
+	h.CompleteLSP()
+	o := host.UI().Last("picker")
+	if o == nil || len(o.Picker.Items) != 2 {
+		t.Fatalf("picker = %+v (log %v)", o, h.LogText(""))
+	}
+	if got := o.Picker.Items[0].Text; !strings.Contains(got, "a.go:4") || strings.Contains(got, "b.go") {
+		t.Errorf("first row = %q, want the call site a.go:4", got)
 	}
 }
 

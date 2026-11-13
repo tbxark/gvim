@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/theme"
 )
@@ -31,7 +32,7 @@ func stripModel(t *testing.T, w int, names ...string) (*Model, *tabFake) {
 func tabsOnScreen(m *Model) map[int]bool {
 	on := map[int]bool{}
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTab {
+		if r.Kind == frame.HitTab {
 			on[r.Index] = true
 		}
 	}
@@ -41,7 +42,7 @@ func tabsOnScreen(m *Model) map[int]bool {
 // plusColumn is the column of the pinned "+" run, or -1.
 func plusColumn(m *Model) int {
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTabNew {
+		if r.Kind == frame.HitTabNew {
 			return r.X
 		}
 	}
@@ -94,7 +95,7 @@ func TestClickRightMarkerScrollsAndPlusOpensItsMenu(t *testing.T) {
 	before := m.layout().Strip.First
 	markerX := -1
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTabScrollAfter {
+		if r.Kind == frame.HitTabScrollAfter {
 			markerX = r.X
 		}
 	}

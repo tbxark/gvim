@@ -2,6 +2,7 @@ package dock
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -63,11 +64,17 @@ func (p *Panel) exitMarkerRow() int {
 	if !p.exitMarkerPending() {
 		return -1
 	}
-	rows := p.scroll.screenRows
 	if p.term != nil {
-		rows = min(rows, p.term.Screen().Rows)
+		return p.exitMarkerRowAt(p.term.Screen().Rows)
 	}
-	return len(p.prior) + p.scroll.total + rows
+	return p.exitMarkerRowAt(p.scroll.screenRows)
+}
+
+// exitMarkerRowAt is exitMarkerRow for a live screen of termRows rows, so a painter
+// that already holds the screen snapshot does not take another one per row. It assumes
+// the marker is pending.
+func (p *Panel) exitMarkerRowAt(termRows int) int {
+	return len(p.prior) + p.scroll.total + min(p.scroll.screenRows, termRows)
 }
 
 // appendExitMarker appends the exit marker line unless the transcript already
@@ -314,18 +321,17 @@ func (p *Panel) RevealTranscriptRow(h TranscriptHit) (tea.Cmd, bool) {
 	return tea.Batch(cmd, p.requestScrollback()), true
 }
 
-// SavedState returns the terminal state the session file keeps: the dock's open
-// flag and directory, the pane width the transcript was captured at, and the
-// newest transcript rows as text. The transcript is the prior rows (if any), then
-// the history window, then the live screen rows. It is bounded and stripped of
-// control characters so a saved answer can never move the cursor of the loader's
-// terminal.
-func (p *Panel) SavedState() terminal.SavedState {
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion,
-		Open:    p.open || p.restored || len(p.prior) > 0,
-		Cwd:     p.dir,
-		Width:   p.contentCols(),
+// SavedState returns the tab record the session file keeps: the tab's open flag and
+// directory, the pane width the transcript was captured at, and the newest transcript
+// rows as text. The transcript is the prior rows (if any), then the history window,
+// then the live screen rows. It is bounded and stripped of control characters so a
+// saved answer can never move the cursor of the loader's terminal. The name is the
+// tab strip's and is filled in by Tabs.
+func (p *Panel) SavedState() terminal.SavedTab {
+	st := terminal.SavedTab{
+		Open:  p.open || p.restored || len(p.prior) > 0,
+		Cwd:   p.dir,
+		Width: p.contentCols(),
 	}
 	// Live is whether a process was running at the capture: only such a tab may be
 	// revived on a dive after the restore. A restored tab that was not revived is
@@ -390,22 +396,22 @@ func (p *Panel) SavedState() terminal.SavedState {
 	return st
 }
 
-// cleanSavedText strips control characters from a saved transcript row, so a
-// shell's output cannot inject escape sequences into the loader.
+// cleanSavedText strips control characters (C0, DEL and the C1 range, whose CSI is
+// 0x9b) from a saved transcript row, so a shell's output cannot inject escape
+// sequences into the loader.
 func cleanSavedText(text string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) {
 			return -1
 		}
 		return r
 	}, text)
 }
 
-// Restore puts a saved terminal state back: the dock is shown, read-only, over
-// the saved transcript, dead until the user restarts it. Nothing runs
-// automatically; Restart starts a shell in the saved directory and appends it
-// below the restored transcript.
-func (p *Panel) Restore(st terminal.SavedState) {
+// Restore puts a saved tab back: the dock is shown, read-only, over the saved
+// transcript, dead until the user restarts it. Nothing runs automatically; Restart
+// starts a shell in the saved directory and appends it below the restored transcript.
+func (p *Panel) Restore(st terminal.SavedTab) {
 	rows := st.Rows
 	if len(rows) > maxSavedRows {
 		rows = rows[len(rows)-maxSavedRows:]
@@ -438,12 +444,6 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	p.focus = false
 	p.dir = clipSavedDir(cleanSavedText(st.Cwd))
 	p.launchDir = clipSavedDir(st.LaunchDir)
-	if p.launchDir == "" {
-		// An older record has no launch_dir: its cwd is the best available launch
-		// directory (the migration keeps the old behaviour rather than inventing a
-		// path).
-		p.launchDir = clipSavedDir(st.Cwd)
-	}
 	p.term = nil
 	p.exited = true
 	p.notice = ""

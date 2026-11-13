@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
@@ -36,16 +37,16 @@ func (m *Model) rightClick(msg tea.MouseClickMsg) tea.Cmd {
 	l := m.layout()
 	t := l.Hit(mo.X, mo.Y)
 	switch t.Kind {
-	case hitTab, hitTabClose:
+	case frame.HitTab, frame.HitTabClose:
 		m.showContextMenu(mo, m.tabMenuItems(t.Index))
-	case hitExplorerRow, hitExplorerBody:
+	case frame.HitExplorerRow, frame.HitExplorerBody:
 		return m.explorerContextMenu(mo, l)
-	case hitEditorText:
+	case frame.HitEditorText:
 		m.editorContextMenu(mo, t)
-	case hitSidebarHeader, hitSidebarClose, hitSidebarRow, hitSidebarBody:
+	case frame.HitSidebarHeader, frame.HitSidebarClose, frame.HitSidebarRow, frame.HitSidebarBody:
 		// The Contents section has no context menu yet: a press there is not a
 		// press the user expects a menu from.
-	case hitNone:
+	case frame.HitNone:
 	default:
 		m.notice = noContextMenuNotice
 	}
@@ -185,19 +186,11 @@ func (m *Model) relativePath(path string) string {
 	return path
 }
 
-// setClipboard puts text on the system clipboard: an OSC 52 write, and a native
-// write when the app gave one. The status row says what was copied.
+// setClipboard puts text on the system clipboard (see copyToClipboard). The status row says
+// what was copied.
 func (m *Model) setClipboard(text string) tea.Cmd {
-	m.rememberYank(text)
 	m.notice = "Copied " + text
-	cmd := tea.SetClipboard(text)
-	if w, ok := m.dock.Clipboard().(ClipboardWriter); ok {
-		cmd = tea.Batch(cmd, func() tea.Msg {
-			_ = w.Write(text)
-			return nil
-		})
-	}
-	return cmd
+	return m.copyToClipboard(text)
 }
 
 // ---- explorer
@@ -205,7 +198,7 @@ func (m *Model) setClipboard(text string) tea.Cmd {
 // explorerContextMenu selects what the pointer is on and opens the explorer menu: the
 // full one for a single entry, the short one for several picked entries, and only
 // creation and paste for the root and the blank area, as in Fresh.
-func (m *Model) explorerContextMenu(mo tea.Mouse, l layout) tea.Cmd {
+func (m *Model) explorerContextMenu(mo tea.Mouse, l frame.Layout) tea.Cmd {
 	if m.tree == nil || !m.explorerOpen {
 		return nil
 	}
@@ -215,10 +208,6 @@ func (m *Model) explorerContextMenu(mo tea.Mouse, l layout) tea.Cmd {
 	}
 	m.takeExplorerFocus()
 	items := m.explorerMenuItems(target)
-	if len(items) == 0 {
-		m.notice = expanel.ErrReadOnlyTree.Error()
-		return nil
-	}
 	m.showContextMenu(mo, items)
 	return nil
 }
@@ -228,41 +217,6 @@ func (m *Model) explorerContextMenu(mo tea.Mouse, l layout) tea.Cmd {
 // trashes them all after one question.
 func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 	paths := target.Paths
-	if m.explorerReadOnly() {
-		// A read-only tree (the remote workspace) has no creation, rename, delete,
-		// cut, paste or duplicate entries. Copying a path is a local string operation
-		// and stays.
-		if len(paths) == 0 {
-			return nil
-		}
-		return []ctxmenu.Item{
-			{Label: "Copy", Action: explorerMenuPrefix + "copy", Data: paths},
-			{Label: "Copy Full Path", Action: explorerMenuPrefix + "copy_full_path", Data: paths},
-			{Label: "Copy Relative Path", Action: explorerMenuPrefix + "copy_relative_path", Data: paths},
-		}
-	}
-	if m.explorerClipboardDisabled() {
-		// A writable remote tree has creation, rename and delete, but no subtree
-		// clipboard or duplicate operations yet (subtree transfer is a recorded gap).
-		row := func(label, action string) ctxmenu.Item {
-			return ctxmenu.Item{Label: label, Action: explorerMenuPrefix + action, Data: paths}
-		}
-		rule := ctxmenu.Item{Separator: true}
-		create := []ctxmenu.Item{row(uiText("gvim.context.new_file", "New File"), "file_explorer_new_file"), row(uiText("gvim.context.new_directory", "New Directory"), "file_explorer_new_directory")}
-		pathCopies := []ctxmenu.Item{
-			row(uiText("gvim.context.copy_full_path", "Copy Full Path"), "copy_full_path"),
-			row(uiText("gvim.context.copy_relative_path", "Copy Relative Path"), "copy_relative_path"),
-		}
-		switch {
-		case target.Root || len(paths) == 0:
-			return create
-		case len(paths) > 1:
-			return append([]ctxmenu.Item{row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), rule}, pathCopies...)
-		}
-		return append(append(create,
-			row(uiText("gvim.context.rename", "Rename"), "file_explorer_rename"),
-			row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), rule), pathCopies...)
-	}
 	row := func(label, action string) ctxmenu.Item {
 		return ctxmenu.Item{Label: label, Action: explorerMenuPrefix + action, Data: paths}
 	}
@@ -286,19 +240,6 @@ func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 	)
 }
 
-// explorerReadOnly reports whether the explorer tree refuses file operations.
-func (m *Model) explorerReadOnly() bool {
-	ro, ok := m.tree.(interface{ ReadOnly() bool })
-	return ok && ro.ReadOnly()
-}
-
-// explorerClipboardDisabled reports whether the tree cannot cut/copy/paste entries (the
-// remote tree: create/rename/delete are available, subtree transfer is not).
-func (m *Model) explorerClipboardDisabled() bool {
-	ro, ok := m.tree.(interface{ ClipboardDisabled() bool })
-	return ok && ro.ClipboardDisabled()
-}
-
 // explorerMenuPrefix starts the action of a row of the explorer menu. The rest is an
 // explorer action, or one of duplicate, copy_full_path and copy_relative_path.
 const explorerMenuPrefix = "explorer:"
@@ -310,9 +251,6 @@ func (m *Model) explorerMenuAction(action string, paths []string) tea.Cmd {
 	case "duplicate":
 		if target := m.remoteExplorerTarget(); target != "" {
 			q := remoteClipboardQuestion(remoteClipboardDuplicate, paths, "", target)
-			if len(paths) == 1 {
-				q = fmt.Sprintf("Duplicate %s on %s?", filepath.Base(paths[0]), target)
-			}
 			m.pushOverlay(prompt.NewConfirm(m.styles, q, remoteClipboardTag{kind: remoteClipboardDuplicate, paths: paths}))
 			return nil
 		}
@@ -338,7 +276,7 @@ func (m *Model) explorerMenuAction(action string, paths []string) tea.Cmd {
 // lands there. A selection is kept, so Cut and Copy act on it, and so is a set of
 // several carets, which Paste then fills in at each caret. Cut and Copy still need a
 // selection, as they do in Fresh. On a read-only document Cut and Paste are disabled.
-func (m *Model) editorContextMenu(mo tea.Mouse, t hitTarget) {
+func (m *Model) editorContextMenu(mo tea.Mouse, t frame.HitTarget) {
 	doc := m.ed.Active()
 	if doc == nil {
 		return

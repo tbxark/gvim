@@ -11,7 +11,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Virtual buffers of the plugin host (stage S18, FINAL X10): the BufferEditor methods that
+// Virtual buffers of the plugin host: the BufferEditor methods that
 // make, fill and describe the scratch tabs plugins own. The text and the properties of the
 // content live in the editor (editor/virtual.go); the styles of the content are decorations
 // of the plugin decor store under the owner "virtual:<id>", so the painter that draws every
@@ -231,8 +231,7 @@ func contentStyle(s pluginapi.Style) decorations.Style {
 // entries, concatenated as given, all in one step: a content that does not fit changes
 // nothing.
 func (p *pluginEditor) SetContent(id pluginapi.BufferID, entries []pluginapi.ContentEntry) error {
-	d, err := p.virtualDoc(id)
-	if err != nil {
+	if _, err := p.virtualDoc(id); err != nil {
 		return err
 	}
 	var c contentBuilder
@@ -250,11 +249,10 @@ func (p *pluginEditor) SetContent(id pluginapi.BufferID, entries []pluginapi.Con
 		return editorErr(err)
 	}
 	p.sweepVirtual()
-	err = p.ed.SetVirtualProps(doc, c.props)
+	err := p.ed.SetVirtualProps(doc, c.props)
 	if err == nil {
 		err = p.decor.Set(uint64(id), virtualOwner(id), virtualNS, c.items)
 	}
-	p.markEdited(d)
 	if errors.Is(err, decorations.ErrFull) {
 		return pluginapi.Errf(pluginapi.CodeLimit, "too many styled runs in the content")
 	}

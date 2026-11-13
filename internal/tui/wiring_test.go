@@ -407,7 +407,7 @@ func TestF10OpensTheFileMenuAndEscapeCloses(t *testing.T) {
 func TestClickEditLabelThenEnterRunsUndo(t *testing.T) {
 	ed := newFakeEditor("hello")
 	m := newTestModel(t, ed, nil, 60, 20)
-	edit := m.layout().MenuRuns[1]
+	edit := menuLabelRuns(m)[1]
 	m.Update(click(edit.X, 0, tea.MouseLeft))
 	if m.menu.Title() != "Edit" {
 		t.Fatalf("menu title = %q after the Edit click, want Edit", m.menu.Title())

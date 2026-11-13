@@ -2,9 +2,10 @@ package session
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 )
 
@@ -107,32 +108,34 @@ func TestSplitLayoutRoundTripAndLegacy(t *testing.T) {
 	}
 }
 
-func TestValidateSplitLayoutHelper(t *testing.T) {
+func TestSplitNodeLeavesReadingOrder(t *testing.T) {
 	t.Parallel()
-	l := &SplitLayout{Root: SplitNode{Dir: SplitSideBySide, A: leaf(0), B: leaf(1)}, Focus: 0}
-	if !ValidateSplitLayout(l, 2) {
-		t.Fatal("a valid layout was rejected")
+	n := &SplitNode{Dir: SplitSideBySide, A: leaf(2), B: &SplitNode{Dir: SplitStacked, A: leaf(0), B: leaf(1)}}
+	if got, want := n.Leaves(), []int{2, 0, 1}; !slices.Equal(got, want) {
+		t.Fatalf("Leaves = %v, want %v", got, want)
 	}
-	if ValidateSplitLayout(nil, 2) {
-		t.Fatal("a nil layout validated")
-	}
-	if !strings.Contains(leavesString(l), "0") {
-		// Leaves() is exercised for the reading-order contract.
-		t.Fatalf("leaves = %v", l.Root.Leaves())
+	if (*SplitNode)(nil).Leaves() != nil {
+		t.Fatal("a nil node has leaves")
 	}
 }
 
-// leavesString renders the reading-order leaves, for the helper test.
-func leavesString(l *SplitLayout) string {
-	var b strings.Builder
-	for _, f := range l.Root.Leaves() {
-		b.WriteString(string(rune('0' + f)))
+// The zero fields of a layout and of the search state are left out of the file, as
+// their omitzero tags say; omitempty would keep false and 0 under encoding/json/v2.
+func TestZeroFieldsAreOmitted(t *testing.T) {
+	t.Parallel()
+	for _, v := range []any{SplitLayout{}, SplitNode{}, Search{}} {
+		data, err := jsonv2.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "{}" && string(data) != `{"root":{}}` {
+			t.Errorf("%T zero value encodes as %s, want no fields", v, data)
+		}
 	}
-	return b.String()
 }
 
 // TestSplitLayoutDualFieldsRoundTrip: the Markdown dual marker and each leaf's view mode
-// are additive JSON fields; a valid dual layout passes Valid, and a dual marker on any
+// are JSON fields; a valid dual layout passes Valid, and a dual marker on any
 // other shape is rejected instead of restoring the wrong panes.
 func TestSplitLayoutDualFieldsRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -164,6 +167,14 @@ func TestSplitLayoutDualFieldsRoundTrip(t *testing.T) {
 	bad.Focus = 1
 	if bad.Valid(1) {
 		t.Fatal("a dual layout focused on the preview was accepted")
+	}
+	for _, mode := range [][2]string{{"", "rendered"}, {"source", ""}, {"rendered", "source"}} {
+		bad = *layout
+		bad.Root.A = &SplitNode{File: 0, Path: "/w/notes.md", ViewMode: mode[0]}
+		bad.Root.B = &SplitNode{File: 0, Path: "/w/notes.md", ViewMode: mode[1]}
+		if bad.Valid(1) {
+			t.Fatalf("a dual layout with view modes %q was accepted", mode)
+		}
 	}
 	bad = *layout
 	bad.Root.B = &SplitNode{File: 1, Path: "/w/other.md", ViewMode: "rendered"}

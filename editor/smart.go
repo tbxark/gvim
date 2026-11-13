@@ -41,7 +41,8 @@ func (e *Editor) typeText(d *Document, text string) {
 	// A language with a decrease rule watches every typed character for the keyword
 	// that completes a dedent trigger.
 	electric := s.AutoIndent && rules != nil && rules.Decrease != nil
-	smart := size == len(text) && (s.AutoClose || s.AutoSurround || (s.AutoIndent && isCloser(r)) || electric)
+	// An empty or undecodable text is no character the rules could act on.
+	smart := size > 0 && r != utf8.RuneError && size == len(text) && (s.AutoClose || s.AutoSurround || (s.AutoIndent && isCloser(r)) || electric)
 	if !smart {
 		if len(d.Extra) == 0 {
 			d.InsertText(text)

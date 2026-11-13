@@ -3,6 +3,7 @@ package tui
 import (
 	"testing"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
@@ -43,7 +44,7 @@ func TestClickOnTheHiddenGutterPadPlacesNoCaret(t *testing.T) {
 		t.Fatalf("toggle_line_numbers = %v", err)
 	}
 	l := m.layout()
-	if got := l.Hit(l.EditorX, l.BodyTop); got.Kind == hitEditorText {
+	if got := l.Hit(l.EditorX, l.BodyTop); got.Kind == frame.HitEditorText {
 		t.Errorf("a click on the pad cell hit the text: %v", got.Kind)
 	}
 }

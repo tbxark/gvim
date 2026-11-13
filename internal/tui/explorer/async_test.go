@@ -1,7 +1,6 @@
 package explorer
 
 import (
-	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -16,7 +15,6 @@ type asyncFakeTree struct {
 	rows      []tree.Row
 	selected  int
 	scroll    int
-	readOnly  bool
 	toggles   []string // synchronous Toggle calls
 	cmdCalls  []string // ToggleCmd calls
 	toggleErr error
@@ -33,7 +31,6 @@ func (t *asyncFakeTree) Toggle(path string) error {
 	t.toggles = append(t.toggles, path)
 	return t.toggleErr
 }
-func (t *asyncFakeTree) ReadOnly() bool { return t.readOnly }
 func (t *asyncFakeTree) Selected() (tree.Row, bool) {
 	if len(t.rows) == 0 {
 		return tree.Row{}, false
@@ -91,33 +88,5 @@ func TestPanelAsyncExpandAndCollapseUseTheCommand(t *testing.T) {
 	_, cmd, _ = p.Action("file_explorer_expand", testGeometry)
 	if cmd == nil || len(tr.cmdCalls) != 2 {
 		t.Fatalf("expand cmd calls = %v, want a second one", tr.cmdCalls)
-	}
-}
-
-// TestPanelReadOnlyRefusesFileOperations checks the read-only tree (the remote one)
-// refuses creation, rename, delete, cut and paste with one explicit notice, and still
-// allows copying paths (a local string operation) and navigation.
-func TestPanelReadOnlyRefusesFileOperations(t *testing.T) {
-	tr := &asyncFakeTree{
-		rows:     []tree.Row{{Name: "dir", Path: "/r/dir", IsDir: true}, {Name: "f", Path: "/r/f"}},
-		readOnly: true,
-	}
-	p := New(tr, style.Styles{}, nil)
-	for _, action := range []string{"file_explorer_new_file", "file_explorer_new_directory", "file_explorer_rename", "file_explorer_delete", "cut", "paste"} {
-		_, cmd, ok := p.Action(action, testGeometry)
-		if !ok {
-			t.Fatalf("%s not handled", action)
-		}
-		msg := run(cmd)
-		errMsg, ok := msg.(ErrorMsg)
-		if !ok || !errors.Is(errMsg.Err, ErrReadOnlyTree) {
-			t.Fatalf("%s sent %#v, want the read-only ErrorMsg", action, msg)
-		}
-	}
-	if _, cmd, ok := p.Action("copy", testGeometry); !ok || cmd == nil {
-		t.Fatal("copy was refused on a read-only tree")
-	}
-	if _, _, ok := p.Action("file_explorer_toggle_select", testGeometry); !ok {
-		t.Fatal("selection was refused on a read-only tree")
 	}
 }

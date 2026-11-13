@@ -53,8 +53,7 @@ func removePluginOrder(order []string, name string) []string {
 }
 
 // plugMenusGone is OwnerGone for the menu rows.
-func (m *Model) plugMenusGone(plugin string, gen uint64) {
-	_ = gen
+func (m *Model) plugMenusGone(plugin string) {
 	h := m.plug.host
 	if h != nil {
 		h.SetMenuItems(plugin, nil)

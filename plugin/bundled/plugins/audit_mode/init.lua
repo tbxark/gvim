@@ -54,11 +54,12 @@ local function truncate_text(s, limit)
   if #s <= limit then
     return s, false
   end
-  local cut = s:sub(1, limit)
-  while #cut > 0 and cut:byte(-1) >= 128 do
-    cut = cut:sub(1, #cut - 1)
+  -- Back up to a character boundary: the byte after the cut must not continue a character.
+  local cut = limit
+  while cut > 0 and s:byte(cut + 1) >= 0x80 and s:byte(cut + 1) < 0xC0 do
+    cut = cut - 1
   end
-  return cut, true
+  return s:sub(1, cut), true
 end
 
 local function clip(s, limit)
@@ -609,7 +610,12 @@ local function show()
     end,
   }
   state.picker = picker
-  picker:open()
+  local opened, err = picker:open()
+  if not opened then
+    state.picker = nil
+    notice(t("status.failed", { error = tostring(err) }), "warn")
+    return
+  end
   refresh()
 end
 

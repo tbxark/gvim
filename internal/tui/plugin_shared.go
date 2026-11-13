@@ -1,6 +1,6 @@
 package tui
 
-// The daemon's shared plugin host (#19b shared-runtime slice). One plugin.Runtime runs for
+// The daemon's shared plugin host. One plugin.Runtime runs for
 // the whole daemon; another workspace is not a second runtime but a REBINDING of that
 // runtime's host and state namespace. This file holds the mux the runtime's host calls
 // route through (pluginHost.model reads PluginShared.Active) and the editor-wide

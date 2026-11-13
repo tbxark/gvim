@@ -77,8 +77,8 @@ type BufferSource struct {
 // backing file to search in gvim; only the open dock's window is searched.
 type TerminalSource struct {
 	// ID is the dock tab's stable runtime identity: a hit is opened by it, so closing
-	// or reordering another tab cannot focus the wrong terminal. 0 means an older
-	// caller that only has Index (tests/fallback); a runtime ID is never reused.
+	// or reordering another tab cannot focus the wrong terminal. A runtime ID is
+	// never reused and never 0.
 	ID    uint64
 	Name  string // the dock tab's label, "" falls back to "terminal"
 	Index int    // the dock tab position at snapshot time
@@ -202,7 +202,7 @@ type GrepHit struct {
 	// Col and the query.
 	TextCol, TextLen int
 	Index            int
-	// TerminalID is the stable dock tab id of a terminal hit (0 for older callers):
+	// TerminalID is the stable dock tab id of a terminal hit (zero for other sources):
 	// opening the hit uses it so a close/reorder cannot focus another tab.
 	TerminalID uint64
 	// TranscriptFirst is the combined scrollback row of the terminal hit's snapshot
@@ -291,8 +291,8 @@ func (m OpenBufferLineMsg) PaletteOwner() Owner { return m.Owner }
 // has closed. It only focuses the open tab: no shell is started, no PTY is touched.
 type OpenTerminalMsg struct {
 	// ID is the stable dock tab identity from the snapshot. It wins over Index: the
-	// snapshot position may be stale after another tab closed or moved. 0 falls back
-	// to Index (older tests/callers).
+	// snapshot position may be stale after another tab closed or moved. A message
+	// whose ID names no open tab is refused.
 	ID uint64
 	// Row is the combined transcript row (0-based, prior rows then history then
 	// screen) to reveal in the tab's read-only scrollback. 0 reveals the top when the
@@ -506,13 +506,14 @@ func (p *Palette) exportGrep() tea.Cmd {
 		hits = hits[:liveExportCap]
 	}
 	query, root, owner := p.grep.text, p.opts.Root, p.owner
+	remote, notice, truncated := p.opts.Remote, p.grep.notice, p.grep.truncated
 	p.invalidatePreviewInstance()
 	p.open = false
 	p.cancelProbe()
 	p.cancelGrepSearch()
 	p.preview.reset()
 	return func() tea.Msg {
-		return GrepExportMsg{Root: root, Query: query, Hits: hits, Total: total, Remote: p.opts.Remote, Notice: p.grep.notice, Truncated: p.grep.truncated, Owner: owner}
+		return GrepExportMsg{Root: root, Query: query, Hits: hits, Total: total, Remote: remote, Notice: notice, Truncated: truncated, Owner: owner}
 	}
 }
 

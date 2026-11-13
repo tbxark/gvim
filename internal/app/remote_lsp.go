@@ -14,6 +14,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/pluginapi"
 	"go.lsp.dev/uri"
 )
 
@@ -205,8 +206,9 @@ func (c *procConn) pump() {
 	}
 }
 
-// feed forwards stdin to the process. A busy stdin buffer is retried (the LSP pipe gives
-// backpressure); a dead process ends the loop.
+// feed forwards stdin to the process. A full stdin buffer (a busy error) is retried (the
+// LSP pipe gives backpressure); any other write error means the process or its stdin is
+// gone and ends the loop.
 func (c *procConn) feed() {
 	defer c.proc.CloseStdin()
 	buf := make([]byte, 32<<10)
@@ -218,7 +220,7 @@ func (c *procConn) feed() {
 				if werr == nil {
 					break
 				}
-				if closedStdin(werr) {
+				if pluginapi.CodeOf(werr) != pluginapi.CodeBusy {
 					return
 				}
 				time.Sleep(2 * time.Millisecond)
@@ -228,13 +230,6 @@ func (c *procConn) feed() {
 			return
 		}
 	}
-}
-
-// closedStdin reports whether a stdin write failed because the process is gone or its
-// stdin is closed, rather than because its bounded buffer is momentarily full.
-func closedStdin(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "closed") || strings.Contains(msg, "exited") || strings.Contains(msg, "busy")
 }
 
 func (c *procConn) Read(p []byte) (int, error) { return c.out.Read(p) }

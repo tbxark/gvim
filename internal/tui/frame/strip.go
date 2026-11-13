@@ -58,7 +58,7 @@ func StripLabel(t TabInfo) string {
 }
 
 // Strip is the tab Strip of one row, placed by PlaceStrip. Its runs are both
-// what drawTabStrip paints and what the hit test reads.
+// what tabstrip.Draw paints and what the hit test reads.
 type Strip struct {
 	Runs     []Run // the painted pieces, with the hit target of each
 	First    int   // the first tab on screen, after the scroll is clamped
@@ -98,7 +98,7 @@ func TabStarts(tabs []TabInfo) (starts []int, total int) {
 // window keeps the cells between two marker columns: "<" (hitTabScrollBefore) at
 // x0 and ">" (hitTabScrollAfter) just left of the "+". The scroll position is first,
 // a tab index: the window starts at that tab. PlaceStrip clamps it so the window
-// never ends past the last tab, and returns the clamped value in Strip.first.
+// never ends past the last tab, and returns the clamped value in Strip.First.
 // The painter and the hit test both read the runs, so they cannot drift apart.
 func PlaceStrip(x0, w int, tabs []TabInfo, first int, ic icons.Mode) Strip {
 	s := placeTabs(x0, w, tabs, first, ic)
@@ -240,10 +240,4 @@ func clipRunTo(r Run, lo, hi int) (Run, bool) {
 		Kind:  r.Kind,
 		Index: r.Index,
 	}, true
-}
-
-// StripHit returns the target of the Strip under column x of its row, or hitNone
-// when no Run covers the column.
-func StripHit(runs []Run, x int) HitTarget {
-	return hitRuns(runs, x, HitTarget{Kind: HitNone})
 }

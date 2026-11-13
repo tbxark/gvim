@@ -18,7 +18,7 @@ const (
 	changePayloadMax = 256 << 10
 )
 
-// ringFor returns the change ring of d, made when first needed.
+// RingFor returns the change ring of d, made when first needed.
 func (d *Document) RingFor() *changeRing {
 	if d.seam.Ring == nil {
 		d.seam.Ring = &changeRing{Cursors: make(map[string]uint64)}
@@ -39,7 +39,7 @@ type changeRing struct {
 
 func payload(c buffer.Change) int { return len(c.Text) + len(c.Removed) }
 
-// next is the sequence number the next record gets.
+// Next is the sequence number the next record gets.
 func (r *changeRing) Next() uint64 { return r.Base + uint64(len(r.Recs)-r.Start) }
 
 func (r *changeRing) Add(c buffer.Change) {

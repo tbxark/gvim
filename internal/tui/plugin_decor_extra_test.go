@@ -3,6 +3,7 @@ package tui
 import (
 	"testing"
 
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -22,7 +23,7 @@ func TestPlugDecorVirtualRowsAndSoftBreaks(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := f.Active()
-	p := m.paneFor(splitPane{Focused: true}, doc)
+	p := m.paneFor(split.Pane{Focused: true}, doc)
 	if p.ExtraRows == nil || p.SoftBreaks == nil {
 		t.Fatalf("hooks not wired: extras %v soft %v", p.ExtraRows != nil, p.SoftBreaks != nil)
 	}
@@ -58,7 +59,7 @@ func TestPlugDecorPluginFolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := f.Active()
-	p := m.paneFor(splitPane{Focused: true}, doc)
+	p := m.paneFor(split.Pane{Focused: true}, doc)
 	if p.PluginFolds == nil {
 		t.Fatal("plugin folds not wired into the pane")
 	}
@@ -84,7 +85,7 @@ func TestPlugDecorPluginFolds(t *testing.T) {
 	if !m.toggleFoldAt(0) {
 		t.Fatal("toggleFoldAt did not report a plugin fold")
 	}
-	p = m.paneFor(splitPane{Focused: true}, doc)
+	p = m.paneFor(split.Pane{Focused: true}, doc)
 	g = p.Render(40, 6)
 	shown := false
 	for y := 0; y < 6; y++ {

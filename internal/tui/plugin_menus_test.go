@@ -29,7 +29,7 @@ func TestPluginMenuRows(t *testing.T) {
 		t.Fatalf("rows after clear = %+v", rows)
 	}
 	h.SetMenuItems("p", []pluginapi.MenuItem{{Menu: "File", Label: "Open", Action: "p.open"}})
-	m.plugMenusGone("p", 1)
+	m.plugMenusGone("p")
 	if rows := m.plugMenuRows(); len(rows) != 0 {
 		t.Fatalf("rows after OwnerGone = %+v", rows)
 	}

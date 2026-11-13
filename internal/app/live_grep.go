@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
@@ -16,7 +17,7 @@ import (
 )
 
 // liveGrep is the palette's Grepper over the search package. It reads the project files
-// one at a time, within the limits above, and searches each one with the query the
+// one at a time, within pluginhost's grep limits (GrepMaxFiles, GrepMaxFileBytes), and searches each one with the query the
 // palette asked for. The open buffers' text comes in the request, so it needs no IO.
 // It is called from a tea.Cmd.
 type liveGrep struct {
@@ -26,11 +27,17 @@ type liveGrep struct {
 	skipFrom int64
 
 	// mu guards the listing of the hidden and ignored files. That listing walks the
-	// tree, which is expensive, so it is cached for the root last searched.
+	// tree, which is expensive, so it is cached for the root last searched, for
+	// ignoredWalkTTL: typing in the palette reuses it, and a file created since is
+	// found once it expires.
 	mu       sync.Mutex
 	walkRoot string
 	walkList []string
+	walkAt   time.Time
 }
+
+// ignoredWalkTTL is how long the walk of the ignored scope is reused.
+const ignoredWalkTTL = 5 * time.Second
 
 // grepFor returns the live grep for an editor with the options o. It skips the
 // files that the editor opens in large file mode.
@@ -107,28 +114,40 @@ func searchFiles(root string, files []string, q search.Query, limit int, hits []
 		if !ok {
 			continue
 		}
-		b := buffer.New(text)
-		matches, err := search.Find(b, q)
+		var err error
+		hits, err = appendLineHits(buffer.New(text), q, limit, hits, func(h palette.GrepHit) palette.GrepHit {
+			h.Rel, h.Source = rel, palette.GrepFiles
+			return h
+		})
 		if err != nil {
 			return nil, err
 		}
-		last := -1
-		for _, m := range matches {
-			if m.Start.Line == last {
-				continue
-			}
-			last = m.Start.Line
-			hits = append(hits, palette.GrepHit{
-				Rel:    rel,
-				Line:   m.Start.Line + 1,
-				Col:    m.Start.Col + 1,
-				Text:   strings.TrimRight(b.Line(m.Start.Line), "\r"),
-				Source: palette.GrepFiles,
-			})
-			if len(hits) >= limit {
-				return hits, nil
-			}
+	}
+	return hits, nil
+}
+
+// appendLineHits appends the hits of q in b to hits, one per matching line, up to limit
+// hits. Each hit comes with its line, column and text; fill sets the source-specific
+// fields.
+func appendLineHits(b *buffer.Buffer, q search.Query, limit int, hits []palette.GrepHit, fill func(palette.GrepHit) palette.GrepHit) ([]palette.GrepHit, error) {
+	matches, err := search.Find(b, q)
+	if err != nil {
+		return nil, err
+	}
+	last := -1
+	for _, m := range matches {
+		if len(hits) >= limit {
+			break
 		}
+		if m.Start.Line == last {
+			continue
+		}
+		last = m.Start.Line
+		hits = append(hits, fill(palette.GrepHit{
+			Line: m.Start.Line + 1,
+			Col:  m.Start.Col + 1,
+			Text: strings.TrimRight(b.Line(m.Start.Line), "\r"),
+		}))
 	}
 	return hits, nil
 }
@@ -143,11 +162,6 @@ func searchBuffers(buffers []palette.BufferSource, q search.Query, limit int, hi
 		if src.Text == "" {
 			continue
 		}
-		b := buffer.New(src.Text)
-		matches, err := search.Find(b, q)
-		if err != nil {
-			return nil, err
-		}
 		label := src.Name
 		if label == "" {
 			label = src.Path
@@ -155,23 +169,13 @@ func searchBuffers(buffers []palette.BufferSource, q search.Query, limit int, hi
 		if label == "" {
 			label = "[No Name]"
 		}
-		last := -1
-		for _, m := range matches {
-			if m.Start.Line == last {
-				continue
-			}
-			last = m.Start.Line
-			hits = append(hits, palette.GrepHit{
-				Rel:    label,
-				Line:   m.Start.Line + 1,
-				Col:    m.Start.Col + 1,
-				Text:   strings.TrimRight(b.Line(m.Start.Line), "\r"),
-				Source: palette.GrepBuffers,
-				Index:  src.Index,
-			})
-			if len(hits) >= limit {
-				return hits, nil
-			}
+		var err error
+		hits, err = appendLineHits(buffer.New(src.Text), q, limit, hits, func(h palette.GrepHit) palette.GrepHit {
+			h.Rel, h.Source, h.Index = label, palette.GrepBuffers, src.Index
+			return h
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 	return hits, nil
@@ -189,41 +193,22 @@ func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, 
 		if len(src.Lines) == 0 {
 			continue
 		}
-		b := buffer.New(strings.Join(src.Lines, "\n"))
-		matches, err := search.Find(b, q)
-		if err != nil {
-			return nil, err
-		}
 		label := src.Name
 		if label == "" {
 			label = "terminal"
 		}
-		last := -1
-		for _, m := range matches {
-			if m.Start.Line == last {
-				continue
-			}
-			last = m.Start.Line
-			hits = append(hits, palette.GrepHit{
-				Rel:                 label,
-				Line:                m.Start.Line + 1,
-				Col:                 m.Start.Col + 1,
-				Text:                strings.TrimRight(b.Line(m.Start.Line), "\r"),
-				Source:              palette.GrepTerminals,
-				Index:               src.Index,
-				TerminalID:          src.ID,
-				TranscriptFirst:     src.First,
-				TerminalTotal:       src.Total,
-				TerminalBefore:      terminalContextBefore(src.Lines, m.Start.Line),
-				TerminalAfter:       terminalContextAfter(src.Lines, m.Start.Line),
-				TerminalSnapshot:    true,
-				TerminalValid:       true,
-				TerminalBeforeKnown: m.Start.Line > 0,
-				TerminalAfterKnown:  m.Start.Line+1 < len(src.Lines),
-			})
-			if len(hits) >= limit {
-				return hits, nil
-			}
+		var err error
+		hits, err = appendLineHits(buffer.New(strings.Join(src.Lines, "\n")), q, limit, hits, func(h palette.GrepHit) palette.GrepHit {
+			line := h.Line - 1
+			h.Rel, h.Source, h.Index = label, palette.GrepTerminals, src.Index
+			h.TerminalID, h.TranscriptFirst, h.TerminalTotal = src.ID, src.First, src.Total
+			h.TerminalBefore, h.TerminalAfter = terminalContextBefore(src.Lines, line), terminalContextAfter(src.Lines, line)
+			h.TerminalSnapshot, h.TerminalValid = true, true
+			h.TerminalBeforeKnown, h.TerminalAfterKnown = line > 0, line+1 < len(src.Lines)
+			return h
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 	return hits, nil
@@ -249,12 +234,12 @@ func terminalContextAfter(lines []string, index int) string {
 
 // ignoredFiles lists the files of root including the hidden and .gitignore-matched
 // ones, for the Ignored scope. The list stops at finder.MaxFiles and is cached for the
-// root last searched, so typing in the palette does not walk the tree on every key. A
-// listing error gives the files found so far.
+// root last searched for ignoredWalkTTL, so typing in the palette does not walk the
+// tree on every key. A listing error gives the files found so far.
 func (g *liveGrep) ignoredFiles(root string) []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.walkRoot == root && g.walkList != nil {
+	if g.walkRoot == root && g.walkList != nil && time.Since(g.walkAt) < ignoredWalkTTL {
 		return g.walkList
 	}
 	list := make([]string, 0, 1024)
@@ -262,6 +247,6 @@ func (g *liveGrep) ignoredFiles(root string) []string {
 		list = append(list, rel)
 		return len(list) < finder.MaxFiles
 	})
-	g.walkRoot, g.walkList = root, list
+	g.walkRoot, g.walkList, g.walkAt = root, list, time.Now()
 	return list
 }

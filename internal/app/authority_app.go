@@ -24,14 +24,14 @@ import (
 // Everything the session launches goes through the slot; no caller asks what kind the
 // slot is.
 
-// newAuthority mounts the slot of the session. It never dials a remote: the startup
-// attempt (and the activation retry, with a password prompt when needed) call Reconnect,
-// because a password prompt needs the running UI.
 // mountAuthority builds the workspace authority slot of a launch. Tests replace it to
 // inject an in-process fake authority (a remote daemon workspace without a real SSH
 // carrier); production is newAuthority.
 var mountAuthority = newAuthority
 
+// newAuthority mounts the slot of the session. It never dials a remote: the startup
+// attempt (and the activation retry, with a password prompt when needed) call Reconnect,
+// because a password prompt needs the running UI.
 func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, gateEnv authority.GateEnv, env authority.EnvProvider) authority.Slot {
 	if opts.Remote != nil {
 		security := opts.SSHSecurity
@@ -149,13 +149,7 @@ func sshKnownHostsPath() string {
 func runGitGrepOneShot(one authority.OneShot, root string, argv []string, extraEnv []string, timeout time.Duration) (string, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	env := map[string]string{}
-	for _, e := range extraEnv {
-		if k, v, ok := strings.Cut(e, "="); ok {
-			env[k] = v
-		}
-	}
-	res, err := one.Run(ctx, argv, hostos.ProcOptions{Cwd: root, Env: env})
+	res, err := one.Run(ctx, argv, hostos.ProcOptions{Cwd: root, Env: remoteEnvMap(extraEnv)})
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", 0, fmt.Errorf("shell command timed out after %s", timeout)
@@ -181,14 +175,8 @@ func authorityShellRunner(slot authority.Slot) func(editor.ShellJob) (string, er
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		env := map[string]string{}
-		for _, e := range job.Env {
-			if k, v, ok := strings.Cut(e, "="); ok {
-				env[k] = v
-			}
-		}
 		res, err := one.Run(ctx, []string{"sh", "-c", job.Command}, hostos.ProcOptions{
-			Cwd: job.Dir, Env: env, Stdin: []byte(job.Input),
+			Cwd: job.Dir, Env: remoteEnvMap(job.Env), Stdin: []byte(job.Input),
 		})
 		if err != nil {
 			if ctx.Err() != nil {

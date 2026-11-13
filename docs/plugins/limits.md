@@ -77,6 +77,8 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | live processes | 16 |
 | decoration namespaces | 64 |
 | key bindings (normal context and modes together) | 4096 |
+| input modes and contexts | 32 modes per plugin, 1024 bindings per mode, 64 contexts per plugin |
+| dashboard sections | 16 per plugin, 64 in all |
 | status items | 8 |
 | menu bar rows a plugin adds | 32 |
 | live pickers and popups | 8 |

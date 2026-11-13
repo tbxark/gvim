@@ -39,7 +39,7 @@ var (
 // overlay.Exclusive.
 func (*Bar) ExclusiveOverlay() {}
 
-// Labels of the bar. The search and replace prompts are the legacy texts.
+// Labels of the bar. The search and replace prompts are Fresh's texts.
 const (
 	searchLabel  = "Search:"
 	replaceLabel = "Replace:"
@@ -416,7 +416,7 @@ func (b *Bar) keyPress(kp tea.KeyPressMsg) (cmd tea.Cmd) {
 	}
 	switch name {
 	case "esc":
-		b.Cancel()
+		b.Dismiss()
 	case "up", "down":
 		b.walkHistory(name == "up")
 	case "ctrl+alt+r":
@@ -530,14 +530,10 @@ func (b *Bar) commit() {
 	b.closed = true
 }
 
-// Cancel closes the bar as Esc does: it ends a running query-replace and puts the
+// Dismiss closes the bar as Esc does: it ends a running query-replace and puts the
 // caret and selection back where they were when the bar opened, if the bar moved
 // them to a match. The root calls it when it pops the bar on Esc.
-// Dismiss cancels the bar, as Esc does. The root calls it when it pops an
-// overlay on Esc.
-func (b *Bar) Dismiss() { b.Cancel() }
-
-func (b *Bar) Cancel() {
+func (b *Bar) Dismiss() {
 	if b.qr != nil {
 		b.finishQuery()
 	}

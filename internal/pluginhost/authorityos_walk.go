@@ -8,11 +8,10 @@ package pluginhost
 //     never followed; unreadable subdirectories are skipped; cancellation is checked
 //     throughout. It reads the remote directory entries, never the local filesystem.
 //   - Copy copies a regular file, or a directory tree, entirely remote-to-remote. Every
-//     file is copied through one of the authority's copy-safe surfaces: the local
-//     no-follow stream (atomic rename over the path, existing destination replace
-//     allowed) or the SSH new-target link-commit stream (POSIX link exact-target; only a
-//     new destination, existing file/dir/symlink is conflict). A backend with neither gets
-//     a clear unsupported error before reading/creating/writing the destination. Symlinks in
+//     file is copied through the authority's new-target stream (a no-clobber commit: only
+//     a new destination, an existing file/dir/symlink is a conflict). A backend without
+//     it gets a clear unsupported error before reading/creating/writing the
+//     destination. Symlinks in
 //     a tree are refused (there is no remote readlink primitive, so copying them as links
 //     is impossible and silently dropping them would be wrong), and the tree is bounded
 //     by copyTreeMax entries. Copy also requires RealPather to prove source/destination
@@ -36,9 +35,8 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// copyStreamOpener opens the authority stream used for one copied file. The copy path
-// either uses the no-follow surface (replace an existing destination atomically, local
-// authority) or the new-target-only hardlink surface (SSH: destination must not exist).
+// copyStreamOpener opens the authority stream used for one copied file: the new-target
+// surface, whose commit never replaces an existing destination.
 type copyStreamOpener func(ctx context.Context, dst string, o hostos.WriteOptions) (authority.WriteStream, error)
 
 const (
@@ -270,10 +268,9 @@ func (o *authorityOS) copyDestinationRealPath(ctx context.Context, rp authority.
 	}
 }
 
-// copyOpener selects the copy-safe stream. The local no-follow surface can replace an
-// existing destination atomically; the SSH new-target surface can only create a new
-// destination with its no-clobber hardlink commit. A backend with neither is refused
-// before any target is touched.
+// copyOpener selects the copy-safe stream: the new-target surface, which can only create a
+// new destination with its no-clobber commit. A backend without it is refused before any
+// target is touched.
 func (o *authorityOS) copyOpener() (copyStreamOpener, error) {
 	if streamer := authority.NewTargetWriteStreams(o.files()); streamer != nil {
 		return streamer.WriteStreamNewTarget, nil
@@ -282,9 +279,8 @@ func (o *authorityOS) copyOpener() (copyStreamOpener, error) {
 }
 
 // proveNewTargetParent proves the copy-safe new-target capability in the destination
-// parent before a tree claims or creates anything. The local no-follow stream needs no
-// proof. A new-target backend without a pre-write prover, or one whose probe fails, is
-// unsupported before any mkdir/write.
+// parent before a tree claims or creates anything. A new-target backend without a
+// pre-write prover, or one whose probe fails, is unsupported before any mkdir/write.
 func (o *authorityOS) proveNewTargetParent(ctx context.Context, dst string) error {
 	if authority.NewTargetWriteStreams(o.files()) == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "copy: the workspace authority has no new-target copy stream; refusing a copy that could overwrite a concurrent creator")
@@ -378,20 +374,14 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 }
 
 // copyFile copies one remote file through the selected copy-safe surface. The destination
-// is untouched until Commit and a failure/cancellation aborts the temp file. The no-follow
-// surface is required for replacing an existing destination (the ordinary save stream
-// follows a final symlink at open); the new-target link-commit surface is required when
-// only creation of a new destination is provable (POSIX link exact-target hardlink commit;
-// existing destinations are unsupported). A backend without either surface is refused
-// before reading or writing: FileCreator creates an empty file but gives no exclusive
+// is untouched until Commit and a failure/cancellation aborts the temp file. Only the
+// new-target surface is used (existing destinations are conflicts, never replaced). A
+// backend without it never gets here (copyOpener refuses it before reading or writing): FileCreator creates an empty file but gives no exclusive
 // handle for the subsequent data write, so a create-then-WriteFile fallback would let
 // another writer replace the path and then be overwritten by the copy. There is no
 // provable same-handle create+write primitive here, so the only safe behavior is
 // unsupported with no target created or written.
 func (o *authorityOS) copyFile(ctx context.Context, src, dst, display string, size int64, mode fs.FileMode, opener copyStreamOpener) error {
-	if opener == nil {
-		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no copy-safe stream; refusing a copy that could race another writer", display)
-	}
 	return o.copyStreamedFile(ctx, opener, src, dst, display, size, mode)
 }
 

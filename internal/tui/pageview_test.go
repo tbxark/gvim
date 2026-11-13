@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/split"
 )
 
 // pageDoc is a document with the optional page-view view state and a path.
@@ -79,7 +80,7 @@ func TestPageViewReachesThePaneThroughTheView(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 8)
 	doc := pageDoc{fakeDoc: &fakeDoc{lines: []string{"Some **bold** text"}}, path: "/w/a.md",
 		view: editor.ViewSettings{PageView: boolPtrPage(true), PageWidth: 30}}
-	p := m.viewPane(splitPane{}, editorpane.Pane{}, doc)
+	p := m.viewPane(split.Pane{}, editorpane.Pane{}, doc)
 	if p.PageView != (editorpane.PageView{On: true, Measure: 30, Markdown: true}) {
 		t.Fatalf("pane page view = %+v", p.PageView)
 	}

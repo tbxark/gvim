@@ -856,7 +856,7 @@ func TestDockLayoutRegion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := frame.ComputeLayout(tt.w, tt.h, layoutInput{DockOpen: tt.open})
+			l := frame.ComputeLayout(tt.w, tt.h, frame.Input{DockOpen: tt.open})
 			if l.DockOn != tt.wantOn {
 				t.Fatalf("dockOn = %v, want %v", l.DockOn, tt.wantOn)
 			}
@@ -1037,13 +1037,13 @@ func TestDockPressFocusesTheDock(t *testing.T) {
 	tests := []struct {
 		name      string
 		shell     bool
-		row       func(l layout) int
+		row       func(l frame.Layout) int
 		wantFocus bool
 	}{
-		{name: "a press on a shell row gives the dock the focus", shell: true, row: func(l layout) int { return l.DockY + 2 }, wantFocus: true},
-		{name: "a press on the title row gives the dock the focus", shell: true, row: func(l layout) int { return l.DockY }, wantFocus: true},
-		{name: "a press above the dock leaves the focus in the editor", shell: true, row: func(l layout) int { return l.DockY - 1 }, wantFocus: false},
-		{name: "a press in the dock with no shell takes no focus", shell: false, row: func(l layout) int { return l.DockY + 2 }, wantFocus: false},
+		{name: "a press on a shell row gives the dock the focus", shell: true, row: func(l frame.Layout) int { return l.DockY + 2 }, wantFocus: true},
+		{name: "a press on the title row gives the dock the focus", shell: true, row: func(l frame.Layout) int { return l.DockY }, wantFocus: true},
+		{name: "a press above the dock leaves the focus in the editor", shell: true, row: func(l frame.Layout) int { return l.DockY - 1 }, wantFocus: false},
+		{name: "a press in the dock with no shell takes no focus", shell: false, row: func(l frame.Layout) int { return l.DockY + 2 }, wantFocus: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

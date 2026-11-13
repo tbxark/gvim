@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -35,7 +36,7 @@ func TestPlugDecorComposeOrdering(t *testing.T) {
 
 	// The composing pane gets every kind, outside the compose: the virtual rows sandwich
 	// the composed text rows and the compose-only decorations paint on them.
-	page := m.paneFor(splitPane{Focused: true}, doc)
+	page := m.paneFor(split.Pane{Focused: true}, doc)
 	page.PageView = editorpane.PageView{On: true, Measure: 30, Markdown: true}
 	page.PageExtraRows = editorpane.PageViewTableBorders(doc, page.Styles)
 	page = m.plugDecor(page, doc)
@@ -78,7 +79,7 @@ func TestPlugDecorComposeOrdering(t *testing.T) {
 
 	// A normal pane gets none of the compose-only overlay: no virtual rows, no line
 	// background, the line is not concealed.
-	normal := m.paneFor(splitPane{Focused: true}, doc)
+	normal := m.paneFor(split.Pane{Focused: true}, doc)
 	ng := normal.Render(40, 14)
 	nrows := ng.Plain()
 	joined := strings.Join(nrows, " / ")

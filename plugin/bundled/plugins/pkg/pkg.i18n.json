@@ -2,9 +2,9 @@
   "en": {
     "cmd.list": "Package: Packages",
     "cmd.list_desc": "Browse installed and bundled packages read-only",
-    "status.scanning": "Reading packages…",
     "status.count": "Packages: %{plugins} plugins · %{themes} themes",
     "status.empty": "No packages found",
+    "status.detail_failed": "Package: cannot open details: %{error}",
     "section.installed": "INSTALLED (%{count})",
     "section.bundled": "BUNDLED (%{count})",
     "section.themes": "THEMES (%{count})",

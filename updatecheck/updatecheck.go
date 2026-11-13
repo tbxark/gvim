@@ -173,15 +173,6 @@ func (c *Checker) Last() (Release, time.Time, bool) {
 	return Release{Version: st.Latest, URL: st.URL}, time.Unix(st.Checked, 0), true
 }
 
-// CheckIfDue runs Check when Due says it may, and reports nil (no error) when the
-// check is not due yet.
-func (c *Checker) CheckIfDue(ctx context.Context) (*Release, error) {
-	if !c.Due() {
-		return nil, nil
-	}
-	return c.Check(ctx)
-}
-
 // Check asks the feed once and returns the newer release, or nil when this build
 // is the newest (or the feed has no newer version). A failure is an error the
 // caller may ignore: it is never fatal, and a successful check is the only one
@@ -228,7 +219,7 @@ func (c *Checker) fetch(ctx context.Context, feed string) ([]byte, error) {
 	req.Header.Set("User-Agent", "gvim/"+c.Current)
 	client := c.Client
 	if client == nil {
-		client = &http.Client{}
+		client = &http.Client{CheckRedirect: checkRedirect}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -246,6 +237,12 @@ func (c *Checker) fetch(ctx context.Context, feed string) ([]byte, error) {
 		return nil, fmt.Errorf("update check: the feed is larger than %d bytes", maxFeedBytes)
 	}
 	return body, nil
+}
+
+// checkRedirect holds a redirect target to the transport policy of ValidateURL.
+func checkRedirect(req *http.Request, _ []*http.Request) error {
+	_, err := ValidateURL(req.URL.String())
+	return err
 }
 
 // parseFeed reads the version and page from a release feed. GitHub's release

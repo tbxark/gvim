@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
@@ -189,7 +190,7 @@ func binaryStatOf(doc Document) (size, mtime int64) {
 
 // hexPaneVisibleRows returns the number of hex rows pane p has. The view uses
 // the whole pane, less one help line at the bottom when there is room.
-func hexPaneVisibleRows(p splitPane) int {
+func hexPaneVisibleRows(p split.Pane) int {
 	if p.H <= 0 {
 		return hexPageRows
 	}
@@ -327,18 +328,10 @@ func (m *Model) hexPaneWheel(i, delta int) bool {
 	if !p.Focused {
 		return false
 	}
-	h, ok := m.activeHex()
-	if !ok {
-		return false
-	}
-	visible := m.hexVisibleRows()
-	size, _ := binaryStatOf(m.ed.Active())
-	h.top += delta
-	m.hexClampTop(h, size, visible)
-	return true
+	return m.hexMove(delta)
 }
 
-// hexKey maps an unbound key in hex mode to its pager action. It is a fallback
+// hexFallbackKey maps an unbound key in hex mode to its pager action. It is a fallback
 // for a keymap that does not bind a key; a bound key still goes through the
 // keymap first.
 func (m *Model) hexFallbackKey(kp KeyPress, text string) (tea.Cmd, bool) {
@@ -505,11 +498,10 @@ func (m *Model) hexMessage(msg tea.Msg) (tea.Cmd, bool) {
 	return nil, true
 }
 
-// hexReleaseClosedCmd drops the state of hex views whose files are no longer
-// open. It returns nil so it can sit in the Update batch like the image upkeep.
-func (m *Model) hexReleaseClosedCmd() tea.Cmd {
+// hexReleaseClosed drops the state of hex views whose files are no longer open.
+func (m *Model) hexReleaseClosed() {
 	if len(m.hexViews) == 0 {
-		return nil
+		return
 	}
 	open := make(map[string]bool)
 	for _, f := range m.openTabFiles() {
@@ -520,7 +512,6 @@ func (m *Model) hexReleaseClosedCmd() tea.Cmd {
 			delete(m.hexViews, path)
 		}
 	}
-	return nil
 }
 
 // hexLine formats one row of the dump. offset is the byte offset of the row and
@@ -555,7 +546,7 @@ func hexLine(offset int64, data []byte) string {
 
 // hexPane paints the hex dump for doc in pane p. It returns false when the pane
 // is not in hex mode or its document is not binary.
-func (m *Model) hexPane(g *grid.Grid, p splitPane, doc Document) bool {
+func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 	path := docPath(doc)
 	if path == "" || !isBinaryDoc(doc) {
 		return false
@@ -590,9 +581,9 @@ func (m *Model) hexPane(g *grid.Grid, p splitPane, doc Document) bool {
 	if helpRow >= 0 {
 		help := "Toggle Hex View: summary"
 		if h.loading {
-			help = "Loading bytes..."
+			help = hexNoticeLoading
 		} else if h.err != nil {
-			help = "Hex view error: " + h.err.Error()
+			help = hexNoticeError + h.err.Error()
 		}
 		g.Put(p.X, helpRow, p.X+p.W, help, dim)
 	}

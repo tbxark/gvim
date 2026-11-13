@@ -155,3 +155,32 @@ func sameTUIColor(a, b theme.Color) bool {
 	}
 	return true
 }
+
+// TestThemeEditorPickerPreviewRaisesNoThemeChanged checks that a colour picker preview
+// (one per arrow press) rebuilds the frame without telling plugins, and that applying
+// the colour raises theme_changed once.
+func TestThemeEditorPickerPreviewRaisesNoThemeChanged(t *testing.T) {
+	t.Parallel()
+	h := newEvHarness(t, "theme_changed")
+	dark, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.m.theme, h.m.themeRef = dark, "dark"
+	h.m.openThemeEditor()
+	page, ok := h.m.overlays[len(h.m.overlays)-1].(*themeEditorPage)
+	if !ok {
+		t.Fatalf("the top overlay is %T, want the theme editor", h.m.overlays[len(h.m.overlays)-1])
+	}
+	row := page.rows[editorRowIndex(t, page, "editor.bg")]
+	evRowsOf(h) // drain what opening queued
+	for i := range 3 {
+		page.previewValue(row.key, theme.Color{IsRGB: true, RGB: theme.RGB{R: byte(i), G: 1, B: 2}})
+	}
+	page.reapplyValues()
+	wantRows(t, evRowsOf(h), nil)
+	page.setColor("editor.bg", theme.Color{IsRGB: true, RGB: theme.RGB{R: 9, G: 9, B: 9}})
+	if got := evRowsOf(h); len(got) != 1 || !strings.HasPrefix(got[0], "theme_changed") {
+		t.Fatalf("events after applying = %v, want one theme_changed", got)
+	}
+}

@@ -61,7 +61,7 @@ func TestRE(t *testing.T) {
 }
 
 // TestREWorkCap: work = len(subject) x len(program) must stay within 4e7, otherwise the call
-// is refused up front; a literal pattern only has the subject cap (AMENDMENTS C7).
+// is refused up front; a literal pattern only has the subject cap.
 func TestREWorkCap(t *testing.T) {
 	const limitText = "limit: subject too large for this pattern"
 	rows := []struct {

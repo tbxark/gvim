@@ -14,7 +14,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// TestPluginServicesGrepConvertsColumns checks the conversion of AMENDMENTS C12/C24: a hit
+// TestPluginServicesGrepConvertsColumns checks the conversion of a hit
 // has a 0-based line and a 0-based BYTE column into its text, where live grep reports a
 // 1-based line and rune column.
 func TestPluginServicesGrepConvertsColumns(t *testing.T) {

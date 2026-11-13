@@ -105,10 +105,11 @@ func TestTrashWrapsBackendError(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "x.txt")
 	writeFile(t, path, "x")
-	swapTrash(t, func(...string) error { return ErrTrashUnavailable })
+	errBackend := errors.New("backend failed")
+	swapTrash(t, func(...string) error { return errBackend })
 
-	if err := Trash(path); !errors.Is(err, ErrTrashUnavailable) {
-		t.Fatalf("want ErrTrashUnavailable, got %v", err)
+	if err := Trash(path); !errors.Is(err, errBackend) {
+		t.Fatalf("want the backend error, got %v", err)
 	}
 	if _, err := os.Lstat(path); err != nil {
 		t.Fatal("file removed although backend reported failure")

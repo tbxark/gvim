@@ -72,6 +72,94 @@ func imageInfoOf(data []byte) (ImageInfo, bool) {
 	}, true
 }
 
+// jpegMaxHead bounds how far into a file imageInfoOfHead looks for a JPEG's frame
+// header: metadata segments (EXIF, XMP, ICC profiles) can push it past the 64 KiB
+// sample, and a file whose frame header lies farther than this is not shown as a
+// picture.
+const jpegMaxHead = 4 << 20
+
+// imageInfoOfHead is imageInfoOf for the head of a file of size bytes. A JPEG whose
+// metadata runs past the head is found by reading more of the file: read(n) returns
+// the first n bytes, and is called only for a file that starts with the JPEG magic,
+// with at most jpegMaxHead bytes in all. Size is the file's size, not the head's.
+func imageInfoOfHead(head []byte, size int64, read func(n int64) ([]byte, error)) (ImageInfo, bool) {
+	if info, ok := imageInfoOf(head); ok {
+		info.Size = max(info.Size, size)
+		return info, true
+	}
+	data := head
+	for {
+		prefix, more, ok := jpegFramePrefix(data)
+		if ok {
+			info, ok := imageInfoOf(prefix)
+			info.Size = size
+			return info, ok
+		}
+		limit := min(size, jpegMaxHead)
+		if !more || int64(len(data)) >= limit {
+			return ImageInfo{}, false
+		}
+		got, err := read(min(int64(len(data))*8, limit))
+		if err != nil || len(got) <= len(data) {
+			return ImageInfo{}, false
+		}
+		data = got
+	}
+}
+
+// jpegFramePrefix walks the marker segments at the start of the JPEG in data and
+// returns a short stream the image package can read the header of: the start marker,
+// the JFIF and Adobe segments (they decide the color model), the frame header and
+// an empty scan marker. It skips every other segment, however long. more is true
+// when data ends inside the segments, so a longer head might hold the frame header.
+// ok is false for data that is not a JPEG, or whose frame header is not one the
+// decoder reads.
+func jpegFramePrefix(data []byte) (prefix []byte, more, ok bool) {
+	const app0, app14, sos, eoi = 0xe0, 0xee, 0xda, 0xd9
+	if len(data) < 2 || data[0] != 0xff || data[1] != 0xd8 {
+		return nil, false, false
+	}
+	prefix = []byte{0xff, 0xd8}
+	for pos := 2; ; {
+		if pos+2 > len(data) {
+			return nil, true, false
+		}
+		if data[pos] != 0xff {
+			return nil, false, false
+		}
+		marker := data[pos+1]
+		switch {
+		case marker == 0xff: // a fill byte
+			pos++
+			continue
+		case marker == 0x01 || (marker >= 0xd0 && marker <= 0xd7):
+			pos += 2 // a marker with no segment
+			continue
+		case marker == sos || marker == eoi || marker == 0xd8:
+			return nil, false, false
+		}
+		if pos+4 > len(data) {
+			return nil, true, false
+		}
+		length := int(data[pos+2])<<8 | int(data[pos+3])
+		end := pos + 2 + length
+		if length < 2 || end > jpegMaxHead {
+			return nil, false, false
+		}
+		if end > len(data) {
+			return nil, true, false
+		}
+		switch marker {
+		case app0, app14:
+			prefix = append(prefix, data[pos:end]...)
+		case 0xc0, 0xc1, 0xc2: // baseline, extended and progressive: the ones the decoder reads
+			prefix = append(prefix, data[pos:end]...)
+			return append(prefix, 0xff, sos, 0x00, 0x02), false, true
+		}
+		pos = end
+	}
+}
+
 // colorModelName names a color model for the summary. A palette is the model of
 // GIF and of an indexed PNG; the rest are matched by identity.
 func colorModelName(m color.Model) string {
@@ -91,17 +179,9 @@ func colorModelName(m color.Model) string {
 	return "RGB"
 }
 
-// imageDocument is the read-only document for an image file. Its text is a short
-// summary, so the tab, the status row and the pane geometry need no special case;
-// the image itself is drawn by the UI from Image().
-func imageDocument(path string, data []byte, disk diskState, info ImageInfo) *Document {
-	info.Size = int64(len(data))
-	return newImageDocument(path, disk, info)
-}
-
 // newImageDocument builds the read-only image document for path from the
-// header's facts. data is not kept: the UI reads the file again only when it can
-// draw pictures.
+// header's facts, the summary being its text. The image itself is drawn by the UI
+// from Image(); the file is read again only when the terminal can draw pictures.
 func newImageDocument(path string, disk diskState, info ImageInfo) *Document {
 	text := strings.Join([]string{
 		filepath.Base(path),

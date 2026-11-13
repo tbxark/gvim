@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/pluginpanel"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/pluginapi"
@@ -90,7 +91,7 @@ func TestSidebarPerSectionHeightDrags(t *testing.T) {
 }
 
 // sectionOfKind returns the layout section for kind.
-func sectionOfKind(t *testing.T, l layout, kind sidebar.Kind) sidebar.Section {
+func sectionOfKind(t *testing.T, l frame.Layout, kind sidebar.Kind) sidebar.Section {
 	t.Helper()
 	for _, sec := range l.Sections {
 		if sec.Kind == kind {
@@ -102,9 +103,8 @@ func sectionOfKind(t *testing.T, l layout, kind sidebar.Kind) sidebar.Section {
 }
 
 // TestSidebarSectionHeightsRestoreAndClamp checks the session path: unified
-// SectionRows/ExplorerRows collect, clamps on restore (Contents 1..200, others
-// 1..1000, plugin id rows capped), legacy fields still restore, and a late-mounting
-// plugin section still gets its saved height.
+// SectionRows collect, clamps on restore (Contents 1..200, others 1..1000, plugin id
+// rows capped), and a late-mounting plugin section still gets its saved height.
 func TestSidebarSectionHeightsRestoreAndClamp(t *testing.T) {
 	t.Parallel()
 	ed := newTOCEditor("notes.md", "# One")
@@ -118,9 +118,9 @@ func TestSidebarSectionHeightsRestoreAndClamp(t *testing.T) {
 	}, panel: pluginpanel.New(pluginapi.WidgetPanel{}, pluginpanel.Options{})}
 	m.plug.panels.add(mp)
 	st := m.SidebarState()
-	if st.ExplorerRows != 4 || st.SectionRows["explorer"] != 4 || st.SectionRows["contents"] != 12 ||
+	if st.SectionRows["explorer"] != 4 || st.SectionRows["contents"] != 12 ||
 		st.SectionRows["diagnostics"] != 6 || st.SectionRows["plugin:79"] != 5 {
-		t.Fatalf("collected section rows = %+v / explorer %d", st.SectionRows, st.ExplorerRows)
+		t.Fatalf("collected section rows = %+v", st.SectionRows)
 	}
 
 	// Restore into a fresh model with clamped values, including a plugin section that
@@ -128,7 +128,6 @@ func TestSidebarSectionHeightsRestoreAndClamp(t *testing.T) {
 	restored := newTOCModel(t, newTOCEditor("notes.md", "# One"), nil)
 	restored.diag.open = true
 	restored.restoreSidebarState(SidebarState{
-		ExplorerRows: 5000,
 		SectionRows: map[string]int{
 			"explorer": 5000, "contents": 5000, "diagnostics": -3, "plugin:79": 5000,
 		},
@@ -151,43 +150,27 @@ func TestSidebarSectionHeightsRestoreAndClamp(t *testing.T) {
 	if late.mount.Rows != maxSessionPluginSectionRow {
 		t.Fatalf("late plugin rows = %d, want the cap %d", late.mount.Rows, maxSessionPluginSectionRow)
 	}
-
-	// A legacy session (no SectionRows) clamps its per-kind fields too.
-	legacy := newTOCModel(t, newTOCEditor("notes.md", "# One"), nil)
-	legacy.diag.open = true
-	legacy.restoreSidebarState(SidebarState{ContentsRows: 5000, DiagnosticsRows: -1})
-	if legacy.contents.Rows() != sidebar.MaxRows {
-		t.Fatalf("legacy contents rows = %d, want %d", legacy.contents.Rows(), sidebar.MaxRows)
-	}
-	if legacy.diag.Rows() != diagDefaultRows {
-		t.Fatalf("legacy diagnostics rows = %d, want the default", legacy.diag.Rows())
-	}
 }
 
-// TestSidebarSectionRowsPrecedence checks that a present SectionRows map is
-// authoritative: the legacy ExplorerRows/ContentsRows/DiagnosticsRows/PluginRows are
-// read only when the unified map is absent, so a stale legacy value cannot contradict it.
-func TestSidebarSectionRowsPrecedence(t *testing.T) {
+// TestSidebarSectionRowsRestore checks that SectionRows is the one source of the section
+// heights: the explorer, Contents, Diagnostics and plugin sections all come from it.
+func TestSidebarSectionRowsRestore(t *testing.T) {
 	t.Parallel()
 	m := newTOCModel(t, newTOCEditor("notes.md", "# One"), nil)
 	m.diag.open = true
 	m.restoreSidebarState(SidebarState{
 		SectionRows:     map[string]int{"explorer": 7, "contents": 5, "diagnostics": 4, "plugin:79": 8},
-		ExplorerRows:    60,
-		ContentsRows:    50,
-		DiagnosticsRows: 70,
-		PluginRows:      map[string]int{"79": 500},
 		PluginOrder:     []string{"79"},
 		PluginCollapsed: map[string]bool{"79": true},
 	})
 	if m.explorerRows != 7 {
-		t.Fatalf("explorer rows = %d, want SectionRows 7 (not legacy 60)", m.explorerRows)
+		t.Fatalf("explorer rows = %d, want 7", m.explorerRows)
 	}
 	if got := m.contents.Rows(); got != 5 {
-		t.Fatalf("contents rows = %d, want SectionRows 5 (not legacy 50)", got)
+		t.Fatalf("contents rows = %d, want 5", got)
 	}
 	if got := m.diag.Rows(); got != 4 {
-		t.Fatalf("diagnostics rows = %d, want SectionRows 4 (not legacy 70)", got)
+		t.Fatalf("diagnostics rows = %d, want 4", got)
 	}
 	late := &mountedPanel{id: 79, owner: "p", mount: pluginapi.WidgetMount{
 		Placement: pluginapi.PlacementSidebar, Rows: 2,
@@ -195,16 +178,7 @@ func TestSidebarSectionRowsPrecedence(t *testing.T) {
 	m.plug.panels.add(late)
 	m.applyPluginSidebarRestore()
 	if late.mount.Rows != 8 {
-		t.Fatalf("plugin rows = %d, want SectionRows 8 (not legacy 500)", late.mount.Rows)
-	}
-
-	// Without SectionRows the legacy fields restore (and are clamped).
-	legacy := newTOCModel(t, newTOCEditor("notes.md", "# One"), nil)
-	legacy.diag.open = true
-	legacy.restoreSidebarState(SidebarState{ExplorerRows: 6, ContentsRows: 9, DiagnosticsRows: 3})
-	if legacy.explorerRows != 6 || legacy.contents.Rows() != 9 || legacy.diag.Rows() != 3 {
-		t.Fatalf("legacy restore = explorer %d contents %d diagnostics %d, want 6/9/3",
-			legacy.explorerRows, legacy.contents.Rows(), legacy.diag.Rows())
+		t.Fatalf("plugin rows = %d, want 8", late.mount.Rows)
 	}
 }
 
@@ -217,8 +191,8 @@ func TestSidebarStateSavesOnlyExplicitHeights(t *testing.T) {
 	m := newTOCModel(t, newTOCEditor("notes.md", "# One"), &defaults)
 	m.diag.open = true
 	st := m.SidebarState()
-	if st.ContentsRows != 0 || st.DiagnosticsRows != 0 || st.ExplorerRows != 0 || len(st.SectionRows) != 0 {
-		t.Fatalf("default heights were saved: rows %d/%d/%d map %+v", st.ContentsRows, st.DiagnosticsRows, st.ExplorerRows, st.SectionRows)
+	if len(st.SectionRows) != 0 {
+		t.Fatalf("default heights were saved: %+v", st.SectionRows)
 	}
 	// A new config contents.rows applies on restart because the session did not override it.
 	bigger := DefaultMarkdownTOC()
@@ -234,10 +208,8 @@ func TestSidebarStateSavesOnlyExplicitHeights(t *testing.T) {
 	m.diag.rows = 5
 	m.explorerRows = 4
 	explicit := m.SidebarState()
-	if explicit.ContentsRows != 9 || explicit.DiagnosticsRows != 5 || explicit.ExplorerRows != 4 ||
-		explicit.SectionRows["contents"] != 9 || explicit.SectionRows["diagnostics"] != 5 || explicit.SectionRows["explorer"] != 4 {
-		t.Fatalf("explicit heights not saved: %+v (legacy %d/%d/%d)", explicit.SectionRows,
-			explicit.ContentsRows, explicit.DiagnosticsRows, explicit.ExplorerRows)
+	if explicit.SectionRows["contents"] != 9 || explicit.SectionRows["diagnostics"] != 5 || explicit.SectionRows["explorer"] != 4 {
+		t.Fatalf("explicit heights not saved: %+v", explicit.SectionRows)
 	}
 	again := newTOCModel(t, newTOCEditor("notes.md", "# One"), &bigger)
 	again.restoreSidebarState(explicit)
@@ -254,7 +226,7 @@ func TestSidebarStateCaptureDoesNotApplyPluginRestore(t *testing.T) {
 	m := newTOCModel(t, newTOCEditor("notes.md", "# One"), nil)
 	m.stashPluginSidebarRestore(SidebarState{
 		PluginOrder: []string{"1"},
-		PluginRows:  map[string]int{"1": 9},
+		SectionRows: map[string]int{"plugin:1": 9},
 	})
 	mountTestSection(m, 1, 3)
 	st := m.SidebarState()
@@ -264,8 +236,8 @@ func TestSidebarStateCaptureDoesNotApplyPluginRestore(t *testing.T) {
 	if m.plug.panels.restore == nil || len(m.plug.panels.restore.applied) != 0 {
 		t.Fatalf("capture mutated the pending restore: %+v", m.plug.panels.restore)
 	}
-	if st.PluginRows["1"] != 9 {
-		t.Fatalf("capture lost the pending plugin rows: %+v", st.PluginRows)
+	if st.SectionRows["plugin:1"] != 9 {
+		t.Fatalf("capture lost the pending plugin rows: %+v", st.SectionRows)
 	}
 }
 

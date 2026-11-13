@@ -27,15 +27,20 @@ func textBetweenWithin(doc Document, a, b buffer.Pos, maxBytes, maxLines int) (s
 		if maxLines > 0 && line-a.Line >= maxLines {
 			return "", false
 		}
-		runes := []rune(doc.Line(line))
-		start, end := 0, len(runes)
-		if line == a.Line {
-			start = min(a.Col, len(runes))
+		text := doc.Line(line)
+		if line == a.Line || line == b.Line {
+			// Only the end lines are cut, by rune column.
+			runes := []rune(text)
+			start, end := 0, len(runes)
+			if line == a.Line {
+				start = min(a.Col, len(runes))
+			}
+			if line == b.Line {
+				end = min(b.Col, len(runes))
+			}
+			text = string(runes[start:end])
 		}
-		if line == b.Line {
-			end = min(b.Col, len(runes))
-		}
-		sb.WriteString(string(runes[start:end]))
+		sb.WriteString(text)
 		if line != b.Line {
 			sb.WriteByte('\n')
 		}

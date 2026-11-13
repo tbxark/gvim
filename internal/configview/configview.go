@@ -54,25 +54,33 @@ type Options struct {
 	Trusted *bool
 }
 
-// validate reports the first option that cannot be used. The messages are the
-// ones app.Options.Validate gives for the same flags, so `gvim config show`
-// rejects a bad --keymap or --theme with the same text as `gvim`.
-func (o Options) validate() error {
-	if o.Keymap != "" {
-		if _, err := keymap.ByName(o.Keymap); err != nil {
-			return fmt.Errorf("--keymap: unknown keymap %q (want default, macos, macos-gui, emacs or vscode)", o.Keymap)
+// KeymapNames lists the built-in keymaps, for help text and completion. Names are
+// checked by ValidateFlags.
+func KeymapNames() []string { return keybindings.BuiltinKeymaps }
+
+// validate reports the first option that cannot be used.
+func (o Options) validate() error { return ValidateFlags(o.Keymap, o.Theme) }
+
+// ValidateFlags reports whether a --keymap and a --theme value can be used: a built-in
+// keymap, and a theme in a valid form that exists when it is a plain name. An empty
+// value is not checked. app.Options.Validate gives the same errors, so `gvim config
+// show` rejects a bad flag with the same text as `gvim`.
+func ValidateFlags(keymapName, themeName string) error {
+	if keymapName != "" {
+		if _, err := keymap.ByName(keymapName); err != nil {
+			return fmt.Errorf("--keymap: unknown keymap %q (want default, macos, macos-gui, emacs or vscode)", keymapName)
 		}
 	}
-	if o.Theme != "" {
-		if err := theme.ValidateForm(o.Theme); err != nil {
+	if themeName != "" {
+		if err := theme.ValidateForm(themeName); err != nil {
 			return fmt.Errorf("--theme: %w", err)
 		}
-		if theme.IsNamedForm(o.Theme) && !slices.Contains(theme.Names(), o.Theme) {
+		if theme.IsNamedForm(themeName) && !slices.Contains(theme.Names(), themeName) {
 			dir, dirErr := config.Dir()
 			if dirErr == nil {
 				registry := theme.NewRegistry(filepath.Join(dir, "themes"))
-				if _, err := registry.Load(o.Theme); err != nil {
-					return fmt.Errorf("--theme: unknown theme %q (want one of the bundled themes, a theme in %s, or a theme path)", o.Theme, filepath.Join(dir, "themes"))
+				if _, err := registry.Load(themeName); err != nil {
+					return fmt.Errorf("--theme: unknown theme %q (want one of the bundled themes, a theme in %s, or a theme path)", themeName, filepath.Join(dir, "themes"))
 				}
 			}
 		}

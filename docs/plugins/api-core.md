@@ -18,8 +18,11 @@ gvim.pos_cmp(a, b) -> -1|0|1
 gvim.range_eq(a, b) -> boolean
 ```
 
-`gvim.has(feature)`: `"decor"`, `"windows"`, `"virtual_buffers"`, `"input"` are always
-true in the shipped editor. `"lsp"` is true when a language server is configured (see
+`gvim.has(feature)`: `"decor"`, `"windows"`, `"virtual_buffers"`, `"input"`, `"http_get"` (the
+function exists; it still needs the user's network opt-in, see [`gvim.http`](api-system.md#gvimhttp))
+and `"decor_virtual_paint"` (the shipped TUI paints the virtual-text surface, see
+[api-ui.md](api-ui.md#virtual-text-surface-tier-1c-ab-painted)) are always true in the shipped
+editor. `"lsp"` is true when a language server is configured (see
 [`gvim.lsp`](api-system.md#gvimlsp)); `"git"` is true when a `git` binary is on the path (it is looked
 up at every call, because the binary can appear or vanish while gvim runs). An unknown feature is
 `false`.
@@ -160,7 +163,7 @@ file and process APIs (`gvim.fs`, `gvim.proc`) follow the remote host instead; s
 
 ```text
 gvim.plugins.list() -> { {name, status, version, source, file, dir, enabled, description, requires}, ... }
-gvim.plugins.export(tbl) -> true | nil, err
+gvim.plugins.export(tbl) -> true
 gvim.plugins.get(name) -> proxy | nil
 ```
 
@@ -185,7 +188,8 @@ end
 ```
 
 * `export` exposes the **functions** of the table; any other value must be plain data and is
-  copied.
+  copied. A key that is not a string, a value that is neither a function nor plain data, and more
+  than 256 entries raise a bad-argument error. Each call replaces what the plugin exported before.
 * Every call through a proxy is **⏳**. Arguments are deep-copied plain data (no functions, no
   userdata, so no `Buffer` or `Window` handle: pass an id), the function runs as a task in the
   *exporting* plugin's state, and the results are copied back. No Lua value is ever shared between

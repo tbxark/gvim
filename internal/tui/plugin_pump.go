@@ -17,7 +17,7 @@ import (
 // which the pump turns into tea.Cmds; their completions return as pluginWorkMsg and go
 // to Runtime.Resolve.
 //
-// Re-entrancy (AMENDMENTS C1). A Host method runs inside a Lua call, so it must never
+// Re-entrancy. A Host method runs inside a Lua call, so it must never
 // call Runtime.Run, Resolve, Control, Veto, Drain or Stop. A Host method that could
 // reach one of those validates its arguments, appends a closure to pluginState.later
 // and returns. The pump runs the closures after the Lua slice has returned, in order,
@@ -59,6 +59,8 @@ type pluginState struct {
 	pe PluginEditor
 	// decor holds the decorations of the plugins (plugin_decor.go); nil with no runtime.
 	decor *decorations.Store
+	// decorSweepDue says a decoration call ran since the last sweep of closed buffers.
+	decorSweepDue bool
 
 	// later holds the closures Host methods deferred; the pump runs them in order at
 	// Runtime.InSlice()==false.
@@ -259,7 +261,7 @@ func (m *Model) plugFlushEvents() {
 
 // plugEmit queues an event for the plugins. It never runs Lua: the next pump hands the
 // event to the runtime. An event nobody subscribed to is dropped here, except the
-// lifecycle events (FINAL section 6): the plugins load asynchronously, so nobody
+// lifecycle events: the plugins load asynchronously, so nobody
 // subscribes yet when the first resize arrives. The runtime filters those and holds
 // ready until its own plugins_loaded has been delivered.
 func (m *Model) plugEmit(name string, data map[string]any) {
@@ -283,7 +285,7 @@ func (m *Model) pluginReady() {
 }
 
 // unconditionalEvents are the events the root emits whether or not a plugin subscribed.
-// shutdown is not one of them: the root raises none (AMENDMENTS C25), Runtime.Stop runs the
+// shutdown is not one of them: the root raises none, Runtime.Stop runs the
 // handlers itself.
 var unconditionalEvents = map[string]bool{"ready": true, "resize": true}
 
@@ -341,7 +343,8 @@ func (m *Model) pluginMessage(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 // pluginControl asks the runtime for a lifecycle operation (reload, enable, ...). The
-// Work it needs becomes commands, and its notices go to the status row.
+// Work it needs becomes commands, and its notices go to the status row. The row holds one
+// message, so the last non-empty notice is shown: it is the most recent outcome.
 func (m *Model) pluginControl(c pluginapi.Control) tea.Cmd {
 	p := &m.plug
 	if p.rt == nil {
@@ -351,7 +354,9 @@ func (m *Model) pluginControl(c pluginapi.Control) tea.Cmd {
 	var notices []pluginapi.Notice
 	cmd := m.pumpAfter(func() { work, notices = p.rt.Control(c) })
 	for _, n := range notices {
-		m.notice = n.Text
+		if n.Text != "" {
+			m.notice = n.Text
+		}
 	}
 	return tea.Batch(m.workCmds(work), cmd)
 }

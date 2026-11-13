@@ -376,7 +376,7 @@ func TestKeyWait(t *testing.T) {
 }
 
 // TestPluginKeyOfNamesSpecialKeys: the Key a plugin sees names the key alone in the keymap
-// vocabulary. A key without such a name has an empty Key, never the raw code point (S14-5).
+// vocabulary. A key without such a name has an empty Key, never the raw code point.
 func TestPluginKeyOfNamesSpecialKeys(t *testing.T) {
 	tests := []struct {
 		name string
@@ -458,7 +458,7 @@ func TestPanicChordEnhancedEncoding(t *testing.T) {
 
 // The ctrl+shift+6 spelling of chord 1 is only a panic chord while a plugin holds the
 // keyboard. Every preset binds it to set_bookmark 6, which must keep working with no plugin
-// input (S14-1).
+// input.
 func TestPanicAliasOnlyWithPluginInput(t *testing.T) {
 	t.Run("without plugin input the key reaches the keymap", func(t *testing.T) {
 		e := newKeyEnv(t)
@@ -1031,13 +1031,12 @@ func TestIdleEvents(t *testing.T) {
 // ---- Status items.
 
 // A left item of a plugin never pushes the status message out: the message keeps room for
-// its first cells at every width, so notices (the panic chord's among them) stay visible
-// (S14-4).
+// its first cells at every width, so notices (the panic chord's among them) stay visible.
 func TestStatusMessageSurvivesWideLeftItem(t *testing.T) {
 	const msg = "plugin input cleared"
-	wide := statusItem{ID: "a", Plugin: "p", Text: strings.Repeat("x", 80)}
+	wide := frame.StatusItem{ID: "a", Plugin: "p", Text: strings.Repeat("x", 80)}
 	for _, w := range []int{80, 120, 200} {
-		sv := statusView{Position: "1:1", Message: msg, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10, Extra: []statusItem{wide}}
+		sv := frame.StatusView{Position: "1:1", Message: msg, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10, Extra: []frame.StatusItem{wide}}
 		var text strings.Builder
 		for _, r := range frame.StatusRuns(w, sv) {
 			text.WriteString(r.Text)
@@ -1047,8 +1046,8 @@ func TestStatusMessageSurvivesWideLeftItem(t *testing.T) {
 		}
 	}
 	t.Run("a short item keeps its place before the message", func(t *testing.T) {
-		sv := statusView{Position: "1:1", Message: msg, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10,
-			Extra: []statusItem{{ID: "a", Plugin: "p", Text: "mode"}}}
+		sv := frame.StatusView{Position: "1:1", Message: msg, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10,
+			Extra: []frame.StatusItem{{ID: "a", Plugin: "p", Text: "mode"}}}
 		var text strings.Builder
 		for _, r := range frame.StatusRuns(120, sv) {
 			text.WriteString(r.Text)
@@ -1060,23 +1059,23 @@ func TestStatusMessageSurvivesWideLeftItem(t *testing.T) {
 }
 
 func TestStatusItemsLayoutAndHit(t *testing.T) {
-	sv := func(items ...statusItem) statusView {
-		return statusView{Position: "Ln 1, Col 1", Message: "msg", EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10, Extra: items}
+	sv := func(items ...frame.StatusItem) frame.StatusView {
+		return frame.StatusView{Position: "Ln 1, Col 1", Message: "msg", EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10, Extra: items}
 	}
-	find := func(l layout, text string) (run, bool) {
+	find := func(l frame.Layout, text string) (frame.Run, bool) {
 		for _, r := range l.Status {
 			if strings.Contains(r.Text, text) {
 				return r, true
 			}
 		}
-		return run{}, false
+		return frame.Run{}, false
 	}
-	items := []statusItem{
+	items := []frame.StatusItem{
 		{ID: "mode", Plugin: "p", Text: "-- NORMAL --"},
 		{ID: "clock", Plugin: "p", Text: "12:00", Right: true, Clickable: true},
 		{ID: "note", Plugin: "p", Text: "note", Clickable: true},
 	}
-	l := frame.ComputeLayout(100, 24, layoutInput{Status: sv(items...)})
+	l := frame.ComputeLayout(100, 24, frame.Input{Status: sv(items...)})
 	for i, text := range []string{"-- NORMAL --", "12:00", "note"} {
 		r, ok := find(l, text)
 		if !ok {
@@ -1084,7 +1083,7 @@ func TestStatusItemsLayoutAndHit(t *testing.T) {
 		}
 		x := r.X + 1
 		got := l.Hit(x, l.StatusY)
-		if (i == 0) != (got.Kind == hitNone) || (i > 0 && (got.Kind != hitStatusPlugin || got.Index != i)) {
+		if (i == 0) != (got.Kind == frame.HitNone) || (i > 0 && (got.Kind != frame.HitStatusPlugin || got.Index != i)) {
 			t.Errorf("hit on %q = %+v", text, got)
 		}
 	}
@@ -1094,32 +1093,32 @@ func TestStatusItemsLayoutAndHit(t *testing.T) {
 	msg, _ := find(l, "msg")
 	clock, _ := find(l, "12:00")
 	lang, _ := find(l, "Go")
-	hint, _ := find(l, paletteHelp)
+	hint, _ := find(l, frame.PaletteHelp)
 	if pos.X >= mode.X || mode.X >= msg.X || lang.X >= clock.X || clock.X >= hint.X {
 		t.Errorf("order wrong: pos %d mode %d msg %d | lang %d clock %d hint %d", pos.X, mode.X, msg.X, lang.X, clock.X, hint.X)
 	}
 	// The built-in segments still hit as before.
-	if got := l.Hit(lang.X, l.StatusY); got.Kind != hitStatusSegment {
+	if got := l.Hit(lang.X, l.StatusY); got.Kind != frame.HitStatusSegment {
 		t.Errorf("language hit = %+v", got)
 	}
-	if got := l.Hit(hint.X, l.StatusY); got.Kind != hitStatusPalette {
+	if got := l.Hit(hint.X, l.StatusY); got.Kind != frame.HitStatusPalette {
 		t.Errorf("palette hit = %+v", got)
 	}
 
 	// A narrow row drops the right group from its end, the plugin items after the palette hint
 	// and before the language.
-	narrow := frame.ComputeLayout(60, 24, layoutInput{Status: sv(items...)})
-	if _, ok := find(narrow, paletteHelp); ok {
+	narrow := frame.ComputeLayout(60, 24, frame.Input{Status: sv(items...)})
+	if _, ok := find(narrow, frame.PaletteHelp); ok {
 		if _, ok := find(narrow, "12:00"); !ok {
 			t.Error("the plugin item was dropped before the palette hint")
 		}
 	}
-	tiny := frame.ComputeLayout(30, 24, layoutInput{Status: sv(items...)})
+	tiny := frame.ComputeLayout(30, 24, frame.Input{Status: sv(items...)})
 	if _, ok := find(tiny, "12:00"); ok {
 		t.Error("the right item survived a row too narrow for it")
 	}
 	// Runs never overlap and stay in the row.
-	for _, lay := range []layout{l, narrow, tiny} {
+	for _, lay := range []frame.Layout{l, narrow, tiny} {
 		end := 0
 		for _, r := range lay.Status {
 			if r.X < end || r.X+r.W > lay.W {
@@ -1167,7 +1166,7 @@ func TestStatusItemsOfPlugins(t *testing.T) {
 	l := e.m.layout()
 	var x int
 	for _, r := range l.Status {
-		if r.Kind == hitStatusPlugin {
+		if r.Kind == frame.HitStatusPlugin {
 			x = r.X
 		}
 	}

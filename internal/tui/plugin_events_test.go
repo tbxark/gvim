@@ -806,7 +806,7 @@ func TestPreAndPostCommand(t *testing.T) {
 	})
 }
 
-// TestQuitRaisesNoShutdownEvent checks AMENDMENTS C25: quitting raises no shutdown event.
+// TestQuitRaisesNoShutdownEvent checks that quitting raises no shutdown event.
 // Close stops the runtime, which runs the shutdown handlers itself.
 func TestQuitRaisesNoShutdownEvent(t *testing.T) {
 	t.Parallel()
@@ -847,7 +847,7 @@ func BenchmarkPluginSnapshotAndTail(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				snap := h.m.pluginSnapshot()
-				h.m.pluginTail(snap, nil)
+				h.m.pluginTail(snap)
 				h.m.pluginViewTail(snap)
 			}
 		})

@@ -34,7 +34,7 @@ func TestTerminalSourcesSnapshotBoundsAndNames(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		tabs = append(tabs, terminal.SavedTab{Open: true, Rows: []string{"t"}})
 	}
-	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Tabs: tabs})
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs})
 	got := m.terminalSources()
 	if len(got) == 0 || len(got) > palette.GrepTerminalsMaxTabs {
 		t.Fatalf("terminal tabs = %d, want 1..%d", len(got), palette.GrepTerminalsMaxTabs)
@@ -103,13 +103,10 @@ func TestOpenTerminalMsgFocusesTheDockTab(t *testing.T) {
 	starter := &shellsStarter{}
 	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	m.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{
-			{Name: "one", Open: true, Rows: []string{"a"}},
-			{Name: "two", Open: true, Rows: []string{"b"}},
-		},
-	})
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "one", Open: true, Rows: []string{"a"}},
+		{Name: "two", Open: true, Rows: []string{"b"}},
+	}})
 	second := m.dock.TabID(1)
 	m.Update(palette.OpenTerminalMsg{ID: second, Row: 0})
 	if !m.dock.Open() || m.dock.ActiveIndex() != 1 || !m.dock.Focus() {
@@ -141,18 +138,15 @@ func TestLiveGrepTerminalExportFocusesDockTab(t *testing.T) {
 	starter := &shellsStarter{}
 	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	m.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: false,
-		Tabs: []terminal.SavedTab{
-			{Name: "one", Open: true, Rows: []string{"a"}},
-			{Name: "shell", Open: true, Rows: []string{"todo terminal"}},
-		},
-	})
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "one", Open: true, Rows: []string{"a"}},
+		{Name: "shell", Open: true, Rows: []string{"todo terminal"}},
+	}})
 	cmd := m.openLiveGrepResultsList(palette.GrepExportMsg{
 		Root:  "/ws",
 		Query: "todo",
 		Hits: []palette.GrepHit{{
-			Source: palette.GrepTerminals, Index: 1, Rel: "shell", Line: 1, Text: "todo terminal",
+			Source: palette.GrepTerminals, TerminalID: m.dock.TabID(1), Index: 1, Rel: "shell", Line: 1, Text: "todo terminal",
 		}},
 	})
 	if cmd != nil {
@@ -174,13 +168,14 @@ func TestLiveGrepTerminalExportFocusesDockTab(t *testing.T) {
 	}
 }
 
-// TestLiveGrepTerminalExportEncoding pins the wire format: terminal hits are t, dock tab
-// index, label, transcript line, so the export callback can never mistake them for files.
+// TestLiveGrepTerminalExportEncoding pins the wire format: terminal hits are T, dock tab
+// id, transcript row, payload, so the export callback can never mistake them for files.
 func TestLiveGrepTerminalExportEncoding(t *testing.T) {
 	t.Parallel()
-	got := liveGrepExportValue(palette.GrepHit{Source: palette.GrepTerminals, Index: 2, Rel: "shell", Line: 3})
-	if got != "t\t2\tshell\t3" {
-		t.Fatalf("terminal export value = %q, want t<TAB>2<TAB>shell<TAB>3", got)
+	got := liveGrepExportValue(palette.GrepHit{Source: palette.GrepTerminals, TerminalID: 7, TranscriptFirst: 2, Line: 3})
+	kind, id, row, _, ok := parseLiveGrepExportValue(got)
+	if !ok || kind != "T" || id != "7" || row != "4" {
+		t.Fatalf("terminal export value = %q, want T<TAB>7<TAB>4<TAB>payload", got)
 	}
 }
 
@@ -362,14 +357,11 @@ func TestOpenTerminalMsgUsesTheIDAfterAClose(t *testing.T) {
 	starter := &shellsStarter{}
 	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	m.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{
-			{Name: "a", Open: true, Rows: []string{"a"}},
-			{Name: "b", Open: true, Rows: []string{"b"}},
-			{Name: "c", Open: true, Rows: []string{"c"}},
-		},
-	})
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "a", Open: true, Rows: []string{"a"}},
+		{Name: "b", Open: true, Rows: []string{"b"}},
+		{Name: "c", Open: true, Rows: []string{"c"}},
+	}})
 	target := m.dock.TabID(2)
 	// Close the first tab; c moves from 2 to 1, b from 1 to 0.
 	m.dock.SetActive(0)

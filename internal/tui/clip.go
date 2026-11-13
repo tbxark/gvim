@@ -159,15 +159,22 @@ func (m *Model) rememberYank(text string) {
 	}
 }
 
+// nativeWriteFailedMsg reports a failed native clipboard write (the OSC 52 write sent with
+// it may still have reached the terminal).
+type nativeWriteFailedMsg struct{ err error }
+
 // nativeWrite is the command that writes text through the app's clipboard writer, or nil
-// when there is none.
+// when there is none. A failed write comes back as a nativeWriteFailedMsg, and a good one
+// returns no message.
 func (m *Model) nativeWrite(text string) tea.Cmd {
 	w, ok := m.dock.Clipboard().(ClipboardWriter)
 	if !ok {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = w.Write(text)
+		if err := w.Write(text); err != nil {
+			return nativeWriteFailedMsg{err: err}
+		}
 		return nil
 	}
 }
@@ -234,6 +241,9 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			m.notice = uiTextVars("gvim.notice.clipboard.plain_error", "Copied as plain text: %{error}", map[string]any{"error": msg.err.Error()})
 		}
+		return nil, true
+	case nativeWriteFailedMsg:
+		m.notice = uiTextVars("gvim.notice.clipboard.copy_failed", "Copy failed: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil, true
 	case promptCutMsg:
 		return m.promptCutResult(msg), true

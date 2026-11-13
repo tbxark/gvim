@@ -352,6 +352,69 @@ func TestLiveDiffRefreshesWhenHeadMoves(t *testing.T) {
 	}
 }
 
+// Regaining the terminal focus refetches the reference of the focused buffer only, not of
+// every buffer with a diff: each fetch is a git process.
+func TestLiveDiffFocusGainedRefetchesOnlyTheFocusedBuffer(t *testing.T) {
+	const other = "/w/b.txt"
+	r := startLiveDiff(t, rigOpts{
+		buffers: []rigBuffer{{liveDiffFile, "a\nb\n"}, {other, "c\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\n"})
+			o.Script(showArgv("b.txt"), plugintest.ProcScript{Stdout: "c\nd\n"})
+			o.SetFile(liveDiffFile, "a\nb\n")
+			o.SetFile(other, "c\nd\n")
+		},
+	})
+	if err := r.h.Run("live_diff.toggle_global", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.emit("after_file_open", liveDiffFile, nil)
+	r.emit("after_file_open", other, nil)
+	if n := r.runs("show"); n != 2 {
+		t.Fatalf("git show ran %d times for two buffers, want 2 (log %v)", n, r.h.LogText("live_diff"))
+	}
+	r.h.Emit(pluginapi.Event{Name: "focus_gained", Data: map[string]any{}})
+	r.h.Settle()
+	if n := r.runs("show"); n != 3 {
+		t.Fatalf("git show ran %d times after the focus returned, want 3: the focused buffer only", n)
+	}
+}
+
+// A directory that was no repository when the diff first painted is looked at again, on a
+// later focus after a cooldown, so a repository created meanwhile gets its HEAD watched.
+func TestLiveDiffRetriesAMissedRepositoryAfterACooldown(t *testing.T) {
+	r := liveDiffRig(t, "a\nb\n", "a\nb\n")
+	liveDiffEnable(t, r) // rev-parse is not scripted: no repository
+	gitWatches := func() int {
+		n := 0
+		for _, w := range r.os.Watches() {
+			if w.Path() == "/w/.git" {
+				n++
+			}
+		}
+		return n
+	}
+	if n := gitWatches(); n != 0 {
+		t.Fatalf("watching %d git directories without a repository", n)
+	}
+	r.os.Script(gitArgv("rev-parse", "--show-toplevel", "--git-path", "HEAD"),
+		plugintest.ProcScript{Stdout: "/w\n/w/.git/HEAD\n"})
+	r.os.SetFile("/w/.git/HEAD", "ref: refs/heads/main\n")
+	focus := func() {
+		r.h.Emit(pluginapi.Event{Name: "focus_gained", Data: map[string]any{}})
+		r.h.Settle()
+	}
+	focus()
+	if n := gitWatches(); n != 0 {
+		t.Fatalf("the directory was retried before the cooldown (%d watches)", n)
+	}
+	r.h.Advance(31 * time.Second)
+	focus()
+	if n := gitWatches(); n != 1 {
+		t.Fatalf("git directory watches after the cooldown = %d, want 1 (log %v)", n, r.h.LogText("live_diff"))
+	}
+}
+
 func TestLiveDiffDiskWatcherUpdatesTheReference(t *testing.T) {
 	r := liveDiffRig(t, "a\nb\n", "a\nb\n")
 	liveDiffEnable(t, r)

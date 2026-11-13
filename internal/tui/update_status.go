@@ -9,7 +9,6 @@ package tui
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -217,14 +216,5 @@ func updateCheckedLabel(at time.Time) string {
 	if at.IsZero() {
 		return "never"
 	}
-	h, mnt := at.Hour(), at.Minute()
-	return at.Format("2006-01-02") + " " + two(h) + ":" + two(mnt)
-}
-
-// two zero-pads a clock field.
-func two(n int) string {
-	if n < 10 {
-		return "0" + strconv.Itoa(n)
-	}
-	return strconv.Itoa(n)
+	return at.Format("2006-01-02 15:04")
 }

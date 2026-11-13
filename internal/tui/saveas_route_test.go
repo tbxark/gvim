@@ -111,6 +111,10 @@ func (d *realDialogs) Unsaved(name string, tag any, ov style.Overlay) Overlay {
 	return dialog.NewUnsavedChanges(d.clock, name, tag, ov)
 }
 
+func (d *realDialogs) Quit(tag any, ov style.Overlay) Overlay {
+	return dialog.NewConfirmQuit(d.clock, tag, ov)
+}
+
 func (d *realDialogs) SaveAs(path string, tag any, ov style.Overlay) Overlay {
 	d.paths = append(d.paths, path)
 	return dialog.NewSaveAs(d.clock, path, tag, dialog.PathChecks{}, ov)
@@ -156,3 +160,5 @@ func TestSaveAsReplacesPrefillAfterTwoUntitledBuffers(t *testing.T) {
 		t.Fatalf("buffer text = %q, want hello", got)
 	}
 }
+
+func (e *docsEditor) QuitNeedsConfirm() bool { return false }

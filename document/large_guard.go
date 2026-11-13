@@ -21,7 +21,7 @@ type contentMark struct {
 	Ver  uint64
 }
 
-// contentMark returns the mark of the document as it is now. Marks compare with ==.
+// ContentMark returns the mark of the document as it is now. Marks compare with ==.
 func (d *Document) ContentMark() contentMark {
 	if d.large != nil {
 		return contentMark{Ver: d.Buffer.Version()}
@@ -120,7 +120,7 @@ func (d *Document) checkLines(first, last int, what string) error {
 	return nil
 }
 
-// readRange returns the text between from and to for an action that copies it, filters
+// ReadRange returns the text between from and to for an action that copies it, filters
 // it or writes it back changed. A document in memory returns it as Buffer.Range does.
 // A large document returns the text of a range up to 16 MiB. A longer range, and a
 // range that takes a line that is cut short whole, are refused, so a copy or a rewrite
@@ -142,7 +142,7 @@ func (d *Document) ReadRange(from, to buffer.Pos) (string, error) {
 	return text, nil
 }
 
-// planRange is readRange for the planning of an edit. Where the edit planner has no
+// PlanRange is readRange for the planning of an edit. Where the edit planner has no
 // way to return an error, a failure is remembered in the document and the planner gets
 // no text. The edit that follows is not made (see failPlan), and the action ends with
 // the error.
@@ -184,7 +184,7 @@ type cursorSnapshot struct {
 	Want      int
 }
 
-// snapCursors copies the caret state of d.
+// SnapCursors copies the caret state of d.
 func (d *Document) SnapCursors() *cursorSnapshot {
 	s := &cursorSnapshot{Cursor: d.Cursor, Block: d.Block, LastMulti: d.LastMulti, Want: d.Want}
 	if d.Sel != nil {
@@ -201,12 +201,12 @@ func (d *Document) SnapCursors() *cursorSnapshot {
 	return s
 }
 
-// restoreCursors puts the caret state of s back into d.
+// RestoreCursors puts the caret state of s back into d.
 func (d *Document) RestoreCursors(s *cursorSnapshot) {
 	d.Cursor, d.Sel, d.Extra, d.Block, d.LastMulti, d.Want = s.Cursor, s.Sel, s.Extra, s.Block, s.LastMulti, s.Want
 }
 
-// takeRefusal returns the reason the last action on d was refused, as an error with the
+// TakeRefusal returns the reason the last action on d was refused, as an error with the
 // words for the status row, and clears it. A planning failure comes first. It is nil
 // when nothing was refused, and always nil for a document in memory.
 func (d *Document) TakeRefusal() error {
@@ -221,7 +221,7 @@ func (d *Document) TakeRefusal() error {
 	return d.RefusalError(err)
 }
 
-// refusalError words a refusal of the buffer for the status row. The caret line stands
+// RefusalError words a refusal of the buffer for the status row. The caret line stands
 // for the line that was refused when there is one caret.
 func (d *Document) RefusalError(err error) error {
 	which := "a line"
@@ -297,7 +297,7 @@ var lineWise = map[Action]bool{
 // maxLargeLines is the most lines a line-by-line action works on in a large document.
 const maxLargeLines = 100_000
 
-// refuseInLargeMode returns the refusal of action a, when d is a large document and a
+// RefuseInLargeMode returns the refusal of action a, when d is a large document and a
 // cannot work on it: the actions of refusedInLargeMode, and a line-by-line action on a
 // selection of too many lines. It is nil for any other document and action.
 func (d *Document) RefuseInLargeMode(a Action) error {
@@ -330,7 +330,7 @@ func (d *Document) selectedLineCount() int {
 	return n
 }
 
-// onFrontier reports whether a caret of d is on the last line the index knows, while
+// OnFrontier reports whether a caret of d is on the last line the index knows, while
 // the index is incomplete.
 func (d *Document) OnFrontier() bool {
 	if d.large == nil || d.Index().Complete {
@@ -357,7 +357,7 @@ var joinsNextLine = map[Action]bool{
 	"delete_word_forward": true,
 }
 
-// atFrontierEnd reports whether a caret of d with no selection is at the end of the last
+// AtFrontierEnd reports whether a caret of d with no selection is at the end of the last
 // line the index knows, while the index is incomplete.
 func (d *Document) AtFrontierEnd() bool {
 	if d.large == nil || d.Index().Complete {

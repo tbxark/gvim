@@ -83,7 +83,10 @@ func (i Installer) Install() (Report, error) {
 	if err := checkOwned(rep.RexPlugin); err != nil {
 		return rep, err
 	}
-	next := withBlock(previous, loader(rep.RexPlugin, bin))
+	next, err := withBlock(previous, loader(rep.RexPlugin, bin))
+	if err != nil {
+		return rep, err
+	}
 	changed, err := writeOwned(rep.RexPlugin, rexSource)
 	if err != nil {
 		return rep, err
@@ -117,7 +120,10 @@ func (i Installer) Uninstall() (Report, error) {
 	if err != nil {
 		return rep, err
 	}
-	next := withoutBlock(previous)
+	next, err := withoutBlock(previous)
+	if err != nil {
+		return rep, err
+	}
 	if next != previous {
 		if err := writeFile(rep.RexConfig, next); err != nil {
 			return rep, err
@@ -227,46 +233,53 @@ func loader(pluginPath, bin string) string {
 }
 
 // withBlock puts block where the managed block is, or after the content. An
-// empty block removes it.
-func withBlock(content, block string) string {
-	if start, end, ok := blockBounds(content); ok {
-		return content[:start] + block + strings.TrimPrefix(content[end:], "\n")
+// empty block removes it. It fails, leaving the content to the caller untouched,
+// when the markers are not one begin followed by one end.
+func withBlock(content, block string) (string, error) {
+	start, end, ok, err := blockBounds(content)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return content[:start] + block + strings.TrimPrefix(content[end:], "\n"), nil
 	}
 	if block == "" {
-		return content
+		return content, nil
 	}
 	if strings.TrimSpace(content) == "" {
-		return block
+		return block, nil
 	}
-	return strings.TrimRight(content, "\n") + "\n\n" + block
+	return strings.TrimRight(content, "\n") + "\n\n" + block, nil
 }
 
 // withoutBlock is withBlock with no block: the managed block is removed,
 // along with the blank line withBlock put before it.
-func withoutBlock(content string) string {
-	start, end, ok := blockBounds(content)
-	if !ok {
-		return content
+func withoutBlock(content string) (string, error) {
+	start, end, ok, err := blockBounds(content)
+	if err != nil || !ok {
+		return content, err
 	}
 	before := content[:start]
 	if strings.HasSuffix(before, "\n\n") {
 		before = before[:len(before)-1]
 	}
-	return before + strings.TrimPrefix(content[end:], "\n")
+	return before + strings.TrimPrefix(content[end:], "\n"), nil
 }
 
-// blockBounds returns the offsets of the managed block, endMarker included.
-func blockBounds(content string) (start, end int, ok bool) {
-	start = strings.Index(content, beginMarker)
-	if start < 0 {
-		return 0, 0, false
+// blockBounds returns the offsets of the managed block, endMarker included. A
+// content with no marker has no block. Markers that are not exactly one begin
+// followed by one end are an error: replacing from a stray begin would swallow
+// the text the user wrote around it.
+func blockBounds(content string) (start, end int, ok bool, err error) {
+	begins, ends := strings.Count(content, beginMarker), strings.Count(content, endMarker)
+	if begins == 0 && ends == 0 {
+		return 0, 0, false, nil
 	}
-	rest := content[start:]
-	at := strings.Index(rest, endMarker)
-	if at < 0 {
-		return 0, 0, false
+	start, stop := strings.Index(content, beginMarker), strings.Index(content, endMarker)
+	if begins != 1 || ends != 1 || stop < start {
+		return 0, 0, false, errors.New("gvim rex: the Rex config has unbalanced \"" + beginMarker + "\" / \"" + endMarker + "\" markers; fix or remove them first")
 	}
-	return start, start + at + len(endMarker), true
+	return start, stop + len(endMarker), true, nil
 }
 
 // luaString quotes s for a Lua string literal.
@@ -319,9 +332,14 @@ func checkOwned(path string) error {
 		return err
 	}
 	if !bytes.HasPrefix(data, []byte(ownMarker)) {
-		return fmt.Errorf("gvim rex: %s exists and was not installed by this command; move it first", path)
+		return errNotOwned(path)
 	}
 	return nil
+}
+
+// errNotOwned is the refusal to replace a file this package did not write.
+func errNotOwned(path string) error {
+	return fmt.Errorf("gvim rex: %s exists and was not installed by this command; move it first", path)
 }
 
 // writeOwned writes a Lua source, refusing a file this package did not write,
@@ -333,7 +351,7 @@ func writeOwned(path string, data []byte) (bool, error) {
 	}
 	if err == nil {
 		if !bytes.HasPrefix(old, []byte(ownMarker)) {
-			return false, fmt.Errorf("gvim rex: %s exists and was not installed by this command; move it first", path)
+			return false, errNotOwned(path)
 		}
 		if bytes.Equal(old, data) {
 			return false, nil

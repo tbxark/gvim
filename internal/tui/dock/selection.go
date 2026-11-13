@@ -65,13 +65,8 @@ type dragScrollMsg struct{ seq int }
 // Selection reports whether a text selection is active.
 func (p *Panel) Selection() bool { return p.sel.active }
 
-// SelectionRange is the start and end column of combined row abs that the
+// selectionRange is the start and end column of combined row abs that the
 // selection covers, and false when it covers none of it.
-func (p *Panel) SelectionRange(abs int) (start, end int, ok bool) {
-	return p.selectionRange(abs)
-}
-
-// selectionRange is SelectionRange for the internal state.
 func (p *Panel) selectionRange(abs int) (start, end int, ok bool) {
 	if !p.sel.active {
 		return 0, 0, false
@@ -443,11 +438,11 @@ func (p *Panel) copySelection() tea.Cmd {
 	}
 	return func() tea.Msg {
 		var histLines []terminal.Line
-		if hEnd > hStart {
+		if t != nil && hEnd > hStart {
 			histLines, _ = t.Scrollback(hStart, hEnd-hStart)
 		}
 		var sc terminal.Screen
-		if hi >= priorN+total {
+		if t != nil && hi >= priorN+total {
 			sc = t.Screen()
 		}
 		var b strings.Builder

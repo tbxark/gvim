@@ -164,12 +164,7 @@ func (f frame) layout(i int, styled bool) line {
 // is long. A segment of a tall line, which has its own rows, is described by seg.
 func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, styled bool) line {
 	raw := []rune(text)
-	plain := expandCells(raw, nil, nil, f.tab)
-	geom := make([]rune, len(plain))
-	glue := make([]bool, len(plain))
-	for j, c := range plain {
-		geom[j], glue[j] = c.r, c.glue
-	}
+	geom, glue := expandedGeom(raw, f.tab)
 	ln := line{geom: geom, raw: raw, spans: []span{{0, len(geom)}}, off: off, long: long}
 	switch {
 	case seg != nil:
@@ -211,6 +206,18 @@ func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, 
 		f.markConceals(i, raw, &ln)
 	}
 	return ln
+}
+
+// expandedGeom is the runes of raw as they are laid out, tabs as blanks and control
+// characters as escapes, and glue[i], which joins rune i to the next one.
+func expandedGeom(raw []rune, tab int) (geom []rune, glue []bool) {
+	plain := expandCells(raw, nil, nil, tab)
+	geom = make([]rune, len(plain))
+	glue = make([]bool, len(plain))
+	for j, c := range plain {
+		geom[j], glue[j] = c.r, c.glue
+	}
+	return geom, glue
 }
 
 // diffLineKind reports whether the kinds of a line mark it as an added or a
@@ -286,7 +293,7 @@ func (f frame) selectedIn(i int) func(col int) bool {
 	}
 }
 
-// expandCells expands raw runes the way the legacy painter does. A tab becomes
+// expandCells expands raw runes into cells. A tab becomes
 // the blanks up to the next tab stop of tab cells, and a control character
 // becomes its <XX> escape. kinds and sel may be nil.
 func expandCells(raw []rune, kinds []syntax.Kind, sel func(col int) bool, tab int) []cell {

@@ -1,12 +1,13 @@
-// Package daemon is the gvim daemon MVP (#18a): a Unix-socket hosted editor and
-// the small length-prefixed protocol a client uses to attach to it.
+// Package daemon is the gvim daemon: a Unix-socket hosted editor and the small
+// length-prefixed protocol a client uses to attach to it.
 //
 // The protocol is a stream of frames: a 4-byte big-endian payload length, one
-// type byte, then the payload. Client frames are hello (JSON cols/rows/args),
+// type byte, then the payload. Client frames are hello (JSON version/cols/rows),
 // input (raw terminal bytes), resize (JSON cols/rows), detach, open-file
-// (JSON paths/wait/cwd/split) and ping. Server frames are output (raw ANSI
-// bytes), notice (text), detached, pong and exit. A frame payload is at most
-// MaxPayload bytes; a reader that sees a larger length fails the connection.
+// (JSON paths/cwd/files), ping and the workspace requests. Server frames are
+// output (raw ANSI bytes), notice (text), detached, pong, exit, version-rejected
+// and workspaces. A frame payload is at most MaxPayload bytes; a reader that sees
+// a larger length fails the connection.
 package daemon
 
 import (
@@ -60,16 +61,11 @@ type VersionMismatch struct {
 	Daemon int `json:"daemon"`
 }
 
-// Hello is the first client frame: the client's terminal size, the protocol version and
-// the launch arguments the daemon should apply (open files and the like).
+// Hello is the first client frame: the protocol version and the client's terminal size.
 type Hello struct {
-	Version int      `json:"version"`
-	Cols    int      `json:"cols"`
-	Rows    int      `json:"rows"`
-	Args    []string `json:"args,omitempty"`
-	// Workspace names the workspace to attach to (its stable id or label); empty
-	// means the daemon's current foreground workspace.
-	Workspace string `json:"workspace,omitempty"`
+	Version int `json:"version"`
+	Cols    int `json:"cols"`
+	Rows    int `json:"rows"`
 }
 
 // Resize is a terminal size change.
@@ -78,18 +74,13 @@ type Resize struct {
 	Rows int `json:"rows"`
 }
 
-// OpenFile asks the daemon to open paths. Paths is the legacy wire shape (bare
-// paths, no positions); Files is the positional form a current client sends. Both may
-// be present: a receiver that knows Files prefers it, and an older receiver still sees
-// Paths. Cwd is the client's working directory, against which a relative Path/File is
-// resolved by the daemon (the client may run in another directory than the editor).
+// OpenFile asks the daemon to open files. Cwd is the client's working directory,
+// against which a relative file path is resolved by the daemon (the client may run in
+// another directory than the editor).
 type OpenFile struct {
-	Paths []string `json:"paths"`
-	Wait  bool     `json:"wait,omitempty"`
-	Cwd   string   `json:"cwd,omitempty"`
-	Split bool     `json:"split,omitempty"`
+	Cwd string `json:"cwd,omitempty"`
 	// Files carries each requested path with its optional 1-based position.
-	Files []OpenFileTarget `json:"files,omitempty"`
+	Files []OpenFileTarget `json:"files"`
 }
 
 // OpenFileTarget is one requested file and its optional 1-based line/column.
@@ -152,9 +143,4 @@ func DecodeJSON(f Frame, v any) error {
 		return errors.New("empty JSON frame")
 	}
 	return json.Unmarshal(f.Payload, v)
-}
-
-// WriteNotice sends a notice frame (a client-visible message).
-func WriteNotice(w io.Writer, text string) error {
-	return WriteFrame(w, TypeNotice, []byte(text))
 }

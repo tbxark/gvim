@@ -16,24 +16,6 @@ type SnippetExpansion struct {
 	CursorOffset int
 }
 
-// IsSnippet reports whether text contains snippet syntax: an unescaped $ followed
-// by a digit or a brace. It is the same heuristic Fresh uses; the format field of
-// the item remains the authority for accepting it as a snippet.
-func IsSnippet(text string) bool {
-	runes := []rune(text)
-	for i := 0; i < len(runes); i++ {
-		switch runes[i] {
-		case '\\':
-			i++
-		case '$':
-			if i+1 < len(runes) && (runes[i+1] == '{' || isDigit(runes[i+1])) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ExpandSnippet turns snippet text into plain text and the final caret offset.
 // An item without the final stop places the caret after the text, and a later
 // final stop wins over an earlier one.

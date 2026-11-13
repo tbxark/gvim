@@ -2,7 +2,11 @@ package pluginpanel
 
 import (
 	"strings"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -229,23 +233,23 @@ func (p *Panel) dualKey(w pluginapi.Widget, k Key) (Result, bool) {
 	}
 	switch k.Name {
 	case "up":
-		p.setSelected(w, clamp(sel-1, 0, max(len(w.Options)-1, 0)))
+		p.setSelected(w, space.Clamp(sel-1, 0, max(len(w.Options)-1, 0)))
 		return Result{Handled: true}, true
 	case "down":
-		p.setSelected(w, clamp(sel+1, 0, max(len(w.Options)-1, 0)))
+		p.setSelected(w, space.Clamp(sel+1, 0, max(len(w.Options)-1, 0)))
 		return Result{Handled: true}, true
 	case "space", "enter":
 		if len(w.Options) == 0 {
 			return Result{Handled: true}, true
 		}
-		return Result{Handled: true, Events: []pluginapi.WidgetEvent{p.toggleIncluded(w, w.Options[clamp(sel, 0, len(w.Options)-1)])}}, true
+		return Result{Handled: true, Events: []pluginapi.WidgetEvent{p.toggleIncluded(w, w.Options[space.Clamp(sel, 0, len(w.Options)-1)])}}, true
 	}
 	return Result{}, false
 }
 
 // cycleOption moves the dropdown highlight without changing the value.
 func (p *Panel) cycleOption(w pluginapi.Widget, delta int) {
-	p.setSelected(w, clamp(p.optionIndex(w)+delta, 0, max(len(w.Options)-1, 0)))
+	p.setSelected(w, space.Clamp(p.optionIndex(w)+delta, 0, max(len(w.Options)-1, 0)))
 }
 
 // HandleAction performs a widget command a plugin sent (gvim.ui.widget_command).
@@ -362,7 +366,7 @@ func (p *Panel) moveSelection(delta int) Result {
 		if sel < 0 {
 			sel = 0
 		}
-		sel = clamp(sel+delta, 0, len(items)-1)
+		sel = space.Clamp(sel+delta, 0, len(items)-1)
 		p.setSelected(w, sel)
 		e := p.ev("select")
 		e.Index = sel
@@ -386,7 +390,7 @@ func (p *Panel) moveSelection(delta int) Result {
 		if pos < 0 {
 			pos = 0
 		}
-		pos = clamp(pos+delta, 0, len(vis)-1)
+		pos = space.Clamp(pos+delta, 0, len(vis)-1)
 		p.setSelected(w, vis[pos].index)
 		e := p.ev("select")
 		e.Index = vis[pos].index
@@ -401,10 +405,7 @@ func (p *Panel) moveSelection(delta int) Result {
 		if sel < 0 {
 			sel = 0
 		}
-		p.setSelected(w, clamp(sel+sign(delta), 0, max(len(w.Options)-1, 0)))
-		return Result{Handled: true}
-	}
-	if p.page {
+		p.setSelected(w, space.Clamp(sel+sign(delta), 0, max(len(w.Options)-1, 0)))
 		return Result{Handled: true}
 	}
 	return Result{Handled: true}
@@ -570,7 +571,7 @@ func (p *Panel) HandleMouse(m Mouse) (Result, bool) {
 			text := p.textValue(w)
 			inner := max(h.r.W-2, 1)
 			if w.Rows > 1 {
-				line := clamp(m.Y-h.r.Y, 0, lineCount(text)-1)
+				line := space.Clamp(m.Y-h.r.Y, 0, lineCount(text)-1)
 				col := max(m.X-h.r.X, 0)
 				p.setText(w, text, offsetOf(text, line, byteColumnAt(text, line, col)))
 			} else {
@@ -596,11 +597,7 @@ func (p *Panel) HandleMouse(m Mouse) (Result, bool) {
 		}
 	case hitDropdown:
 		if w.Kind == pluginapi.WidgetDropdown {
-			if p.dropdownOpen(w) {
-				p.setDropdownOpen(w, false)
-			} else {
-				p.setDropdownOpen(w, true)
-			}
+			p.setDropdownOpen(w, !p.dropdownOpen(w))
 		}
 	}
 	return res, true
@@ -660,7 +657,8 @@ func (p *Panel) endTreeDrag(x, y int) Result {
 	return res
 }
 
-// byteColumnAt returns the byte offset within a line of the rune column col.
+// byteColumnAt returns the byte offset within a line of the display column col (a column
+// inside a wide rune is the start of that rune).
 func byteColumnAt(text string, line, col int) int {
 	start := offsetOf(text, line, 0)
 	end := strings.IndexByte(text[start:], '\n')
@@ -669,8 +667,12 @@ func byteColumnAt(text string, line, col int) int {
 	}
 	lineText := text[start : start+end]
 	off := 0
-	for i := 0; i < col && off < len(lineText); i++ {
-		off = nextRune(lineText, off)
+	for cells := 0; off < len(lineText); {
+		r, n := utf8.DecodeRuneInString(lineText[off:])
+		if cells += ansi.StringWidth(string(r)); cells > col {
+			break
+		}
+		off += n
 	}
 	return off
 }
@@ -703,7 +705,7 @@ func (p *Panel) Mutate(m pluginapi.WidgetMutation) bool {
 			} else if w.Kind != pluginapi.WidgetList {
 				n = len(w.Options)
 			}
-			p.setSelected(w, clamp(m.Index, 0, max(n-1, 0)))
+			p.setSelected(w, space.Clamp(m.Index, 0, max(n-1, 0)))
 			return true
 		}
 	case "setNumber":
@@ -848,19 +850,6 @@ func findWidget(root pluginapi.Widget, key string) (pluginapi.Widget, bool) {
 // FocusEvent is the widget_event a mount or an explicit focus reports for a panel-level
 // focus change: the key of the widget that starts focused.
 func (p *Panel) FocusEvent() pluginapi.WidgetEvent { return p.focusEvent() }
-
-func clamp(v, lo, hi int) int {
-	if hi < lo {
-		return lo
-	}
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
 
 func sign(v int) int {
 	switch {

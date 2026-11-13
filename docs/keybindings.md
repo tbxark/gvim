@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 259 | 257 |
-| `macos` | 60 | 279 |
-| `macos-gui` | 52 | 330 |
-| `emacs` | 98 | 322 |
-| `vscode` | 9 | 262 |
+| `default` | 269 | 266 |
+| `macos` | 61 | 289 |
+| `macos-gui` | 52 | 340 |
+| `emacs` | 98 | 331 |
+| `vscode` | 11 | 273 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not

@@ -51,11 +51,12 @@ local function clip(s, limit)
   if #s <= limit then
     return s
   end
-  local cut = s:sub(1, limit)
-  while #cut > 0 and cut:byte(-1) >= 128 do
-    cut = cut:sub(1, #cut - 1)
+  -- Back up to a character boundary: the byte after the cut must not continue a character.
+  local cut = limit
+  while cut > 0 and s:byte(cut + 1) >= 0x80 and s:byte(cut + 1) < 0xC0 do
+    cut = cut - 1
   end
-  return cut .. "…"
+  return s:sub(1, cut) .. "…"
 end
 
 local function scalar(v)
@@ -63,8 +64,6 @@ local function scalar(v)
     return clip(v, MAX_VALUE)
   elseif type(v) == "number" or type(v) == "boolean" then
     return tostring(v)
-  elseif v == nil or v == json.null then
-    return nil
   end
   return nil
 end
@@ -314,7 +313,7 @@ local function format_target(name, target, default_name)
   return lines
 end
 
-local function build_panel(path, config, targets, default_name)
+local function build_panel(path, targets, default_name)
   local lines = {}
   add(lines, t("panel.title"))
   add(lines, t("panel.path", { path = path }))
@@ -397,15 +396,14 @@ local function show()
   if not state.config then
     notice(t("status.parse_failed", { path = state.path, error = state.errors[1] or "invalid config" }), "warn")
   else
-    local default = scalar(state.config.defaultTarget)
     if #state.errors > 0 then
       notice(t("status.invalid", { count = #state.errors, path = state.path }), "warn")
     elseif targets then
-      notice(t("status.valid", { targets = #targets, path = state.path }))
+      notice(t("status.valid", { targets = #sorted_keys(targets), path = state.path }))
     end
   end
   local default = type(state.config) == "table" and scalar(state.config.defaultTarget) or nil
-  local text = build_panel(state.path, state.config, targets, default)
+  local text = build_panel(state.path, targets, default)
   close_panel()
   local buf, err = gvim.buf.create {
     name = "*K8s Workspace: " .. clip(gvim.path.basename(state.path), 40) .. "*",

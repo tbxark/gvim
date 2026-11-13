@@ -166,3 +166,10 @@ func TestWrapRowsMeasuresClustersWhole(t *testing.T) {
 		})
 	}
 }
+
+// wrapSpans splits the expanded runes of a buffer line into rows of at most w
+// cells using the break rule above. An empty line still has one row. A width
+// under two cells does not wrap, so the line stays one row.
+func wrapSpans(runes []rune, w int) []span {
+	return wrapRows(runes, w, 0, nil)
+}

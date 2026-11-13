@@ -11,12 +11,12 @@ import (
 // Cache holds the syntax spans of the active document. The lexer runs over
 // the whole text, because chroma is a stream lexer, and the result is kept until
 // the next change of the text, which its version tells: an action that only moves
-// the caret or the viewport lexes nothing, although it calls Edited. A document
-// that is too big to lex per keystroke is lexed in windows (windowed). A document switch, or a change of its language, starts a new lexer. A
-// large document is lexed in windows of lines instead, kept by the version of its
-// text (spans_large.go). The cache is used on the UI goroutine only.
+// the caret or the viewport lexes nothing. A document
+// that is too big to lex per keystroke, and a large document, is lexed in windows
+// of lines instead, kept by the version of its text (spans_large.go). A document
+// switch, or a change of its language, starts a new lexer. The cache is used on the
+// UI goroutine only.
 type Cache struct {
-	gen   uint64           // bumped by every action that may edit
 	doc   *editor.Document // the document the lexer belongs to
 	lang  string           // the language the lexer was chosen for, as set with Set Language
 	plain bool             // no lexer matched the document: no spans
@@ -28,7 +28,6 @@ type Cache struct {
 	hl           *syntax.Highlighter
 	spans        [][]syntax.Span
 	valid        bool           // spans were lexed
-	lexedAt      uint64         // gen the spans were lexed at
 	lexedV       editor.Version // the text version the spans were lexed at
 	lexes        int            // how many times the whole text was lexed, the version Highlighter sees
 
@@ -51,14 +50,6 @@ func New() *Cache {
 	return &Cache{}
 }
 
-// Edited marks the spans stale. It is called before every action. A nil cache
-// is a zero adapter with no spans, and it is ignored.
-func (c *Cache) Edited() {
-	if c != nil {
-		c.gen++
-	}
-}
-
 // Lines returns the spans of every line of doc, lexing again only after an
 // edit. It returns nil when no lexer matched the document, or when the cache is
 // nil.
@@ -71,8 +62,7 @@ func (c *Cache) Lines(doc *editor.Document) [][]syntax.Span {
 		// A large document is never lexed whole: see window.
 		return nil
 	}
-	// Only a change of the text lexes again. An action that moves the caret or the
-	// viewport marks the cache edited, but the version of the text is the same.
+	// Only a change of the text lexes again.
 	if ver := doc.Version(); !c.valid || c.lexedV != ver {
 		text := make([]string, doc.Buffer.Lines())
 		for i := range text {
@@ -82,7 +72,6 @@ func (c *Cache) Lines(doc *editor.Document) [][]syntax.Span {
 		}
 		c.lexes++
 		c.spans = c.hl.Lines(c.lexes, text)
-		c.lexedAt = c.gen
 		c.lexedV = ver
 		c.valid = true
 	}

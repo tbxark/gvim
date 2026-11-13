@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.win and the Window handle (FINAL 5.3, X9, AMENDMENTS C23).
+// gvim.win and the Window handle.
 //
 //	gvim.win.current() -> Window | nil     gvim.win.list() -> Window[]
 //	gvim.win.get(id) -> Window | nil       gvim.win.equalize() -> true
@@ -48,7 +48,7 @@ func winTable(L *lua.LState, fields ...winField) *lua.LTable {
 	return t
 }
 
-// installWin installs windows: gvim.win and the Window handle methods (stage S17).
+// installWin installs windows: gvim.win and the Window handle methods.
 func installWin(e *apiEnv) {
 	p := e.p
 	e.provides("windows")

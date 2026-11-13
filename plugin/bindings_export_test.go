@@ -8,7 +8,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// A test seam for bindings.go, which has no Lua API of its own until stage S14: a `B`
+// A test seam for bindings.go that reaches the set without gvim.keymap: a `B`
 // table in every plugin state.
 //
 //	B.set(chord, action) -> true | nil, err      bind a chord to an action id
@@ -47,7 +47,7 @@ func installBindingsSeam(e *apiEnv) {
 		if err != nil {
 			return result(L, err)
 		}
-		id, err := p.hiddenCommand(L.CheckFunction(2))
+		id, err := p.hiddenCommandTitled(L.CheckFunction(2), "")
 		if err == nil {
 			err = p.bindings().set(pluginapi.Binding{Chord: chord, Action: id})
 		}

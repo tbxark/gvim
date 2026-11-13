@@ -28,16 +28,10 @@ const (
 	localRenameMaxDepth   = 64
 )
 
-// RenameNoReplace renames oldPath to newPath without replacing an existing target. A
+// RenameNoReplaceResult renames oldPath to newPath without replacing an existing target. A
 // rename to a name that differs only in case (the same file on a case-insensitive
-// filesystem) is allowed. A failure leaves the source and reports it.
-func RenameNoReplace(oldPath, newPath string) error {
-	_, err := RenameNoReplaceResult(oldPath, newPath)
-	return err
-}
-
-// RenameNoReplaceResult is RenameNoReplace plus the copy-publication warning (the
-// no-hard-link O_EXCL fallback). Callers that show a status notice use it.
+// filesystem) is allowed. A failure leaves the source and reports it. The result carries
+// the copy-publication warning (the no-hard-link O_EXCL fallback) for a status notice.
 func RenameNoReplaceResult(oldPath, newPath string) (CopyResult, error) {
 	oldPath, newPath = cleanPath(oldPath), cleanPath(newPath)
 	oldInfo, err := os.Lstat(oldPath)
@@ -57,15 +51,9 @@ func RenameNoReplaceResult(oldPath, newPath string) (CopyResult, error) {
 	return renameOrCopy("rename", oldPath, newPath)
 }
 
-// MoveNoReplace moves src into dstDir keeping its name, without replacing an existing
-// destination. A move within the source's own directory is a no-op. It renames, or
-// copies and removes, as RenameNoReplace does.
-func MoveNoReplace(src, dstDir string) error {
-	_, err := MoveNoReplaceResult(src, dstDir)
-	return err
-}
-
-// MoveNoReplaceResult is MoveNoReplace plus the copy-publication warning.
+// MoveNoReplaceResult moves src into dstDir keeping its name, without replacing an existing
+// destination. A move within the source's own directory is a no-op. It renames, or copies
+// and removes, as RenameNoReplaceResult does. The result carries the copy-publication warning.
 func MoveNoReplaceResult(src, dstDir string) (CopyResult, error) {
 	src, dstDir = cleanPath(src), cleanPath(dstDir)
 	if _, err := os.Lstat(src); err != nil {

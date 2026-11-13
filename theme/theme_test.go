@@ -2,6 +2,8 @@ package theme_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tbxark/gvim/theme"
@@ -126,4 +128,19 @@ func ExampleLoad() {
 	c := th.RGBOr("editor", "bg", theme.RGB{})
 	fmt.Printf("%s background: #%02x%02x%02x\n", th.Name, c.R, c.G, c.B)
 	// Output: dark background: #0d1117
+}
+
+// TestDeleteThemeWithoutAUserDirRefusesAFileURL: a registry with no user theme dir has no
+// user theme to delete, so a file:// ref must not remove an arbitrary file.
+func TestDeleteThemeWithoutAUserDirRefusesAFileURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keep.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := theme.NewRegistry("").DeleteTheme("file://" + path); err == nil {
+		t.Fatal("DeleteTheme accepted a file:// ref without a user theme dir")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the file was removed: %v", err)
+	}
 }

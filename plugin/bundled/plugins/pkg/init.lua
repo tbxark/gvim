@@ -30,11 +30,12 @@ local function clip(s, limit)
   if #s <= limit then
     return s
   end
-  local cut = s:sub(1, limit)
-  while #cut > 0 and cut:byte(-1) >= 128 do
-    cut = cut:sub(1, #cut - 1)
+  -- Back up to a character boundary: the byte after the cut must not continue a character.
+  local cut = limit
+  while cut > 0 and s:byte(cut + 1) >= 0x80 and s:byte(cut + 1) < 0xC0 do
+    cut = cut - 1
   end
-  return cut .. "…"
+  return s:sub(1, cut) .. "…"
 end
 
 local function status_label(row)
@@ -124,7 +125,7 @@ local function show_detail(pkg)
     focus = true,
   }
   if not buf then
-    notice("Package: cannot open details: " .. tostring(err), "warn")
+    notice(t("status.detail_failed", { error = tostring(err) }), "warn")
     return
   end
   state.detail_buf = buf

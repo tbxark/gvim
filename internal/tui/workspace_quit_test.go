@@ -1,10 +1,12 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"fmt"
-	"github.com/tbxark/gvim/internal/tui/dialog"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/dialog"
 )
 
 type quitWorkspaceFake struct {

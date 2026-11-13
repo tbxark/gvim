@@ -71,7 +71,7 @@ func fitGrep(r row, width int) (string, []int) {
 	displayRel := textsafe.Clean(r.rel)
 	full := displayRel + loc + text
 	if ansi.StringWidth(full) <= width {
-		return full, matchOffsets(len([]rune(r.rel+loc)), r.mcol, r.qlen, len([]rune(text)))
+		return full, matchOffsets(len([]rune(displayRel+loc)), r.mcol, r.qlen, len([]rune(text)))
 	}
 	locW := ansi.StringWidth(loc)
 	// The path takes what the line text does not need, and leaves it half the row.

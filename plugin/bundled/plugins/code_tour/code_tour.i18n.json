@@ -15,8 +15,6 @@
     "prompt.path": "Enter tour file path:",
     "prompt.title": "Tour title:",
     "prompt.create_path": "Write the tour to (relative to the workspace root):",
-    "panel.title": "Tour",
-    "panel.steps": "Steps",
     "panel.step_counter": "Step %{step} of %{total}",
     "panel.file_missing": "%{file} is not in this working tree.",
     "panel.drift": "recorded at %{recorded} · you are on %{current}",

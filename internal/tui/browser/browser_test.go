@@ -14,6 +14,7 @@ import (
 
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 )
 
 // fixture writes a directory with sub/ (holding inner.md), a.go, b.txt and a
@@ -687,7 +688,7 @@ func TestPrintableAndClamp(t *testing.T) {
 	if printable("") || printable("\x01") || !printable(" ") || !printable("é") {
 		t.Error("printable classification wrong")
 	}
-	if clamp(5, 0, 3) != 3 || clamp(-1, 0, 3) != 0 || clamp(2, 4, 1) != 4 {
+	if space.Clamp(5, 0, 3) != 3 || space.Clamp(-1, 0, 3) != 0 || space.Clamp(2, 4, 1) != 4 {
 		t.Error("clamp wrong")
 	}
 }
@@ -810,4 +811,32 @@ func entryNames(b *Browser) []string {
 		}
 	}
 	return out
+}
+
+// TestDoubleClickHonoursDisabledEncodingDetection: a double click opens the file the way
+// Enter does, so it asks for the encoding when auto-detection is off.
+func TestDoubleClickHonoursDisabledEncodingDetection(t *testing.T) {
+	t.Parallel()
+	dir, home := fixture(t)
+	clk := &clock{now: time.Unix(1000, 0)}
+	b := New(Options{Dir: dir, Home: home, Now: clk.Now})
+	b.Draw(grid.New(60, 20))
+	send(t, b, altKey('e'))
+	i := slices.Index(names(b), "b.txt")
+	x, y := b.box.x+3, b.box.y+3+(i-b.top)
+	send(t, b, click(x, y))
+	clk.now = clk.now.Add(100 * time.Millisecond)
+	got, ok := send(t, b, click(x, y)).(Open)
+	if !ok || !got.AskEncoding {
+		t.Fatalf("double click sent %+v, want AskEncoding", got)
+	}
+}
+
+func TestCapitalizeKeepsMultibyteLetters(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{"": "", "open x": "Open x", "écrit": "Écrit", "中文": "中文"} {
+		if got := capitalize(in); got != want {
+			t.Errorf("capitalize(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

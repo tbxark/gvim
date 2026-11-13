@@ -107,7 +107,7 @@ func encodeText(codec, text string) ([]byte, error) {
 	return encoding.Encode(codec, text)
 }
 
-// codecName is the encoding the document saves in.
+// CodecName is the encoding the document saves in.
 func (d *Document) CodecName() string {
 	if d.Codec == "" {
 		return defaultCodec
@@ -138,7 +138,7 @@ func isASCII(s string) bool {
 	return true
 }
 
-// textSample is the text that the encoding label is judged by: all of the text of a
+// TextSample is the text that the encoding label is judged by: all of the text of a
 // document, and the head of a large document, as when the file was opened.
 func (d *Document) TextSample() string {
 	if d.large != nil {

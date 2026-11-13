@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -171,7 +172,7 @@ func (m *Model) openLineTarget(t pluginapi.LineTarget, source Document) tea.Cmd 
 		}
 	}
 	if !placed && m.ed.Active() == source {
-		m.trySplit(sideBySide)
+		m.trySplit(split.SideBySide)
 	}
 	line := t.Target
 	if line < 0 {

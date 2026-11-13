@@ -118,8 +118,8 @@ func (e *Editor) CheckRename(oldPath, newPath string) error {
 // CloseByPath closes every open document whose path is path or lies under it,
 // for a file or folder that has been deleted. A document with unsaved edits is
 // kept unless force is true. If one of them blocks the close, none is closed and
-// the error wraps ErrUnsaved. Closing the last tab leaves the editor Empty, as
-// CloseTab does. A path that matches no open document is not an error. An empty
+// the error wraps ErrUnsaved. Closing the last tab leaves the editor Empty, or
+// with a new empty buffer, as CloseTab does. A path that matches no open document is not an error. An empty
 // path returns an error wrapping ErrEmptyPath.
 func (e *Editor) CloseByPath(path string, force bool) error {
 	if path == "" {
@@ -147,10 +147,19 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 	}
 
 	// Detach every shared victim first: a promotion can move the canonical document to
-	// another workspace and leave a throw-away snapshot in the slot. Doing it up front
-	// means a refused transfer leaves the tabs and their text untouched (nothing has been
-	// released yet).
+	// another workspace and leave a throw-away snapshot in the slot. Every transfer is
+	// checked before the first one is made, so a refused one leaves all the tabs and
+	// their text untouched (nothing has been detached or released yet).
 	if e.shared != nil {
+		for _, d := range e.docs {
+			if !victim(d) {
+				continue
+			}
+			if err := e.shared.CheckClose(e, d); err != nil {
+				e.setError(err)
+				return err
+			}
+		}
 		for _, d := range e.docs {
 			if !victim(d) {
 				continue
@@ -172,12 +181,12 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 			// A shared victim was detached above; for a promoted owner this slot now holds
 			// a throw-away snapshot.
 			e.releaseDoc(e.docs[i])
-			if i < e.active {
-				beforeActive++
-			}
 		default:
 			if i == e.active {
 				newActive = len(kept)
+			}
+			if i < e.active {
+				beforeActive++
 			}
 			kept = append(kept, d)
 		}
@@ -188,6 +197,7 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 	e.docs = kept
 	if len(kept) == 0 {
 		e.switchTo(0)
+		e.reopenEmpty()
 		return nil
 	}
 	if newActive >= 0 {

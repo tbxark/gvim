@@ -33,6 +33,7 @@ func TestDiffText(t *testing.T) {
 		{"eol kept on request", `local h = gvim.diff.text("a\nb\n", "a\r\nc\n", {ignore_eol = false}) T.spy(#h, h[1].old_start, h[1].old_count)`, "1 0 2"},
 		{"identical", `T.spy(#gvim.diff.text("x", "x"))`, "0"},
 		{"bad argument", `T.spy(pcall(gvim.diff.text, "x", 5))`, "~two strings expected"},
+		{"too many lines", `T.spy(gvim.diff.text(string.rep("\n", 1000000), "x"))`, "nil too_large: diff.text: more than 1000000 lines per side"},
 	}), plugintest.Options{Timeout: 5 * time.Second})
 }
 
@@ -47,8 +48,8 @@ func TestDiffHunkNavigation(t *testing.T) {
 	}))
 }
 
-// bufHost is a host with the two buffer reads diff.buffer and diff.saved use (stage S6 gives
-// the FakeHost the real ones): FullText and SavedLines.
+// bufHost is a host with the two buffer reads diff.buffer and diff.saved use (the FakeHost
+// has the real ones): FullText and SavedLines.
 type bufHost struct {
 	*plugintest.FakeHost
 	mu       sync.Mutex

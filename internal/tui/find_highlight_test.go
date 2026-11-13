@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/search"
 )
 
@@ -17,6 +18,11 @@ func openBarWith(m *Model, text string) {
 	for _, r := range text {
 		press(m, typed(string(r)))
 	}
+}
+
+// pane is the editor pane for doc that fills the focused pane's place.
+func (m *Model) pane(doc Document) editorpane.Pane {
+	return m.paneFor(split.Pane{Focused: true, Top: doc.Top()}, doc)
 }
 
 func TestFindLineHighlights(t *testing.T) {
@@ -201,5 +207,63 @@ func TestPaneHighlightsAreTheFindRuns(t *testing.T) {
 				t.Fatalf("pane runs of line %d = %v, want %v", tt.line, got, tt.want)
 			}
 		})
+	}
+}
+
+// versionedSelDoc is a selDoc with a text version the test moves.
+type versionedSelDoc struct {
+	selDoc
+	ver *uint64
+}
+
+func (d versionedSelDoc) Version() uint64 { return *d.ver }
+
+// countingSearch is a searchFake whose document has a version and that counts the searches.
+type countingSearch struct {
+	*searchFake
+	ver   uint64
+	finds int
+}
+
+func (f *countingSearch) Active() Document {
+	return versionedSelDoc{selDoc: selDoc{fakeDoc: f.doc, s: f.searchFake}, ver: &f.ver}
+}
+
+func (f *countingSearch) FindMatches(q search.Query) ([]search.Match, error) {
+	f.finds++
+	return f.searchFake.FindMatches(q)
+}
+
+// TestFindHighlightsSearchOncePerVersionAndQuery checks that the highlight search is not
+// repeated on every frame: it runs again only for a new text version or query.
+func TestFindHighlightsSearchOncePerVersionAndQuery(t *testing.T) {
+	t.Parallel()
+	cs := &countingSearch{searchFake: &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor("foo bar foo", "x foo")}}}
+	m := newRouteModelPreset(t, cs, "default")
+	openBarWith(m, "foo")
+	m.findLineHighlights()(0) // the first frame searches
+	cs.finds = 0
+	for range 5 {
+		if got := m.findLineHighlights()(0); len(got) != 2 {
+			t.Fatalf("highlights = %v, want both matches", got)
+		}
+	}
+	if cs.finds != 0 {
+		t.Fatalf("%d searches across five frames, want none after the first", cs.finds)
+	}
+	// An edit (a new version) searches again.
+	cs.doc.lines[0] = "foo"
+	cs.ver++
+	if got := m.findLineHighlights()(0); len(got) != 1 {
+		t.Fatalf("highlights after the edit = %v, want one match", got)
+	}
+	if cs.finds != 1 {
+		t.Fatalf("searches after the edit = %d, want 1", cs.finds)
+	}
+	// A new query searches again.
+	press(m, typed("x"))
+	m.findLineHighlights()(0)
+	if cs.finds < 2 {
+		t.Fatalf("searches after a new query = %d, want another", cs.finds)
 	}
 }

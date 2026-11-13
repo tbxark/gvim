@@ -81,9 +81,7 @@ func (p *Panel) applyForegroundPoll(msg foregroundPollMsg) tea.Cmd {
 	if !msg.ok {
 		name = ""
 	}
-	if name != p.fgName {
-		p.fgName = name
-	}
+	p.fgName = name
 	return p.foregroundTickCmd()
 }
 

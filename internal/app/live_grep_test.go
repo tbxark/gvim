@@ -330,3 +330,23 @@ func TestLiveGrepSearchesTerminalSnapshot(t *testing.T) {
 		t.Fatal("an invalid regex over terminals was not rejected")
 	}
 }
+
+// TestLiveGrepIgnoredListingExpires: the cached walk of the ignored scope is reused
+// until its TTL passes, then a file created since is found.
+func TestLiveGrepIgnoredListingExpires(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"a.txt": "x\n"})
+	g := &liveGrep{}
+	if got := g.ignoredFiles(dir); len(got) != 1 {
+		t.Fatalf("first listing = %v", got)
+	}
+	writeTree(t, dir, map[string]string{"b.txt": "x\n"})
+	if got := g.ignoredFiles(dir); len(got) != 1 {
+		t.Fatalf("a fresh cache was walked again: %v", got)
+	}
+	g.walkAt = g.walkAt.Add(-2 * ignoredWalkTTL)
+	if got := g.ignoredFiles(dir); len(got) != 2 {
+		t.Fatalf("an expired cache was reused: %v", got)
+	}
+}

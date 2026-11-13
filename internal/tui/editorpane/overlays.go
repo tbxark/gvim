@@ -311,12 +311,9 @@ func cleanVirtual(text string) string {
 	}, text)
 }
 
-// paintRowTail fills the rest of row y from column end with the look of the line's row
-// style and extended overlays.
-func (f frame) paintRowTail(g *grid.Grid, ln line, y, end int, cur bool) {
-	if !ln.hasTail || end >= f.w-1 {
-		return
-	}
+// rowBase is the style the cells past the text of a row start from: the text style under
+// the row's diff background, or under the current line's tint on the caret line.
+func (f frame) rowBase(ln line, cur bool) grid.Style {
 	base := f.styles.Text
 	switch {
 	case ln.diffAdd && f.styles.DiffAdd.BG != nil:
@@ -326,6 +323,16 @@ func (f frame) paintRowTail(g *grid.Grid, ln line, y, end int, cur bool) {
 	case cur && f.styles.CurrentLine.BG != nil:
 		base = withBackground(base, f.styles.CurrentLine)
 	}
+	return base
+}
+
+// paintRowTail fills the rest of row y from column end with the look of the line's row
+// style and extended overlays.
+func (f frame) paintRowTail(g *grid.Grid, ln line, y, end int, cur bool) {
+	if !ln.hasTail || end >= f.w-1 {
+		return
+	}
+	base := f.rowBase(ln, cur)
 	g.Fill(end, f.w-1, y, PatchStyle(base, ln.tail))
 }
 
@@ -337,15 +344,7 @@ func (f frame) paintVirtualText(g *grid.Grid, ln line, i, y, end, skip int, cur 
 	if f.hooks.eol == nil || ln.long {
 		return
 	}
-	base := f.styles.Text
-	switch {
-	case ln.diffAdd && f.styles.DiffAdd.BG != nil:
-		base = PatchStyle(base, f.styles.DiffAdd)
-	case ln.diffRemove && f.styles.DiffRemove.BG != nil:
-		base = PatchStyle(base, f.styles.DiffRemove)
-	case cur && f.styles.CurrentLine.BG != nil:
-		base = withBackground(base, f.styles.CurrentLine)
-	}
+	base := f.rowBase(ln, cur)
 	x := end
 	for _, t := range f.hooks.eol(i) {
 		if x >= f.w-1 {

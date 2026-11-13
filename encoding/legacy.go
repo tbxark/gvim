@@ -57,8 +57,8 @@ func IsBinary(data []byte) bool {
 }
 
 // validUTF8Sample reports whether sample is valid UTF-8. A sample cut out of a
-// longer file may end inside a character, so up to 3 trailing bytes are ignored
-// then.
+// longer file may end inside a character, so then up to 3 trailing bytes that
+// are the start of a character are ignored.
 func validUTF8Sample(sample []byte, truncated bool) bool {
 	if utf8.Valid(sample) {
 		return true
@@ -67,7 +67,7 @@ func validUTF8Sample(sample []byte, truncated bool) bool {
 		return false
 	}
 	for cut := 1; cut <= 3 && cut < len(sample); cut++ {
-		if utf8.Valid(sample[:len(sample)-cut]) {
+		if !utf8.FullRune(sample[len(sample)-cut:]) && utf8.Valid(sample[:len(sample)-cut]) {
 			return true
 		}
 	}

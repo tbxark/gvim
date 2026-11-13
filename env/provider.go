@@ -56,11 +56,6 @@ var envInputFiles = []string{
 // environment (a copy; the local fingerprint cache and the remote watcher both use it).
 func EnvInputFiles() []string { return append([]string(nil), envInputFiles...) }
 
-// EnvInputRootNames returns the top-level entries a workspace-root watch must treat as
-// env-input changes: the direct files plus the directories that hold nested inputs
-// (".venv" for ".venv/pyvenv.cfg"). A root watch reports direct children only, so a
-// change inside .venv appears as a .venv directory event.
-//
 // EnvInputNestedDirs returns the workspace-relative parent directories of nested inputs
 // (".venv"): the remote watcher must also watch those directories, because changing the
 // content of .venv/pyvenv.cfg changes the file but not the .venv directory mtime the root
@@ -83,6 +78,10 @@ func EnvInputNestedDirs() []string {
 	return out
 }
 
+// EnvInputRootNames returns the top-level entries a workspace-root watch must treat as
+// env-input changes: the direct files plus the directories that hold nested inputs
+// (".venv" for ".venv/pyvenv.cfg"). A root watch reports direct children only, so a
+// change inside .venv appears as a .venv directory event.
 func EnvInputRootNames() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -419,41 +418,6 @@ func (p *Provider) SetRunner(r Runner) {
 	}
 	p.invalidateLocked()
 	p.mu.Unlock()
-}
-
-// EnvFor returns base with the active environment applied: the delta's keys are
-// removed and the captured set entries appended. It is the exact environment a
-// child process should see.
-func (p *Provider) EnvFor(base []string) []string {
-	overlay := p.Overlay()
-	unset := p.Unset()
-	if len(overlay) == 0 && len(unset) == 0 {
-		return base
-	}
-	drop := append([]string(nil), unset...)
-	for _, entry := range overlay {
-		name, _, _ := strings.Cut(entry, "=")
-		drop = append(drop, name)
-	}
-	return append(removeKeys(base, drop), overlay...)
-}
-
-func removeKeys(base, keys []string) []string {
-	if len(keys) == 0 {
-		return base
-	}
-	drop := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		drop[k] = true
-	}
-	out := make([]string, 0, len(base))
-	for _, entry := range base {
-		name, _, _ := strings.Cut(entry, "=")
-		if !drop[name] {
-			out = append(out, entry)
-		}
-	}
-	return out
 }
 
 // capture runs the baseline and the activation shell in dir and diffs their

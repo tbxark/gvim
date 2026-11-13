@@ -109,7 +109,7 @@ unsupported conflict limit stale`. `gvim.err_code(err)` returns the code of an e
   went wrong; the log has the usual form and a traceback of at most 14 lines (a repeated frame counts
   once: `... the line above repeats 29 more times`), in which an anonymous function is
   `in function <hello/hello.lua:7>`.
-* A function whose host capability does not exist (a stage the editor does not implement, no
+* A function whose host capability does not exist (the editor does not implement it, no
   language server configured) returns `nil, "unsupported: <name>"`. `gvim.has(feature)` reports
   features: `decor`, `windows`, `virtual_buffers`, `input`, `lsp` (a language server is
   configured) and `git` (a `git` binary is on the path; checked at every call).

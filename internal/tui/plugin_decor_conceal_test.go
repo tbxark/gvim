@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -21,7 +22,7 @@ func TestPlugDecorConcealAndCursorLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := f.Active()
-	p := m.paneFor(splitPane{Focused: true}, doc)
+	p := m.paneFor(split.Pane{Focused: true}, doc)
 	if p.Conceals == nil || p.CursorLineOverlay == nil {
 		t.Fatalf("hooks not wired: conceal %v cursor %v", p.Conceals != nil, p.CursorLineOverlay != nil)
 	}
@@ -49,11 +50,11 @@ func TestPlugDecorComposeOnlyPerPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := f.Active()
-	p := m.paneFor(splitPane{Focused: true}, doc)
+	p := m.paneFor(split.Pane{Focused: true}, doc)
 	if got := p.Conceals(0); len(got) != 0 {
 		t.Fatalf("a compose-only conceal reached a normal pane: %+v", got)
 	}
-	page := m.viewPane(splitPane{}, editorpane.Pane{}, doc)
+	page := m.viewPane(split.Pane{}, editorpane.Pane{}, doc)
 	page.PageView.On = true
 	page = m.plugDecor(page, doc)
 	if got := page.Conceals(0); len(got) != 1 {

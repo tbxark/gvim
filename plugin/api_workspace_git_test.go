@@ -8,7 +8,7 @@ import (
 )
 
 // gvim.workspace.git_root and git_branch are what gvim.git falls back to when the git
-// binary is missing (AMENDMENTS C28), and gvim.has("git") says whether the binary exists.
+// binary is missing, and gvim.has("git") says whether the binary exists.
 func TestWorkspaceGitFallbacks(t *testing.T) {
 	svc := &plugintest.FakeServices{GitRoots: map[string]string{"/repo": "/repo"}, Branches: map[string]string{"/repo": "trunk"}}
 	luaRows(t, gvimRows([]row{

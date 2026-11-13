@@ -119,3 +119,34 @@ func TestFrameChangesBuildsOnlyTheChangedLines(t *testing.T) {
 		})
 	}
 }
+
+// changeMarks compares the saved lines with the current lines and returns the
+// indexes that carry the two change marks:
+//
+//   - bar: the margin bar "│" in the gutter's first column. A line is marked when
+//     it is new, or when it gained text relative to the saved line it replaces.
+//     A line that only lost text is not marked.
+//   - scroll: the change mark in the last column. A line is marked when its text
+//     differs from the saved line at the same index. When the line count changed,
+//     the row just past the last line is marked too.
+//
+// Both maps are nil when nothing differs.
+func changeMarks(saved, cur []string) (bar, scroll map[int]bool) {
+	for i := range cur {
+		if i >= len(saved) || cur[i] != saved[i] {
+			if scroll == nil {
+				scroll = make(map[int]bool)
+			}
+			scroll[i] = true
+		}
+	}
+	if scroll != nil && len(cur) != len(saved) {
+		scroll[len(cur)] = true
+	}
+	plain := make([]curLine, len(cur))
+	for i, text := range cur {
+		plain[i] = curLine{text: text}
+	}
+	bar = barMarks(saved, plain)
+	return bar, scroll
+}

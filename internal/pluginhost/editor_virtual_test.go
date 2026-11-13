@@ -119,7 +119,7 @@ func quotas(t *testing.T, perPlugin, all, bytesPerPlugin, bytesAll int) {
 }
 
 // The buffer count is a quota of each plugin: one plugin that fills its own cannot take the
-// places of another (S18-2), and the editor-wide ceiling stops all of them together.
+// places of another, and the editor-wide ceiling stops all of them together.
 func TestPluginCreateBufferQuota(t *testing.T) {
 	quotas(t, 3, 5, 1<<20, 1<<20)
 	pe, ed, _ := pluginEditorOver(t, "x")
@@ -144,7 +144,7 @@ func TestPluginCreateBufferQuota(t *testing.T) {
 }
 
 // The text of virtual buffers lives in host memory, outside the Lua heap guard, so a plugin
-// has a byte budget of its own, and the editor one for all (S18-1). A replaced content frees
+// has a byte budget of its own, and the editor one for all. A replaced content frees
 // the bytes it held; a closed buffer frees its text.
 func TestPluginVirtualTextBudget(t *testing.T) {
 	quotas(t, 16, 16, 100, 150)
@@ -486,30 +486,6 @@ func TestPluginOptionReachesTheEditorSettings(t *testing.T) {
 	d, _, _ := ed.DocByID(editor.DocID(id))
 	if s := ed.SettingsFor(d); s.LineWrap || s.TabSize != 3 {
 		t.Fatalf("settings = wrap %v tab %d, want false and 3", s.LineWrap, s.TabSize)
-	}
-}
-
-// S18 (C19): the content write marks the spans of the document stale.
-func TestPluginSetContentMarksSpansStale(t *testing.T) {
-	ed := editor.New(editor.Options{})
-	insertText(t, ed, "first")
-	var edited []*editor.Document
-	pe := newPluginEditor(ed, func(d *editor.Document) { edited = append(edited, d) })
-	id, err := pe.CreateBuffer(pluginapi.CreateBuffer{Name: "v", Language: "go"})
-	apptest.Must(t, err)
-	d, _, _ := ed.DocByID(editor.DocID(id))
-	if ed.Active() == d {
-		t.Fatal("the virtual buffer is active")
-	}
-	apptest.Must(t, pe.SetContent(id, []pluginapi.ContentEntry{{Text: "package p"}}))
-	found := false
-	for _, e := range edited {
-		if e == d {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("the spans of the virtual buffer are not stale")
 	}
 }
 

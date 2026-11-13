@@ -188,7 +188,7 @@ func (s *SharedBuffers) openMirrorLocked(e *Editor, mirror *document.Document) {
 // When this workspace already owns the entry, its loaded copy is replaced by the
 // canonical document under the same rule.
 func (s *SharedBuffers) AdoptLoaded(e *Editor, d *document.Document) (open, conflict *document.Document, handled bool) {
-	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() {
+	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() || d.Large() || d.Virtual() || d.Binary() {
 		return d, nil, false
 	}
 	canonical := sharedCanonical(d.Path)
@@ -253,7 +253,7 @@ func sharedDocumentText(d *document.Document) (string, bool) {
 // canonical path when no other workspace owns it. A path already owned elsewhere is
 // left to the ordinary open (sharing starts on the OpenFile path).
 func (s *SharedBuffers) Register(e *Editor, d *document.Document) {
-	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() || d.Large() || d.Virtual() {
+	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() || d.Large() || d.Virtual() || d.Binary() {
 		return
 	}
 	canonical := sharedCanonical(d.Path)
@@ -314,41 +314,51 @@ func (s *SharedBuffers) onOwnerChange(entry *sharedEntry, c buffer.Change) {
 	}
 }
 
+// checkTransferLocked is the part of transferLocked that can refuse, and changes
+// nothing: it returns the tab slots of the move, the mirror that takes the canonical
+// document and the snapshot the old owner keeps.
+func (s *SharedBuffers) checkTransferLocked(entry *sharedEntry, from, to *Editor) (fromIdx, toIdx int, toMirror, snapshot *document.Document, err error) {
+	if entry.owner != from || entry.doc == nil || to == nil || from == nil {
+		return 0, 0, nil, nil, errors.New("the ownership changed while taking it")
+	}
+	if s.Deny != nil {
+		if err := s.Deny(from, to); err != nil {
+			return 0, 0, nil, nil, err
+		}
+	}
+	toMirror = entry.mirrors[to]
+	if toMirror == nil {
+		return 0, 0, nil, nil, errors.New("the mirror is no longer open")
+	}
+	fromIdx = slices.Index(from.docs, entry.doc)
+	if fromIdx < 0 {
+		return 0, 0, nil, nil, errors.New("the owner's tab is no longer open")
+	}
+	toIdx = slices.Index(to.docs, toMirror)
+	if toIdx < 0 {
+		return 0, 0, nil, nil, errors.New("the mirror's tab is no longer open")
+	}
+	// The mirror text must still be the owner's version before the move.
+	snapshot, err = document.NewMirrorDocument(entry.doc)
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	return fromIdx, toIdx, toMirror, snapshot, nil
+}
+
 // transferLocked moves the canonical document from from to to. The requester must have a
 // mirror of entry (to's slot); from gets a fresh read-only snapshot in the same tab, to
 // adopts the canonical Document with its undo and unsaved state. The stale-version guard
 // is checked before the move: the owner's recorded version must still be the mirror's.
 func (s *SharedBuffers) transferLocked(entry *sharedEntry, from, to *Editor) error {
-	if entry.owner != from || entry.doc == nil || to == nil || from == nil {
-		return errors.New("the ownership changed while taking it")
-	}
-	if s.Deny != nil {
-		if err := s.Deny(from, to); err != nil {
-			return err
-		}
-	}
-	toMirror := entry.mirrors[to]
-	if toMirror == nil {
-		return errors.New("the mirror is no longer open")
-	}
-	fromIdx := slices.Index(from.docs, entry.doc)
-	if fromIdx < 0 {
-		return errors.New("the owner's tab is no longer open")
-	}
-	toIdx := slices.Index(to.docs, toMirror)
-	if toIdx < 0 {
-		return errors.New("the mirror's tab is no longer open")
-	}
-	// The mirror text must still be the owner's version before the move.
-	mirrorOfOwner, err := document.NewMirrorDocument(entry.doc)
+	fromIdx, toIdx, toMirror, snapshot, err := s.checkTransferLocked(entry, from, to)
 	if err != nil {
 		return err
 	}
-	snapshot := mirrorOfOwner
 	s.unwatchLocked(entry)
 	canonical := entry.doc
 	canonical.Seam().Obs = nil
-	canonical.Seam().Id = 0
+	canonical.Seam().ID = 0
 	canonical.Buffer.SetObserver(nil)
 	snapshot.SetSharedMirrorStatus("Mirror of " + s.label(to) + ": read-only until focused")
 	from.docs[fromIdx] = snapshot
@@ -530,6 +540,25 @@ func (s *SharedBuffers) BeforeClose(e *Editor, d *document.Document) error {
 	}
 	// The closing editor's slot now holds a snapshot; it is released with the tab.
 	delete(entry.mirrors, e)
+	return nil
+}
+
+// CheckClose reports the error BeforeClose(e, d) would return, and changes nothing, so a
+// caller closing several tabs can refuse the whole close before it detaches the first.
+func (s *SharedBuffers) CheckClose(e *Editor, d *document.Document) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.closeEntryLocked(e, d)
+	if entry == nil || entry.mirrors[e] == d {
+		return nil
+	}
+	for target := range entry.mirrors {
+		_, _, _, _, err := s.checkTransferLocked(entry, e, target)
+		return err
+	}
 	return nil
 }
 

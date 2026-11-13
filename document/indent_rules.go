@@ -150,7 +150,7 @@ type indentView struct {
 
 func (v indentView) runes(line int) []rune { return []rune(v.Doc.Buffer.Line(line)) }
 
-// code returns runes[from:to] of line with the comment and string characters turned
+// Code returns runes[from:to] of line with the comment and string characters turned
 // into spaces and the carriage returns dropped.
 func (v indentView) Code(line int, runes []rune, from, to int) string {
 	from, to = min(max(from, 0), len(runes)), min(max(to, 0), len(runes))
@@ -199,7 +199,7 @@ func (r *indentRules) increases(code string) bool {
 	return matchRe(r.Increase, code) && !matchRe(r.SelfClose, code)
 }
 
-// newLineIndent returns the indent width for a line that Enter starts at p
+// NewLineIndent returns the indent width for a line that Enter starts at p
 // (calculate_indent).
 func (r *indentRules) NewLineIndent(v indentView, p buffer.Pos) int {
 	line := v.runes(p.Line)
@@ -236,7 +236,7 @@ func (r *indentRules) NewLineIndent(v indentView, p buffer.Pos) int {
 	return indent
 }
 
-// dedentForDelimiter returns the indent of a line whose first typed character is the
+// DedentForDelimiter returns the indent of a line whose first typed character is the
 // closing delimiter ch, or false when the language has no decrease rule for it
 // (calculate_dedent_for_delimiter).
 func (r *indentRules) DedentForDelimiter(v indentView, p buffer.Pos, ch rune) (int, bool) {
@@ -255,7 +255,7 @@ func (r *indentRules) DedentForDelimiter(v indentView, p buffer.Pos, ch rune) (i
 	return max(indent-v.Tab, 0), true
 }
 
-// consumesLine reports whether line is exactly a decrease trigger: the pattern
+// ConsumesLine reports whether line is exactly a decrease trigger: the pattern
 // matches, and the leftmost match is the whole text (decrease_consumes_line).
 func (r *indentRules) ConsumesLine(line string) bool {
 	if r.Decrease == nil {
@@ -265,7 +265,7 @@ func (r *indentRules) ConsumesLine(line string) bool {
 	return m != nil && m[0] == 0 && m[1] == len(line)
 }
 
-// onTypeDedentTarget returns the indent for a line that a keystroke just made a
+// OnTypeDedentTarget returns the indent for a line that a keystroke just made a
 // decrease trigger: one level shallower than the previous line with text, or false when
 // that line opens a block, where the trigger is the block's first body line
 // (on_type_dedent_target).

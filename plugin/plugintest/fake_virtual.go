@@ -8,9 +8,9 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The virtual-buffer half of the fake host (stage S18): CreateBuffer, SetContent, PropsAt,
+// The virtual-buffer half of the fake host: CreateBuffer, SetContent, PropsAt,
 // SetReadOnly, SetBufferMode and the per-buffer options. It follows the rules of the real
-// host (internal/app/pluginvirtual.go): a virtual buffer is never modified and cannot be
+// host (internal/pluginhost/editorvirtual.go): a virtual buffer is never modified and cannot be
 // saved or reverted, SetContent replaces text, props and styles in one step and gives the
 // buffer a new generation, props answer only for the content state they were set for, and
 // the ui closes a plugin's virtual buffers when the plugin goes (OwnerGone).

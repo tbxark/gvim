@@ -119,8 +119,6 @@ func HasUpper(text string) bool {
 type wordStat struct {
 	text        string // the casing of the first occurrence
 	count       int
-	nearestLine int
-	nearestCol  int
 	nearestDist int
 	inViewport  bool
 }
@@ -136,7 +134,7 @@ func BufferWordCompletions(s WordSnapshot) []WordCandidate {
 	}
 	lowerPrefix := strings.ToLower(prefix)
 	stats := make(map[string]*wordStat)
-	collectWordStats(s.Lines, 0, s.CursorLine, s.CursorCol, s.ViewportTop, s.ViewportBottom, s.WordChars, prefix, lowerPrefix, s.PrefixHasUpper, stats, 0, false)
+	collectWordStats(s.Lines, s.StartLine, s.CursorLine, s.CursorCol, s.ViewportTop, s.ViewportBottom, s.WordChars, prefix, lowerPrefix, s.PrefixHasUpper, stats, 0, false)
 	// Multi-buffer: other buffers are scanned from the start of their window and
 	// only add words the active buffer did not already have, each buffer lower
 	// than the one before it.
@@ -211,12 +209,10 @@ func collectWordStats(lines []string, startLine, cursorLine, cursorCol, viewport
 			dist := baseOffset + lineDistance(lineNo, cursorLine)*1000 + absInt(start-cursorCol)
 			stat := stats[key]
 			if stat == nil {
-				stat = &wordStat{text: word, nearestLine: lineNo, nearestCol: start, nearestDist: dist}
+				stat = &wordStat{text: word, nearestDist: dist}
 				stats[key] = stat
 			} else if dist < stat.nearestDist {
 				stat.nearestDist = dist
-				stat.nearestLine = lineNo
-				stat.nearestCol = start
 			}
 			stat.count++
 			if viewportBottom >= viewportTop && lineNo >= viewportTop && lineNo <= viewportBottom {

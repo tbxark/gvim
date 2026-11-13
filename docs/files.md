@@ -22,7 +22,7 @@ the only places that decide the roots.
 | File | Written by | Notes |
 |---|---|---|
 | `config.json` | the Settings page (Edit ▸ Settings…, Save) | never created at startup; a missing file means the defaults |
-| `init.lua` | **Create init.lua** from the plugin template | created once, never overwritten |
+| `init.lua` | **init: Edit init.lua** from the plugin template (when it does not exist) | created once, never overwritten |
 | `plugins/` | the user | `<name>.lua` files and `<name>/` directories |
 | `themes/` | the user | user themes; the registry only reads them |
 | `plugin-data/<plugin>/state.json` | `gvim.state` of a **direct** launch | plugin data (not configuration); a daemon workspace keeps it in its session directory instead |
@@ -51,7 +51,6 @@ The workspace directory can be moved with `GVIM_WORKSPACE_DIR` (the tests use it
 | `slang-builtin/<module>-<sha256>.slang` | a slang LSP goto needs a synthetic source | content-addressed |
 | `remote-sessions/<hash>/session/` | a remote workspace stages unsaved documents | only with `editor.save_session`; `GVIM_REMOTE_SESSION_DIR` overrides |
 | `daemon/*.sock` | a daemon starts | the listening sockets |
-| `session/` | older builds | the default session directory before it moved to the project; a current build does not write or read it |
 
 ## Project directory — `<root>/.gvim`
 
@@ -64,6 +63,10 @@ The workspace directory can be moved with `GVIM_WORKSPACE_DIR` (the tests use it
 | `session/stash-<random>.txt` | a document with unsaved text is saved | one file per dirty document |
 | `session/recovery/` | every `editor.auto_recovery_save_interval_secs` while a document is dirty | `session.json` plus stash files; removed on a clean exit |
 
+With `editor.restore_previous_session` off, a start restores only the hot-exit part of the
+session: the tabs that carry unsaved text come back, and the saved active tab is active again
+when it is one of them (otherwise the first restored tab is active).
+
 `session/` exists only when `editor.save_session` is **on** (the default is off). With it
 off, gvim reads and writes none of these files and does not create `.gvim` by itself; the
 project `config.json` still works because the user writes it through Settings.
@@ -73,12 +76,3 @@ project `config.json` still works because the user writes it through Settings.
 - A log file: only with `--log-file PATH`.
 - A session or crash-recovery copy while `editor.save_session` is off.
 - Anything inside a project from the trust store.
-
-## Moving from older builds
-
-On first use, files an older build left in the config directory are moved once:
-`recent.json`, `trust.json`, `plugin-state.json`, `update-check.json` and
-`theme-cache/` (the cache goes to the cache directory, file by file, without replacing a
-newer entry). A file already in the new place wins. If the trust store cannot be moved it
-is read and written in place until the next launch retries, so a recorded decision is
-never lost.

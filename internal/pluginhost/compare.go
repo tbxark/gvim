@@ -111,7 +111,6 @@ func (p *pluginEditor) ReplaceRange(id pluginapi.BufferID, start, end int, text 
 	err = p.ed.ApplyEdits(editor.DocID(id), edit, opts)
 	switch {
 	case err == nil:
-		p.markEdited(d)
 		return true, nil
 	case errors.Is(err, editor.ErrStale), errors.Is(err, editor.ErrReadOnly),
 		errors.Is(err, editor.ErrLargeFile), errors.Is(err, buffer.ErrLargeBuffer):

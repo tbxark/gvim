@@ -11,19 +11,19 @@ import (
 )
 
 // statusTrustRun returns the workspace-trust pill on the status row of m.
-func statusTrustRun(t *testing.T, m *Model) run {
+func statusTrustRun(t *testing.T, m *Model) frame.Run {
 	t.Helper()
 	l := m.layout()
 	if !l.StatusOn {
 		t.Fatal("the status row is hidden")
 	}
 	for _, r := range l.Status {
-		if r.Kind == hitStatusSegment && r.Index == statusSegmentTrust {
+		if r.Kind == frame.HitStatusSegment && r.Index == frame.StatusSegmentTrust {
 			return r
 		}
 	}
 	t.Fatalf("no trust pill on the status row: %+v", l.Status)
-	return run{}
+	return frame.Run{}
 }
 
 // TestStatusRowTrustPillShowsTheLevel checks the status-bar wiring: the trust level is
@@ -70,7 +70,7 @@ func TestStatusRowTrustPillIsClickable(t *testing.T) {
 	m := newTrustModel(t, p)
 	r := statusTrustRun(t, m)
 	l := m.layout()
-	if got := l.Hit(r.X+1, l.StatusY); got.Kind != hitStatusSegment || got.Index != statusSegmentTrust {
+	if got := l.Hit(r.X+1, l.StatusY); got.Kind != frame.HitStatusSegment || got.Index != frame.StatusSegmentTrust {
 		t.Fatalf("hit at column %d = %+v, want the trust segment", r.X+1, got)
 	}
 	m.Update(click(r.X+1, l.StatusY, tea.MouseLeft))
@@ -127,7 +127,7 @@ func TestStatusRowHasNoTrustPillWithoutTrust(t *testing.T) {
 		}
 		l := m.layout()
 		for _, r := range l.Status {
-			if r.Kind == hitStatusSegment && r.Index == statusSegmentTrust {
+			if r.Kind == frame.HitStatusSegment && r.Index == frame.StatusSegmentTrust {
 				t.Fatalf("a trust run %+v is on the row without a trust state", r)
 			}
 		}

@@ -381,13 +381,12 @@ func TestTrustStatusLabels(t *testing.T) {
 		available bool
 		wantLabel string
 		wantWarn  bool
-		wantLevel trust.Level
 	}{
-		{name: "unavailable", available: false, wantLevel: trust.Undecided},
-		{name: "trusted", state: trust.State{Root: "/ws", Level: trust.Trusted, Decided: true}, available: true, wantLabel: "Trusted", wantLevel: trust.Trusted},
-		{name: "restricted", state: trust.State{Root: "/ws", Level: trust.Restricted, Decided: true}, available: true, wantLabel: "Restricted", wantWarn: true, wantLevel: trust.Restricted},
-		{name: "blocked", state: trust.State{Root: "/ws", Level: trust.Blocked, Decided: true}, available: true, wantLabel: "Blocked", wantWarn: true, wantLevel: trust.Blocked},
-		{name: "undecided", state: trust.State{Root: "/ws", Level: trust.Restricted, Markers: []string{"go.mod"}}, available: true, wantLabel: "Restricted", wantWarn: true, wantLevel: trust.Restricted},
+		{name: "unavailable", available: false},
+		{name: "trusted", state: trust.State{Root: "/ws", Level: trust.Trusted, Decided: true}, available: true, wantLabel: "Trusted"},
+		{name: "restricted", state: trust.State{Root: "/ws", Level: trust.Restricted, Decided: true}, available: true, wantLabel: "Restricted", wantWarn: true},
+		{name: "blocked", state: trust.State{Root: "/ws", Level: trust.Blocked, Decided: true}, available: true, wantLabel: "Blocked", wantWarn: true},
+		{name: "undecided", state: trust.State{Root: "/ws", Level: trust.Restricted, Markers: []string{"go.mod"}}, available: true, wantLabel: "Restricted", wantWarn: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,9 +401,6 @@ func TestTrustStatusLabels(t *testing.T) {
 			label, warn := m.trustStatus()
 			if label != tt.wantLabel || warn != tt.wantWarn {
 				t.Errorf("trustStatus() = (%q, %v), want (%q, %v)", label, warn, tt.wantLabel, tt.wantWarn)
-			}
-			if got := m.trustLevel(); got != tt.wantLevel {
-				t.Errorf("trustLevel() = %q, want %q", string(got), string(tt.wantLevel))
 			}
 		})
 	}

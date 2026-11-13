@@ -10,7 +10,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 )
 
 // hexFakeDoc is a fakeDoc that also carries the binary hex surface. It does not
@@ -121,7 +123,7 @@ func TestHexToggleLoadsAWindowAndDrawsTheDump(t *testing.T) {
 	}
 	m.Update(msg)
 	g := grid.New(70, 6)
-	p := splitPane{Focused: true, X: 0, Y: 0, W: 70, H: 6}
+	p := split.Pane{Focused: true, X: 0, Y: 0, W: 70, H: 6}
 	if !m.hexPane(g, p, doc) {
 		t.Fatal("hexPane = false")
 	}
@@ -312,10 +314,10 @@ func TestHexQueueReadsEnoughForTheTallestPane(t *testing.T) {
 	m.Update(cmd())
 
 	// Both panes show tab 0. The unfocused pane is taller than the focused one.
-	root := &splitNode{
-		Dir: stacked,
-		A:   &splitNode{Tab: 0},
-		B:   &splitNode{Tab: 0},
+	root := &split.Node{
+		Dir: split.Stacked,
+		A:   &split.Node{Tab: 0},
+		B:   &split.Node{Tab: 0},
 	}
 	m.splits.Root = root
 	m.splits.Focus = root.B
@@ -365,11 +367,11 @@ func TestHexMessageQueuesForTheTallestPaneOfABackgroundDocument(t *testing.T) {
 		{Name: "notes.txt", Path: "notes.txt", Active: true},
 	}
 	ed.tabDocs = []Document{doc, text}
-	root := &splitNode{
-		Dir:   stacked,
+	root := &split.Node{
+		Dir:   split.Stacked,
 		Ratio: 85,
-		A:     &splitNode{Tab: 0},
-		B:     &splitNode{Tab: 1},
+		A:     &split.Node{Tab: 0},
+		B:     &split.Node{Tab: 1},
 	}
 	m.splits.Root = root
 	m.splits.Focus = root.B
@@ -415,10 +417,10 @@ func TestHexClickFocusesThePressedPane(t *testing.T) {
 	}
 	m.Update(cmd())
 
-	root := &splitNode{
-		Dir: sideBySide,
-		A:   &splitNode{Tab: 0},
-		B:   &splitNode{Tab: 0},
+	root := &split.Node{
+		Dir: split.SideBySide,
+		A:   &split.Node{Tab: 0},
+		B:   &split.Node{Tab: 0},
 	}
 	m.splits.Root = root
 	m.splits.Focus = root.B
@@ -472,11 +474,11 @@ func TestHexStatusButtonSwitchesBothWays(t *testing.T) {
 		t.Fatalf("summary chip = %q, want Hex", got)
 	}
 	l := m.layout()
-	r := statusRun(t, m, statusSegmentHexView)
+	r := statusRun(t, m, frame.StatusSegmentHexView)
 	if r.Text != " [Hex] " {
 		t.Fatalf("summary status run = %+v, want the [Hex] button", r)
 	}
-	if got := l.Hit(r.X+1, l.StatusY); got.Kind != hitStatusSegment || got.Index != statusSegmentHexView {
+	if got := l.Hit(r.X+1, l.StatusY); got.Kind != frame.HitStatusSegment || got.Index != frame.StatusSegmentHexView {
 		t.Fatalf("summary button hit = %+v, want the hex switch", got)
 	}
 	_, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: r.X + 1, Y: l.StatusY, Button: tea.MouseLeft}))
@@ -486,7 +488,7 @@ func TestHexStatusButtonSwitchesBothWays(t *testing.T) {
 	if got := m.statusView().HexView; got != "Summary" {
 		t.Fatalf("hex chip = %q, want Summary", got)
 	}
-	r = statusRun(t, m, statusSegmentHexView)
+	r = statusRun(t, m, frame.StatusSegmentHexView)
 	if r.Text != " [Summary] " {
 		t.Fatalf("hex status run = %+v, want the [Summary] button", r)
 	}
@@ -508,13 +510,13 @@ func TestHexStatusButtonSwitchesBothWays(t *testing.T) {
 // agree on the row count of a one- or two-row pane.
 func TestHexPaneReservesTheHelpRowForShortPanes(t *testing.T) {
 	t.Parallel()
-	if got := hexPaneVisibleRows(splitPane{H: 1}); got != 1 {
+	if got := hexPaneVisibleRows(split.Pane{H: 1}); got != 1 {
 		t.Errorf("one-row pane = %d, want 1", got)
 	}
-	if got := hexPaneVisibleRows(splitPane{H: 2}); got != 2 {
+	if got := hexPaneVisibleRows(split.Pane{H: 2}); got != 2 {
 		t.Errorf("two-row pane = %d, want 2 (no help row)", got)
 	}
-	if got := hexPaneVisibleRows(splitPane{H: 5}); got != 4 {
+	if got := hexPaneVisibleRows(split.Pane{H: 5}); got != 4 {
 		t.Errorf("five-row pane = %d, want 4 (one help row)", got)
 	}
 }

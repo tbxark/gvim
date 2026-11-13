@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/plugin/bundled"
 	"github.com/tbxark/gvim/plugin/plugintest"
@@ -130,6 +131,43 @@ func TestK8sWorkspaceShowsValidConfig(t *testing.T) {
 	panel = k8sPanel(t, host)
 	if panel == nil || !strings.Contains(strings.Join(panel.Lines, "\n"), "Default target: build") {
 		t.Fatalf("refreshed panel = %+v", panel)
+	}
+}
+
+// The notice counts the targets of the config (an object keyed by name).
+func TestK8sWorkspaceCountsTargets(t *testing.T) {
+	t.Parallel()
+	host, os := k8sHost(t)
+	os.SetFile("/w/.fresh/k8s.json", k8sValidConfig())
+	h := startK8s(t, host, os)
+	if err := h.Run(k8sPlugin+".show", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	found := false
+	for _, n := range h.NoticeTexts() {
+		if strings.Contains(n, "3 target(s) validated from /w/.fresh/k8s.json") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("notices = %v, want the 3 targets counted", h.NoticeTexts())
+	}
+}
+
+// A config whose top level is not an object is a validation error, not a script error.
+func TestK8sWorkspaceNonObjectTopLevel(t *testing.T) {
+	t.Parallel()
+	host, os := k8sHost(t)
+	os.SetFile("/w/.fresh/k8s.json", `5`)
+	h := startK8s(t, host, os)
+	if err := h.Run(k8sPlugin+".show", nil); err != nil {
+		t.Fatalf("show failed: %v (log %v)", err, h.LogText(""))
+	}
+	h.Advance(0)
+	panel := k8sPanel(t, host)
+	if panel == nil || !strings.Contains(strings.Join(panel.Lines, "\n"), "the top level must be an object") {
+		t.Fatalf("panel = %+v (notices %v log %v)", panel, h.NoticeTexts(), h.LogText(""))
 	}
 }
 
@@ -329,4 +367,30 @@ func TestK8sWorkspaceTargetsLimitIsInclusive(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A value of multibyte characters longer than the display cap is cut at a character
+// boundary, not emptied: the clip used to drop every trailing non-ASCII byte.
+func TestK8sWorkspaceClipKeepsMultibyteValues(t *testing.T) {
+	t.Parallel()
+	host, os := k8sHost(t)
+	os.SetFile("/w/.fresh/k8s.json", strings.Replace(k8sValidConfig(), `"/workspace"`, `"`+strings.Repeat("工作", 200)+`"`, 1))
+	h := startK8s(t, host, os)
+	if err := h.Run(k8sPlugin+".show", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	panel := k8sPanel(t, host)
+	if panel == nil {
+		t.Fatalf("no panel (notices %v log %v)", h.NoticeTexts(), h.LogText(""))
+	}
+	for _, line := range panel.Lines {
+		if strings.Contains(line, "workspace: 工作") {
+			if !strings.HasSuffix(line, "…") || !utf8.ValidString(line) {
+				t.Fatalf("line = %q", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("no clipped workspace line:\n%s", strings.Join(panel.Lines, "\n"))
 }

@@ -73,18 +73,6 @@ func FindNextAt(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes 
 	return findNextSpan(s, q, from, dir, maxBytes, nextWindow, defaultHuge, at)
 }
 
-// findNext is FindNext with the window size as a parameter, so tests can make
-// every window boundary matter.
-func findNext(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, window int) (Match, bool, bool, error) {
-	m, found, scanned, _, err := findNextSpan(s, q, from, dir, maxBytes, window, defaultHuge, Cursor{})
-	return m, found, scanned, err
-}
-
-// findNextAt is FindNextAt with the window size as a parameter.
-func findNextAt(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, window int, at Cursor) (Match, bool, bool, Cursor, error) {
-	return findNextSpan(s, q, from, dir, maxBytes, window, defaultHuge, at)
-}
-
 // findNextSpan is FindNextAt with the window size and the windows of a huge line as
 // parameters, so that tests can make every window boundary matter.
 func findNextSpan(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, window int, huge hugeSpan, at Cursor) (Match, bool, bool, Cursor, error) {
@@ -190,13 +178,7 @@ func (n *nextSearch) account(text string) error {
 
 // locate returns the matches in the window, in order, with buffer positions.
 func (n *nextSearch) locate(first int, text string) []hit {
-	d := newWindow(first, text)
-	locs := d.locate(n.re, n.q)
-	out := make([]hit, len(locs))
-	for i, loc := range locs {
-		out[i] = d.hit(loc)
-	}
-	return out
+	return newWindow(first, text).hits(n.re, n.q)
 }
 
 // forward searches the lines of p from lo upwards for the first match on the

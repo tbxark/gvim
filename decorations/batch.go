@@ -90,7 +90,7 @@ func (g *group) applyComposed(c *composed) (removed int) {
 		if !e.moveComposed(c) {
 			e.id = 0 // marks the item for removal
 			removed++
-		} else if e.Kind == Highlight || e.Kind == Scroll {
+		} else if e.Kind == Highlight || e.Kind == Scroll || e.Kind == Conceal {
 			g.maxSpan = max(g.maxSpan, e.ToLine-e.FromLine)
 		}
 	}
@@ -110,7 +110,7 @@ func (g *group) applyComposed(c *composed) (removed int) {
 // moveComposed is move for a whole sequence of edits.
 func (e *entry) moveComposed(c *composed) bool {
 	switch e.Kind {
-	case Highlight:
+	case Highlight, Conceal:
 		return e.moveRangeComposed(c)
 	case Scroll:
 		if e.ToLine != e.FromLine || e.ToCol != e.FromCol {

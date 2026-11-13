@@ -19,18 +19,19 @@ import (
 
 // fakeEditor implements EditorState. It records every action it is asked to run.
 type fakeEditor struct {
-	doc        *fakeDoc
-	docAlt     Document // when set, Active returns it (a test document with extra methods)
-	tabDocs    []Document
-	tabs       []TabInfo
-	status     string
-	rows, cols int
-	actions    []editor.Action
-	args       []map[string]any
-	quitAction editor.Action // the action that reports quit
-	extends    []buffer.Pos  // the drag ends passed to ExtendSelection
-	root       string        // the workspace root that SetRoot gave
-	bookmarks  []Bookmark
+	doc         *fakeDoc
+	docAlt      Document // when set, Active returns it (a test document with extra methods)
+	tabDocs     []Document
+	tabs        []TabInfo
+	status      string
+	rows, cols  int
+	actions     []editor.Action
+	args        []map[string]any
+	quitAction  editor.Action // the action that reports quit
+	extends     []buffer.Pos  // the drag ends passed to ExtendSelection
+	root        string        // the workspace root that SetRoot gave
+	bookmarks   []Bookmark
+	confirmQuit bool // QuitNeedsConfirm
 }
 
 func newFakeEditor(lines ...string) *fakeEditor {
@@ -39,6 +40,8 @@ func newFakeEditor(lines ...string) *fakeEditor {
 		tabs: []TabInfo{{Name: "a.txt", Active: true}},
 	}
 }
+
+func (f *fakeEditor) QuitNeedsConfirm() bool { return f.confirmQuit }
 
 func (f *fakeEditor) SetViewport(rows, cols int) { f.rows, f.cols = rows, cols }
 

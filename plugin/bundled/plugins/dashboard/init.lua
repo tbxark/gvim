@@ -138,16 +138,16 @@ local BRANCH_LOG = "dashboard.click_branch_log"
 local REPO_URL = "dashboard.click_repo_url"
 local BRANCH_URL = "dashboard.click_branch_url"
 
--- gitURL normalizes a git remote for opening in a browser. https/http URLs are kept
--- (an http(s) URL on any host is openable); the common scp-like/ssh/HTTPS GitHub
--- forms become https://github.com/owner/repo. Anything else (local paths, unknown
--- schemes) yields "" so the dashboard never advertises an unsafe URL.
 local function url_encode(s)
   return (tostring(s):gsub("([^%w%-%._~])", function(c)
     return string.format("%%%02X", string.byte(c))
   end))
 end
 
+-- normalize_repo_url normalizes a git remote for opening in a browser. https/http URLs are
+-- kept (an http(s) URL on any host is openable); the common scp-like/ssh/HTTPS GitHub
+-- forms become https://github.com/owner/repo. Anything else (local paths, unknown
+-- schemes) yields "" so the dashboard never advertises an unsafe URL.
 local function normalize_repo_url(raw)
   local text = raw and raw:match("^%s*(.-)%s*$") or ""
   if text == "" then
@@ -286,7 +286,7 @@ local function git_out(root, args, max)
   if not gvim.git.available() or root == "" then
     return nil
   end
-  local r, err = gvim.git.run(args, { cwd = root, timeout_ms = 5000, max_output = max or 65536 })
+  local r = gvim.git.run(args, { cwd = root, timeout_ms = 5000, max_output = max or 65536 })
   if not r or not r.ok then
     return nil
   end
@@ -413,83 +413,7 @@ local function pull_number(value)
   return string.format("%d", value)
 end
 
--- Unicode Cc/Cf handling for PR titles. Cc controls become spaces; Cf format marks
--- (bidi overrides/isolates, ZWSP/ZWJ/ZWNJ, soft hyphen, BOM, tags, interlinear
--- annotations, ...) are removed so a hostile title cannot visually reorder or hide the
--- dashboard row. The table is the assigned Cf set as of Unicode 15.1; invalid UTF-8 bytes
--- become spaces rather than reaching the terminal.
-local CF_RANGES = {
-  { 0x00AD, 0x00AD }, { 0x0600, 0x0605 }, { 0x061C, 0x061C }, { 0x06DD, 0x06DD },
-  { 0x070F, 0x070F }, { 0x0890, 0x0891 }, { 0x08E2, 0x08E2 }, { 0x180E, 0x180E },
-  { 0x200B, 0x200F }, { 0x202A, 0x202E }, { 0x2060, 0x2064 }, { 0x2066, 0x206F },
-  { 0xFEFF, 0xFEFF }, { 0xFFF9, 0xFFFB }, { 0x110BD, 0x110BD }, { 0x110CD, 0x110CD },
-  { 0x13430, 0x1343F }, { 0x1BCA0, 0x1BCA3 }, { 0x1D173, 0x1D17A },
-  { 0xE0001, 0xE0001 }, { 0xE0020, 0xE007F },
-}
-
-local function is_cf(cp)
-  for _, range in ipairs(CF_RANGES) do
-    if cp >= range[1] and cp <= range[2] then
-      return true
-    end
-  end
-  return false
-end
-
-local function utf8_codepoint(text, i)
-  local b1 = text:byte(i)
-  if not b1 then
-    return nil, nil
-  end
-  if b1 < 0x80 then
-    return b1, 1
-  end
-  if b1 >= 0xC2 and b1 <= 0xDF then
-    local b2 = text:byte(i + 1)
-    if b2 and b2 >= 0x80 and b2 <= 0xBF then
-      return (b1 - 0xC0) * 0x40 + (b2 - 0x80), 2
-    end
-  elseif b1 >= 0xE0 and b1 <= 0xEF then
-    local b2, b3 = text:byte(i + 1), text:byte(i + 2)
-    if b2 and b3 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF then
-      local cp = (b1 - 0xE0) * 0x1000 + (b2 - 0x80) * 0x40 + (b3 - 0x80)
-      if cp >= 0x800 and not (cp >= 0xD800 and cp <= 0xDFFF) then
-        return cp, 3
-      end
-    end
-  elseif b1 >= 0xF0 and b1 <= 0xF4 then
-    local b2, b3, b4 = text:byte(i + 1), text:byte(i + 2), text:byte(i + 3)
-    if b2 and b3 and b4 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF and b4 >= 0x80 and b4 <= 0xBF then
-      local cp = (b1 - 0xF0) * 0x40000 + (b2 - 0x80) * 0x1000 + (b3 - 0x80) * 0x40 + (b4 - 0x80)
-      if cp >= 0x10000 and cp <= 0x10FFFF then
-        return cp, 4
-      end
-    end
-  end
-  return nil, 1
-end
-
-local function strip_pr_format(text)
-  local out = {}
-  local i = 1
-  while i <= #text do
-    local cp, width = utf8_codepoint(text, i)
-    if not cp or width == nil then
-      out[#out + 1] = " "
-      i = i + 1
-    elseif cp <= 0x1F or cp == 0x7F or (cp >= 0x80 and cp <= 0x9F) then
-      out[#out + 1] = " "
-      i = i + width
-    elseif is_cf(cp) then
-      -- Cf marks are invisible/format-only: remove them, keeping surrounding text.
-      i = i + width
-    else
-      out[#out + 1] = text:sub(i, i + width - 1)
-      i = i + width
-    end
-  end
-  return table.concat(out)
-end
+local strip_pr_format = require("gvim.textsafe").strip
 
 -- pr_title keeps a display string from untrusted JSON: non-strings, Cc controls and Cf
 -- format characters and runaway lengths are replaced/removed/clipped instead of reaching
@@ -1247,10 +1171,6 @@ end
 -- replaced on every paint (a row moving with the frame keeps its own line) and cleared
 -- when the dashboard closes or the plugin unloads.
 local function publish_targets(buf, top_pad)
-  local set = gvim.buf.set_line_targets
-  if type(set) ~= "function" then
-    return
-  end
   local targets = {}
   for _, row in ipairs(state.rows) do
     if not row.line_index then
@@ -1266,7 +1186,7 @@ local function publish_targets(buf, top_pad)
   for _, row in ipairs(state.click_rows or {}) do
     targets[#targets + 1] = { line = top_pad + row.index + 1, action = row.action }
   end
-  local ok, err = pcall(set, buf, targets)
+  local ok, err = gvim.buf.set_line_targets(buf, targets)
   if not ok then
     gvim.log.debug("dashboard: line targets: " .. tostring(err))
   end
@@ -1293,9 +1213,6 @@ local function paint()
   end
   state.rows = rows
   local frame = {}
-  local function push(segments)
-    frame[#frame + 1] = { segments = segments }
-  end
   local pad = string.rep(" ", leftPad)
   local function row(segments, border_left, border_right)
     local line = { { text = pad }, { text = border_left, style = STYLE.frame } }
@@ -1582,7 +1499,7 @@ local function refresh(force)
     end
   end
   local size = gvim.ui.size()
-  local inner = select(1, frame_width(size.width or 100))
+  local inner = frame_width(size.width or 100)
   local ok, err = pcall(refresh_external_sections, force, inner)
   if not ok then
     gvim.log.debug("dashboard: external sections: " .. tostring(err))
@@ -1608,10 +1525,7 @@ local function close_dashboard(quiet)
   state.buf, state.auto, state.rows, state.frame = nil, false, {}, ""
   state.focus = 0
   if buf then
-    local clear = gvim.buf.clear_line_targets
-    if type(clear) == "function" then
-      pcall(clear, buf)
-    end
+    gvim.buf.clear_line_targets(buf)
     pcall(buf.close, buf, { force = true })
   end
   if not quiet then
@@ -1876,9 +1790,8 @@ end)
 gvim.plugin.on_unload(function()
   stop_timer()
   local buf = valid_buf()
-  local clear = gvim.buf.clear_line_targets
-  if buf and type(clear) == "function" then
-    pcall(clear, buf)
+  if buf then
+    gvim.buf.clear_line_targets(buf)
   end
 end)
 

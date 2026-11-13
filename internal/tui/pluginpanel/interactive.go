@@ -4,10 +4,12 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -29,24 +31,24 @@ type panelOverlay struct {
 	key   string // the widget key the overlay belongs to
 }
 
-// evInteractive builds a widget event for the focused interactive widget.
+// evInteractive builds the widget event called name ("change" for an edit, "activate" for
+// Enter/Space, as the mouse activates) for the focused interactive widget, carrying its
+// current value.
 func (p *Panel) evInteractive(name string, w pluginapi.Widget) pluginapi.WidgetEvent {
 	e := pluginapi.WidgetEvent{Event: name, Widget: w.Key, Index: -1, CursorByte: -1}
 	switch w.Kind {
 	case pluginapi.WidgetText:
-		e.Event, e.Value = "change", p.textValue(w)
+		e.Value = p.textValue(w)
 		e.CursorByte = p.textCursor(w)
 	case pluginapi.WidgetNumber:
-		e.Event, e.Value = "change", formatNumber(w, p.numberValue(w))
+		e.Value = formatNumber(w, p.numberValue(w))
 	case pluginapi.WidgetDropdown, pluginapi.WidgetRadio:
-		e.Event = "change"
 		sel := p.selected(w)
 		e.Index = sel
 		if sel >= 0 && sel < len(w.Options) {
 			e.Value = w.Options[sel]
 		}
 	case pluginapi.WidgetDualList:
-		e.Event = "change"
 		e.Included = includedList(p.includedSet(w), w.Options)
 	}
 	return e
@@ -82,7 +84,7 @@ func prevRune(s string, i int) int {
 	if i <= 0 {
 		return 0
 	}
-	_, n := lastRune(s[:i])
+	_, n := utf8.DecodeLastRuneInString(s[:i])
 	return i - n
 }
 
@@ -90,28 +92,13 @@ func nextRune(s string, i int) int {
 	if i >= len(s) {
 		return len(s)
 	}
-	_, n := firstRune(s[i:])
+	_, n := utf8.DecodeRuneInString(s[i:])
 	return i + n
-}
-
-func lastRune(s string) (rune, int) {
-	r := []rune(s)
-	if len(r) == 0 {
-		return 0, 0
-	}
-	return r[len(r)-1], len(string(r[len(r)-1]))
-}
-
-func firstRune(s string) (rune, int) {
-	for _, r := range s {
-		return r, len(string(r))
-	}
-	return 0, 0
 }
 
 // lineColOf returns the 0-based line and the byte column of the offset.
 func lineColOf(text string, off int) (line, col int) {
-	off = clamp(off, 0, len(text))
+	off = space.Clamp(off, 0, len(text))
 	for i := 0; i < off; i++ {
 		if text[i] == '\n' {
 			line++
@@ -138,6 +125,11 @@ func offsetOf(text string, line, col int) int {
 		end = len(text) - off
 	}
 	return off + min(col, end)
+}
+
+// offsetAtCell returns the byte offset of display column cells in the 0-based line.
+func offsetAtCell(text string, line, cells int) int {
+	return offsetOf(text, line, byteColumnAt(text, line, cells))
 }
 
 // lineCount is the number of lines of the text.
@@ -183,6 +175,9 @@ func (p *Panel) moveCaret(w pluginapi.Widget, name string, extend bool) {
 	text := p.textValue(w)
 	caret := p.textCursor(w)
 	line, col := lineColOf(text, caret)
+	// Up and down keep the display column, which is not the byte column of a line with
+	// multi-byte runes.
+	cells := ansi.StringWidth(text[caret-col : caret])
 	switch name {
 	case "left":
 		caret = prevRune(text, caret)
@@ -192,12 +187,12 @@ func (p *Panel) moveCaret(w pluginapi.Widget, name string, extend bool) {
 		if line == 0 {
 			return
 		}
-		caret = offsetOf(text, line-1, col)
+		caret = offsetAtCell(text, line-1, cells)
 	case "down":
 		if line >= lineCount(text)-1 {
 			return
 		}
-		caret = offsetOf(text, line+1, col)
+		caret = offsetAtCell(text, line+1, cells)
 	case "home":
 		caret = offsetOf(text, line, 0)
 	case "end":
@@ -261,12 +256,12 @@ func (p *Panel) optionIndex(w pluginapi.Widget) int {
 	if sel < 0 {
 		sel = 0
 	}
-	return clamp(sel, 0, max(len(w.Options)-1, 0))
+	return space.Clamp(sel, 0, max(len(w.Options)-1, 0))
 }
 
 // changeOption selects option i of a dropdown/radio widget and returns the change event.
 func (p *Panel) changeOption(w pluginapi.Widget, i int) pluginapi.WidgetEvent {
-	p.setSelected(w, clamp(i, 0, max(len(w.Options)-1, 0)))
+	p.setSelected(w, space.Clamp(i, 0, max(len(w.Options)-1, 0)))
 	return p.evInteractive("change", w)
 }
 
@@ -293,17 +288,9 @@ func (p *Panel) viewportRows() int {
 }
 
 // scrollPage moves the page window by delta content rows, clamped to the content.
-func (p *Panel) scrollPage(delta int) bool {
-	if !p.page {
-		return false
-	}
+func (p *Panel) scrollPage(delta int) {
 	rows := p.viewportRows()
-	top := clamp(p.pageTop+delta, 0, max(p.contentRows-rows, 0))
-	if top == p.pageTop {
-		return true
-	}
-	p.pageTop = top
-	return true
+	p.pageTop = space.Clamp(p.pageTop+delta, 0, max(p.contentRows-rows, 0))
 }
 
 // pageScrollKey handles a movement key that no focused widget took in a page panel.
@@ -336,7 +323,7 @@ func (p *Panel) pageScrollKey(k Key) (Result, bool) {
 
 // ---- painting ----
 
-// paintText draws a text field: single-line with a horizontal window, or the visible lines
+// textField draws a text field: single-line with a horizontal window, or the visible lines
 // of a multiline field, with the caret and selection.
 func (pt *painter) textField(node pluginapi.Widget, x, y, wd, h int) {
 	p := pt.p
@@ -357,9 +344,7 @@ func (pt *painter) textField(node pluginapi.Widget, x, y, wd, h int) {
 		rows = min(max(node.Rows, 1), h)
 	}
 	if node.MaxRows > 0 {
-		lines := lineCount(text)
-		rows = min(max(min(lines+1, max(node.MinRows, 1)), 1), max(node.MaxRows, 1))
-		rows = min(rows, h)
+		rows = min(min(max(lineCount(text), max(node.MinRows, 1)), max(node.MaxRows, 1)), h)
 	}
 	if rows <= 1 {
 		pt.textSingleLine(node, x, y, field, base, text, cursor, selStart, selEnd, focused)
@@ -370,7 +355,7 @@ func (pt *painter) textField(node pluginapi.Widget, x, y, wd, h int) {
 		items := p.completionsOf(node)
 		build := make([]string, len(items))
 		for i, it := range items {
-			build[i] = " " + it
+			build[i] = " " + Sanitize(it)
 		}
 		p.overlays = append(p.overlays, panelOverlay{kind: "completion", rect: Rect{X: x, Y: y + rows, W: min(max(joinWidth(build)+2, 10), max(wd, 10)), H: min(len(items), 8) + 2}, items: build, sel: p.completionSelOf(node), key: node.Key})
 	}
@@ -389,24 +374,13 @@ func (pt *painter) textSingleLine(node pluginapi.Widget, x, y, field int, base g
 	}
 	g.Put(x+1, y, x+field-1, shown, base)
 	if selStart != selEnd {
-		selCols := selectionColumns(text, shown, cursor, selStart, selEnd)
-		for _, c := range selCols {
-			if cx := x + 1 + c; cx < x+field-1 {
-				g.Set(cx, y, cellAt(shown, c), pt.p.chrome.Selected)
-			}
+		if col, sel := selectedText(text, shown, selStart, selEnd); sel != "" {
+			g.Put(x+1+col, y, x+field-1, sel, pt.p.chrome.Selected)
 		}
 	}
 	if focused {
-		cx := x + 1 + caretCol
-		if cx < x+field-1 {
-			ch := " "
-			if cx-x-1 < len(shown) {
-				ch = string([]rune(shown)[max(caretCol, 0)])
-				if ch == "" {
-					ch = " "
-				}
-			}
-			g.Set(cx, y, ch, pt.p.focusedStyle(pt.p.chrome.Box))
+		if cx := x + 1 + caretCol; cx < x+field-1 {
+			g.Set(cx, y, cellAt(shown, caretCol), pt.p.focusedStyle(pt.p.chrome.Box))
 		}
 	}
 	g.Put(x+field-1, y, x+field, "]", base)
@@ -417,10 +391,10 @@ func (pt *painter) textSingleLine(node pluginapi.Widget, x, y, field int, base g
 func (pt *painter) textMultiLine(node pluginapi.Widget, x, y, field, rows int, base grid.Style, text string, cursor, selStart, selEnd int, focused bool) {
 	g := pt.g
 	line, _ := lineColOf(text, cursor)
-	top := clamp(line-rows+1, 0, max(lineCount(text)-rows, 0))
+	top := space.Clamp(line-rows+1, 0, max(lineCount(text)-rows, 0))
 	if in := pt.p.inst[node.Key]; in != nil {
-		top = clamp(in.textTop, 0, max(lineCount(text)-rows, 0))
-		in.textTop = clamp(line-rows/2, 0, max(lineCount(text)-rows, 0))
+		top = space.Clamp(in.textTop, 0, max(lineCount(text)-rows, 0))
+		in.textTop = space.Clamp(line-rows/2, 0, max(lineCount(text)-rows, 0))
 	}
 	lines := strings.Split(text, "\n")
 	for r := 0; r < rows; r++ {
@@ -434,19 +408,24 @@ func (pt *painter) textMultiLine(node pluginapi.Widget, x, y, field, rows int, b
 			rowStyle = pt.p.chrome.Idle
 		}
 		g.Fill(x, x+field, y+r, rowStyle)
-		s := elide(lines[ln], field)
+		s := space.End(lines[ln], field)
 		g.Put(x, y+r, x+field, s, base)
 	}
 	if focused {
 		// Caret block: the line and column of the caret, when the line is visible.
 		_, col := lineColOf(text, cursor)
 		if line >= top && line < top+rows {
-			cx := x + min(col, field-1)
-			ch := " "
-			if line < len(lines) && col < len(lines[line]) {
-				ch = string([]rune(lines[line][col:])[0])
+			ccol := 0
+			if line < len(lines) {
+				ccol = ansi.StringWidth(lines[line][:min(col, len(lines[line]))])
 			}
-			g.Set(cx, y+line-top, ch, pt.p.focusedStyle(pt.p.chrome.Box))
+			if ccol < field {
+				ch := " "
+				if line < len(lines) {
+					ch = cellAt(lines[line], ccol)
+				}
+				g.Set(x+ccol, y+line-top, ch, pt.p.focusedStyle(pt.p.chrome.Box))
+			}
 		}
 	}
 	pt.addHit(node, x, y, field, rows, hitText)
@@ -455,12 +434,12 @@ func (pt *painter) textMultiLine(node pluginapi.Widget, x, y, field, rows int, b
 // windowText returns the slice of text shown in an inner of cells with the caret in view,
 // and the caret's display column in that slice.
 func windowText(text string, cursor, inner int) (string, int) {
-	cursor = clamp(cursor, 0, len(text))
+	cursor = space.Clamp(cursor, 0, len(text))
 	before := text[:cursor]
 	width := ansi.StringWidth(before)
 	start := 0
 	for width > inner-1 && start < len(before) {
-		r, n := firstRune(before[start:])
+		r, n := utf8.DecodeRuneInString(before[start:])
 		width -= ansi.StringWidth(string(r))
 		start += n
 	}
@@ -469,21 +448,16 @@ func windowText(text string, cursor, inner int) (string, int) {
 	return shown, caret
 }
 
-// selectionColumns returns the display columns of the selection inside shown.
-func selectionColumns(text, shown string, cursor, selStart, selEnd int) []int {
+// selectedText returns the part of shown, the visible tail of text, that the selection
+// covers, and the display column it starts at.
+func selectedText(text, shown string, selStart, selEnd int) (col int, sel string) {
 	start := len(text) - len(shown)
 	from := max(selStart-start, 0)
 	to := min(selEnd-start, len(shown))
 	if from >= to {
-		return nil
+		return 0, ""
 	}
-	a := ansi.StringWidth(shown[:from])
-	b := ansi.StringWidth(shown[:to])
-	out := make([]int, 0, b-a)
-	for c := a; c < b; c++ {
-		out = append(out, c)
-	}
-	return out
+	return ansi.StringWidth(shown[:from]), shown[from:to]
 }
 
 // cellAt returns the grapheme at display column c of s, a space when past its end.
@@ -520,7 +494,7 @@ func (pt *painter) addHit(node pluginapi.Widget, x, y, w, h int, kind hitKind) {
 	pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y, W: w, H: h}, kind: kind, focusIdx: pt.fi - 1, path: "", index: -1})
 }
 
-// paintNumber draws a number control: its optional label and the value cell.
+// numberField draws a number control: its optional label and the value cell.
 func (pt *painter) numberField(node pluginapi.Widget, x, y, wd int) {
 	p := pt.p
 	base := p.styleOf(node)
@@ -530,14 +504,14 @@ func (pt *painter) numberField(node pluginapi.Widget, x, y, wd int) {
 	}
 	label := ""
 	if node.Label != "" {
-		label = node.Label + " "
+		label = Sanitize(node.Label) + " "
 	}
 	text := label + "[ " + formatNumber(node, p.numberValue(node)) + " ]"
-	pt.g.Put(x, y, x+wd, elide(text, wd), base)
+	pt.g.Put(x, y, x+wd, space.End(text, wd), base)
 	pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y, W: min(ansi.StringWidth(text), wd), H: 1}, kind: hitNumber, focusIdx: pt.fi - 1, path: "", index: -1})
 }
 
-// paintDropdown draws a dropdown: the value cell, and when open the option list overlay.
+// dropdown draws a dropdown: the value cell, and when open the option list overlay.
 func (pt *painter) dropdown(node pluginapi.Widget, x, y, wd int) {
 	p := pt.p
 	base := p.styleOf(node)
@@ -548,7 +522,7 @@ func (pt *painter) dropdown(node pluginapi.Widget, x, y, wd int) {
 	sel := p.optionIndex(node)
 	value := ""
 	if sel < len(node.Options) {
-		value = node.Options[sel]
+		value = Sanitize(node.Options[sel])
 	}
 	open := p.dropdownOpen(node)
 	arrow := "▼"
@@ -556,18 +530,18 @@ func (pt *painter) dropdown(node pluginapi.Widget, x, y, wd int) {
 		arrow = "▲"
 	}
 	text := " " + value + " " + arrow + " "
-	pt.g.Put(x, y, x+wd, elide("["+strings.TrimSpace(text)+" ]", wd), base)
+	pt.g.Put(x, y, x+wd, space.End("["+strings.TrimSpace(text)+" ]", wd), base)
 	pt.p.hits = append(pt.p.hits, hit{r: Rect{X: x, Y: y, W: min(ansi.StringWidth(text)+2, wd), H: 1}, kind: hitDropdown, focusIdx: pt.fi - 1, path: "", index: -1})
 	if open && focused {
 		items := make([]string, len(node.Options))
 		for i, o := range node.Options {
-			items[i] = " " + o
+			items[i] = " " + Sanitize(o)
 		}
 		p.overlays = append(p.overlays, panelOverlay{kind: "dropdown", rect: Rect{X: x, Y: y + 1, W: min(max(joinWidth(items), 8), max(wd, 8)), H: min(len(items), 8) + 2}, items: items, sel: sel, key: node.Key})
 	}
 }
 
-// paintRadio draws a radio group: one row per option, the selected one marked.
+// radio draws a radio group: one row per option, the selected one marked.
 func (pt *painter) radio(node pluginapi.Widget, x, y, wd, h int) {
 	p := pt.p
 	base := p.styleOf(node)
@@ -585,12 +559,13 @@ func (pt *painter) radio(node pluginapi.Widget, x, y, wd, h int) {
 		if i == sel {
 			mark = "(o)"
 		}
-		pt.g.Put(x, y+i, x+wd, elide(mark+" "+o, wd), st)
-		p.hits = append(p.hits, hit{r: Rect{X: x, Y: y + i, W: min(ansi.StringWidth(mark+" "+o), wd), H: 1}, kind: hitRadio, focusIdx: pt.fi - 1, path: "", index: i})
+		line := mark + " " + Sanitize(o)
+		pt.g.Put(x, y+i, x+wd, space.End(line, wd), st)
+		p.hits = append(p.hits, hit{r: Rect{X: x, Y: y + i, W: min(ansi.StringWidth(line), wd), H: 1}, kind: hitRadio, focusIdx: pt.fi - 1, path: "", index: i})
 	}
 }
 
-// paintDualList draws the dual list as one column of options with the included ones marked
+// dualList draws the dual list as one column of options with the included ones marked
 // (the tier-1b simplification of Fresh's two columns; documented).
 func (pt *painter) dualList(node pluginapi.Widget, x, y, wd, h int) {
 	p := pt.p
@@ -613,14 +588,14 @@ func (pt *painter) dualList(node pluginapi.Widget, x, y, wd, h int) {
 		if set[node.Options[i]] {
 			mark = "[x]"
 		}
-		text := mark + " " + node.Options[i]
+		text := mark + " " + Sanitize(node.Options[i])
 		pt.g.Fill(x, x+wd, y+k, st)
-		pt.g.Put(x, y+k, x+wd, elide(text, wd), st)
+		pt.g.Put(x, y+k, x+wd, space.End(text, wd), st)
 		p.hits = append(p.hits, hit{r: Rect{X: x, Y: y + k, W: wd, H: 1}, kind: hitDualRow, focusIdx: pt.fi - 1, path: "", index: i})
 	}
 }
 
-// paintLabeledSection draws a rounded box with the label on its top rule, and the wrapped
+// labeledSection draws a rounded box with the label on its top rule, and the wrapped
 // child inside.
 func (pt *painter) labeledSection(node pluginapi.Widget, x, y, wd, h int) {
 	if wd < 4 || h < 3 {
@@ -654,7 +629,7 @@ func (pt *painter) paintWindowEmbed(node pluginapi.Widget, x, y, wd, h int) {
 		label = "no window"
 	}
 	for r := 1; r < h-1; r++ {
-		pt.g.Put(x+2, y+r, x+wd-1, elide(label, wd-3), pt.p.chrome.Muted)
+		pt.g.Put(x+2, y+r, x+wd-1, space.End(label, wd-3), pt.p.chrome.Muted)
 	}
 }
 
@@ -673,7 +648,7 @@ func (p *Panel) paintOverlays(g *grid.Grid) {
 				st = p.chrome.Selected
 			}
 			g.Fill(b.X+1, b.X+b.W-1, b.Y+1+k, st)
-			g.Put(b.X+2, b.Y+1+k, b.X+b.W-1, elide(ov.items[k], b.W-3), st)
+			g.Put(b.X+2, b.Y+1+k, b.X+b.W-1, space.End(ov.items[k], b.W-3), st)
 			p.hits = append(p.hits, hit{r: Rect{X: b.X, Y: b.Y + 1 + k, W: b.W, H: 1}, kind: hitOverlayItem, focusIdx: -1, index: k, overlay: ov.kind, overlayKey: ov.key})
 		}
 	}

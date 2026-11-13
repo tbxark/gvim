@@ -10,7 +10,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.timer (FINAL 5.9). A timer is Work{After}: the ui (or the test harness's manual
+// gvim.timer. A timer is Work{After}: the ui (or the test harness's manual
 // clock) answers it with a completion, and the callback runs as an event-class task. A
 // repeating timer re-arms after its callback finished, so slow callbacks never pile up.
 

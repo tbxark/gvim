@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
@@ -179,7 +180,11 @@ func diagFlatIndex(rows []diagRow, sel int) int {
 // clampDiagSelection keeps the selection on a diagnostic and the scroll such that
 // the selected row is inside the body.
 func (m *Model) clampDiagSelection() {
-	rows := m.diagRows()
+	m.clampDiagSelectionIn(m.diagRows())
+}
+
+// clampDiagSelectionIn is clampDiagSelection over rows already built by diagRows.
+func (m *Model) clampDiagSelectionIn(rows []diagRow) {
 	n := selectableDiagRows(rows)
 	switch {
 	case n == 0:
@@ -297,7 +302,7 @@ func (m *Model) diagEmptyText() string {
 // paintDiagPanel paints the Diagnostics section's body: the file/diagnostic rows
 // inside the column's walls, scrolling so the selection is visible, or the
 // section's empty state.
-func (m *Model) paintDiagPanel(dst *grid.Grid, l layout, sec sidebar.Section) {
+func (m *Model) paintDiagPanel(dst *grid.Grid, l frame.Layout, sec sidebar.Section) {
 	rows, right, x := sec.Rows(), l.ExX+l.Ex, l.ExX
 	if l.Ex < 2 || rows <= 0 {
 		return
@@ -310,8 +315,8 @@ func (m *Model) paintDiagPanel(dst *grid.Grid, l layout, sec sidebar.Section) {
 		dst.Set(x, y, "│", body)
 		dst.Set(right-1, y, "│", body)
 	}
-	m.clampDiagSelection()
 	flat := m.diagRows()
+	m.clampDiagSelectionIn(flat)
 	end := right - 1 - space.PadX
 	if len(flat) == 0 {
 		st := body
@@ -515,8 +520,6 @@ func (m *Model) diagJump() tea.Cmd {
 	return m.lspGoto(LSPLocation{Path: r.path, Start: r.item.Start, End: r.item.End})
 }
 
-// pressDiagHeader is a left press on the Diagnostics header: it takes the keyboard
-// and folds or unfolds the section.
 // pressDiagRow is a left press on a row of the Diagnostics body: it selects the row
 // and, for a diagnostic, jumps to it. A header row only selects nothing.
 func (m *Model) pressDiagRow(row int) tea.Cmd {

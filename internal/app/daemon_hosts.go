@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/internal/daemon"
 )
 
@@ -77,15 +78,8 @@ func writeHostMark(root, name string) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	_, err = atomicfile.WriteFileMode(path, data, 0o600)
+	return err
 }
 
 // clearHostMark removes daemon name's mark for root and an empty root directory. A failed

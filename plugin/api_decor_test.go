@@ -245,7 +245,7 @@ T.spy(ns:set(b, {{kind="line", line=0}}), type(ns:add(b, {kind="line", line=0}, 
 }
 
 func TestDecorBadVersionTokenIsReturned(t *testing.T) {
-	// AMENDMENTS C4: a malformed token is `nil, "invalid: bad version token"` for ns:set and
+	// a malformed token is `nil, "invalid: bad version token"` for ns:set and
 	// ns:add, as for b:edit; it must not raise.
 	h, host := bufRun(t, "a", `
 local ns = gvim.decor.namespace("n")

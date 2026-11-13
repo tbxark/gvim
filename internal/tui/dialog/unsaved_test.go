@@ -219,3 +219,33 @@ func TestConfirmTrashClickMovesToTrash(t *testing.T) {
 	_, cmd := d.Update(click(x+2, y))
 	mustClose(t, d, cmd, ChoiceMoveToTrash, "")
 }
+
+func TestConfirmQuitKeysAndFocus(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		keys []string
+		want Choice
+	}{
+		{"enter starts on Cancel", []string{"enter"}, ChoiceCancel},
+		{"q quits", []string{"q"}, ChoiceQuit},
+		{"c cancels", []string{"c"}, ChoiceCancel},
+		{"esc cancels", []string{"esc"}, ChoiceCancel},
+		{"left then enter quits", []string{"left", "enter"}, ChoiceQuit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := newFakeClock()
+			d := NewConfirmQuit(c.Now, "tag", testOv)
+			c.afterGrace()
+			var cmd tea.Cmd
+			for _, k := range tt.keys {
+				_, cmd = d.Update(key(k))
+			}
+			mustClose(t, d, cmd, tt.want, "")
+		})
+	}
+	g := draw(NewConfirmQuit(newFakeClock().Now, nil, testOv), 80, 24)
+	mustFind(t, g, "Quit gvim?")
+}

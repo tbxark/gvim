@@ -339,6 +339,18 @@ func TestPluginOSRenameCopy(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("rename onto an existing path is a conflict", func(t *testing.T) {
+		writePluginTree(t, dir, map[string]string{"r1.txt": "1", "r2.txt": "2"})
+		if err := o.Rename(ctx, "r1.txt", "r2.txt"); codeOf(err) != pluginapi.CodeConflict {
+			t.Fatalf("err = %v", err)
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, "r2.txt")); string(b) != "2" {
+			t.Fatalf("destination = %q, want it untouched", b)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "r1.txt")); err != nil {
+			t.Fatalf("source gone: %v", err)
+		}
+	})
 	t.Run("copy a file", func(t *testing.T) {
 		if err := o.Copy(ctx, "b.txt", "copy.txt"); err != nil {
 			t.Fatal(err)

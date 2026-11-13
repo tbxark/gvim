@@ -40,12 +40,12 @@ attach/resume argv in this API.
 
 ```text
 gvim.fs.read(path, opts?) ⏳ -> string | nil, err       -- opts {max = 16 MiB}; over it: too_large
-gvim.fs.write(path, data, opts?) ⏳ -> true | nil, err  -- opts {atomic = true, append = false, mode = 0644, parents = false}
+gvim.fs.write(path, data, opts?) ⏳ -> true | nil, err  -- opts {atomic = true, append = false, mode = 0644, parents = false, exclusive = false}
 gvim.fs.list(path, opts?) ⏳ -> { {name, kind, size, mtime, target_kind}, ... } | nil, err   -- opts {hidden = false}
 gvim.fs.stat(path) ⏳ -> { kind, size, mtime, mode } | nil, err
-gvim.fs.exists(path) ⏳ -> boolean
+gvim.fs.exists(path) ⏳ -> boolean | nil, err           -- false when missing; err when that cannot be told (permissions, ...)
 gvim.fs.mkdir(path, opts?) ⏳ -> true | nil, err        -- opts {parents = true}
-gvim.fs.remove(path, opts?) ⏳ -> true | nil, err       -- opts {recursive = false}
+gvim.fs.remove(path, opts?) ⏳ -> true | nil, err       -- opts {recursive = false}; unsupported on a remote workspace
 gvim.fs.rename(from, to) ⏳ -> true | nil, err
 gvim.fs.copy(from, to) ⏳ -> true | nil, err
 gvim.fs.realpath(path) ⏳ -> string | nil, err
@@ -57,7 +57,8 @@ watcher:stop()  watcher:active() -> boolean
 * `kind` is `"file"`, `"dir"` or `"symlink"`. `mtime` is Unix seconds as a float; `mode` is the
   permission bits. `stat` follows symlinks, and a broken link is `kind = "symlink"`.
 * `write` is **atomic** by default (a temporary file, then a rename; through a symlink it writes the
-  target), except with `append = true`. `mode` 0 keeps the mode of the file it replaces, else 0644.
+  target; a dangling link is refused rather than replaced), except with `append = true`. A write to
+  anything but a regular file (a FIFO, a device) is refused, and never blocks. `mode` 0 keeps the mode of the file it replaces, else 0644.
 * `write` with `exclusive = true` is a **create-new**: it fails with `conflict` (and leaves the
   existing entry untouched) when the path already exists as a file, directory or symlink, so a
   config file cannot be silently overwritten after an existence check raced another process. It
@@ -84,11 +85,14 @@ watcher:stop()  watcher:active() -> boolean
   overwritten. A backend without those surfaces returns `unsupported` (no check-then-write or
   NoFollow replacement fallback). Copy observes the plugin `ctx`: cancellation between entries
   or file chunks returns `cancelled`, aborts the temporary file, and leaves no destination.
-* `remove` refuses `/`, `$HOME`, the workspace root and the gvim config directory, even with
-  `recursive = true`.
+* `rename` onto an existing path is a `conflict`, on one file system or across two.
+* `remove` refuses `/`, `$HOME`, the workspace root, the working directory and the gvim config
+  directory, and every directory that contains one of them, even with `recursive = true`. Symlinks in
+  the parent of the target are resolved before the check. On a remote workspace `remove` is
+  `unsupported` (see Remote workspaces): those directories are local ones.
 * `walk` opts: `skip_dirs = {".git"}`, `hidden = false`, `max_depth`, `max_entries` (default and
-  maximum 50 000 / 100 000). `list` returns at most 100 000 entries. These results are converted to
-  Lua on the editor loop, hence the cap.
+  maximum 50 000 / 100 000). `list` of a directory with more than 100 000 entries is `too_large`
+  (use `walk`). These results are converted to Lua on the editor loop, hence the cap.
 * **Watching.** `watch(path, fn, {debounce_ms = 50})` (10 to 5000) calls `fn({path, kind})` for
   coalesced changes; `kind` is `"create"`, `"write"`, `"remove"`, `"rename"` or `"error"` (then `err`
   says why). The callback is an event-class task. A file is watched through its parent directory, so
@@ -101,9 +105,9 @@ watcher:stop()  watcher:active() -> boolean
 
 ### Remote workspaces
 
-In a remote SSH workspace (a direct ssh:// launch or a daemon-hosted one) `gvim.fs` and `gvim.proc` follow the workspace: reads, writes, stats, listings, mkdir/remove/rename, watches, one-shot runs and stdio processes go through the workspace authority, so a plugin edits and spawns on the remote host and never on the local machine. Relative paths are resolved against the remote workspace root; the workspace trust gate is consulted
+In a remote SSH workspace (a direct ssh:// launch or a daemon-hosted one) `gvim.fs` and `gvim.proc` follow the workspace: reads, writes, stats, listings, mkdir/rename, watches, one-shot runs and stdio processes go through the workspace authority, so a plugin edits and spawns on the remote host and never on the local machine (`remove` is the exception: it returns `unsupported`, because its protected-directory rule only knows the local machine). Relative paths are resolved against the remote workspace root; the workspace trust gate is consulted
 before every remote process launch (an untrusted workspace refuses plugin processes), and the
-authority's own trust gate, working directory and environment apply to every process launch. If the authority backend has no file-mutation surface, mkdir/remove/rename return a clear `unsupported` error rather than falling back locally. `walk` and `copy` are implemented over the authority's bounded `ReadDir`/`ReadFile`/`WriteFile` surface and never touch the local machine: `walk` is depth-first in lexical order with the local hidden/skip-dirs/max-depth/max-entries semantics (symlinks are reported, never followed; unreadable subdirectories are skipped; cancellation returns `cancelled`), and `copy` copies one regular file or a directory tree remote-to-remote, refusing symbolic links in a tree (there is no remote readlink, so copying them as links is impossible and silently dropping them would be wrong). When the authority exposes a copy-safe stream, each file is copied in bounded 1 MiB `ReadRange` windows: memory stays one chunk, there is no 16 MiB file cap, and cancellation is checked between chunks. Two proof-backed surfaces exist, and the copy refuses a backend with neither before reading source data or touching a target:
+authority's own trust gate, working directory and environment apply to every process launch. If the authority backend has no file-mutation surface, mkdir/rename return a clear `unsupported` error rather than falling back locally. `walk` and `copy` are implemented over the authority's bounded `ReadDir`/`ReadFile`/`WriteFile` surface and never touch the local machine: `walk` is depth-first in lexical order with the local hidden/skip-dirs/max-depth/max-entries semantics (symlinks are reported, never followed; unreadable subdirectories are skipped; cancellation returns `cancelled`), and `copy` copies one regular file or a directory tree remote-to-remote, refusing symbolic links in a tree (there is no remote readlink, so copying them as links is impossible and silently dropping them would be wrong). When the authority exposes a copy-safe stream, each file is copied in bounded 1 MiB `ReadRange` windows: memory stays one chunk, there is no 16 MiB file cap, and cancellation is checked between chunks. Two proof-backed surfaces exist, and the copy refuses a backend with neither before reading source data or touching a target:
 
 * **Local authority — no-follow replace.** `WriteStreamNoFollow` writes a temp and atomically renames it over the destination path. It never follows a final link; an existing destination (file or link) is atomically replaced. Ordinary `WriteStream` keeps the save behavior of following a final link.
 * **SSH authority — new target only.** `WriteStreamNewTarget` streams into a private `mktemp` file in the destination directory and publishes the complete file with the POSIX `link` utility (exact target, no `-f`) as one hard link. The destination must not exist: an existing file, directory, symlink or dangling symlink gives `conflict` and is left untouched; a creator that wins concurrently gives `conflict` and its file is untouched. The implementation never opens, follows, replaces or deletes the target; abort/failure removes only its own temporary file. Before streaming, a private probe in the destination directory must prove exact-target no-clobber hardlinks (`link` utility present; a second link, a symlink target and a directory target all fail EEXIST without being followed); if that cannot be proven the copy returns `unsupported` before source data is read. `link` is used rather than `ln` because `ln` treats an existing directory target as a directory to put the new name into, while the exact-target link utility reports EEXIST. Existing destinations are therefore unsupported on SSH (there is no no-follow replace there). A tree copy needs `DirectoryCreator` plus this new-target stream, and the destination parent must already exist so the private probe can run before the root claim; otherwise it is `unsupported` before any mkdir/write.
@@ -135,7 +139,7 @@ browser is local). This is the safer equivalent of Fresh's dashboard `openUrl` (
 
 ```text
 gvim.http.get(url, opts?) ⏳ -> {status = 200, body = "...", headers = {...}} | nil, err
-opt 800 -> timeout_ms (default 5000, clamped 100..10000)
+-- opts {timeout_ms = 5000}, clamped to 100..10000
 ```
 
 A bounded HTTPS GET for plugins. The explicit user opt-in is host-enforced: the plugin's USER
@@ -283,8 +287,8 @@ gvim.env.get(name) -> string | nil
 `argv` is an array and there is **no shell**: `{"git", "status", "-s"}`. At most 1024 entries and
 1 MiB in all. Options of `run`: `cwd`, `env = {K = "V"}` (added to the environment; at most 256),
 `stdin = "text"`, `timeout_ms = 60000` (at most 600 000), `max_output = 8 MiB` per stream,
-`merge_stderr = false`. `spawn` takes the same options (`merge_stderr` included), plus
-the ones below.
+`merge_stderr = false`. `spawn` takes the same options (`merge_stderr` included, and no timeout
+unless `timeout_ms` is given), plus the ones below.
 
 ```lua
 local r = gvim.proc.run({ "git", "rev-parse", "--short", "HEAD" }, { cwd = gvim.workspace.root() })
@@ -440,7 +444,7 @@ gvim.lsp.all_diagnostics() -> { {path, diagnostics}, ... } | nil, err
 ```
 
 Read access to the language servers gvim runs for the user (configured in `config.json`).
-`gvim.has("lsp")` is true when at least one server is configured; without one both functions return
+`gvim.has("lsp")` is true when at least one server is configured; without one these functions return
 `unsupported: no language server is configured`.
 
 * `diagnostics(buf)` returns the diagnostics the server last published for the buffer (the current

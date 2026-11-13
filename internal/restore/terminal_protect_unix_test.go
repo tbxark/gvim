@@ -12,7 +12,7 @@ import (
 )
 
 func terminalSavedForTest() terminal.SavedState {
-	return terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"fresh"}}
+	return terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"fresh"}}}}
 }
 
 func emptyTerminalSavedForTest() terminal.SavedState {
@@ -164,7 +164,7 @@ func TestDanglingSymlinkIsNotMissingAndIsQuarantined(t *testing.T) {
 		t.Fatalf("fresh save after quarantining the symlink: %v", err)
 	}
 	st, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || len(st.Rows) != 1 || st.Rows[0] != "fresh" {
+	if err != nil || !ok || len(activeSaved(st).Rows) != 1 || activeSaved(st).Rows[0] != "fresh" {
 		t.Fatalf("fresh record = %+v, %v, %v", st, ok, err)
 	}
 }

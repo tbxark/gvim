@@ -109,9 +109,6 @@ func DefaultEnvDetectors() []EnvDetector {
 // DefaultEnvConfig is the config env section with the built-in detectors.
 func DefaultEnvConfig() EnvConfig { return EnvConfig{Detectors: DefaultEnvDetectors()} }
 
-// EnvIsPathOnly reports whether d is the low-risk virtualenv kind.
-func (d EnvDetector) EnvIsPathOnly() bool { return d.Kind == EnvKindPathOnly }
-
 // setEnv applies the env object of a config file. It is only called for the user
 // layer (see applyObject).
 func (c *Config) setEnv(raw json.RawMessage) []Diagnostic {

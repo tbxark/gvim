@@ -110,11 +110,11 @@ func (m *workspaceManager) evictToCap() {
 			m.mu.Unlock()
 			continue
 		}
-		cap := m.materializedCap
+		limit := m.materializedCap
 		m.evicting[id] = true
 		m.mu.Unlock()
 
-		kept, err := m.evictWorkspace(sess, cap)
+		kept, err := m.evictWorkspace(sess, limit)
 
 		m.mu.Lock()
 		delete(m.evicting, id)
@@ -128,7 +128,7 @@ func (m *workspaceManager) evictToCap() {
 
 // evictWorkspace captures and tears down one workspace. kept=true means it was not evicted
 // (it became active, or the capture and the fallback save both failed) and err explains why.
-func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept bool, err error) {
+func (m *workspaceManager) evictWorkspace(sess *workspaceSession, limit int) (kept bool, err error) {
 	label := sess.ws.File.Label
 	if sess.rt.sessionDir == "" {
 		return true, fmt.Errorf("cannot evict workspace %q: session saving is disabled; the workspace stays open", label)
@@ -167,12 +167,13 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept
 		return true, err
 	}
 	sess.rt.shutdown()
+	m.releasePluginWorkspace(sess)
 	m.mu.Lock()
 	delete(m.sessions, sess.ws.File.StableID)
 	h := m.host
 	m.mu.Unlock()
 
-	msg := appTextVars("gvim.workspace.report_evicted", "Evicted workspace %{label} from memory (limit %{limit} materialized workspaces)", map[string]any{"label": fmt.Sprintf("%q", label), "limit": cap})
+	msg := appTextVars("gvim.workspace.report_evicted", "Evicted workspace %{label} from memory (limit %{limit} materialized workspaces)", map[string]any{"label": fmt.Sprintf("%q", label), "limit": limit})
 	if captureErr != nil {
 		msg = appTextVars("gvim.workspace.report_evicted_capture", "%{message}; its capture write failed (%{error}) but the fallback save kept the session", map[string]any{"message": msg, "error": captureErr})
 	}

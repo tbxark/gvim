@@ -1,11 +1,15 @@
 package editor
 
-import "github.com/tbxark/gvim/fold"
+import (
+	"sync/atomic"
 
-// externalFoldRev orders the external fold sets the editor pushed into documents.
-// A document compares it to decide whether Folds must merge the ranges again; one
-// counter for the editor is enough, because it only ever grows.
-var externalFoldRev uint64
+	"github.com/tbxark/gvim/fold"
+)
+
+// externalFoldRev orders the external fold sets pushed into documents. A document
+// compares it to decide whether Folds must merge the ranges again. It is shared by
+// all editors of the process, because it only ever grows.
+var externalFoldRev atomic.Uint64
 
 // SetExternalFolds sets the fold ranges a language server gave for the open
 // document at path. They merge with the document's indentation folds, so the fold
@@ -17,6 +21,5 @@ func (e *Editor) SetExternalFolds(path string, ranges []fold.Range) {
 	if d == nil {
 		return
 	}
-	externalFoldRev++
-	d.SetExternalFolds(ranges, externalFoldRev)
+	d.SetExternalFolds(ranges, externalFoldRev.Add(1))
 }

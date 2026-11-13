@@ -130,9 +130,6 @@ func TestManagerNamesTheServerThatIsNotInstalled(t *testing.T) {
 			t.Errorf("message %q lacks %q", err.Error(), want)
 		}
 	}
-	if !lsp.IsNotInstalled(err) || lsp.IsNotInstalled(errors.New("other")) {
-		t.Error("IsNotInstalled does not tell the two apart")
-	}
 }
 
 func TestManagerExplainsAServerThatDiesDuringTheHandshake(t *testing.T) {

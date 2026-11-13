@@ -13,7 +13,7 @@ import (
 func TestLocaleFlowsIntoThePluginRuntime(t *testing.T) {
 	t.Cleanup(func() { i18n.SetLocale("en") })
 	i18n.SetLocale("zh-CN")
-	w := New(config.Defaults(), editor.New(editor.Options{}), func(*editor.Document) {}, Options{})
+	w := New(config.Defaults(), editor.New(editor.Options{}), Options{})
 	if got := w.Runtime.Locale(); got != "zh-CN" {
 		t.Fatalf("plugin runtime locale = %q, want the editor locale zh-CN", got)
 	}

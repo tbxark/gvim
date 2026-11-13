@@ -133,13 +133,6 @@ func (pc *pageCache) clearIfRetired() {
 	}
 }
 
-// len returns the number of cached pages.
-func (pc *pageCache) len() int {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	return pc.lru.Len()
-}
-
 // lineSpan is where a terminated base line lies in the source and how it ends.
 type lineSpan struct {
 	start, end int64
@@ -149,12 +142,6 @@ type lineSpan struct {
 // rangeMemoMax is how many line spans the memo holds before it starts over.
 const rangeMemoMax = 4096
 
-// rangeMemo remembers the spans of the base lines that were looked up last. Finding a
-// line needs the page that holds its newline, which for a long line is a page of the
-// cache read just to place the line. A frame of long lines would need more pages than
-// the cache holds and read them all again on every frame, an idle one too; the memo
-// answers from the spans instead. The span of a terminated line never changes, so an
-// entry is never stale. Safe for concurrent use.
 // hugeMemoMax is how many huge indexes a hugeMemo keeps before it starts again. Each index
 // holds a mark for every stride runes of its line, so the bound is small.
 const hugeMemoMax = 64
@@ -191,6 +178,12 @@ func (hm *hugeMemo) put(b int, h *hugeLine) {
 	hm.m[b] = h
 }
 
+// rangeMemo remembers the spans of the base lines that were looked up last. Finding a
+// line needs the page that holds its newline, which for a long line is a page of the
+// cache read just to place the line. A frame of long lines would need more pages than
+// the cache holds and read them all again on every frame, an idle one too; the memo
+// answers from the spans instead. The span of a terminated line never changes, so an
+// entry is never stale. Safe for concurrent use.
 type rangeMemo struct {
 	mu sync.Mutex
 	m  map[int]lineSpan

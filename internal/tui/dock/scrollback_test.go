@@ -318,3 +318,56 @@ func TestCloseOnExitOffKeepsTheScreen(t *testing.T) {
 		t.Fatal("the exited shell did not show its transcript automatically")
 	}
 }
+
+// A shell that exited while the dock had no rows opens its transcript at the next
+// Sync, and that Sync must also run the history fetch the view starts with.
+func TestSyncRunsTheHistoryFetchOfTheExitTranscriptItOpens(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	for i := range 10 {
+		term.history = append(term.history, "hist-"+itoa(i))
+	}
+	term.screen = terminal.NewScreen(1, 80, make([]terminal.Cell, 80))
+	rows := 4
+	var p Panel
+	p.SetHost(Host{
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, rows },
+		Focus:       func() {},
+	})
+	p.SetPorts(Ports{Starter: &fakeStarter{term: term}})
+	p.SetEffects(Effects{StayInScrollback: true})
+	p.Update(p.Show()())
+	rows = 0
+	p.Update(exitMsg{gen: p.gen})
+	if p.Scrolling() {
+		t.Fatal("setup: the transcript opened with no rows to show it")
+	}
+	rows = 4
+	cmd := p.Sync()
+	if !p.Scrolling() {
+		t.Fatal("Sync did not open the exited shell's transcript")
+	}
+	applyScroll(t, &p, cmd)
+	if p.scroll.pending {
+		t.Fatal("the history fetch of the opened view was dropped, so it never completes")
+	}
+	if text, ok := p.combinedText(p.scroll.top, false); !ok || text != "hist-8" {
+		t.Fatalf("first visible row = %q, %v; want the fetched hist-8", text, ok)
+	}
+}
+
+// SearchQuery is the committed scrollback search, or "".
+func (p *Panel) SearchQuery() string { return p.scroll.search }
+
+// SearchMatches is the number of rows the scrollback search matches.
+func (p *Panel) SearchMatches() int { return len(p.scroll.matches) }
+
+// ToggleScrollback is the Ctrl+Space switch: it enters the scrollback view, or
+// returns to the live screen.
+func (p *Panel) ToggleScrollback() tea.Cmd {
+	if p.scroll.on {
+		return p.leaveScrollback()
+	}
+	return p.enterScrollback()
+}

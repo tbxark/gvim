@@ -1,11 +1,8 @@
 package session
 
-import "fmt"
-
 // SplitLayout is the saved pane layout of a session: a tree of editor panes with
 // the focused pane, and each pane's tab (as an index into Session.Files) and
-// scroll position. It is additive and optional: a session file without it restores
-// as one pane, exactly as before, and this package keeps the format version at 1.
+// scroll position. It is optional: a session file without it restores as one pane.
 //
 // The tree mirrors the editor's in-memory split tree (internal/tui/split.Node):
 // an inner node has Dir and two children (A first, B second) and a ratio; a leaf
@@ -18,12 +15,12 @@ type SplitLayout struct {
 	Root SplitNode `json:"root"`
 	// Focus is the focused leaf's index in reading order (the leaves of Root,
 	// first child before second, depth first). Zero is the first pane.
-	Focus int `json:"focus,omitempty"`
+	Focus int `json:"focus,omitzero"`
 	// Dual marks the Markdown dual view: Root must be a side-by-side two-leaf
 	// split of the same saved file, the first leaf is the source and the second
 	// the composed/rendered pane, and Focus is zero (the source, Fresh's policy).
-	// It is optional and additive: an older session or a normal split omits it.
-	Dual bool `json:"dual,omitempty"`
+	// It is optional: a normal split omits it.
+	Dual bool `json:"dual,omitzero"`
 }
 
 // SplitNode is one node of SplitLayout: a leaf when A and B are nil, else an inner
@@ -37,23 +34,23 @@ type SplitNode struct {
 	Dir string `json:"dir,omitempty"`
 	// Ratio is the percentage of the area the first child takes (1..99); zero
 	// means an even split. Unused on a leaf.
-	Ratio int `json:"ratio,omitempty"`
+	Ratio int `json:"ratio,omitzero"`
 	// A and B are the two children of an inner node; both are nil on a leaf.
 	A *SplitNode `json:"a,omitempty"`
 	B *SplitNode `json:"b,omitempty"`
 	// File is a leaf's index into Session.Files.
-	File int `json:"file,omitempty"`
+	File int `json:"file,omitzero"`
 	// Path is the leaf file's path, as Session.Files[File].Path. It is the stable
 	// identity a restore uses to find the restored tab; an empty path (an unnamed
 	// buffer) cannot be restored as a pane and makes the whole layout fall back.
 	Path string `json:"path,omitempty"`
 	// Top is the leaf's viewport top line and TopRow its scrolled rows into that
 	// line (compare views only). Zero is the first line.
-	Top    int `json:"top,omitempty"`
-	TopRow int `json:"topRow,omitempty"`
+	Top    int `json:"top,omitzero"`
+	TopRow int `json:"topRow,omitzero"`
 	// ViewMode is the leaf's Markdown view override: "source" or "rendered"; empty
 	// means the document's own page view. Persisted for the dual view's two panes,
-	// so the saved split keeps each side's mode; an older session omits it.
+	// so the saved split keeps each side's mode.
 	ViewMode string `json:"viewMode,omitempty"`
 }
 
@@ -97,9 +94,8 @@ func (l *SplitLayout) Valid(nFiles int) bool {
 }
 
 // validDual validates the optional Markdown dual marker: two side-by-side leaves of
-// the same saved file, source first and rendered second, focus on the source. Empty
-// ViewMode values are accepted for backward-compatible writers and inferred by the
-// restore; a non-empty value must name the leaf's side.
+// the same saved file, source first and rendered second, focus on the source. Each
+// leaf's ViewMode must name its side.
 func (l *SplitLayout) validDual() bool {
 	if l.Focus != 0 {
 		return false
@@ -111,13 +107,7 @@ func (l *SplitLayout) validDual() bool {
 	if root.A.File != root.B.File || root.A.Path == "" || root.A.Path != root.B.Path {
 		return false
 	}
-	if root.A.ViewMode != "" && root.A.ViewMode != "source" {
-		return false
-	}
-	if root.B.ViewMode != "" && root.B.ViewMode != "rendered" {
-		return false
-	}
-	return true
+	return root.A.ViewMode == "source" && root.B.ViewMode == "rendered"
 }
 
 // valid checks n and its subtree. It returns the leaf count and the subtree depth.
@@ -139,8 +129,6 @@ func (n *SplitNode) valid(nFiles, depth int) (leaves, maxDepth int, ok bool) {
 	case n.Dir != SplitSideBySide && n.Dir != SplitStacked:
 		return 0, 0, false
 	case n.Ratio < 0 || n.Ratio > 99:
-		return 0, 0, false
-	case n.Ratio > 0 && n.Ratio < 1:
 		return 0, 0, false
 	}
 	la, da, ok := n.A.valid(nFiles, depth+1)
@@ -167,9 +155,3 @@ func (n *SplitNode) Leaves() []int {
 	}
 	return append(n.A.Leaves(), n.B.Leaves()...)
 }
-
-// ValidateSplitLayout is Valid as a free function, for callers that hold a nil
-// layout from an old session.
-func ValidateSplitLayout(l *SplitLayout, nFiles int) bool { return l.Valid(nFiles) }
-
-var _ = fmt.Sprintf

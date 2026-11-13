@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/session"
 )
 
@@ -325,9 +326,9 @@ func TestHotExitQuitBehavior(t *testing.T) {
 	}
 }
 
-// TestHotExitEditorKeepsTheAdapterPorts checks the temporary wrapper satisfies
-// the interfaces the root probes on its editor port, and that with hot exit on a
-// plain quit is granted while the tabs stay modified.
+// TestHotExitEditorKeepsTheAdapterPorts checks the editor port still satisfies
+// the interfaces the root probes, and that with hot exit on a plain quit is
+// granted while the tabs stay modified.
 func TestHotExitEditorKeepsTheAdapterPorts(t *testing.T) {
 	isolateConfig(t)
 	root := t.TempDir()
@@ -343,19 +344,12 @@ func TestHotExitEditorKeepsTheAdapterPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildCaptured error = %v", err)
 	}
-	wrapped, ok := got.deps.Editor.(hotExitEditor)
+	wrapped, ok := got.deps.Editor.(*uiadapter.Editor)
 	if !ok {
-		t.Fatalf("Deps.Editor is %T, want the hot-exit wrapper", got.deps.Editor)
-	}
-	if wrapped.Editor == nil {
-		t.Fatal("the wrapper hides the real adapter")
-	}
-	if !wrapped.hot {
-		t.Error("the wrapper is not in hot-exit mode for a session launch with hot_exit on")
+		t.Fatalf("Deps.Editor is %T, want the uiadapter editor", got.deps.Editor)
 	}
 	// The root probes these on its editor port: the tab surface (Quit lives
-	// there), the shell runner and the workspace root setter. The wrapper must
-	// keep them promoted from *uiadapter.Editor.
+	// there), the shell runner and the workspace root setter.
 	if _, ok := got.deps.Editor.(trustTestTabSurface); !ok {
 		t.Error("the tab surface is hidden by the wrapper")
 	}
@@ -382,7 +376,7 @@ func TestHotExitEditorKeepsTheAdapterPorts(t *testing.T) {
 }
 
 // TestHotExitOffQuitAsksForTheDirtyTabs pins the pass-through: with hot_exit
-// off the wrapper returns the editor's dirty-tab list, so the root asks.
+// off the editor returns its dirty-tab list, so the root asks.
 func TestHotExitOffQuitAsksForTheDirtyTabs(t *testing.T) {
 	isolateConfig(t)
 	root := t.TempDir()
@@ -398,9 +392,9 @@ func TestHotExitOffQuitAsksForTheDirtyTabs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildCaptured error = %v", err)
 	}
-	wrapped, ok := got.deps.Editor.(hotExitEditor)
-	if !ok || wrapped.hot {
-		t.Fatalf("Deps.Editor = %T (%+v), want the wrapper with hot exit off", got.deps.Editor, wrapped)
+	wrapped, ok := got.deps.Editor.(*uiadapter.Editor)
+	if !ok {
+		t.Fatalf("Deps.Editor = %T, want the uiadapter editor", got.deps.Editor)
 	}
 	apptest.Must(t, got.ed.OpenFile(file))
 	if res := got.ed.Do("insert_char", map[string]any{"text": "Z"}); res.Err != nil {

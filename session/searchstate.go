@@ -17,10 +17,10 @@ const searchFileName = "search.json"
 type Search struct {
 	Find    []string `json:"find,omitempty"`
 	Replace []string `json:"replace,omitempty"`
-	Case    bool     `json:"case,omitempty"`
-	Word    bool     `json:"word,omitempty"`
-	Regex   bool     `json:"regex,omitempty"`
-	Confirm bool     `json:"confirm,omitempty"`
+	Case    bool     `json:"case,omitzero"`
+	Word    bool     `json:"word,omitzero"`
+	Regex   bool     `json:"regex,omitzero"`
+	Confirm bool     `json:"confirm,omitzero"`
 }
 
 // SaveSearch writes s to dir/search.json. It is separate from the session, so a

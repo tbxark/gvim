@@ -18,7 +18,7 @@ func OwnRecoveryDir(root string) string {
 }
 
 // recoverAbandoned restores the unsaved text that earlier runs left in root, with
-// recoverCrash. It looks at root itself, where earlier versions kept one copy, and at each
+// restoreCrash. It looks at root itself, where earlier versions kept one copy, and at each
 // directory named for a process id. A directory of a process that alive reports running is
 // left alone, because that run is still editing. The directory of this process's own pid is
 // recovered whatever alive says: the pid is ours again, so its owner is gone. A directory with

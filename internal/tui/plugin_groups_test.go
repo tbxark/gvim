@@ -87,6 +87,33 @@ func TestBufferGroupHost(t *testing.T) {
 	}
 }
 
+// TestBufferGroupFailedMountLeavesNothing checks that a layout that fails half way through
+// mounting closes the windows and panel buffers it had already created.
+func TestBufferGroupFailedMountLeavesNothing(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime(t)
+	m, _, pe := newPluginEditorModel(t, rt)
+	h := m.plug.host
+	layout := pluginapi.BufferGroupLayout{Dir: "h",
+		First: &pluginapi.BufferGroupLayout{Leaf: &pluginapi.BufferGroupLeaf{Name: "files"}},
+		Second: &pluginapi.BufferGroupLayout{Dir: "x",
+			First:  &pluginapi.BufferGroupLayout{Leaf: &pluginapi.BufferGroupLeaf{Name: "a"}},
+			Second: &pluginapi.BufferGroupLayout{Leaf: &pluginapi.BufferGroupLeaf{Name: "b"}},
+		},
+	}
+	if err := h.CreateBufferGroup("p", 5, pluginapi.BufferGroupSpec{Name: "Bad", Layout: layout}); err == nil {
+		t.Fatal("a layout with direction x mounted")
+	}
+	if got := len(m.windowLeaves()); got != 1 {
+		t.Fatalf("leaves after the failed mount = %d, want 1", got)
+	}
+	for _, id := range pe.created {
+		if _, ok := pe.Buffer(id); ok {
+			t.Fatalf("panel buffer %d survived the failed mount", id)
+		}
+	}
+}
+
 // TestScrollFollowMapping checks the anchor interpolation of the scroll-sync follower.
 func TestScrollFollowMapping(t *testing.T) {
 	t.Parallel()

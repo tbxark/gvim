@@ -33,7 +33,7 @@ func moduleNameOK(name string) bool {
 // is being loaded: a cycle yields true) it returns nil and the value; otherwise it
 // returns the loader function, which the prelude runs in Lua so a module may await.
 //
-// Resolution order (FINAL 8.3): (1) host modules "gvim" and "gvim.<area>", also the
+// Resolution order: (1) host modules "gvim" and "gvim.<area>", also the
 // bundled library modules "gvim.<name>" (cannot be overridden); (2) plugin-local files
 // lua/a/b.lua, lua/a/b/init.lua, a/b.lua, a/b/init.lua from the compiled file map of the
 // plugin; (3) nothing else: no package.path, no cross-plugin require, no filesystem.

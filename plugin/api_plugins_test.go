@@ -47,7 +47,7 @@ func TestPluginsProxy(t *testing.T) {
 		{"several results", `T.spy(pa.echo(1, "x", true))`, "1 x true"},
 		{"arguments are copied", `local t = {1, {k = "v"}} local r = pa.echo(t) T.spy(r ~= t, r[2].k, r[2] ~= t[2])`, "true v true"},
 		{"the callee cannot change the caller's table", `local t = {x = 1} local r = pa.mutate(t) T.spy(t.x, r.x)`, "1 99"},
-		// FINAL 5.11: no userdata crosses between plugins; a buffer travels as its id.
+		// No userdata crosses between plugins; a buffer travels as its id.
 		{"a handle argument is refused", `T.spy(pa.kind(T.buf(7)))`, "~nil invalid: argument #1"},
 		{"a nested handle argument is refused", `T.spy(pa.echo({{h = T.buf(7)}}))`, "~nil invalid: argument #1"},
 		{"a handle result is refused", `T.spy(pa.handle())`, "~nil invalid: result"},

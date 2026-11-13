@@ -147,14 +147,20 @@ func parseSSHConfig(text string) (*sshConfig, error) {
 	return cfg, nil
 }
 
-// splitSSHConfigLine splits "Keyword value" and strips surrounding quotes and a
+// splitSSHConfigLine splits "Keyword value" (or "Keyword=value") and strips surrounding quotes and a
 // trailing unquoted comment. Values with spaces keep them.
 func splitSSHConfigLine(line string) (key, value string) {
-	i := strings.IndexAny(line, " \t")
+	i := strings.IndexAny(line, " \t=")
 	if i < 0 {
 		return line, ""
 	}
-	key, value = line[:i], strings.TrimSpace(line[i:])
+	// The keyword ends at a blank or an equals sign, as in OpenSSH: "Key value",
+	// "Key=value" and "Key = value".
+	key, value = line[:i], strings.TrimLeft(line[i:], " \t")
+	if rest, ok := strings.CutPrefix(value, "="); ok {
+		value = rest
+	}
+	value = strings.TrimSpace(value)
 	// Strip a trailing comment outside quotes.
 	quoted := byte(0)
 	for j := 0; j < len(value); j++ {

@@ -276,11 +276,10 @@ type fullLoadTag struct{ err editor.ErrLargeNeedsFullLoad }
 // of it. The question is a Yes/No confirm; No leaves the notice, so the user sees why
 // the file did not open.
 func (m *Model) askFullLoad(err editor.ErrLargeNeedsFullLoad) {
+	m.notice = err.Error()
 	if _, ok := m.ed.(fullLoader); !ok {
-		m.notice = err.Error()
 		return
 	}
-	m.notice = err.Error()
 	q := err.Error() + ". Load it?"
 	m.pushOverlay(prompt.NewConfirm(m.styles, q, fullLoadTag{err: err}))
 }
@@ -343,9 +342,6 @@ func (r *saveRun) stop() {
 	r.stopped = true
 	r.cancel()
 }
-
-// ctxDone reports whether the write was stopped.
-func (r *saveRun) ctxDone() bool { return r.stopped }
 
 // beginSave registers a write that is about to start and returns its number and the
 // context that stops it. The write saves the active tab, or every modified tab for

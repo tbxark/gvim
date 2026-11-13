@@ -259,7 +259,7 @@ func TestPcallOfGoFunctions(t *testing.T) {
 }
 
 // A Go function used as a coroutine body, a command or an event handler must keep its results
-// and not fail with a nil error (S7-1).
+// and not fail with a nil error.
 func TestGoFunctionsAsEntryPoints(t *testing.T) {
 	rows := []struct {
 		name, body, want string

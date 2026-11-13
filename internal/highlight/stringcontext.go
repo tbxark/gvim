@@ -31,8 +31,9 @@ const stringMaxBytes = 64 << 10
 // lexed whole, so its answer is exact. The last window is kept while the text is
 // unchanged, so the carets of one keystroke share one lexing. A position at the end
 // of a line, in a window with no lexer, or in a window too large to lex, is not in a
-// string. A document in large file mode is never in a string: its lines can be huge.
-// The editor calls it on the UI goroutine only.
+// string. A document in large file mode is read only from the lines that are loaded
+// and short enough to lex, within stringMaxBytes (largeStringWindow); any other
+// position is not in a string. The editor calls it on the UI goroutine only.
 type stringCache struct {
 	doc     *editor.Document
 	version uint64
@@ -83,7 +84,7 @@ func stringWindow(n, line int, blank func(int) bool) (start, end int) {
 // refresh makes the window cover line of doc, and lexes it again when the text, the
 // document, its language or a remote window arrival changed. It reports false when
 // the line cannot be read safely (an unloaded remote window, a line too big to lex,
-// or a local large document, which keeps the no-context behavior).
+// or a window of a large document that cannot be built, see largeStringWindow).
 func (c *stringCache) refresh(doc *editor.Document, line int) bool {
 	b := doc.Buffer
 	gen := b.WindowGeneration()
@@ -187,6 +188,8 @@ func (c *stringCache) largeStringWindow(doc *editor.Document, b *buffer.Buffer, 
 func lineTooBig(b *buffer.Buffer, line int) bool {
 	return b.LineBytes(line) > maxLexedLineBytes
 }
+
+// inString is the editor.StringContext: whether the rune at p is inside a string literal.
 func (c *stringCache) inString(doc *editor.Document, p buffer.Pos) bool {
 	if p.Line < 0 || p.Line >= doc.Buffer.Lines() {
 		return false

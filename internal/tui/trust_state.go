@@ -45,18 +45,9 @@ func newTrustState(port TrustPort) trustState {
 // available reports whether the session has a trust port.
 func (t trustState) available() bool { return t.port != nil }
 
-// trustLevel returns the effective level of the open workspace, or
-// trust.Undecided when trust is unavailable.
-func (m *Model) trustLevel() trust.Level {
-	if !m.trust.available() {
-		return trust.Undecided
-	}
-	return trust.Effective(m.trust.state.Level)
-}
-
 // trustStatus returns the label and severity of the status-bar trust pill: the
-// level's Fresh label (uiText("gvim.status.trusted", "Trusted"), uiText("gvim.status.restricted", "Restricted") or uiText("gvim.status.blocked", "Blocked")), and true when the
-// pill is painted with the warning colour. Fresh paints Restricted and Blocked
+// level's Fresh label (Trusted, Restricted or Blocked, from the catalogue), and true
+// when the pill is painted with the warning colour. Fresh paints Restricted and Blocked
 // with the warning role. An unavailable, undecided or empty state returns "",
 // so the row paints no pill.
 func (m *Model) trustStatus() (label string, warn bool) {
@@ -64,5 +55,13 @@ func (m *Model) trustStatus() (label string, warn bool) {
 		return "", false
 	}
 	level := trust.Effective(m.trust.state.Level)
-	return level.String(), level != trust.Trusted
+	switch level {
+	case trust.Trusted:
+		label = uiText("gvim.status.trusted", "Trusted")
+	case trust.Restricted:
+		label = uiText("gvim.status.restricted", "Restricted")
+	case trust.Blocked:
+		label = uiText("gvim.status.blocked", "Blocked")
+	}
+	return label, level != trust.Trusted
 }

@@ -36,6 +36,28 @@ func (m *Model) statusFilename(doc Document) string {
 	if root == "" {
 		return path
 	}
+	now := m.now()
+	if c := &m.statusName; c.name != "" && c.root == root && c.path == path && now.Sub(c.at) < statusNameTTL {
+		return c.name
+	}
+	name := m.resolveStatusFilename(root, path)
+	m.statusName = statusNameCache{root: root, path: path, name: name, at: now}
+	return name
+}
+
+// statusNameTTL is how long a resolved status file name is reused: a symlink swapped
+// under the open file shows within this time, and the per-frame cost is one comparison.
+const statusNameTTL = 2 * time.Second
+
+// statusNameCache is the last statusFilename result and what it was computed from.
+type statusNameCache struct {
+	root, path, name string
+	at               time.Time
+}
+
+// resolveStatusFilename is statusFilename for a document with a path under a known root.
+func (m *Model) resolveStatusFilename(root, filePath string) string {
+	path := filePath
 	// Fresh anchors a relative path to the working directory before making it
 	// relative to it, so a relative FilePath behaves the same way.
 	if !filepath.IsAbs(path) {
@@ -48,7 +70,7 @@ func (m *Model) statusFilename(doc Document) string {
 	// Fresh shows for a file outside the working directory.
 	rel, err := filepath.Rel(canonicalFilePath(root), canonicalFilePath(path))
 	if err != nil || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return pe.FilePath()
+		return filePath
 	}
 	return rel
 }

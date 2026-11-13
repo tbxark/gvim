@@ -15,7 +15,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The documentation tests (FINAL section 11, the "docs" suite): the plugin author docs under
+// The documentation tests: the plugin author docs under
 // docs/plugins are checked against the runtime instead of by eye, so they cannot drift.
 //
 //   - TestStubsMatchRuntime: gvim.d.lua declares exactly the functions and values a live plugin

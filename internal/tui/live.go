@@ -261,26 +261,22 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 			line, _ := strconv.Atoi(lineStr)
 			col, _ := strconv.Atoi(colStr)
 			return m.lspGoto(LSPLocation{Path: name, Start: buffer.Pos{Line: line - 1, Col: col - 1}})
-		case "t", "T":
-			// t carries the legacy dock position; T carries the stable tab id, the
-			// absolute transcript row and a snapshot payload (scrollback length + the
-			// expected line/neighbours). Prefer the id and validated payload so a later
+		case "T":
+			// T carries the stable tab id, the absolute transcript row and a snapshot
+			// payload (scrollback length + the expected line/neighbours), so a later
 			// close/reorder/output drift cannot focus or land on a different terminal line.
 			n, _ := strconv.ParseUint(name, 10, 64)
-			if kind == "T" {
-				row, _ := strconv.Atoi(lineStr)
-				payload, valid := decodeTerminalExportPayload(colStr)
-				return func() tea.Msg {
-					return palette.OpenTerminalMsg{
-						ID: n, Row: row, Total: payload.Total,
-						Text: payload.Text, Before: payload.Before, After: payload.After,
-						BeforeKnown: payload.BeforeKnown, AfterKnown: payload.AfterKnown,
-						Snapshot: true, Valid: valid,
-						Owner: m.workspaceOwner,
-					}
+			row, _ := strconv.Atoi(lineStr)
+			payload, valid := decodeTerminalExportPayload(colStr)
+			return func() tea.Msg {
+				return palette.OpenTerminalMsg{
+					ID: n, Row: row, Total: payload.Total,
+					Text: payload.Text, Before: payload.Before, After: payload.After,
+					BeforeKnown: payload.BeforeKnown, AfterKnown: payload.AfterKnown,
+					Snapshot: true, Valid: valid,
+					Owner: m.workspaceOwner,
 				}
 			}
-			return func() tea.Msg { return palette.OpenTerminalMsg{Index: int(n), Owner: m.workspaceOwner} }
 		}
 		return nil
 	})
@@ -337,18 +333,13 @@ func liveGrepExportValue(hit palette.GrepHit) string {
 	case palette.GrepTerminals:
 		// T, stable dock tab id, absolute transcript row, snapshot payload. The callback
 		// focuses and positions the existing dock tab (never a file or a shell); the id
-		// survives closes/reorders and the payload validates/relocates the row. A hit
-		// without an id (old caller/test) falls back to t/index (focus only).
-		row := hit.TranscriptFirst + hit.Line - 1
-		if hit.TerminalID != 0 {
-			payload := encodeTerminalExportPayload(terminalExportPayload{
-				Total: hit.TerminalTotal, Text: hit.Text,
-				Before: hit.TerminalBefore, After: hit.TerminalAfter,
-				BeforeKnown: hit.TerminalBeforeKnown, AfterKnown: hit.TerminalAfterKnown,
-			})
-			return fmt.Sprintf("T	%d	%d	%s", hit.TerminalID, row, payload)
-		}
-		return fmt.Sprintf("t	%d	%s	%d", hit.Index, hit.Rel, hit.Line)
+		// survives closes/reorders and the payload validates/relocates the row.
+		payload := encodeTerminalExportPayload(terminalExportPayload{
+			Total: hit.TerminalTotal, Text: hit.Text,
+			Before: hit.TerminalBefore, After: hit.TerminalAfter,
+			BeforeKnown: hit.TerminalBeforeKnown, AfterKnown: hit.TerminalAfterKnown,
+		})
+		return fmt.Sprintf("T	%d	%d	%s", hit.TerminalID, hit.TranscriptFirst+hit.Line-1, payload)
 	default:
 		return fmt.Sprintf("f	%s	%d	%d", hit.Rel, hit.Line, hit.Col)
 	}

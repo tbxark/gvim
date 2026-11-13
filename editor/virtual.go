@@ -21,7 +21,7 @@ func (e *Editor) NewVirtual(o VirtualOptions) DocID {
 	d.SetReadOnly(o.ReadOnly)
 	d.SetExt(docExt{Virtual: true, Name: cleanVirtualName(o.Name), Owner: o.Owner, Size: len(text), Mode: o.Mode})
 	e.addDoc(d)
-	return d.Seam().Id
+	return d.Seam().ID
 }
 
 // VirtualCount returns the number of open virtual documents.

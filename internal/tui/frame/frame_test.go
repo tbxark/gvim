@@ -29,8 +29,8 @@ func TestMenuBandTakesOneRow(t *testing.T) {
 	if l.StripY != 2 || l.BodyTop != 3 {
 		t.Fatalf("strip row %d, body top %d; want 2 and 3", l.StripY, l.BodyTop)
 	}
-	if got := l.Hit(1, l.MenuLabelY); got.Kind != HitMenuLabel {
-		t.Errorf("the label row at File hits %v, want a menu label", got.Kind)
+	if got := l.Hit(1, l.MenuLabelY); got.Kind != HitNone {
+		t.Errorf("the label row hits %v, want none (the menu bar owns its hit map)", got.Kind)
 	}
 	if got := l.Hit(l.EditorX+1, l.StripY); got.Kind != HitTab {
 		t.Errorf("row 2 at the first tab hits %v, want the tab", got.Kind)
@@ -172,7 +172,7 @@ func TestScrollMarkerDisappearsAtTheEdge(t *testing.T) {
 			t.Errorf("the right marker is a target at the tail: %+v", r)
 		}
 	}
-	if got := StripHit(s.Runs, w-4); got.Kind == HitTabScrollAfter {
+	if got := hitRuns(s.Runs, w-4, HitTarget{}); got.Kind == HitTabScrollAfter {
 		t.Errorf("the blank right edge is still a live scroll target: %+v", got)
 	}
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"unicode/utf8"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/search"
 )
@@ -46,7 +47,7 @@ func (m *Model) findLineHighlights() func(line int) []search.Highlight {
 		return m.largeVisibleHighlights(ss, doc, q)
 	}
 	h := findHost{m: m}
-	matches, err := h.Find(q)
+	matches, err := m.cachedFindMatches(h, doc, q)
 	if err != nil || len(matches) == 0 {
 		return noHighlights
 	}
@@ -63,6 +64,47 @@ func (m *Model) findLineHighlights() func(line int) []search.Highlight {
 	return func(line int) []search.Highlight {
 		return search.Highlights(lines, matches, line, current)
 	}
+}
+
+// findMatchCache is the matches of the last highlight search and what they were found
+// for: the document (tab and name), its text version, the query and the search range.
+type findMatchCache struct {
+	ok      bool
+	tab     int
+	name    string
+	version uint64
+	query   search.Query
+	limited bool
+	rng     buffer.Selection
+	matches []search.Match
+}
+
+// cachedFindMatches is h.Find(q) for the active document, kept while the document text,
+// the query and the search range stay as they were: the highlights are asked for on every
+// frame while the find bar is open, and searching the whole document each time is wasted
+// work. A document without a version is always searched. Only a successful search is kept.
+func (m *Model) cachedFindMatches(h findHost, doc Document, q search.Query) ([]search.Match, error) {
+	v, versioned := doc.(versionedDoc)
+	if !versioned {
+		return h.Find(q)
+	}
+	key := findMatchCache{ok: true, tab: m.activeTab(), name: doc.Name(), version: v.Version(), query: q}
+	if r, ok := m.ed.(searchRanger); ok {
+		key.rng, key.limited = r.SearchRange()
+	}
+	c := &m.findMatches
+	if c.ok && c.tab == key.tab && c.name == key.name && c.version == key.version &&
+		c.query == key.query && c.limited == key.limited && c.rng == key.rng {
+		return c.matches, nil
+	}
+	matches, err := h.Find(q)
+	if err != nil {
+		*c = findMatchCache{}
+		return nil, err
+	}
+	key.matches = matches
+	*c = key
+	return matches, nil
 }
 
 // paneHighlights converts the search highlights of a line to the editor pane's

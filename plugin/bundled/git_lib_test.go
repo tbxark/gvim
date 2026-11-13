@@ -44,7 +44,7 @@ end }`
 // anyGit makes every git command succeed with no output.
 func anyGit(o *plugintest.FakeOS) { o.Script(gitHead, plugintest.ProcScript{}) }
 
-// TestGitArgvHardened is binding (AMENDMENTS C28): every call is the fixed prefix, the
+// TestGitArgvHardened is binding: every call is the fixed prefix, the
 // extra flags of the subcommand and the arguments of the caller, with the fixed
 // environment, and the caller cannot undo the environment.
 func TestGitArgvHardened(t *testing.T) {
@@ -70,7 +70,7 @@ func TestGitArgvHardened(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r, _ := probe(t, rigOpts{script: anyGit}, tt.lua)
 			runs := r.os.Runs()
-			// git.blame first lists the filter drivers of the repository (S19-1): a second
+			// git.blame first lists the filter drivers of the repository: a second
 			// git command with the same fixed prefix and environment.
 			if strings.Contains(tt.lua, "git.blame(") {
 				if len(runs) != 2 || !slices.Equal(runs[0].Argv, filtersArgv) || runs[0].Opts.Env["GIT_CONFIG_NOSYSTEM"] != "1" {
@@ -125,7 +125,7 @@ say(git.commit("/w", "abc"))`)
 	})
 }
 
-// TestGitRootBranchFallbackWithoutBinary is binding (AMENDMENTS C28).
+// TestGitRootBranchFallbackWithoutBinary is binding.
 func TestGitRootBranchFallbackWithoutBinary(t *testing.T) {
 	svc := &plugintest.FakeServices{GitRoots: map[string]string{"/repo": "/repo"}, Branches: map[string]string{"/repo": "main"}}
 	r, out := probe(t, rigOpts{noGit: true, services: svc}, `
@@ -223,7 +223,7 @@ func TestGitBranch(t *testing.T) {
 	}
 }
 
-// TestGitShowForBufferDecodes is binding (AMENDMENTS C22): the blob is decoded with the
+// TestGitShowForBufferDecodes is binding: the blob is decoded with the
 // encoding of the buffer, and its line ends are made LF.
 func TestGitShowForBufferDecodes(t *testing.T) {
 	tests := []struct {
@@ -364,7 +364,7 @@ func TestGitBlameErrors(t *testing.T) {
 	}
 }
 
-// TestGitBlameNeutralisesRepositoryFilters is the regression test of S19-1: `git blame` reads
+// TestGitBlameNeutralisesRepositoryFilters is the regression test for this: `git blame` reads
 // the work tree file (or the --contents text) through the clean filters that .gitattributes
 // assigns, and their commands come from the repository's config, so every filter the
 // config names is switched off on the command line.

@@ -16,17 +16,17 @@ import (
 
 // paintWelcome draws the welcome lines of l. The row at index sel is highlighted.
 // The screen covers the editor pane, so the explorer is not touched.
-func paintWelcome(g *grid.Grid, st style.Styles, l layout, sel int) {
+func paintWelcome(g *grid.Grid, st style.Styles, l frame.Layout, sel int) {
 	base, selected := style.Cell(st.Editor), style.Cell(st.Accent)
 	text, chip, dim := style.Cell(st.Editor), st.Overlay.Idle, style.Cell(st.Gutter)
 	for _, r := range l.Welcome {
 		switch r.Role {
-		case welcomeBlank:
-		case welcomeTitleRow:
+		case frame.WelcomeBlank:
+		case frame.WelcomeTitleRow:
 			g.Put(r.X, r.Y, g.Width(), r.Text, text)
-		case welcomeSubtitle, welcomeHeadingRow:
+		case frame.WelcomeSubtitle, frame.WelcomeHeadingRow:
 			g.Put(r.X, r.Y, g.Width(), r.Text, dim)
-		case welcomeDoorRow, welcomeRecentRow:
+		case frame.WelcomeDoorRow, frame.WelcomeRecentRow:
 			rowStyle := base
 			if r.Item == sel {
 				rowStyle = selected
@@ -37,7 +37,7 @@ func paintWelcome(g *grid.Grid, st style.Styles, l layout, sel int) {
 			switch {
 			case r.Item == sel:
 				keyStyle = rowStyle
-			case r.Role == welcomeRecentRow:
+			case r.Role == frame.WelcomeRecentRow:
 				keyStyle = dim
 			}
 			g.Put(r.KeyX, r.Y, g.Width(), r.Key, keyStyle)

@@ -3,10 +3,10 @@ package app
 import "github.com/tbxark/gvim/config"
 
 // sessionPlan says what a launch does with the saved session and with the
-// unsaved text the session keeps. gvim is a direct editor: one process, one
-// session directory, no daemon and no per-buffer hot-exit store, so Fresh's
-// launch modes map onto the session file gvim already writes (session/ and
-// internal/restore) rather than onto a daemon.
+// unsaved text the session keeps. gvim has one session directory per workspace and
+// no per-buffer hot-exit store, so Fresh's launch modes map onto the session file
+// gvim already writes (session/ and internal/restore). A daemon workspace has its
+// own session directory and capture path (workspace_capture.go).
 //
 // The three config keys involved are editor.restore_previous_session,
 // editor.skip_session_restore_when_files_passed and editor.hot_exit, and the

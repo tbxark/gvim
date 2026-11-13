@@ -113,13 +113,13 @@ T.spy(b:del(), b:active())`)
 		{"a bad when is invalid", `T.spy(gvim.err_code(select(2, gvim.keymap.set("a", "save", { when = { "no way" } }))))`, "invalid"},
 		{"a wrong action type raises", `T.spy((pcall(gvim.keymap.set, "a", 5)))`, "false"},
 		{"a wrong option type raises", `T.spy((pcall(gvim.keymap.set, "a", "save", { args = 5 })))`, "false"},
-		{"del of an unbound chord is true (FINAL 5.4)", `T.spy(gvim.keymap.del("ctrl+q"))`, "true"},
+		{"del of an unbound chord is true", `T.spy(gvim.keymap.del("ctrl+q"))`, "true"},
 		{"del in an undefined mode is not found", `T.spy(gvim.err_code(select(2, gvim.keymap.del("ctrl+q", { mode = "nope" }))))`, "not_found"},
 	})
 }
 
 // A chord that names no key is "invalid" where the plugin can see it, from the keymap's own
-// verdict (Services.ValidateChord), for set, del, mode bindings and command keys (S14-2).
+// verdict (Services.ValidateChord), for set, del, mode bindings and command keys.
 func TestKeymapRejectsUnknownKeys(t *testing.T) {
 	keysRows(t, []struct{ name, lua, want string }{
 		{"set", `T.spy(gvim.err_code(select(2, gvim.keymap.set("ctrl+bogus", "save"))))`, "invalid"},

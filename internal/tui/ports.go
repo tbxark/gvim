@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -22,6 +23,10 @@ import (
 // them. Concrete domain types satisfy them through the adapters in
 // internal/app, and test fakes implement them directly. ui does not import
 // the concrete finder, fsops, lsp or markdown packages.
+
+// TabInfo is one open tab as the editor port reports it. The frame kit places the strip
+// with the same type (frame.TabInfo), and the app fills it.
+type TabInfo = frame.TabInfo
 
 // EditorState is what the root model needs from the editor. The app adapter
 // wraps *editor.Editor and maps editor.Tab to TabInfo.
@@ -36,6 +41,9 @@ type EditorState interface {
 	Active() Document // the active document, or nil when no tab is open (the welcome screen shows)
 	Tabs() []TabInfo
 	Status() string
+	// QuitNeedsConfirm reports that the quit action wants a confirmation even when no
+	// tab has unsaved changes (editor.confirm_quit).
+	QuitNeedsConfirm() bool
 	SetCursor(p buffer.Pos, extend bool)
 	ExtendSelection(p buffer.Pos, u editor.Unit)
 	ScrollBy(rows int)
@@ -187,9 +195,8 @@ type FileIndex interface {
 	Close()
 }
 
-// FileRanker scores paths for the palette and the browser filter. The fuzzy
-// scorer provides it (planned, see fuzzy). Nil leaves the palette's file rows
-// unranked.
+// FileRanker scores paths for the palette and the browser filter. The app's
+// fuzzy-backed ranker provides it. Nil leaves the palette's file rows unranked.
 type FileRanker interface {
 	Rank(query string, files []string, limit int) []Ranked
 }
@@ -201,7 +208,7 @@ type Ranked struct {
 	Indexes []int
 }
 
-// FileOps is the file-operation surface (fsops, planned). Nil until P6.
+// FileOps is the file-operation surface that the app backs with fsops.
 type FileOps interface {
 	CreateFile(ctx context.Context, dir, name string) (string, error)
 	Rename(ctx context.Context, path, newName string) (string, error)
@@ -627,6 +634,9 @@ type Dialogs interface {
 	// Unsaved asks what to do with the edits of the tab called name: Save,
 	// Discard or Cancel. The dialog is drawn with the overlay styles ov.
 	Unsaved(name string, tag any, ov style.Overlay) Overlay
+	// Quit asks whether to quit gvim when no tab has unsaved changes (editor.confirm_quit):
+	// Quit or Cancel, with Cancel the default.
+	Quit(tag any, ov style.Overlay) Overlay
 	// SaveAs asks for a path, prefilled with path. Save sends the path in Text.
 	// The dialog asks before it replaces an existing file, and Replace comes back
 	// when the user confirms.
@@ -714,7 +724,7 @@ type Deps struct {
 	// means commands.Commands(nil): the builtin table with the default keymap's
 	// shortcuts.
 	Commands []commands.Entry
-	Ops      FileOps    // nil until P6
+	Ops      FileOps    // nil: the explorer's file operations are not offered
 	LSP      LSPSession // nil disables the language-server features
 	// MarkdownTOC configures the Contents sidebar section from the
 	// plugins.markdown_toc entry of the config. Nil enables it with the

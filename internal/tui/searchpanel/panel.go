@@ -12,7 +12,9 @@ import (
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -387,7 +389,7 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		}
 		if msg.seq == p.preview.seq {
 			p.preview.loading = false
-			p.previewCancel = nil
+			p.cancelPreviewRead()
 			if msg.err != nil {
 				p.preview.err = msg.err.Error()
 				p.preview.result = PreviewResult{}
@@ -471,8 +473,7 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 	p.notice = ""
 	switch name {
 	case "esc":
-		p.cancelBatches()
-		p.open = false
+		p.Dismiss()
 		return nil, nil
 	case "tab":
 		p.cycleFocus(1)
@@ -578,13 +579,11 @@ func (p *Panel) resultsKey(name string) tea.Cmd {
 
 // exportCmd asks the root to show the current result set as a navigable list.
 func (p *Panel) exportCmd() tea.Cmd {
-	if p.git {
-		if len(p.fileMatches) == 0 {
-			p.errText = "No Git Grep results to list"
-			return nil
-		}
-	} else if len(p.fileMatches) == 0 {
+	if len(p.fileMatches) == 0 {
 		p.errText = "No matches to list"
+		if p.git {
+			p.errText = "No Git Grep results to list"
+		}
 		return nil
 	}
 	// The export opens its list over the panel's result view: an in-flight preview read
@@ -594,21 +593,13 @@ func (p *Panel) exportCmd() tea.Cmd {
 	return func() tea.Msg { return ExportMsg{Owner: owner} }
 }
 
-// ExportItems returns the current result set as flat list rows for the root's list
-// overlay: a file header before each file's matches, every match of every file, folded
-// or not. The panel keeps ownership of the result; the list is a read-only view that
-// jumps through the same positions.
-func (p *Panel) ExportItems() []ExportItem {
-	items, _ := p.ExportItemsCapped(0)
-	return items
-}
-
-// ExportItemsCapped is ExportItems with an independent bound on exported matches: it
-// stops after limit match rows (a file header is added only for files that contribute
-// one) and returns how many matches were left out. A limit <= 0 means no bound, which
-// is what ExportItems uses for the panel's existing callers. The root passes a cap so a
-// 10000-match project search cannot build an unbounded quickfix list; the omitted count
-// becomes the panel notice.
+// ExportItemsCapped returns the current result set as flat list rows for the root's list
+// overlay: a file header before each file's matches, then the matches, folded or not.
+// The panel keeps ownership of the result; the list is a read-only view that jumps
+// through the same positions. It stops after limit match rows (a file header is added
+// only for files that contribute one) and returns how many matches were left out. A
+// limit <= 0 means no bound. The root passes a cap so a 10000-match project search
+// cannot build an unbounded quickfix list; the omitted count becomes the panel notice.
 func (p *Panel) ExportItemsCapped(limit int) ([]ExportItem, int) {
 	if limit <= 0 {
 		limit = int(^uint(0) >> 1)
@@ -703,7 +694,7 @@ func (p *Panel) selectedMatch() (Match, FileMatches, bool) {
 	if len(p.rows) == 0 {
 		return Match{}, FileMatches{}, false
 	}
-	r := p.rows[clamp(p.selected, 0, len(p.rows)-1)]
+	r := p.rows[space.Clamp(p.selected, 0, len(p.rows)-1)]
 	if r.file < 0 || r.file >= len(p.fileMatches) {
 		return Match{}, FileMatches{}, false
 	}
@@ -905,13 +896,19 @@ func (p *Panel) scrollPreview(delta int) tea.Cmd {
 	}
 	target := p.previewVisibleStart() + delta
 	if limit := p.previewMaxStart(); p.preview.result.Total > 0 {
-		target = clamp(target, 0, limit)
+		target = space.Clamp(target, 0, limit)
 	} else {
 		target = max(target, 0)
 	}
 	if target == p.previewVisibleStart() {
 		return nil
 	}
+	return p.showPreviewAt(target)
+}
+
+// showPreviewAt scrolls the preview to target and refetches only when the window is
+// outside the cached one.
+func (p *Panel) showPreviewAt(target int) tea.Cmd {
 	p.preview.scrolled = true
 	p.preview.viewStart = target
 	h := p.previewPage()
@@ -927,18 +924,11 @@ func (p *Panel) scrollPreviewTo(first int) tea.Cmd {
 	if !p.wantsPreview() || p.preview.loading && len(p.preview.result.Lines) == 0 {
 		return nil
 	}
-	target := clamp(first, 0, p.previewMaxStart())
+	target := space.Clamp(first, 0, p.previewMaxStart())
 	if target == p.previewVisibleStart() {
 		return nil
 	}
-	p.preview.scrolled = true
-	p.preview.viewStart = target
-	h := p.previewPage()
-	r := p.preview.result
-	if r.Start <= target && target+h <= r.Start+len(r.Lines) {
-		return nil
-	}
-	return p.previewCmd()
+	return p.showPreviewAt(target)
 }
 
 // previewWheel scrolls the preview when the wheel notch is over its column.
@@ -1057,8 +1047,8 @@ func (p *Panel) requery() tea.Cmd {
 		return nil
 	}
 	p.loading = true
-	seq := p.seq
-	return tea.Tick(searchDebounce, func(time.Time) tea.Msg { return tickMsg{seq: seq, owner: p.owner} })
+	seq, owner := p.seq, p.owner
+	return tea.Tick(searchDebounce, func(time.Time) tea.Msg { return tickMsg{seq: seq, owner: owner} })
 }
 
 // ReSearch re-runs the current search immediately, without the debounce. The root uses
@@ -1124,31 +1114,30 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		cancel := make(chan struct{})
 		p.searchCancel = cancel
 		return func() tea.Msg {
-			if files != nil {
-				var st FileIndexState
-				req.Files, st = SnapshotWithState(files)
-				req.FilesKnown, req.FilesReady = st.Known, st.Ready
-				req.FilesUnknown, req.FilesIdle, req.FilesTruncated, req.FilesClosed = st.Unknown, st.Idle, st.Truncated, st.Closed
-				req.FilesError, req.FilesNotice = st.Error, st.Notice
-			}
-			req.Files = matcher.filter(req.Files)
+			req.attachFiles(files, matcher)
 			ch := bs.ProjectSearchBatches(req, cancel)
 			batch, ok := <-ch
 			return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok, owner: owner}
 		}
 	}
 	return func() tea.Msg {
-		if files != nil {
-			var st FileIndexState
-			req.Files, st = SnapshotWithState(files)
-			req.FilesKnown, req.FilesReady = st.Known, st.Ready
-			req.FilesUnknown, req.FilesIdle, req.FilesTruncated, req.FilesClosed = st.Unknown, st.Idle, st.Truncated, st.Closed
-			req.FilesError, req.FilesNotice = st.Error, st.Notice
-		}
-		req.Files = matcher.filter(req.Files)
+		req.attachFiles(files, matcher)
 		res, err := s.ProjectSearch(req)
 		return searchDoneMsg{seq: seq, result: res, err: err, owner: owner}
 	}
+}
+
+// attachFiles fills in the file index snapshot of the request, filtered by the glob. It
+// runs in the search command, so the update loop does no IO.
+func (r *SearchRequest) attachFiles(files Files, matcher *globMatcher) {
+	if files != nil {
+		var st FileIndexState
+		r.Files, st = SnapshotWithState(files)
+		r.FilesKnown, r.FilesReady = st.Known, st.Ready
+		r.FilesUnknown, r.FilesIdle, r.FilesTruncated, r.FilesClosed = st.Unknown, st.Idle, st.Truncated, st.Closed
+		r.FilesError, r.FilesNotice = st.Error, st.Notice
+	}
+	r.Files = matcher.filter(r.Files)
 }
 
 // waitBatch returns the command that reads the next batch of the live stream.
@@ -1174,7 +1163,7 @@ func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
 	}
 	p.batchCh = msg.ch
 	p.scanned, p.totalFiles = msg.batch.Scanned, msg.batch.Total
-	if p.pendingReset && msg.seq == p.seq {
+	if p.pendingReset {
 		// The first batch of a new search replaces the rows of the older result, so the
 		// stale rows never mix with the streamed ones.
 		p.fileMatches, p.rows, p.checked, p.expanded = nil, nil, nil, nil
@@ -1328,7 +1317,7 @@ func (p *Panel) resetRows() {
 func (p *Panel) rebuildRows() {
 	p.rows = p.rows[:0]
 	for i, f := range p.fileMatches {
-		p.rows = append(p.rows, panelRow{kind: rowFile, file: i, path: f.Name, count: len(f.Matches)})
+		p.rows = append(p.rows, panelRow{kind: rowFile, file: i, path: textsafe.Clean(f.Name), count: len(f.Matches)})
 		if i < len(p.expanded) && !p.expanded[i] {
 			continue
 		}
@@ -1340,41 +1329,17 @@ func (p *Panel) rebuildRows() {
 			})
 		}
 	}
-	p.selected = clamp(p.selected, 0, max(len(p.rows)-1, 0))
+	p.selected = space.Clamp(p.selected, 0, max(len(p.rows)-1, 0))
 	p.clampTop()
 }
 
-// matchText makes one match's line paintable: tabs become four spaces and the matched
-// runes are returned as the span to bold.
+// matchText makes one match's line paintable: format and control runes are removed (the
+// line is untrusted file text), tabs become four spaces, and the matched runes are
+// returned as the span to bold.
 func matchText(m Match) (text string, hlStart, hlEnd int) {
-	line := strings.TrimRight(m.Text, " ")
+	line, mapping := textsafe.CleanWithMap(strings.TrimRight(m.Text, " "))
 	start := max(m.Col-1, 0)
-	end := start + max(m.Len, 1)
-	var b strings.Builder
-	disp := 0
-	hlStart, hlEnd = -1, -1
-	for i, r := range []rune(line) {
-		if i == start {
-			hlStart = disp
-		}
-		if i == end {
-			hlEnd = disp
-		}
-		if r == '\t' {
-			b.WriteString("    ")
-			disp += 4
-			continue
-		}
-		b.WriteRune(r)
-		disp++
-	}
-	if hlStart < 0 {
-		hlStart = disp
-	}
-	if hlEnd < 0 {
-		hlEnd = disp
-	}
-	return b.String(), hlStart, hlEnd
+	return expandPreviewLine(line, textsafe.MapIndex(mapping, start), textsafe.MapIndex(mapping, start+max(m.Len, 1)))
 }
 
 // activate runs the selected row: a file row folds or unfolds its matches, and a match
@@ -1472,7 +1437,7 @@ func (p *Panel) ScopedReplaceRequest() (ReplaceRequest, bool) {
 		p.errText = "No matches to replace"
 		return ReplaceRequest{}, false
 	}
-	r := p.rows[clamp(p.selected, 0, len(p.rows)-1)]
+	r := p.rows[space.Clamp(p.selected, 0, len(p.rows)-1)]
 	f := p.fileMatches[r.file]
 	var selected []Position
 	if r.kind == rowFile {
@@ -1554,7 +1519,7 @@ func (p *Panel) toggleChecked() {
 	if p.git || len(p.rows) == 0 {
 		return
 	}
-	r := p.rows[clamp(p.selected, 0, len(p.rows)-1)]
+	r := p.rows[space.Clamp(p.selected, 0, len(p.rows)-1)]
 	if r.kind == rowFile {
 		on := !p.fileChecked(r.file)
 		for j := range p.checked[r.file] {
@@ -1632,10 +1597,9 @@ func (p *Panel) Stats() (matches, files int, truncated bool) {
 	return matches, files, p.truncated
 }
 
-// Query, Replacement and Glob report the field values, for the root's tests.
-func (p *Panel) Query() string       { return p.query.Value() }
-func (p *Panel) Replacement() string { return p.replace.Value() }
-func (p *Panel) Glob() string        { return p.glob.Value() }
+// Query and Glob report the field values.
+func (p *Panel) Query() string { return p.query.Value() }
+func (p *Panel) Glob() string  { return p.glob.Value() }
 
 // Move selects the row delta from the selection.
 func (p *Panel) Move(delta int) { p.move(delta) }
@@ -1652,7 +1616,7 @@ func (p *Panel) selectRow(i int) {
 		p.selected = 0
 		return
 	}
-	p.selected = clamp(i, 0, len(p.rows)-1)
+	p.selected = space.Clamp(i, 0, len(p.rows)-1)
 	p.clampTop()
 }
 
@@ -1669,7 +1633,7 @@ func (p *Panel) clampTop() {
 	if p.selected >= p.top+h {
 		p.top = p.selected - h + 1
 	}
-	p.top = clamp(p.top, 0, max(len(p.rows)-h, 0))
+	p.top = space.Clamp(p.top, 0, max(len(p.rows)-h, 0))
 }
 
 // resultsHeight is the number of result rows the current frame gives the panel. It is
@@ -1679,14 +1643,4 @@ func (p *Panel) resultsHeight() int {
 		return 0
 	}
 	return layoutFor(p.width, p.height, p.git).results
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }

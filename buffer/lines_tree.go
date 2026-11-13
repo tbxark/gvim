@@ -2,7 +2,7 @@ package buffer
 
 import "unicode/utf8"
 
-// Terminator flags of a document line (see AMENDMENTS C14). Base lines carry
+// Terminator flags of a document line. Base lines carry
 // their real terminator; literal lines carry the flag of the line they
 // replaced. eolDefault means "use the document's default EOL on save".
 const (

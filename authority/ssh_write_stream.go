@@ -137,8 +137,9 @@ while [ -L "$tgt" ]; do
     *) tgt=$(dirname "$tgt")/$l ;;
   esac
 done
+if [ -d "$tgt" ]; then echo "$tgt: is a directory" >&2; exit 2; fi
 td=$(dirname "$tgt") || exit 2
-tmp=$(mktemp "$td/.$(basename "$tgt").gvim-XXXXXX") || exit 2
+tmp=$(mktemp "$td/.$(basename "$tgt" | cut -c1-200).gvim-XXXXXX") || exit 2
 printf '%s\0%s\0' "$tmp" "$tgt"
 `
 

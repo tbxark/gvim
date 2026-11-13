@@ -3,7 +3,10 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/split"
 )
 
 // dropEdge is the part of a pane a dragged tab is over, as Fresh's tab drop zones: an
@@ -29,31 +32,31 @@ const dropThreshold = 3
 type tabZone struct {
 	pane int
 	edge dropEdge
-	area rect
+	area space.Rect
 }
 
 // dropEdges returns the edge of r that cell (x, y) is on and the part of r it tints.
 // Each edge takes a quarter of the extent, at least 3 columns or 2 rows, as Fresh does.
 // Edges come before the centre, and the left and right before the top and bottom.
-func dropEdges(r rect, x, y int) (dropEdge, rect) {
+func dropEdges(r space.Rect, x, y int) (dropEdge, space.Rect) {
 	tx, ty := max(r.W/4, 3), max(r.H/4, 2)
 	rx, ry := x-r.X, y-r.Y
 	switch {
 	case rx < tx:
-		return dropLeft, rect{X: r.X, Y: r.Y, W: min(tx, r.W), H: r.H}
+		return dropLeft, space.Rect{X: r.X, Y: r.Y, W: min(tx, r.W), H: r.H}
 	case rx >= r.W-tx:
-		return dropRight, rect{X: r.X + max(r.W-tx, 0), Y: r.Y, W: min(tx, r.W), H: r.H}
+		return dropRight, space.Rect{X: r.X + max(r.W-tx, 0), Y: r.Y, W: min(tx, r.W), H: r.H}
 	case ry < ty:
-		return dropTop, rect{X: r.X, Y: r.Y, W: r.W, H: min(ty, r.H)}
+		return dropTop, space.Rect{X: r.X, Y: r.Y, W: r.W, H: min(ty, r.H)}
 	case ry >= r.H-ty:
-		return dropBottom, rect{X: r.X, Y: r.Y + max(r.H-ty, 0), W: r.W, H: min(ty, r.H)}
+		return dropBottom, space.Rect{X: r.X, Y: r.Y + max(r.H-ty, 0), W: r.W, H: min(ty, r.H)}
 	}
 	return dropCenter, r
 }
 
 // dragTabZone finds the drop zone under the pointer while a tab is dragged off the
 // strip. The pointer on the strip, or within dropThreshold of the press, has none.
-func (m *Model) dragTabZone(l layout, mo tea.Mouse) {
+func (m *Model) dragTabZone(l frame.Layout, mo tea.Mouse) {
 	td := m.drag.tab
 	td.zone = nil
 	if abs(mo.X-td.startX) <= dropThreshold && abs(mo.Y-td.startY) <= dropThreshold {
@@ -91,9 +94,9 @@ func (m *Model) dropTab(td *tabDrag) {
 	pressedIn := z.pane >= 0 && z.pane < len(leaves) && leaves[z.pane] == m.splits.Focus
 	m.focusPane(z.pane)
 	if z.edge != dropCenter {
-		dir := sideBySide
+		dir := split.SideBySide
 		if z.edge == dropTop || z.edge == dropBottom {
-			dir = stacked
+			dir = split.Stacked
 		}
 		if msg := m.trySplit(dir); msg != "" {
 			m.notice = msg

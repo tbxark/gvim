@@ -29,7 +29,7 @@ func mtimeNano(ds diskState) int64 {
 	return ds.Mtime.UnixNano()
 }
 
-// restoring reports whether stashed edits are waiting to be put back into d.
+// Restoring reports whether stashed edits are waiting to be put back into d.
 func (d *Document) Restoring() bool {
 	return d.large != nil && d.large.Restore != nil && d.large.RestoreErr == nil
 }
@@ -103,7 +103,7 @@ func (d *Document) FailedStash() (st OverlayStash, ok bool) {
 	return OverlayStash{}, false
 }
 
-// stashUnsaved writes the unsaved edits of d beside the session as an overlay stash and
+// StashUnsaved writes the unsaved edits of d beside the session as an overlay stash and
 // returns the sentence that tells the user where they are, or why they are not kept.
 // It writes nothing, and returns "", for a document without edits and one that has no
 // stash directory. A document whose edits were stashed already at this version gets
@@ -141,7 +141,7 @@ func (d *Document) refuseWhileRestoring(a Action) error {
 	return nil
 }
 
-// refuseEditWhileRestoring returns ErrRestoring for a change to the text of d that does
+// RefuseEditWhileRestoring returns ErrRestoring for a change to the text of d that does
 // not go through Do (a replacement, a shell filter, an edit from the language server)
 // while its stash waits for the index. what names the change in the message.
 func (d *Document) RefuseEditWhileRestoring(what string) error {

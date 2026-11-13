@@ -34,18 +34,13 @@ func SaveSession(ed *editor.Editor, dir string, st tui.ExplorerState) error {
 	return WriteSession(ed, dir, st, nil)
 }
 
-// WriteSessionWithLayout is WriteSession with the pane layout of the workspace. It
-// saves the layout only when every pane still names a file of the session with the
-// same path, so a stale or hand-edited layout never attaches a pane to the wrong
-// file. A nil layout keeps the single-pane behavior.
-func WriteSessionWithLayout(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState, layout *session.SplitLayout) error {
-	return WriteSession(ed, dir, st, kept, layout)
-}
-
 // WriteSession writes the session as SaveSession does, and lists the kept files after
 // the open tabs. A kept file is one whose unsaved text restoreSession could not put
 // back. Its stash file is named in the new session, so the save does not remove it,
-// and the next start tries to restore it again.
+// and the next start tries to restore it again. The optional layout is the pane layout
+// of the workspace: it is saved only when every pane still names a file of the session
+// with the same path, so a stale or hand-edited layout never attaches a pane to the
+// wrong file. Without one the session keeps the single-pane behavior.
 func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState, layouts ...*session.SplitLayout) error {
 	tabs := ed.Tabs()
 	// The MRU order must be read before the save loop activates every tab; that loop
@@ -178,7 +173,8 @@ func RestoreSessionAccess(ed *editor.Editor, dir string, s session.Session, exis
 // edits of a file and the unnamed buffers with text. It is the restore of
 // editor.restore_previous_session=false: the layout, the clean tabs and the
 // explorer state are skipped, but in-progress work comes back. The saved active
-// tab is not applied, because most of the saved tabs are not opened.
+// tab is applied when it is one of the tabs that come back; otherwise the first one
+// that does is active.
 func RestoreHotExit(ed *editor.Editor, dir string, s session.Session) []Unrestored {
 	return restoreHotExitFiles(ed, dir, s, nil)
 }
@@ -192,8 +188,11 @@ func RestoreHotExitAccess(ed *editor.Editor, dir string, s session.Session, exis
 // restoreHotExitFiles opens only the tabs that carry unsaved text.
 func restoreHotExitFiles(ed *editor.Editor, dir string, s session.Session, exists func(path string) bool) []Unrestored {
 	var hot session.Session
-	for _, f := range s.Files {
+	for i, f := range s.Files {
 		if f.StashFile != "" || f.OverlayFile != "" {
+			if i == s.Active {
+				hot.Active = len(hot.Files)
+			}
 			hot.Files = append(hot.Files, f)
 		}
 	}

@@ -56,7 +56,7 @@ type SaveResult struct {
 // Err returns the error of the save, or nil when the file was written.
 func (r SaveResult) Err() error { return r.err }
 
-// planSave prepares the save of d to path: it applies the save-time options to the
+// PlanSave prepares the save of d to path: it applies the save-time options to the
 // buffer and encodes the text. A text the codec cannot hold makes a job that fails.
 // The job checks the disk state of path, as a save to the document's own file does.
 func (d *Document) PlanSave(path string, o Settings) SaveJob {

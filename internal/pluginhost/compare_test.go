@@ -52,7 +52,7 @@ func TestPluginEditorDiffSourceRefusesABinary(t *testing.T) {
 	apptest.Must(t, os.WriteFile(path, []byte("a\x00b\x00c"), 0o644))
 	ed := editor.New(editor.Options{Empty: true})
 	apptest.Must(t, ed.OpenFile(path))
-	pe := newPluginEditor(ed, func(*editor.Document) {})
+	pe := newPluginEditor(ed)
 	id := pe.ListBuffers()[0].ID
 	src, err := pe.DiffSource(id)
 	if pluginapi.CodeOf(err) != pluginapi.CodeInvalid {

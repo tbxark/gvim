@@ -93,8 +93,8 @@ func TestRegistryLocalDiscoveryIgnoresRemoteWorkspaces(t *testing.T) {
 }
 
 // TestRegistryAuthoritySpecVersionTolerance checks old/foreign files: a v2 file without the
-// field loads as local (empty spec), a v1 file loads unchanged, and a file with a control
-// character in the spec is refused, not silently accepted.
+// field loads as local (empty spec), and a file with a control character in the spec is
+// refused, not silently accepted.
 func TestRegistryAuthoritySpecVersionTolerance(t *testing.T) {
 	reg := newRegistry(t)
 	plain := WorkspaceFile{
@@ -105,14 +105,6 @@ func TestRegistryAuthoritySpecVersionTolerance(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspaceFileAt(t, reg, plain)
-	v1 := WorkspaceFile{
-		Version: 1, StableID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		Label: "v1", Root: filepath.Join(t.TempDir(), "v1root"), LastFocusedAt: 2,
-	}
-	if err := os.MkdirAll(v1.Root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	workspaceFileAt(t, reg, v1)
 	list, problems := reg.List()
 	if len(problems) != 0 {
 		t.Fatalf("problems = %v", problems)
@@ -123,9 +115,6 @@ func TestRegistryAuthoritySpecVersionTolerance(t *testing.T) {
 	}
 	if spec, ok := seen[plain.StableID]; !ok || spec != "" {
 		t.Fatalf("old v2 workspace = %v, want empty spec", seen)
-	}
-	if spec, ok := seen[v1.StableID]; !ok || spec != "" {
-		t.Fatalf("v1 workspace = %v, want empty spec", seen)
 	}
 	bad := WorkspaceFile{
 		Version: WorkspaceVersion, StableID: "cccccccccccccccccccccccccccccccc",

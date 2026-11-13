@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -96,5 +97,23 @@ func TestFieldCtrlKeyKeepsUntouchedPrefill(t *testing.T) {
 	f.key(key("z"))
 	if got := f.value(); got != "abcz" {
 		t.Fatalf("value = %q, want abcz", got)
+	}
+}
+
+// TestFieldKeepsContextAroundAMidTextCaret checks that a long value with the caret in
+// the middle shows the text on both sides of the caret, with the caret inside the field.
+func TestFieldKeepsContextAroundAMidTextCaret(t *testing.T) {
+	t.Parallel()
+	f := newField("0123456789abcdefghij0123456789")
+	for range 12 {
+		f.key(tea.KeyPressMsg{Code: tea.KeyLeft})
+	}
+	g := grid.New(14, 1)
+	cx, ok := f.draw(g, 0, 0, 14, testOv.Idle)
+	if !ok || cx < 0 || cx >= 14 {
+		t.Fatalf("caret %d ok=%v, want it inside the field", cx, ok)
+	}
+	if got := g.Plain()[0]; !strings.Contains(got, "89ab") || !strings.Contains(got, "ij0") {
+		t.Fatalf("field %q shows no text on one side of the caret", got)
 	}
 }

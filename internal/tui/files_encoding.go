@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 )
 
@@ -118,21 +119,21 @@ func (m *Model) openLineEndings() {
 func (m *Model) statusSegmentClick(i int) tea.Cmd {
 	m.focusEditor()
 	switch i {
-	case statusSegmentEOL:
+	case frame.StatusSegmentEOL:
 		return m.dispatch(Command{Action: "set_line_ending"})
-	case statusSegmentEncoding:
+	case frame.StatusSegmentEncoding:
 		return m.dispatch(Command{Action: "set_encoding"})
-	case statusSegmentLanguage:
+	case frame.StatusSegmentLanguage:
 		return m.dispatch(Command{Action: "set_language"})
-	case statusSegmentPosition:
+	case frame.StatusSegmentPosition:
 		return m.dispatch(Command{Action: "goto_line"})
-	case statusSegmentLSP:
+	case frame.StatusSegmentLSP:
 		return m.dispatch(Command{Action: "show_lsp_status"})
-	case statusSegmentTrust:
+	case frame.StatusSegmentTrust:
 		return m.openWorkspaceTrust()
-	case statusSegmentUpdate:
+	case frame.StatusSegmentUpdate:
 		return m.dispatch(Command{Action: "show_update_output"})
-	case statusSegmentHexView:
+	case frame.StatusSegmentHexView:
 		return m.toggleHexView()
 	}
 	return nil

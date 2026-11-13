@@ -295,7 +295,7 @@ func TestDockSearchHistoryIsSharedAndPersisted(t *testing.T) {
 	legacy.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
 	legacyStarter := &fakeStarter{term: newFakeTerm()}
 	legacy.SetPorts(Ports{Starter: legacyStarter})
-	legacy.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}})
+	legacy.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"out"}}}})
 	if len(legacy.history.entries()) != 0 {
 		t.Fatalf("legacy record history = %v, want empty", legacy.history.entries())
 	}
@@ -336,5 +336,29 @@ func TestDockSearchHistoryMergeBoundsAndCleans(t *testing.T) {
 	}
 	if got := tabs.SearchHistory(); got[len(got)-1] != fmt.Sprintf("m%d", terminal.MaxSearchHistoryEntries+9) {
 		t.Fatalf("merged newest = %q", got[len(got)-1])
+	}
+}
+
+// Losing the focus closes the search input but cannot run a search, so a committed
+// search the re-wrap made stale must stay flagged for the next Sync.
+func TestFocusLossKeepsAStaleSearchForSync(t *testing.T) {
+	t.Parallel()
+	var p Panel
+	p.SetHost(Host{
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 4 },
+		Focus:       func() {},
+	})
+	p.Restore(terminal.SavedTab{Rows: []string{"alpha", "beta"}})
+	p.scroll.search = "alpha"
+	p.scroll.searchStale = true
+	p.scroll.typing = true
+	p.focus = true
+	p.SetFocus(false)
+	if p.scroll.typing {
+		t.Fatal("focus loss left the search input open")
+	}
+	if p.Sync() == nil {
+		t.Fatal("Sync did not re-run the stale committed search")
 	}
 }

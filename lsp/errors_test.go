@@ -19,9 +19,6 @@ func TestNotInstalledMessageWithoutAHintNamesTheConfigKey(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "lsp.nim.command") {
 		t.Errorf("message %q does not name the config key", got)
 	}
-	if cmd, install := err.MissingServer(); cmd != "nimlangserver" || install != "" {
-		t.Errorf("MissingServer = %q, %q", cmd, install)
-	}
 }
 
 func TestTailBufferKeepsTheLastLines(t *testing.T) {

@@ -21,6 +21,11 @@ func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) tui.Overlay {
 	return dialog.NewUnsavedChanges(time.Now, name, tag, ov)
 }
 
+// Quit asks whether to quit when nothing is unsaved (editor.confirm_quit).
+func (dialogPort) Quit(tag any, ov style.Overlay) tui.Overlay {
+	return dialog.NewConfirmQuit(time.Now, tag, ov)
+}
+
 // Error shows message with one OK button.
 func (dialogPort) Error(message string, tag any, ov style.Overlay) tui.Overlay {
 	return dialog.NewErrorDialog(time.Now, message, tag, ov)

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"maps"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -321,12 +322,10 @@ func (p *themeEditorPage) preview() {
 }
 
 // previewValue previews a candidate colour on one key without recording it as an
-// edit: the colour picker drives this while its selection moves.
+// edit: the colour picker drives this while its selection moves. The plugins are not
+// told (theme_changed is for an applied colour, not for each arrow press).
 func (p *themeEditorPage) previewValue(key theme.Key, value theme.Color) {
-	values := make(map[string]theme.Color, len(p.values)+1)
-	for name, c := range p.values {
-		values[name] = c
-	}
+	values := maps.Clone(p.values)
 	values[key.Name()] = value
 	working, err := theme.WithValues(p.base, values)
 	if err != nil {
@@ -335,12 +334,13 @@ func (p *themeEditorPage) previewValue(key theme.Key, value theme.Color) {
 	}
 	p.working = working
 	p.model.theme = working
-	p.model.rebuildTheme()
+	p.model.rebuildStyles()
 	p.layout()
 }
 
 // reapplyValues puts the frame and the editor rows back on the recorded edits,
-// dropping a picker preview that was not applied.
+// dropping a picker preview that was not applied. The plugins never saw the preview, so
+// they are not told.
 func (p *themeEditorPage) reapplyValues() {
 	working, err := theme.WithValues(p.base, p.values)
 	if err != nil {
@@ -348,7 +348,7 @@ func (p *themeEditorPage) reapplyValues() {
 	}
 	p.working = working
 	p.model.theme = working
-	p.model.rebuildTheme()
+	p.model.rebuildStyles()
 	p.layout()
 }
 

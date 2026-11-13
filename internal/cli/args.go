@@ -80,7 +80,7 @@ func ParseTargets(args []string, stat StatFunc) (Targets, error) {
 	}
 	if t.Remote != nil {
 		// One workspace is one backend: a remote launch opens no local directory
-		// and no local files in this slice.
+		// and no local files.
 		if len(t.Files) > 0 || t.Root != "" {
 			return Targets{}, errors.New("a remote target cannot be combined with local directories or files")
 		}

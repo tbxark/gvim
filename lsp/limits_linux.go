@@ -11,14 +11,19 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
+
+// cgroupSeq numbers the cgroups of this process, one per started server.
+var cgroupSeq atomic.Uint64
 
 // cgroupBaseEnv overrides the cgroup v2 base the limits are created under, for tests and
 // for a user whose delegation lives elsewhere.
 const cgroupBaseEnv = "GVIM_CGROUP_BASE"
 
-// PlanLimits builds the Linux plan for a server's process limits: user-delegated cgroup v2
-// for memory.max and cpu.max (the child is moved in right after Start), and the sh ulimit -v
+// PlanLimits builds the Linux plan for a server's process limits: a user-delegated cgroup v2
+// of its own for memory.max and cpu.max (the child is moved in right after Start, and Release
+// removes the cgroup once it has exited), and the sh ulimit -v
 // wrapper for memory when no cgroup is delegated. A CPU percent cap has no rlimit (an rlimit
 // CPU limit is seconds), so without a cgroup it is recorded as not applied.
 func PlanLimits(l ProcessLimits) LimitPlan {
@@ -54,6 +59,7 @@ func PlanLimits(l ProcessLimits) LimitPlan {
 			plan.AfterStart = func(pid int) error {
 				return os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0o644)
 			}
+			plan.Release = func() { _ = os.Remove(dir) }
 		} else {
 			_ = os.Remove(dir)
 		}
@@ -77,8 +83,9 @@ func PlanLimits(l ProcessLimits) LimitPlan {
 	return plan
 }
 
-// cgroupDir makes the per-editor cgroup of a writable user-delegated cgroup v2 base, or
-// reports that none is available. The locations are Fresh's.
+// cgroupDir makes a cgroup for one server under a writable user-delegated cgroup v2 base,
+// or reports that none is available. Each server gets its own, so the limits of one never
+// apply to another. The locations of the base are Fresh's.
 func cgroupDir() (string, bool) {
 	base := os.Getenv(cgroupBaseEnv)
 	if base == "" {
@@ -102,7 +109,7 @@ func cgroupDir() (string, bool) {
 			return "", false
 		}
 	}
-	dir := filepath.Join(base, fmt.Sprintf("gvim-lsp-%d", os.Getpid()))
+	dir := filepath.Join(base, fmt.Sprintf("gvim-lsp-%d-%d", os.Getpid(), cgroupSeq.Add(1)))
 	if err := os.Mkdir(dir, 0o755); err != nil && !os.IsExist(err) {
 		return "", false
 	}
@@ -115,7 +122,7 @@ func totalMemoryMB() (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("reading /proc/meminfo: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return parseMemTotal(f)
 }
 

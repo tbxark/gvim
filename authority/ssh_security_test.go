@@ -124,11 +124,11 @@ func TestKnownHostsPolicyTransitions(t *testing.T) {
 		t.Fatalf("changed key rewrote known_hosts: %q", data)
 	}
 
-	// off is refused before dialing, with the documented message.
+	// off is not a policy: it is refused before dialing.
 	offSrv := newFakeSSH(t)
 	off := securityOptions(offSrv, filepath.Join(t.TempDir(), "known_hosts"))
 	off.KnownHostsPolicy = "off"
-	if _, err := connectSecurity(t, off); err == nil || !strings.Contains(strings.ToLower(err.Error()), "refused") {
+	if _, err := connectSecurity(t, off); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("off policy error = %v", err)
 	}
 }

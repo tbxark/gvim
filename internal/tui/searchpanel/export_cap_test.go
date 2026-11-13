@@ -38,3 +38,9 @@ func TestExportItemsCapped(t *testing.T) {
 		t.Fatalf("limit 0 = %d rows omitted %d, want all 5", len(again), omitted)
 	}
 }
+
+// ExportItems is the unbounded export, which only the tests use.
+func (p *Panel) ExportItems() []ExportItem {
+	items, _ := p.ExportItemsCapped(0)
+	return items
+}

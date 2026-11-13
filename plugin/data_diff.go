@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"strings"
 
 	lua "github.com/yuin/gopher-lua"
 
@@ -167,6 +168,16 @@ func checkDiffText(c *awaitCall, name, s string) bool {
 		c.Fail(pluginapi.Errf(pluginapi.CodeTooLarge, "diff.%s: text larger than %d bytes", name, maxDiffTextBytes))
 		return false
 	}
+	return checkDiffTextLines(c, name, s)
+}
+
+// checkDiffTextLines refuses a text of more than maxDiffTextLines lines: the Work would
+// split it into a string per line, which neither the slice budget nor the heap guard bounds.
+func checkDiffTextLines(c *awaitCall, name, s string) bool {
+	if strings.Count(s, "\n") >= maxDiffTextLines {
+		c.Fail(pluginapi.Errf(pluginapi.CodeTooLarge, "diff.%s: more than %d lines per side", name, maxDiffTextLines))
+		return false
+	}
 	return true
 }
 
@@ -209,6 +220,9 @@ func awaitDiffBuffer(c *awaitCall) {
 	}
 	if len(snapshot) > maxDiffTextBytes {
 		c.Fail(pluginapi.Errf(pluginapi.CodeTooLarge, "diff.buffer: buffer larger than %d bytes", maxDiffTextBytes))
+		return
+	}
+	if !checkDiffTextLines(c, "buffer", snapshot) {
 		return
 	}
 	svc, old := c.r.svc, string(text)

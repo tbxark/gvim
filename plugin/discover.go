@@ -18,7 +18,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Limits of what the loader reads from a plugin directory (AMENDMENTS C20: 256 KiB per
+// Limits of what the loader reads from a plugin directory (256 KiB per
 // .lua file, 1 MiB for plugin.json, 64 .lua files and 5 MiB per plugin). Other files of a
 // plugin directory are never read by the loader and do not count: a plugin may ship data.
 const (
@@ -42,7 +42,7 @@ var compileHook func(plugin string)
 // lead out) and returns the function that releases it. It is only called from Work.
 type OpenFunc func(dir string) (fsys fs.FS, closeFn func(), err error)
 
-// LoaderOptions configure plugin discovery (FINAL 4). A nil Options.Loader means the
+// LoaderOptions configure plugin discovery. A nil Options.Loader means the
 // runtime discovers nothing: Start returns no Work and plugins are added with LoadPlugin.
 type LoaderOptions struct {
 	// Bundled holds the embedded plugins under plugins/<name>/ (nil: the binary's own).
@@ -94,7 +94,7 @@ func (l *LoaderOptions) openParent(dir string) (fs.FS, func(), error) {
 }
 
 // PluginSettings are the plugins.<name>.settings objects of the two config layers, kept
-// apart because the project layer is untrusted (AMENDMENTS C11).
+// apart because the project layer is untrusted.
 type PluginSettings struct {
 	User, Project map[string]any
 }
@@ -228,6 +228,8 @@ func (l *LoaderOptions) gather(ctx context.Context, osys hostos.OS, cfgDir strin
 			if !l.WorkspaceState {
 				c.readState(ctx, osys, cfgDir)
 			}
+		} else {
+			c.raw = nil // enabling reads the plugin again (scanOne); the sources would stay for nothing
 		}
 	}
 	return d
@@ -625,7 +627,7 @@ func (c *candidate) decide(cfg map[string]bool, st *pluginState) {
 	}
 }
 
-// compile compiles every readable .lua file (AMENDMENTS C20). It runs in Work. The
+// compile compiles every readable .lua file. It runs in Work. The
 // entry file's failure becomes err; failures of other files are kept in problems and
 // surface when the file is required, or abort a reload.
 func (c *candidate) compile() {

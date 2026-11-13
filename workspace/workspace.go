@@ -107,22 +107,13 @@ type recentFile struct {
 	Roots []string `json:"roots"`
 }
 
-// recentPath returns the recent list in the per-user state directory, moving
-// the old config-directory file on first use.
+// recentPath returns the recent list in the per-user state directory.
 func recentPath() (string, error) {
 	dir, err := config.StateDir()
 	if err != nil {
 		return "", fmt.Errorf("workspace: state dir: %w", err)
 	}
-	oldDir, err := config.Dir()
-	if err != nil {
-		return "", fmt.Errorf("workspace: config dir: %w", err)
-	}
-	path := filepath.Join(dir, "recent.json")
-	if err := config.MoveLegacyFile(filepath.Join(oldDir, "recent.json"), path); err != nil {
-		return "", fmt.Errorf("workspace: migrate recent list: %w", err)
-	}
-	return path, nil
+	return filepath.Join(dir, "recent.json"), nil
 }
 
 // load reads the stored root paths. A missing file is an empty list.

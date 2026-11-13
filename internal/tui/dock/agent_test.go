@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
@@ -78,14 +80,7 @@ func TestRestoredTerminalNeverStartsAndRestartsWithItsRecord(t *testing.T) {
 	t.Parallel()
 	starter := &fakeStarter{term: newFakeTerm()}
 	p := agentPanel(Effects{ResumeAgents: true}, starter)
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Cwd: "/ws",
-		Rows:       []string{"old output"},
-		LaunchArgv: []string{"claude", "--session-id", "s1"},
-		ResumeArgv: []string{"claude", "--resume", "s1"},
-		Agent:      "claude",
-		Ephemeral:  true,
-	})
+	p.Restore(terminal.SavedTab{Open: true, Cwd: "/ws", Rows: []string{"old output"}, LaunchArgv: []string{"claude", "--session-id", "s1"}, ResumeArgv: []string{"claude", "--resume", "s1"}, Agent: "claude", Ephemeral: true})
 	if len(starter.dirs) != 0 || len(starter.launches) != 0 {
 		t.Fatalf("restore started something: shell %v launches %+v", starter.dirs, starter.launches)
 	}
@@ -272,11 +267,11 @@ func TestAgentRestartUsesTheReportedDirectory(t *testing.T) {
 	// reported cwd for the restart/resume.
 	starter.term.cwd = "/reported"
 	st := tabs.SavedState()
-	if st.Cwd != "/reported" {
-		t.Fatalf("saved cwd = %q, want the terminal's reported directory", st.Cwd)
+	if activeSaved(st).Cwd != "/reported" {
+		t.Fatalf("saved cwd = %q, want the terminal's reported directory", activeSaved(st).Cwd)
 	}
-	if st.LaunchDir != "/chosen" {
-		t.Fatalf("saved launch dir = %q, want the chosen directory", st.LaunchDir)
+	if activeSaved(st).LaunchDir != "/chosen" {
+		t.Fatalf("saved launch dir = %q, want the chosen directory", activeSaved(st).LaunchDir)
 	}
 	if len(st.Tabs) != 1 || st.Tabs[0].LaunchDir != "/chosen" {
 		t.Fatalf("saved tabs = %+v, want the per-tab launch dir", st.Tabs)
@@ -323,51 +318,14 @@ func TestAgentRestartUsesTheReportedDirectory(t *testing.T) {
 	}
 }
 
-// TestLegacySavedStateLaunchDirFallsBackToCwd checks the migration: a record
-// without launch_dir (an older file) restarts its recorded agent in its saved cwd.
-func TestLegacySavedStateLaunchDirFallsBackToCwd(t *testing.T) {
-	t.Parallel()
-	starter := &fakeStarter{term: newFakeTerm()}
-	var legacy terminal.SavedState
-	record := `{"version":1,"cwd":"/legacy","launch_argv":["old-agent"],"agent":"a"}`
-	if err := json.Unmarshal([]byte(record), &legacy); err != nil {
-		t.Fatal(err)
-	}
-	if legacy.LaunchDir != "" {
-		t.Fatalf("legacy launch dir = %q, want empty", legacy.LaunchDir)
-	}
-	tabs := newAgentTabs(starter)
-	tabs.Restore(legacy)
-	if got := tabs.SavedState().LaunchDir; got != "/legacy" {
-		t.Fatalf("restored launch dir = %q, want the cwd fallback", got)
-	}
-	if cmd := tabs.Restart(); cmd == nil {
-		t.Fatal("restart returned no command")
-	} else {
-		tabs.Update(cmd())
-	}
-	if got := starter.launchDirs; !slices.Equal(got, []string{"/legacy"}) {
-		t.Fatalf("launch dirs = %v, want the legacy cwd", got)
-	}
-	if len(starter.launches) != 1 || !slices.Equal(starter.launches[0].Argv, []string{"old-agent"}) {
-		t.Fatalf("launches = %+v, want the recorded argv", starter.launches)
-	}
-}
-
 // TestRestoreClipsTheSavedLaunchDir bounds a hand-edited launch_dir on load, so a
 // corrupt record cannot pass an unbounded path to a start.
 func TestRestoreClipsTheSavedLaunchDir(t *testing.T) {
 	t.Parallel()
 	starter := &fakeStarter{term: newFakeTerm()}
 	tabs := newAgentTabs(starter)
-	tabs.Restore(terminal.SavedState{
-		Version:    terminal.SavedStateVersion,
-		Open:       true,
-		Cwd:        "/reported",
-		LaunchArgv: []string{"claude"},
-		LaunchDir:  "/" + strings.Repeat("a", maxSavedDirBytes+10),
-	})
-	if got := len(tabs.SavedState().LaunchDir); got != maxSavedDirBytes {
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Cwd: "/reported", LaunchArgv: []string{"claude"}, LaunchDir: "/" + strings.Repeat("a", maxSavedDirBytes+10)}}})
+	if got := len(activeSaved(tabs.SavedState()).LaunchDir); got != maxSavedDirBytes {
 		t.Fatalf("restored launch dir length = %d, want the bound %d", got, maxSavedDirBytes)
 	}
 }
@@ -422,8 +380,8 @@ func TestSourceSurvivesTheSavedStateRoundTrip(t *testing.T) {
 	}, "tmux:work", "/chosen")
 	tabs.Update(cmd())
 	st := tabs.SavedState()
-	if st.Source != "tmux:default/work" || len(st.Tabs) != 1 || st.Tabs[0].Source != "tmux:default/work" {
-		t.Fatalf("saved source = %q tabs %+v", st.Source, st.Tabs)
+	if activeSaved(st).Source != "tmux:default/work" || len(st.Tabs) != 1 || st.Tabs[0].Source != "tmux:default/work" {
+		t.Fatalf("saved source = %q tabs %+v", activeSaved(st).Source, st.Tabs)
 	}
 	restored := newAgentTabs(starter)
 	restored.Restore(st)
@@ -441,4 +399,74 @@ func TestSourceSurvivesTheSavedStateRoundTrip(t *testing.T) {
 	if got := starter.launchDirs; len(got) != 2 || got[1] != "/chosen" {
 		t.Fatalf("restart dirs = %v, want the chosen directory", got)
 	}
+}
+
+// The agent starts below are exercised by tests only: the picker starts agents
+// through StartAgentChoiceAt.
+
+// StartAgent starts a configured agent preset in the dock. It reports whether the
+// name is a configured agent; a miss is a status notice. The session terminal is
+// ephemeral and records the launch and resume argv, so Restart can rejoin it.
+func (p *Panel) StartAgent(name string) (tea.Cmd, bool) {
+	for _, agent := range p.effects.Agents {
+		if agent.Name != name {
+			continue
+		}
+		dir := ""
+		if p.host.RootDir != nil {
+			dir = p.host.RootDir()
+		}
+		record := terminal.Launch{Argv: agent.Argv, Agent: agent.Name, ResumeArgv: agent.ResumeArgv, Ephemeral: true}
+		p.open = true
+		p.focus = false
+		return p.launchProgram(dir, record.Argv, record, true), true
+	}
+	p.notice = dockText("gvim.dock.no_agent", "No terminal agent is configured under that name.")
+	return nil, false
+}
+
+// StartAgent starts a configured agent in a new tab and makes it active. It
+// reports whether name is configured. The agent session is ephemeral and records
+// its launch and resume argv, so the tab's Restart can rejoin it.
+func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
+	found := false
+	for _, a := range t.effects.Agents {
+		if a.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	if len(t.tabs) >= MaxTerminalTabs {
+		if t.host.Notice != nil {
+			t.host.Notice(dockTextVars("gvim.dock.tab_limit_max", "Terminal: the tab limit (%{max}) is reached", map[string]any{"max": MaxTerminalTabs}))
+		}
+		return nil, false
+	}
+	if prev := t.Active(); prev != nil {
+		prev.SetFocus(false)
+	}
+	p := t.newPanel()
+	t.tabs = append(t.tabs, p)
+	t.names = append(t.names, name)
+	t.ids = append(t.ids, t.newID())
+	t.active = len(t.tabs) - 1
+	cmd, ok := p.StartAgent(name)
+	if cmd == nil {
+		return nil, ok
+	}
+	tab := t.tabs[len(t.tabs)-1]
+	return func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} }, ok
+}
+
+// StartAgentChoice starts a configured agent with the user's launch choice.
+// resume runs the agent's resume argv now (a user-initiated rejoin, so it is
+// allowed even with terminal.resume_agents off, which only gates automatic
+// restarts); otherwise the new-session argv runs. The tab is named after the
+// agent and the record keeps both argv lists, so a later Restart follows the
+// configured gate.
+func (t *Tabs) StartAgentChoice(name string, resume bool) (tea.Cmd, bool) {
+	return t.StartAgentChoiceAt(name, resume, t.LaunchDir())
 }

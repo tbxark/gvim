@@ -326,3 +326,23 @@ func TestSetupRemoteWatchWiresTheRootPorts(t *testing.T) {
 }
 
 var _ authority.FileSystem = (*fakeWatchFS)(nil)
+
+// TestRemoteWatchKeepsTheFirstEventAfterAReconnect checks a change that arrives on the new
+// carrier while a batch of the old carrier is still waiting for its quiet window is
+// delivered: the old batch is dropped, the new change is not dropped with it.
+func TestRemoteWatchKeepsTheFirstEventAfterAReconnect(t *testing.T) {
+	w := newRemoteWatch(t.Context(), nil)
+	t.Cleanup(func() { _ = w.Close() })
+	w.updates <- remoteWatchUpdate{gen: w.currentGen(), dir: "/old", file: "/old/a"}
+	time.Sleep(remoteWatchDebounce / 3) // let the collector take it into its pending batch
+	w.Reconnected()
+	w.updates <- remoteWatchUpdate{gen: w.currentGen(), dir: "/new", file: "/new/b"}
+	select {
+	case changed := <-w.Events():
+		if len(changed.Files) != 1 || changed.Files[0] != "/new/b" {
+			t.Fatalf("changed = %+v, want only /new/b", changed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the change on the new carrier was dropped")
+	}
+}

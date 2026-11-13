@@ -51,10 +51,7 @@ func installCmd(e *apiEnv) {
 	e.set(methods, "unregister", func(L *lua.LState) int {
 		h := checkObject(L, 1, kindCommand).(*cmdHandle)
 		if h.p.dead || h.p.commands[h.cmd.name] != h.cmd {
-			v, msg := errTuple(pluginapi.Errf(pluginapi.CodeNotFound, "command %q is not registered", h.cmd.name))
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeNotFound, "command %q is not registered", h.cmd.name))
 		}
 		h.p.unregisterCommand(h.cmd.name)
 		L.Push(lua.LTrue)
@@ -78,16 +75,10 @@ func installCmd(e *apiEnv) {
 			}
 		}
 		if err := bs.checkRoom(fresh); err != nil {
-			v, msg := errTuple(err)
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, err)
 		}
 		if err := p.addCommand(c); err != nil {
-			v, msg := errTuple(err)
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, err)
 		}
 		for _, k := range keys {
 			_ = bs.put(pluginapi.Binding{Chord: k, Action: c.id})
@@ -102,10 +93,7 @@ func installCmd(e *apiEnv) {
 	e.set(area, "unregister", func(L *lua.LState) int {
 		name := L.CheckString(1)
 		if _, ok := p.commands[name]; !ok || strings.HasPrefix(name, hiddenCommandPrefix) {
-			v, msg := errTuple(pluginapi.Errf(pluginapi.CodeNotFound, "command %q is not registered", name))
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeNotFound, "command %q is not registered", name))
 		}
 		p.unregisterCommand(name)
 		L.Push(lua.LTrue)
@@ -159,10 +147,7 @@ func installCmd(e *apiEnv) {
 			err = r.runAction(action, args)
 		}
 		if err != nil {
-			v, msg := errTuple(err)
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, err)
 		}
 		L.Push(lua.LTrue)
 		return 1
@@ -174,10 +159,7 @@ func installCmd(e *apiEnv) {
 			err = r.guard.DoAll(steps)
 		}
 		if err != nil {
-			v, msg := errTuple(err)
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return bufRet(L, err)
 		}
 		L.Push(lua.LTrue)
 		return 1

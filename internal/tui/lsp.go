@@ -434,21 +434,10 @@ func (m *Model) lspReconcile() tea.Cmd {
 		m.lspDropDiags(path)
 		m.lspDropData(path)
 	}
-	for _, path := range sortedKeys(s.tracks) {
+	for _, path := range slices.Sorted(maps.Keys(s.tracks)) {
 		cmds = append(cmds, m.lspSendFor(s.tracks[path]))
 	}
 	return tea.Batch(cmds...)
-}
-
-// sortedKeys returns the keys of the track map in order, so the commands start in
-// a stable order.
-func sortedKeys(m map[string]*lspTrack) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }
 
 // lspWatchActive notices an edit to the active document. An edit marks the track dirty and arms
@@ -575,7 +564,7 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		var cmds []tea.Cmd
-		for _, path := range sortedKeys(s.tracks) {
+		for _, path := range slices.Sorted(maps.Keys(s.tracks)) {
 			cmds = append(cmds, m.lspSendFor(s.tracks[path]))
 		}
 		cmds = append(cmds, m.lspDataArm(lspDataHints), m.lspDataArm(lspDataTokens), m.lspDataArm(lspDataFolds))
@@ -631,7 +620,7 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 			return cmd, true
 		}
 		if pick, ok := msg.Item.Data.(lspPick); ok {
-			return m.lspChosen(pick, msg.Index), true
+			return m.lspChosen(pick), true
 		}
 	case prompt.Done:
 		if tag, ok := msg.Tag.(lspRenameTag); ok {
@@ -708,7 +697,7 @@ func (m *Model) lspPollArm() tea.Cmd {
 func (m *Model) lspPoll() tea.Cmd {
 	s := &m.lsp
 	var paths []string
-	for _, path := range sortedKeys(s.tracks) {
+	for _, path := range slices.Sorted(maps.Keys(s.tracks)) {
 		if s.tracks[path].state == lspOpen {
 			paths = append(paths, path)
 		}
@@ -812,6 +801,7 @@ func (m *Model) lspDropDiags(path string) {
 	}
 	m.plugDiagnosticsChanged(path, old, nil)
 	delete(m.lsp.diags, path)
+	delete(m.lsp.diagVersion, path)
 }
 
 // lspServerDone applies the end of lsp_restart or lsp_stop. A restart closes every
@@ -968,13 +958,6 @@ func (m *Model) lspLoaded(msg lspLoadedMsg) {
 	m.focusEditor()
 }
 
-// lspHover shows the hover text in a popup, one row per line, and a line wider than the popup
-// over several rows, so that no message is cut. The diagnostics that cover the position come
-// first, with their severity and source, so one popup says both what the server knows of the
-// symbol and what it found wrong with it, as Fresh's hover does. Without any text there is a
-// notice.
-
-// lspPeek displays a preview card of the definition at the cursor.
 // peekLines is how many lines a definition peek shows: the line before the definition
 // and twelve from it.
 const peekLines = 13
@@ -998,6 +981,7 @@ func readPeekLines(path string, from, n int) []string {
 	return out
 }
 
+// lspPeek displays a preview card of the definition at the cursor.
 func (m *Model) lspPeek(r lspReplyMsg) {
 	if len(r.locs) == 0 {
 		m.notice = "No definition found to peek"
@@ -1032,6 +1016,11 @@ func (m *Model) lspPeek(r lspReplyMsg) {
 	m.lspPopup(title, items)
 }
 
+// lspHover shows the hover text in a popup, one row per line, and a line wider than the popup
+// over several rows, so that no message is cut. The diagnostics that cover the position come
+// first, with their severity and source, so one popup says both what the server knows of the
+// symbol and what it found wrong with it, as Fresh's hover does. Without any text there is a
+// notice.
 func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 	var items []popup.Item
 	width := popup.TextWidth(m.width)
@@ -1137,9 +1126,9 @@ func (m *Model) lspCodeActions(path string, actions []CodeAction) {
 	m.lspPopup("Code Actions", items)
 }
 
-// lspChosen runs the choice of a popup row. index is the row's position. It returns
-// the command the choice starts, if there is one.
-func (m *Model) lspChosen(pick lspPick, index int) tea.Cmd {
+// lspChosen runs the choice of a popup row. It returns the command the choice starts,
+// if there is one.
+func (m *Model) lspChosen(pick lspPick) tea.Cmd {
 	switch pick.ask {
 	case lspAskDefinition, lspAskImplementation, lspAskReferences, lspAskPeekDefinition:
 		return m.lspGoto(pick.loc)
@@ -1301,7 +1290,7 @@ func (m *Model) acceptCompletion(c *lspCompletion, index int) tea.Cmd {
 	err := m.applyCompletionItem(c, item)
 	m.closeCompletion(c)
 	if err != nil {
-		m.notice = err.Error()
+		m.notice = completionAcceptNotice(err)
 	}
 	return nil
 }
@@ -1324,7 +1313,7 @@ func (m *Model) completionResolved(msg completionResolvedMsg) tea.Cmd {
 		return nil
 	}
 	if err := m.applyCompletionItem(msg.comp, msg.item); err != nil {
-		m.notice = err.Error()
+		m.notice = completionAcceptNotice(err)
 	}
 	return nil
 }
@@ -1433,17 +1422,9 @@ func (m *Model) completionMultiResolved(msg completionMultiResolvedMsg) tea.Cmd 
 		m.notice = uiText("gvim.notice.completion.resolve_unsupported", "completion: multi-cursor resolved acceptance is not available in this editor")
 		return nil
 	}
-	additional := make([]editor.LSPEdit, 0, len(msg.item.Additional))
-	for _, add := range msg.item.Additional {
-		additional = append(additional, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
-	}
-	cursorOffset := -1
-	if msg.item.Snippet && msg.item.CursorOffset >= 0 {
-		cursorOffset = msg.item.CursorOffset
-	}
 	wordChars := m.docLanguageSettings(doc).WordCharacters
 	expect := msg.state.version
-	if _, err := accepter.ApplyCompletionItemAtCarets(msg.state.path, msg.item.Insert, cursorOffset, additional, wordChars, &expect); err != nil {
+	if _, err := accepter.ApplyCompletionItemAtCarets(msg.state.path, msg.item.Insert, completionStop(msg.item), completionAdditionalEdits(msg.item), wordChars, &expect); err != nil {
 		m.notice = completionAcceptNotice(err)
 	}
 	return nil
@@ -1494,15 +1475,7 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 			m.notice = uiText("gvim.notice.completion.accept_snippet_import_unsupported", "completion: multi-cursor snippet/import acceptance is not available in this editor")
 			return true
 		}
-		additional := make([]editor.LSPEdit, 0, len(item.Additional))
-		for _, add := range item.Additional {
-			additional = append(additional, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
-		}
-		cursorOffset := -1
-		if item.Snippet && item.CursorOffset >= 0 {
-			cursorOffset = item.CursorOffset
-		}
-		_, err = accepter.ApplyCompletionItemAtCarets(c.path, item.Insert, cursorOffset, additional, wordChars, expect)
+		_, err = accepter.ApplyCompletionItemAtCarets(c.path, item.Insert, completionStop(item), completionAdditionalEdits(item), wordChars, expect)
 	} else {
 		accepter, ok := m.ed.(completionAtCarets)
 		if !ok {
@@ -1539,11 +1512,7 @@ func (m *Model) applyCompletionItem(c *lspCompletion, item CompletionItem) error
 	if item.Range != nil {
 		from, to = item.Range.Start, item.Range.End
 	}
-	edits := make([]editor.LSPEdit, 0, len(item.Additional)+1)
-	edits = append(edits, editor.LSPEdit{From: from, To: to, Text: item.Insert})
-	for _, add := range item.Additional {
-		edits = append(edits, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
-	}
+	edits := append([]editor.LSPEdit{{From: from, To: to, Text: item.Insert}}, completionAdditionalEdits(item)...)
 	if err := completionEditConflict(edits); err != nil {
 		return err
 	}
@@ -1553,12 +1522,6 @@ func (m *Model) applyCompletionItem(c *lspCompletion, item CompletionItem) error
 	}
 	err := m.applyLSPEditsExpect(c.path, edits, expect)
 	if err != nil {
-		switch {
-		case errors.Is(err, editor.ErrStale):
-			return errors.New("completion is stale: the document changed, so nothing was applied")
-		case errors.Is(err, editor.ErrOverlappingEdits):
-			return errors.New("completion edits overlap, so nothing was applied")
-		}
 		return err
 	}
 	if doc := m.ed.Active(); doc != nil && docPath(doc) == c.path {
@@ -1567,12 +1530,30 @@ func (m *Model) applyCompletionItem(c *lspCompletion, item CompletionItem) error
 	return nil
 }
 
+// completionAdditionalEdits are the additional (auto-import) edits of item as editor edits.
+func completionAdditionalEdits(item CompletionItem) []editor.LSPEdit {
+	edits := make([]editor.LSPEdit, 0, len(item.Additional))
+	for _, add := range item.Additional {
+		edits = append(edits, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
+	}
+	return edits
+}
+
+// completionStop is the rune offset of a snippet item's final stop in its insert text, or
+// -1 when the item has none.
+func completionStop(item CompletionItem) int {
+	if item.Snippet && item.CursorOffset >= 0 {
+		return item.CursorOffset
+	}
+	return -1
+}
+
 // completionEditConflict reports whether the main edit and the additional edits of
 // an item overlap (or two zero-width edits sit at the same place). An ambiguous
 // edit is refused before it touches the document.
 func completionEditConflict(edits []editor.LSPEdit) error {
 	for i := range edits {
-		if posLess(edits[i].To, edits[i].From) {
+		if edits[i].To.Less(edits[i].From) {
 			return errors.New("completion edit has an inverted range, so nothing was applied")
 		}
 		for j := i + 1; j < len(edits); j++ {
@@ -1591,15 +1572,7 @@ func completionRangesOverlap(aFrom, aTo, bFrom, bTo buffer.Pos) bool {
 	if aFrom == bFrom && aTo == aFrom && bTo == bFrom {
 		return true
 	}
-	return posLess(aFrom, bTo) && posLess(bFrom, aTo)
-}
-
-// posLess reports whether a is before b.
-func posLess(a, b buffer.Pos) bool {
-	if a.Line != b.Line {
-		return a.Line < b.Line
-	}
-	return a.Col < b.Col
+	return aFrom.Less(bTo) && bFrom.Less(aTo)
 }
 
 // posAfterText returns the position just after text inserted at from.
@@ -1624,11 +1597,11 @@ func posAfterText(from buffer.Pos, text string) buffer.Pos {
 func completionCaret(from buffer.Pos, item CompletionItem) buffer.Pos {
 	at := from
 	for _, add := range item.Additional {
-		if !posLess(add.Range.End, from) && add.Range.End != from {
+		if !add.Range.End.Less(from) && add.Range.End != from {
 			continue
 		}
 		if add.Range.End.Line < at.Line {
-			at.Line += countNewlines(add.Text) - (add.Range.End.Line - add.Range.Start.Line)
+			at.Line += strings.Count(add.Text, "\n") - (add.Range.End.Line - add.Range.Start.Line)
 			continue
 		}
 		if add.Range.End.Line == at.Line && add.Range.Start.Line == add.Range.End.Line {
@@ -1641,17 +1614,6 @@ func completionCaret(from buffer.Pos, item CompletionItem) buffer.Pos {
 		offset = item.CursorOffset
 	}
 	return posAfterText(at, string(insert[:offset]))
-}
-
-// countNewlines returns the number of line breaks in s.
-func countNewlines(s string) int {
-	n := 0
-	for _, r := range s {
-		if r == '\n' {
-			n++
-		}
-	}
-	return n
 }
 
 // closeCompletion closes the list c: its popup leaves the stack, and the root forgets
@@ -2123,9 +2085,12 @@ func (m *Model) lspSetLanguage(mute bool, language string) tea.Cmd {
 		m.notice = noServerNotice(language)
 		return nil
 	}
-	enabled := !mute
+	action := "unmute"
+	if mute {
+		action = "mute"
+	}
 	return func() tea.Msg {
-		return lspServerActionMsg{action: map[bool]string{true: "mute", false: "unmute"}[mute], language: language, err: port.SetLanguageEnabled(language, enabled)}
+		return lspServerActionMsg{action: action, language: language, err: port.SetLanguageEnabled(language, !mute)}
 	}
 }
 

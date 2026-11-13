@@ -162,8 +162,8 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	// outside it are skipped. A READY snapshot that filtered to zero files is a genuine
 	// empty result (local project search is the same), not a reason to fall back to the
 	// whole tree. A loading/unknown snapshot may be partial, so it permits the bounded
-	// whole-tree fallback with the glob still applied; direct/legacy callers that do not
-	// set the snapshot-state fields keep the previous fallback behavior.
+	// whole-tree fallback with the glob still applied; a request with no snapshot attached
+	// (FilesKnown false) takes the same fallback.
 	allowed := remoteAllowedFiles(req.Files)
 	if req.FilesKnown && !req.FilesReady {
 		allowed = nil
@@ -198,9 +198,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			errText = "remote search tool probe timed out"
 		}
-		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, globMatch, indexFallbackNotice, cancelled, send, errText) {
-			return
-		}
+		sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, globMatch, indexFallbackNotice, cancelled, send, errText)
 		return
 	}
 	// Fresh's project-file scope is the search scope. When the complete git candidate
@@ -262,9 +260,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			errText = "remote search timed out"
 		}
-		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, globMatch, indexFallbackNotice, cancelled, send, errText) {
-			return
-		}
+		sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, globMatch, indexFallbackNotice, cancelled, send, errText)
 		return
 	}
 	if cancelled() {
@@ -453,18 +449,18 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 // before a terminal tool failure, so unsaved editor text is still searchable when the
 // remote search tool is missing, times out or fails. The terminal batch carries the
 // original error and a notice that only open buffers were searched: the result is never
-// presented as a complete project search, and no local disk is read. It returns false when
-// the caller cancelled (no Done batch is sent then).
-func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, q search.Query, limit int, allowed map[string]bool, globMatch func(string) bool, indexNotice string, cancelled func() bool, send func(searchpanel.SearchBatch) bool, errText string) bool {
+// presented as a complete project search, and no local disk is read. No Done batch is sent
+// when the caller cancelled.
+func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, q search.Query, limit int, allowed map[string]bool, globMatch func(string) bool, indexNotice string, cancelled func() bool, send func(searchpanel.SearchBatch) bool, errText string) {
 	if cancelled() {
-		return false
+		return
 	}
 	openSources, _, openOrder := remoteOpenSources(req, s.root, allowed, globMatch)
 	if len(openSources) == 0 {
 		batch := searchpanel.SearchBatch{Done: true, Err: errText}
 		batch.Notice = indexNotice
 		send(batch)
-		return true
+		return
 	}
 	var pending []searchpanel.FileMatches
 	total := 0
@@ -514,7 +510,7 @@ func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, 
 			if src, in := openSources[rel]; in {
 				emitted[rel] = true
 				if !add(rel, src) {
-					return false
+					return
 				}
 			}
 		}
@@ -524,12 +520,12 @@ func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, 
 			continue
 		}
 		if !add(rel, openSources[rel]) {
-			return false
+			return
 		}
 	}
 	if len(pending) > 0 {
 		if !flush(false, "", "") {
-			return false
+			return
 		}
 	}
 	// The terminal failure batch: the files already streamed above remain visible, while
@@ -538,10 +534,7 @@ func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, 
 	if indexNotice != "" {
 		terminal.Notice += "; " + indexNotice
 	}
-	if !send(terminal) {
-		return false
-	}
-	return true
+	send(terminal)
 }
 
 // remoteFileIndexFallbackNotice explains why the bounded fallback scan is being

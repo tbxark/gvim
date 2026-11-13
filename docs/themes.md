@@ -31,7 +31,7 @@ The fetch reuses the update check's transport policy exactly
 loopback interface, so a local mirror or a test server works), is one bounded
 request (8 s timeout, 256 KiB body cap), and is validated through the same JSON
 parser and resolver as a user theme (including `extends` and fallbacks). The
-body is cached atomically under `<user config dir>/gvim/theme-cache/<sha256(url)>.json`;
+body is cached atomically under `<user cache dir>/gvim/theme-cache/<sha256(url)>.json`;
 a cache younger than 24 hours is used without a request, and when a fetch or its
 validation fails the cached copy is the last-known-good fallback ("using the
 cached copy" warning). A URL theme that cannot be fetched and has no cache falls

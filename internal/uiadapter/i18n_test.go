@@ -16,7 +16,4 @@ func TestTerminalDirNoticesUseTheCatalogue(t *testing.T) {
 	if got != "Remote terminal directory \"/w/old\" is unavailable (missing); starting in the remote default directory" {
 		t.Errorf("remote terminal notice = %q", got)
 	}
-	if got := uiadapterText("gvim.notice.terminal_dir_invalid", "Terminal directory %{dir} is not an absolute path on this platform; starting in the default directory"); got == "gvim.notice.terminal_dir_invalid" {
-		t.Errorf("invalid terminal dir notice leaked the key")
-	}
 }

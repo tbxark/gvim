@@ -1,7 +1,6 @@
 package lsp
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,12 +36,6 @@ func (e *NotInstalledError) langKey() string {
 		return "<language>"
 	}
 	return e.Language
-}
-
-// MissingServer reports the program that is missing and the way to install it. The root
-// model asks for it through an interface, because it does not import this package.
-func (e *NotInstalledError) MissingServer() (command, install string) {
-	return e.Command, e.Install
 }
 
 // StartError is a language server that was launched but did not complete its handshake.
@@ -115,10 +108,4 @@ func (t *tailBuffer) tail(lines, limit int) string {
 		out = "..." + string(r[len(r)-limit:])
 	}
 	return out
-}
-
-// IsNotInstalled reports whether err says a language server is not on PATH.
-func IsNotInstalled(err error) bool {
-	var ni *NotInstalledError
-	return errors.As(err, &ni)
 }

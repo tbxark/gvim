@@ -38,7 +38,7 @@ func TestWriteSessionLayoutRoundTrip(t *testing.T) {
 		},
 		Focus: 1,
 	}
-	apptest.Must(t, WriteSessionWithLayout(ed, dir, tui.ExplorerState{}, nil, layout))
+	apptest.Must(t, WriteSession(ed, dir, tui.ExplorerState{}, nil, layout))
 	got, ok, err := session.Load(dir)
 	apptest.Must(t, err)
 	if !ok || got.Layout == nil {
@@ -72,7 +72,7 @@ func TestWriteSessionDropsStaleLayout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			apptest.Must(t, WriteSessionWithLayout(ed, dir, tui.ExplorerState{}, nil, tt.layout))
+			apptest.Must(t, WriteSession(ed, dir, tui.ExplorerState{}, nil, tt.layout))
 			got, _, err := session.Load(dir)
 			apptest.Must(t, err)
 			if got.Layout != nil {

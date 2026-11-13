@@ -130,8 +130,8 @@ func TestHTTPOnlyHTTPS(t *testing.T) {
 		t.Error("an http URL reached the server")
 	}, "http://example.com/x", 1000, map[string]any{"network": true}, nil)
 	notices := x.run(t)
-	if !strings.Contains(notices, "scheme must be https") {
-		t.Fatalf("notices = %q", notices)
+	if !strings.Contains(notices, "err:invalid: http: scheme must be https") {
+		t.Fatalf("notices = %q, want an invalid-coded policy refusal", notices)
 	}
 	if x.rt.hits.Load() != 0 {
 		t.Fatalf("an http URL made a request")

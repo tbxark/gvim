@@ -267,7 +267,7 @@ func TestPluginDiagnosticsUpdatedEvent(t *testing.T) {
 
 // TestPluginDiagnosticsUpdatedWhenDiagnosticsAreDropped: every way a document loses its
 // diagnostics other than a poll (the server stops, LSP goes off for the buffer, the tab
-// goes away) raises diagnostics_updated with zero counts (S23-3).
+// goes away) raises diagnostics_updated with zero counts.
 func TestPluginDiagnosticsUpdatedWhenDiagnosticsAreDropped(t *testing.T) {
 	d := func(sev int) []Diagnostic { return []Diagnostic{{Severity: sev, Message: "m"}} }
 	tests := []struct {

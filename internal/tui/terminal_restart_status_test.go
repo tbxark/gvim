@@ -46,11 +46,11 @@ func exitedDockModel(t *testing.T, code int, known bool) (*Model, *shellsStarter
 }
 
 // restartSegment returns the layout run of {terminal_restart}.
-func restartSegment(t *testing.T, m *Model) *run {
+func restartSegment(t *testing.T, m *Model) *frame.Run {
 	t.Helper()
 	l := m.layout()
 	for i := range l.Status {
-		if l.Status[i].Kind == hitStatusSegment && l.Status[i].Index == frame.StatusSegmentTerminalRestart {
+		if l.Status[i].Kind == frame.HitStatusSegment && l.Status[i].Index == frame.StatusSegmentTerminalRestart {
 			return &l.Status[i]
 		}
 	}
@@ -76,30 +76,20 @@ func TestTerminalRestartStatusText(t *testing.T) {
 	}
 	// A restored exited tab carries the launch record and exit status.
 	restored := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
-	restored.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"},
-		LaunchArgv: []string{"/usr/bin/npm", "run", "dev"}, ExitCode: 2, ExitKnown: true,
-	})
+	restored.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out"}, LaunchArgv: []string{"/usr/bin/npm", "run", "dev"}, ExitCode: 2, ExitKnown: true}}})
 	if got := restored.statusView().TerminalRestart; got != "⟳ Restart npm (exit 2)" {
 		t.Fatalf("restored launch label = %q", got)
 	}
 	// A resume record rejoins the agent when terminal.resume_agents is on.
 	resume := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
 	resume.SetDock(DockPorts{Starter: &shellsStarter{}, Effects: dock.Effects{ResumeAgents: true}})
-	resume.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"},
-		LaunchArgv: []string{"npm"}, ResumeArgv: []string{"/opt/bin/claude", "--resume", "x"},
-		ExitCode: 0, ExitKnown: true,
-	})
+	resume.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out"}, LaunchArgv: []string{"npm"}, ResumeArgv: []string{"/opt/bin/claude", "--resume", "x"}, ExitCode: 0, ExitKnown: true}}})
 	if got := resume.statusView().TerminalRestart; got != "⟳ Resume claude" {
 		t.Fatalf("resume label = %q", got)
 	}
 	// With resume_agents off the same record restarts the program.
 	resumeOff := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
-	resumeOff.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"},
-		LaunchArgv: []string{"npm"}, ResumeArgv: []string{"/opt/bin/claude", "--resume", "x"},
-	})
+	resumeOff.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out"}, LaunchArgv: []string{"npm"}, ResumeArgv: []string{"/opt/bin/claude", "--resume", "x"}}}})
 	if got := resumeOff.statusView().TerminalRestart; got != "⟳ Restart claude" {
 		t.Fatalf("resume-agents-off label = %q", got)
 	}
@@ -152,10 +142,7 @@ func TestTerminalRestartHover(t *testing.T) {
 func TestTerminalRestartStatusNarrow(t *testing.T) {
 	t.Parallel()
 	restored := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
-	restored.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"},
-		LaunchArgv: []string{"/usr/bin/claude", "--x"}, ExitCode: 12, ExitKnown: true,
-	})
+	restored.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out"}, LaunchArgv: []string{"/usr/bin/claude", "--x"}, ExitCode: 12, ExitKnown: true}}})
 	restored.Update(tea.WindowSizeMsg{Width: 24, Height: 12})
 	l := restored.layout()
 	for _, r := range l.Status {
@@ -174,10 +161,7 @@ func TestRestoredRestartClickAndKeyboardParity(t *testing.T) {
 	restore := func(t *testing.T, starter *shellsStarter) *Model {
 		t.Helper()
 		m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
-		m.RestoreTerminal(terminal.SavedState{
-			Version: terminal.SavedStateVersion, Open: true, Live: false, Rows: []string{"out"},
-			LaunchArgv: []string{"/usr/bin/npm", "run", "dev"}, ExitCode: 5, ExitKnown: true,
-		})
+		m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Live: false, Rows: []string{"out"}, LaunchArgv: []string{"/usr/bin/npm", "run", "dev"}, ExitCode: 5, ExitKnown: true}}})
 		return m
 	}
 	clickStarter := &shellsStarter{}

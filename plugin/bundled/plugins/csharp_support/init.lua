@@ -212,7 +212,7 @@ gvim.command.register({
 
 gvim.on("after_file_open", function(ev)
   local path = ev.path
-  if is_csharp_path(path) and not pending[path] then
+  if is_csharp_path(path) then
     restore_for_path(path, false)
   end
 end)

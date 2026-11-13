@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/outline"
@@ -49,7 +49,7 @@ type tocState struct {
 	// auto_open is on, as Fresh remounts its plugin section there.
 	closed bool
 	// ident names the active buffer the state belongs to.
-	ident string
+	ident tocIdent
 	// version and versionOK are the text version the rows were scanned from.
 	version   uint64
 	versionOK bool
@@ -73,6 +73,12 @@ type tocState struct {
 	restore *contentsRestore
 	// pending is the restore's scroll/selected part, applied once after a scan.
 	pending *contentsRestore
+}
+
+// tocIdent names a buffer by its tab and name; the zero value is no buffer.
+type tocIdent struct {
+	tab  int
+	name string
 }
 
 // contentsRestore is the saved Contents section state of a restored session: the
@@ -331,22 +337,31 @@ func (m *Model) setContentsAutoOpen(on bool) {
 	}
 }
 
+// markdownTOCAvailable reports whether the Contents section can work on the active buffer:
+// it needs the explorer column, the feature on and a Markdown buffer. Otherwise it sets
+// the notice that says which is missing.
+func (m *Model) markdownTOCAvailable() bool {
+	switch {
+	case m.tree == nil:
+		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
+		return false
+	case !m.toc.enabled:
+		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
+		return false
+	}
+	if doc := m.ed.Active(); doc == nil || !isMarkdownName(doc.Name()) {
+		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
+		return false
+	}
+	return true
+}
+
 // markdownTOCToggle is Fresh's "Markdown: Toggle Table of Contents": close the
 // section when it is open, otherwise open it (even with auto_open off) without
 // taking the keyboard. A non-Markdown buffer reports the same status Fresh's plugin
 // does.
 func (m *Model) markdownTOCToggle() {
-	switch {
-	case m.tree == nil:
-		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
-		return
-	case !m.toc.enabled:
-		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
-		return
-	}
-	doc := m.ed.Active()
-	if doc == nil || !isMarkdownName(doc.Name()) {
-		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
+	if !m.markdownTOCAvailable() {
 		return
 	}
 	if m.contents.Open() {
@@ -370,10 +385,10 @@ func (m *Model) contentsSync() tea.Cmd {
 			m.clearOutlineFolds("")
 			m.contents.SetOpen(false)
 		}
-		m.toc.ident = ""
+		m.toc.ident = tocIdent{}
 		return nil
 	}
-	ident := fmt.Sprintf("%d\x00%s", m.activeTab(), doc.Name())
+	ident := tocIdent{tab: m.activeTab(), name: doc.Name()}
 	if ident != m.toc.ident {
 		// The published ranges of the document left behind are cleared; the new
 		// document publishes its own from its scan.
@@ -560,17 +575,7 @@ func (m *Model) tocRescan(msg tocRescanMsg) tea.Cmd {
 // markdownTOCShown opens the Contents section for the active buffer and gives
 // it the keyboard; the palette's Markdown: Show Outline runs it.
 func (m *Model) markdownTOCShown() {
-	switch {
-	case m.tree == nil:
-		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
-		return
-	case !m.toc.enabled:
-		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
-		return
-	}
-	doc := m.ed.Active()
-	if doc == nil || !isMarkdownName(doc.Name()) {
-		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
+	if !m.markdownTOCAvailable() {
 		return
 	}
 	m.toc.wanted = true
@@ -685,17 +690,7 @@ func (m *Model) takeContentsFocus() {
 // Markdown buffer and unfolding it first: the keyboard does not go to a section
 // with no rows on screen.
 func (m *Model) focusContents() {
-	switch {
-	case m.tree == nil:
-		m.notice = uiText("gvim.contents.status.needs_explorer", "The Contents section needs the file explorer column")
-		return
-	case !m.toc.enabled:
-		m.notice = uiText("gvim.contents.status.disabled", "The markdown_toc section is disabled in the config")
-		return
-	}
-	doc := m.ed.Active()
-	if doc == nil || !isMarkdownName(doc.Name()) {
-		m.notice = uiText("gvim.contents.status.not_markdown", "Not a Markdown buffer")
+	if !m.markdownTOCAvailable() {
 		return
 	}
 	if !m.contents.Open() {
@@ -853,8 +848,6 @@ func (m *Model) wheelContents(up bool) {
 	m.contents.Wheel(delta)
 }
 
-// dragDivider moves the boundary between the sections: the pointer row sets
-// the Contents section's rows, and the explorer keeps at least one row.
 // dragDivider resizes the pressed section from the absolute pointer delta since the
 // press, clamping its own body at one row and leaving at least one row to every other
 // open section (both neighbours of the shared header are kept visible). The explorer
@@ -962,7 +955,7 @@ func (m *Model) columnBodyRows() int {
 // is the explorer panel exactly as it always was; with the Contents section
 // open the column is a stack of header rows and bodies that share their border
 // rows, and the column's bottom border closes it.
-func (m *Model) paintSidebar(g *grid.Grid, l layout) {
+func (m *Model) paintSidebar(g *grid.Grid, l frame.Layout) {
 	if len(l.Sections) == 0 {
 		return
 	}

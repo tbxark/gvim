@@ -29,23 +29,19 @@ local MAX_SUGGESTIONS = 100
 local MAX_SCAN = 20000
 local MAX_INPUT = 4096
 
--- parse_path mirrors Fresh's parsePath: the directory to list, the prefix pattern and
--- whether the input is absolute.
+-- parse_path mirrors Fresh's parsePath: the directory to list and the prefix pattern.
 local function parse_path(input)
   if input == "" then
-    return ".", "", false
+    return ".", ""
   end
-  local is_absolute = input:sub(1, 1) == "/"
   local last_slash = input:match("^.*()/")
   if not last_slash then
-    return ".", input, false
+    return ".", input
   end
   if last_slash == 1 then
-    return "/", input:sub(2), true
+    return "/", input:sub(2)
   end
-  local dir = input:sub(1, last_slash - 1)
-  local pattern = input:sub(last_slash + 1)
-  return dir ~= "" and dir or "/", pattern, is_absolute
+  return input:sub(1, last_slash - 1), input:sub(last_slash + 1)
 end
 
 -- absolute resolves a possibly relative path against the editor's working directory.
@@ -59,7 +55,7 @@ local function absolute(path)
   return gvim.path.join(gvim.dirs.cwd(), path)
 end
 
--- display_path is the path a suggestion's value carries: the input directory as written
+-- join_display is the path a suggestion's value carries: the input directory as written
 -- (".", "/", "src" stay as they are), never the resolved working directory.
 local function join_display(dir, name)
   if dir == "." then
@@ -94,7 +90,7 @@ local function generate(input)
   if #input > MAX_INPUT then
     input = input:sub(1, MAX_INPUT)
   end
-  local dir, pattern, _ = parse_path(input)
+  local dir, pattern = parse_path(input)
   local show_hidden = pattern:sub(1, 1) == "."
   local entries, readable = list_dir(dir, show_hidden)
   local pattern_lower = lower(pattern)
@@ -109,7 +105,8 @@ local function generate(input)
     if name ~= "" and (show_hidden or name:sub(1, 1) ~= ".") and lower(name):sub(1, #pattern_lower) == pattern_lower then
       matched[#matched + 1] = {
         name = name,
-        is_dir = entry.kind == "dir",
+        -- A symlink to a directory completes as a directory.
+        is_dir = entry.kind == "dir" or (entry.kind == "symlink" and entry.target_kind == "dir"),
       }
     end
   end
@@ -155,11 +152,7 @@ local function generate(input)
 end
 
 -- The exported engine: other plugins open a prompt and call complete() from on_change.
-gvim.plugins.export {
-  complete = function(input)
-    return generate(input)
-  end,
-}
+gvim.plugins.export { complete = generate }
 
 -- The prompt loop: a directory answer descends, a file answer opens, Esc cancels.
 local function run_prompt(start)
@@ -169,12 +162,7 @@ local function run_prompt(start)
       prompt = t("prompt.path"),
       default = input,
       on_change = function(text)
-        local suggestions = generate(text)
-        if #suggestions > 0 then
-          gvim.ui.set_prompt_suggestions(suggestions)
-        else
-          gvim.ui.set_prompt_suggestions({})
-        end
+        gvim.ui.set_prompt_suggestions(generate(text))
       end,
     }
     if answer == nil then

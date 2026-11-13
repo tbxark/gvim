@@ -73,12 +73,6 @@ var languageOverrideFieldKeys = func() map[string]LanguageOverrideField {
 	return m
 }()
 
-// LanguageOverrideFieldByKey returns the scalar override field called key.
-func LanguageOverrideFieldByKey(key string) (LanguageOverrideField, bool) {
-	f, ok := languageOverrideFieldKeys[key]
-	return f, ok
-}
-
 // LanguageInheritedValue returns the display form of the value a
 // languages.<id> entry inherits for one scalar field: the built-in language entry
 // applied over the global editor option (go tab_size inherits 8, auto_indent
@@ -119,12 +113,6 @@ func (c Config) LanguageInheritedValue(language, field string) (string, bool) {
 		return eff.TextmateGrammar, true
 	}
 	return "", false
-}
-
-// LanguageStructuredValues are the structured per-language value names the
-// Settings page edits besides the scalar overrides, in page order.
-func LanguageStructuredValues() []string {
-	return []string{"extensions", "filenames", "formatter", "on_save", "indent"}
 }
 
 // KnownLanguageIDs returns the language ids gvim knows by default, plus "text",

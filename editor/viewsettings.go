@@ -58,9 +58,9 @@ var viewFlags = map[Action]viewFlag{
 	},
 }
 
-// registerViewHandlers adds the per-document view actions to h. The editor's
-// handler table is built in handlers.go, which this file does not own, so the
-// init below adds these entries to it once the table exists.
+// registerViewHandlers adds the per-document view actions to h. The init below adds
+// them to the handler table once handlers.go has built it, so guardDocument does not
+// wrap them: none of them changes text.
 func registerViewHandlers(h map[Action]handler) {
 	for name, f := range viewFlags {
 		h[name] = toggleViewFlag(f)

@@ -167,3 +167,17 @@ func TestClicksOnTheMarginAndBordersDoNotReachARow(t *testing.T) {
 		}
 	}
 }
+
+// TestFitGrepOffsetsFollowTheSanitizedPath: the label shows the cleaned path, so the bold
+// run is counted from the cleaned path, not from the raw one with its stripped runes.
+func TestFitGrepOffsetsFollowTheSanitizedPath(t *testing.T) {
+	t.Parallel()
+	r := grepRow(GrepHit{Rel: "\u202eevil\u200b.go", Line: 3, Col: 1, Text: "todo here"}, "todo")
+	got, hl := fitGrep(r, 60)
+	if want := "evil.go:3: todo here"; got != want {
+		t.Fatalf("label %q, want %q", got, want)
+	}
+	if b := boldRunes(got, hl); b != "todo" {
+		t.Fatalf("bold runes %q in %q, want %q", b, got, "todo")
+	}
+}

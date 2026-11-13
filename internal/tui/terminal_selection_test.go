@@ -101,12 +101,7 @@ func TestTerminalStateRestoresThroughTheModel(t *testing.T) {
 	if st.Version != terminal.SavedStateVersion {
 		t.Fatalf("terminal state version = %d", st.Version)
 	}
-	m.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion,
-		Open:    true,
-		Cwd:     "/restored",
-		Rows:    []string{"old"},
-	})
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Cwd: "/restored", Rows: []string{"old"}}}})
 	if !m.dock.Restored() {
 		t.Fatal("RestoreTerminal did not put the dock in the restored state")
 	}

@@ -19,8 +19,9 @@ func TestSSHConfigParsing(t *testing.T) {
 	if cfg.SSH.KnownHostsPolicy != "accept-new" || cfg.SSH.Keyring != true || strings.Join(cfg.SSH.HostKeyAlgorithms, ",") != "ssh-ed25519,rsa-sha2-512" {
 		t.Fatalf("ssh = %+v", cfg.SSH)
 	}
-	if cfg, diags := loadBody(t, `{"ssh": {"known_hosts_policy": "off"}}`); len(diags) != 0 || cfg.SSH.KnownHostsPolicy != "off" {
-		t.Fatalf("off parser = %+v, %+v (the transport refuses it, the parser accepts the document)", cfg.SSH, diags)
+	cfg, diags = loadBody(t, `{"ssh": {"known_hosts_policy": "off"}}`)
+	if len(diags) != 1 || diags[0].Key != "ssh.known_hosts_policy" || !strings.Contains(diags[0].Message, "not supported") || cfg.SSH.KnownHostsPolicy != "strict" {
+		t.Fatalf("off = %+v, %+v; want a not-supported diagnostic and the strict default kept", cfg.SSH, diags)
 	}
 	for _, body := range []string{
 		`{"ssh": {"known_hosts_policy": "sometimes"}}`,

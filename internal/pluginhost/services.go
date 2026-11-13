@@ -252,18 +252,19 @@ const (
 )
 
 // ReadSearchable returns the first GrepMaxFileBytes of the file at path. It reports
-// false when the file cannot be read, is skipFrom bytes or more (when skipFrom is not
-// zero), or looks binary: a NUL byte in its first grepBinaryProbe bytes.
+// false when the file cannot be read, is not a regular file (a FIFO behind a symbolic link
+// must not block the search), is skipFrom bytes or more (when skipFrom is not zero), or
+// looks binary: a NUL byte in its first grepBinaryProbe bytes.
 func ReadSearchable(path string, skipFrom int64) (string, bool) {
-	f, err := os.Open(path)
+	// O_NONBLOCK: opening a FIFO must not wait for a writer.
+	f, err := os.OpenFile(path, os.O_RDONLY|openNoBlock, 0)
 	if err != nil {
 		return "", false
 	}
 	defer func() { _ = f.Close() }()
-	if skipFrom > 0 {
-		if info, err := f.Stat(); err != nil || info.Size() >= skipFrom {
-			return "", false
-		}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || (skipFrom > 0 && info.Size() >= skipFrom) {
+		return "", false
 	}
 	data, err := io.ReadAll(io.LimitReader(f, GrepMaxFileBytes))
 	if err != nil {

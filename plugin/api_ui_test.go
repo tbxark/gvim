@@ -293,7 +293,7 @@ func TestUIChooseRows(t *testing.T) {
 	}
 }
 
-// TestSelectIndexIsOneBased is binding (AMENDMENTS C24): the host item ID is the 0-based
+// TestSelectIndexIsOneBased is binding: the host item ID is the 0-based
 // Go index, and the second result of gvim.ui.select is the 1-based position in the array.
 func TestSelectIndexIsOneBased(t *testing.T) {
 	rows := []struct {
@@ -789,7 +789,7 @@ func TestUIHostErrorsAreStrings(t *testing.T) {
 	}
 }
 
-// TestUIPickerSelectedIsNilWhenNothingIsHighlighted checks S13-4: the host reports a move to
+// TestUIPickerSelectedIsNilWhenNothingIsHighlighted checks that the host reports a move to
 // no item (the filter matched nothing) and selected() stops returning the old item. on_move
 // does not run for it.
 func TestUIPickerSelectedIsNilWhenNothingIsHighlighted(t *testing.T) {

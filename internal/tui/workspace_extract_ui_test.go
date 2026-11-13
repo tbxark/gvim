@@ -149,10 +149,7 @@ func mixedTabModel(t *testing.T) (*Model, *fakeEditor) {
 		{Name: "welcome", Path: ""},
 		{Name: "b.txt", Path: "/ws/b.txt"},
 	}
-	m.RestoreTerminal(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{Name: "shell", Open: true, Rows: []string{"out"}}},
-	})
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "shell", Open: true, Rows: []string{"out"}}}})
 	return m, ed
 }
 

@@ -134,3 +134,57 @@ type hostosWriteOptions = hostos.WriteOptions
 
 var _ = strings.TrimSpace
 var _ = time.Second
+
+// TestSSHRenameOntoDirectoryIsRefused: mv would move the source into an existing
+// directory, where a local rename fails; the helper refuses the move.
+func TestSSHRenameOntoDirectoryIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	a := fsSlot(t)
+	m := authority.Mutations(a.Files())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	src := filepath.Join(dir, "one.txt")
+	writeLocal(t, src, "x")
+	target := filepath.Join(dir, "d")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := m.Rename(ctx, src, target)
+	if err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("rename onto a directory = %v, want the directory refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "one.txt")); err == nil {
+		t.Fatal("the file was moved into the directory")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("the source is gone: %v", err)
+	}
+}
+
+// TestSSHHelpersTakeADashPathAsAPath: a relative path that starts with "-" is not an
+// option of the helper's utilities.
+func TestSSHHelpersTakeADashPathAsAPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	a := fsSlot(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	writeLocal(t, filepath.Join(dir, "-rf"), "dash")
+	got, err := a.Files().ReadFile(ctx, "-rf", 100)
+	if err != nil || string(got) != "dash" {
+		t.Fatalf("ReadFile(-rf) = %q, %v", got, err)
+	}
+	m := authority.Mutations(a.Files())
+	if err := m.Rename(ctx, "-rf", "-moved"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "-moved")); err != nil {
+		t.Fatalf("the file did not move: %v", err)
+	}
+	if err := m.Remove(ctx, "-moved", false); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "-moved")); err == nil {
+		t.Fatal("the file survived the remove")
+	}
+}

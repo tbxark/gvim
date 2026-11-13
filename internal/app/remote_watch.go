@@ -88,7 +88,7 @@ func newRemoteWatch(parent context.Context, slot authority.Slot) *remoteWatch {
 	return w
 }
 
-// NewRemoteWatchForApp is setupRemoteWatch: create the bridge and wire it into the root
+// setupRemoteWatch creates the bridge and wires it into the root
 // ports for a remote launch. It returns nil for a local launch (spec nil) or a missing
 // slot, so the local file watcher wiring stays untouched.
 func setupRemoteWatch(ctx context.Context, deps *tui.Deps, slot authority.Slot, spec *authority.RemoteSpec) *remoteWatch {
@@ -123,8 +123,10 @@ func (w *remoteWatch) Add(dir string) error {
 		return nil
 	}
 	w.dirs[dir] = true
-	w.mu.Unlock()
+	// Counted under the lock Close takes, so Close cannot start waiting between the check
+	// above and this Add.
 	w.wg.Add(1)
+	w.mu.Unlock()
 	go w.supervise(dir)
 	return nil
 }
@@ -314,12 +316,13 @@ func (w *remoteWatch) collect() {
 			if update.gen != w.currentGen() {
 				continue
 			}
+			if dirs != nil && update.gen != gen {
+				// The pending batch belongs to a carrier that is gone; this update starts
+				// the new one.
+				reset()
+			}
 			if dirs == nil {
 				dirs, files, gen = make(map[string]bool), make(map[string]bool), update.gen
-			}
-			if update.gen != gen {
-				reset()
-				continue
 			}
 			dirs[update.dir], files[update.file] = true, true
 			if timer == nil {

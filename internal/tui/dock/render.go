@@ -3,6 +3,7 @@ package dock
 import (
 	"fmt"
 	"image/color"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
@@ -39,7 +40,7 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 		return
 	}
 	if p.term == nil {
-		g.Put(x0+1, top, x0+w, p.dockText(), body)
+		g.Put(x0+1, top, x0+w, p.bodyText(), body)
 		return
 	}
 	for r := range min(rows, sc.Rows) {
@@ -54,15 +55,26 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 // window needs but the snapshot does not hold yet is left blank until the next
 // snapshot arrives.
 func (p *Panel) paintScrollback(g *grid.Grid, x0, top, rows, w int, sc terminal.Screen, base grid.Style, sel color.Color) {
+	// The marker row and the row count are the same for every row of the frame; sc is
+	// the snapshot the shell's own Screen would give, so it is not taken again per row.
+	marker := -1
+	if p.exitMarkerPending() {
+		termRows := p.scroll.screenRows
+		if p.term != nil {
+			termRows = sc.Rows
+		}
+		marker = p.exitMarkerRowAt(termRows)
+	}
+	combined := p.combinedWith(marker)
 	for i := range rows {
 		abs := p.scroll.top + i
-		if abs >= p.combined() {
+		if abs >= combined {
 			break
 		}
 		y := top + i
 		hist := abs - len(p.prior)
 		switch {
-		case abs == p.exitMarkerRow():
+		case abs == marker:
 			paintShellCells(g, x0, y, w, lineFromText(terminalExitMarker).Cells, base)
 		case abs < len(p.prior):
 			paintShellCells(g, x0, y, w, p.prior[abs].Cells, base)
@@ -133,11 +145,7 @@ func tintRow(g *grid.Grid, x0, y, w int, bg color.Color) {
 func paintShellCells(g *grid.Grid, x0, y, w int, cells []terminal.Cell, base grid.Style) {
 	for c := 0; c < min(w, len(cells)); c++ {
 		cell := cells[c]
-		text := " "
-		if cell.Rune != 0 {
-			text = string(cell.Rune)
-		}
-		if g.Put(x0+c, y, x0+w, text, shellStyle(cell.Style, base)) == 2 {
+		if g.Put(x0+c, y, x0+w, cellText(cell.Rune), shellStyle(cell.Style, base)) == 2 {
 			c++
 		}
 	}
@@ -238,9 +246,9 @@ func (p *Panel) scrollbackTitle() string {
 	return fmt.Sprintf("%s — /%s%s %d/%d", title, p.scroll.search, opts, pos, len(p.scroll.matches))
 }
 
-// dockText is what the dock shows in place of a screen: the notice that says why no
+// bodyText is what the dock shows in place of a screen: the notice that says why no
 // shell runs, or that one is starting.
-func (p *Panel) dockText() string {
+func (p *Panel) bodyText() string {
 	if p.notice != "" {
 		return p.notice
 	}
@@ -253,14 +261,30 @@ func (p *Panel) dockText() string {
 func paintShellRow(g *grid.Grid, x0, y, w int, sc terminal.Screen, r int, base grid.Style) {
 	for c := 0; c < min(w, sc.Cols); c++ {
 		cell := sc.Cell(r, c)
-		text := " "
-		if cell.Rune != 0 {
-			text = string(cell.Rune)
-		}
-		if g.Put(x0+c, y, x0+w, text, shellStyle(cell.Style, base)) == 2 {
+		if g.Put(x0+c, y, x0+w, cellText(cell.Rune), shellStyle(cell.Style, base)) == 2 {
 			c++
 		}
 	}
+}
+
+// asciiText holds the one-rune strings of ASCII, so painting a screen of mostly ASCII
+// text does not allocate a string per cell per frame.
+var asciiText = func() (t [utf8.RuneSelf]string) {
+	for i := range t {
+		t[i] = string(rune(i))
+	}
+	return t
+}()
+
+// cellText is the text a shell cell paints: its rune, or a space for an empty cell.
+func cellText(r rune) string {
+	switch {
+	case r == 0:
+		return " "
+	case uint32(r) < utf8.RuneSelf:
+		return asciiText[r]
+	}
+	return string(r)
 }
 
 // shellStyle is the grid style of a shell cell. A colour the shell did not set takes

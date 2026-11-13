@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/i18n"
+	"github.com/tbxark/gvim/trust"
 )
 
 // TestTask154AuthorityRemoteStrings checks the new authority/remote/trust extraction:
@@ -33,5 +34,30 @@ func TestTask154AuthorityRemoteStrings(t *testing.T) {
 		if got := i18n.T("en", key, nil); got == key {
 			t.Errorf("missing English entry for %s", key)
 		}
+	}
+}
+
+// TestTrustStatusLabelFollowsLocale checks the status-bar trust pill reads the catalogue
+// (gvim.status.*) instead of the English trust.Level names. Not parallel: locale.
+func TestTrustStatusLabelFollowsLocale(t *testing.T) {
+	i18n.SetLocale("zh-CN")
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	tests := []struct {
+		level trust.Level
+		want  string
+	}{
+		{trust.Trusted, "已信任"},
+		{trust.Restricted, uiText("gvim.status.restricted", "Restricted")},
+		{trust.Blocked, uiText("gvim.status.blocked", "Blocked")},
+	}
+	for _, tt := range tests {
+		m := newTrustModel(t, &fakeTrustPort{state: trust.State{Root: "/ws", Level: tt.level, Decided: true}})
+		label, _ := m.trustStatus()
+		if label != tt.want {
+			t.Errorf("trustStatus() under zh-CN for %v = %q, want %q", tt.level, label, tt.want)
+		}
+	}
+	if got := uiText("gvim.status.restricted", "Restricted"); got == "Restricted" {
+		t.Errorf("zh-CN catalogue has no gvim.status.restricted translation: %q", got)
 	}
 }

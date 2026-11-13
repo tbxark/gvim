@@ -146,7 +146,7 @@ func TestUnknownManifestFieldsAreIgnoredWithADebugLog(t *testing.T) {
 }
 
 // TestStateSurvivesRestart: state saved by one session is what gvim.state.get returns in the
-// next one, before the plugin's main chunk runs (S8-2). A second plugin's state stays apart.
+// next one, before the plugin's main chunk runs. A second plugin's state stays apart.
 func TestStateSurvivesRestart(t *testing.T) {
 	src := `local gvim = require "gvim"
 local n = gvim.state.get("n", 0)
@@ -197,7 +197,7 @@ if n == 0 then assert(gvim.state.set("big", string.rep("z", 1048569))) end`
 }
 
 // TestStateIsSeededWhenAPluginIsEnabledLater: a plugin switched on in the manager gets its
-// saved state too (S8-2).
+// saved state too.
 func TestStateIsSeededWhenAPluginIsEnabledLater(t *testing.T) {
 	e := newEnv(t)
 	e.os.config = "/cfg"

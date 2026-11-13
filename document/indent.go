@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-// indentLines inserts unit at the start of each selected line. The caret moves
+// IndentLines inserts unit at the start of each selected line. The caret moves
 // with its text. An anchor at column 0 of an indented line moves past the new
 // indent, as Fresh does.
 func (d *Document) IndentLines(unit string) {

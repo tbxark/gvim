@@ -85,7 +85,15 @@ type helperResult struct {
 func (f *sshFiles) execScript(ctx context.Context, script string, args []string, stdin []byte, stdoutLimit, stderrLimit int64) (helperResult, error) {
 	argv := make([]string, 0, 4+len(args))
 	argv = append(argv, "sh", "-c", script, "sh")
-	argv = append(argv, args...)
+	for _, a := range args {
+		// No helper argument is meant to be an option, and the paths among them can
+		// start with "-": "./" keeps a relative path the same file and out of the
+		// utilities' option parsing.
+		if strings.HasPrefix(a, "-") {
+			a = "./" + a
+		}
+		argv = append(argv, a)
+	}
 	stdout, stderr := newBoundBuffer(stdoutLimit), newBoundBuffer(stderrLimit)
 	o := hostos.ProcOptions{}
 	if stdin != nil {
@@ -319,7 +327,7 @@ func (f *sshFiles) ReadDir(ctx context.Context, path string, hidden bool) ([]hos
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	hr, err := f.execScript(ctx, sshReadDirScript, []string{path}, nil, sshFilesMaxListBytes, sshFilesMaxStderrBytes)
+	hr, err := f.execScript(ctx, sshReadDirScript, []string{path, strconv.Itoa(sshFilesMaxDirEntries)}, nil, sshFilesMaxListBytes, sshFilesMaxStderrBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -596,9 +604,11 @@ if [ -n "$mtime" ]; then TZ=UTC touch -t "$mtime" "$p" || exit 2; fi
 const sshMkdirScript = `p=$1
 if [ "$2" = 1 ]; then mkdir -p "$p"; else mkdir "$p"; fi`
 
-// sshRenameScript moves $1 to $2, replacing the target.
+// sshRenameScript moves $1 to $2, replacing a file target. A directory target is
+// refused: mv would move $1 into it, where a local rename fails.
 const sshRenameScript = `from=$1
 to=$2
+if [ -d "$to" ]; then echo "$to: is a directory" >&2; exit 2; fi
 mv -f "$from" "$to"`
 
 // sshRemoveScript deletes $1, recursively when $2 is 1.
@@ -653,6 +663,7 @@ if [ "$atomic" = 1 ]; then
       *) tgt=$(dirname "$tgt")/$l ;;
     esac
   done
+  if [ -d "$tgt" ]; then echo "$tgt: is a directory" >&2; exit 2; fi
   td=$(dirname "$tgt") || exit 2
   if [ -z "$mode" ]; then
     if [ -e "$tgt" ]; then
@@ -679,8 +690,8 @@ if [ "$existed" = 0 ] && [ -n "$mode" ]; then chmod "$mode" "$p" || exit 2; fi
 exit 0`
 
 // sshReadDirScript prints NUL-separated name, type|size|mtime and followed type for
-// every entry of $1, hidden entries included (the caller filters); the outer counter
-// bounds the listing. It avoids find -printf so GNU and BSD/macOS both run it.
+// every entry of $1, hidden entries included (the caller filters); $2 bounds the
+// number of entries. It avoids find -printf so GNU and BSD/macOS both run it.
 const sshReadDirScript = `d=$1
 if [ ! -e "$d" ] && [ ! -L "$d" ]; then
   stat "$d" >/dev/null || true
@@ -693,7 +704,7 @@ n=0
 for p in "$d"/* "$d"/.[!.]* "$d"/..?*; do
   if [ ! -e "$p" ] && [ ! -L "$p" ]; then continue; fi
   n=$((n+1))
-  if [ "$n" -gt 5000 ]; then echo "directory has more than 5000 entries" >&2; exit 3; fi
+  if [ "$n" -gt "$2" ]; then echo "directory has more than $2 entries" >&2; exit 3; fi
   nm=${p##*/}
   if [ "$gnu" = 1 ]; then
     l=$(stat -c '%F|%s|%Y' "$p" 2>/dev/null) || continue

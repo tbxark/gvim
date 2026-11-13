@@ -39,25 +39,6 @@ func (p ConflictPolicy) String() string {
 	}
 }
 
-// Copy copies src to dst. A file is copied with its permission bits. A
-// directory is copied recursively. A symbolic link is recreated as a link with
-// the same target, not followed.
-//
-// If dst does not exist, the copy is made. If dst exists, policy decides; see
-// ConflictPolicy. Only the top-level destination is checked: entries created
-// inside a new copy never conflict. The copy is built in a hidden staging
-// directory beside dst and renamed into place, so a failure while copying
-// leaves dst unchanged. With Overwrite, the old dst is renamed to a backup
-// beside it before the copy is renamed in, and the backup is removed afterwards.
-// An error names the backup when it holds the old contents: dst is then the new
-// copy (removing the backup failed), or missing (the old contents could not be
-// renamed back).
-//
-// Copy fails with ErrInvalidDest if dst is src, lies inside src, or contains
-// src. It also fails with ErrInvalidDest if src is a symbolic link whose target
-// is dst, lies inside dst, or is the same file as dst, because an overwrite
-// would remove the target. The parent of dst must already exist. src is cleaned
-// first, so a trailing separator does not make Copy follow a link.
 // CopyResult carries a non-fatal warning of a successful copy. The only current
 // warning is the atomic-publish fallback: a filesystem without hard links falls back to
 // direct O_EXCL creation, which can leave a partial target if the write fails afterwards.
@@ -65,8 +46,29 @@ type CopyResult struct {
 	Warning string
 }
 
-// Copy copies src to dst under the conflict policy. It returns an error only; use
-// CopyWithResult when the caller needs a non-fatal publication warning.
+// Copy copies src to dst. A file is copied with its permission bits. A
+// directory is copied recursively. A symbolic link is recreated as a link with
+// the same target, not followed.
+//
+// If dst does not exist, the copy is made. If dst exists, policy decides; see
+// ConflictPolicy. Only the top-level destination is checked: entries created
+// inside a new copy never conflict. A free destination is created in place
+// (O_EXCL files, so a concurrent creator is never overwritten); a failed
+// directory copy removes what it created. With Overwrite, the copy is built in a
+// hidden staging directory beside dst, the old dst is renamed to a backup beside
+// it, the copy is renamed in, and the backup is removed afterwards, so a failure
+// while copying leaves dst unchanged. An error names the backup when it holds the
+// old contents: dst is then the new copy (removing the backup failed), or missing
+// (the old contents could not be renamed back).
+//
+// Copy fails with ErrInvalidDest if dst is src, lies inside src, or contains
+// src. It also fails with ErrInvalidDest if src is a symbolic link whose target
+// is dst, lies inside dst, or is the same file as dst, because an overwrite
+// would remove the target. The parent of dst must already exist. src is cleaned
+// first, so a trailing separator does not make Copy follow a link.
+//
+// Copy returns an error only; use CopyWithResult when the caller needs a non-fatal
+// publication warning.
 func Copy(src, dst string, policy ConflictPolicy) error {
 	_, err := CopyWithResult(src, dst, policy)
 	return err

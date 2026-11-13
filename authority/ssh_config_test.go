@@ -156,3 +156,16 @@ func TestSSHProxyJumpOneHop(t *testing.T) {
 		t.Fatalf("nested jump error = %v", err)
 	}
 }
+
+// TestSSHConfigEqualsSeparator: OpenSSH accepts "Keyword=value" and "Keyword = value" as
+// well as "Keyword value".
+func TestSSHConfigEqualsSeparator(t *testing.T) {
+	cfg, err := parseSSHConfig("Host=dev\n  HostName=dev.example.com\n  User = alice\n  Port\t2222\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.resolve("dev")
+	if got.HostName != "dev.example.com" || got.User != "alice" || got.Port != 2222 {
+		t.Fatalf("resolve = %+v, want HostName dev.example.com, User alice, Port 2222", got)
+	}
+}

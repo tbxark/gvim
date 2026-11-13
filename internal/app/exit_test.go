@@ -37,8 +37,7 @@ func TestExitSavesTheSessionBeforeStoppingTheServers(t *testing.T) {
 	prevUI := newUI
 	t.Cleanup(func() { newUI = prevUI })
 	newUI = func(d tui.Deps) *tui.Model {
-		servers := map[string]config.LSPServer{"go": {Command: "gopls"}}
-		d.LSP = stopRecorder{LSPSession: lsphost.New(servers), onStop: func() {
+		d.LSP = stopRecorder{LSPSession: lsphost.NewFor(config.Config{}), onStop: func() {
 			_, err := os.Stat(sessionFile)
 			sawSession = err == nil
 		}}

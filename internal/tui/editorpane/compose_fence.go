@@ -14,8 +14,9 @@ import (
 // while keeping their syntax colours, and the close delimiter becomes a bottom
 // border. The frame is measure-4 cells wide (Fresh's codeFrameWidth), indented
 // with the block, and the rails cost two cells each. A body line wider than the
-// inner width wraps without rails on its continuation rows: that is a documented
-// residual of the single-visual-row frame; see docs/markdown.md.
+// inner width wraps onto continuation rows, which PageViewTableBorders adds as railed
+// extra rows; the caret line keeps its whole text on unrailed wrapped rows. See
+// docs/markdown.md.
 
 // frameWidth is the width of the frame of a fenced block indented by indent
 // cells in a page of measure cells: Fresh's measure-4, shrunk by the indent.
@@ -59,25 +60,13 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 	case syntax.FenceBody:
 		inner := width - 4
 		start := base + indent
-		segments := fenceBodySegments(raw, start, inner)
-		show := segments[0]
+		var show []fenceBodyRune
 		if f.caret.Line == i {
 			// The caret line keeps the whole body text (the wrapped rows without
 			// rails are the editing view); the continuation rows stand down.
-			show = nil
-			for k := start; k < len(raw); k++ {
-				r := raw[k]
-				if r == '\t' {
-					for q := 0; q < 4; q++ {
-						show = append(show, fenceBodyRune{' ', k})
-					}
-					continue
-				}
-				if unicode.IsControl(r) {
-					r = ' '
-				}
-				show = append(show, fenceBodyRune{r, k})
-			}
+			show = fenceContent(raw, start)
+		} else {
+			show = fenceBodySegments(raw, start, inner)[0]
 		}
 		add('│', syntax.KindPlain, src)
 		add(' ', syntax.KindPlain, src)
@@ -108,9 +97,14 @@ type fenceBodyRune struct {
 // row is cut). The primary row shows segment 0; the caller's extra-row builder
 // emits the rest as railed continuation rows.
 func fenceBodySegments(raw []rune, start, inner int) [][]fenceBodyRune {
-	inner = max(inner, 1)
+	return wrapRuneRows(fenceContent(raw, max(start, 0)), max(inner, 1), func(fr fenceBodyRune) rune { return fr.r })
+}
+
+// fenceContent is the visible runes of a body line from rune column start, with tabs as
+// four blanks and control characters as blanks.
+func fenceContent(raw []rune, start int) []fenceBodyRune {
 	var content []fenceBodyRune
-	for k := max(start, 0); k < len(raw); k++ {
+	for k := start; k < len(raw); k++ {
 		r := raw[k]
 		if r == '\t' {
 			for q := 0; q < 4; q++ {
@@ -123,43 +117,51 @@ func fenceBodySegments(raw []rune, start, inner int) [][]fenceBodyRune {
 		}
 		content = append(content, fenceBodyRune{r, k})
 	}
-	var out [][]fenceBodyRune
-	rowStart := 0
-	for rowStart < len(content) {
-		used := 0
-		end := rowStart
-		lastSpace := -1
+	return content
+}
+
+// wrapRuneRows wraps content into rows of at most width cells, breaking after the last
+// space that fits (the space ends the row) and cutting a word that has no space to break at.
+// Blanks at the start of a row are dropped. An empty content is one empty row.
+func wrapRuneRows[T any](content []T, width int, runeOf func(T) rune) [][]T {
+	if len(content) == 0 {
+		return [][]T{{}}
+	}
+	var out [][]T
+	start := 0
+	for start < len(content) {
+		used, end, lastSpace := 0, start, -1
 		for end < len(content) {
-			w := ansi.StringWidth(string(content[end].r))
-			if used+w > inner && end > rowStart {
-				switch {
-				case content[end].r == ' ':
-					out = append(out, content[rowStart:end])
-					rowStart = end + 1
-				case lastSpace > rowStart:
-					out = append(out, content[rowStart:lastSpace])
-					rowStart = lastSpace + 1
-				default:
-					out = append(out, content[rowStart:end])
-					rowStart = end
-				}
-				for rowStart < len(content) && content[rowStart].r == ' ' {
-					rowStart++
-				}
-				goto nextRow
+			w := ansi.StringWidth(string(runeOf(content[end])))
+			if used+w > width && end > start {
+				break
 			}
 			used += w
-			if content[end].r == ' ' {
+			if runeOf(content[end]) == ' ' {
 				lastSpace = end
 			}
 			end++
 		}
-		out = append(out, content[rowStart:])
-		break
-	nextRow:
-	}
-	if len(out) == 0 {
-		return [][]fenceBodyRune{{}}
+		if end == len(content) {
+			out = append(out, content[start:])
+			break
+		}
+		// The space just met ends the row; a word boundary behind it takes the break; a
+		// word longer than the row is cut.
+		switch {
+		case runeOf(content[end]) == ' ':
+			out = append(out, content[start:end])
+			start = end + 1
+		case lastSpace > start:
+			out = append(out, content[start:lastSpace])
+			start = lastSpace + 1
+		default:
+			out = append(out, content[start:end])
+			start = end
+		}
+		for start < len(content) && runeOf(content[start]) == ' ' {
+			start++
+		}
 	}
 	return out
 }
@@ -193,14 +195,14 @@ func (f frame) composeFenceOpen(out *composedLine, fl syntax.FenceLine, width, s
 	label := fenceLabel(fl.Info)
 	// "╭ " + label + " " + fill + "╮" needs room for the corners, the blanks and
 	// at least one fill cell.
-	if label != "" && width >= 4+ansiiWidth(label) {
+	if label != "" && width >= 4+ansi.StringWidth(label) {
 		add('╭', syntax.KindPlain, src)
 		add(' ', syntax.KindPlain, src)
 		for _, r := range label {
 			add(r, syntax.KindString, src)
 		}
 		add(' ', syntax.KindPlain, src)
-		for j := 0; j < width-4-ansiiWidth(label); j++ {
+		for j := 0; j < width-4-ansi.StringWidth(label); j++ {
 			add('─', syntax.KindPlain, src)
 		}
 		add('╮', syntax.KindPlain, src)
@@ -235,10 +237,6 @@ func fenceLabel(info string) string {
 	}
 	return word
 }
-
-// ansiiWidth is the display width of s, used for the label that sits in the top
-// border.
-func ansiiWidth(s string) int { return ansi.StringWidth(s) }
 
 // quotePrefixLen is the number of source runes a blockquote prefix of depth
 // levels takes: up to three blanks, then ">" with at most one blank after it per

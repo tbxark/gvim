@@ -55,10 +55,11 @@ type Config struct {
 	InitializationOptions protocol.LSPAny
 	// ApplyEdit, when non-nil, answers a server's workspace/applyEdit request.
 	// It runs on the connection's read goroutine, so it must not wait on the
-	// UI: enqueue the edit and return whether it was accepted. Answering here,
+	// UI: enqueue the edit and return whether it was accepted, and when it was not,
+	// the reason, which goes back to the server as failureReason. Answering here,
 	// off the request queue, is what keeps a server's executeCommand followed by
 	// applyEdit from deadlocking on the main thread.
-	ApplyEdit func(protocol.ApplyWorkspaceEditParams) bool
+	ApplyEdit func(protocol.ApplyWorkspaceEditParams) (applied bool, failureReason string)
 	// Limits is the server's process_limits. Start applies what the platform can
 	// (Linux cgroup v2, or an sh ulimit memory wrapper) and records what it could
 	// not in the client's LimitsNote; the zero value applies nothing.
@@ -93,7 +94,7 @@ type Client struct {
 	progOrder []string
 
 	// applyEdit answers workspace/applyEdit; nil when the editor takes none.
-	applyEdit func(protocol.ApplyWorkspaceEditParams) bool
+	applyEdit func(protocol.ApplyWorkspaceEditParams) (bool, string)
 	// initOptions answers workspace/configuration, and is what initialize sent.
 	initOptions protocol.LSPAny
 
@@ -116,6 +117,8 @@ type Client struct {
 	proc       *exec.Cmd
 	stderr     *tailBuffer
 	limitsNote string
+	// limitsRelease frees the server's cgroup after the process has exited (Close).
+	limitsRelease func()
 
 	closeOnce sync.Once
 	closeErr  error
@@ -157,6 +160,14 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 	// passes it as an argument, so nothing is looked up twice and $@ keeps the arguments
 	// as they were written.
 	plan := PlanLimits(cfg.Limits)
+	// A plan holds its cgroup until the child has exited: Close releases it, and every
+	// way out of Start before that does.
+	started := false
+	defer func() {
+		if !started && plan.Release != nil {
+			plan.Release()
+		}
+	}()
 	command := append([]string{program}, cfg.Command[1:]...)
 	if plan.WrapMemoryKB > 0 {
 		if sh, err := exec.LookPath("sh"); err != nil {
@@ -199,6 +210,8 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 	c.proc = cmd
 	c.stderr = stderr
 	c.limitsNote = plan.Note
+	c.limitsRelease = plan.Release
+	started = true
 	return c, nil
 }
 
@@ -520,6 +533,9 @@ func (c *Client) Close() error {
 		c.closeErr = c.conn.Close()
 		if c.proc != nil {
 			waitProcess(c.proc)
+		}
+		if c.limitsRelease != nil {
+			c.limitsRelease()
 		}
 	})
 	return c.closeErr

@@ -124,7 +124,7 @@ func TestRebaseKeepsEscFromJumpingBack(t *testing.T) {
 	}
 	f.Place(buffer.Pos{Line: 1, Col: 5}) // a click in the text
 	b.Rebase()
-	b.Cancel()
+	b.Dismiss()
 	if f.cursor != (buffer.Pos{Line: 1, Col: 5}) {
 		t.Errorf("Esc put the caret at %v, want it kept where the click put it", f.cursor)
 	}

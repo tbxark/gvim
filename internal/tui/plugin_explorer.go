@@ -12,7 +12,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// File explorer decorations and slots (task-61): the host store behind Fresh's
+// File explorer decorations and slots: the host store behind Fresh's
 // setFileExplorerDecorations/setFileExplorerSlots. Plugins set them per namespace; the
 // root resolves, per painted row, the best decoration and slot, and hands the explorer a
 // plugin-agnostic explorer.RowDecor through the Geometry callback. Painting reads the
@@ -149,11 +149,9 @@ func (h *pluginHost) SetExplorerDecorations(plugin, ns string, list []pluginapi.
 	}
 	pe := &m.plug.explorer
 	s := pe.set(plugin, ns, true)
-	if s == nil || (len(s.decos) == 0 && pe.countPlugin(plugin) > pluginapi.MaxExplorerNamespaces) {
-		if s != nil && len(s.decos) == 0 && pe.countPlugin(plugin) > pluginapi.MaxExplorerNamespaces {
-			delete(pe.sets, plugin+"\x00"+ns)
-			return pluginapi.Errf(pluginapi.CodeLimit, "a plugin uses at most %d explorer namespaces", pluginapi.MaxExplorerNamespaces)
-		}
+	if len(s.decos) == 0 && len(s.slots) == 0 && pe.countPlugin(plugin) > pluginapi.MaxExplorerNamespaces {
+		delete(pe.sets, plugin+"\x00"+ns)
+		return pluginapi.Errf(pluginapi.CodeLimit, "a plugin uses at most %d explorer namespaces", pluginapi.MaxExplorerNamespaces)
 	}
 	if s.decos == nil {
 		s.decos = map[string]explorerDeco{}
@@ -202,9 +200,6 @@ func (h *pluginHost) SetExplorerSlots(plugin, ns string, list []pluginapi.FileEx
 	}
 	pe := &m.plug.explorer
 	s := pe.set(plugin, ns, true)
-	if s == nil {
-		return pluginapi.Errf(pluginapi.CodeBusy, "cannot create the explorer namespace")
-	}
 	if len(s.decos) == 0 && len(s.slots) == 0 && pe.countPlugin(plugin) > pluginapi.MaxExplorerNamespaces {
 		delete(pe.sets, plugin+"\x00"+ns)
 		return pluginapi.Errf(pluginapi.CodeLimit, "a plugin uses at most %d explorer namespaces", pluginapi.MaxExplorerNamespaces)

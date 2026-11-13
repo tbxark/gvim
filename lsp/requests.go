@@ -467,18 +467,19 @@ func (c *Client) Formatting(ctx context.Context, docURI string, tabSize int, ins
 	return edits, nil
 }
 
-// PullDiagnostics asks for the server-pulled diagnostics of docURI
-// (textDocument/diagnostic). previousResultID is the result id of the last full
-// answer, or "" for a full pull. The server may answer "unchanged" (items is nil
-// and Unchanged is true) when it has nothing new for that id.
+// PullDiagnosticsResult is the answer of a textDocument/diagnostic pull. A server that
+// has nothing new for the previous result id answers "unchanged": Items is nil and
+// Unchanged is true.
 type PullDiagnosticsResult struct {
 	Items     []protocol.Diagnostic
 	ResultID  string
 	Unchanged bool
 }
 
-// PullDiagnostics asks the server for the document's diagnostics. Some servers
-// report their problems only this way instead of publishing them.
+// PullDiagnostics asks the server for the document's diagnostics
+// (textDocument/diagnostic). previousResultID is the result id of the last full
+// answer, or "" for a full pull. Some servers report their problems only this way
+// instead of publishing them.
 func (c *Client) PullDiagnostics(ctx context.Context, docURI, previousResultID string) (PullDiagnosticsResult, error) {
 	params := map[string]any{
 		"textDocument": map[string]any{"uri": docURI},

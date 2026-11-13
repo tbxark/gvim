@@ -71,6 +71,12 @@
 ---@field timed_out boolean
 ---@field truncated boolean
 
+---@class ExitResult what a spawned process reports when it ends: a ProcResult without the output
+---@field code integer
+---@field signal? string
+---@field ok boolean code == 0, no signal, no timeout
+---@field timed_out boolean
+
 ---@class Diagnostic
 ---@field range Range
 ---@field severity "error"|"warning"|"info"|"hint"
@@ -227,7 +233,7 @@ function Buffer:set_read_only(ro) end
 ---@return true|nil, string?
 function Buffer:set_mode(name) end
 ---@param name "wrap"|"line_numbers"|"tab_size"
----@param value any
+---@param value boolean|number|nil nil drops the override
 ---@return true|nil, string?
 function Buffer:set_option(name, value) end
 ---@param name "wrap"|"line_numbers"|"tab_size"
@@ -290,7 +296,7 @@ function Mode:enter() end
 
 ---@class Timer
 local Timer = {}
----@return true
+---@return boolean was_active true when the timer was still pending
 function Timer:cancel() end
 ---@return boolean
 function Timer:active() end
@@ -315,7 +321,7 @@ function Process:close_stdin() end
 function Process:kill(signal) end
 ---@return boolean
 function Process:is_running() end
----@return ProcResult|nil, string?
+---@return ExitResult|nil, string?
 function Process:wait() end
 ---@return integer|nil, string?
 function Process:wait_started() end
@@ -358,13 +364,13 @@ function Picker:open() end
 ---@return true|nil, string?
 function Picker:set_items(items) end
 ---@param s string
----@return true
+---@return true|nil, string?
 function Picker:set_title(s) end
 ---@param s string
----@return true
+---@return true|nil, string?
 function Picker:set_footer(s) end
 ---@param s string
----@return true
+---@return true|nil, string?
 function Picker:set_status(s) end
 ---@return string
 function Picker:query() end
@@ -388,13 +394,13 @@ function Popup:set_lines(lines) end
 ---@class StatusItem
 local StatusItem = {}
 ---@param text string
----@return true
+---@return true|nil, string? closed once the item was removed
 function StatusItem:set(text) end
----@return true
+---@return true|nil, string?
 function StatusItem:show() end
----@return true
+---@return true|nil, string?
 function StatusItem:hide() end
----@return true
+---@return true|nil, string?
 function StatusItem:remove() end
 
 ---@class Regex
@@ -432,7 +438,7 @@ gvim.api_version = 2
 gvim.version = ""
 gvim.platform = ""
 
----@param feature "decor"|"windows"|"virtual_buffers"|"input"|"lsp"|"git"|string
+---@param feature "decor"|"decor_virtual_paint"|"windows"|"virtual_buffers"|"input"|"http_get"|"lsp"|"git"|string
 ---@return boolean
 function gvim.has(feature) end
 ---@param err any
@@ -606,7 +612,7 @@ function gvim.buf.get_window_state(buf, key, default) end
 function gvim.buf.set_window_state(buf, key, value) end
 ---@param path string
 ---@param opts? {direction?: "right"|"below", focus?: boolean, preview?: boolean, background?: boolean, pos?: Pos}
----@return true, Buffer|nil, string?
+---@return Buffer|nil, string?
 function gvim.buf.open_file_in_split(path, opts) end
 ---@param win Window
 ---@return true|nil, string?
@@ -621,6 +627,9 @@ function gvim.buf.set_line_targets(buf, targets) end
 ---@param buf Buffer
 ---@return true
 function gvim.buf.clear_line_targets(buf) end
+---@param buf? Buffer the buffer whose primary caret's properties are read (default: current)
+---@return table|nil the properties of the entry under the caret, string?
+function gvim.buf.text_properties_at_cursor(buf) end
 
 
 
@@ -651,7 +660,7 @@ function gvim.win.clear_split_label(win) end
 ---@return true|nil, string?
 function gvim.win.create_scroll_sync(id, left, right) end
 ---@param id integer
----@param anchors {left: integer, right: integer}[] 0-based line pairs
+---@param anchors {[1]: integer, [2]: integer}[] {left_line, right_line} pairs, 0-based
 ---@return true|nil, string?
 function gvim.win.set_scroll_sync_anchors(id, anchors) end
 ---@param id integer
@@ -779,7 +788,7 @@ function gvim.emit(name, payload) end
 ---@field children? Widget[] row, col and the one-child wrappers (labeledSection/component/overlay/popup)
 ---@field text? string label text, the editable text field's seed/read-only block, the divider glyph
 ---@field label? string button and toggle text, number label
----@field value? string (number) seed value; the text field reads "text"
+---@field value? string|number text field: the seed text (as "text"); number: the seed value
 ---@field runs? WidgetRun[] label segments; raw rows; hintBar entries
 ---@field style? Style
 ---@field checked? boolean toggle
@@ -795,7 +804,6 @@ function gvim.emit(name, payload) end
 ---@field cols? integer spacer width in a row (default 1)
 ---@field flex? boolean spacer: take the free width of a row
 ---@field options? string[] dropdown, radio and dualList: the selectable values
----@field number? number number: seed value
 ---@field min? number
 ---@field max? number
 ---@field step? number default 1
@@ -845,7 +853,7 @@ function gvim.ui.popup(spec) end
 ---@param opts {title?: string, message?: string, actions: {id: string, label: string}[]}
 ---@return string|nil chosen action id, string?
 function gvim.ui.action_popup(opts) end
----@param items (string|{id?: string, text?: string, description?: string, value?: string, disabled?: boolean})[]
+---@param items (string|{text?: string, description?: string, value?: string, disabled?: boolean})[]
 ---@param selected? integer 1-based highlighted row
 ---@return true|nil, string?
 function gvim.ui.set_prompt_suggestions(items, selected) end
@@ -878,20 +886,21 @@ function gvim.ui.widget_mutate(id, mutation) end
 ---@return integer|nil panel id, string?
 function gvim.ui.mount_sidebar_section(spec, opts) end
 gvim.ui.statusbar = {}
----@param spec {id: string, text?: string, align?: "left"|"right", priority?: integer, on_click?: fun()}
+---@param spec {id?: string, text?: string, align?: "left"|"right", priority?: integer, on_click?: fun()}
 ---@return StatusItem|nil, string?
 function gvim.ui.statusbar.item(spec) end
+gvim.decor = {}
 -- tier-1c-A decoration surface: convenience wrappers over the namespace items above.
 ---@param buf Buffer
 ---@param line integer 0-based anchor line
 ---@param text string
----@param opts? {above?: boolean, style?: Style, gutter_glyph?: string, gutter_style?: Style, gutter_color?: Color, priority?: integer, compose_only?: boolean, activation?: "always"|"unless-cursor-in"|"if-cursor-in", scope?: {start_line?: integer, end_line?: integer}, text_overlays?: {start: integer, end: integer, style: Style}[], namespace?: string, version?: string}
+---@param opts? {style?: Style, gutter_glyph?: string, gutter_style?: Style, gutter_color?: Color, priority?: integer, compose_only?: boolean, activation?: "always"|"unless-cursor-in"|"if-cursor-in", scope?: {start_line?: integer, end_line?: integer}, namespace?: string, version?: string}
 ---@return integer|nil id, string?
 function gvim.decor.add_virtual_line(buf, line, text, opts) end
 ---@param buf Buffer
 ---@param line integer
 ---@param text string
----@param opts? table same as add_virtual_line, above is forced false
+---@param opts? table same as add_virtual_line
 ---@return integer|nil, string?
 function gvim.decor.add_virtual_line_below(buf, line, text, opts) end
 ---@param buf Buffer
@@ -928,7 +937,7 @@ function gvim.decor.refresh_lines(buf) end
 ---@param buf Buffer
 ---@param start_line integer
 ---@param end_line integer
----@param opts? {placeholder?: string, collapsed?: boolean, fold_kind?: string, namespace?: string, version?: string}
+---@param opts? {placeholder?: string, collapsed?: boolean, kind?: string, namespace?: string, version?: string}
 ---@return true|nil, string?
 function gvim.decor.add_fold(buf, start_line, end_line, opts) end
 ---@param buf Buffer
@@ -963,7 +972,6 @@ gvim.clipboard = {}
 ---@return true|nil, string?
 function gvim.clipboard.set(text) end
 
-gvim.decor = {}
 ---@param name string
 ---@return Namespace|nil, string?
 function gvim.decor.namespace(name) end
@@ -1004,7 +1012,6 @@ function gvim.path.to_uri(p) end
 ---@return string|nil, string?
 function gvim.path.from_uri(u) end
 
-gvim.agent_sessions = {}
 ---@class AgentSession
 ---@field kind "tmux"|"history"
 ---@field tool string
@@ -1018,12 +1025,15 @@ gvim.agent_sessions = {}
 ---@field socket_only boolean
 ---@field exact boolean
 ---@field mod_time integer
+
 ---@class AgentReport
 ---@field supported boolean
 ---@field installed boolean
 ---@field truncated boolean
 ---@field sessions AgentSession[]
 ---@field problems string[]
+
+gvim.agent_sessions = {}
 ---@return AgentReport
 function gvim.agent_sessions.discover() end
 
@@ -1045,7 +1055,7 @@ function gvim.fs.list(path, opts) end
 ---@return {kind: string, size: integer, mtime: number, mode: integer}|nil, string?
 function gvim.fs.stat(path) end
 ---@param path string
----@return boolean
+---@return boolean|nil, string? false when it is missing; nil, err when that cannot be told
 function gvim.fs.exists(path) end
 ---@param path string
 ---@param opts? {parents?: boolean}
@@ -1053,7 +1063,7 @@ function gvim.fs.exists(path) end
 function gvim.fs.mkdir(path, opts) end
 ---@param path string
 ---@param opts? {recursive?: boolean}
----@return true|nil, string?
+---@return true|nil, string? `unsupported` on a remote workspace
 function gvim.fs.remove(path, opts) end
 ---@param from string
 ---@param to string
@@ -1093,7 +1103,7 @@ gvim.proc = {}
 ---@return ProcResult|nil, string?
 function gvim.proc.run(argv, opts) end
 ---@param argv string[]
----@param opts? {cwd?: string, env?: table<string, string>, stdin?: string|boolean, timeout_ms?: integer, max_output?: integer, merge_stderr?: boolean, lines?: boolean, on_start?: fun(pid: integer), on_stdout?: fun(chunk: string), on_stderr?: fun(chunk: string), on_exit?: fun(result: ProcResult)}
+---@param opts? {cwd?: string, env?: table<string, string>, stdin?: string|boolean, timeout_ms?: integer, max_output?: integer, merge_stderr?: boolean, lines?: boolean, on_start?: fun(pid: integer), on_stdout?: fun(chunk: string), on_stderr?: fun(chunk: string), on_exit?: fun(result: ExitResult)}
 ---@return Process|nil, string?
 function gvim.proc.spawn(argv, opts) end
 ---@param name string
@@ -1184,9 +1194,6 @@ function gvim.git.blame(path, opts) end
 function gvim.git.commit(dir, hash) end
 
 gvim.lsp = {}
----@param buf? Buffer the buffer whose primary caret's properties are read (default: current)
----@return table|nil the properties of the entry under the caret, string?
-function gvim.buf.text_properties_at_cursor(buf) end
 ---@param buf? Buffer
 ---@return Diagnostic[]|nil, string?
 function gvim.lsp.diagnostics(buf) end
@@ -1279,8 +1286,8 @@ function gvim.dashboard.auto_open() end
 gvim.plugins = {}
 ---@return {name: string, status: string, version: string, source: string, file: string, dir: string, enabled: boolean, description: string, requires: string[]}[]
 function gvim.plugins.list() end
----@param tbl table
----@return true|nil, string?
+---@param tbl table functions and plain data; a bad key or value raises
+---@return true
 function gvim.plugins.export(tbl) end
 ---@param name string
 ---@return table|nil
@@ -1449,7 +1456,7 @@ function gvim.i18n.t(key, vars) end
 ---@param vars? table<string, string|number|boolean>
 ---@return string
 function gvim.i18n.translate(key, vars) end
----@return string the editor's locale ("en" today)
+---@return string the editor's locale ("en" or "zh-CN")
 function gvim.i18n.locale() end
 
 gvim.bit = {}

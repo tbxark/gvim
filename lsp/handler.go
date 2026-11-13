@@ -106,13 +106,18 @@ func (h *clientHandler) LogMessage(context.Context, *protocol.LogMessageParams) 
 // ApplyEdit answers a server's workspace/applyEdit request. The edit is handed to
 // the configured callback and the answer goes back on the read goroutine, so the
 // server is never left waiting on the UI. Without a callback every edit is
-// refused. It never blocks: the callback enqueues the edit and returns.
+// refused. A refusal carries its reason as failureReason. It never blocks: the
+// callback enqueues the edit and returns.
 func (h *clientHandler) ApplyEdit(_ context.Context, p *protocol.ApplyWorkspaceEditParams) (*protocol.ApplyWorkspaceEditResult, error) {
-	applied := false
+	applied, reason := false, "the editor does not take workspace edits from servers"
 	if h.c.applyEdit != nil {
-		applied = h.c.applyEdit(*p)
+		applied, reason = h.c.applyEdit(*p)
 	}
-	return &protocol.ApplyWorkspaceEditResult{Applied: applied}, nil
+	res := &protocol.ApplyWorkspaceEditResult{Applied: applied}
+	if !applied && reason != "" {
+		res.FailureReason = &reason
+	}
+	return res, nil
 }
 
 // Configuration answers a server's workspace/configuration request from the

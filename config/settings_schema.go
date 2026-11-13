@@ -126,7 +126,7 @@ var settingsTable = []Setting{
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: func(c Config) string { return c.Theme }, encode: encodeText},
 	{Path: []string{"keymap"}, Section: SectionInterface, Kind: SettingEnum, ChoicesFrom: "keymaps",
-		Layers: LayerUser, Apply: ApplyLive, // the project layer cannot set the keymap (C11)
+		Layers: LayerUser, Apply: ApplyLive, // the project layer cannot set the keymap
 		value: func(c Config) string { return c.Keymap }, encode: encodeText},
 	{Path: []string{"ui_icons"}, Section: SectionInterface, Kind: SettingEnum,
 		Choices: []string{UIIconsAuto, UIIconsPlain, UIIconsNerd},
@@ -383,7 +383,7 @@ var settingsTable = []Setting{
 		value: boolValue(func(c Config) bool { return c.FileExplorer.CompactDirectories }), encode: encodeBool},
 
 	// Terminal. The terminal reads these while the dock is built, so they are
-	// restart settings. A project config cannot choose the shell program (C11),
+	// restart settings. A project config cannot choose the shell program,
 	// so the shell rows are user-only.
 	{Path: []string{"terminal", "shell", "command"}, Section: SectionTerminal, Kind: SettingString,
 		Layers: LayerUser, Apply: ApplyRestart,

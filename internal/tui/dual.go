@@ -27,8 +27,8 @@ const (
 // active tab; any other change clears it (dualValid/syncDual).
 type dualView struct {
 	tab     int
-	source  *splitNode
-	preview *splitNode
+	source  *split.Node
+	preview *split.Node
 }
 
 // dualRole is which side of the dual view a pane is.
@@ -93,7 +93,7 @@ func (m *Model) markdownMode() string {
 // are in the leaves' reading order, so the source pane is the first and the
 // preview the second. A pane built without a rectangle (the focused-pane
 // shortcut in the caret and body-row paths) takes the role of the focused leaf.
-func (m *Model) dualRoleOf(p splitPane) dualRole {
+func (m *Model) dualRoleOf(p split.Pane) dualRole {
 	d := m.validDual()
 	if d == nil {
 		return dualNone
@@ -124,7 +124,7 @@ func (m *Model) dualRoleOf(p splitPane) dualRole {
 // paneViewMode returns the saved per-pane Markdown view override: the leaves of
 // the layout are in the geometry panes' reading order, and a pane built without a
 // rectangle takes the focused leaf's mode.
-func (m *Model) paneViewMode(p splitPane) string {
+func (m *Model) paneViewMode(p split.Pane) string {
 	if m.splits.Root == nil {
 		return ""
 	}
@@ -145,7 +145,7 @@ func (m *Model) paneViewMode(p splitPane) string {
 // panePageView returns the page view of pane p: the document's, unless the pane
 // is a side of the dual view, where the preview is composed and the source is
 // plain whatever the document's settings say.
-func (m *Model) panePageView(p splitPane, doc Document) editorpane.PageView {
+func (m *Model) panePageView(p split.Pane, doc Document) editorpane.PageView {
 	pv := m.pageViewFor(doc)
 	switch m.dualRoleOf(p) {
 	case dualPreview:
@@ -222,7 +222,7 @@ func (m *Model) openMarkdownDual() bool {
 	// the buffer's compose as it opens the dual tab).
 	m.setMarkdownPageView(false)
 	m.focusEditor()
-	if msg := m.trySplit(sideBySide); msg != "" {
+	if msg := m.trySplit(split.SideBySide); msg != "" {
 		m.notice = msg
 		return false
 	}

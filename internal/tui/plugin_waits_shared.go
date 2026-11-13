@@ -1,6 +1,6 @@
 package tui
 
-// Cross-workspace plugin UI waits (#19b follow-up). One plugin runtime serves every daemon
+// Cross-workspace plugin UI waits. One plugin runtime serves every daemon
 // workspace, and a plugin UI wait is answered by the root model that opened its overlay.
 // The registry keeps the token -> owning model mapping for shared-runtime daemons, so a
 // wait opened in workspace A stays with A across a switch (its overlay and plug.waits live
@@ -17,7 +17,7 @@ import (
 
 // waitRegistry is the cross-workspace wait ownership map of each shared host. It lives
 // beside PluginShared rather than inside its struct so the daemon-wide host and the
-// workspace-scoped chrome work (task-141) can edit plugin_shared.go independently.
+// workspace-scoped chrome work can edit plugin_shared.go independently.
 var waitRegistry = struct {
 	mu   sync.Mutex
 	byID map[*PluginShared]map[pluginapi.Token]*Model
@@ -57,14 +57,6 @@ func (s *PluginShared) unregisterWait(t pluginapi.Token, m *Model) {
 	if waits[t] == m {
 		delete(waits, t)
 	}
-}
-
-// waitOwner returns the model that owns t, or nil.
-func (s *PluginShared) waitOwner(t pluginapi.Token) *Model {
-	waits := sharedWaits(s)
-	waitRegistry.mu.Lock()
-	defer waitRegistry.mu.Unlock()
-	return waits[t]
 }
 
 // takeWaitsFor removes and returns the waits owned by m: the workspace is closing, so no

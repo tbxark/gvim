@@ -14,7 +14,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.buf and the Buffer handle (FINAL 5.2, amended by C4, C7, C18, C22 and C24).
+// gvim.buf and the Buffer handle.
 //
 // Everything here is synchronous except open, save, revert and diff_saved, which are
 // awaitable. Positions are 0-based line and 0-based byte column; Lua arrays are 1-based.
@@ -23,7 +23,7 @@ import (
 
 // Limits of the buffer API.
 const (
-	bufMaxEdits       = 50_000        // edits in one b:edit call (C18)
+	bufMaxEdits       = 50_000        // edits in one b:edit call
 	bufMaxEditBytes   = 8 << 20       // inserted bytes in one edit call
 	bufMaxReadLines   = 200_000       // lines in one b:lines call
 	bufMaxReadBytes   = 16 << 20      // bytes in one b:lines / b:text call
@@ -184,7 +184,7 @@ var bufWholeRange = pluginapi.Range{To: pluginapi.Pos{Line: bufEndOfText}}
 var bufEndPos = pluginapi.Pos{Line: bufEndOfText}
 
 // bufSetLinesEdit turns b:set_lines(first, last, lines) on a document of n lines into one
-// edit (C24). The line array L[0..n) becomes L[0..first) ++ lines ++ L[last..n); the edit
+// edit. The line array L[0..n) becomes L[0..first) ++ lines ++ L[last..n); the edit
 // is the text between the lines first-1 and last, so that no newline is invented or lost.
 // noop reports an edit that changes nothing.
 func bufSetLinesEdit(n, first, last int, lines []string) (ed pluginapi.Edit, noop bool, err error) {
@@ -215,7 +215,7 @@ func bufSetLinesEdit(n, first, last int, lines []string) (ed pluginapi.Edit, noo
 	return pluginapi.Edit{Range: pluginapi.Range{From: from, To: pluginapi.Pos{Line: n}}, Text: body}, false, nil
 }
 
-// installBuf installs buffers: gvim.buf and the Buffer handle methods (stage S6).
+// installBuf installs buffers: gvim.buf and the Buffer handle methods.
 func installBuf(e *apiEnv) {
 	p := e.p
 	area := e.area("buf")
@@ -930,7 +930,7 @@ func (p *plugin) contentFromLua(L *lua.LState, t *lua.LTable) ([]pluginapi.Conte
 	return out, nil
 }
 
-// installBufVirtual is the virtual-buffer part of the buffer API (stage S18): gvim.buf.create
+// installBufVirtual is the virtual-buffer part of the buffer API: gvim.buf.create
 // and the methods set_content, props_at, set_read_only, set_mode, set_option and get_option.
 func installBufVirtual(e *apiEnv) {
 	p := e.p

@@ -125,9 +125,9 @@ func TestDynamicRegistrationUpdatesCapabilities(t *testing.T) {
 
 func TestApplyEditHandlerAnswersOnTheReadPath(t *testing.T) {
 	var got *protocol.ApplyWorkspaceEditParams
-	f := newFixture(t, Config{ApplyEdit: func(p protocol.ApplyWorkspaceEditParams) bool {
+	f := newFixture(t, Config{ApplyEdit: func(p protocol.ApplyWorkspaceEditParams) (bool, string) {
 		got = &p
-		return true
+		return true, ""
 	}}, nil)
 	ctx := newTestContext(t)
 	if _, err := f.client.Initialize(ctx); err != nil {
@@ -160,8 +160,22 @@ func TestApplyEditWithoutAHandlerIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("applyEdit: %v", err)
 	}
-	if res == nil || res.Applied {
-		t.Fatalf("applyEdit result = %+v, want not applied", res)
+	if res == nil || res.Applied || res.FailureReason == nil || *res.FailureReason == "" {
+		t.Fatalf("applyEdit result = %+v, want not applied with a reason", res)
+	}
+}
+
+func TestApplyEditRefusalCarriesTheHandlersReason(t *testing.T) {
+	f := newFixture(t, Config{ApplyEdit: func(protocol.ApplyWorkspaceEditParams) (bool, string) {
+		return false, "unsupported edit"
+	}}, nil)
+	ctx := newTestContext(t)
+	if _, err := f.client.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	res, err := f.srv.ApplyEdit(ctx, &protocol.ApplyWorkspaceEditParams{Edit: protocol.WorkspaceEdit{}})
+	if err != nil || res == nil || res.Applied || res.FailureReason == nil || *res.FailureReason != "unsupported edit" {
+		t.Fatalf("applyEdit = %+v, %v; want the handler's reason", res, err)
 	}
 }
 
@@ -247,9 +261,9 @@ func TestExecuteCommandThatAppliesAnEditDoesNotDeadlock(t *testing.T) {
 	// executeCommand result. This is the nested-request shape that a reader that
 	// queued applyEdit behind the main thread would deadlock on.
 	var applied bool
-	f := newFixture(t, Config{ApplyEdit: func(p protocol.ApplyWorkspaceEditParams) bool {
+	f := newFixture(t, Config{ApplyEdit: func(p protocol.ApplyWorkspaceEditParams) (bool, string) {
 		applied = true
-		return true
+		return true, ""
 	}}, nil)
 	ctx := newTestContext(t)
 	if _, err := f.client.Initialize(ctx); err != nil {

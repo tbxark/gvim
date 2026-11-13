@@ -147,8 +147,6 @@ function M.lines(first, last)
   return out
 end
 
-function M.pos(l, c) return { line = l, col = c } end
-
 function M.cmp(a, b)
   if a.line ~= b.line then
     return a.line < b.line and -1 or 1
@@ -307,11 +305,6 @@ end
 -- replace edits one range.
 function M.replace(from, to, text)
   M.edit({ { from = from, to = to, text = text } })
-end
-
--- delete_range removes [from, to).
-function M.delete_range(from, to)
-  M.edit({ { from = from, to = to } })
 end
 
 -- last_pos is the end of the buffer.

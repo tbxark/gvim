@@ -30,15 +30,16 @@ func TestSidebarStateCollectsAndRestores(t *testing.T) {
 	m.diag.rows = 6
 	m.contents.SetRows(12)
 	m.contents.ToggleCollapsed()
+	m.contents.SetViewRows(1) // a window of one row over two headings can scroll by one
 	m.contents.SetScroll(1)
 	st := m.SidebarState()
-	if !st.ContentsOpen || !st.ContentsCollapsed || st.ContentsRows != 12 || st.ContentsScroll != 1 {
+	if !st.ContentsOpen || !st.ContentsCollapsed || st.SectionRows["contents"] != 12 || st.ContentsScroll != 1 {
 		t.Fatalf("collected contents state = %+v", st)
 	}
 	if st.Width != explorer.ColumnsWidth(42) || st.Side != explorer.SideRight || !st.ExplorerCollapsed || st.ExplorerScroll != 2 || st.ExplorerSelected != "/ws/f1" {
 		t.Fatalf("collected explorer state = %+v", st)
 	}
-	if !st.DiagnosticsOpen || !st.DiagnosticsCollapsed || st.DiagnosticsRows != 6 {
+	if !st.DiagnosticsOpen || !st.DiagnosticsCollapsed || st.SectionRows["diagnostics"] != 6 {
 		t.Fatalf("collected diagnostics state = %+v", st)
 	}
 

@@ -1,7 +1,6 @@
 package editorpane
 
 import (
-	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -51,106 +50,33 @@ func (f frame) layoutCompose(i int, styled bool) line {
 		}
 	}
 	raw := cp.runes
-	plain := expandCells(raw, nil, nil, f.tab)
-	geom := make([]rune, len(plain))
-	glue := make([]bool, len(plain))
-	for j, c := range plain {
-		geom[j], glue[j] = c.r, c.glue
-	}
+	geom, glue := expandedGeom(raw, f.tab)
 	ln := line{geom: geom, raw: raw, off: 0, spans: []span{{0, len(geom)}},
 		srcToDisp: cp.srcToDisp, dispToSrc: cp.dispToSrc}
 	if f.wrap {
-		if cp.hang > 0 {
-			ln.spans = wrapRows(geom, f.pageMeasure, cp.hang, glue)
-			if len(ln.spans) > 1 {
-				ln.indent = cp.hang
-			}
-		} else {
-			ln.spans = wrapRows(geom, f.pageMeasure, 0, glue)
+		ln.spans = wrapRows(geom, f.pageMeasure, cp.hang, glue)
+		if len(ln.spans) > 1 {
+			ln.indent = cp.hang
 		}
 	}
 	if styled {
-		ln.cells = expandCellsSrc(raw, cp.kinds, cp.src, f.selectedInSrc(i), f.tab)
+		// The selection test takes the source column of each visible rune.
+		var sel func(int) bool
+		if inSel := f.selectedIn(i); inSel != nil {
+			sel = func(j int) bool {
+				if j < len(cp.src) {
+					j = cp.src[j]
+				}
+				return inSel(j)
+			}
+		}
+		ln.cells = expandCells(raw, cp.kinds, sel, f.tab)
 		f.markMatchesComposed(i, raw, cp, ln.cells)
 		f.markDiagnosticsComposed(i, raw, cp, ln.cells)
 		f.decorateComposed(i, raw, cp.kinds, &ln)
 		f.markConceals(i, raw, &ln)
 	}
 	return ln
-}
-
-// selectedInSrc is selectedIn for a composed line: the test takes a source rune
-// column, so the selection over hidden delimiters still marks the visible cells.
-func (f frame) selectedInSrc(i int) func(srcCol int) bool {
-	if len(f.sels) == 0 {
-		return nil
-	}
-	var here []buffer.Selection
-	for _, s := range f.sels {
-		if from, to := s.Ordered(); from.Line <= i && i <= to.Line {
-			here = append(here, s)
-		}
-	}
-	if len(here) == 0 {
-		return nil
-	}
-	return func(srcCol int) bool {
-		p := buffer.Pos{Line: i, Col: srcCol}
-		for _, s := range here {
-			from, to := s.Ordered()
-			if !p.Less(from) && p.Less(to) {
-				return true
-			}
-		}
-		return false
-	}
-}
-
-// expandCellsSrc is expandCells for a composed line: sel takes the source rune
-// column of each visible rune.
-func expandCellsSrc(raw []rune, kinds []syntax.Kind, src []int, sel func(int) bool, tab int) []cell {
-	out := make([]cell, 0, len(raw))
-	col := 0
-	for j, r := range raw {
-		k := syntax.KindPlain
-		if j < len(kinds) {
-			k = kinds[j]
-		}
-		selected := false
-		if sel != nil {
-			srcCol := j
-			if j < len(src) {
-				srcCol = src[j]
-			}
-			selected = sel(srcCol)
-		}
-		switch {
-		case r == '\t':
-			n := cellAdvance(col, r, tab)
-			for q := range n {
-				b := blankTabPad
-				if q == 0 {
-					b = blankTab
-				}
-				out = append(out, cell{r: ' ', kind: k, sel: selected, blank: b})
-			}
-			col += n
-		case controlRune(r):
-			esc := controlEscape(r)
-			for q, e := range esc {
-				out = append(out, cell{r: e, kind: k, sel: selected, glue: q < len(esc)-1})
-			}
-			col += controlWidth
-		default:
-			c := cell{r: r, kind: k, sel: selected}
-			if r == ' ' {
-				c.blank = blankSpace
-			}
-			out = append(out, c)
-			col += cellAdvance(col, r, tab)
-		}
-	}
-	return out
 }
 
 // markMatchesComposed marks the search matches of a composed line: the highlight

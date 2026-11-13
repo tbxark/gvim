@@ -357,6 +357,8 @@ type mdInline struct {
 	// view (see MarkdownInlineMarkers); marks holds them, in bytes of the line.
 	collect bool
 	marks   []mark
+	// closers remembers the closing run found for each opener, see closingRun.
+	closers map[closerKey]int
 }
 
 func (p *mdInline) emit(from, to int, k Kind) { p.t.add(p.line, from, to, k) }

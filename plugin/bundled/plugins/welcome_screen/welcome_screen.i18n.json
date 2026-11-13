@@ -18,6 +18,8 @@
     "verb.help.label": "Help",
     "verb.help.detail": "Keys, commands and documentation",
     "section.dashboard": "DASHBOARD",
+    "section.doors": "DOORS",
+    "section.verbs": "VERBS",
     "section.recent": "RECENT FILES",
     "section.empty_dashboard": "No dashboard sections registered.",
     "section.empty_recent": "No recent files yet.",

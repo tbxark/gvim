@@ -355,7 +355,7 @@ func TestViErrorsDoNotWedgeTheModes(t *testing.T) {
 }
 
 // TestViKilledColonCommandDoesNotWedgeKeys: a : command line that the host stops (time
-// budget) leaves the key reader usable; the next keys work at once (S22-2).
+// budget) leaves the key reader usable; the next keys work at once.
 func TestViKilledColonCommandDoesNotWedgeKeys(t *testing.T) {
 	lines := make([]string, 20000)
 	for i := range lines {
@@ -382,7 +382,7 @@ func TestViKilledColonCommandDoesNotWedgeKeys(t *testing.T) {
 
 // TestViVerticalAtTheFirstAndLastLine: j and k in normal mode leave the editor's own
 // vertical move to decide at the first and last line, because it can still move a display
-// row there when the line wraps; an operator with j or k has no such row and fails (S22-4).
+// row there when the line wraps; an operator with j or k has no such row and fails.
 func TestViVerticalAtTheFirstAndLastLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

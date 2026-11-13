@@ -5,7 +5,6 @@
     "cmd.show_help": "Assembly: Show LSP Help",
     "cmd.show_help_desc": "Install commands and status for the asm-lsp assembly language server",
     "status.not_assembly": "Open an assembly file first (.asm/.nasm/.s)",
-    "status.write_failed": "Failed to write %{path}: %{error}",
     "status.created": "Created .asm-lsp.toml (%{assembler}, %{arch}); restarting the assembly LSP",
     "status.never": "Won't offer to create .asm-lsp.toml for this project again",
     "status.never_failed": "Could not save the don't-ask-again choice for this project",

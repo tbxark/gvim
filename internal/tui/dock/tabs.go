@@ -172,11 +172,7 @@ func (t *Tabs) RenameActive(name string) {
 // TabNames returns the display names of every tab (default names for unnamed
 // tabs, with an exited marker).
 func (t *Tabs) TabNames() []string {
-	out := make([]string, len(t.tabs))
-	for i := range t.tabs {
-		out[i] = t.tabLabel(i)
-	}
-	return out
+	return t.tabLabels()
 }
 
 // tabBaseLabels is the undecorated label of every tab: the explicit user name
@@ -250,7 +246,7 @@ func combineTabTitle(command, osc string) string {
 	if strings.Contains(strings.ToLower(osc), strings.ToLower(command)) {
 		return osc
 	}
-	return command + " " + "\u2014" + " " + osc
+	return command + " \u2014 " + osc
 }
 
 // cleanTabTitle strips control and Cf format characters (bidi overrides/isolates,
@@ -304,11 +300,15 @@ func (t *Tabs) tabLabel(i int) string {
 	return t.tabLabels()[i]
 }
 
-// stripLabel is a tab's label cleaned and truncated to one tab's cell budget with
-// an ellipsis, in terminal cells, so the strip paints and the hit map measures
+// stripLabels is every tab's label cleaned and truncated to one tab's cell budget
+// with an ellipsis, in terminal cells, so the strip paints and the hit map measures
 // the same text (a wide glyph is never split).
-func (t *Tabs) stripLabel(i int) string {
-	return ansi.Truncate(cleanTabTitle(t.tabLabel(i)), MaxTerminalTabTitleCells, "…")
+func (t *Tabs) stripLabels() []string {
+	labels := t.tabLabels()
+	for i, label := range labels {
+		labels[i] = ansi.Truncate(cleanTabTitle(label), MaxTerminalTabTitleCells, "…")
+	}
+	return labels
 }
 
 // currentName is the active tab's label.
@@ -641,42 +641,6 @@ func (t *Tabs) Restart() tea.Cmd {
 // Agents returns the configured agent presets the Run Agent picker offers.
 func (t *Tabs) Agents() []Agent { return t.effects.Agents }
 
-// StartAgent starts a configured agent in a new tab and makes it active. It
-// reports whether name is configured. The agent session is ephemeral and records
-// its launch and resume argv, so the tab's Restart can rejoin it.
-func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
-	found := false
-	for _, a := range t.effects.Agents {
-		if a.Name == name {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, false
-	}
-	if len(t.tabs) >= MaxTerminalTabs {
-		if t.host.Notice != nil {
-			t.host.Notice(dockTextVars("gvim.dock.tab_limit_max", "Terminal: the tab limit (%{max}) is reached", map[string]any{"max": MaxTerminalTabs}))
-		}
-		return nil, false
-	}
-	if prev := t.Active(); prev != nil {
-		prev.SetFocus(false)
-	}
-	p := t.newPanel()
-	t.tabs = append(t.tabs, p)
-	t.names = append(t.names, name)
-	t.ids = append(t.ids, t.newID())
-	t.active = len(t.tabs) - 1
-	cmd, ok := p.StartAgent(name)
-	if cmd == nil {
-		return nil, ok
-	}
-	tab := t.tabs[len(t.tabs)-1]
-	return func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} }, ok
-}
-
 // Open reports whether the dock is shown.
 func (t *Tabs) Open() bool { p := t.Active(); return p != nil && p.Open() }
 
@@ -799,11 +763,7 @@ func restartProgramName(argv []string) string {
 	if len(argv) == 0 {
 		return ""
 	}
-	program := argv[0]
-	if i := strings.LastIndexAny(program, "/\\"); i >= 0 {
-		program = program[i+1:]
-	}
-	return program
+	return commandBase(argv[0])
 }
 
 // Restored reports whether the active tab is a restored transcript.
@@ -856,22 +816,6 @@ func (t *Tabs) ScrollSelected() int {
 	return p.ScrollSelected()
 }
 
-// SearchQuery and SearchMatches expose the active tab's search state.
-func (t *Tabs) SearchQuery() string {
-	p := t.Active()
-	if p == nil {
-		return ""
-	}
-	return p.SearchQuery()
-}
-func (t *Tabs) SearchMatches() int {
-	p := t.Active()
-	if p == nil {
-		return 0
-	}
-	return p.SearchMatches()
-}
-
 // Selection reports whether the active tab has a text selection.
 func (t *Tabs) Selection() bool { p := t.Active(); return p != nil && p.Selection() }
 
@@ -883,24 +827,6 @@ func (t *Tabs) ClearHover() {
 	if p := t.Active(); p != nil {
 		p.ClearHover()
 	}
-}
-
-// Range returns the active tab's selection range in absolute rows.
-func (t *Tabs) SelectionRange(abs int) (int, int, bool) {
-	p := t.Active()
-	if p == nil {
-		return 0, 0, false
-	}
-	return p.SelectionRange(abs)
-}
-
-// ToggleScrollback enters/leaves the active tab's scrollback pager.
-func (t *Tabs) ToggleScrollback() tea.Cmd {
-	p := t.Active()
-	if p == nil {
-		return nil
-	}
-	return p.ToggleScrollback()
 }
 
 // ScrollKey forwards a scrollback/pager key to the active tab.
@@ -949,13 +875,6 @@ func (t *Tabs) SendToShell(text string) bool {
 	return p.SendToShell(text)
 }
 
-// SendBytes sends bytes to the active tab's shell.
-func (t *Tabs) SendBytes(b []byte) {
-	if p := t.Active(); p != nil {
-		p.SendBytes(b)
-	}
-}
-
 // Caret returns the active tab's caret cell.
 func (t *Tabs) Caret(l frame.Layout) (int, int, bool) {
 	p := t.Active()
@@ -963,15 +882,6 @@ func (t *Tabs) Caret(l frame.Layout) (int, int, bool) {
 		return 0, 0, false
 	}
 	return p.Caret(l)
-}
-
-// Press forwards a press in the active tab's body.
-func (t *Tabs) Press(l frame.Layout, y int) bool {
-	p := t.Active()
-	if p == nil {
-		return false
-	}
-	return p.Press(l, y)
 }
 
 // Update routes a dock message to every tab (messages carry the tab's shell
@@ -986,7 +896,7 @@ func (t *Tabs) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	var cmds []tea.Cmd
-	any := false
+	handled := false
 	for _, p := range t.tabs {
 		update := msg
 		if ts, ok := msg.(tabStartedMsg); ok {
@@ -996,7 +906,7 @@ func (t *Tabs) Update(msg tea.Msg) (tea.Cmd, bool) {
 			update = ts.inner
 		}
 		if cmd, ok := p.Update(update); ok {
-			any = true
+			handled = true
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1005,7 +915,7 @@ func (t *Tabs) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if t.effects.CloseOnExit {
 		t.closeExited()
 	}
-	return tea.Batch(cmds...), any
+	return tea.Batch(cmds...), handled
 }
 
 // closeExited removes tabs whose shell exited under close_on_exit. A restored
@@ -1135,13 +1045,18 @@ type tabRun struct {
 // with one ellipsis cell at each end; the markers are indicators, not targets, and
 // Ctrl+PageUp/PageDown reach the hidden tabs.
 func (t *Tabs) stripRuns(w int) (runs []tabRun, moreBefore, moreAfter bool) {
+	return t.stripRunsFor(w, t.stripLabels())
+}
+
+// stripRunsFor is stripRuns for the strip labels the caller already holds.
+func (t *Tabs) stripRunsFor(w int, labels []string) (runs []tabRun, moreBefore, moreAfter bool) {
 	if w <= 2 || len(t.tabs) == 0 {
 		return nil, false, false
 	}
 	widths := make([]int, len(t.tabs))
 	total := 0
 	for i := range t.tabs {
-		widths[i] = ansi.StringWidth(" " + t.stripLabel(i) + " ")
+		widths[i] = ansi.StringWidth(" " + labels[i] + " ")
 		total += widths[i]
 	}
 	if total <= w-1 {
@@ -1258,7 +1173,8 @@ func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
 		focused = p.Focus()
 	}
 	g.Fill(x0, x0+w, l.DockY, bar)
-	runs, moreBefore, moreAfter := t.stripRuns(w)
+	labels := t.stripLabels()
+	runs, moreBefore, moreAfter := t.stripRunsFor(w, labels)
 	if moreBefore {
 		g.Set(x0, l.DockY, "…", bar)
 	}
@@ -1266,7 +1182,7 @@ func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
 		g.Set(x0+w-1, l.DockY, "…", bar)
 	}
 	for _, r := range runs {
-		label := " " + t.stripLabel(r.index) + " "
+		label := " " + labels[r.index] + " "
 		cell := inactive
 		if r.index == t.active {
 			// The active tab takes the bold weight as well as its colour, the same
@@ -1316,25 +1232,14 @@ func (t *Tabs) RunningTabs() []RunningTab {
 // ActiveName returns the active tab's display name.
 func (t *Tabs) ActiveName() string { return t.currentName() }
 
-// ExitedFlags returns the exited state of every tab (tests and the strip).
-func (t *Tabs) ExitedFlags() []bool {
-	out := make([]bool, len(t.tabs))
-	for i := range t.tabs {
-		out[i] = t.tabs[i].Exited()
-	}
-	return out
-}
-
-// SavedState returns the terminal state the session file keeps: the active tab's
-// record mirrored into the top-level fields (so a reader that does not know tabs
-// restores that tab), plus every tab as a SavedTab and the active index. The
-// per-tab rows/launch records are the same bounded panel records a single-tab
-// dock wrote.
+// SavedState returns the terminal state the session file keeps: every tab as a
+// SavedTab, the active index and the search history. The per-tab rows/launch records
+// are the bounded panel records.
 func (t *Tabs) SavedState() terminal.SavedState {
+	st := terminal.SavedState{Version: terminal.SavedStateVersion}
 	if len(t.tabs) == 0 {
-		return terminal.SavedState{Version: terminal.SavedStateVersion}
+		return st
 	}
-	st := t.Active().SavedState()
 	st.Tabs = make([]terminal.SavedTab, len(t.tabs))
 	for i, p := range t.tabs {
 		st.Tabs[i] = t.savedTabOf(i, p)
@@ -1349,13 +1254,8 @@ func (t *Tabs) SavedState() terminal.SavedState {
 // savedTabOf builds tab i's saved record from its panel.
 func (t *Tabs) savedTabOf(i int, p *Panel) terminal.SavedTab {
 	rec := p.SavedState()
-	return terminal.SavedTab{
-		Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width, Title: rec.Title,
-		Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
-		Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
-		Source: rec.Source, Live: rec.Live, Screen: rec.Screen,
-		ExitCode: rec.ExitCode, ExitKnown: rec.ExitKnown,
-	}
+	rec.Name = t.names[i]
+	return rec
 }
 
 // TabRef names one dock tab for the extract picker: Index is the tab's slot
@@ -1370,9 +1270,10 @@ type TabRef struct {
 
 // TabRefs returns every dock tab as a picker reference, in tab order.
 func (t *Tabs) TabRefs() []TabRef {
+	labels := t.tabLabels()
 	out := make([]TabRef, len(t.tabs))
 	for i := range t.tabs {
-		out[i] = TabRef{Index: i, Name: t.names[i], Label: t.tabLabel(i)}
+		out[i] = TabRef{Index: i, Name: t.names[i], Label: labels[i]}
 	}
 	return out
 }
@@ -1402,11 +1303,15 @@ func (t *Tabs) CloseTabAtForExtract(i int, name string) bool {
 // SavedState writes), for the extract-terminal-tab action that moves a tab to
 // another workspace. A dock with no tabs reports false.
 func (t *Tabs) ActiveSavedTab() (terminal.SavedTab, bool) {
-	st := t.SavedState()
-	if len(st.Tabs) == 0 || t.active < 0 || t.active >= len(st.Tabs) {
-		return terminal.SavedTab{}, false
-	}
-	return st.Tabs[t.active], true
+	return t.SavedTabAt(t.active)
+}
+
+// restoredPanel returns a new tab panel holding the saved tab as a read-only
+// transcript.
+func (t *Tabs) restoredPanel(tab terminal.SavedTab) *Panel {
+	p := t.newPanel()
+	p.Restore(tab)
+	return p
 }
 
 // AppendRestoredTab appends a saved tab as a read-only/dormant panel with its
@@ -1415,14 +1320,7 @@ func (t *Tabs) ActiveSavedTab() (terminal.SavedTab, bool) {
 // flag, so the target revives it on the first dive (the dock's normal dive rule),
 // never at append time. The existing tabs and the active index stay as they were.
 func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
-	p := t.newPanel()
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
-		Title: tab.Title, Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
-		Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
-		Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
-		ExitCode: tab.ExitCode, ExitKnown: tab.ExitKnown,
-	})
+	p := t.restoredPanel(tab)
 	t.tabs = append(t.tabs, p)
 	t.names = append(t.names, tab.Name)
 	t.ids = append(t.ids, t.newID())
@@ -1432,37 +1330,15 @@ func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
 	return len(t.tabs) - 1
 }
 
-// Restore puts a saved terminal state back. A record with tabs restores every tab
-// as a read-only transcript with its saved name and launch record; a record
-// without tabs restores the single terminal exactly as before. The active tab is
-// the saved one, clamped to the restored set. Nothing runs automatically.
+// Restore puts a saved terminal state back: every tab as a read-only transcript with its
+// saved name and launch record. The active tab is the saved one, clamped to the restored
+// set. Nothing runs automatically.
 func (t *Tabs) Restore(st terminal.SavedState) {
 	t.history.restore(st.SearchHistory)
 	t.Close()
-	t.tabs = nil
-	t.names = nil
-	t.active = 0
-	t.dive = nil
-	saved := st.Tabs
-	if len(saved) == 0 {
-		saved = []terminal.SavedTab{{
-			Open: st.Open, Cwd: st.Cwd, Width: st.Width, Title: st.Title, Rows: st.Rows,
-			LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv,
-			Agent: st.Agent, Ephemeral: st.Ephemeral, LaunchDir: st.LaunchDir,
-			Source: st.Source, Live: st.Live, Screen: st.Screen,
-			ExitCode: st.ExitCode, ExitKnown: st.ExitKnown,
-		}}
-	}
-	for _, tab := range saved {
-		p := t.newPanel()
-		p.Restore(terminal.SavedState{
-			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
-			Title: tab.Title, Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
-			Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
-			Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
-			ExitCode: tab.ExitCode, ExitKnown: tab.ExitKnown,
-		})
-		t.tabs = append(t.tabs, p)
+	t.drag = tabDrag{} // a strip drag referred to the tabs that just closed
+	for _, tab := range st.Tabs {
+		t.tabs = append(t.tabs, t.restoredPanel(tab))
 		t.names = append(t.names, tab.Name)
 		t.ids = append(t.ids, t.newID())
 	}

@@ -44,7 +44,7 @@ var knownActions = sync.OnceValue(func() map[string]bool {
 func knownAction(name string) bool { return knownActions()[name] }
 
 // ApplyOverrides applies the keybindings of the config to km. A binding that cannot be
-// applied is left out, and keybindingWarnings reports it, so a typo in the config costs
+// applied is left out, and Warnings reports it, so a typo in the config costs
 // one binding and never stops gvim from starting. Without keybindings km is returned
 // unchanged.
 func ApplyOverrides(km *keymap.Map, cfg config.Config) *keymap.Map {

@@ -26,7 +26,7 @@ func resolveNormal(t *testing.T, k tui.Keymap, name string, mods ...string) stri
 // startup preset and for the preset a keymap switch chose.
 func TestUserBindingBeatsPluginBinding(t *testing.T) {
 	cfg := config.Config{Keybindings: json.RawMessage(`{"bindings":[{"key":"s","modifiers":["ctrl"],"action":"save_all","when":"normal"}]}`)}
-	pw := New(cfg, editor.New(editor.Options{}), func(*editor.Document) {}, Options{Preset: keymap.Default(), Root: func() string { return "" }})
+	pw := New(cfg, editor.New(editor.Options{}), Options{Preset: keymap.Default(), Root: func() string { return "" }})
 	bs := []pluginapi.Binding{
 		{Chord: "ctrl+s", Action: "hello.save", Plugin: "hello"},
 		{Chord: "ctrl+alt+j", Action: "hello.jump", Plugin: "hello"},
@@ -49,7 +49,7 @@ func TestUserBindingBeatsPluginBinding(t *testing.T) {
 // TestSwitchKeymapKeepsPluginBindings: the PluginKeys port given a preset name builds that
 // preset with the plugin bindings over it, so switch_keybinding_map keeps them.
 func TestSwitchKeymapKeepsPluginBindings(t *testing.T) {
-	pw := New(config.Config{}, editor.New(editor.Options{}), func(*editor.Document) {}, Options{Preset: keymap.Default()})
+	pw := New(config.Config{}, editor.New(editor.Options{}), Options{Preset: keymap.Default()})
 	emacs, err := keymap.ByName("emacs")
 	if err != nil {
 		t.Fatal(err)

@@ -14,7 +14,7 @@ import (
 )
 
 // gvim.on, once, off, emit and the Subscription handle, plus the delivery rules of the
-// event queue that depend on a subscription (AMENDMENTS C25):
+// event queue that depend on a subscription:
 //
 //   - hot events can be dropped by the cascade cap, lifecycle events never (runtime.go);
 //   - hot events of one buffer that are still queued for a subscription are merged into
@@ -24,7 +24,7 @@ import (
 
 const kindSubscription = "Subscription"
 
-// knownEvents are the names gvim.on accepts besides "<plugin>:<name>" (FINAL section 6).
+// knownEvents are the names gvim.on accepts besides "<plugin>:<name>".
 var knownEvents = map[string]bool{
 	"plugins_loaded": true, "ready": true, "shutdown": true, "resize": true,
 	"after_file_open": true, "buffer_activated": true, "buffer_deactivated": true, "buffer_closed": true,
@@ -100,16 +100,10 @@ func installEvents(e *apiEnv) {
 	}
 
 	e.set(g, "emit", func(L *lua.LState) int {
-		fail := func(err error) int {
-			v, msg := errTuple(err)
-			L.Push(v)
-			L.Push(msg)
-			return 2
-		}
 		name := L.CheckString(1)
 		m := customEventRE.FindStringSubmatch(name)
 		if m == nil || m[1] != p.name {
-			return fail(pluginapi.Errf(pluginapi.CodeInvalid, "event name must be %q, \"%s:<name>\" with [a-z][a-z0-9_]* names", p.name+":<name>", p.name))
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeInvalid, "event name must be %q, \"%s:<name>\" with [a-z][a-z0-9_]* names", p.name+":<name>", p.name))
 		}
 		var data map[string]any
 		if v := L.Get(2); v != lua.LNil {
@@ -119,17 +113,17 @@ func installEvents(e *apiEnv) {
 			}
 			x, err := p.fromLua(t)
 			if err != nil {
-				return fail(err)
+				return bufRet(L, err)
 			}
 			if data, ok = x.(map[string]any); !ok {
 				L.ArgError(2, "table with string keys expected")
 			}
 		}
 		if payloadSize(data, maxEmitPayload) > maxEmitPayload {
-			return fail(pluginapi.Errf(pluginapi.CodeLimit, "event payload is larger than %d KiB", maxEmitPayload>>10))
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "event payload is larger than %d KiB", maxEmitPayload>>10))
 		}
 		if r.queuedFrom(p) >= maxQueuedEmits {
-			return fail(pluginapi.Errf(pluginapi.CodeLimit, "too many events waiting (max %d)", maxQueuedEmits))
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "too many events waiting (max %d)", maxQueuedEmits))
 		}
 		r.emit(pluginapi.Event{Name: name, Data: data}, p)
 		L.Push(lua.LTrue)
@@ -155,10 +149,7 @@ func (p *plugin) subscribe(L *lua.LState, api string, once bool) int {
 	o := parseEventOpts(L, event, 3)
 	s, err := p.addSub(event, fn, once)
 	if err != nil {
-		v, msg := errTuple(err)
-		L.Push(v)
-		L.Push(msg)
-		return 2
+		return bufRet(L, err)
 	}
 	c := &subCtl{r: p.r, p: p, s: s, o: o, pend: map[uint64]*debState{}}
 	if c.needsFilter() {

@@ -4,32 +4,20 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 )
-
-func TestHitMenuLabels(t *testing.T) {
-	l := layoutFor(100, 30, layoutInput{})
-	first := l.MenuRuns[0]
-	if got := l.Hit(first.X, l.MenuLabelY); got.Kind != hitMenuLabel || got.Index != 0 {
-		t.Errorf("press on File = %+v", got)
-	}
-	// The gap between two labels belongs to no target.
-	gap := l.MenuRuns[0].X + l.MenuRuns[0].W
-	if got := l.Hit(gap, l.MenuLabelY); got.Kind != hitNone {
-		t.Errorf("press in the gap = %+v", got)
-	}
-}
 
 func TestHitTabsCloseAndNew(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}
-	l := layoutFor(100, 30, layoutInput{Tabs: tabs})
-	var kinds []hitKind
+	l := layoutFor(100, 30, frame.Input{Tabs: tabs})
+	var kinds []frame.HitKind
 	for _, r := range l.Strip.Runs {
 		kinds = append(kinds, r.Kind)
 		if got := l.Hit(r.X, l.StripY); got.Kind != r.Kind || got.Index != r.Index {
 			t.Errorf("run %+v hit as %+v", r, got)
 		}
 	}
-	want := []hitKind{hitTab, hitTabClose, hitTab, hitTab, hitTabClose, hitTab, hitTabNew}
+	want := []frame.HitKind{frame.HitTab, frame.HitTabClose, frame.HitTab, frame.HitTab, frame.HitTabClose, frame.HitTab, frame.HitTabNew}
 	if len(kinds) != len(want) {
 		t.Fatalf("tab runs = %v, want %v", kinds, want)
 	}
@@ -41,79 +29,79 @@ func TestHitTabsCloseAndNew(t *testing.T) {
 }
 
 func TestHitExplorerTitleButtons(t *testing.T) {
-	in := layoutInput{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(30)}
+	in := frame.Input{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(30)}
 	l := layoutFor(100, 30, in)
-	if got := l.Hit(l.ExReloadX, l.ExTitleY); got.Kind != hitExplorerTitleReload {
+	if got := l.Hit(l.ExReloadX, l.ExTitleY); got.Kind != frame.HitExplorerTitleReload {
 		t.Errorf("reload button = %+v", got)
 	}
-	if got := l.Hit(l.ExCloseX, l.ExTitleY); got.Kind != hitExplorerTitleClose {
+	if got := l.Hit(l.ExCloseX, l.ExTitleY); got.Kind != frame.HitExplorerTitleClose {
 		t.Errorf("close button = %+v", got)
 	}
-	if got := l.Hit(2, l.ExTitleY); got.Kind != hitExplorerBody {
+	if got := l.Hit(2, l.ExTitleY); got.Kind != frame.HitExplorerBody {
 		t.Errorf("title body = %+v", got)
 	}
 }
 
 func TestHitExplorerRowsAndGrip(t *testing.T) {
-	in := layoutInput{ExplorerOpen: true, ExplorerRows: 3}
+	in := frame.Input{ExplorerOpen: true, ExplorerRows: 3}
 	l := layoutFor(100, 30, in)
-	if got := l.Hit(3, l.BodyTop+1); got.Kind != hitExplorerRow || got.Index != 1 {
+	if got := l.Hit(3, l.BodyTop+1); got.Kind != frame.HitExplorerRow || got.Index != 1 {
 		t.Errorf("second explorer row = %+v", got)
 	}
-	if got := l.Hit(3, l.BodyTop+5); got.Kind != hitExplorerBody {
+	if got := l.Hit(3, l.BodyTop+5); got.Kind != frame.HitExplorerBody {
 		t.Errorf("below the rows = %+v", got)
 	}
-	if got := l.Hit(l.Ex-1, l.BodyTop); got.Kind != hitExplorerGrip {
+	if got := l.Hit(l.Ex-1, l.BodyTop); got.Kind != frame.HitExplorerGrip {
 		t.Errorf("right border = %+v", got)
 	}
-	if got := l.Hit(0, l.BodyTop); got.Kind != hitExplorerBody {
+	if got := l.Hit(0, l.BodyTop); got.Kind != frame.HitExplorerBody {
 		t.Errorf("left border = %+v", got)
 	}
 }
 
 func TestHitEditorGutterTextAndTrack(t *testing.T) {
-	in := layoutInput{ExplorerOpen: true, Lines: 100}
+	in := frame.Input{ExplorerOpen: true, Lines: 100}
 	l := layoutFor(80, 15, in)
 	if !l.Scrollbar {
 		t.Fatal("100 lines in 10 rows should show the scrollbar")
 	}
-	if got := l.Hit(l.EditorX, l.BodyTop+2); got.Kind != hitGutter || got.Index != 2 {
+	if got := l.Hit(l.EditorX, l.BodyTop+2); got.Kind != frame.HitGutter || got.Index != 2 {
 		t.Errorf("gutter = %+v", got)
 	}
-	if got := l.Hit(l.TextX, l.BodyTop+2); got.Kind != hitEditorText || got.Index != 2 {
+	if got := l.Hit(l.TextX, l.BodyTop+2); got.Kind != frame.HitEditorText || got.Index != 2 {
 		t.Errorf("text = %+v", got)
 	}
-	if got := l.Hit(l.W-2, l.BodyTop); got.Kind != hitScrollbarTrack {
+	if got := l.Hit(l.W-2, l.BodyTop); got.Kind != frame.HitScrollbarTrack {
 		t.Errorf("scrollbar column = %+v", got)
 	}
-	if got := l.Hit(l.W-1, l.BodyTop); got.Kind != hitNone {
+	if got := l.Hit(l.W-1, l.BodyTop); got.Kind != frame.HitNone {
 		t.Errorf("frame border = %+v, want no target", got)
 	}
 }
 
 func TestHitNothingOutsideTheFrame(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{})
+	l := layoutFor(80, 24, frame.Input{})
 	for _, p := range [][2]int{{-1, 0}, {0, -1}, {80, 0}, {0, 24}} {
-		if got := l.Hit(p[0], p[1]); got.Kind != hitNone {
+		if got := l.Hit(p[0], p[1]); got.Kind != frame.HitNone {
 			t.Errorf("hit(%d, %d) = %+v", p[0], p[1], got)
 		}
 	}
 }
 
 func TestHitStatusRowIsNotTheBody(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{})
+	l := layoutFor(80, 24, frame.Input{})
 	// The message of the left status group has no target, so a press there is not an
 	// editor press. The caret position before it is the Go to Line target.
-	if got := l.Hit(40, l.StatusY); got.Kind != hitNone {
+	if got := l.Hit(40, l.StatusY); got.Kind != frame.HitNone {
 		t.Errorf("status row press = %+v", got)
 	}
-	if got := l.Hit(10, l.StatusY); got.Kind != hitStatusSegment || got.Index != statusSegmentPosition {
+	if got := l.Hit(10, l.StatusY); got.Kind != frame.HitStatusSegment || got.Index != frame.StatusSegmentPosition {
 		t.Errorf("caret position press = %+v", got)
 	}
-	if got := l.Hit(10, l.BodyBottom); got.Kind != hitEditorText {
+	if got := l.Hit(10, l.BodyBottom); got.Kind != frame.HitEditorText {
 		t.Errorf("last body row = %+v", got)
 	}
-	if got := l.Hit(10, l.StatusY-1); got.Kind != hitNone {
+	if got := l.Hit(10, l.StatusY-1); got.Kind != frame.HitNone {
 		t.Errorf("bottom border = %+v, want no target", got)
 	}
 }

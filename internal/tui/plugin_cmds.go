@@ -276,10 +276,16 @@ func (m *Model) actionOnce(action string, args map[string]any) (tea.Cmd, error) 
 	if c, ok := m.explorerAction(action); ok {
 		return c, nil
 	}
+	if c, ok := m.hexAction(action); ok {
+		return c, nil
+	}
 	if m.explorerFocus && clipboardActions[action] {
 		return nil, nil
 	}
 	if c, ok := m.editorPaste(action, args); ok {
+		return c, nil
+	}
+	if c, ok := m.lineTargetAction(action, args); ok {
 		return c, nil
 	}
 	res := m.editorDo(editor.Action(action), args)

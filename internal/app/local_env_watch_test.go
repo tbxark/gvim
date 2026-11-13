@@ -522,3 +522,22 @@ func TestLocalEnvWatchRetrySetInstallConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// TestLocalEnvWatchFailedStartDegrades checks a failed filewatch.New, which returns a nil
+// *Watcher together with its error, degrades to the Env: Reload notice instead of closing
+// the nil pointer boxed in the watcher interface.
+func TestLocalEnvWatchFailedStartDegrades(t *testing.T) {
+	prev := newFileWatcher
+	t.Cleanup(func() { newFileWatcher = prev })
+	newFileWatcher = func(filewatch.Options) (*filewatch.Watcher, error) {
+		return nil, errors.New("too many open files")
+	}
+	root := t.TempDir()
+	provider := env.New(root, nil, func() bool { return true })
+	if lw := startLocalEnvWatch(context.Background(), provider, root); lw != nil {
+		t.Fatalf("watcher = %v, want none", lw)
+	}
+	if notice := provider.WatchNotice(); !strings.Contains(notice, "too many open files") {
+		t.Fatalf("watch notice = %q, want the failure", notice)
+	}
+}

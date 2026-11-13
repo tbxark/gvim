@@ -89,16 +89,6 @@ func TestProviderCaptureDeltaAndOverlay(t *testing.T) {
 	if unset := p.Unset(); len(unset) != 1 || unset[0] != "X" {
 		t.Errorf("unset = %v, want [X]", unset)
 	}
-	environment := p.EnvFor([]string{"A=1", "B=2", "X=9", "Z=0"})
-	want := map[string]bool{"A=1": true, "B=3": true, "C=4": true, "Z=0": true}
-	if len(environment) != len(want) {
-		t.Fatalf("EnvFor = %v", environment)
-	}
-	for _, entry := range environment {
-		if !want[entry] {
-			t.Errorf("EnvFor entry %q unexpected", entry)
-		}
-	}
 }
 
 func TestProviderCaptureFailureDegrades(t *testing.T) {

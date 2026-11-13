@@ -20,7 +20,7 @@ const lspHelpPlugin = "lsp_help"
 func lspHelpFiles(t *testing.T) plugintest.Files {
 	t.Helper()
 	files := plugintest.Files{}
-	for _, name := range []string{"init.lua", lspHelpPlugin + ".i18n.json"} {
+	for _, name := range []string{"init.lua", lspHelpPlugin + ".i18n.json", "lua/lsp_help/servers.lua"} {
 		data, err := fs.ReadFile(bundled.FS, "plugins/"+lspHelpPlugin+"/"+name)
 		if err != nil {
 			t.Fatalf("read the bundled plugin file %s: %v", name, err)
@@ -177,6 +177,24 @@ func TestLSPHelpPopupAndCopy(t *testing.T) {
 	}
 	// Let the parked popup request finish (the real host closes the popup on a choice).
 	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"copy:copy_go"}})
+}
+
+// A popup the host refuses to open must not block the next click: the request is cleared.
+func TestLSPHelpPopupFailureAllowsRetry(t *testing.T) {
+	t.Parallel()
+	host, _ := lspHelpHost(t)
+	h := startLSPHelp(t, host)
+	h.Emit(pluginapi.Event{Name: "lsp_server_error", Data: map[string]any{"error": "gopls: not found"}})
+	host.UI().Reject = pluginapi.Errf(pluginapi.CodeBusy, "another overlay is open")
+	h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	if ov := host.UI().Last("action_popup"); ov != nil {
+		t.Fatalf("a refused popup was recorded: %+v", ov)
+	}
+	host.UI().Reject = nil
+	h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	if ov := host.UI().Last("action_popup"); ov == nil {
+		t.Fatalf("no popup after the refusal cleared (log %v)", h.LogText(""))
+	}
 }
 
 func TestLSPHelpNativeActionsAndDisable(t *testing.T) {

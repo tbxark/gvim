@@ -81,6 +81,7 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		m.popOverlay()
 	}
 	modes, scope := m.projectSearchSettings()
+	openFiles := m.projectOpenFiles()
 	glob := ""
 	var history []string
 	if m.proj.panel != nil {
@@ -112,8 +113,8 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		Root:         root,
 		Owner:        m.workspaceOwner,
 		Files:        m.files,
-		OpenFiles:    m.projectOpenFiles(),
-		Current:      m.projectCurrentFile(),
+		OpenFiles:    openFiles,
+		Current:      m.projectCurrentFile(openFiles),
 		Modes:        modes,
 		Scope:        scope,
 		Glob:         glob,
@@ -195,9 +196,9 @@ func (m *Model) projectOpenFiles() []searchpanel.SourceFile {
 	return out
 }
 
-// projectCurrentFile snapshots the active buffer for the current-file scope.
-func (m *Model) projectCurrentFile() *searchpanel.SourceFile {
-	files := m.projectOpenFiles()
+// projectCurrentFile picks the active buffer out of files, the projectOpenFiles snapshot,
+// for the current-file scope.
+func (m *Model) projectCurrentFile(files []searchpanel.SourceFile) *searchpanel.SourceFile {
 	i := m.activeTab()
 	if i < 0 || i >= len(files) {
 		return nil
@@ -395,44 +396,37 @@ func (m *Model) projectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
 		m.notice = uiTextVars("gvim.project_search.error", "Replace: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
-	// The finder and the editor can spell one file differently (a canonical
-	// /private/var against a /var temp path, or a symlinked workspace), so the open
-	// buffers are keyed by their resolved path and the edits carry the tab's spelling.
+	// The open buffers are keyed by the tab's own path spelling: the finder and the editor
+	// can spell one file differently (a canonical /private/var against a /var temp path,
+	// or a symlinked workspace), and openTabPath maps the finder's spelling to the tab's.
 	sources := map[string]string{}
-	openPaths := map[string]string{}
 	for _, s := range m.projectOpenFiles() {
-		key := canonicalFilePath(s.Path)
-		if key == "" {
-			continue
-		}
-		sources[key] = s.Text
-		openPaths[key] = s.Path
+		sources[s.Path] = s.Text
 	}
-	files, tabs, skipped := 0, 0, 0
+	skipped := 0
 	var edits []FileEdit
 	for _, fe := range msg.result.Files {
 		switch {
-		case fe.Err != "":
-			skipped++
-		case fe.Stale:
+		case fe.Err != "" || fe.Stale:
 			skipped++
 		case len(fe.Edits) == 0:
-		case m.docOpen(fe.Path):
+		default:
+			tab, open := m.openTabPath(fe.Path)
+			if !open {
+				edits = append(edits, FileEdit{Path: fe.Path, Edits: projectLSPEdits(fe.Edits), ExpectHash: fe.Hash})
+				continue
+			}
 			// The open buffer must still hold the text the edits were planned from.
-			key := canonicalFilePath(fe.Path)
-			text, ok := sources[key]
-			tab, tabOK := openPaths[key]
-			if !ok || !tabOK || hashText(text) != fe.Hash {
+			text, ok := sources[tab]
+			if !ok || hashText(text) != fe.Hash {
 				skipped++
 				continue
 			}
 			edits = append(edits, FileEdit{Path: tab, Edits: projectLSPEdits(fe.Edits)})
-		default:
-			edits = append(edits, FileEdit{Path: fe.Path, Edits: projectLSPEdits(fe.Edits), ExpectHash: fe.Hash})
 		}
 	}
 	return m.ApplyFileEdits(edits, func(res FileEditResult) tea.Cmd {
-		return m.finishProjectReplace(files+res.Files, tabs+res.Tabs, skipped+len(res.Skipped))
+		return m.finishProjectReplace(res.Files, res.Tabs, skipped+len(res.Skipped))
 	})
 }
 
@@ -463,7 +457,8 @@ func (m *Model) remoteProjectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
 		return nil
 	}
 	p.SetNotice(m.notice)
-	p.SetSources(m.projectOpenFiles(), m.projectCurrentFile())
+	openFiles := m.projectOpenFiles()
+	p.SetSources(openFiles, m.projectCurrentFile(openFiles))
 	return p.ReSearch()
 }
 
@@ -481,7 +476,8 @@ func (m *Model) finishProjectReplace(files, tabs, skipped int) tea.Cmd {
 		return nil
 	}
 	p.SetNotice(m.notice)
-	p.SetSources(m.projectOpenFiles(), m.projectCurrentFile())
+	openFiles := m.projectOpenFiles()
+	p.SetSources(openFiles, m.projectCurrentFile(openFiles))
 	return p.ReSearch()
 }
 
@@ -497,26 +493,6 @@ func projectLSPEdits(edits []searchpanel.ReplaceEdit) []editor.LSPEdit {
 		}
 	}
 	return out
-}
-
-// docOpen reports whether a document at path is open. Two spellings of one file (a
-// symlinked workspace, a /var versus /private/var temp path) count as the same file.
-func (m *Model) docOpen(path string) bool {
-	for _, t := range m.ed.Tabs() {
-		if t.Path == path {
-			return true
-		}
-	}
-	canon := canonicalFilePath(path)
-	if canon == "" {
-		return false
-	}
-	for _, t := range m.ed.Tabs() {
-		if t.Path != "" && canonicalFilePath(t.Path) == canon {
-			return true
-		}
-	}
-	return false
 }
 
 // hashText is the content token a project replacement plans against: an FNV-64a hash of

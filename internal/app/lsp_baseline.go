@@ -82,20 +82,6 @@ func (b *lspBaselineUpdater) UpdateTrust(state trust.State) {
 	b.signal()
 }
 
-// Applied reports the last sequence applied. Seq reports the latest requested sequence; the
-// pair is for tests to wait for the worker without polling UI state.
-func (b *lspBaselineUpdater) Applied() uint64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.applied
-}
-
-func (b *lspBaselineUpdater) Seq() uint64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.seq
-}
-
 // Wait waits for the updates requested before it was called. It runs off the UI
 // goroutine, before an LSP open, so the open sees the settled baseline.
 func (b *lspBaselineUpdater) Wait() {

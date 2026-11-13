@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The window half of the fake host (stage S17): a list of windows in reading order over the
+// The window half of the fake host: a list of windows in reading order over the
 // fake's buffers. It starts with one window that fills the screen under a three-row chrome
 // and shows whatever buffer is active; a split cuts a window in two as the ui does (one
 // border cell between them). Sizes are the text area; the fake has no gutter or scrollbar.

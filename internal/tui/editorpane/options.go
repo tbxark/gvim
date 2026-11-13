@@ -96,9 +96,9 @@ type frameFX struct {
 	brackets             bracketScan
 
 	// occSel is the selected text whose other occurrences are marked. The selection
-	// itself is the rune columns [occFrom, occTo) of line occLine.
-	occSel                  string
-	occLine, occFrom, occTo int
+	// itself starts at rune column occFrom of line occLine.
+	occSel           string
+	occLine, occFrom int
 
 	// wins are the windows of the long lines laid out in this frame, by line.
 	wins map[int]window
@@ -189,7 +189,7 @@ func (f *frame) setOccurrence(p Pane) {
 	if !matchableSelection(text) {
 		return
 	}
-	f.fx.occSel, f.fx.occLine, f.fx.occFrom, f.fx.occTo = text, a.Line, from, to
+	f.fx.occSel, f.fx.occLine, f.fx.occFrom = text, a.Line, from
 }
 
 // matchableSelection reports whether the other occurrences of the selected text are

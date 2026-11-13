@@ -73,8 +73,8 @@ shown raw (delimiters visible), and so is the line above a caret at the start of
 a line. No other input reveals the markers: they are a view transform, not a
 hover decoration.
 
-Block-level heading text keeps the existing heading kind; the `#` markers are not
-concealed in this slice (deferred with the rest of the heading polish).
+Block-level heading text keeps the existing heading kind; the ATX `#` markers and a setext
+underline are concealed (see Headings below).
 
 ## Code-fence frames
 
@@ -100,11 +100,10 @@ Activation follows the rest of the compose: the caret on an open or close
 delimiter line (or at the start of the line below it) reveals the raw delimiter,
 while the caret INSIDE a body line keeps the frame - the source-display map makes
 its column exact, and jumping the frame away under the caret would be wrong. A
-body line longer than the inner width wraps: its first visual row is framed and
-the continuation rows have no rails (a documented residual of the
-single-visual-row frame). A fence inside a blockquote or a list is classified by
-the tokenizer the same way it always was; the page view frames only the
-top-level forms it can classify, and the nested forms are left raw.
+body line longer than the inner width wraps onto continuation rows that carry the
+rails too (the caret line keeps its whole text on unrailed wrapped rows, the editing
+view). A fence inside a blockquote is framed at the container (above) and a
+list-indented fence keeps its indent; forms the classifier cannot attribute are left raw.
 
 ## Tables
 

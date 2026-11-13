@@ -38,17 +38,17 @@ type Session struct {
 	// MRU is the most-recently-used order of the saved documents, newest first. It
 	// names documents by their saved path (or by label for a pathless buffer), not by
 	// runtime identity or tab index, so a reference cannot point at a different
-	// document after a restart. Optional and additive: a session file without it (or
-	// an entry that no longer matches an open file) restores the old tab-order MRU and
-	// skips the missing reference, keeping the rest of the order.
+	// document after a restart. Optional: without it (or for an entry that no longer
+	// matches an open file) the restore uses the tab order and skips the missing
+	// reference, keeping the rest of the order.
 	MRU []MruFile `json:"mru,omitempty"`
 	// Sidebar is the sidebar UI state (sections, sizes, scroll, width form). It is
 	// optional: a session file without it keeps the config defaults.
 	Sidebar *SidebarState `json:"sidebar,omitempty"`
 	// Layout is the saved pane layout (split tree, focused pane and each pane's tab
-	// and scroll position; see session/split.go). It is optional and additive: a
-	// session file without it restores as one pane exactly as before, and an
-	// invalid or no-longer-resolvable layout is ignored on restore.
+	// and scroll position; see session/split.go). It is optional: a
+	// session file without it restores as one pane, and an invalid or
+	// no-longer-resolvable layout is ignored on restore.
 	Layout *SplitLayout `json:"layout,omitempty"`
 }
 
@@ -69,9 +69,7 @@ type FileState struct {
 	StashFile string `json:"stashFile,omitempty"`
 	// Label is the display label of a saved unnamed buffer (an untitled buffer, a
 	// restored shared-buffer conflict copy). Named tabs take their name from Path, so
-	// this is only written for a pathless document with unsaved text. Optional and
-	// additive: an older session file has no label and restores as an ordinary untitled
-	// buffer.
+	// this is only written for a pathless document with unsaved text.
 	Label string `json:"label,omitempty"`
 	// Size and MTimeUnixNano are the size and modification time of the file the text
 	// of StashFile was based on, or zero when unknown. A start that finds the file
@@ -84,16 +82,13 @@ type FileState struct {
 	OverlayFile string `json:"overlayFile,omitempty"`
 	// PageView and PageWidth are the per-file Markdown page view of the document
 	// (docs/markdown.md). A nil PageView means the file kept no override and the
-	// language's page_view decides, and the fields are omitted then, so a session
-	// written by an older version decodes unchanged and a reader that ignores them
-	// keeps the defaults. PageWidth zero means the language or viewport width.
+	// language's page_view decides, and the fields are omitted then. PageWidth zero
+	// means the language or viewport width.
 	PageView  *bool `json:"pageView,omitempty"`
 	PageWidth int   `json:"pageWidth,omitzero"`
 	// VirtualLines and VirtualColumn are the caret's vertical virtual-space position:
 	// the empty display rows below the last line it sits on (0 when it is on text)
-	// and its display column there. Both are omitted when zero, so a session written
-	// by an older version decodes unchanged and a reader that ignores them keeps the
-	// caret on text (docs/internal/virtual-space-scoping.md).
+	// and its display column there. Both are omitted when zero (docs/internal/virtual-space-scoping.md).
 	VirtualLines  int `json:"virtualLines,omitzero"`
 	VirtualColumn int `json:"virtualColumn,omitzero"`
 }

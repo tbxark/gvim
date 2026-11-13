@@ -58,6 +58,7 @@ const (
 	ChoiceMoveToTrash               // Confirm Delete: move the item to the Trash
 	ChoiceOpen                      // Open Folder: open the folder at Result.Text
 	ChoiceOK                        // Error: acknowledged
+	ChoiceQuit                      // Confirm Quit: quit the editor
 )
 
 // String names the choice, for logs and tests.
@@ -77,6 +78,8 @@ func (c Choice) String() string {
 		return "open"
 	case ChoiceOK:
 		return "ok"
+	case ChoiceQuit:
+		return "quit"
 	}
 	return "unknown"
 }

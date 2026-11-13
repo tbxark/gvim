@@ -27,15 +27,10 @@ func TestTerminalScreenSnapshotRoundTrip(t *testing.T) {
 		{Rune: 'o', Fg: "#ff0000", Bold: true},
 		{Rune: 'k', Bg: "#0000ff"},
 	}}}}
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"ok"},
-		Screen: screen,
-		Tabs: []terminal.SavedTab{
-			{Name: "a", Open: true, Rows: []string{"ok"}, Screen: screen},
-			{Name: "b", Open: true, Rows: []string{"b"}},
-		},
-		ActiveTab: 0,
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "a", Open: true, Rows: []string{"ok"}, Screen: screen},
+		{Name: "b", Open: true, Rows: []string{"b"}},
+	}, ActiveTab: 0}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -43,15 +38,15 @@ func TestTerminalScreenSnapshotRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %v, %v", ok, err)
 	}
-	if got.Screen == nil || len(got.Screen.Rows) != 1 || got.Screen.Rows[0].Cells[0].Fg != "#ff0000" {
-		t.Fatalf("top-level snapshot = %+v", got.Screen)
+	if activeSaved(got).Screen == nil || len(activeSaved(got).Screen.Rows) != 1 || activeSaved(got).Screen.Rows[0].Cells[0].Fg != "#ff0000" {
+		t.Fatalf("top-level snapshot = %+v", activeSaved(got).Screen)
 	}
 	if got.Tabs[0].Screen == nil || got.Tabs[1].Screen != nil {
 		t.Fatalf("tab snapshots = %+v / %+v", got.Tabs[0].Screen, got.Tabs[1].Screen)
 	}
 
 	// An old record has no screen field anywhere and loads fine (text only).
-	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"old"}}
+	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"old"}}}}
 	data, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +56,7 @@ func TestTerminalScreenSnapshotRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	old, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || old.Screen != nil {
+	if err != nil || !ok || activeSaved(old).Screen != nil {
 		t.Fatalf("legacy record = %+v, %v, %v", old, ok, err)
 	}
 }
@@ -85,11 +80,7 @@ func TestLoadTerminalBoundsScreenSnapshot(t *testing.T) {
 	}
 	rows[0] = terminal.SavedRow{Cells: overCols}
 	bad := &terminal.SavedScreen{Cols: 3, Rows: rows}
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"x"},
-		Screen: bad,
-		Tabs:   []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}, Screen: bad}},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}, Screen: bad}}}
 	if err := SaveTerminal(dir, st); err != nil {
 		if !strings.Contains(err.Error(), "") {
 			t.Fatal(err)
@@ -100,7 +91,7 @@ func TestLoadTerminalBoundsScreenSnapshot(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %v, %v", ok, err)
 	}
-	for name, snap := range map[string]*terminal.SavedScreen{"top": got.Screen, "tab": got.Tabs[0].Screen} {
+	for name, snap := range map[string]*terminal.SavedScreen{"top": activeSaved(got).Screen, "tab": got.Tabs[0].Screen} {
 		if snap == nil {
 			t.Fatalf("%s snapshot missing", name)
 		}
@@ -146,11 +137,7 @@ func TestLoadTerminalRemainderBounds(t *testing.T) {
 		Alt:    true,
 	}
 	dir := t.TempDir()
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"x"},
-		Screen: screen,
-		Tabs:   []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}, Screen: screen}},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}, Screen: screen}}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +145,7 @@ func TestLoadTerminalRemainderBounds(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %v, %v", ok, err)
 	}
-	for name, snap := range map[string]*terminal.SavedScreen{"top": got.Screen, "tab": got.Tabs[0].Screen} {
+	for name, snap := range map[string]*terminal.SavedScreen{"top": activeSaved(got).Screen, "tab": got.Tabs[0].Screen} {
 		if snap == nil {
 			t.Fatalf("%s snapshot missing", name)
 		}
@@ -186,19 +173,16 @@ func TestLoadTerminalRemainderBounds(t *testing.T) {
 func TestLoadTerminalOldRecordNoRemainder(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"old"},
-		Screen: &terminal.SavedScreen{Cols: 3, Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'o'}}}}},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"old"}, Screen: &terminal.SavedScreen{Cols: 3, Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'o'}}}}}}}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || got.Screen == nil {
+	if err != nil || !ok || activeSaved(got).Screen == nil {
 		t.Fatalf("LoadTerminal = %+v, %v, %v", got, ok, err)
 	}
-	if got.Screen.Cursor != (terminal.SavedCursor{}) || got.Screen.Alt || len(got.Screen.History) != 0 {
-		t.Fatalf("old record gained remainder: %+v", got.Screen)
+	if activeSaved(got).Screen.Cursor != (terminal.SavedCursor{}) || activeSaved(got).Screen.Alt || len(activeSaved(got).Screen.History) != 0 {
+		t.Fatalf("old record gained remainder: %+v", activeSaved(got).Screen)
 	}
 }
 
@@ -207,14 +191,10 @@ func TestLoadTerminalOldRecordNoRemainder(t *testing.T) {
 func TestTerminalExitStatusRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out", terminalExitMarkerForTest},
-		ExitCode: 3, ExitKnown: true,
-		Tabs: []terminal.SavedTab{
-			{Name: "a", Open: true, Rows: []string{"out", terminalExitMarkerForTest}, ExitCode: 3, ExitKnown: true},
-			{Name: "b", Open: true, Rows: []string{"out"}},
-		},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "a", Open: true, Rows: []string{"out", terminalExitMarkerForTest}, ExitCode: 3, ExitKnown: true},
+		{Name: "b", Open: true, Rows: []string{"out"}},
+	}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -222,19 +202,19 @@ func TestTerminalExitStatusRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %v, %v", ok, err)
 	}
-	if !got.ExitKnown || got.ExitCode != 3 {
-		t.Fatalf("top-level exit status = %d/%v", got.ExitCode, got.ExitKnown)
+	if !activeSaved(got).ExitKnown || activeSaved(got).ExitCode != 3 {
+		t.Fatalf("top-level exit status = %d/%v", activeSaved(got).ExitCode, activeSaved(got).ExitKnown)
 	}
 	if !got.Tabs[0].ExitKnown || got.Tabs[0].ExitCode != 3 || got.Tabs[1].ExitKnown {
 		t.Fatalf("tab exit statuses = %+v", got.Tabs)
 	}
 	// The old-record direction: no fields means "exited, status unknown".
-	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}}
+	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"out"}}}}
 	if err := SaveTerminal(dir, legacy); err != nil {
 		t.Fatal(err)
 	}
 	old, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || old.ExitKnown || old.ExitCode != 0 {
+	if err != nil || !ok || activeSaved(old).ExitKnown || activeSaved(old).ExitCode != 0 {
 		t.Fatalf("old record = %+v, %v, %v", old, ok, err)
 	}
 }
@@ -246,14 +226,10 @@ func TestTerminalTitleRoundTrip(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("x", terminal.MaxTitleRunes+20)
 	dir := t.TempDir()
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"},
-		Title: "editor title \033bad\n",
-		Tabs: []terminal.SavedTab{
-			{Name: "a", Open: true, Rows: []string{"out"}, Title: "tab title"},
-			{Name: "b", Open: true, Rows: []string{"out"}, Title: long},
-		},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "a", Open: true, Rows: []string{"out"}, Title: "tab title"},
+		{Name: "b", Open: true, Rows: []string{"out"}, Title: long},
+	}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -261,23 +237,20 @@ func TestTerminalTitleRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %v, %v", ok, err)
 	}
-	if got.Title != "editor title bad" {
-		t.Fatalf("top-level title = %q", got.Title)
-	}
 	if got.Tabs[0].Title != "tab title" {
 		t.Fatalf("tab title = %q", got.Tabs[0].Title)
 	}
 	if n := len([]rune(got.Tabs[1].Title)); n != terminal.MaxTitleRunes {
 		t.Fatalf("long tab title = %d runes, want %d", n, terminal.MaxTitleRunes)
 	}
-	// Old record: no title, nothing invented.
-	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}}
+	// A tab with no title: nothing invented.
+	legacy := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"out"}}}}
 	if err := SaveTerminal(dir, legacy); err != nil {
 		t.Fatal(err)
 	}
 	old, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || old.Title != "" || len(old.Tabs) != 0 {
-		t.Fatalf("old record = %+v, %v, %v", old, ok, err)
+	if err != nil || !ok || len(old.Tabs) != 1 || old.Tabs[0].Title != "" {
+		t.Fatalf("untitled record = %+v, %v, %v", old, ok, err)
 	}
 }
 
@@ -296,19 +269,15 @@ func TestLoadTerminalAltScreenContent(t *testing.T) {
 		}}},
 		Cursor: terminal.SavedCursor{Row: 0, Col: 0, Visible: true},
 	}
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"ALT"}, Title: "alt-app",
-		Screen: &screen,
-		Tabs:   []terminal.SavedTab{{Name: "a", Open: true, Rows: []string{"ALT"}, Screen: &screen, Title: "alt-app"}},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Name: "a", Open: true, Rows: []string{"ALT"}, Screen: &screen, Title: "alt-app"}}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || got.Screen == nil || got.Tabs[0].Screen == nil {
+	if err != nil || !ok || activeSaved(got).Screen == nil || got.Tabs[0].Screen == nil {
 		t.Fatalf("LoadTerminal = %+v, %v, %v", got, ok, err)
 	}
-	for name, snap := range map[string]*terminal.SavedScreen{"top": got.Screen, "tab": got.Tabs[0].Screen} {
+	for name, snap := range map[string]*terminal.SavedScreen{"top": activeSaved(got).Screen, "tab": got.Tabs[0].Screen} {
 		if !snap.Alt || len(snap.History) != 0 || len(snap.Rows) == 0 {
 			t.Fatalf("%s alt frame = %+v", name, snap)
 		}
@@ -316,8 +285,8 @@ func TestLoadTerminalAltScreenContent(t *testing.T) {
 			t.Fatalf("%s alt content = %+v", name, snap.Rows)
 		}
 	}
-	if got.Title != "alt-app" || got.Tabs[0].Title != "alt-app" {
-		t.Fatalf("alt title = %q / %q", got.Title, got.Tabs[0].Title)
+	if activeSaved(got).Title != "alt-app" || got.Tabs[0].Title != "alt-app" {
+		t.Fatalf("alt title = %q / %q", activeSaved(got).Title, got.Tabs[0].Title)
 	}
 }
 
@@ -327,14 +296,10 @@ func TestLoadTerminalCwdIsBounded(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	long := "/" + strings.Repeat("a", maxSavedTerminalDirBytes+20)
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"},
-		Cwd: "/ws/ok\x00\x1b\n",
-		Tabs: []terminal.SavedTab{
-			{Name: "a", Open: true, Rows: []string{"out"}, Cwd: "/tab/ok\x07"},
-			{Name: "b", Open: true, Rows: []string{"out"}, Cwd: long},
-		},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "a", Open: true, Rows: []string{"out"}, Cwd: "/tab/ok\x07"},
+		{Name: "b", Open: true, Rows: []string{"out"}, Cwd: long},
+	}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -342,8 +307,8 @@ func TestLoadTerminalCwdIsBounded(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadTerminal = %v, %v", ok, err)
 	}
-	if got.Cwd != "/ws/ok" || got.Tabs[0].Cwd != "/tab/ok" {
-		t.Fatalf("cleaned cwds = %q / %q", got.Cwd, got.Tabs[0].Cwd)
+	if got.Tabs[0].Cwd != "/tab/ok" {
+		t.Fatalf("cleaned cwd = %q", got.Tabs[0].Cwd)
 	}
 	if n := len(got.Tabs[1].Cwd); n != maxSavedTerminalDirBytes {
 		t.Fatalf("bounded tab cwd = %d, want %d", n, maxSavedTerminalDirBytes)
@@ -358,10 +323,7 @@ func TestSearchHistoryPersistenceBoundsAndCompat(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	long := strings.Repeat("x", terminal.MaxSearchQueryBytes+40)
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"},
-		SearchHistory: []string{"", "  ok  ", "a\x01b\n", long},
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, SearchHistory: []string{"", "  ok  ", "a\x01b\n", long}, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"out"}}}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +361,7 @@ func TestSearchHistoryPersistenceBoundsAndCompat(t *testing.T) {
 	}
 	// Old record compatibility: no field means no history (and the record still
 	// restores its transcript exactly as before).
-	old := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}}
+	old := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"out"}}}}
 	if err := SaveTerminal(dir, old); err != nil {
 		t.Fatal(err)
 	}
@@ -427,12 +389,12 @@ func TestLoadTerminalRejectsOversizedFile(t *testing.T) {
 		t.Fatalf("oversized record error = %v, want the size limit named", err)
 	}
 	// Under the lowered cap a legitimate bounded record still loads.
-	st := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"out"}}}}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || len(got.Rows) != 1 || got.Rows[0] != "out" {
+	if err != nil || !ok || len(activeSaved(got).Rows) != 1 || activeSaved(got).Rows[0] != "out" {
 		t.Fatalf("normal record = %+v, %v, %v", got, ok, err)
 	}
 }
@@ -467,10 +429,7 @@ func TestSaveTerminalBoundsTheGenericEntryPoint(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		history = append(history, strings.Repeat("q", 2000))
 	}
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}, Tabs: tabs,
-		ActiveTab: 1, SearchHistory: history,
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs, ActiveTab: 1, SearchHistory: history}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +486,7 @@ func TestSaveTerminalRefusesToExceedTheReaderCap(t *testing.T) {
 	oldCap := maxTerminalFileBytes
 	maxTerminalFileBytes = 2048
 	t.Cleanup(func() { maxTerminalFileBytes = oldCap })
-	original := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"kept"}}
+	original := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"kept"}}}}
 	if err := SaveTerminal(dir, original); err != nil {
 		t.Fatal(err)
 	}
@@ -536,10 +495,7 @@ func TestSaveTerminalRefusesToExceedTheReaderCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	big := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Rows: []string{strings.Repeat("a", 2000), strings.Repeat("b", 1000)},
-	}
+	big := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{strings.Repeat("a", 2000), strings.Repeat("b", 1000)}}}}
 	err = SaveTerminal(dir, big)
 	if err == nil || !strings.Contains(err.Error(), "reader cap") {
 		t.Fatalf("SaveTerminal error = %v, want the reader-cap refusal", err)
@@ -552,7 +508,7 @@ func TestSaveTerminalRefusesToExceedTheReaderCap(t *testing.T) {
 		t.Fatal("a refused save changed the previous record")
 	}
 	got, ok, err := LoadTerminal(dir)
-	if err != nil || !ok || len(got.Rows) != 1 || got.Rows[0] != "kept" {
+	if err != nil || !ok || len(activeSaved(got).Rows) != 1 || activeSaved(got).Rows[0] != "kept" {
 		t.Fatalf("previous record after refusal = %+v, %v, %v", got, ok, err)
 	}
 }
@@ -589,11 +545,7 @@ func TestBoundedStateFitsTheReaderCap(t *testing.T) {
 	for i := range history {
 		history[i] = strings.Repeat("q", terminal.MaxSearchQueryBytes)
 	}
-	st := boundTerminalState(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: rows[:1], Tabs: tabs,
-		ActiveTab: 3, SearchHistory: history,
-		LaunchArgv: argv, ResumeArgv: argv, Agent: labels, Source: labels,
-	})
+	st := boundTerminalState(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs, ActiveTab: 3, SearchHistory: history})
 	data, err := json.Marshal(st)
 	if err != nil {
 		t.Fatal(err)
@@ -651,7 +603,7 @@ func TestLoadTerminalForRestoreQuarantinesBeforeSave(t *testing.T) {
 			dir := t.TempDir()
 			original := tc.setup(t, dir)
 			st, ok, err := LoadTerminalForRestore(dir)
-			if err == nil || ok || len(st.Rows) != 0 {
+			if err == nil || ok || len(activeSaved(st).Rows) != 0 {
 				t.Fatalf("LoadTerminalForRestore = %+v, %v, %v; want an explicit warning", st, ok, err)
 			}
 			rejected := filepath.Join(dir, terminalFileName+".rejected")
@@ -668,11 +620,11 @@ func TestLoadTerminalForRestoreQuarantinesBeforeSave(t *testing.T) {
 				t.Fatalf("warning does not name the quarantine path: %v", err)
 			}
 			// The later save writes a fresh record; the quarantined original survives.
-			if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"fresh"}}); err != nil {
+			if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"fresh"}}}}); err != nil {
 				t.Fatal(err)
 			}
 			fresh, ok, err := LoadTerminal(dir)
-			if err != nil || !ok || len(fresh.Rows) != 1 || fresh.Rows[0] != "fresh" {
+			if err != nil || !ok || len(activeSaved(fresh).Rows) != 1 || activeSaved(fresh).Rows[0] != "fresh" {
 				t.Fatalf("fresh record after save = %+v, %v, %v", fresh, ok, err)
 			}
 			if got, _ := os.ReadFile(rejected); !bytes.Equal(got, original) {
@@ -714,7 +666,7 @@ func TestQuarantineCollisionAndProtectionMarker(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("could not quarantine"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"new"}}); err == nil {
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"new"}}}}); err == nil {
 		t.Fatal("SaveTerminal wrote while the protection marker existed")
 	}
 	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion}); err == nil {
@@ -755,7 +707,7 @@ func TestQuarantineAttemptLimitProtectsRecord(t *testing.T) {
 	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
 		t.Fatalf("the original record changed after the attempt limit: %q, %v", got, err)
 	}
-	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"new"}}); err == nil {
+	if err := SaveTerminal(dir, terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"new"}}}}); err == nil {
 		t.Fatal("a protected record was overwritten after the attempt limit")
 	}
 	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {

@@ -87,7 +87,7 @@ func TestViOperators(t *testing.T) {
 }
 
 // TestViInclusiveMotionOnEmptyLine: an operator with an inclusive end-of-line motion on an
-// empty line has nothing to act on; it must not take the line break (S22-1).
+// empty line has nothing to act on; it must not take the line break.
 func TestViInclusiveMotionOnEmptyLine(t *testing.T) {
 	t.Parallel()
 	const text = "abc\n\ndef\nghi"

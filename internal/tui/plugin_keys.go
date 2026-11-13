@@ -14,10 +14,10 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// Plugin key layers (stage S14): the bindings of the plugins in the keymap, input modes,
+// Plugin key layers: the bindings of the plugins in the keymap, input modes,
 // the key wait of gvim.input.next_key, plugin contexts, and the panic chords.
 //
-// The order a key press takes in handleKey (AMENDMENTS C17): the panic chords; the F7 focus
+// The order a key press takes in handleKey: the panic chords; the F7 focus
 // cycle, the dock, the tab strip and the welcome screen (all existing); pluginKey, only
 // while the editor has the focus: a pending key wait, then the editor's input mode, then the
 // mode of the active buffer; then the keymap. Overlays are routed before handleKey, so a
@@ -459,10 +459,9 @@ func (m *Model) pluginContext(name string) (on, defined bool) {
 	return false, false
 }
 
-// plugKeysGone drops what the plugin (at generation gen) set: bindings, modes, contexts and
-// the input mode. A key capture has no owner here; the runtime cancels it on unload.
-func (m *Model) plugKeysGone(plugin string, gen uint64) {
-	_ = gen
+// plugKeysGone drops what the plugin set: bindings, modes, contexts and the input mode.
+// A key capture has no owner here; the runtime cancels it on unload.
+func (m *Model) plugKeysGone(plugin string) {
 	ks := &m.plug.keys
 	if _, ok := ks.bindings[plugin]; ok {
 		delete(ks.bindings, plugin)
@@ -714,7 +713,7 @@ func (m *Model) pluginPaste(content string) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// ---- The panic chords (AMENDMENTS C27).
+// ---- The panic chords.
 
 // panicChord reports whether k is one of the two chords that always clear the plugin input:
 // ctrl+^, matched on what the terminal decoded so that it fires in the legacy encoding

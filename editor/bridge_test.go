@@ -15,6 +15,7 @@ var clusterCells = document.ClusterCells
 const clusterWholeLine = document.ClusterWholeLine
 
 var comparePos = document.ComparePos
+var diskStateOf = document.DiskStateOf
 var errFileGrew = document.ErrFileGrew
 var formatSize = document.FormatSize
 

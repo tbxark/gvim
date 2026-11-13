@@ -1,6 +1,6 @@
 package plugin
 
-// Per-workspace plugin state (#19b slice). A direct launch keeps the editor-wide plugin
+// Per-workspace plugin state. A direct launch keeps the editor-wide plugin
 // state: one gvim.state file per plugin under the config directory. A daemon workspace
 // instead gives its plugin runtime one workspace-scoped state file in the workspace's
 // session directory (sessions/<stable-id>/plugin-state.json); a workspace switch to another

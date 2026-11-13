@@ -12,8 +12,8 @@ import (
 )
 
 // noticeInput is a layoutInput whose status row carries message.
-func noticeInput(message string) layoutInput {
-	return layoutInput{Status: statusView{Position: "Ln 1, Col 1", Message: message, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10}}
+func noticeInput(message string) frame.Input {
+	return frame.Input{Status: frame.StatusView{Position: "Ln 1, Col 1", Message: message, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10}}
 }
 
 const longNotice = "save /private/tmp/gvim-dogfood/writer/w/se_e.txt: encoding: cannot represent U+4E2D in Windows-1252, choose another encoding"
@@ -62,7 +62,7 @@ func TestALongMessageWrapsAboveTheStatusRow(t *testing.T) {
 			t.Errorf("width %d: the status row still holds the message: %q", w, text.String())
 		}
 		// A click on a band row reaches nothing.
-		if got := l.Hit(5, l.NoticeY); got.Kind != hitNone {
+		if got := l.Hit(5, l.NoticeY); got.Kind != frame.HitNone {
 			t.Errorf("width %d: a click on the notice band hit %v", w, got.Kind)
 		}
 	}
@@ -74,8 +74,8 @@ func TestAVeryLongMessageKeepsItsEndAndCutsTheMiddle(t *testing.T) {
 	t.Parallel()
 	msg := "head words " + strings.Repeat("filler words ", 60) + "the final reason"
 	l := frame.ComputeLayout(80, 30, noticeInput(msg))
-	if len(l.Notice) != maxNoticeRows {
-		t.Fatalf("band has %d rows, want %d", len(l.Notice), maxNoticeRows)
+	if len(l.Notice) != frame.MaxNoticeRows {
+		t.Fatalf("band has %d rows, want %d", len(l.Notice), frame.MaxNoticeRows)
 	}
 	joined := strings.Join(l.Notice, " ")
 	if !strings.Contains(joined, "…") {
@@ -160,8 +160,8 @@ func TestNoBandWhileTheStatusRowIsHiddenOrTheFrameIsTiny(t *testing.T) {
 	if l := frame.ComputeLayout(80, 24, in); len(l.Notice) != 0 {
 		t.Errorf("a hidden status row got a band: %q", l.Notice)
 	}
-	for h := gateMinHeight; h <= 10; h++ {
-		for w := gateMinWidth; w <= 30; w += 2 {
+	for h := frame.GateMinHeight; h <= 10; h++ {
+		for w := frame.GateMinWidth; w <= 30; w += 2 {
 			l := frame.ComputeLayout(w, h, noticeInput(longNotice))
 			if l.Gated {
 				continue

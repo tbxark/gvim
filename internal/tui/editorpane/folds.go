@@ -41,7 +41,8 @@ func (f *frame) setFolds(doc Document) {
 	// Plugin folding ranges merge with the document's (ids tie: the document's win).
 	if f.pluginFolds != nil {
 		extra, extraCollapsed, placeholder := f.pluginFolds()
-		ranges = append(ranges, extra...)
+		// Clip: the document's slice is shared, and the sort below must not reorder it.
+		ranges = append(slices.Clip(ranges), extra...)
 		for start, c := range extraCollapsed {
 			if _, ok := collapsed[start]; !ok {
 				collapsed[start] = c

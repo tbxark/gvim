@@ -10,7 +10,7 @@ import (
 )
 
 // Cancellation causes of a slice. The runtime reads context.Cause after a failed resume
-// and ignores gopher-lua's own message for these (AMENDMENTS C10).
+// and ignores gopher-lua's own message for these.
 var (
 	errSliceDeadline = errors.New("slice deadline exceeded")
 	errHardDeadline  = errors.New("hard deadline exceeded")
@@ -108,7 +108,7 @@ func (s *slice) finish() {
 	s.cancel(errSliceDone)
 }
 
-// ---------- heap guard (AMENDMENTS C10) ----------
+// ---------- heap guard ----------
 
 var heapNames = [...]string{"/memory/classes/heap/objects:bytes", "/gc/heap/live:bytes"}
 

@@ -11,8 +11,7 @@ import (
 // several display rows. The editor still moves by buffer lines, so only painting,
 // the caret's row and the mouse mapping read these spans.
 //
-// The rule comes from the legacy screens (the 14x24 open screen and the
-// W-14 to W-18 sweep). A row breaks after the last space that fits in the width.
+// A row breaks after the last space that fits in the width.
 // With no space in the width, the row is cut at the width. The space stays on
 // the upper row, and the next row starts at the break:
 //
@@ -20,23 +19,17 @@ import (
 //	W=14: "second line" has no space in its first 6 cells -> "second" / " line"
 //	W=15 (wrap width 7): "second line" -> "second " / "line"
 //
-// A wrap width under two cells does not wrap (legacy 14x24 explorer screen).
+// A wrap width under two cells does not wrap.
 
 // span is a run of display runes in an expanded line, as indexes [from, to).
 type span struct{ from, to int }
-
-// wrapSpans splits the expanded runes of a buffer line into rows of at most w
-// cells using the break rule above. An empty line still has one row. A width
-// under two cells does not wrap, so the line stays one row.
-func wrapSpans(runes []rune, w int) []span {
-	return wrapRows(runes, w, 0, nil)
-}
 
 // minContinuation is the least width of a continuation row after its hanging indent.
 // A line indented deeper than the row leaves is not given a hanging indent.
 const minContinuation = 10
 
-// wrapHanging is wrapSpans with a hanging indent when hang is set. The rows after
+// wrapHanging splits the expanded runes of a buffer line into rows of at most w cells using
+// the break rule above, with a hanging indent when hang is set. The rows after
 // the first start under the first character of the line: they are indent cells
 // narrower, and the indent is the number of leading blanks of the line. It is zero
 // when the line has no continuation row, or when it would leave a row under
@@ -127,7 +120,7 @@ func wrapRowsFrom(runes []rune, w, indent int, glue []bool, cont bool) []span {
 
 // breaksBeforeToken reports whether the row that starts at start ends before the token
 // that begins at brk, so the token moves to the next row. A token that fits a fresh row
-// moves, as the legacy rule has it. A token wider than a fresh row moves only when the
+// moves. A token wider than a fresh row moves only when the
 // row already holds the floor of Fresh's wrap machine, the larger of w-16 and w/2 cells,
 // hanging indent included. Otherwise it is split on this row, and a marker such as "- "
 // is not left alone before a long unspaced run.

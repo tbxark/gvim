@@ -262,3 +262,24 @@ func drainRuntime(h *plugintest.Harness) {
 		}
 	}
 }
+
+// A long title of multibyte characters is cut at a character boundary, not emptied.
+func TestLiveSessionsClipKeepsMultibyteTitles(t *testing.T) {
+	t.Parallel()
+	host, svc := liveSessionsHost(t)
+	svc.AgentDiscovery.Sessions = []pluginapi.AgentSession{
+		{Kind: "history", Tool: "claude-code", ID: "abc", Title: strings.Repeat("会话", 100), Path: "/p/a.jsonl", Dir: "/w", Exact: true},
+	}
+	h := startLiveSessions(t, host, svc)
+	if err := h.Run(liveSessionsPlugin+".show", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(0)
+	o := h.Host.UI().Last("picker")
+	if o == nil || len(o.Picker.Items) != 1 {
+		t.Fatalf("picker = %+v", o)
+	}
+	if text := o.Picker.Items[0].Text; !strings.Contains(text, "会话会话") || !strings.HasSuffix(text, "…") {
+		t.Fatalf("row = %q", text)
+	}
+}

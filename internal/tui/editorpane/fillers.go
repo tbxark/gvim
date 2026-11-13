@@ -90,8 +90,8 @@ func (fl *Fillers) TextRow(line int) int {
 	return fl.BlockStart(line) + fl.above(line)
 }
 
-// BlockRows is the number of rows of the block of line.
-func (fl *Fillers) BlockRows(line int) int {
+// blockRows is the number of rows of the block of line.
+func (fl *Fillers) blockRows(line int) int {
 	return fl.above(line) + 1 + fl.after(line)
 }
 
@@ -103,7 +103,7 @@ func (fl *Fillers) Total(lines int) int {
 	if lines <= 0 {
 		return fl.Above
 	}
-	return fl.BlockStart(lines-1) + fl.BlockRows(lines-1)
+	return fl.BlockStart(lines-1) + fl.blockRows(lines-1)
 }
 
 // LineAt is the line whose block holds row, and the row's index inside that block, for a

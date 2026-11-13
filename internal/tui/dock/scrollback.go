@@ -115,12 +115,6 @@ func (p *Panel) ScrollTop() int { return p.scroll.top }
 // ScrollSelected is the combined row y copies, or -1.
 func (p *Panel) ScrollSelected() int { return p.scroll.selected }
 
-// SearchQuery is the committed scrollback search, or "".
-func (p *Panel) SearchQuery() string { return p.scroll.search }
-
-// SearchMatches is the number of rows the scrollback search matches.
-func (p *Panel) SearchMatches() int { return len(p.scroll.matches) }
-
 // bodyRows is the number of shell rows the layout gives the dock.
 func (p *Panel) bodyRows() int {
 	_, rows := p.contentSize()
@@ -129,8 +123,11 @@ func (p *Panel) bodyRows() int {
 
 // combined is the rows the scrollback view scrolls through: a restarted shell's
 // prior transcript, then the history, then the live screen rows.
-func (p *Panel) combined() int {
-	if marker := p.exitMarkerRow(); marker >= 0 {
+func (p *Panel) combined() int { return p.combinedWith(p.exitMarkerRow()) }
+
+// combinedWith is combined for a known exitMarkerRow marker (-1 when none).
+func (p *Panel) combinedWith(marker int) int {
+	if marker >= 0 {
 		// The marker follows the frozen screen's real rows; rows the pager window
 		// keeps below it are not reachable while the marker is the transcript end.
 		return marker + 1
@@ -194,15 +191,6 @@ func (p *Panel) leaveScrollback() tea.Cmd {
 	p.autoExitScroll = false
 	p.clearSelection()
 	return nil
-}
-
-// ToggleScrollback is the Ctrl+Space switch: it enters the scrollback view, or
-// returns to the live screen.
-func (p *Panel) ToggleScrollback() tea.Cmd {
-	if p.scroll.on {
-		return p.leaveScrollback()
-	}
-	return p.enterScrollback()
 }
 
 // covers reports whether the snapshot holds rows [from, to).
@@ -320,12 +308,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		return p.searchInputKey(k), true
 	}
 	switch {
-	case isCtrlSpace(k):
-		if p.restored && p.term == nil {
-			return nil, true
-		}
-		return p.leaveScrollback(), true
-	case k.Code == tea.KeyEscape:
+	case isCtrlSpace(k), k.Code == tea.KeyEscape:
 		if p.restored && p.term == nil {
 			return nil, true
 		}
@@ -377,7 +360,6 @@ func isCtrlSpace(k tea.Key) bool {
 	return k.Mod&tea.ModCtrl != 0 && (k.Code == tea.KeySpace || k.Code == ' ')
 }
 
-// searchInputKey edits the search input line.
 // historyStore returns the dock-wide search history, or a panel-local one for a
 // panel built without Tabs (tests, an extracted/standalone panel).
 func (p *Panel) historyStore() *searchHistoryStore {
@@ -423,12 +405,23 @@ func (p *Panel) startSearchInput() tea.Cmd {
 }
 
 // cancelSearchInput closes the input and restores the view it opened on, keeping
-// the previously committed search/matches. It is used by Esc and when the dock
-// loses the keyboard focus, so an unfocused dock never keeps an input swallowing
-// keys or applying a late preview answer (the sequence bump drops those).
+// the previously committed search/matches. It is used by Esc, which re-runs a
+// search the re-wrap made stale.
 func (p *Panel) cancelSearchInput() tea.Cmd {
-	if !p.scroll.typing {
+	if !p.closeSearchInput() {
 		return nil
+	}
+	return p.takeStaleSearch()
+}
+
+// closeSearchInput is cancelSearchInput without the stale-search command, for the
+// callers that have nowhere to return one: Hide and losing the keyboard focus, so an
+// unfocused dock never keeps an input swallowing keys or applying a late preview
+// answer (the sequence bump drops those). A stale search stays flagged for Sync. It
+// reports whether an input was open.
+func (p *Panel) closeSearchInput() bool {
+	if !p.scroll.typing {
+		return false
 	}
 	p.scroll.typing, p.scroll.searchInput = false, ""
 	p.scroll.preview = nil
@@ -442,7 +435,7 @@ func (p *Panel) cancelSearchInput() tea.Cmd {
 		p.scroll.searchSaved = false
 		p.clampScroll()
 	}
-	return p.takeStaleSearch()
+	return true
 }
 
 // recallSearchHistory navigates the open input through its query history like
@@ -521,6 +514,7 @@ func (p *Panel) previewStepCmd(dir int) tea.Cmd {
 	return p.searchCommand(query, p.scroll.regex, p.scroll.matchCase, false)
 }
 
+// searchInputKey edits the search input line.
 func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	switch {
 	case k.Code == tea.KeyUp:

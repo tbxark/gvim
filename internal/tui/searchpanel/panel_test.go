@@ -12,6 +12,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/space"
 )
 
 // typedKey is a printable key press.
@@ -1283,7 +1284,7 @@ func windowPreview(total int) func(PreviewRequest) PreviewResult {
 		} else {
 			start = max(req.Line-1-(req.Lines-1)/2, 0)
 		}
-		start = clamp(start, 0, max(total-req.Lines, 0))
+		start = space.Clamp(start, 0, max(total-req.Lines, 0))
 		var lines []string
 		for i := 0; i < req.Lines && start+i < total; i++ {
 			lines = append(lines, fmt.Sprintf("line %d", start+i+1))

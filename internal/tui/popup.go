@@ -8,8 +8,7 @@ import (
 )
 
 // ShowPopup opens a popup at anchor with title and items on the overlay stack. The
-// choice arrives as a popup.Chosen message. The root does nothing with it yet, so
-// an owner that wants the choice handles that message in its own case.
+// choice arrives as a popup.Chosen message, which the owner handles in its own case.
 func (m *Model) ShowPopup(anchor popup.Point, title string, items []popup.Item) {
 	p := popup.New(popupStyles(m.styles))
 	p.Show(anchor, title, items)
@@ -25,7 +24,6 @@ func popupStyles(st style.Styles) style.Overlay { return st.Overlay }
 func (m *Model) popupFocus() bool {
 	for i, top := range slices.Backward(m.overlays) {
 		if _, ok := top.(*popup.Popup); ok {
-
 			m.overlays = append(slices.Delete(m.overlays, i, i+1), top)
 			return true
 		}

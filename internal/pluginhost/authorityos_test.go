@@ -249,8 +249,11 @@ func TestAuthorityOSRoutesFilesProcessesAndWatch(t *testing.T) {
 	if err := osys.Rename(ctx, "a.txt", "b.txt"); err != nil {
 		t.Fatalf("Rename: %v", err)
 	}
-	if err := osys.Remove(ctx, "c.txt", false); err != nil {
-		t.Fatalf("Remove: %v", err)
+	if err := osys.Remove(ctx, "c.txt", false); pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("Remove = %v, want unsupported on a remote workspace", err)
+	}
+	if !hostos.IsRemote(osys) {
+		t.Fatal("the authority OS does not report itself remote")
 	}
 	if len(mutable.mkdirs) != 1 || mutable.mkdirs[0] != "/srv/proj/dir" {
 		t.Fatalf("remote mkdirs = %v, want the resolved workspace path", mutable.mkdirs)
@@ -258,8 +261,8 @@ func TestAuthorityOSRoutesFilesProcessesAndWatch(t *testing.T) {
 	if len(mutable.renames) != 1 || mutable.renames[0] != [2]string{"/srv/proj/a.txt", "/srv/proj/b.txt"} {
 		t.Fatalf("remote renames = %v", mutable.renames)
 	}
-	if len(mutable.removes) != 1 || mutable.removes[0] != "/srv/proj/c.txt" {
-		t.Fatalf("remote removes = %v", mutable.removes)
+	if len(mutable.removes) != 0 {
+		t.Fatalf("remote removes = %v, want none", mutable.removes)
 	}
 
 	res, err := osys.Run(ctx, []string{"git", "status"}, hostos.ProcOptions{Cwd: "sub", Env: map[string]string{"A": "B"}, Timeout: 5 * time.Second, MaxOutput: 4096})
@@ -360,7 +363,7 @@ func TestAuthorityOSLocalOnlyAPIsStayLocal(t *testing.T) {
 func TestNewWrapOSInstallsTheAuthorityOS(t *testing.T) {
 	var seen hostos.OS
 	wrapped := hostos.NopOS{}
-	pw := New(config.Config{}, editor.New(editor.Options{}), func(*editor.Document) {}, Options{
+	pw := New(config.Config{}, editor.New(editor.Options{}), Options{
 		WrapOS: func(local hostos.OS) hostos.OS {
 			seen = local
 			return wrapped
@@ -412,7 +415,7 @@ func TestAuthorityOSGateRefusesBeforeRemoteSpawn(t *testing.T) {
 // TestNewWithoutWrapOSKeepsTheLocalPluginOS: a local session leaves Options.WrapOS nil
 // and keeps the exact plugin OS implementation it had before.
 func TestNewWithoutWrapOSKeepsTheLocalPluginOS(t *testing.T) {
-	pw := New(config.Config{}, editor.New(editor.Options{}), func(*editor.Document) {}, Options{})
+	pw := New(config.Config{}, editor.New(editor.Options{}), Options{})
 	if _, ok := pw.OS.(*pluginOS); !ok {
 		t.Fatalf("local Wiring.OS = %T, want the local plugin OS", pw.OS)
 	}

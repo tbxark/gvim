@@ -300,17 +300,10 @@ func TestRemoteTreeReveal(t *testing.T) {
 	}
 }
 
-// TestRemoteTreeWriteCapabilities checks the tree advertises the capability shape the
-// panel and the root consult: file creation/rename/delete and the bounded subtree
-// clipboard are available, and remote gitignore filtering stays unsupported.
+// TestRemoteTreeWriteCapabilities checks the remote tree's ignored-entry setting
+// round-trips (remote gitignore filtering stays unsupported).
 func TestRemoteTreeWriteCapabilities(t *testing.T) {
 	tree := NewRemoteExplorerTree("/srv/proj", remoteTreeTestLoader())
-	if tree.ReadOnly() {
-		t.Fatal("the remote tree reports read-only although file operations are available")
-	}
-	if tree.ClipboardDisabled() {
-		t.Fatal("the remote tree still reports the clipboard unavailable")
-	}
 	if tree.ShowIgnored() {
 		t.Fatal("the remote tree lists ignored entries by default")
 	}

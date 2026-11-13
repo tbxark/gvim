@@ -98,16 +98,13 @@ func (f frame) extrasFor(i int) ExtraRows {
 		ex = f.extras(i)
 	}
 	if f.pageExtras != nil && f.pageOn {
+		// Concat builds new slices: appending would write into the hook's backing array.
 		page := f.pageExtras(i, f.w, f.gutter, f.pageMeasure)
-		ex.Above = append(ex.Above, page.Above...)
-		ex.Below = append(ex.Below, page.Below...)
+		ex.Above = slices.Concat(ex.Above, page.Above)
+		ex.Below = slices.Concat(ex.Below, page.Below)
 	}
-	if len(ex.Above) > 1 {
-		slices.SortStableFunc(ex.Above, extraRowOrder)
-	}
-	if len(ex.Below) > 1 {
-		slices.SortStableFunc(ex.Below, extraRowOrder)
-	}
+	ex.Above = sortedExtraRows(ex.Above)
+	ex.Below = sortedExtraRows(ex.Below)
 	ex.Above = f.wrapExtraRows(ex.Above)
 	ex.Below = f.wrapExtraRows(ex.Below)
 	f.extraCache[i] = ex
@@ -195,6 +192,17 @@ func chunkOverlays(overlays []ExtraTextOverlay, from, to int) []ExtraTextOverlay
 		out = append(out, ExtraTextOverlay{Start: start - from, End: end - from, Style: ov.Style})
 	}
 	return out
+}
+
+// sortedExtraRows returns rows in priority order, ties in their given order. It sorts a
+// copy: the slice may be the one a hook returned and keeps.
+func sortedExtraRows(rows []ExtraRow) []ExtraRow {
+	if len(rows) < 2 || slices.IsSortedFunc(rows, extraRowOrder) {
+		return rows
+	}
+	rows = slices.Clone(rows)
+	slices.SortStableFunc(rows, extraRowOrder)
+	return rows
 }
 
 func extraRowOrder(a, b ExtraRow) int { return cmp.Compare(a.Priority, b.Priority) }
@@ -412,9 +420,10 @@ func (f frame) paintExtraRow(g *grid.Grid, i int, er ExtraRow, y int, cur bool) 
 	slices.SortStableFunc(runs, func(a, b ExtraTextOverlay) int { return cmp.Compare(a.Start, b.Start) })
 	x, at := f.gutter, 0
 	for _, r := range runs {
-		if r.Start <= at {
-			continue
+		if r.End <= at {
+			continue // inside the run before it
 		}
+		r.Start = max(r.Start, at)
 		x += g.Put(x, y, f.w-1, text[at:r.Start], st)
 		x += g.Put(x, y, f.w-1, text[r.Start:r.End], PatchStyle(st, r.Style))
 		at = r.End

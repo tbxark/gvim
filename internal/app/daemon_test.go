@@ -513,7 +513,7 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 	}
 	first := list.Entries[0]
 	// Open a file in the foreground workspace and wait for its text.
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Paths: []string{filepath.Join(root1, "a.txt")}}); err != nil {
+	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: filepath.Join(root1, "a.txt")}}}); err != nil {
 		t.Fatal(err)
 	}
 	drainDaemonForText(t, conn, "hello")
@@ -559,7 +559,7 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 	}
 	// Single writer: opening a file that the switched-away workspace has open brings
 	// that workspace back instead of opening a second copy in the active one.
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Paths: []string{filepath.Join(root1, "a.txt")}}); err != nil {
+	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: filepath.Join(root1, "a.txt")}}}); err != nil {
 		t.Fatal(err)
 	}
 	deadline = time.Now().Add(10 * time.Second)

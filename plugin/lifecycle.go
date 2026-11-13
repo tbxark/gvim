@@ -794,7 +794,7 @@ func (b *batch) okNames() []string {
 	return out
 }
 
-// replay tells a plugin that loaded after files were opened about them (AMENDMENTS C21 4):
+// replay tells a plugin that loaded after files were opened about them:
 // after_file_open{buf, path, replay=true} for each tab with a path, in tab order, then
 // buffer_activated{buf, replay=true} for the active one, only for names it subscribed to.
 func (r *Runtime) replay(name string) {

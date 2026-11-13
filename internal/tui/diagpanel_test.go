@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 )
@@ -303,7 +304,7 @@ func TestDiagnosticsSectionInSidebarStack(t *testing.T) {
 }
 
 // findDiagSection returns the Diagnostics section of a layout.
-func findDiagSection(t *testing.T, l layout) sidebar.Section {
+func findDiagSection(t *testing.T, l frame.Layout) sidebar.Section {
 	t.Helper()
 	for _, sec := range l.Sections {
 		if sec.Kind == sidebar.KindDiagnostics {

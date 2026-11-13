@@ -59,18 +59,9 @@ func TestTabsRestoreAppliesStyledScreenTail(t *testing.T) {
 		Focus:       func() {},
 	})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	tabs.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Rows: []string{"OLD"}, Screen: func() *terminal.SavedScreen {
-			bad := styledSavedScreen()
-			bad.Rows[0].Cells = []terminal.SavedCell{{Rune: 'B'}, {Rune: 'A'}, {Rune: 'D'}}
-			return bad
-		}(),
-		Tabs: []terminal.SavedTab{{
-			Name: "t", Open: true, Rows: []string{"OLD"}, Screen: styledSavedScreen(), Live: true,
-		}},
-		ActiveTab: 0,
-	})
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "t", Open: true, Rows: []string{"OLD"}, Screen: styledSavedScreen(), Live: true,
+	}}, ActiveTab: 0})
 	p := tabs.tabs[0]
 	if len(p.prior) != 1 || p.prior[0].Cells[0].Style.Fg == nil || !p.prior[0].Cells[0].Style.Bold {
 		t.Fatalf("restored prior = %+v", p.prior[0].Cells)
@@ -80,8 +71,8 @@ func TestTabsRestoreAppliesStyledScreenTail(t *testing.T) {
 	}
 	// A save of the restored (undived) tab keeps its styles.
 	st := tabs.SavedState()
-	if st.Screen == nil || st.Screen.Rows[0].Cells[0].Fg != "#ff0000" {
-		t.Fatalf("re-captured screen = %+v", st.Screen)
+	if activeSaved(st).Screen == nil || activeSaved(st).Screen.Rows[0].Cells[0].Fg != "#ff0000" {
+		t.Fatalf("re-captured screen = %+v", activeSaved(st).Screen)
 	}
 }
 
@@ -95,16 +86,13 @@ func TestRestoreIgnoresMismatchedScreen(t *testing.T) {
 		Focus:       func() {},
 	})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	tabs.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{
-			Name: "t", Open: true, Rows: []string{"OLD"}, Screen: func() *terminal.SavedScreen {
-				bad := styledSavedScreen()
-				bad.Rows[0].Cells = []terminal.SavedCell{{Rune: 'B'}, {Rune: 'A'}, {Rune: 'D'}}
-				return bad
-			}(),
-		}},
-	})
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "t", Open: true, Rows: []string{"OLD"}, Screen: func() *terminal.SavedScreen {
+			bad := styledSavedScreen()
+			bad.Rows[0].Cells = []terminal.SavedCell{{Rune: 'B'}, {Rune: 'A'}, {Rune: 'D'}}
+			return bad
+		}(),
+	}}})
 	p := tabs.tabs[0]
 	if got := p.prior[0].Text(); got != "OLD" {
 		t.Fatalf("text = %q", got)
@@ -119,14 +107,10 @@ func TestRevivedTabPaintsSnapshotAboveNewOutput(t *testing.T) {
 	starter := &fakeStarter{term: newFakeTerm()}
 	starter.term.screen = newScreen(20, "NEW")
 	tabs := liveTestTabs(t, Effects{RestoreLive: true}, starter)
-	tabs.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{
-			Name: "t", Open: true, Cwd: "/ws", LaunchDir: "/ws",
-			Rows: []string{"OLD"}, Screen: styledSavedScreen(), Live: true,
-		}},
-		ActiveTab: 0,
-	})
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "t", Open: true, Cwd: "/ws", LaunchDir: "/ws",
+		Rows: []string{"OLD"}, Screen: styledSavedScreen(), Live: true,
+	}}, ActiveTab: 0})
 	tabs.SetActive(0)
 	cmd := tabs.Sync()
 	if cmd == nil {
@@ -175,14 +159,11 @@ func TestRestoredLiveTabKeepsLiveFlagOnResave(t *testing.T) {
 		Focus:       func() {},
 	})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	tabs.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Live: true, Rows: []string{"still here"},
-		Tabs: []terminal.SavedTab{{
-			Name: "t", Open: true, Cwd: "/ws", Rows: []string{"still here"}, Live: true,
-		}},
-	})
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "t", Open: true, Cwd: "/ws", Rows: []string{"still here"}, Live: true,
+	}}})
 	st := tabs.SavedState()
-	if !st.Live || !st.Tabs[0].Live {
+	if !activeSaved(st).Live || !st.Tabs[0].Live {
 		t.Fatalf("a dormant live tab was re-saved as dead: %+v", st)
 	}
 }
@@ -201,14 +182,9 @@ func remainderRecord() terminal.SavedState {
 		}}},
 		Cursor: terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"},
 	}
-	return terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Width: 6, Rows: []string{"hi", "old"},
-		Screen: screen,
-		Tabs: []terminal.SavedTab{{
-			Name: "t", Open: true, Rows: []string{"hi", "old"}, Screen: screen, Live: true,
-		}},
-		ActiveTab: 0,
-	}
+	return terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+		Name: "t", Open: true, Rows: []string{"hi", "old"}, Screen: screen, Live: true,
+	}}, ActiveTab: 0}
 }
 
 // TestPanelCapturesHistoryCursorAndAlt checks the live capture writes the styled
@@ -275,8 +251,8 @@ func TestTabsRestoreHistoryAndCursor(t *testing.T) {
 	}
 	// A re-save keeps the full snapshot.
 	st := tabs.SavedState()
-	if st.Screen == nil || len(st.Screen.History) != 1 || len(st.Screen.Rows) != 1 || st.Screen.Cursor != p.savedCursor {
-		t.Fatalf("re-saved snapshot = %+v", st.Screen)
+	if activeSaved(st).Screen == nil || len(activeSaved(st).Screen.History) != 1 || len(activeSaved(st).Screen.Rows) != 1 || activeSaved(st).Screen.Cursor != p.savedCursor {
+		t.Fatalf("re-saved snapshot = %+v", activeSaved(st).Screen)
 	}
 }
 
@@ -287,7 +263,7 @@ func TestRestoreIgnoresCorruptRemainder(t *testing.T) {
 	t.Parallel()
 	corrupt := func(mutate func(*terminal.SavedScreen)) terminal.SavedState {
 		st := remainderRecord()
-		mutate(st.Screen)
+		mutate(activeSaved(st).Screen)
 		return st
 	}
 	cases := map[string]terminal.SavedState{
@@ -324,14 +300,12 @@ func TestRestoreIgnoresCorruptRemainder(t *testing.T) {
 func TestRestoreAltAndReflowInvalidates(t *testing.T) {
 	t.Parallel()
 	st := remainderRecord()
-	st.Screen.Alt = true
-	st.Screen.History = nil
-	st.Screen.Rows = []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'o'}}}}
-	st.Width = 6
-	st.Rows = []string{"o"}
-	st.Tabs[0].Screen = st.Screen
-	st.Tabs[0].Rows = []string{"o"}
-	st.Tabs[0].Width = 6
+	tab := &st.Tabs[0]
+	tab.Screen.Alt = true
+	tab.Screen.History = nil
+	tab.Screen.Rows = []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'o'}}}}
+	tab.Width = 6
+	tab.Rows = []string{"o"}
 	var tabs Tabs
 	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
@@ -396,21 +370,17 @@ func TestPanelCapturesAndRestoresTitle(t *testing.T) {
 		var tabs Tabs
 		tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 		tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-		tabs.Restore(terminal.SavedState{
-			Version: terminal.SavedStateVersion, Open: true, Title: title, Rows: []string{"out"},
-			LaunchArgv: launch,
-			Tabs: []terminal.SavedTab{{
-				Name: "", Open: true, Title: title, Rows: []string{"out"}, LaunchArgv: launch,
-			}},
-		})
+		tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{
+			Name: "", Open: true, Title: title, Rows: []string{"out"}, LaunchArgv: launch,
+		}}})
 		return &tabs
 	}
 	restored := restore("vim main.go", nil)
 	if got := restored.TabNames()[0]; !strings.Contains(got, "vim main.go") {
 		t.Fatalf("restored tab label = %q, want the recorded title", got)
 	}
-	if st := restored.SavedState(); st.Title != "vim main.go" || st.Tabs[0].Title != "vim main.go" {
-		t.Fatalf("re-saved title = %q / %q", st.Title, st.Tabs[0].Title)
+	if st := restored.SavedState(); activeSaved(st).Title != "vim main.go" || st.Tabs[0].Title != "vim main.go" {
+		t.Fatalf("re-saved title = %q / %q", activeSaved(st).Title, st.Tabs[0].Title)
 	}
 	// An explicit rename still wins.
 	restored.RenameActive("mine")
@@ -464,7 +434,7 @@ func TestAltScreenContentAndTitleRoundTrip(t *testing.T) {
 	var tabs Tabs
 	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	tabs.Restore(st)
+	tabs.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{st}})
 	panel := tabs.tabs[0]
 	if !panel.savedAlt {
 		t.Fatal("restored alt flag was lost")
@@ -475,8 +445,8 @@ func TestAltScreenContentAndTitleRoundTrip(t *testing.T) {
 	if got := tabs.TabNames()[0]; !strings.Contains(got, "alt-app") {
 		t.Fatalf("restored alt tab label = %q", got)
 	}
-	if st2 := tabs.SavedState(); st2.Screen == nil || !st2.Screen.Alt || st2.Title != "alt-app" || len(st2.Screen.Rows) == 0 {
-		t.Fatalf("re-saved alt frame = %+v", st2.Screen)
+	if st2 := tabs.SavedState(); activeSaved(st2).Screen == nil || !activeSaved(st2).Screen.Alt || activeSaved(st2).Title != "alt-app" || len(activeSaved(st2).Screen.Rows) == 0 {
+		t.Fatalf("re-saved alt frame = %+v", activeSaved(st2).Screen)
 	}
 
 	// A corrupt alt frame (history window) is ignored whole, the title still restores.
@@ -488,14 +458,10 @@ func TestAltScreenContentAndTitleRoundTrip(t *testing.T) {
 		Rows:    []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'A'}}}},
 	}
 	corrupt.Rows = []string{"out"}
-	for i := range corrupt.Tabs {
-		corrupt.Tabs[i].Screen = corrupt.Screen
-		corrupt.Tabs[i].Rows = []string{"out"}
-	}
 	var bad Tabs
 	bad.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
 	bad.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	bad.Restore(corrupt)
+	bad.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{corrupt}})
 	badPanel := bad.tabs[0]
 	if badPanel.savedAlt || badPanel.prior[0].Cells[0].Style.Fg != nil {
 		t.Fatal("a corrupt alt frame was applied")

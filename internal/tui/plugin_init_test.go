@@ -21,6 +21,9 @@ func parseLua(t *testing.T, name, src string) {
 	}
 }
 
+// initExamplesMarker is the line of initTemplate after which every line is an example.
+const initExamplesMarker = "-- Examples"
+
 // TestInitTemplate checks that the file Edit init.lua creates is valid Lua as it is, that
 // its examples are valid Lua once uncommented, and that they use names the runtime has.
 func TestInitTemplate(t *testing.T) {

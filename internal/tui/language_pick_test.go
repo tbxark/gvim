@@ -8,19 +8,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // statusRun returns the status-row run of the segment kind and index.
-func statusRun(t *testing.T, m *Model, index int) run {
+func statusRun(t *testing.T, m *Model, index int) frame.Run {
 	t.Helper()
 	for _, r := range m.layout().Status {
-		if r.Kind == hitStatusSegment && r.Index == index {
+		if r.Kind == frame.HitStatusSegment && r.Index == index {
 			return r
 		}
 	}
 	t.Fatalf("no status segment %d in %+v", index, m.layout().Status)
-	return run{}
+	return frame.Run{}
 }
 
 func clickAt(m *Model, x, y int) {
@@ -33,7 +34,7 @@ func clickAt(m *Model, x, y int) {
 func TestLanguageSegmentOpensAFilterableListOfRealLanguages(t *testing.T) {
 	ed := newFakeEditor("abc")
 	m := newTestModel(t, ed, newFakeTree(3), 100, 30)
-	r := statusRun(t, m, statusSegmentLanguage)
+	r := statusRun(t, m, frame.StatusSegmentLanguage)
 	clickAt(m, r.X, m.layout().StatusY)
 	v := topList(m)
 	if v == nil || v.Title != "Select Language" {
@@ -140,7 +141,7 @@ func TestLineEndingListFitsItsRows(t *testing.T) {
 func TestPositionSegmentOpensGoToLine(t *testing.T) {
 	ed := newFakeEditor("abc\ndef")
 	m := newTestModel(t, ed, newFakeTree(3), 100, 30)
-	r := statusRun(t, m, statusSegmentPosition)
+	r := statusRun(t, m, frame.StatusSegmentPosition)
 	clickAt(m, r.X+1, m.layout().StatusY)
 	if len(m.overlays) != 1 {
 		t.Fatalf("%d overlays after a click on Ln, Col, want the Go to Line prompt", len(m.overlays))

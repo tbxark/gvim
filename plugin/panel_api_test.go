@@ -203,3 +203,36 @@ func TestWidgetPanelAPISurface(t *testing.T) {
 		}
 	}
 }
+
+// TestPanelWidgetSeedsAndStyle checks the fields the docs promise: a text field takes its seed
+// from a string `value` (it used to be refused as "must be a number"), a number widget from a
+// numeric `value`, and a label keeps its `style` when it has no runs.
+func TestPanelWidgetSeedsAndStyle(t *testing.T) {
+	h := cmd(t, "", `
+local id, err = gvim.ui.mount_widget_panel({ root = { kind = "col", children = {
+  { kind = "label", text = "x", style = { fg = "#ff0000", bold = true } },
+  { kind = "text", key = "t", value = "seed" },
+  { kind = "number", key = "n", value = 7 },
+} } })
+T.spy(tostring(err))`)
+	if got := spyText(h); got != "nil" {
+		t.Fatalf("mount error = %q (log %v)", got, h.LogText(""))
+	}
+	mounted := h.Host.Panels().Mounted()
+	if len(mounted) != 1 {
+		t.Fatalf("mounted = %+v", mounted)
+	}
+	kids := mounted[0].Panel.Root.Children
+	if len(kids) != 3 {
+		t.Fatalf("children = %+v", kids)
+	}
+	if st := kids[0].Style; !st.FG.Set || st.FG.R != 255 || !st.Bold {
+		t.Fatalf("label style = %+v, want the red bold style kept", st)
+	}
+	if kids[1].Text != "seed" || kids[1].Number != 0 {
+		t.Fatalf("text field = %+v, want Text seed", kids[1])
+	}
+	if kids[2].Number != 7 || kids[2].Text != "" {
+		t.Fatalf("number widget = %+v, want Number 7", kids[2])
+	}
+}

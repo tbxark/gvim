@@ -7,9 +7,8 @@
 // *Browser implements overlay.Overlay directly, so the root stacks it without an
 // adapter.
 //
-// Listing runs in Update and in New. A directory is one ReadDir, which is what
-// the legacy browser did on every keystroke; the root's overlay routing has no
-// path for an asynchronous listing result yet.
+// Listing runs in Update and in New. A directory is one ReadDir; the root's overlay
+// routing has no path for an asynchronous listing result yet.
 package browser
 
 import (
@@ -20,6 +19,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -328,7 +328,7 @@ func (b *Browser) click(m tea.Mouse) tea.Cmd {
 	case r.dirLike() && !b.folderOnly && n == 1:
 		b.enterDir(r.Path)
 	case r.Kind == RowFile && n == 2:
-		return b.finish(Open{Path: r.Path})
+		return b.finish(Open{Path: r.Path, AskEncoding: !b.detectEncoding})
 	}
 	b.follow()
 	return nil
@@ -347,8 +347,8 @@ func (b *Browser) wheel(m tea.Mouse) {
 	if delta == 0 {
 		return
 	}
-	b.top = clamp(b.top+delta, 0, max(len(b.rows)-b.vis, 0))
-	b.sel = clamp(b.sel, b.top, min(b.top+b.vis, len(b.rows))-1)
+	b.top = space.Clamp(b.top+delta, 0, max(len(b.rows)-b.vis, 0))
+	b.sel = space.Clamp(b.sel, b.top, min(b.top+b.vis, len(b.rows))-1)
 }
 
 // enter acts on the selected row, or on a typed "path:line:col" in file mode.
@@ -469,7 +469,7 @@ func (b *Browser) move(delta int) {
 	if len(b.rows) == 0 {
 		return
 	}
-	b.sel = clamp(b.sel+delta, 0, len(b.rows)-1)
+	b.sel = space.Clamp(b.sel+delta, 0, len(b.rows)-1)
 	b.follow()
 }
 
@@ -478,7 +478,7 @@ func (b *Browser) jump(i int) {
 	if len(b.rows) == 0 {
 		return
 	}
-	b.sel = clamp(i, 0, len(b.rows)-1)
+	b.sel = space.Clamp(i, 0, len(b.rows)-1)
 	b.follow()
 }
 
@@ -518,7 +518,7 @@ func (b *Browser) refresh() {
 		}
 	}
 	b.rows = b.buildRows()
-	b.sel = clamp(b.sel, 0, len(b.rows)-1)
+	b.sel = space.Clamp(b.sel, 0, len(b.rows)-1)
 	b.follow()
 }
 
@@ -558,7 +558,7 @@ func (b *Browser) buildRows() []Row {
 // the one Draw used last.
 func (b *Browser) follow() {
 	vis := max(b.vis, 1)
-	b.top = clamp(b.top, 0, max(len(b.rows)-vis, 0))
+	b.top = space.Clamp(b.top, 0, max(len(b.rows)-vis, 0))
 	switch {
 	case b.sel < b.top:
 		b.top = b.sel
@@ -599,7 +599,8 @@ func capitalize(s string) string {
 	if s == "" {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	first, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(first)) + s[size:]
 }
 
 // paste extends the filter with pasted text. A line break becomes a space and any other
@@ -634,11 +635,6 @@ func printable(s string) bool {
 	return true
 }
 
-// clamp limits v to the range lo..hi. When hi is below lo, it returns lo.
-func clamp(v, lo, hi int) int {
-	return max(lo, min(v, hi))
-}
-
 // truncateLeft shortens s to at most w cells, keeping its end and marking the
 // cut with "…" at the start. Paths are cut from the front so the file name stays
 // visible.
@@ -649,21 +645,7 @@ func truncateLeft(s string, w int) string {
 	if ansi.StringWidth(s) <= w {
 		return s
 	}
-	var kept []rune
-	width := 0
-	r := []rune(s)
-	for _, v := range slices.Backward(r) {
-		cw := ansi.StringWidth(string(v))
-		if width+cw > w-1 {
-			break
-		}
-		width += cw
-		kept = append(kept, v)
-	}
-	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
-		kept[i], kept[j] = kept[j], kept[i]
-	}
-	return "…" + string(kept)
+	return "…" + space.Tail(s, w-1)
 }
 
 // Draw paints the box over the frame in g. The box sits above the status row,
@@ -672,7 +654,7 @@ func truncateLeft(s string, w int) string {
 func (b *Browser) Draw(g *grid.Grid) {
 	b.box = box{}
 	w, h := g.Width(), g.Height()
-	bw := min(boxMaxWidth, w-2*space.ListMargin(w))
+	bw := min(boxMaxWidth, w-2*space.Margin(w))
 	if bw < boxMinWidth || h < boxMinH {
 		return
 	}

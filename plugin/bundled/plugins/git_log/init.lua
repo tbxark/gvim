@@ -33,14 +33,12 @@
 --     for this view either).
 --   * A historical file view takes its language from a small extension map: Lua has no
 --     "detect the language from this file name" call.
---   * Layout: gvim's plugin group layout has ratio-only leaves (no fixed height), so the
---     toolbar's Fresh "fixed height 1" is accepted and ignored and it gets its ratio share
---     (about two rows). The file/hunk fold ranges are published with
---     gvim.decor.set_folding_ranges when the host has it: the pane paints the fold marker,
+--   * Layout: the toolbar is a fixed one-row leaf ({type="fixed",height=1}); the split border
+--     can leave it a row off. The file/hunk fold ranges are published with
+--     gvim.decor.set_folding_ranges: the pane paints the fold marker,
 --     hides a collapsed body, shows the placeholder, and the normal fold action toggles it.
 --   * View state: the detail's scroll line per commit is saved with
---     gvim.buf.get/set_window_state and restored when the commit is revisited (the seam is
---     in the shipped TUI; a host without it starts the commit at the top). State is
+--     gvim.buf.get/set_window_state and restored when the commit is revisited. State is
 --     in-session only and cleared with the buffer.
 --
 -- Everything is bounded: at most 200 commits in the log, a 4 MiB/20,000-line diff stream
@@ -72,6 +70,7 @@ local MAX_LINE_PARSE = 4096
 local SELECT_DEBOUNCE_MS = 60
 local GIT_TIMEOUT_MS = 15000
 local CACHE_SUBDIR = "git_log"
+local MAX_CACHED_COMMITS = 50
 local END_OF_LINE = 1073741824 -- 2^30: "the end of the line" for a Range column
 
 local NUL = string.char(0)
@@ -515,6 +514,44 @@ local function cache_paths(sha)
   return base .. ".diff", base .. ".json", base .. ".done"
 end
 
+-- prune_cache keeps the files of the MAX_CACHED_COMMITS most recently written commits and
+-- removes the rest: a cached diff can be MAX_DIFF_BYTES, and nothing else ever deletes one.
+local function prune_cache()
+  local dir = cache_dir()
+  local entries = gvim.fs.list(dir)
+  if not entries then
+    return
+  end
+  local groups, order = {}, {}
+  for _, entry in ipairs(entries) do
+    local sha, ext = tostring(entry.name):match("^(%x+)%.(%a+)$")
+    if sha and entry.kind == "file" and (ext == "diff" or ext == "json" or ext == "done") then
+      local group = groups[sha]
+      if not group then
+        group = { sha = sha, mtime = 0, names = {} }
+        groups[sha] = group
+        order[#order + 1] = group
+      end
+      group.names[#group.names + 1] = entry.name
+      group.mtime = math.max(group.mtime, entry.mtime or 0)
+    end
+  end
+  if #order <= MAX_CACHED_COMMITS then
+    return
+  end
+  table.sort(order, function(a, b)
+    if a.mtime ~= b.mtime then
+      return a.mtime > b.mtime
+    end
+    return a.sha < b.sha
+  end)
+  for i = MAX_CACHED_COMMITS + 1, #order do
+    for _, name in ipairs(order[i].names) do
+      gvim.fs.remove(gvim.path.join(dir, name))
+    end
+  end
+end
+
 -- close_run flushes one +/- run: one highlight decoration covers all of its lines, so a
 -- huge diff costs a few hundred host calls, not one per line.
 local function close_run(end_line)
@@ -692,12 +729,10 @@ local function feed_stream(chunk)
   end
 end
 
--- publish_folds hands the file/hunk ranges to the fold engine when tier 1c-A is
--- present (the port stays green on hosts without it).
+-- publish_folds hands the file/hunk ranges to the fold engine.
 local function publish_folds()
-  local setter = gvim.decor and gvim.decor.set_folding_ranges
   local buf = state.bufs.detail
-  if type(setter) ~= "function" or not buf then
+  if not buf then
     return
   end
   local ranges = {}
@@ -707,32 +742,30 @@ local function publish_folds()
     end
     ranges[#ranges + 1] = { start_line = r[1], end_line = r[2], kind = "region" }
   end
-  pcall(setter, buf, ranges, { namespace = "git_log" })
+  pcall(gvim.decor.set_folding_ranges, buf, ranges, { namespace = "git_log" })
 end
 
--- View state (tier 1c-C): remember the detail scroll line per commit for this session.
+-- View state: remember the detail scroll line per commit for this session.
 local function save_window_state()
   if not detail.sha then
     return
   end
-  local get, put = gvim.buf.get_window_state, gvim.buf.set_window_state
   local buf = state.bufs.detail
-  if type(get) ~= "function" or type(put) ~= "function" or not buf then
+  if not buf then
     return
   end
-  pcall(put, buf, "scroll:" .. detail.sha, buf:cursor().line)
+  pcall(gvim.buf.set_window_state, buf, "scroll:" .. detail.sha, buf:cursor().line)
 end
 
 local function restore_window_state(sha)
   if not sha then
     return
   end
-  local get = gvim.buf.get_window_state
   local buf = state.bufs.detail
-  if type(get) ~= "function" or not buf then
+  if not buf then
     return
   end
-  local ok, line = pcall(get, buf, "scroll:" .. sha)
+  local ok, line = pcall(gvim.buf.get_window_state, buf, "scroll:" .. sha)
   if ok and type(line) == "number" and line > 0 then
     set_cursor(buf, line, false)
   end
@@ -866,10 +899,7 @@ local function detail_clear()
     return
   end
   ns_detail:clear(buf)
-  local clear = gvim.decor and gvim.decor.clear_folds
-  if type(clear) == "function" then
-    pcall(clear, buf, { namespace = "git_log" })
-  end
+  pcall(gvim.decor.clear_folds, buf, { namespace = "git_log" })
   buf:set_read_only(false)
   buf:set_text("")
   buf:set_read_only(true)
@@ -1316,6 +1346,7 @@ open_log = function(path_filter)
     gvim.notify(t("status.no_commits"))
     return
   end
+  prune_cache()
   state.repo = repo
   state.commits = commits
   state.selected = 1

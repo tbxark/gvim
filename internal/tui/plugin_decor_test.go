@@ -372,8 +372,15 @@ func TestDecorForgetsClosedBuffers(t *testing.T) {
 		}
 	}
 	pe.bufs = pe.bufs[:1] // buffer 2 is closed
-	// The next call that touches the store frees what the closed buffer held.
-	h.DecorClear("p", "nothing", 1)
+	// A call that touches the store asks for the sweep, and the end of the update frees
+	// what the closed buffer held: many calls in one slice sweep once.
+	for range 20 {
+		h.DecorClear("p", "nothing", 1)
+	}
+	if got := m.plug.decor.Docs(); len(got) != 2 {
+		t.Fatalf("documents with decorations = %v before the update ends, want both", got)
+	}
+	m.pluginTail(m.pluginSnapshot())
 	if got := m.plug.decor.Docs(); !slices.Equal(got, []uint64{1}) {
 		t.Fatalf("documents with decorations = %v, want [1]", got)
 	}

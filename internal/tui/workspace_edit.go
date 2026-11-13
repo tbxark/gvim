@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -116,15 +115,15 @@ type fileEditsLoadedMsg struct {
 // matching by resolved path when the two spellings differ (a symlinked workspace or a
 // /var versus /private/var temp directory). ok is false when the file is not open.
 func (m *Model) openTabPath(path string) (string, bool) {
-	canon := canonicalFilePath(path)
-	if canon == "" {
+	if path == "" {
 		return "", false
 	}
 	for _, t := range m.ed.Tabs() {
-		if t.Path != "" && t.Path == path {
+		if t.Path == path {
 			return t.Path, true
 		}
 	}
+	canon := canonicalFilePath(path)
 	for _, t := range m.ed.Tabs() {
 		if t.Path != "" && canonicalFilePath(t.Path) == canon {
 			return t.Path, true
@@ -149,7 +148,7 @@ func canonicalFilePath(path string) string {
 // The tab that was active when the apply began is restored at the end, so a
 // refactor does not move the user.
 func (m *Model) fileEditsLoaded(msg fileEditsLoadedMsg) tea.Cmd {
-	res := FileEditResult{Files: msg.files, Tabs: msg.files, Skipped: cloneStrings(msg.skipped)}
+	res := FileEditResult{Files: msg.files, Tabs: msg.files, Skipped: slices.Clone(msg.skipped)}
 	ge, ok := m.ed.(gotoEditor)
 	if !ok {
 		return finishFileEdits(res, msg.onDone)
@@ -189,23 +188,12 @@ func finishFileEdits(res FileEditResult, onDone func(FileEditResult) tea.Cmd) te
 	return onDone(res)
 }
 
-// cloneStrings returns a copy of s, or nil for an empty slice.
-func cloneStrings(s []string) []string {
-	if len(s) == 0 {
-		return nil
-	}
-	out := make([]string, len(s))
-	copy(out, s)
-	return out
-}
-
 // documentHash is the fnv64a hash of a loaded document's text.
 func documentHash(doc *editor.Document) uint64 {
-	h := fnv.New64a()
-	if doc != nil && doc.Buffer != nil {
-		_, _ = h.Write([]byte(doc.Buffer.Text()))
+	if doc == nil || doc.Buffer == nil {
+		return hashText("")
 	}
-	return h.Sum64()
+	return hashText(doc.Buffer.Text())
 }
 
 // activateTabPath makes the tab whose path is path the active one.

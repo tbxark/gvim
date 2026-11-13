@@ -16,6 +16,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/find"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/search"
 	"github.com/tbxark/gvim/syntax"
@@ -816,11 +817,11 @@ func TestLargeDocumentWrapsWhenTheSettingSaysSo(t *testing.T) {
 	dir := t.TempDir()
 	m, le := newLargeModel(t, writeLines(t, dir, "a.txt", bigFile, 400, 0))
 	start(m)
-	if p := m.viewPane(splitPane{}, editorpane.Pane{}, le.Active()); !p.Wrap {
+	if p := m.viewPane(split.Pane{}, editorpane.Pane{}, le.Active()); !p.Wrap {
 		t.Errorf("a large document is painted unwrapped while line wrap is on")
 	}
 	m.view.lineWrap = false
-	if p := m.viewPane(splitPane{}, editorpane.Pane{}, le.Active()); p.Wrap {
+	if p := m.viewPane(split.Pane{}, editorpane.Pane{}, le.Active()); p.Wrap {
 		t.Errorf("a large document is painted wrapped while line wrap is off")
 	}
 }
@@ -905,7 +906,7 @@ func TestClosingATabStopsItsWriteAndNamesTheCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, run := range m.large.saves {
-		if run.ctxDone() {
+		if run.stopped {
 			t.Fatalf("closing another tab stopped the write")
 		}
 	}

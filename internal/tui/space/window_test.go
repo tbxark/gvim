@@ -58,3 +58,22 @@ func TestWindowShowsTheEndOfTheTypedText(t *testing.T) {
 		t.Errorf("no room: Window = (%q, %d)", shown, caret)
 	}
 }
+
+// TestWindowRangeMatchesWindow checks that the rune range is the part Window shows.
+func TestWindowRangeMatchesWindow(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("abcdefghij", 12)
+	wide := strings.Repeat("中文字符", 20)
+	for _, value := range []string{"", "abc", long, wide} {
+		runes := []rune(value)
+		for _, pos := range []int{0, 1, len(runes) / 2, len(runes)} {
+			for _, room := range []int{0, 1, 2, 9, 30} {
+				start, end := WindowRange(value, pos, room)
+				shown, _ := Window(value, pos, room)
+				if start < 0 || end < start || end > len(runes) || string(runes[start:end]) != shown {
+					t.Errorf("WindowRange(%q, %d, %d) = [%d, %d), Window shows %q", value, pos, room, start, end, shown)
+				}
+			}
+		}
+	}
+}

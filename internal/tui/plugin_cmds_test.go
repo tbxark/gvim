@@ -752,8 +752,7 @@ func TestQueuedActionFailureIsTheNotice(t *testing.T) {
 	t.Parallel()
 	rt := newFakeRuntime(t, "x.cmd")
 	ed := newFakeEditor("x")
-	// Every reentrant action has a handler now (this row used plugin_reload_all until S16
-	// and quit_discard until S22), so the action is deferred the other way: while a prompt
+	// Every reentrant action has a handler, so the action is deferred the other way: while a prompt
 	// validator runs (plug.ui.busy) every action waits for the pump, and the editor refuses
 	// this one as unknown.
 	ee := &errEditor{fakeEditor: ed, err: editor.ErrUnknownAction, only: []string{"move_left"}}
@@ -908,4 +907,38 @@ func TestDoStopsWhenTheTimeBudgetIsSpent(t *testing.T) {
 	if got := len(ed.actions); got != 1000 {
 		t.Fatalf("the editor ran %d actions, want 1000", got)
 	}
+}
+
+// TestPluginDoRunsHexAndLineTargetActions checks that an action a plugin runs through
+// Do takes the same routes as the user's key: the hex dump consumes navigation, and Enter
+// on a line target opens the target.
+func TestPluginDoRunsHexAndLineTargetActions(t *testing.T) {
+	t.Run("hex navigation", func(t *testing.T) {
+		m, ed, _ := newHexModel(t, make([]byte, hexBytesPerRow*200))
+		m.toggleHexView()
+		ed.actions = nil
+		if _, err := m.doForPlugin("move_down", nil, 1); err != nil {
+			t.Fatal(err)
+		}
+		if len(ed.actions) != 0 {
+			t.Fatalf("hex navigation reached the editor: %v", ed.actions)
+		}
+	})
+	t.Run("line target", func(t *testing.T) {
+		m, ed, _ := targetModel(t)
+		if err := m.plug.host.SetLineTargets("p", 1, []pluginapi.LineTarget{{Line: 0, Path: "dir/target.go", Target: 5}}); err != nil {
+			t.Fatal(err)
+		}
+		m.ed.SetCursor(buffer.Pos{Line: 0, Col: 0}, false)
+		cmd, err := m.doForPlugin("insert_newline", nil, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd != nil {
+			cmd()
+		}
+		if len(ed.opened) != 1 {
+			t.Fatalf("opened = %v, want the line target", ed.opened)
+		}
+	})
 }

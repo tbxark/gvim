@@ -17,24 +17,24 @@ import (
 //     table raises. An empty table is the object {}; json.array(t) marks a table as an
 //     array (it then encodes as [], holes become null).
 //   - json null decodes to json.null (a sentinel), so arrays stay contiguous.
-//   - Caps (AMENDMENTS C5): input and output at most MaxString bytes, MaxJSONNodes nodes,
+//   - Caps: input and output at most MaxString bytes, MaxJSONNodes nodes,
 //     MaxJSONDepth levels, checked while parsing, before the tables are built.
 
 func installJSON(e *apiEnv) *lua.LTable {
 	p, L := e.p, e.L
 	d := &p.data
 	d.null = L.NewUserData()
-	nullMT := L.NewTable()
+	nullMT := L.CreateTable(0, 2)
 	nullMT.RawSetString("__tostring", L.NewFunction(func(L *lua.LState) int {
 		L.Push(lua.LString("json.null"))
 		return 1
 	}))
 	nullMT.RawSetString("__metatable", lua.LString("locked"))
 	L.SetMetatable(d.null, nullMT)
-	d.arrayMT = L.NewTable()
+	d.arrayMT = L.CreateTable(0, 1)
 	d.arrayMT.RawSetString("__metatable", lua.LString("json.array"))
 
-	t := L.NewTable()
+	t := L.CreateTable(0, 5)
 	t.RawSetString("null", d.null)
 	e.set(t, "array", func(L *lua.LState) int {
 		tb := L.OptTable(1, nil)
@@ -543,7 +543,7 @@ func (p *jsonParser) str() string {
 		if c == '"' {
 			s := p.s[start:p.i]
 			p.i++
-			return s
+			return strings.Clone(s) // a substring would pin the whole decoded blob
 		}
 		if c == '\\' {
 			break

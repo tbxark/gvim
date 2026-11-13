@@ -6,8 +6,9 @@ remote `FileSystem`, and the connection-state hooks are implemented in `authorit
 `internal/terminal/session_backend.go`. The editor's file I/O and the language servers of a
 remote workspace are routed through the slot (§6), including automatic server restart after
 a reconnect and remote external-change watching (the authority watch bridged into the root's
-watch pipeline); the remaining residuals are listed in §7 (remote explorer, remote large
+watch pipeline); the remaining residuals are listed in §7 (remote large
 files, reconnect retry/backoff, remote trust store, terminal respawn as an open parity gap).
+The remote explorer has landed since ("File mutations (remote explorer write foundation)" below).
 
 ## 1. The slot and its four surfaces
 
@@ -22,7 +23,7 @@ slot; they never branch on the backend kind. Four routing surfaces:
 - `OneShot` — `Run(ctx, argv, ProcOptions)`: run to completion and collect stdin/stdout/
   stderr/exit status (git, formatters, git grep, plugin `spawnProcess`).
 - `LongRunning` — `Start(ctx, argv, ProcOptions)`: long-lived stdio children. The surface
-  for language servers and tool agents; no LSP is routed through it yet.
+  for language servers and tool agents; a remote workspace's language servers start through it (§6).
 - `Terminal` — `Launch(ctx, TerminalOptions)`: how the integrated terminal starts.
   `TerminalLaunch.Backend` is nil for a local PTY (the app starts it as today) and a
   transport for a re-parented terminal (SSH); `internal/terminal.StartWithBackend` wraps that
@@ -122,7 +123,7 @@ Rules (all covered by table tests):
 
 ## 5. SSH backend
 
-`authority.ConnectSSH(ctx, SSHOptions{...})` dials and mounts a remote slot.
+`authority.NewSSH(SSHOptions{...})` mounts a remote slot without dialing; the app connects it with `Reconnect` once the UI can prompt for a password.
 
 - Dependency: `golang.org/x/crypto/ssh` (pure Go). v0.58.0 was already an indirect module
   and is cached; this slice promotes it to a direct `require` with no new download. The
@@ -208,13 +209,8 @@ deliberately does not take.
   answer, never the whole file; every chunk and the commit are bounded by their contexts
   (a cancelled chunk is an error, and the abort still removes the temporary file with its
   own short bounded context).
-- Copy-safe streamed writes have two capability-gated surfaces, and plugin `fs.copy`
-  refuses a backend with neither before reading source data or touching a target:
-  * **Local no-follow replace.** `NoFollowWriteStreamer` (`authority.NoFollowWriteStreams`)
-    uses the same temp-file/`Commit`/`Abort` protocol but does **not** resolve a symbolic
-    link at the final destination: `Commit` renames over the destination path itself,
-    replacing a link instead of following it. Existing destinations can be atomically
-    replaced. Ordinary `WriteStream` keeps the save semantics of following the final link.
+- Copy-safe streamed writes have one capability-gated surface, and plugin `fs.copy`
+  refuses a backend without it before reading source data or touching a target:
   * **SSH new target only.** `NewTargetWriteStreamer` (`authority.NewTargetWriteStreams`)
     streams into a private `mktemp` in the destination directory and `Commit`s with the
     POSIX `link` utility (exact target) — one no-clobber hard link, never `ln`/`mv`/rm of
@@ -234,11 +230,8 @@ deliberately does not take.
     tested against the local helper shell, not a real SSH host. When the helper succeeds,
     the target is complete and atomically linked, and an existing target is never followed,
     replaced or deleted.
-  Plugin `fs.copy` canonicalizes the destination first, so a concurrent symlink to the
-  source cannot redirect the local no-follow stream (the ordinary save stream would follow
-  it at open). On SSH only new destinations are supported; replacing an existing
-  destination is unsupported, and the SSH no-follow replace surface remains absent. Tests
-  cover the local no-follow behaviour, the SSH new-target link commit (existing/
+  On SSH only new destinations are supported; replacing an existing destination is
+  unsupported. Tests cover the SSH new-target link commit (existing/
   concurrent targets, links, directories, abort/cancel, multi-chunk) and the plugin-host
   capability selection/refusal (`authority/ssh_new_target_stream_test.go`,
   `authority/write_stream_test.go`, `internal/pluginhost/authorityos_copy_safety_test.go`).
@@ -437,8 +430,8 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
 - Remote UX: a remote launch opens no local files or session, does not restore or save
   the local session, opens the SSH terminal at `RemoteSpec.Workspace()`, mounts a real
   remote `FileSystem` and routes the editor's file I/O through it (see §6). The file named
-  by the remote target is opened by the root's first command; a directory target opens the
-  terminal only (the remote explorer is a recorded residual). The launch is scoped: the
+  by the remote target is opened by the root's first command; a directory target shows the remote
+  tree in the explorer (see the remote explorer notes below). The launch is scoped: the
   local fsnotify watcher is replaced by the remote watch bridge (the directories of the open
   documents are watched on the remote host, so a change another program makes reaches the
   tree/auto-revert like a local one), the crash-recovery copy of remote text is off, and
@@ -466,10 +459,9 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   `app.Options.Remote` repeats the rules in `Validate`.
 Residuals of this slice (documented, not bugs):
 
-- Remote residuals of the landed routing: remote explorer/listing (a directory target
-  opens the terminal only; the palette/explorer still describe the local tree), remote
-  external-change watching covers only the directories of open documents (the workspace tree
-  itself is not watched because the remote explorer is not implemented, and the authority
+- Remote residuals of the landed routing: remote
+  external-change watching covers the directories of open documents and of the explorer's
+  listed directories, and the authority
   watch is polled at ~500 ms plus the 150 ms coalescing window, with a rename reported as
   remove+create; manual Revert/Reopen and the periodic disk check remain the fallback), remote
   large-file saves (remote large files edit as an overlay and save by streaming the merged
@@ -511,9 +503,10 @@ Residuals of this slice (documented, not bugs):
   unchanged). Shell startup output before the command is discarded via a NUL marker; the interactive shell is run once per baseline/recipe capture (two remote
   commands), so rc-sourcing latency is paid per capture but not per spawn. A post-reconnect
   re-probe updates the shell choice and the Settings fallback row but not the already-shown
-  startup notice, and it does not re-detect the env markers or recapture the overlay (Env:
-  Reload or a new activation re-captures); if the re-probe is cancelled/disconnected it
-  leaves a fallback notice reflecting that attempt. Fixed env inputs and user-configured detector marker/require
+  startup notice; if the re-probe is cancelled/disconnected it leaves a fallback notice
+  reflecting that attempt. After a reconnect the env input watch is re-armed on the restored
+  carrier and the environment is re-detected and re-captured once (an env input may have
+  changed during the outage). Fixed env inputs and user-configured detector marker/require
   paths are watched through authority polled watches (one bounded directory snapshot per
   poll for the root and each existing parent directory; the plan is capped at
   MaxDetectorWatchPaths/MaxDetectorWatchDirs, excess paths are reported in Settings and
@@ -530,9 +523,9 @@ Residuals of this slice (documented, not bugs):
   can use the previous captured delta until the warm finishes), the Settings Environment rows
   show the remote facts only after the background warm, and there is no status-row indicator
   of the active remote environment yet (Fresh shows one). Local behavior is unchanged.
-- SSH authentication/connection residuals: ssh-agent forwarding and \`ssh_config\` reading
-  (ProxyJump, Host aliases, IdentityAgent, host-key algorithms) are not implemented; the known
-  hosts file is the default \`~/.ssh/known_hosts\` only; a supplied password/passphrase/2FA
+- SSH authentication/connection residuals: the OpenSSH config subset, one-hop ProxyJump and
+  agent forwarding are described in "SSH config, ProxyJump and agent forwarding" below; the known
+  hosts file is the default `~/.ssh/known_hosts` only; a supplied password/passphrase/2FA
   answer is kept in memory for the session by default; with `ssh.keyring` on, a host password may be looked up/stored in the OS keyring (macOS security / Linux secret-tool, docs below) — passphrases and 2FA answers are never keyring-stored; the passphrase is
   asked for only after a dial reports it needs one (no interactive first-open prompt for a
   key that is decrypted on demand either way); keyboard-interactive is replayed as one answer
@@ -542,8 +535,8 @@ Residuals of this slice (documented, not bugs):
   variables, not user settings; a background retry that needs credentials opens the prompt
   once per disconnect cycle and then waits for activation if the user cancels; every test is
   offline against in-process servers (no real host/2FA provider).
-- The remote workspace's trust decision uses the local workspace's trust in this slice
-  (a remote workspace needs its own trust store in a later slice).
+- The remote workspace's trust decision is recorded in the trust store under the remote
+  target's record key (see above); the spawn gate itself still gates only the local backend.
 - A dropped carrier does not resurrect an open remote terminal (open parity gap, see
   above): activation reconnects the carrier, and opening the terminal again starts a fresh
   session set by the user.
@@ -551,7 +544,9 @@ Residuals of this slice (documented, not bugs):
   daemon-hosted remote workspace (the app wraps the local plugin OS with
   `pluginhost.NewAuthorityOS`: files, mutations, watches and processes go to the slot, the
   authority trust gate/env/cwd apply, and LookPath/Dirs/Getenv/Now stay documented local-only APIs;
-  copy/realpath/walk and a backend without mutations return clear unsupported errors; remote
+  copy/realpath/walk and a backend without mutations return clear unsupported errors, and
+  `gvim.fs.remove` is always unsupported on a remote workspace (its protected-directory check only
+  knows the local machine, so a remote delete would be unguarded); remote
   fs.watch is the polling watch with a startup degradation notice). This closes the earlier
   residual that plugin file/process APIs always used the local OS.
 
@@ -1177,7 +1172,7 @@ These are top-level `ssh` keys in the user config (a project file cannot set the
 verification is a user security choice). Fresh delegates SSH to `ssh(1)` and gets OpenSSH's
 `StrictHostKeyChecking=accept-new` for free; the pure-Go backend makes the choice explicit.
 
-- **`ssh.known_hosts_policy`** — `"strict"` (default), `"accept-new"` or `"off"`.
+- **`ssh.known_hosts_policy`** — `"strict"` (default) or `"accept-new"`.
   - **strict** refuses a host whose key is missing from known_hosts and says how to add it
     (`ssh-keyscan`); the known_hosts file itself is never created or written.
   - **accept-new** writes a **first-seen** host's normalized `[host]:port` line to the
@@ -1187,8 +1182,8 @@ verification is a user security choice). Fresh delegates SSH to `ssh(1)` and get
     user learns the host was trusted on first use. Subsequent connections are known.
   - **A changed host key is always refused**, under every policy, with a "HOST KEY CHANGED …
     possible man-in-the-middle" error; accept-new never overwrites an existing line.
-  - **off** is accepted by the config parser only so the transport can refuse it with one
-    clear error; there is no mode that disables host-key verification.
+  - There is no **off**: the config rejects it with one clear error, and the transport
+    refuses it too; no mode disables host-key verification.
 - **`ssh.host_key_algorithms`** — ordered server host-key algorithm preference. The default
   is `ssh-ed25519, ecdsa-sha2-nistp256, ecdsa-sha2-nistp384, ecdsa-sha2-nistp521,
   rsa-sha2-512, rsa-sha2-256` (SHA-1 `ssh-rsa` and DSA are never preferred by default);
@@ -1231,7 +1226,7 @@ verification is a user security choice). Fresh delegates SSH to `ssh(1)` and get
 
 Tests: policy transitions with an in-process server (strict unknown refuses and writes
 nothing; accept-new records once with a notice and is trusted next time; a changed key is
-refused and the file is untouched; off refuses), algorithm parsing/order/duplication/unknown
+refused and the file is untouched; off is not a policy), algorithm parsing/order/duplication/unknown
 names and the negotiated detail (Ed25519 success, RSA-only list fails as "no common
 algorithm"), and a fake password store (retrieve before the prompt, no store with the knob
 off, store + notice with it on, unavailable store reported honestly, lookup error falls

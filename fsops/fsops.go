@@ -28,8 +28,6 @@ var (
 	// inside the source, contains the source, or is not a directory where one
 	// is required.
 	ErrInvalidDest = errors.New("invalid destination")
-	// ErrTrashUnavailable reports that no system trash backend is linked.
-	ErrTrashUnavailable = errors.New("trash backend not available")
 )
 
 // CreateFile creates an empty regular file at path. It fails with an error

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
@@ -325,3 +326,12 @@ func TestLongListsKeepTheirMaximumHeight(t *testing.T) {
 		t.Errorf("box %d rows %d, want %d and %d", box.H, rows, MaxHeight, MaxHeight-3)
 	}
 }
+
+// box returns the box of a list in a w by h frame, and the number of item rows it holds.
+func box(w, h int) (space.Rect, int) {
+	return boxFor(w, h, MaxHeight)
+}
+
+// boxFor is box for a list of n rows: a box that is not taller than its rows
+// need, so two rows do not sit in a box of 28.
+func boxFor(w, h, n int) (space.Rect, int) { return boxSized(w, h, n, 0) }

@@ -8,8 +8,8 @@ import (
 // is being built. Installers fill the tables of the gvim API with Go functions that close
 // over the plugin.
 //
-// A stage that owns an area replaces the installer in its api_<area>.go; the list below is
-// the only shared place, so stages add files instead of editing a table.
+// Each area has its installer in its own api_<area>.go; the list below is the only shared
+// place, so a new area adds a file and one line here.
 type apiEnv struct {
 	r    *Runtime
 	p    *plugin
@@ -56,9 +56,9 @@ var extraInstallers []func(*apiEnv)
 
 // installAPI creates the gvim table and runs the installers.
 func (p *plugin) installAPI() {
-	e := &apiEnv{r: p.r, p: p, L: p.L, gvim: p.L.NewTable()}
+	e := &apiEnv{r: p.r, p: p, L: p.L, gvim: p.L.CreateTable(0, 64)}
 	p.gvim = e.gvim
-	mt := p.L.NewTable()
+	mt := p.L.CreateTable(0, 2)
 	mt.RawSetString("__index", p.L.NewFunction(p.libIndex))
 	mt.RawSetString("__metatable", lua.LString("locked"))
 	p.L.SetMetatable(e.gvim, mt)
@@ -76,7 +76,9 @@ func (e *apiEnv) area(name string) *lua.LTable {
 	if t := e.p.areas[name]; t != nil {
 		return t
 	}
-	t := e.L.NewTable()
+	// L.NewTable() would reserve a 32-slot array and a 32-entry hash for every area of
+	// every plugin state; an area is a small, string-keyed table.
+	t := e.L.CreateTable(0, 8)
 	e.gvim.RawSetString(name, t)
 	e.p.areas[name] = t
 	return t

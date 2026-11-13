@@ -33,9 +33,11 @@ type Span struct {
 //
 // Builtins: a builtin function name (NameBuiltin, such as len or print) is
 // KindFunction. A builtin pseudo-variable (NameBuiltinPseudo, such as self or
-// this) is KindBuiltin. A decorator or annotation is KindAttribute. Word operators such as "and" are KindKeyword. Heading
-// tokens from markup lexers are KindKeyword. Punctuation, plain names, text,
-// and error tokens are KindPlain.
+// this) is KindBuiltin. A decorator or annotation is KindAttribute. Word operators
+// such as "and" are KindKeyword. Heading tokens from markup lexers are
+// KindKeyword; inserted and deleted diff tokens are KindDiffAdd and
+// KindDiffRemove. Punctuation, plain names, text, and error tokens are
+// KindPlain.
 func Classify(t chroma.TokenType) Kind {
 	switch t.Category() {
 	case chroma.Keyword:

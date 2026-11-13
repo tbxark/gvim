@@ -9,7 +9,7 @@ import (
 )
 
 // setProcAttr gives the child a process group of its own. Windows has no signals: every
-// signal ends the process (this file is only compile-checked, see FINAL residual risk 8).
+// signal ends the process (this file is only compile-checked).
 func setProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }

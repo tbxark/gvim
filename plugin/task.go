@@ -526,7 +526,7 @@ type runError struct {
 func (e *runError) Error() string { return e.msg }
 
 // classify maps the outcome of a failed resume to a runError, using the cancellation
-// cause of the slice instead of gopher-lua's own message (AMENDMENTS C10).
+// cause of the slice instead of gopher-lua's own message.
 func (r *Runtime) classify(t *task, sl *slice, res resumeResult) *runError {
 	re := &runError{kind: failLua, obj: lua.LNil, limit: sl.budget}
 	var ae *lua.ApiError

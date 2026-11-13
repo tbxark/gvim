@@ -112,7 +112,7 @@ end
 -- absolute resolves a prompt path the way gvim.buf.open does: a relative path
 -- is against the workspace root.
 local function absolute(path)
-  if path:sub(1, 1) == "/" then
+  if gvim.path.is_absolute(path) then
     return path
   end
   return gvim.path.join(gvim.workspace.root(), path)
@@ -169,8 +169,6 @@ local function paint_hunks(buf, res, side, clear)
     local theirs = h[other(side)]
     local paired = math.min(mine.count, theirs.count)
     for i = 1, mine.count do
-      local start = mine.lines[i][1]
-      local finish = mine.lines[i][2]
       local is_paired = i <= paired
       if #lines < MAX_ITEMS then
         lines[#lines + 1] = {
@@ -583,11 +581,11 @@ register {
   description = "%cmd.compare_files_desc",
   run = function()
     local left = prompt_path(t("prompt.left"))
-    if not left then
+    if not left or left == "" then
       return
     end
     local right = prompt_path(t("prompt.right"))
-    if not right then
+    if not right or right == "" then
       return
     end
     compare(left, right)
@@ -606,7 +604,7 @@ register {
       return
     end
     local right = prompt_path(t("prompt.with", { name = base_name(path) }))
-    if not right then
+    if not right or right == "" then
       return
     end
     compare(path, right)
@@ -629,7 +627,7 @@ register {
       gvim.notify(t("status.identical"))
       return
     end
-    local pos = c[side == "left" and "left" or "right"]:offset_of(c[side]:cursor())
+    local pos = c[side]:offset_of(c[side]:cursor())
     pos = pos or 0
     local n = #res.hunks
     local index = -1
@@ -666,7 +664,7 @@ register {
       gvim.notify(t("status.identical"))
       return
     end
-    local pos = c[side == "left" and "left" or "right"]:offset_of(c[side]:cursor())
+    local pos = c[side]:offset_of(c[side]:cursor())
     pos = pos or 0
     local n = #res.hunks
     local index = -1

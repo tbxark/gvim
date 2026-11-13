@@ -13,10 +13,12 @@ import (
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
@@ -575,10 +577,17 @@ func (m *Model) effectiveTheme() theme.Theme {
 	return over
 }
 
-// rebuildTheme rebuilds every style the root keeps from the active theme,
-// layered under the session color overrides (plugin gvim.theme.override and the
-// theme editor's live preview). It is the one place theme colors become styles.
+// rebuildTheme rebuilds the styles and tells the plugins the theme changed (theme_changed).
 func (m *Model) rebuildTheme() {
+	m.rebuildStyles()
+	m.plugThemeChanged(m.theme.Name, m.theme.Dark())
+}
+
+// rebuildStyles rebuilds every style the root keeps from the active theme,
+// layered under the session color overrides (plugin gvim.theme.override and the
+// theme editor's live preview). It is the one place theme colors become styles,
+// and it raises no event: a transient preview uses it directly.
+func (m *Model) rebuildStyles() {
 	effective := m.theme
 	if len(m.themeOverrides) > 0 {
 		over, err := theme.WithOverrides(m.theme, m.themeOverrides)
@@ -591,11 +600,11 @@ func (m *Model) rebuildTheme() {
 	st := style.New(effective)
 	m.styles = st
 	m.panes = editorpane.NewStyles(effective)
+	m.themeGen++
 	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics).WithThemeChoices(m.themeChoices())
 	if m.tree != nil {
 		m.explorerPanel = expanel.New(m.tree, st, m.now).CarryCut(m.explorerPanel)
 	}
-	m.plugThemeChanged(m.theme.Name, m.theme.Dark())
 }
 
 // SetThemeOverrides replaces the session color overrides (the plugin
@@ -678,7 +687,7 @@ func (m *Model) setLocale(code string) tea.Cmd {
 
 // viewLayout sets the chrome rows and the gutter of the frame from the view state. It
 // runs after the layout input is gathered, so the rows it sets win.
-func (m *Model) viewLayout(in *layoutInput) {
+func (m *Model) viewLayout(in *frame.Input) {
 	in.HideTabBar = !m.view.tabBar
 	in.HideStatus = in.HideStatus || !m.view.statusBar
 	// The prompt row is reserved only while a prompt is open: with no prompt the
@@ -709,7 +718,7 @@ func (m *Model) promptOpen() bool {
 // the settings of its document and the view state. Nothing else of the pane changes.
 // The page view comes from the document, unless the dual view gives the pane a side
 // of its own (panePageView).
-func (m *Model) viewPane(sp splitPane, p editorpane.Pane, doc Document) editorpane.Pane {
+func (m *Model) viewPane(sp split.Pane, p editorpane.Pane, doc Document) editorpane.Pane {
 	s := docViewOf(doc)
 	p.PageView = m.panePageView(sp, doc)
 	if !sp.Focused && m.validDual() != nil {
@@ -894,7 +903,7 @@ func (m *Model) viewTerminal(v *tea.View) {
 
 // viewStatus replaces the status message with the highlight ranges of the caret line
 // while the highlight debug is on.
-func (m *Model) viewStatus(s *statusView) {
+func (m *Model) viewStatus(s *frame.StatusView) {
 	// The language a set_language command named is shown, in place of the one the
 	// file name gives.
 	if lang, ok := m.ed.Active().(interface{ Language() string }); ok && lang.Language() != "" {

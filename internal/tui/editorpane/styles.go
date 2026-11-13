@@ -47,7 +47,7 @@ type Styles struct {
 // style.New. Each syntax kind keeps the text background and takes its foreground
 // from the theme's "syntax" section. A kind with no RGB value in that section
 // takes the editor foreground, and a kind set to the terminal default takes no
-// foreground, as the legacy painter does.
+// foreground.
 func NewStyles(th theme.Theme) Styles {
 	chrome := style.New(th)
 	// Every pane role records the theme keys it is painted from, for the theme

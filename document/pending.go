@@ -29,7 +29,7 @@ type pending struct {
 	Cursor buffer.Pos
 }
 
-// waitsToSelect reports whether a selection (select_all, select_document_end) is queued
+// WaitsToSelect reports whether a selection (select_all, select_document_end) is queued
 // for the index of d.
 func (d *Document) WaitsToSelect() bool {
 	p := d.large.Pending

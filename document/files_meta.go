@@ -4,7 +4,7 @@ import (
 	"github.com/tbxark/gvim/encoding"
 )
 
-// markMetaChanged records that the encoding or the line ending of d changed, when
+// MarkMetaChanged records that the encoding or the line ending of d changed, when
 // changed is true. The text stays as it is, but the file will differ, so the
 // document counts as modified until it is saved or reloaded. A read-only or binary
 // document is never saved, so the change would leave it modified with no way to

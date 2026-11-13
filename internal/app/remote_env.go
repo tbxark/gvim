@@ -130,16 +130,6 @@ func newRemoteMarkerProber(slot func() authority.Slot) env.MarkerProber {
 	}
 }
 
-// newRemoteEnvRunner returns the env.RemoteRunner of a remote session for detection and
-// the plain fallback path: sh -c, exactly as before. slot and root are called per command
-// because the authority connects after the provider is built and the remote root may be
-// expanded from ~ once the connection exists.
-func newRemoteEnvRunner(slot func() authority.Slot, root func() string) env.RemoteRunner {
-	return func(ctx context.Context, command string) (string, error) {
-		return runRemoteEnvStdout(ctx, slot, root, []string{"sh", "-c", command})
-	}
-}
-
 // remoteEnvShell is the app's capture runner: it detects the remote interactive login
 // shell once, uses it for trusted activation captures, and falls back to sh -c with a
 // clear notice when unavailable or failing. Detection probes stay on sh -c.

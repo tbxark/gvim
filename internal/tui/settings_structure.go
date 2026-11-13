@@ -175,9 +175,7 @@ func (p *settingsStructurePage) layout() {
 	if p.st.Filter && len(p.filter) > 0 {
 		rows = p.filterRows(rows)
 	}
-	if p.st.AddLabel != "" && p.st.Kind != "dual" {
-		rows = append(rows, structureRow{add: true, item: SettingsStructureRow{Name: p.st.AddLabel}})
-	} else if p.st.AddLabel != "" && p.st.Kind == "dual" {
+	if p.st.AddLabel != "" {
 		rows = append(rows, structureRow{add: true, item: SettingsStructureRow{Name: p.st.AddLabel}})
 	}
 	p.rows = rows
@@ -449,7 +447,7 @@ func (p *settingsStructurePage) moveDual(group, name string) {
 	p.layout()
 }
 
-// commentStyle returns the footer hints of the page.
+// footer returns the key hints of the page.
 func (p *settingsStructurePage) footer() string {
 	switch p.st.Kind {
 	case "map":
@@ -458,9 +456,7 @@ func (p *settingsStructurePage) footer() string {
 		return "Enter edit · ^N add · Del remove · Alt+↑/↓ move · Esc back · ^S save"
 	case "fields":
 		return "Enter edit · Del reset · Esc back · ^S save"
-	case "languages":
-		return "Enter fields · ^N add · Del remove · Esc back · ^S save"
-	case "entries":
+	case "languages", "entries":
 		return "Enter fields · ^N add · Del remove · Esc back · ^S save"
 	case "bindings":
 		return "Type to filter · Enter on the action row opens the editor · Esc back"
@@ -660,7 +656,7 @@ func (p *settingsStructurePage) writeEntries() {
 	p.parent.setPendingRaw(p.listPath(), raw)
 }
 
-// structKey returns the config path the structure's rows share, for writing the
+// listPath returns the config path the structure's rows share, for writing the
 // whole list: terminal.shell.args or editor.status_bar.left/right.
 func (p *settingsStructurePage) listPath() []string {
 	if len(p.st.Path) > 0 {
@@ -963,8 +959,6 @@ func (p *settingsStructurePage) Draw(g *grid.Grid) {
 	if box.W == 0 || box.H < 3 {
 		return
 	}
-	p.page = box.H - 3
-	p.keepVisible()
 	ov := p.parent.m.styles.Overlay
 	title := "Settings · " + p.st.Title + " — " + settingsLayerTitle(p.parent.layer)
 	if p.parent.dirty() {

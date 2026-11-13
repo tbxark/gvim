@@ -700,3 +700,21 @@ func TestLiveGrepRowOpenMessagesCarryPaletteOwner(t *testing.T) {
 		})
 	}
 }
+
+// TestGrepExportSnapshotsTheNoticeWhenItIsBuilt: the export command runs off the update
+// goroutine, so it must not read the palette's grep state when it runs.
+func TestGrepExportSnapshotsTheNoticeWhenItIsBuilt(t *testing.T) {
+	t.Parallel()
+	p := New(liveOptions("todo", &fakeFiles{}, &fakeGrepper{}))
+	p.applyGrep(GrepResultMsg{Token: p.token, Seq: p.seq, Text: "todo", Notice: "capped", Truncated: true,
+		Hits: []GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}})
+	cmd := p.exportGrep()
+	if cmd == nil {
+		t.Fatal("no export command")
+	}
+	p.grep.notice, p.grep.truncated = "", false
+	msg, ok := cmd().(GrepExportMsg)
+	if !ok || msg.Notice != "capped" || !msg.Truncated {
+		t.Fatalf("export = %+v, want the notice and truncation captured at export time", msg)
+	}
+}

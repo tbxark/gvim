@@ -456,3 +456,17 @@ func TestContentsJumpSuppressionInScrollMode(t *testing.T) {
 		t.Fatalf("selected = %q after a later scroll, want One", got.Title)
 	}
 }
+
+func TestContentsWheelKeepsTheWindowFull(t *testing.T) {
+	t.Parallel()
+	c := scanContents(t, DefaultSettings(), "# A\n## B\n## C\n## D\n## E")
+	c.SetViewRows(2)
+	c.Wheel(100)
+	if got := c.Scroll(); got != 3 {
+		t.Fatalf("scroll = %d after a long wheel down, want 3 so the last two rows fill the window", got)
+	}
+	c.Wheel(-100)
+	if got := c.Scroll(); got != 0 {
+		t.Fatalf("scroll = %d after a long wheel up, want 0", got)
+	}
+}

@@ -5,11 +5,8 @@ package session
 // and side, and the scroll positions of the explorer and Contents trees. It is a
 // bounded snapshot of numbers and booleans (no file contents, no diagnostics).
 //
-// The format is migration-safe: the field is optional (omitempty) and every zero
-// value means the default, so a session file from an older release decodes with no
-// sidebar state and keeps the config defaults, and a reader that does not know the
-// field ignores it. Session.Version does not change: this is an additive optional
-// object, not a format revision.
+// The field is optional (omitempty) and every zero value means the default, so a
+// session without sidebar state keeps the config defaults.
 type SidebarState struct {
 	ExplorerCollapsed bool `json:"explorerCollapsed,omitzero"`
 	// WidthMode and WidthValue are the explorer width form: 0 automatic, 1 percent
@@ -22,27 +19,17 @@ type SidebarState struct {
 	// The Contents section's open/collapsed state and its rows and tree position.
 	ContentsOpen      bool `json:"contentsOpen,omitzero"`
 	ContentsCollapsed bool `json:"contentsCollapsed,omitzero"`
-	ContentsRows      int  `json:"contentsRows,omitzero"`
 	ContentsScroll    int  `json:"contentsScroll,omitzero"`
 	// The Diagnostics section's open/collapsed state and its rows.
 	DiagnosticsOpen      bool `json:"diagnosticsOpen,omitzero"`
 	DiagnosticsCollapsed bool `json:"diagnosticsCollapsed,omitzero"`
-	DiagnosticsRows      int  `json:"diagnosticsRows,omitzero"`
-	// ExplorerRows is the explorer section's explicit body height (0 = flex, the
-	// remainder). It is additive/optional so an older session keeps the flex.
-	ExplorerRows int `json:"explorerRows,omitzero"`
-	// SectionRows is the unified per-section body height map (keys explorer, contents,
-	// diagnostics and plugin:<id>), bounded on collect and clamped on restore. It is
-	// additive/optional: an older session keeps the legacy ContentsRows/DiagnosticsRows/
-	// PluginRows fields, and a reader that does not know it ignores it.
+	// SectionRows is the per-section explicit body height map (0 or absent = flex; keys explorer, contents,
+	// diagnostics and plugin:<id>), bounded on collect and clamped on restore.
 	SectionRows map[string]int `json:"sectionRows,omitempty"`
-	// PluginOrder, PluginRows and PluginCollapsed are the plugin sections' stack
-	// order, requested body rows and folded state, by the plugin panel id. They are
+	// PluginOrder and PluginCollapsed are the plugin sections' stack order and folded
+	// state, by the plugin panel id (their rows are in SectionRows as plugin:<id>). They are
 	// optional and bounded (at most 64 sections, rows clamped, unknown ids ignored
-	// on load), so an older session keeps the mount order and the defaults, and a
-	// reader that does not know them ignores them. Section body contents are never
-	// stored.
+	// on load). Section body contents are never stored.
 	PluginOrder     []string        `json:"pluginOrder,omitempty"`
-	PluginRows      map[string]int  `json:"pluginRows,omitempty"`
 	PluginCollapsed map[string]bool `json:"pluginCollapsed,omitempty"`
 }

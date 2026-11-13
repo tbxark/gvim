@@ -13,7 +13,7 @@ import (
 
 // Key bindings of a plugin. The set is whole-set replace on the host side
 // (Host.SetBindings), so each plugin keeps its list here and republishes it after every
-// change. command.register{keys=} is sugar for a binding of the new command; stage S14's
+// change. command.register{keys=} is sugar for a binding of the new command;
 // gvim.keymap.set/del use the same set.
 //
 // Only bindings of the normal editing context live here: a binding with a mode never
@@ -220,18 +220,4 @@ func (b *bindingSet) publish() {
 		return
 	}
 	b.p.r.host.SetBindings(b.p.name, append([]pluginapi.Binding(nil), b.list...))
-}
-
-// hiddenCommand registers fn as a hidden command and returns its action id
-// "<plugin>.__fn<N>", for bindings given as a Lua function.
-func (p *plugin) hiddenCommand(fn *lua.LFunction) (string, error) {
-	p.fnSeq++
-	name := hiddenCommandPrefix + strconv.Itoa(p.fnSeq)
-	id := p.name + "." + name
-	err := p.addCommand(&command{id: id, name: name, fn: fn,
-		info: pluginapi.CommandInfo{ID: id, Title: name, Plugin: p.name, Hidden: true, Record: true}})
-	if err != nil {
-		return "", err
-	}
-	return id, nil
 }

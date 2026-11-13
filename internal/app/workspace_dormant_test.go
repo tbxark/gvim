@@ -104,8 +104,7 @@ func quitDaemonDiscard(t *testing.T, conn net.Conn, done <-chan error) {
 }
 
 // TestOpenFileFromAnotherClientCwd checks a named daemon opens a client's relative
-// file:line:col from the client's own working directory, with the positional form and
-// with the legacy Paths-only form.
+// file:line:col from the client's own working directory.
 func TestOpenFileFromAnotherClientCwd(t *testing.T) {
 	isolateConfig(t)
 	name := daemonTestHome(t, "app-openfile-cwd")
@@ -117,7 +116,7 @@ func TestOpenFileFromAnotherClientCwd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clientCwd, "sub", "f.txt"), []byte("line1\nline2\nline3\nline4\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(clientCwd, "legacy.txt"), []byte("LEGACY-CONTENT\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(clientCwd, "plain.txt"), []byte("PLAIN-CONTENT\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	workspacesDir := t.TempDir()
@@ -134,7 +133,6 @@ func TestOpenFileFromAnotherClientCwd(t *testing.T) {
 	// Positional form: a path relative to the CLIENT cwd, at 3:2.
 	requestOpen(t, conn, daemon.OpenFile{
 		Cwd:   clientCwd,
-		Paths: []string{"sub/f.txt"},
 		Files: []daemon.OpenFileTarget{{Path: "sub/f.txt", Line: 3, Col: 2}},
 	})
 	sendResize(t, conn)
@@ -142,10 +140,10 @@ func TestOpenFileFromAnotherClientCwd(t *testing.T) {
 	if !strings.Contains(out, "line1") && !strings.Contains(out, "f.txt") {
 		t.Fatalf("the client's file was not painted:\n%s", out)
 	}
-	// Legacy form: Paths only, still resolved against the client cwd.
-	requestOpen(t, conn, daemon.OpenFile{Cwd: clientCwd, Paths: []string{"legacy.txt"}})
+	// A position-less target is also resolved against the client cwd.
+	requestOpen(t, conn, daemon.OpenFile{Cwd: clientCwd, Files: []daemon.OpenFileTarget{{Path: "plain.txt"}}})
 	sendResize(t, conn)
-	drainDaemonForText(t, conn, "LEGACY-CONTENT")
+	drainDaemonForText(t, conn, "PLAIN-CONTENT")
 	quitDaemon(t, conn, done)
 }
 
@@ -183,7 +181,7 @@ func TestOpenFileDormantOwnerMaterializesAndSwitches(t *testing.T) {
 		t.Fatalf("B is not dormant at start: %+v", list)
 	}
 	// No requested position: the saved 3:2 is preserved.
-	requestOpen(t, conn, daemon.OpenFile{Paths: []string{fileB}, Files: []daemon.OpenFileTarget{{Path: fileB}}})
+	requestOpen(t, conn, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: fileB}}})
 	sendResize(t, conn)
 	out := drainDaemonForText(t, conn, "Ln 3, Col 2")
 	if !strings.Contains(out, "b1") && !strings.Contains(out, "b.txt") {
@@ -222,7 +220,7 @@ func TestOpenFileStaleDormantLayoutIgnored(t *testing.T) {
 	done := startDaemonTest(t, opts, name)
 	conn := attachDaemonTest(t, name)
 	t.Cleanup(func() { _ = conn.Close() })
-	requestOpen(t, conn, daemon.OpenFile{Paths: []string{gone}})
+	requestOpen(t, conn, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: gone}}})
 	list := daemonWorkspaceCall(t, conn, daemon.TypeWorkspaceList, nil)
 	for _, e := range list.Entries {
 		if e.ID == idB && (e.Materialized || e.Active) {
@@ -264,7 +262,7 @@ func TestOpenFileDormantStashIsRestored(t *testing.T) {
 	done := startDaemonTest(t, opts, name)
 	conn := attachDaemonTest(t, name)
 	t.Cleanup(func() { _ = conn.Close() })
-	requestOpen(t, conn, daemon.OpenFile{Paths: []string{gone}})
+	requestOpen(t, conn, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: gone}}})
 	sendResize(t, conn)
 	drainDaemonForText(t, conn, "UNSAVED-STASH-TEXT")
 	list := daemonWorkspaceCall(t, conn, daemon.TypeWorkspaceList, nil)
@@ -275,29 +273,24 @@ func TestOpenFileDormantStashIsRestored(t *testing.T) {
 }
 
 // TestOpenTargetsFromRequestResolvesCwd checks the pure request resolution: client-relative
-// paths against Cwd, absolute paths unchanged, Files preferred over legacy Paths.
+// paths against Cwd, absolute paths unchanged.
 func TestOpenTargetsFromRequestResolvesCwd(t *testing.T) {
 	cwd := t.TempDir()
 	got := openTargetsFromRequest(daemon.OpenFile{
-		Cwd:   cwd,
-		Paths: []string{"legacy.txt"},
+		Cwd: cwd,
 		Files: []daemon.OpenFileTarget{
 			{Path: "rel/a.txt", Line: 3, Col: 2},
 			{Path: filepath.Join(cwd, "abs.txt")},
 		},
 	})
 	if len(got) != 2 {
-		t.Fatalf("targets = %+v, want 2 (Files preferred over Paths)", got)
+		t.Fatalf("targets = %+v, want 2", got)
 	}
 	if got[0].path != filepath.Join(cwd, "rel", "a.txt") || got[0].line != 3 || got[0].col != 2 {
 		t.Fatalf("relative target = %+v", got[0])
 	}
 	if got[1].path != filepath.Join(cwd, "abs.txt") {
 		t.Fatalf("absolute target = %+v", got[1])
-	}
-	legacy := openTargetsFromRequest(daemon.OpenFile{Cwd: cwd, Paths: []string{"x/y.txt"}})
-	if len(legacy) != 1 || legacy[0].path != filepath.Join(cwd, "x", "y.txt") {
-		t.Fatalf("legacy targets = %+v", legacy)
 	}
 }
 
@@ -336,7 +329,7 @@ func TestOpenFileDormantOwnerMaterializeFailureKeepsCurrentState(t *testing.T) {
 	done := startDaemonTest(t, opts, name)
 	conn := attachDaemonTest(t, name)
 	t.Cleanup(func() { _ = conn.Close() })
-	requestOpen(t, conn, daemon.OpenFile{Paths: []string{gone}})
+	requestOpen(t, conn, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: gone}}})
 	sendResize(t, conn)
 	drainDaemonForText(t, conn, "the file was not opened")
 	list := daemonWorkspaceCall(t, conn, daemon.TypeWorkspaceList, nil)
@@ -399,9 +392,6 @@ func TestAttachClientTargetsSendsCwdAndPositions(t *testing.T) {
 	case req := <-got:
 		if req.Cwd != cwd {
 			t.Fatalf("cwd = %q, want %q", req.Cwd, cwd)
-		}
-		if len(req.Paths) != 2 || req.Paths[0] != "rel/f.txt" || req.Paths[1] != "/abs/g.txt" {
-			t.Fatalf("legacy paths = %v", req.Paths)
 		}
 		if len(req.Files) != 2 || req.Files[0].Line != 3 || req.Files[0].Col != 2 || req.Files[1].Path != "/abs/g.txt" {
 			t.Fatalf("files = %+v", req.Files)

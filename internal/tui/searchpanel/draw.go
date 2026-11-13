@@ -67,7 +67,7 @@ type geometry struct {
 // the menu bar and the tab strip (rows 0 and 1) visible, and a frame with no room for
 // that returns the zero geometry, which paints nothing.
 func layoutFor(w, h int, git bool) geometry {
-	rows := clamp(h/2, 4, 18)
+	rows := space.Clamp(h/2, 4, 18)
 	total := func(r int) int {
 		// Search and Replace has search, replace, files and options rows; Git Grep has
 		// search, files and options.
@@ -125,7 +125,6 @@ func (p *Panel) Draw(g *grid.Grid) {
 	geo.listEnd = geo.end
 	p.previewColumns(&geo)
 	p.mouseGeo = geo
-	p.optionHits = nil
 	boxW, boxH := geo.right-geo.left+1, geo.bottom-geo.top+1
 	p.styles.ov.PaintBox(g, geo.left, geo.top, boxW, boxH, p.title())
 	p.paintResults(g, geo)
@@ -407,7 +406,7 @@ func (p *Panel) paintPreviewWrapped(g *grid.Grid, geo geometry, height int, req 
 	for idx := offset; idx < len(s.result.Lines) && rows < height; idx++ {
 		fileLine := s.result.Start + idx
 		view := p.buildPreviewLine(fileLine, s.result.Lines[idx], spansByLine[fileLine], m)
-		segs, truncated := previewWrapSegments(len(view.expanded), width, paintPreviewMaxRows)
+		segs, truncated := previewWrapSegments(view.expanded, width, paintPreviewMaxRows)
 		if len(segs) == 0 {
 			segs = [][2]int{{0, 0}}
 		}
@@ -450,20 +449,32 @@ func (p *Panel) previewGutter(first, count int, r PreviewResult) int {
 	return len(strconv.Itoa(max(r.Start+len(r.Lines), first+count, 1)))
 }
 
-// previewWrapSegments splits n display runes into rows of width, capping the row count at
-// maxRows; truncated says the line continues past the last row.
-func previewWrapSegments(n, width, maxRows int) (segs [][2]int, truncated bool) {
-	if n <= 0 || width <= 0 {
+// previewWrapSegments splits the display runes into rows of at most width cells, as
+// rune index ranges, capping the row count at maxRows; truncated says the line continues
+// past the last row. A wide rune that does not fit the rest of a row starts the next one,
+// a zero-width rune stays with the rune before it, and a row always takes at least one rune.
+func previewWrapSegments(runes []rune, width, maxRows int) (segs [][2]int, truncated bool) {
+	if len(runes) == 0 || width <= 0 {
 		return nil, false
 	}
 	if maxRows <= 0 {
 		maxRows = 1
 	}
-	for a := 0; a < n; a += width {
+	for a := 0; a < len(runes); {
 		if len(segs) == maxRows {
 			return segs, true
 		}
-		segs = append(segs, [2]int{a, min(a+width, n)})
+		b, cells := a, 0
+		for b < len(runes) {
+			w := ansi.StringWidth(string(runes[b]))
+			if cells+w > width && b > a {
+				break
+			}
+			cells += w
+			b++
+		}
+		segs = append(segs, [2]int{a, b})
+		a = b
 	}
 	return segs, false
 }
@@ -509,8 +520,8 @@ func (p *Panel) buildPreviewLine(fileLine int, lineText string, spans []PreviewS
 			continue
 		}
 		st.BG = view.base.BG
-		lo := textsafe.MapIndex(mapping, clamp(span.Start, 0, len(raw)))
-		hi := textsafe.MapIndex(mapping, clamp(span.End, 0, len(raw)))
+		lo := textsafe.MapIndex(mapping, space.Clamp(span.Start, 0, len(raw)))
+		hi := textsafe.MapIndex(mapping, space.Clamp(span.End, 0, len(raw)))
 		if hi <= lo {
 			continue
 		}
@@ -594,7 +605,7 @@ func displayOffsets(line []rune) []int {
 // window's place in the file, and the unsaved marker), with a trailing ellipsis while a
 // scrolled window loads.
 func previewHeader(req PreviewRequest, first, count, total int, loading, truncated, window bool) string {
-	header := fmt.Sprintf("%s:%d", req.Name, req.Line)
+	header := fmt.Sprintf("%s:%d", textsafe.Clean(req.Name), req.Line)
 	if req.EndLine > req.Line {
 		header += fmt.Sprintf("–%d:%d", req.EndLine, req.EndCol)
 		if lines := req.EndLine - req.Line + 1; lines > 1 {

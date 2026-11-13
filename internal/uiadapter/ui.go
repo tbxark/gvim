@@ -19,8 +19,8 @@ import (
 // table is built for the active keymap, so the palette shows its shortcuts. The
 // file ranker is always wired. A nil tree leaves the explorer out of the model,
 // and a nil files index leaves the palette's file mode on its loading row. The
-// optional ports (LSP and markdown) stay nil until their phases add adapters for
-// them here. File operations follow renames and closes in ed.
+// optional ports (LSP, plugins, terminal and the rest) stay nil: internal/app sets them
+// on the result. File operations follow renames and closes in ed.
 func NewDeps(ed *editor.Editor, km *keymap.Map, th theme.Theme, tree *explorer.Tree, files *finder.Index) tui.Deps {
 	deps := tui.Deps{
 		Editor:   &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}, saves: &autoSaveGate{}},

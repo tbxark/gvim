@@ -68,30 +68,3 @@ func ReflowLines(lines []Line, fromWidth, toWidth int) []Line {
 	}
 	return out
 }
-
-// ReflowRows is ReflowLines for plain saved transcript rows.
-func ReflowRows(rows []string, fromWidth, toWidth int) []string {
-	if len(rows) == 0 {
-		return nil
-	}
-	lines := make([]Line, len(rows))
-	for i, text := range rows {
-		lines[i] = cellsFromText(text)
-	}
-	lines = ReflowLines(lines, fromWidth, toWidth)
-	out := make([]string, len(lines))
-	for i := range lines {
-		out[i] = lines[i].Text()
-	}
-	return out
-}
-
-// cellsFromText turns plain transcript text into cells with the default style.
-func cellsFromText(text string) Line {
-	runes := []rune(text)
-	cells := make([]Cell, len(runes))
-	for i, r := range runes {
-		cells[i] = Cell{Rune: r}
-	}
-	return Line{Cells: cells}
-}

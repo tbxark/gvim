@@ -44,9 +44,6 @@ func newUpdateTracker(cfg *config.Config) *updateTracker {
 	t.checker = &updatecheck.Checker{Current: updateVersion(), URL: updateFeedURL(cfg)}
 	if dir, err := config.StateDir(); err == nil {
 		t.checker.StampPath = filepath.Join(dir, updateStampName)
-		if oldDir, err := config.Dir(); err == nil {
-			_ = config.MoveLegacyFile(filepath.Join(oldDir, updateStampName), t.checker.StampPath)
-		}
 	}
 	t.st.Current = t.checker.Current
 	t.st.Feed = t.checker.URL

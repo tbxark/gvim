@@ -7,7 +7,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The language-server half of the fake host (stage S23): the diagnostics a plugin reads and
+// The language-server half of the fake host: the diagnostics a plugin reads and
 // the requests it sends. It is off until a test calls EnableLSP, as the ui's is without a
 // configured server: both calls then answer "unsupported".
 

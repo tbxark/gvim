@@ -49,7 +49,7 @@ func TestRemoteEnvRunnerUsesTheRemoteHostOnly(t *testing.T) {
 	slot := authoritytest.New()
 	slot.OneShotter = script
 	root := "/remote/proj"
-	run := newRemoteEnvRunner(func() authority.Slot { return slot }, func() string { return root })
+	run := newRemoteEnvShell(func() authority.Slot { return slot }, func() string { return root }, nil).RunDetect
 	if _, err := run(context.Background(), "cd /remote/proj && env -0"); err != nil {
 		t.Fatalf("runner: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestRemoteEnvRunnerUsesTheRemoteHostOnly(t *testing.T) {
 		t.Fatalf("the local environment leaked into the remote command: %v", call.env)
 	}
 	// No authority mounted yet: a clear error, not a local fallback.
-	none := newRemoteEnvRunner(func() authority.Slot { return nil }, func() string { return root })
+	none := newRemoteEnvShell(func() authority.Slot { return nil }, func() string { return root }, nil).RunDetect
 	if _, err := none(context.Background(), "true"); err == nil || !strings.Contains(err.Error(), "not mounted") {
 		t.Fatalf("nil slot = %v", err)
 	}
@@ -76,7 +76,7 @@ func TestRemoteEnvRunnerUsesTheRemoteHostOnly(t *testing.T) {
 	failing.OneShotter = oneShotFunc(func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
 		return hostos.ProcResult{Code: 2, Stderr: []byte("boom\n")}, nil
 	})
-	run = newRemoteEnvRunner(func() authority.Slot { return failing }, func() string { return root })
+	run = newRemoteEnvShell(func() authority.Slot { return failing }, func() string { return root }, nil).RunDetect
 	if _, err := run(context.Background(), "true"); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("failed command = %v", err)
 	}
@@ -97,7 +97,7 @@ func TestRemoteEnvProviderEndToEnd(t *testing.T) {
 	slot := authoritytest.New()
 	slot.OneShotter = script
 	trusted := true
-	provider := env.NewRemote("/remote/proj", configEnvDetector(), func() bool { return trusted }, newRemoteEnvRunner(func() authority.Slot { return slot }, func() string { return "/remote/proj" }))
+	provider := env.NewRemote("/remote/proj", configEnvDetector(), func() bool { return trusted }, newRemoteEnvShell(func() authority.Slot { return slot }, func() string { return "/remote/proj" }, nil).RunDetect)
 	provider.Warm(context.Background())
 	if det, ok := provider.Detected(); !ok || det.Name != "direnv" {
 		t.Fatalf("detected = %+v, %v", det, ok)

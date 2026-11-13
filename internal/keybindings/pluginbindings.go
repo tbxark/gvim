@@ -2,7 +2,6 @@ package keybindings
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -32,7 +31,7 @@ func PluginKeymap(preset *keymap.Map, cfg config.Config, bs []pluginapi.Binding)
 
 // PluginLayer is the preset with the plugins' key bindings layered over it, and without the
 // user's keybindings. The keybinding editor previews its pending list over this layer, so a
-// plugin's binding stays in the table while the list is being changed. pluginKeymap is this
+// plugin's binding stays in the table while the list is being changed. PluginKeymap is this
 // layer plus the saved user keybindings.
 func PluginLayer(preset *keymap.Map, bs []pluginapi.Binding) (*keymap.Map, error) {
 	var dropped []string
@@ -112,13 +111,8 @@ func chordSteps(chord string) (steps []map[string]any, canon string, err error) 
 	if err := keymap.ValidateChord(chord); err != nil {
 		return nil, "", err
 	}
+	// ValidateChord has ruled out an empty chord and one of too many steps.
 	fields := strings.Fields(chord)
-	if len(fields) == 0 {
-		return nil, "", errors.New("empty chord")
-	}
-	if len(fields) > 4 {
-		return nil, "", errors.New("a sequence has at most 4 steps")
-	}
 	parts := make([]string, len(fields))
 	for i, f := range fields {
 		c, err := keymap.Normalize(f)

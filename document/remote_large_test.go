@@ -507,3 +507,25 @@ func TestRemoteLargeSaveAsOtherPath(t *testing.T) {
 		t.Fatalf("Save As created the local path %q", other)
 	}
 }
+
+func TestRemoteWindowSourceReadPastEndIsEOF(t *testing.T) {
+	t.Parallel()
+	access := &fakeRangeAccess{data: remoteLargeContent(10, 20)}
+	size := int64(len(access.data))
+	src, err := newRemoteWindowSource(context.Background(), access, "/remote/small.txt", size)
+	if err != nil {
+		t.Fatalf("newRemoteWindowSource: %v", err)
+	}
+	defer func() { _ = src.Close() }()
+	// A read that starts past the end has no window to wait for: asking the root to
+	// load one would repeat forever.
+	for _, off := range []int64{size, size + 5, RemoteWindowSize, 3 * RemoteWindowSize} {
+		n, err := src.ReadAt(make([]byte, 4), off)
+		if n != 0 || !errors.Is(err, io.EOF) {
+			t.Errorf("ReadAt(off=%d) = %d, %v, want 0, io.EOF", off, n, err)
+		}
+		if _, _, ok := src.TakePendingWindow(); ok {
+			t.Errorf("ReadAt(off=%d) recorded a pending window", off)
+		}
+	}
+}

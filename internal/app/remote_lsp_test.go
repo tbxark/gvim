@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/authority/authoritytest"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // fakeLSPProc is an authority long-running child that answers one LSP initialize request
@@ -293,5 +295,94 @@ func TestExpandRemotePathRejectsShellTildeNames(t *testing.T) {
 	got, err := expandRemotePath(context.Background(), slot, "~alice-1/proj")
 	if err != nil || got != "/home/normal/proj" {
 		t.Fatalf("normal ~alice-1 = %q, %v", got, err)
+	}
+}
+
+// stdinProc is a hostos.Proc whose stdin Write fails with the scripted errors first, then
+// records what it was given.
+type stdinProc struct {
+	mu     sync.Mutex
+	errs   []error
+	got    bytes.Buffer
+	writes int
+	done   chan struct{}
+	once   sync.Once
+}
+
+func (p *stdinProc) PID() int { return 1 }
+
+func (p *stdinProc) Write(data []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.writes++
+	if len(p.errs) > 0 {
+		err := p.errs[0]
+		p.errs = p.errs[1:]
+		return err
+	}
+	p.got.Write(data)
+	return nil
+}
+
+func (p *stdinProc) CloseStdin() {}
+
+func (p *stdinProc) Kill(string) error { p.Terminate(0); return nil }
+
+func (p *stdinProc) Terminate(time.Duration) { p.once.Do(func() { close(p.done) }) }
+
+func (p *stdinProc) Output(ctx context.Context) (hostos.ProcChunk, bool) {
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+	}
+	return hostos.ProcChunk{}, false
+}
+
+func (p *stdinProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
+	<-p.done
+	return hostos.ProcResult{}, nil
+}
+
+func (p *stdinProc) state() (string, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.got.String(), p.writes
+}
+
+// TestProcConnRetriesABusyStdin checks a full stdin buffer (a busy error) is retried until
+// the process takes the bytes, so a JSON-RPC message is never dropped.
+func TestProcConnRetriesABusyStdin(t *testing.T) {
+	proc := &stdinProc{done: make(chan struct{}), errs: []error{
+		pluginapi.Errf(pluginapi.CodeBusy, "stdin buffer full"),
+		pluginapi.Errf(pluginapi.CodeBusy, "stdin buffer full"),
+	}}
+	conn := newProcConn(proc)
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := conn.Write([]byte("message")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := proc.state(); got == "message" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	got, writes := proc.state()
+	t.Fatalf("the process received %q after %d writes, want the message after the busy retries", got, writes)
+}
+
+// TestProcConnStopsOnADeadStdin checks a stdin write that fails for any reason other than
+// a full buffer (the SSH channel ended: io.EOF) ends the feed instead of retrying forever.
+func TestProcConnStopsOnADeadStdin(t *testing.T) {
+	proc := &stdinProc{done: make(chan struct{}), errs: []error{io.EOF, io.EOF, io.EOF, io.EOF, io.EOF, io.EOF}}
+	conn := newProcConn(proc)
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := conn.Write([]byte("message")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, writes := proc.state(); writes != 1 {
+		t.Fatalf("stdin writes = %d, want 1: a dead stdin must not be retried", writes)
 	}
 }

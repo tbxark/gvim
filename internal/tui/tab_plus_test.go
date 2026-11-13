@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
 )
 
 // plusCell returns the frame column of the "+" new-tab button on the tab strip.
@@ -12,7 +14,7 @@ func plusCell(t *testing.T, m *Model) (int, int) {
 	t.Helper()
 	l := m.layout()
 	for x := range m.width {
-		if l.Hit(x, l.StripY).Kind == hitTabNew {
+		if l.Hit(x, l.StripY).Kind == frame.HitTabNew {
 			return x, l.StripY
 		}
 	}

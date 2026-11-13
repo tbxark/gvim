@@ -22,7 +22,7 @@ func errSearchTextTooLarge() error {
 	}
 }
 
-// searchTextTooLarge reports whether the range from..to, in order, is certainly over
+// SearchTextTooLarge reports whether the range from..to, in order, is certainly over
 // the size find_selection takes in a large document. It reads no text: the length comes
 // from the line index. A range it lets through may still be a little over.
 func (d *Document) SearchTextTooLarge(from, to buffer.Pos) bool {

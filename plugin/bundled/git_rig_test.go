@@ -19,7 +19,7 @@ import (
 // The rig of the git ports: bundled plugins and a probe plugin over a fake host and a fake OS
 // whose git binary answers scripted output. Nothing here runs git.
 
-// gitHead is the part of every git command line the lib adds (AMENDMENTS C28).
+// gitHead is the part of every git command line the lib adds.
 var gitHead = []string{
 	"git", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external=",
 	"-c", "core.attributesFile=/dev/null", "-c", "protocol.ext.allow=never",
@@ -28,7 +28,7 @@ var gitHead = []string{
 // gitArgv is the full command line the lib builds for git's own arguments.
 func gitArgv(args ...string) []string { return append(slices.Clone(gitHead), args...) }
 
-// filtersArgv is the command that lists the filter drivers of a repository (S19-1).
+// filtersArgv is the command that lists the filter drivers of a repository.
 var filtersArgv = gitArgv("config", "-z", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`)
 
 // showArgv is the command line that reads file from HEAD.

@@ -123,7 +123,11 @@ func (m *modal) update(msg tea.Msg) tea.Cmd {
 		m.hover = m.buttonAt(msg.X, msg.Y)
 	default:
 		if m.field != nil {
+			before := m.field.value()
 			m.field.update(msg)
+			if m.field.value() != before {
+				m.errText = ""
+			}
 		}
 	}
 	return nil

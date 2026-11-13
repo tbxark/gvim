@@ -168,12 +168,3 @@ func splitDirOf(name string) Dir {
 	}
 	return SideBySide
 }
-
-// LeavesInReadingOrder is the leaf count of a saved node, for callers that only
-// need the pane count.
-func LeavesInReadingOrder(l *session.SplitLayout) int {
-	if l == nil {
-		return 0
-	}
-	return len(l.Root.Leaves())
-}

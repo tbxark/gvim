@@ -224,6 +224,33 @@ func TestCodeTourLoadsAndWalksSteps(t *testing.T) {
 	}
 }
 
+// The title row styles its runs: a run's colours and flags sit on the run table itself, a
+// nested style table would be ignored.
+func TestCodeTourTitleRunIsStyled(t *testing.T) {
+	t.Parallel()
+	host, os := codeTourHost(t)
+	os.SetFile("/w/demo.fresh-tour.json", codeTourJSON())
+	h := startCodeTour(t, host, os)
+	if err := h.Run(codeTourPlugin+".load", nil); err != nil {
+		t.Fatal(err)
+	}
+	resolvePrompt(t, h, "demo.fresh-tour.json")
+	h.CompleteBuffers()
+	h.Advance(20 * time.Millisecond)
+	panels := codeTourPanels(h)
+	if len(panels) != 1 {
+		t.Fatalf("panels = %d, want the tour panel", len(panels))
+	}
+	root := panels[0].Panel.Root
+	if len(root.Children) == 0 || len(root.Children[0].Runs) == 0 {
+		t.Fatalf("no title runs in %+v", root)
+	}
+	run := root.Children[0].Runs[0]
+	if run.Text != "Demo Tour" || !run.Style.Bold || run.Style.FG.Key != "syntax.keyword" {
+		t.Errorf("title run = %+v, want bold syntax.keyword", run)
+	}
+}
+
 func TestCodeTourReadsVSCodeTours(t *testing.T) {
 	t.Parallel()
 	host, os := codeTourHost(t)

@@ -66,83 +66,13 @@ local function valid_buf()
   return nil
 end
 
--- Unicode Cc/Cf handling for display text. Cc controls become spaces; Cf format marks
--- (bidi overrides/isolates, zero-width/word-joiner characters, BOM, tags, ...) are removed,
--- and invalid UTF-8 bytes become spaces. Newlines therefore cannot inject a new page line or
--- move a line target: row() computes the target from the cleaned single-line text.
--- The range table is the assigned Cf set as of Unicode 15.1, matching the dashboard's
--- existing strip_pr_format sanitizer.
-local CF_RANGES = {
-  { 0x00AD, 0x00AD }, { 0x0600, 0x0605 }, { 0x061C, 0x061C }, { 0x06DD, 0x06DD },
-  { 0x070F, 0x070F }, { 0x0890, 0x0891 }, { 0x08E2, 0x08E2 }, { 0x180E, 0x180E },
-  { 0x200B, 0x200F }, { 0x202A, 0x202E }, { 0x2060, 0x2064 }, { 0x2066, 0x206F },
-  { 0xFEFF, 0xFEFF }, { 0xFFF9, 0xFFFB }, { 0x110BD, 0x110BD }, { 0x110CD, 0x110CD },
-  { 0x13430, 0x1343F }, { 0x1BCA0, 0x1BCA3 }, { 0x1D173, 0x1D17A },
-  { 0xE0001, 0xE0001 }, { 0xE0020, 0xE007F },
-}
-
-local function is_cf(cp)
-  for _, range in ipairs(CF_RANGES) do
-    if cp >= range[1] and cp <= range[2] then
-      return true
-    end
-  end
-  return false
-end
-
-local function utf8_codepoint(text, i)
-  local b1 = text:byte(i)
-  if not b1 then
-    return nil, nil
-  end
-  if b1 < 0x80 then
-    return b1, 1
-  end
-  if b1 >= 0xC2 and b1 <= 0xDF then
-    local b2 = text:byte(i + 1)
-    if b2 and b2 >= 0x80 and b2 <= 0xBF then
-      return (b1 - 0xC0) * 0x40 + (b2 - 0x80), 2
-    end
-  elseif b1 >= 0xE0 and b1 <= 0xEF then
-    local b2, b3 = text:byte(i + 1), text:byte(i + 2)
-    if b2 and b3 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF then
-      local cp = (b1 - 0xE0) * 0x1000 + (b2 - 0x80) * 0x40 + (b3 - 0x80)
-      if cp >= 0x800 and not (cp >= 0xD800 and cp <= 0xDFFF) then
-        return cp, 3
-      end
-    end
-  elseif b1 >= 0xF0 and b1 <= 0xF4 then
-    local b2, b3, b4 = text:byte(i + 1), text:byte(i + 2), text:byte(i + 3)
-    if b2 and b3 and b4 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF and b4 >= 0x80 and b4 <= 0xBF then
-      local cp = (b1 - 0xF0) * 0x40000 + (b2 - 0x80) * 0x1000 + (b3 - 0x80) * 0x40 + (b4 - 0x80)
-      if cp >= 0x10000 and cp <= 0x10FFFF then
-        return cp, 4
-      end
-    end
-  end
-  return nil, 1
-end
+-- Display text is stripped of Cc controls and Cf format marks (gvim.textsafe), so newlines
+-- cannot inject a new page line or move a line target: row() computes the target from the
+-- cleaned single-line text.
+local textsafe = require "gvim.textsafe"
 
 local function strip_format(text, limit)
-  local out = {}
-  local raw = text:sub(1, limit * 4)
-  local i = 1
-  while i <= #raw do
-    local cp, width = utf8_codepoint(raw, i)
-    if not cp or width == nil then
-      out[#out + 1] = " "
-      i = i + 1
-    elseif cp <= 0x1F or cp == 0x7F or (cp >= 0x80 and cp <= 0x9F) then
-      out[#out + 1] = " "
-      i = i + width
-    elseif is_cf(cp) then
-      i = i + width
-    else
-      out[#out + 1] = raw:sub(i, i + width - 1)
-      i = i + width
-    end
-  end
-  return table.concat(out)
+  return textsafe.strip(text:sub(1, limit * 4))
 end
 
 local function sanitize(value, max)
@@ -280,7 +210,7 @@ local function build_page()
   end
   blank()
 
-  heading("DOORS")
+  heading(t("section.doors"))
   row(t("door.open.label"), t("door.open.detail"), "action", "open", "welcome_screen.click_action_1")
   row(t("door.new.label"), t("door.new.detail"), "action", "new", "welcome_screen.click_action_2")
   row(t("door.recent.label"), t("door.recent.detail"), "action", "quick_open_buffers", "welcome_screen.click_action_3")
@@ -295,7 +225,7 @@ local function build_page()
   end
   blank()
 
-  heading("VERBS")
+  heading(t("section.verbs"))
   row(t("verb.find.label"), t("verb.find.detail"), "action", "quick_open_files", "welcome_screen.click_action_4")
   row(t("verb.palette.label"), t("verb.palette.detail"), "action", "command_palette", "welcome_screen.click_action_5")
   row(t("verb.settings.label"), t("verb.settings.detail"), "action", "open_settings", "welcome_screen.click_action_6")
@@ -310,10 +240,6 @@ local function build_page()
 end
 
 local function publish_targets(buf)
-  local set = gvim.buf.set_line_targets
-  if type(set) ~= "function" then
-    return
-  end
   local targets = {}
   for _, item in ipairs(state.rows) do
     if item.kind == "recent" and item.value then
@@ -322,7 +248,7 @@ local function publish_targets(buf)
       targets[#targets + 1] = { line = item.line, action = item.target }
     end
   end
-  pcall(set, buf, targets)
+  pcall(gvim.buf.set_line_targets, buf, targets)
 end
 
 -- reveal_focus keeps the selected actionable row visible in a small viewport. It uses the

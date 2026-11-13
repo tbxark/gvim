@@ -24,6 +24,7 @@
 #     cli/                       cobra command tree (imports app for Options/Run, configview
 #                                for config commands, syntax for the grammar list)
 #     configview/                the `gvim config show/paths` backend (config + keybindings)
+#     rexplugin/                 the `gvim rex install/uninstall` backend (imports atomicfile only)
 #     tui/ (+ sub-packages)      the Bubble Tea UI
 #     terminal/  filewatch/      private backends of the shell
 #     daemon/                    the attach/detach socket host and workspace registry
@@ -62,7 +63,7 @@
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
 #       runtime, lsp, finder or fsops; a tui sub-package must not import its
 #       parent package (internal/tui).
-#   R6  internal/cli imports only internal/app, internal/configview, authority and
+#   R6  internal/cli imports only internal/app, internal/configview, internal/rexplugin, authority and
 #       syntax (plus the standard library and cobra). authority is the top-level
 #       remote-spec parser the target classification needs; it imports no internal/.
 #   R7  only the root main package and internal/cli import internal/app; only
@@ -249,7 +250,7 @@ while IFS=$'\t' read -r pkg imp; do
     # R6: cli is the flags layer; app holds the run, configview the config views.
     if [ "$rel" = internal/cli ]; then
       case "$irel" in
-        internal/app | internal/configview | syntax | authority) ;;
+        internal/app | internal/configview | internal/rexplugin | syntax | authority) ;;
         *) add R6 "$pkg" "$imp" ;;
       esac
     fi

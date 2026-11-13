@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -229,7 +230,7 @@ walk:
 	}
 	sortNewest(files)
 	if len(files) > maxSessions {
-		out.problems = append(out.problems, "Claude Code: reporting the newest "+itoa(maxSessions)+" of "+itoa(len(files))+" transcripts")
+		out.problems = append(out.problems, "Claude Code: reporting the newest "+strconv.Itoa(maxSessions)+" of "+strconv.Itoa(len(files))+" transcripts")
 		files = files[:maxSessions]
 		out.truncated = true
 	}
@@ -307,7 +308,10 @@ func scanCodexStore(ctx context.Context, home string, getenv func(string) string
 			out.problems = append(out.problems, dir+": "+err.Error())
 			return false
 		}
-		for _, entry := range items {
+		// The store is date-sharded (YYYY/MM/DD), so name order is time order: walk
+		// newest first, so the entry bound drops the oldest days, not the newest.
+		for i := len(items) - 1; i >= 0; i-- {
+			entry := items[i]
 			if ctx.Err() != nil {
 				return true
 			}
@@ -343,7 +347,7 @@ func scanCodexStore(ctx context.Context, home string, getenv func(string) string
 	walk(sessionsDir, "", 1)
 	sortNewest(files)
 	if len(files) > maxSessions {
-		out.problems = append(out.problems, "Codex CLI: reporting the newest "+itoa(maxSessions)+" of "+itoa(len(files))+" rollouts")
+		out.problems = append(out.problems, "Codex CLI: reporting the newest "+strconv.Itoa(maxSessions)+" of "+strconv.Itoa(len(files))+" rollouts")
 		files = files[:maxSessions]
 		out.truncated = true
 	}
@@ -464,11 +468,11 @@ func firstStringField(records []map[string]any, keys ...string) string {
 }
 
 // safeSessionID reports whether a value is a safe command argument: a short
-// alphanumeric token with -. _ separators. A transcript's ID is placed in the
-// fixed resume template, so this check is what keeps arbitrary transcript bytes
-// out of argv.
+// alphanumeric token with -. _ separators that does not start with "-" (it would
+// read as a flag). A transcript's ID is placed in the fixed resume template, so
+// this check is what keeps arbitrary transcript bytes out of argv.
 func safeSessionID(id string) bool {
-	if id == "" || len(id) > maxExternalIDBytes {
+	if id == "" || len(id) > maxExternalIDBytes || id[0] == '-' {
 		return false
 	}
 	for i := 0; i < len(id); i++ {
@@ -496,19 +500,4 @@ func boundProblems(problems []string) []string {
 		return problems
 	}
 	return problems[:defaultExternalMaxProblems]
-}
-
-// itoa formats a small non-negative int without importing strconv at call sites.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits [20]byte
-	i := len(digits)
-	for n > 0 {
-		i--
-		digits[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(digits[i:])
 }

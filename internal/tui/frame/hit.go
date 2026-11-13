@@ -7,7 +7,6 @@ type HitKind int
 
 const (
 	HitNone HitKind = iota
-	HitMenuLabel
 	HitTab
 	HitTabClose
 	HitTabNew
@@ -98,7 +97,7 @@ func (l Layout) Hit(x, y int) HitTarget {
 		return none // the notice band covers the body rows under it
 	}
 	if l.MenuOn && y == l.MenuLabelY {
-		return hitRuns(l.MenuRuns, x, none)
+		return none // the menu bar sub-model owns its labels' hit map
 	}
 	if l.InExplorer(x) {
 		for _, sec := range l.Sections {
@@ -229,7 +228,7 @@ func (l Layout) hitWelcome(x, y int) HitTarget {
 	return HitTarget{Kind: HitNone}
 }
 
-// onNotice reports whether cell (x, y) is on the notice band, the rows that a long
+// OnNotice reports whether cell (x, y) is on the notice band, the rows that a long
 // status message covers above the status row. The band starts at the editor's left edge
 // and spans the editor column, so the explorer beside it is not covered; it stops above
 // the dock, whose rows are not part of the band.

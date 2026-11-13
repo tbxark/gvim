@@ -127,10 +127,6 @@ func ParseColorText(text string) (Color, error) {
 	return Color{}, fmt.Errorf("unknown color %q (want #RRGGBB, a theme color name or Default)", text)
 }
 
-// ModifierNames are the text attributes a theme value may carry, in the order
-// the theme editor shows them.
-var ModifierNames = []string{"bold", "italic", "underlined", "dim", "reversed"}
-
 // NormalizeModifiers canonicalizes attribute names (Fresh's aliases) and drops
 // unknown ones, so a typo cannot break a render.
 func NormalizeModifiers(names []string) []string {

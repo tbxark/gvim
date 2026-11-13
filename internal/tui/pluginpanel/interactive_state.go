@@ -1,6 +1,7 @@
 package pluginpanel
 
 import (
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -74,7 +75,7 @@ func (p *Panel) cycleCompletion(w pluginapi.Widget, delta int) {
 	if in == nil {
 		return
 	}
-	in.completionSel = clamp(in.completionSel+delta, 0, len(items)-1)
+	in.completionSel = space.Clamp(in.completionSel+delta, 0, len(items)-1)
 }
 
 // acceptCompletion fills the highlighted candidate into the text field and reports a change

@@ -184,9 +184,5 @@ func (p *Panel) SetPorts(ports Ports) {
 	}
 }
 
-// Clipboard returns the clipboard reader the dock was given, or nil. The root reads
-// it for the editor clipboard actions too.
-func (p *Panel) Clipboard() ClipboardReader { return p.clipboard }
-
 // SetHost sets the root services. The root model sets it once at construction.
 func (p *Panel) SetHost(host Host) { p.host = host }

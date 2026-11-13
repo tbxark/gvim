@@ -1,6 +1,6 @@
 package plugin
 
-// Per-workspace project plugin configuration (#19b follow-up). One daemon runs one plugin
+// Per-workspace project plugin configuration. One daemon runs one plugin
 // runtime, but a workspace can enable/disable plugins and set plugin settings in its own
 // project layer of config.json. On a switch the daemon compares the entering workspace's
 // plugin configuration with the runtime's current one and calls
@@ -90,7 +90,7 @@ func (r *Runtime) ApplyWorkspacePluginConfig(enabled map[string]bool, settings m
 					r.say(pluginapi.LevelError, fmt.Sprintf("plugin '%s' (workspace config): %s", n, statusText(nc.err)))
 					return
 				}
-				if _, why := r.replace(nc, func(b *batch) {
+				if why := r.replace(nc, func(b *batch) {
 					if it := b.by[n]; it != nil && it.st == itemOK {
 						r.say(pluginapi.LevelInfo, fmt.Sprintf("Plugin '%s' enabled by the workspace config", n))
 					}

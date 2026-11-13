@@ -20,7 +20,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The plugin management commands (FINAL X11): the manager, the reload picker, the log, the
+// The plugin management commands: the manager, the reload picker, the log, the
 // reload commands and Load Plugin from Buffer. The init.lua commands are in plugin_init.go.
 //
 // They are reentrant actions (see reentrantActions): a plugin's command.run defers them,

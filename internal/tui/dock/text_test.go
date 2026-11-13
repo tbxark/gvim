@@ -38,3 +38,10 @@ func TestPasteTextDropsEscapeSequences(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanSavedTextDropsC0AndC1Controls(t *testing.T) {
+	t.Parallel()
+	if got := cleanSavedText("a\x1b[31mb\u009bc\x7fd\te"); got != "a[31mbcde" {
+		t.Fatalf("cleanSavedText = %q, want %q", got, "a[31mbcde")
+	}
+}

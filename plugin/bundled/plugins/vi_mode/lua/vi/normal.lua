@@ -38,7 +38,6 @@ local function P(l, c) return { line = l, col = c } end
 M.hooks = {
   set_mode = function() end,
   status = function() end,
-  collapse = function() end,
 }
 
 local function cancel() error(CANCEL, 0) end
@@ -1004,8 +1003,6 @@ local function exec(cmd)
     end
   end
 end
-
-M.exec = exec
 
 -- repeatable tells whether . repeats the command.
 local function repeatable(cmd)

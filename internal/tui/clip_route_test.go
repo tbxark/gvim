@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -198,5 +199,24 @@ func TestBracketedPasteClosesAPopupAndReachesTheEditor(t *testing.T) {
 	}
 	if len(m.overlays) != 0 {
 		t.Fatalf("%d overlays left open, want the popup closed", len(m.overlays))
+	}
+}
+
+// failWriteClipboard is a system clipboard whose writes fail.
+type failWriteClipboard struct{ recClipboard }
+
+func (failWriteClipboard) Write(string) error { return errors.New("no clipboard tool") }
+
+// TestNativeClipboardWriteFailureShowsANotice checks that a failed native write (the OSC 52
+// copy may still arrive) is not silent: the status row names the error.
+func TestNativeClipboardWriteFailureShowsANotice(t *testing.T) {
+	t.Parallel()
+	ed := &copyEditor{docEditor: newDocEditor("/ws/a.txt", false), text: "abc"}
+	m := clipModel(t, ed, failWriteClipboard{})
+	for _, msg := range collect(m.dispatch(Command{Action: "copy"})) {
+		m.Update(msg)
+	}
+	if !strings.Contains(m.notice, "no clipboard tool") {
+		t.Fatalf("notice = %q, want the write error", m.notice)
 	}
 }

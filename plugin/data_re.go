@@ -9,7 +9,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-// re: Go RE2 for Lua (linear time), with work caps (AMENDMENTS C7).
+// re: Go RE2 for Lua (linear time), with work caps.
 //
 // A pattern is compiled with regexp/syntax first; a program of more than reMaxProg
 // instructions is refused at compile time. Before every operation
@@ -119,7 +119,7 @@ func (p *plugin) reArg(L *lua.LState, n int) (*reProg, error) {
 func installRE(e *apiEnv) *lua.LTable {
 	p, L := e.p, e.L
 	methods := e.kind(kindRegex).methods
-	t := L.NewTable()
+	t := L.CreateTable(0, 8)
 
 	e.set(t, "compile", func(L *lua.LState) int {
 		pat := L.CheckString(1)

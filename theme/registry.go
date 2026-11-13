@@ -366,9 +366,6 @@ func (r *Registry) Canonical(ref string) (string, error) {
 	return "file://" + path, nil
 }
 
-// Resolve is Canonical's older name, kept for the app's validation path.
-func (r *Registry) Resolve(ref string) (string, error) { return r.Canonical(ref) }
-
 // ThemePath returns where SaveTheme(name, ...) writes.
 func (r *Registry) ThemePath(name string) (string, error) {
 	if r.userDir == "" {
@@ -392,10 +389,11 @@ func (r *Registry) DeleteTheme(ref string) error {
 	if builtin != "" {
 		return fmt.Errorf("theme: %q is a bundled theme and cannot be deleted", ref)
 	}
-	if r.userDir != "" {
-		if rel, err := filepath.Rel(r.userDir, path); err != nil || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("theme: %q is not a user theme in %s", ref, r.userDir)
-		}
+	if r.userDir == "" {
+		return fmt.Errorf("theme: there is no user theme dir")
+	}
+	if rel, err := filepath.Rel(r.userDir, path); err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("theme: %q is not a user theme in %s", ref, r.userDir)
 	}
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("theme: delete %s: %w", path, err)

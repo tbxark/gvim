@@ -216,7 +216,7 @@ T.command("ok", function() T.spy("alive", ("abc"):find("b")) end)`, plugintest.O
 	}
 }
 
-// capRow is one row of TestStdlibCaps (AMENDMENTS C5): the call must fail with the stated
+// capRow is one row of TestStdlibCaps: the call must fail with the stated
 // text, in under 100 ms, without allocating much. The body times the call under test with
 // os.clock and reports `os.clock() - c < LIMIT`; building its inputs is not part of that.
 type capRow struct {

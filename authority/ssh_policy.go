@@ -9,9 +9,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -27,9 +29,6 @@ const (
 	// KnownHostsAcceptNew records a first-seen host key in known_hosts after a clear
 	// notice, then trusts it on later connections. A CHANGED key is always refused.
 	KnownHostsAcceptNew KnownHostsPolicy = "accept-new"
-	// KnownHostsOff is accepted by the config parser for a clear error, but the
-	// transport refuses it: host keys are always verified.
-	KnownHostsOff KnownHostsPolicy = "off"
 )
 
 // ParseKnownHostsPolicy validates the configured policy. Empty means strict.
@@ -39,10 +38,10 @@ func ParseKnownHostsPolicy(s string) (KnownHostsPolicy, error) {
 		return KnownHostsStrict, nil
 	case string(KnownHostsAcceptNew):
 		return KnownHostsAcceptNew, nil
-	case string(KnownHostsOff):
-		return KnownHostsOff, nil
+	case "off":
+		return "", errors.New("ssh: known_hosts policy \"off\" is not supported: host keys are always verified (use strict or accept-new)")
 	}
-	return "", fmt.Errorf("ssh: unknown known_hosts policy %q (use strict, accept-new or off; off is refused at connect)", s)
+	return "", fmt.Errorf("ssh: unknown known_hosts policy %q (use strict or accept-new)", s)
 }
 
 // DefaultHostKeyAlgorithms is the safe preference order: modern Ed25519, ECDSA and
@@ -105,25 +104,14 @@ func ParseHostKeyAlgorithms(names []string) ([]string, error) {
 }
 
 func sortedHostKeyAlgorithmNames() []string {
-	names := make([]string, 0, len(knownHostKeyAlgorithms))
-	for name := range knownHostKeyAlgorithms {
-		names = append(names, name)
-	}
-	for i := 1; i < len(names); i++ {
-		for j := i; j > 0 && names[j] < names[j-1]; j-- {
-			names[j], names[j-1] = names[j-1], names[j]
-		}
-	}
-	return names
+	return slices.Sorted(maps.Keys(knownHostKeyAlgorithms))
 }
 
 // newKnownHostsCallback builds the host-key check for path under policy. A missing file
 // is a clear error for strict; accept-new creates an empty file, then records first-seen
-// hosts. A changed key is always refused. off is a hard error.
+// hosts. A changed key is always refused.
 func newKnownHostsCallback(path string, policy KnownHostsPolicy, notice func(string)) (ssh.HostKeyCallback, error) {
 	switch policy {
-	case KnownHostsOff:
-		return nil, errors.New("ssh: known_hosts policy \"off\" is refused: host keys are always verified (use strict or accept-new)")
 	case KnownHostsStrict, KnownHostsAcceptNew:
 	default:
 		return nil, fmt.Errorf("ssh: unsupported known_hosts policy %q", policy)
@@ -152,6 +140,11 @@ func newKnownHostsCallback(path string, policy KnownHostsPolicy, notice func(str
 		if !errors.As(err, &keyErr) {
 			return fmt.Errorf("ssh: host key of %s rejected by %s: %w", hostname, path, err)
 		}
+		if len(keyErr.Want) > 0 && !hasKeyType(keyErr.Want, key.Type()) {
+			// known_hosts lists the host under other key types only: the server may offer
+			// both, and this is a preference problem, not evidence of a changed key.
+			return fmt.Errorf("ssh: %s presented a %s key but %s records only %s for it; this is not a changed key: set ssh.host_key_algorithms to prefer the recorded type", hostname, key.Type(), path, wantTypes(keyErr.Want))
+		}
 		if len(keyErr.Want) > 0 {
 			return fmt.Errorf("ssh: HOST KEY CHANGED for %s: the key in %s does not match the server (possible man-in-the-middle); refusing (verify and remove the stale line before retrying)", hostname, path)
 		}
@@ -167,6 +160,27 @@ func newKnownHostsCallback(path string, policy KnownHostsPolicy, notice func(str
 		}
 		return fmt.Errorf("ssh: host key of %s is not known: add it to %s with ssh-keyscan, or set ssh.known_hosts_policy to accept-new", hostname, path)
 	}, nil
+}
+
+// hasKeyType reports whether any recorded key has the given type.
+func hasKeyType(want []knownhosts.KnownKey, keyType string) bool {
+	for _, k := range want {
+		if k.Key.Type() == keyType {
+			return true
+		}
+	}
+	return false
+}
+
+// wantTypes lists the key types of the recorded keys, for an error message.
+func wantTypes(want []knownhosts.KnownKey) string {
+	var types []string
+	for _, k := range want {
+		if t := k.Key.Type(); !slices.Contains(types, t) {
+			types = append(types, t)
+		}
+	}
+	return strings.Join(types, ", ")
 }
 
 func ensureKnownHostsFile(path string) error {

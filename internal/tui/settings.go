@@ -665,7 +665,7 @@ func (p *settingsPage) pick(it SettingsItem) tea.Cmd {
 		return nil
 	})
 	v.Fit = true
-	v.Hint = list.Hint + ", Esc cancel"
+	v.Hint = list.Hint() + ", Esc cancel"
 	p.m.pushOverlay(v)
 	return nil
 }

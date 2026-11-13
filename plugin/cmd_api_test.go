@@ -386,7 +386,7 @@ end }`,
 }
 
 // TestCommandRunTargetsActiveDocument: run and run_all hand the action to the host with no
-// buffer argument; the host runs it on its active document (AMENDMENTS C15).
+// buffer argument; the host runs it on its active document.
 func TestCommandRunTargetsActiveDocument(t *testing.T) {
 	host := cmdHost()
 	host.AddBuffer("a.go", "x")

@@ -6,20 +6,16 @@
     "cmd.git_grep_toggle_case_desc": "Match upper and lower case exactly in git grep",
     "prompt.grep": "Git grep: ",
     "prompt.placeholder": "Type to search...",
-    "status.ready": "Git Grep plugin ready",
     "status.type_to_search": "Type to search...",
     "status.found": "Found %{count} matches",
     "status.no_matches": "No matches found",
     "status.not_in_git": "Not in git",
     "status.error": "Git grep error: %{error}",
     "status.opened": "Opened %{location}",
-    "status.no_selection": "No file selected",
-    "status.cancelled": "Git grep cancelled",
     "status.no_git": "Git Grep: git is not installed",
     "status.case": "Case: %{state}",
     "case.on": "on",
     "case.off": "off",
-    "footer.hint": "Case: %{case} · Enter: jump · Esc: close",
-    "mode.case": "Case"
+    "footer.hint": "Case: %{case} · Enter: jump · Esc: close"
   }
 }

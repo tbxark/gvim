@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 )
 
 func TestClassicWorkbenchDefaultGeometry(t *testing.T) {
@@ -23,7 +24,7 @@ func TestClassicWorkbenchDefaultGeometry(t *testing.T) {
 			if l.EditorX < 1 || l.EditorX+l.EditorW > 79 {
 				t.Fatalf("editor overlaps border: x=%d width=%d", l.EditorX, l.EditorW)
 			}
-			if hit := l.Hit(l.Panes[0].TextX, l.BodyTop); hit.Kind != hitEditorText {
+			if hit := l.Hit(l.Panes[0].TextX, l.BodyTop); hit.Kind != frame.HitEditorText {
 				t.Fatalf("editor text hit = %+v", hit)
 			}
 			g := m.paint()

@@ -7,10 +7,8 @@ import (
 	"time"
 )
 
-// The daemon-exit durability path (#19a review). The plain closeAll wrapper keeps the
-// historical shape (tests and deferred cleanup call it and ignore the outcome); this
-// checked form is what the daemon's exit path uses, so a failed capture can never be
-// mistaken for a clean exit.
+// The daemon-exit durability path (#19a review): closeAllChecked returns the durability
+// error, so a failed capture can never be mistaken for a clean exit.
 
 // workspaceExitTimeout bounds the WHOLE daemon-exit capture wait, not each write: the
 // writes of every workspace share one deadline, so N hung writers cost one timeout.

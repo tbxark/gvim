@@ -12,6 +12,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/diff"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
@@ -45,7 +46,7 @@ func alignedTops(t *testing.T, m *Model) (left, right int) {
 	if !ok {
 		t.Fatal("compareState = not ok")
 	}
-	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
+	nodes := [2]*split.Node{m.splits.Root.A, m.splits.Root.B}
 	var rows [2]int
 	for side, n := range nodes {
 		top, topRow := n.Top, n.TopRow
@@ -320,7 +321,7 @@ func TestComparePanesTintTheLinesThatDiffer(t *testing.T) {
 	l := m.layout()
 	left, right := l.Panes[0], l.Panes[1]
 	st, _ := m.compareState()
-	bgAt := func(p splitPane, side, line int, tail bool) color.Color {
+	bgAt := func(p split.Pane, side, line int, tail bool) color.Color {
 		x := p.TextX
 		if tail {
 			x = p.TextX + 10 // well past the one-character text
@@ -330,7 +331,7 @@ func TestComparePanesTintTheLinesThatDiffer(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		pane splitPane
+		pane split.Pane
 		side int
 		line int
 		want color.Color

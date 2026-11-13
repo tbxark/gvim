@@ -50,7 +50,7 @@ func TestNilRuntimeIsInert(t *testing.T) {
 	if len(m.plug.events) != 0 {
 		t.Fatalf("plugEmit queued %d events with no runtime", len(m.plug.events))
 	}
-	if cmd := m.pluginTail(m.pluginSnapshot(), tea.WindowSizeMsg{}); cmd != nil {
+	if cmd := m.pluginTail(m.pluginSnapshot()); cmd != nil {
 		t.Fatal("pluginTail started a command with no runtime")
 	}
 	if cmd, ok := m.pluginAction("x.cmd", nil); ok || cmd != nil {
@@ -396,6 +396,21 @@ func TestControlReloadSchedulesWork(t *testing.T) {
 	m.Update(works[0])
 	if len(rt.resolved) != 1 || rt.resolved[0].Token != 7 || rt.resolved[0].Values[0] != "sources" {
 		t.Fatalf("resolved %+v, want the completion of token 7", rt.resolved)
+	}
+}
+
+// TestControlShowsTheLastNonEmptyNotice checks the status row's rule for several notices
+// of one control call: the last non-empty text is shown, and an empty one never blanks it.
+func TestControlShowsTheLastNonEmptyNotice(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime(t)
+	rt.onControl = func(pluginapi.Control) ([]pluginapi.Work, []pluginapi.Notice) {
+		return nil, []pluginapi.Notice{{Text: "first"}, {Text: "second"}, {Text: ""}}
+	}
+	m, _ := newPluginModel(t, rt)
+	m.pluginControl(pluginapi.Control{Op: "reload_all"})
+	if m.notice != "second" {
+		t.Fatalf("notice = %q, want the last non-empty one", m.notice)
 	}
 }
 

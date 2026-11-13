@@ -11,7 +11,7 @@ type lineEdit struct {
 	Inserted, Removed int
 }
 
-// move returns where p ends up after the edit. A position on another line does
+// Move returns where p ends up after the edit. A position on another line does
 // not move. After a removal, a position past the removed run moves back by its
 // length, and a position inside it moves to where the run began. After an
 // insertion, a position past col moves forward by the inserted length. A

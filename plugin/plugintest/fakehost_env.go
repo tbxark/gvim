@@ -10,33 +10,33 @@ type EnvSetCall struct {
 	Kind    string
 }
 
-func (h *FakeHost) DetectedEnv() (pluginapi.EnvInfo, bool) {
-	return h.EnvDetected, h.HasEnvDetected
+func (f *FakeHost) DetectedEnv() (pluginapi.EnvInfo, bool) {
+	return f.EnvDetected, f.HasEnvDetected
 }
 
-func (h *FakeHost) ActiveEnv() (pluginapi.EnvInfo, bool) {
-	return h.EnvActiveInfo, h.HasEnvActive
+func (f *FakeHost) ActiveEnv() (pluginapi.EnvInfo, bool) {
+	return f.EnvActiveInfo, f.HasEnvActive
 }
 
-func (h *FakeHost) EnvTrustLevel() string {
-	if h.EnvTrust == "" {
+func (f *FakeHost) EnvTrustLevel() string {
+	if f.EnvTrust == "" {
 		return "restricted"
 	}
-	return h.EnvTrust
+	return f.EnvTrust
 }
 
-func (h *FakeHost) SetEnv(plugin, snippet, dir, kind string) error {
-	if h.EnvSetErr != nil {
-		return h.EnvSetErr
+func (f *FakeHost) SetEnv(plugin, snippet, dir, kind string) error {
+	if f.EnvSetErr != nil {
+		return f.EnvSetErr
 	}
-	h.EnvSets = append(h.EnvSets, EnvSetCall{Plugin: plugin, Snippet: snippet, Dir: dir, Kind: kind})
+	f.EnvSets = append(f.EnvSets, EnvSetCall{Plugin: plugin, Snippet: snippet, Dir: dir, Kind: kind})
 	return nil
 }
 
-func (h *FakeHost) ClearEnv(plugin string) error {
-	if h.EnvClearErr != nil {
-		return h.EnvClearErr
+func (f *FakeHost) ClearEnv(plugin string) error {
+	if f.EnvClearErr != nil {
+		return f.EnvClearErr
 	}
-	h.EnvClears++
+	f.EnvClears++
 	return nil
 }

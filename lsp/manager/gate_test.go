@@ -69,3 +69,35 @@ func TestManagerGateAllowsWithANilGate(t *testing.T) {
 		t.Error("the start hook was not reached with no gate")
 	}
 }
+
+// TestManagerResolvesTheServerThroughTheOverlayPath: the child sees the last PATH entry of
+// its environment, so an active project environment's PATH is the one that finds the
+// server program and the one the gate judges.
+func TestManagerResolvesTheServerThroughTheOverlayPath(t *testing.T) {
+	t.Parallel()
+	bin := t.TempDir()
+	exe := filepath.Join(bin, "fakels-overlay")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(t.TempDir(), map[string][]ServerConfig{
+		"go": {{Command: []string{"fakels-overlay"}}},
+	}, nil)
+	m.SetSpawnEnv(func() []string { return []string{"PATH=" + bin} })
+	var gotPath, gotProgram string
+	m.SetGate(func(_ context.Context, _ []string, _, pathValue string) error {
+		gotPath = pathValue
+		return nil
+	})
+	m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
+		gotProgram = cfg.Program
+		return nil, errors.New("stop here")
+	}
+	_ = m.StartLanguage("go")
+	if gotPath != bin {
+		t.Errorf("gate PATH = %q, want the overlay PATH %q", gotPath, bin)
+	}
+	if gotProgram != exe {
+		t.Errorf("program = %q, want %q resolved through the overlay PATH", gotProgram, exe)
+	}
+}

@@ -39,7 +39,7 @@ func gitLogFiles(t *testing.T) plugintest.Files {
 	return files
 }
 
-// gitBase is the hardened prefix (the bundled gvim.git module's settings, AMENDMENTS C28).
+// gitBase is the hardened prefix (the bundled gvim.git module's settings).
 func gitBase() []string {
 	return []string{
 		"git", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external=",
@@ -291,6 +291,12 @@ func TestGitLogManifestAndLoad(t *testing.T) {
 	if bindings := h.Host.Bindings[gitLogPlugin]; len(bindings) != 0 {
 		t.Errorf("bindings = %v, want none (Fresh binds no default key for this plugin)", bindings)
 	}
+	// The status label of each mode is a real translation, not the catalogue key.
+	for name, mode := range modes {
+		if mode.Status == "" || strings.HasPrefix(mode.Status, "panel.") {
+			t.Errorf("mode %s status = %q, want a translated label", name, mode.Status)
+		}
+	}
 }
 
 func TestGitLogOpensAndStreams(t *testing.T) {
@@ -384,6 +390,42 @@ func TestGitLogOpensAndStreams(t *testing.T) {
 	}
 	if got := lastNotice(h); !strings.Contains(got, "Commit aaaa111") {
 		t.Errorf("last notice = %q, want the detail footer (commit_ready)", got)
+	}
+}
+
+// Opening the log keeps the cached diffs of the 50 most recently written commits and removes
+// the older ones (all three files of each), so the cache directory stays bounded.
+func TestGitLogPrunesTheDiffCache(t *testing.T) {
+	t.Parallel()
+	host, os, _ := gitLogHost(t)
+	dir := "/home/u/.config/gvim/plugin-data/git_log/git_log"
+	for i := range 60 { // written oldest first: s000 is the oldest
+		sha := "a" + strings.Repeat("0", 2-len(gitLogItoa(i))) + gitLogItoa(i)
+		for _, ext := range []string{".diff", ".json", ".done"} {
+			os.SetFile(dir+"/"+sha+ext, "x")
+		}
+	}
+	os.SetFile(dir+"/notes.txt", "not a cache file")
+	scriptRepo(os)
+	os.Script(gitLogArgv(false, "log"), plugintest.ProcScript{Stdout: commitRecord("bbbb2222", "bbbb222", "Bob", "1 day ago", "", "subject")})
+	os.Script(gitLogArgv(true, "show", "--numstat"), plugintest.ProcScript{})
+	os.Script(gitLogArgv(true, "show", "--stat"), plugintest.ProcScript{Stdout: patchText})
+	os.Script(gitLogArgv(false, "show"), plugintest.ProcScript{Stdout: "line\n"})
+	h := startGitLog(t, host, os)
+	if err := h.Run(gitLogPlugin+".show_git_log", nil); err != nil {
+		t.Fatal(err)
+	}
+	finishStreams(h)
+	for i := range 60 {
+		sha := "a" + strings.Repeat("0", 2-len(gitLogItoa(i))) + gitLogItoa(i)
+		for _, ext := range []string{".diff", ".json", ".done"} {
+			if got, want := os.Exists(dir+"/"+sha+ext), i >= 10; got != want {
+				t.Errorf("%s%s exists = %v, want %v", sha, ext, got, want)
+			}
+		}
+	}
+	if !os.Exists(dir + "/notes.txt") {
+		t.Error("a file that is not a cache entry was removed")
 	}
 }
 

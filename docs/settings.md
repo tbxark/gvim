@@ -4,7 +4,7 @@ Status: design record of the editable Settings page (rounds 3 and 4).
 
 gvim reads its settings from JSONC files with three layers: the built-in
 defaults, the user file (`~/.config/gvim/config.json`, or `--config`) and the
-project file (`.gvim/config.json` at or above the workspace root). The
+project file (`<root>/.gvim/config.json`, the workspace root only). The
 **Settings** page (Edit ▸ Settings…, the palette command **Open Settings**) edits
 the user or project layer, validates each value through the same option tables a
 real config load uses, writes the file without rewriting it, and applies what it
@@ -19,13 +19,12 @@ the recent project list, the workspace trust decisions, the plugin toggles, the 
 stamp and the daemon workspace registry. Regenerable data (fetched URL themes) goes to
 `config.CacheDir()`. A workspace's own session lives in its `.gvim/session` only when
 `editor.save_session` is on. [files.md](files.md) lists every file and the moment it is
-written; files an older build left in the config directory are moved to their new place
-once.
+written.
 
 ## 1. The schema
 
 `config/settings_schema.go` holds the descriptor table the page is built from:
-77 settings rows, each a `config.Setting` with
+79 settings rows, each a `config.Setting` with
 
 - `Path`: where the value lives in the file, such as `{"editor", "tab_size"}`;
 - `Kind`: `bool`, `int`, `enum`, `string`, or `page` (a row that opens
@@ -139,9 +138,8 @@ switches it.
 - **User** (the default): the user config file, `--config` when given, else
   `~/.config/gvim/config.json` (created on save).
 - **Project**: the project config file, and only for a workspace that is
-  **Trusted** (see `docs/trust.md`). The page writes the nearest existing
-  `.gvim/config.json` at or above the workspace root; when there is none it
-  writes `<root>/.gvim/config.json`. A row whose setting is user-only (the
+  **Trusted** (see `docs/trust.md`). The page writes
+  `<root>/.gvim/config.json` (created on save); a parent directory's file never applies. A row whose setting is user-only (the
   keymap, the locale, the terminal shell and its arguments) is shown as
   "`<name> (user layer)`" and cannot be edited there.
 
@@ -323,6 +321,12 @@ the whole `terminal` section (the dock is built at startup). The LSP, plugin and
 large-file settings are not in the page at all yet (deferred), and they keep
 their own restart boundary when edited by hand.
 
+**Config-file-only editor options.** `editor.confirm_quit` (default off: a Quit/Cancel
+dialog, Cancel the default, appears when a quit finds no unsaved tab) and
+`editor.auto_create_empty_buffer_on_last_buffer_close` (default on: closing the last tab
+leaves one untitled tab; off shows the welcome screen) are read from the config file when
+the editor starts. They have no row on the Settings page, so edit the file and restart.
+
 **Command-line flags win over the file** for the running editor, as they already
 do: setting the theme or the keymap while `--theme`/`--keymap` is given
 writes the file but does not apply the value, and the notice says the flag wins.
@@ -372,9 +376,9 @@ short list of deliberate decisions rather than unfinished paths:
 - **No in-page key capture and no second writer of the keybindings file**: keybinding editing
   deliberately stays in the Keybinding Editor (`docs/keybindings.md`); the page's Keybindings
   section is read-only.
-- **No project-environment activation**: `env.detectors` are resolved and listed on the
-  Environment section's Detectors page (round 10), but gvim does not activate the detected
-  environment; that remains a spawn-time decision (see `docs/trust.md`).
+- **Environment activation has no Settings control**: `env.detectors` are resolved and listed
+  read-only on the Environment section's Detectors page; activation itself is the `env_manager`
+  plugin's and the trust gate's business (see `docs/trust.md`, "Environments").
 - **Fresh's two-button per-field distinction between reset-to-default and inherit/unset, and
   its full per-change undo stack**, are not ported: the page has one reset per setting and
   `Ctrl+R` to discard everything; inherited rows show the inherited value and say so.
@@ -441,7 +445,7 @@ opens the config file on Enter (the ui_icons row opens the icon preview).
 | `config/settings_structured.go` | the structured knowledge: language override fields, language ids, status-bar element names, removable paths, page summaries, explorer width, `DecodeLayer` |
 | `config/patch.go` | `Edit` (set or remove), `PatchBytes` (surgical hujson patch with the reset cascade), `ValidateEdits` |
 | `config/config.go` | `applyObject`, the shared key-application path |
-| `i18n/i18n.go`, `i18n/catalogue.go`, `i18n/locales/*.json` | the translation package and its embedded catalogues: locale resolution, `T`/`TN`, plurals, the Fresh import mapping and catalogue validation for the `locale` row (see [i18n.md](i18n.md)) |
+| `i18n/i18n.go`, `i18n/locales/*.json` | the translation package and its embedded catalogues: locale resolution, `T`/`TN`, plurals, the Fresh import mapping and catalogue validation for the `locale` row (see [i18n.md](i18n.md)) |
 | `config/contents.go` | the native `contents.fold_buffer`/`follow`/`auto_open`/`rows` keys, their project-layer rule (accepted and ignored: the retired markdown_toc plugin's settings are the user's) and the effective getters with the plugin-key fallback (`ContentsEnabled` reads the USER plugin enabled only, so a project `enabled=false` cannot disable the built-in Contents) |
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |
@@ -527,7 +531,7 @@ on setEnv are NOT implemented: the attempt was withdrawn after audit showed the 
 cannot activate with correct ownership and language-server semantics; enable the env-manager
 plugin. When the official env-manager plugin is enabled its own `env` status pill replaces
 this native segment (single pill, plugin click path); another plugin's item that merely
-reuses the id `env` does not suppress it. See docs/parity.md residual R13-18.
+reuses the id `env` does not suppress it. See the remote environment gap in [parity.md](parity.md) (R13-18).
 
 In a REMOTE workspace the provider is `env.Remote`: the markers are probed and the
 recipe activated on the remote host through the authority, so these rows describe the remote

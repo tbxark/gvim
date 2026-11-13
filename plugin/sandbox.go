@@ -46,16 +46,16 @@ func stateOptions() lua.Options {
 }
 
 // stripped are the globals removed from a fresh state: dynamic code loading, file access,
-// environment tricks and process-wide effects (FINAL 8.1 step 2).
+// environment tricks and process-wide effects.
 var stripped = []string{
 	"dofile", "loadfile", "load", "loadstring", "module", "newproxy", "collectgarbage",
 	"getfenv", "setfenv", "_printregs", "_GOPHER_LUA_VERSION", "require",
 }
 
-// buildState creates the sandboxed state of p and installs the API (FINAL 8.1).
+// buildState creates the sandboxed state of p and installs the API.
 func (p *plugin) buildState() error {
 	// 1. Only base, table, string, math and coroutine are opened. io, os, debug, package and
-	// channel never are (os arrives reduced with the stdlib repairs of stage S9).
+	// channel never are (a reduced os is installed with the stdlib below).
 	L := lua.NewState(stateOptions())
 	p.L = L
 	for _, lib := range []struct {
@@ -104,7 +104,7 @@ func (p *plugin) buildState() error {
 		mt.RawSetString("__metatable", lua.LString("locked"))
 	}
 
-	// 4. Repaired standard library (tonumber, string.rep, table.concat, patterns ...): S9.
+	// 4. Repaired standard library (tonumber, string.rep, table.concat, patterns ...).
 	installStdlib(p)
 
 	// 5. Prelude.
@@ -135,7 +135,7 @@ func (p *plugin) buildState() error {
 		vals := append([]lua.LValue{p.tag}, argsFrom(L, 1)...)
 		return L.Yield(vals...)
 	})
-	goT := L.NewTable()
+	goT := L.CreateTable(0, 4)
 	goT.RawSetString("find", L.NewFunction(p.requireFind))
 	goT.RawSetString("done", L.NewFunction(p.requireDone))
 	goT.RawSetString("is_go", L.NewFunction(func(L *lua.LState) int {
@@ -176,7 +176,7 @@ func (p *plugin) buildState() error {
 		return 1
 	}))
 
-	// 6. Libraries and require (the data libraries arrive with S9) and the gvim API.
+	// 6. require and the gvim API.
 	L.SetGlobal("require", pre.RawGetString("require"))
 	p.installAPI()
 	return nil

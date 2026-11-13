@@ -6,7 +6,7 @@ package document
 
 var AbsPath = absPath
 var AngleBrackets = angleBrackets
-var AsciiWordRune = asciiWordRune
+var ASCIIWordRune = asciiWordRune
 var BlankPrefix = blankPrefix
 var BracketPairs = bracketPairs
 var BracketTarget = bracketTarget

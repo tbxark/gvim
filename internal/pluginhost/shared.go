@@ -1,6 +1,6 @@
 package pluginhost
 
-// The daemon's shared plugin runtime (#19b follow-up): one plugin.Runtime for every LOCAL
+// The daemon's shared plugin runtime: one plugin.Runtime for every LOCAL
 // daemon workspace, with the per-workspace parts rebound on a switch instead of a runtime
 // per workspace. A direct launch keeps the one-runtime-per-session model (New). Remote /
 // authority-spec workspaces are excluded from sharing in this slice: their plugin OS and
@@ -194,29 +194,15 @@ func (d *Daemon) Ensure(cfg config.Config, o Options) (*plugin.Runtime, func(str
 // own root/env/gate, registered with the daemon's mux), the editor adapter, the keymap
 // builder and the parsed gvim.state namespace. buildRuntime calls it for every local daemon
 // workspace.
-func NewWorkspace(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document), o Options) *Workspace {
-	osys := newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
-	osys.logSink = o.LogSink
-	osys.gate = o.Gate
+func NewWorkspace(cfg config.Config, ed *editor.Editor, o Options) *Workspace {
 	ws := &Workspace{
-		OS:     osys,
-		Editor: newPluginEditor(ed, markEdited),
+		OS:     newLocalOS(o),
+		Editor: newPluginEditor(ed),
 		Keys:   pluginKeysFor(cfg, o),
 	}
 	ws.PluginEnabled, ws.PluginSettings, ws.PluginConfigKey = workspacePluginConfig(cfg)
-	if o.WorkspaceStateFile != "" {
-		ws.StatePath = o.WorkspaceStateFile
-		st, readOnly, err := parsedWorkspaceState(o)
-		switch {
-		case err != nil:
-			ws.StateNote = "per-workspace plugin state ignored: " + err.Error()
-		case readOnly:
-			ws.ReadOnly = true
-			ws.StateNote = "per-workspace plugin state is read-only: it was written by a newer gvim"
-		default:
-			ws.State = st
-		}
-	}
+	ws.StatePath = o.WorkspaceStateFile
+	ws.State, ws.ReadOnly, ws.StateNote = parseWorkspaceState(o)
 	return ws
 }
 

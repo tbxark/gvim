@@ -13,15 +13,14 @@ package app
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/configview"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui"
-	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
 	"github.com/tbxark/gvim/updatecheck"
@@ -50,8 +49,6 @@ const (
 	DaemonAttach
 )
 
-// DaemonOptions carries a daemon launch. The CLI sets the mode and the socket name
-// (empty means the per-root default name); Run fills Detach for the hosted program.
 // SSHSecurity is the config-derived SSH policy of a remote launch: the known_hosts
 // policy, ordered host-key algorithm preference and whether the OS keyring may be used
 // (lookup and, after a notice, storing an accepted password). Zero values mean strict,
@@ -62,6 +59,8 @@ type SSHSecurity struct {
 	Keyring           bool
 }
 
+// DaemonOptions carries a daemon launch. The CLI sets the mode and the socket name
+// (empty means the per-root default name); Run fills Detach for the hosted program.
 type DaemonOptions struct {
 	Mode DaemonMode
 	// Name is the socket name. Empty means DefaultName(root).
@@ -193,29 +192,14 @@ func (o Options) StdinLaunch() bool {
 // the file system: a missing file is valid, and a root is checked when Run
 // opens it.
 func (o Options) Validate() error {
-	if o.Keymap != "" {
-		if _, err := keymap.ByName(o.Keymap); err != nil {
-			return fmt.Errorf("--keymap: unknown keymap %q (want default, macos, macos-gui, emacs or vscode)", o.Keymap)
-		}
+	if err := configview.ValidateFlags(o.Keymap, o.Theme); err != nil {
+		return err
 	}
-	if o.Theme != "" {
-		if err := theme.ValidateForm(o.Theme); err != nil {
+	if theme.IsURLForm(o.Theme) {
+		// The same transport policy as the update check, applied before any
+		// request: https, or http only on the loopback interface.
+		if _, err := updatecheck.ValidateURL(o.Theme); err != nil {
 			return fmt.Errorf("--theme: %w", err)
-		}
-		if theme.IsURLForm(o.Theme) {
-			// The same transport policy as the update check, applied before any
-			// request: https, or http only on the loopback interface.
-			if _, err := updatecheck.ValidateURL(o.Theme); err != nil {
-				return fmt.Errorf("--theme: %w", err)
-			}
-		}
-		if theme.IsNamedForm(o.Theme) && !slices.Contains(theme.Names(), o.Theme) {
-			// A plain name may also be a user theme: check the user theme dir, so
-			// a typo is one line instead of a start-time error.
-			registry := theme.NewRegistry(userThemeDir())
-			if _, err := registry.Load(o.Theme); err != nil {
-				return fmt.Errorf("--theme: unknown theme %q (want one of the bundled themes, a theme in %s, or a theme path)", o.Theme, userThemeDir())
-			}
 		}
 	}
 	if o.Diff {

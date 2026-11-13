@@ -17,8 +17,9 @@ var _ tui.ClipboardWriter = SystemClipboard{}
 
 // Write puts text on the system clipboard with the platform's own tool. It fails when no
 // tool is installed or every installed tool fails. A tool that fails (wl-copy under X11,
-// say) does not stop the next one from being tried. The editor has already written the text to the terminal with OSC 52,
-// so a failure here costs only the terminals that ignore it.
+// say) does not stop the next one from being tried. The editor has already written the
+// text to the terminal with OSC 52, so a failure here costs only the terminals that
+// ignore it.
 func (SystemClipboard) Write(text string) error {
 	return writeClipboard(clipboardWriteCommands(goruntime.GOOS), text)
 }
@@ -47,7 +48,7 @@ func runClipboardTools(tools []clipboardTool, none string) error {
 		if err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), clipboardReadTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), clipboardTimeout)
 		// Stdout and stderr stay unset: xclip and wl-copy fork a process that serves the
 		// selection, and an attached pipe would keep Run waiting for it.
 		cmd := exec.CommandContext(ctx, path, argv[1:]...)

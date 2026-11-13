@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -225,5 +226,28 @@ func TestCompileErrorOfALongQueryIsShort(t *testing.T) {
 				t.Errorf("error = %q, want it to say the pattern is invalid", err)
 			}
 		})
+	}
+}
+
+// Find on one very long line with a match in every few runes must count each rune
+// of the line once, not once per match: counting from the line's start for every
+// match takes minutes on a minified file.
+func TestFindManyMatchesOnOneLine(t *testing.T) {
+	t.Parallel()
+	const pairs = 250_000
+	b := buffer.New(strings.Repeat("aé", pairs))
+	start := time.Now()
+	ms, err := Find(b, Query{Text: "é"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != pairs {
+		t.Fatalf("matches = %d, want %d", len(ms), pairs)
+	}
+	if last := ms[len(ms)-1]; last != m(0, 2*pairs-1, 0, 2*pairs) {
+		t.Fatalf("last match = %v", last)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("Find took %v: positions are counted from the line start for every match", d)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alecthomas/chroma/v2"
 )
@@ -111,5 +112,21 @@ func BenchmarkTokenizeMarkdown(b *testing.B) {
 		if _, err := Tokenize(lexer, lines); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestMarkdownUnclosedOpenersAreNotExponential(t *testing.T) {
+	t.Parallel()
+	// Every "*" here opens emphasis and none closes it.
+	line := strings.Repeat("*.go ", 60)
+	done := make(chan struct{})
+	go func() {
+		tokenizeMarkdown([]string{line}, false)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tokenizeMarkdown did not finish a line of unclosed emphasis openers")
 	}
 }

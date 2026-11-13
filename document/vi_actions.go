@@ -47,7 +47,7 @@ func toggleRunes(s string) string {
 	return string(out)
 }
 
-// toggleCase swaps the case of the selection of each caret. A caret without a selection
+// ToggleCase swaps the case of the selection of each caret. A caret without a selection
 // swaps the character at it and moves past that character, as vi's ~ does; at the end of
 // a line there is nothing to swap and the caret stays. A selection is replaced by the
 // swapped text and the caret ends after it.

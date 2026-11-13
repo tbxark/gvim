@@ -199,7 +199,9 @@ gvim.context.get(name) -> boolean
 
 A **context** is a named flag the `when` clauses of commands and bindings can test. It is
 plugin-scoped and cleared when the plugin unloads. Names starting with `mode:` belong to the editor
-and cannot be set.
+and cannot be set. A name is 1 to 64 bytes of the characters a `when` name takes, and a plugin sets at
+most 64 (`limit`). `context.get(name)` answers the plugin's own value, and for a name it never set the
+editor's: a built-in context such as `read_only`, a context another plugin set, or the active mode.
 
 ## gvim.input
 

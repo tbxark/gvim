@@ -38,7 +38,7 @@ type dabbrevCycle struct {
 	Index      int
 }
 
-// shows reports whether the open session still describes the text of d.
+// Shows reports whether the open session still describes the text of d.
 func (c *dabbrevCycle) Shows(d *Document) bool {
 	if c.Doc != d || d.Cursor != c.End {
 		return false
@@ -54,7 +54,7 @@ func (c *dabbrevCycle) current() string {
 	return c.Candidates[c.Index]
 }
 
-// begin starts a session for the word that ends at the caret. others are the
+// Begin starts a session for the word that ends at the caret. others are the
 // other open buffers in tab order; their words follow the active buffer's and are
 // read from a bounded middle window per buffer (see DabbrevOtherBufferBytes and
 // DabbrevOtherBufferLimit). A large or virtual other buffer is skipped; a large
@@ -79,7 +79,7 @@ func (c *dabbrevCycle) Begin(d *Document, others []*Document) error {
 	return nil
 }
 
-// step moves to the next text of the cycle. After the last candidate it puts
+// Step moves to the next text of the cycle. After the last candidate it puts
 // the prefix back and ends the session.
 func (c *dabbrevCycle) Step(d *Document) {
 	c.Index++

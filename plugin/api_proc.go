@@ -13,7 +13,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.proc and gvim.env (FINAL 5.8, AMENDMENTS C16). proc.run waits for the process in a
+// gvim.proc and gvim.env. proc.run waits for the process in a
 // Work. proc.spawn returns a Process at once: starting the child happens in a Work, its
 // output and exit come back as stream items that run the callbacks as event-class tasks.
 
@@ -670,10 +670,7 @@ func installProc(e *apiEnv) {
 			L.ArgError(2, "string expected")
 		}
 		if err := pr.write(data); err != nil {
-			v, s := errTuple(err)
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, err)
 		}
 		L.Push(lua.LTrue)
 		return 1
@@ -699,10 +696,7 @@ func installProc(e *apiEnv) {
 			L.ArgError(2, `signal must be "TERM", "KILL", "INT" or "HUP"`)
 		}
 		if err := pr.kill(sig); err != nil {
-			v, s := errTuple(err)
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, err)
 		}
 		L.Push(lua.LTrue)
 		return 1
@@ -718,10 +712,7 @@ func installProc(e *apiEnv) {
 			L.ArgError(n, bad)
 		}
 		if live >= QuotaProcesses {
-			v, s := errTuple(pluginapi.Errf(pluginapi.CodeLimit, "process quota (%d)", QuotaProcesses))
-			L.Push(v)
-			L.Push(s)
-			return 2
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "process quota (%d)", QuotaProcesses))
 		}
 		live++
 		seq++

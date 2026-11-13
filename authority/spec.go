@@ -377,8 +377,12 @@ func QuoteDir(dir string) string {
 
 // RemoteCommand builds the shell command line an SSH exec channel runs: cd to dir (when
 // given), export env entries (when any), then the quoted argv. SSH exec has no cwd/env
-// flags, so this is the composition point.
+// flags, so this is the composition point. An empty argv has no command to build and
+// returns "": the backends refuse it before they get here.
 func RemoteCommand(argv []string, dir string, env map[string]string) string {
+	if len(argv) == 0 {
+		return ""
+	}
 	var b strings.Builder
 	if dir != "" {
 		b.WriteString("cd ")

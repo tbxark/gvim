@@ -13,7 +13,7 @@ func normalizePaste(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
 }
 
-// copyText returns the text a copy or cut takes, and whether it is whole lines.
+// CopyText returns the text a copy or cut takes, and whether it is whole lines.
 // The selections of all carets are joined with a newline, and a block selection
 // keeps an empty row for a line the rectangle misses. With no selection the text
 // is the line of each caret, once, with the break after the last one unless it is
@@ -95,7 +95,7 @@ func (d *Document) copyVirtualBlockText(rect BlockRect) (string, bool, error) {
 	return strings.Join(parts, "\n"), false, nil
 }
 
-// cutLines deletes the line of each caret, with its break, as one undo step. The
+// CutLines deletes the line of each caret, with its break, as one undo step. The
 // last line of the document loses its text only. Carets on one line delete it once.
 func (d *Document) CutLines() {
 	prev := -1
@@ -114,7 +114,7 @@ func (d *Document) CutLines() {
 	})
 }
 
-// pasteText inserts text at every caret, replacing the selections, as one undo
+// PasteText inserts text at every caret, replacing the selections, as one undo
 // step. When the text has as many lines as there are carets, and more than one,
 // caret i gets line i.
 func (d *Document) PasteText(text string) {

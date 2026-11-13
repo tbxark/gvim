@@ -116,7 +116,8 @@ func Scan(lines []string) []Heading {
 		}
 		// A setext heading is written as its text line followed by an
 		// underline, so it is found at the underline, one line after its text.
-		if level, ok := setextUnderline(line); ok && i > 0 && setextText(lines[i-1]) {
+		// The text line must be in the body too: the line closing front matter is not one.
+		if level, ok := setextUnderline(line); ok && i > body && setextText(lines[i-1]) {
 			if n := len(heads); n > 0 && heads[n-1].Line == i-1 {
 				continue // the line above is an ATX heading, not a paragraph
 			}

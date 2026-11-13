@@ -231,14 +231,14 @@ func TestConfigPathsOutput(t *testing.T) {
 				"project  {PROJECT} (exists)\n",
 		},
 		{
-			name: "project file in a parent directory and user file present",
+			name: "project file in a parent directory is not used",
 			setup: func(t *testing.T, base, userFile string) {
 				writeFile(t, filepath.Join(base, ".gvim", "config.json"), "{}")
 				writeFile(t, userFile, "{}")
 			},
-			wantProject: ".gvim/config.json",
+			wantProject: "work/deep/.gvim/config.json",
 			want: "user     {USER} (exists)\n" +
-				"project  {PROJECT} (exists)\n",
+				"project  {PROJECT} (missing)\n",
 		},
 	}
 	for _, tt := range tests {

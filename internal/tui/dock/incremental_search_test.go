@@ -21,9 +21,7 @@ func restoredSearchPanel(t *testing.T, rows ...string) *Panel {
 		Focus:       func() {},
 	})
 	p.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
-	p.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Width: 80, Rows: rows,
-	})
+	p.Restore(terminal.SavedTab{Open: true, Width: 80, Rows: rows})
 	if !p.Scrolling() {
 		t.Fatal("a restored transcript did not open in the scrollback view")
 	}

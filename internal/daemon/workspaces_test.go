@@ -271,10 +271,10 @@ func TestRegistryRootBasedOrder(t *testing.T) {
 	}
 }
 
-// TestRegistryV1FileMigratesOnSave: a registry v1 file (one workspace per root) loads
-// unchanged with its stable id and session directory, and only a later save rewrites it as
-// version 2 - the session directory is never lost.
-func TestRegistryV1FileMigratesOnSave(t *testing.T) {
+// TestRegistryV1FileIsNotLoaded: only the current registry format loads. A version-1 file
+// is reported as a problem and the registry starts without it; Discover mints a new
+// workspace for the root instead of adopting the old one.
+func TestRegistryV1FileIsNotLoaded(t *testing.T) {
 	root := t.TempDir()
 	canonical, err := CanonicalRoot(root)
 	if err != nil {
@@ -284,39 +284,16 @@ func TestRegistryV1FileMigratesOnSave(t *testing.T) {
 	id := strings.Repeat("e", 32)
 	v1 := WorkspaceFile{Version: 1, StableID: id, Root: canonical, Label: "legacy", LastFocusedAt: 7}
 	path := workspaceFileAt(t, reg, v1)
-	dir, err := reg.SessionDir(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("kept"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	list, problems := reg.List()
-	if len(problems) != 0 || len(list) != 1 || list[0].File.StableID != id || list[0].File.Label != "legacy" {
+	if len(list) != 0 || len(problems) != 1 || !strings.Contains(problems[0].Error(), "unsupported version 1") {
 		t.Fatalf("v1 load = %+v, problems %v", list, problems)
 	}
-	// Discover reuses the legacy workspace instead of minting a second one at the root.
 	d, err := reg.Discover(canonical)
-	if err != nil || d.Foreground.File.StableID != id || len(d.Dormant) != 0 {
+	if err != nil || d.Foreground.File.StableID == id {
 		t.Fatalf("Discover over a v1 file = %+v, %v", d, err)
 	}
-	// A later save migrates the file to version 2, keeping identity and session data.
-	if _, err := reg.Rename(id, "migrated"); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "\"version\": 2") {
-		t.Fatalf("the v1 file was not rewritten as v2: %s", raw)
-	}
-	dirAfter, err := reg.SessionDir(id)
-	if err != nil || dirAfter != dir {
-		t.Fatalf("session dir changed after migration: %q, %q, %v", dir, dirAfter, err)
-	}
-	if rawKeep, err := os.ReadFile(filepath.Join(dir, "keep.txt")); err != nil || string(rawKeep) != "kept" {
-		t.Fatalf("session data lost in migration: %q, %v", rawKeep, err)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the old file was removed: %v", err)
 	}
 }
 
@@ -461,12 +438,6 @@ func TestRegistryRemoveKeepsSessionData(t *testing.T) {
 	}
 	if _, err := os.Stat(stash); err != nil {
 		t.Fatalf("Remove deleted session data: %v", err)
-	}
-	if err := reg.RemoveSessionData(ws.File.StableID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(stash); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("RemoveSessionData left the stash: %v", err)
 	}
 }
 

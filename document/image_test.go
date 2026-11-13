@@ -245,3 +245,125 @@ func TestOpenBinaryFileIsNotAnImage(t *testing.T) {
 		t.Error("the binary summary contains a NUL byte")
 	}
 }
+
+// jpegWithMetadata inserts APP1 segments holding n payload bytes in all after the SOI
+// marker of a JPEG, as EXIF, XMP and ICC blocks do. A segment length is 16 bits, so the
+// payload is split into segments of at most 60000 bytes. The frame header is pushed
+// past the head sample.
+func jpegWithMetadata(t *testing.T, w, h, n int) []byte {
+	t.Helper()
+	src := jpegBytes(t, w, h)
+	out := append([]byte{}, src[:2]...)
+	for left := n; left > 0; {
+		size := min(left, 60000)
+		out = append(out, 0xff, 0xe1, byte((size+2)>>8), byte(size+2))
+		out = append(out, make([]byte, size)...)
+		left -= size
+	}
+	return append(out, src[2:]...)
+}
+
+// TestOpenJPEGWithLargeMetadataIsAnImage: a JPEG whose metadata is longer than the 64 KiB
+// head sample still opens as an image on every open path, reading no more than the
+// bounded head.
+func TestOpenJPEGWithLargeMetadataIsAnImage(t *testing.T) {
+	t.Parallel()
+	data := jpegWithMetadata(t, 40, 30, 100<<10)
+	if _, ok := imageInfoOf(data[:largeSampleSize]); ok {
+		t.Fatal("fixture: the sample alone decodes, so the metadata is too short to test")
+	}
+	path := filepath.Join(t.TempDir(), "photo.jpg")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := func(t *testing.T, d *Document) {
+		t.Helper()
+		info, ok := d.Image()
+		if !ok || info.Format != "jpeg" || info.Width != 40 || info.Height != 30 || info.Size != int64(len(data)) {
+			t.Fatalf("Image() = %+v, %v; want a 40x30 jpeg of %d bytes", info, ok, len(data))
+		}
+		if d.Large() || !d.Binary() {
+			t.Fatalf("Large = %v, Binary = %v", d.Large(), d.Binary())
+		}
+	}
+	t.Run("local", func(t *testing.T) {
+		d, err := readDocument(path, loadSpec{Eol: eolLF})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, d)
+	})
+	t.Run("local large", func(t *testing.T) {
+		d, err := readDocument(path, loadSpec{Eol: eolLF, LargeConf: largeSpec{Threshold: 16, FullMax: maxFullLoad}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, d)
+	})
+	for name, conf := range map[string]largeSpec{"remote": {}, "remote large": {Threshold: 16, FullMax: maxFullLoad}} {
+		t.Run(name, func(t *testing.T) {
+			access := &countingRangeAccess{data: data}
+			d, err := readDocument("/remote/photo.jpg", loadSpec{Eol: eolLF, Access: access, LargeConf: conf})
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, d)
+			if access.bytes > jpegMaxHead+largeSampleSize {
+				t.Fatalf("read %d bytes, want at most the %d-byte JPEG head bound", access.bytes, jpegMaxHead)
+			}
+		})
+	}
+}
+
+// TestJPEGFrameBeyondTheBoundIsNotAnImage: metadata past jpegMaxHead stops the scan, and
+// a non-JPEG head never triggers a longer read.
+func TestJPEGFrameBeyondTheBoundIsNotAnImage(t *testing.T) {
+	t.Parallel()
+	reads := 0
+	read := func(n int64) ([]byte, error) {
+		reads++
+		return make([]byte, n), nil
+	}
+	if _, ok := imageInfoOfHead(append([]byte{0x00, 0x01}, make([]byte, 100)...), 1<<30, read); ok || reads != 0 {
+		t.Fatalf("a non-JPEG head: ok = %v, reads = %d", ok, reads)
+	}
+	// Segments of 64 KiB chain up to the bound without ever reaching a frame header.
+	seg := append([]byte{0xff, 0xe1, 0xff, 0xff}, make([]byte, 0xffff-2)...)
+	var data []byte
+	data = append(data, 0xff, 0xd8)
+	for len(data) < jpegMaxHead+len(seg) {
+		data = append(data, seg...)
+	}
+	more := func(n int64) ([]byte, error) { return data[:n], nil }
+	if _, ok := imageInfoOfHead(data[:largeSampleSize], int64(len(data)), more); ok {
+		t.Fatal("a frame header beyond the bound was accepted")
+	}
+}
+
+// TestMirrorKeepsBinaryAndImage: a cross-workspace mirror of an image or binary
+// document is still not text, so it takes the same gates as its owner.
+func TestMirrorKeepsBinaryAndImage(t *testing.T) {
+	t.Parallel()
+	img := newImageDocument("/w/a.png", diskState{}, ImageInfo{Format: "png", Width: 3, Height: 2, Size: 9, Color: "RGBA"})
+	bin := binaryDocument("/w/a.bin", diskState{})
+	for name, owner := range map[string]*Document{"image": img, "binary": bin} {
+		m, err := NewMirrorDocument(owner)
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		if m.Binary() != owner.Binary() || m.IsImage() != owner.IsImage() {
+			t.Errorf("%s mirror: Binary = %v, IsImage = %v", name, m.Binary(), m.IsImage())
+		}
+		if got, ok := m.Image(); ok != owner.IsImage() || (ok && got != *owner.ImagePtr()) {
+			t.Errorf("%s mirror image = %+v, %v", name, got, ok)
+		}
+		stale := newDocument("/w/a", "text")
+		stale.sharedMirror = true
+		if err := stale.SyncMirrorFrom(owner); err != nil {
+			t.Fatal(err)
+		}
+		if stale.Binary() != owner.Binary() || stale.IsImage() != owner.IsImage() {
+			t.Errorf("%s sync: Binary = %v, IsImage = %v", name, stale.Binary(), stale.IsImage())
+		}
+	}
+}

@@ -53,8 +53,8 @@ type SSHOptions struct {
 	KeyboardInteractive func(ctx context.Context, name, instruction string, questions []string, echos []bool) ([]string, error)
 	// KnownHostsPath is the known_hosts file; empty uses ~/.ssh/known_hosts.
 	KnownHostsPath string
-	// KnownHostsPolicy is "strict" (default), "accept-new" (record a first-seen host key
-	// with a notice) or "off" (refused at connect: host keys are always verified).
+	// KnownHostsPolicy is "strict" (default) or "accept-new" (record a first-seen host key
+	// with a notice). There is no "off": host keys are always verified.
 	KnownHostsPolicy string
 	// HostKeyAlgorithms is the ordered server host-key algorithm preference; empty uses
 	// DefaultHostKeyAlgorithms. An unknown name fails the dial clearly.
@@ -154,23 +154,6 @@ type sshBackend struct {
 	// source ("ui", "prompt" or "keyring") for the consent-gated store.
 	usedPassword       string
 	usedPasswordSource string
-}
-
-// ConnectSSH dials the remote and mounts an authority slot over it.
-func ConnectSSH(ctx context.Context, o SSHOptions) (*Authority, error) {
-	b := &sshBackend{opts: o, spec: o.Spec}
-	if err := b.connect(ctx); err != nil {
-		return nil, err
-	}
-	return New(Parts{
-		Files:       newSSHFiles(b),
-		OneShot:     b,
-		LongRunning: b,
-		Terminal:    b,
-		Label:       b.Label(),
-		Remote:      b,
-		RemoteSpec:  &b.spec,
-	}), nil
 }
 
 // NewSSH mounts an SSH slot without dialing: the caller connects with Reconnect (a
@@ -284,7 +267,7 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 	var jumpClient *ssh.Client
 	if res.jump != nil {
 		jumpAddr := net.JoinHostPort(res.jump.host, strconv.Itoa(res.jump.port))
-		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: auth, HostKeyCallback: hostKey, HostKeyAlgorithms: algorithms, Timeout: timeout}, timeout, b.spec.Display())
+		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: auth, HostKeyCallback: hostKey, HostKeyAlgorithms: algorithms, Timeout: timeout}, timeout)
 		if err != nil {
 			return nil, fmt.Errorf("ssh %s: jump %s: %w", b.spec.Display(), jumpAddr, err)
 		}
@@ -311,12 +294,11 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 		}
 	}
 	b.clearUsedPassword()
-	c, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, targetCfg)
+	client, err := handshake(ctx, conn, targetAddr, targetCfg, timeout)
 	if err != nil {
 		closeAll()
 		return nil, fmt.Errorf("ssh %s: %w", b.spec.Display(), err)
 	}
-	client := ssh.NewClient(c, chans, reqs)
 
 	b.mu.Lock()
 	b.resolved = res
@@ -357,23 +339,41 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 }
 
 // dialSSHConn dials addr and completes the SSH handshake.
-func dialSSHConn(ctx context.Context, addr string, cfg *ssh.ClientConfig, timeout time.Duration, display string) (*ssh.Client, error) {
+func dialSSHConn(ctx context.Context, addr string, cfg *ssh.ClientConfig, timeout time.Duration) (*ssh.Client, error) {
 	var d net.Dialer
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	conn, err := d.DialContext(dialCtx, "tcp", addr)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
-	if dl, ok := dialCtx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
-	}
-	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	client, err := handshake(ctx, conn, addr, cfg, timeout)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	_ = conn.SetDeadline(time.Time{})
+	return client, nil
+}
+
+// handshake completes the SSH handshake over conn. ssh.NewClientConn ignores
+// ClientConfig.Timeout and the context, so a server that accepts the connection and
+// then stalls would block it forever: the handshake is bounded by timeout and by ctx
+// by closing conn. A tunnelled conn (a jump channel) has no deadlines, hence the close.
+func handshake(ctx context.Context, conn net.Conn, addr string, cfg *ssh.ClientConfig, timeout time.Duration) (*ssh.Client, error) {
+	hctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	stop := context.AfterFunc(hctx, func() { _ = conn.Close() })
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if !stop() {
+		// The close already ran: the handshake lost the race with the deadline.
+		if err == nil {
+			_ = c.Close()
+		}
+		return nil, fmt.Errorf("handshake with %s: %w", addr, hctx.Err())
+	}
+	if err != nil {
+		return nil, err
+	}
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
@@ -741,6 +741,10 @@ func (b *sshBackend) Close() error {
 	return nil
 }
 
+// errEmptyArgv is the refusal of a remote command with no program: its command line
+// would be only the cd prefix.
+var errEmptyArgv = errors.New("authority: remote command has no program")
+
 // runSession runs a one-shot command and maps ssh exit statuses into ProcResult. The
 // one-shot surface keeps the port's contract: output is collected without a transport
 // cap here (callers bound it with ProcOptions.MaxOutput where they need to).
@@ -753,6 +757,9 @@ func (b *sshBackend) runSession(ctx context.Context, argv []string, o hostos.Pro
 // remote process never blocks on a full pipe) while recording that the answer was over
 // the cap; the caller can then reject the answer instead of using a truncated one.
 func (b *sshBackend) runSessionBuffered(ctx context.Context, argv []string, o hostos.ProcOptions, stdout, stderr *boundBuffer) (hostos.ProcResult, error) {
+	if len(argv) == 0 {
+		return hostos.ProcResult{}, errEmptyArgv
+	}
 	client, err := b.clientSnapshot()
 	if err != nil {
 		return hostos.ProcResult{}, err
@@ -804,6 +811,9 @@ func (b *sshBackend) Run(ctx context.Context, argv []string, o hostos.ProcOption
 
 // Start is the long-running stdio surface.
 func (b *sshBackend) Start(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.Proc, error) {
+	if len(argv) == 0 {
+		return nil, errEmptyArgv
+	}
 	client, err := b.clientSnapshot()
 	if err != nil {
 		return nil, err
@@ -834,7 +844,7 @@ func (b *sshBackend) Start(ctx context.Context, argv []string, o hostos.ProcOpti
 		_ = sess.Close()
 		return nil, err
 	}
-	p := &sshProc{sess: sess, stdin: stdin, backend: b, chunks: make(chan hostos.ProcChunk, 64)}
+	p := &sshProc{sess: sess, stdin: stdin, backend: b, chunks: make(chan hostos.ProcChunk, 64), waitDone: make(chan struct{})}
 	p.pump(stdout, false)
 	p.pump(stderr, true)
 	return p, nil
@@ -941,6 +951,12 @@ type sshProc struct {
 	stdin   io.WriteCloser
 	backend *sshBackend
 	chunks  chan hostos.ProcChunk
+	// waitOnce starts the one goroutine that reaps the session; every Wait call
+	// waits for its result, so a second Wait does not start a goroutine that
+	// nothing would ever finish.
+	waitOnce sync.Once
+	waitDone chan struct{}
+	waitErr  error
 }
 
 // pump copies one stream into the chunk channel.
@@ -991,12 +1007,17 @@ func (p *sshProc) Output(ctx context.Context) (hostos.ProcChunk, bool) {
 	}
 }
 func (p *sshProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
-	done := make(chan error, 1)
-	go func() { done <- p.sess.Wait() }()
+	p.waitOnce.Do(func() {
+		go func() {
+			p.waitErr = p.sess.Wait()
+			close(p.waitDone)
+		}()
+	})
 	select {
 	case <-ctx.Done():
 		return hostos.ProcResult{}, ctx.Err()
-	case err := <-done:
+	case <-p.waitDone:
+		err := p.waitErr
 		res := hostos.ProcResult{}
 		var exit *ssh.ExitError
 		switch {

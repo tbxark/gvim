@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 )
 
-// Plugin decorations (stage S15, AMENDMENTS C13). The decoration store belongs to the
+// Plugin decorations. The decoration store belongs to the
 // root model, which paints it; the app joins it to the editor. The store is made here and
 // the root reads it through DecorStore, so the one store that the editor's change listener
 // moves is the one the painter reads.

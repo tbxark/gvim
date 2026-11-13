@@ -14,7 +14,7 @@
 -- Every call is `git -c core.fsmonitor=false -c core.pager=cat -c diff.external=
 -- -c core.attributesFile=<null device> -c protocol.ext.allow=never <args>` with
 -- --no-ext-diff --no-textconv where git takes them, and GIT_OPTIONAL_LOCKS=0
--- GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 in the environment (AMENDMENTS C28): reading
+-- GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 in the environment: reading
 -- a repository never runs a program the repository names. Without a git binary, `root` and
 -- `branch` answer from the editor's own reader; `run`, `show`, `ls_files`, `blame` and
 -- `commit` return "unsupported: git binary not found".

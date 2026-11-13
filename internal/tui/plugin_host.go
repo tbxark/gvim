@@ -24,7 +24,7 @@ type pluginHost struct {
 	m *Model
 	// shared, when set, is the daemon-wide host mux: m is nil and the active model is
 	// looked up on every call, so one runtime's host calls route to whichever workspace
-	// model is active (#19b shared-runtime slice).
+	// model is active.
 	shared *PluginShared
 }
 
@@ -39,8 +39,6 @@ func (h *pluginHost) model() *Model {
 
 var _ pluginapi.Host = (*pluginHost)(nil)
 
-// ed returns the editor's plugin port (RootPorts.PluginEditor), or a port that refuses
-// everything when there is none.
 // Feature reports the host capabilities gvim.has may ask about (the optional host feature
 // seam; see installDecor).
 func (h *pluginHost) Feature(name string) bool {
@@ -51,6 +49,8 @@ func (h *pluginHost) Feature(name string) bool {
 	return false
 }
 
+// ed returns the editor's plugin port (RootPorts.PluginEditor), or a port that refuses
+// everything when there is none.
 func (h *pluginHost) ed() pluginapi.BufferEditor {
 	m := h.model()
 	if m == nil {
@@ -499,7 +499,7 @@ func (h *pluginHost) Notify(plugin string, level pluginapi.Level, msg string) {
 }
 
 // SetClipboard puts text on the clipboard the way a copy does. Calls in one slice are
-// coalesced: only the last text is written, once, by the pump (S13-3).
+// coalesced: only the last text is written, once, by the pump.
 func (h *pluginHost) SetClipboard(text string) {
 	m := h.model()
 	ui := &m.plug.ui
@@ -539,18 +539,16 @@ func (h *pluginHost) ScreenSize() (w, ht int) { return h.model().width, h.model(
 // the commands here, the others in plugin_<area>.go. The Host calls carry no plugin, so
 // a wait cannot be matched to its owner here; the runtime drops the completions of a
 // dead generation instead.
-func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
+func (h *pluginHost) OwnerGone(plugin string, _ uint64) {
 	m := h.model()
 	m.dropCommands(plugin)
-	m.plugKeysGone(plugin, gen)
-	m.plugPanelsGone(plugin, gen)
-	m.plugMenusGone(plugin, gen)
-	m.plugGroupsGone(plugin, gen)
-	m.plugPromptsGone(plugin, gen)
-	m.plugStatusGone(plugin, gen)
-	m.plugDecorGone(plugin, gen)
-	m.plugWinGone(plugin, gen)
-	m.plugVirtualGone(plugin, gen)
+	m.plugKeysGone(plugin)
+	m.plugPanelsGone(plugin)
+	m.plugMenusGone(plugin)
+	m.plugGroupsGone(plugin)
+	m.plugStatusGone(plugin)
+	m.plugDecorGone(plugin)
+	m.plugVirtualGone(plugin)
 	m.plugViewStateDropOwner(plugin)
 	m.plugLineTargetsDropOwner(plugin)
 	m.plug.explorer.dropOwner(plugin)

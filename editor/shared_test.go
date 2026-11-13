@@ -847,3 +847,86 @@ func TestSharedBuffersSaveAsAsyncWindowNoIndependentCopy(t *testing.T) {
 		t.Fatalf("target = %q, %v, want the planned text", raw, err)
 	}
 }
+
+// TestSharedBuffersSkipBinary: a binary file is not text, so a second workspace opens
+// its own binary document instead of a text mirror of the first one's summary.
+func TestSharedBuffersSkipBinary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blob.bin")
+	if err := os.WriteFile(path, []byte{0, 1, 2, 3, 0, 255}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	for name, e := range map[string]*Editor{"first": a, "second": b} {
+		if d := e.Active(); !d.Binary() || d.SharedMirror() {
+			t.Errorf("%s workspace: binary = %v, mirror = %v, want a binary document", name, d.Binary(), d.SharedMirror())
+		}
+	}
+	if shared.Has(shared.CanonicalPath(path)) {
+		t.Error("a binary file was registered as a shared buffer")
+	}
+}
+
+// TestCloseByPathRefusedTransferDetachesNothing: when the ownership transfer of a later
+// victim is refused, the earlier victims are not detached either.
+func TestCloseByPathRefusedTransferDetachesNothing(t *testing.T) {
+	dir := t.TempDir()
+	var paths []string
+	for _, name := range []string{"one.txt", "two.txt"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(name+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	for _, p := range paths {
+		if err := a.OpenFile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared.Focus(b)
+	for _, p := range paths {
+		if err := b.OpenFile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared.Focus(a) // a owns both files again, b mirrors them
+	for i, d := range a.docs {
+		if d.SharedMirror() {
+			t.Fatalf("tab %d of the owner is a mirror", i)
+		}
+	}
+	calls := 0
+	shared.Deny = func(owner, requester *Editor) error {
+		calls++
+		if calls >= 2 {
+			return errTestShareConflict
+		}
+		return nil
+	}
+	if err := a.CloseByPath(dir, true); err == nil {
+		t.Fatal("CloseByPath succeeded although a transfer was refused")
+	}
+	shared.Deny = nil
+	if len(a.docs) != 2 {
+		t.Fatalf("tabs = %d, want both kept", len(a.docs))
+	}
+	for i, d := range a.docs {
+		if d.SharedMirror() {
+			t.Errorf("tab %d was detached to a snapshot although the close was refused", i)
+		}
+	}
+}

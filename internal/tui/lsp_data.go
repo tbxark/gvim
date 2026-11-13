@@ -140,11 +140,11 @@ const lspTokenPadding = 20
 func (m *Model) lspHints(msg lspHintsDoneMsg) {
 	s := &m.lsp
 	if msg.err != nil {
-		doc := m.ed.Active()
-		lang := ""
-		if doc != nil {
-			lang = m.lspLanguage(doc)
+		doc, ok := m.lspDocFor(msg.path)
+		if !ok {
+			return
 		}
+		lang := m.lspLanguage(doc)
 		if s.hintErr == nil {
 			s.hintErr = make(map[string]string)
 		}
@@ -172,11 +172,11 @@ func (m *Model) lspHints(msg lspHintsDoneMsg) {
 func (m *Model) lspTokens(msg lspTokensDoneMsg) {
 	s := &m.lsp
 	if msg.err != nil {
-		doc := m.ed.Active()
-		lang := ""
-		if doc != nil {
-			lang = m.lspLanguage(doc)
+		doc, ok := m.lspDocFor(msg.path)
+		if !ok {
+			return
 		}
+		lang := m.lspLanguage(doc)
 		if s.tokenErr == nil {
 			s.tokenErr = make(map[string]string)
 		}
@@ -196,7 +196,7 @@ func (m *Model) lspTokens(msg lspTokensDoneMsg) {
 	s.tokens[msg.path] = msg.tokens
 }
 
-// lspDocFor reports whether path is an open tab of the editor.
+// lspDocFor returns the document of the open tab of the editor at path.
 func (m *Model) lspDocFor(path string) (Document, bool) {
 	tabs, ok := m.ed.(tabDocs)
 	if !ok {
@@ -249,7 +249,7 @@ func lspInlayHintCells(h InlayHint, lineLen int) string {
 	return text + " "
 }
 
-// lspDataDecoration wraps the pane's overlay hooks with the LSP data of doc: inlay
+// lspData wraps the pane's overlay hooks with the LSP data of doc: inlay
 // hints as end-of-line virtual text and semantic tokens as styled spans. The hooks
 // of the pane are composed, never replaced, so a plugin's decorations keep
 // painting. The spans have priority -1: they paint below the plugin decorations
@@ -357,10 +357,11 @@ func (m *Model) semanticTokenStyle(tok SemanticToken) grid.Style {
 func (m *Model) lspFolds(msg lspFoldsDoneMsg) {
 	s := &m.lsp
 	if msg.err != nil {
-		lang := ""
-		if doc := m.ed.Active(); doc != nil {
-			lang = m.lspLanguage(doc)
+		doc, ok := m.lspDocFor(msg.path)
+		if !ok {
+			return
 		}
+		lang := m.lspLanguage(doc)
 		if s.foldErr == nil {
 			s.foldErr = make(map[string]string)
 		}

@@ -71,13 +71,7 @@ func (m *Model) windowSync() tea.Cmd {
 	}
 	loader := m.largeWindows
 	if w, ok := loader.PendingLargeWindow(); ok {
-		m.large.windowBusy = true
-		ctx, gen := m.large.context(), m.large.gen
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(ctx, windowLoadTimeout)
-			defer cancel()
-			return windowFetchedMsg{gen: gen, err: loader.LoadLargeWindow(ctx, w)}
-		}
+		return m.windowLoadCmd(loader, w)
 	}
 	// The paint that runs after this update may record the miss: check once shortly
 	// after it. Do not arm another check from the check itself, so an idle remote
@@ -94,6 +88,17 @@ func (m *Model) windowSync() tea.Cmd {
 	return tea.Tick(windowPollDelay, func(time.Time) tea.Msg { return windowPollMsg{gen: gen} })
 }
 
+// windowLoadCmd loads window w in a command, bounded by windowLoadTimeout.
+func (m *Model) windowLoadCmd(loader LargeWindowLoader, w LargeWindow) tea.Cmd {
+	m.large.windowBusy = true
+	ctx, gen := m.large.context(), m.large.gen
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, windowLoadTimeout)
+		defer cancel()
+		return windowFetchedMsg{gen: gen, err: loader.LoadLargeWindow(ctx, w)}
+	}
+}
+
 // windowPolled handles the delayed check: a missed window is loaded, and otherwise
 // the chain stops until the next update.
 func (m *Model) windowPolled(msg windowPollMsg) tea.Cmd {
@@ -106,13 +111,7 @@ func (m *Model) windowPolled(msg windowPollMsg) tea.Cmd {
 	}
 	loader := m.largeWindows
 	if w, ok := loader.PendingLargeWindow(); ok {
-		m.large.windowBusy = true
-		ctx, gen := m.large.context(), m.large.gen
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(ctx, windowLoadTimeout)
-			defer cancel()
-			return windowFetchedMsg{gen: gen, err: loader.LoadLargeWindow(ctx, w)}
-		}
+		return m.windowLoadCmd(loader, w)
 	}
 	// No miss: the next update arms the next check. Marking this so the batch added
 	// after this message does not arm one immediately (the idle spin).

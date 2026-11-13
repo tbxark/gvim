@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// sortLines sorts the lines of the selection, or of the whole document when nothing
+// SortLines sorts the lines of the selection, or of the whole document when nothing
 // is selected. A selection covers whole lines (see selectedLines). The order is the
 // byte order of the text, so uppercase letters sort before lowercase. The empty
 // line after a final break is not a line of the text, so it stays at the end. The
@@ -118,10 +118,8 @@ func enclosingBrackets(line string, col int) (inFrom, inTo, outFrom, outTo int, 
 // taken only when it is larger than the selection, so a press that changes nothing
 // means the buffer is already selected.
 func (d *Document) ExpandSelection() {
-	cur := buffer.Selection{Anchor: d.Cursor, Head: d.Cursor}
-	if d.Sel != nil {
-		cur = *d.Sel
-	}
+	d.dropStaleSelHistory()
+	cur := d.currentSelection()
 	from, to := cur.Ordered()
 	var levels []buffer.Selection
 	if wFrom, wTo, ok := d.wordAt(d.Cursor); ok {
@@ -151,23 +149,41 @@ func (d *Document) ExpandSelection() {
 		if from.Less(lvFrom) || lvTo.Less(to) || (lvFrom == from && lvTo == to) {
 			continue
 		}
-		if d.Sel != nil {
-			d.selHistory = append(d.selHistory, *d.Sel)
-		} else {
-			d.selHistory = append(d.selHistory, buffer.Selection{Anchor: d.Cursor, Head: d.Cursor})
-		}
+		d.selHistory = append(d.selHistory, cur)
 		d.SetRange(lvFrom, lvTo)
+		d.selHistoryAt = d.currentSelection()
 		return
 	}
 }
 
+// currentSelection is the selection, or the empty selection at the caret.
+func (d *Document) currentSelection() buffer.Selection {
+	if d.Sel != nil {
+		return *d.Sel
+	}
+	return buffer.Selection{Anchor: d.Cursor, Head: d.Cursor}
+}
+
+// dropStaleSelHistory forgets the recorded selections when the selection is no longer
+// the one the last expand or shrink left: a caret move or a new selection since then
+// ends the chain, so a later shrink cannot restore a selection from before it.
+func (d *Document) dropStaleSelHistory() {
+	if len(d.selHistory) > 0 && d.currentSelection() != d.selHistoryAt {
+		d.selHistory = nil
+	}
+}
+
 // ShrinkSelection restores the narrower selection from before the last ExpandSelection.
+// It does nothing once the selection was changed by anything but an expand or a shrink.
 func (d *Document) ShrinkSelection() {
+	d.dropStaleSelHistory()
 	if len(d.selHistory) == 0 {
 		return
 	}
 	prev := d.selHistory[len(d.selHistory)-1]
 	d.selHistory = d.selHistory[:len(d.selHistory)-1]
+	// The text may have changed since the selection was recorded.
+	prev.Anchor, prev.Head = d.Buffer.Clamp(prev.Anchor), d.Buffer.Clamp(prev.Head)
 	if prev.Anchor == prev.Head {
 		d.Cursor = prev.Head
 		d.Sel = nil
@@ -175,6 +191,7 @@ func (d *Document) ShrinkSelection() {
 		from, to := prev.Ordered()
 		d.SetRange(from, to)
 	}
+	d.selHistoryAt = d.currentSelection()
 }
 
 // wordAt returns the word that p is in, or the word that ends just before p. ok is
@@ -191,7 +208,7 @@ func (d *Document) wordAt(p buffer.Pos) (from, to buffer.Pos, ok bool) {
 	return from, to, true
 }
 
-// trimTrailing removes the trailing blanks of every line, as one undo step. It
+// TrimTrailing removes the trailing blanks of every line, as one undo step. It
 // reports whether the text changed. The caret and selection are kept inside the
 // text afterwards.
 func (d *Document) TrimTrailing() bool {
@@ -204,7 +221,7 @@ func (d *Document) TrimTrailing() bool {
 	return true
 }
 
-// ensureFinalLineBreak adds a final line break when the text lacks one, as one undo
+// EnsureFinalLineBreak adds a final line break when the text lacks one, as one undo
 // step. It reports whether the text changed.
 func (d *Document) EnsureFinalLineBreak() bool {
 	before := d.ContentMark()
@@ -212,7 +229,7 @@ func (d *Document) EnsureFinalLineBreak() bool {
 	return d.ContentMark() != before
 }
 
-// clampToText moves the caret and the selection back into the text after an edit
+// ClampToText moves the caret and the selection back into the text after an edit
 // that may have shortened it. A selection that becomes empty is cleared.
 func (d *Document) ClampToText() {
 	if caret := d.Buffer.Clamp(d.Cursor); caret != d.Cursor {

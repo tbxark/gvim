@@ -23,15 +23,11 @@ func TestSidebarStateConversion(t *testing.T) {
 		ExplorerScroll:       2,
 		ContentsOpen:         true,
 		ContentsCollapsed:    true,
-		ContentsRows:         11,
 		ContentsScroll:       1,
 		DiagnosticsOpen:      true,
 		DiagnosticsCollapsed: true,
-		DiagnosticsRows:      7,
-		ExplorerRows:         6,
 		SectionRows:          map[string]int{"explorer": 6, "contents": 11, "diagnostics": 7, "plugin:1": 5},
 		PluginOrder:          []string{"3", "1"},
-		PluginRows:           map[string]int{"1": 5},
 		PluginCollapsed:      map[string]bool{"3": true},
 	}
 	saved := SaveSidebarState(ui)
@@ -72,11 +68,9 @@ func TestWriteSessionKeepsSidebarState(t *testing.T) {
 		Width:             explorer.ColumnsWidth(40),
 		Side:              explorer.SideRight,
 		ContentsOpen:      true,
-		ContentsRows:      9,
 		DiagnosticsOpen:   true,
-		DiagnosticsRows:   5,
+		SectionRows:       map[string]int{"contents": 9, "diagnostics": 5, "plugin:7": 4},
 		PluginOrder:       []string{"7"},
-		PluginRows:        map[string]int{"7": 4},
 		PluginCollapsed:   map[string]bool{"7": true},
 	}
 	ed := apptest.NewSessionEditor()

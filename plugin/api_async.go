@@ -12,7 +12,7 @@ import (
 
 // gvim.async: spawn, all, suspend, and the Task handle. The primitives live here because
 // the task and yield protocol belongs to the runtime core. suspend and Task:wait take an
-// optional timeout_ms (AMENDMENTS C28): a parked task that is not woken in time resumes
+// optional timeout_ms: a parked task that is not woken in time resumes
 // with nil, "timeout: ...".
 
 func init() {

@@ -201,6 +201,46 @@ func TestFindReferencesHideCommand(t *testing.T) {
 	}
 }
 
+// Hiding the list discards the preview tab the last selection opened, like Esc does.
+func TestFindReferencesHideClosesThePreviewTab(t *testing.T) {
+	t.Parallel()
+	host, buf := findRefHost(t)
+	if err := host.SetCursor(buf, pluginapi.Pos{Line: 2, Col: 5}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	host.SetFile("/work/b.go", "one\ntwo\nthree\n")
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		return []any{refLocation("/work/a.go", 2, 5), refLocation("/work/b.go", 1, 0)}, ""
+	}
+	h := startFindRef(t, host)
+	h.OS.SetFile("/work/b.go", "one\ntwo\nthree\n")
+	if err := h.Run(findRefPlugin+".show_references", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.CompleteLSP()
+	o := h.Host.UI().Last("picker")
+	if o == nil {
+		t.Fatal("no references list opened")
+	}
+	h.Resolve(pluginapi.Completion{Token: o.Token, Kind: "move", Values: []any{1}, More: true})
+	h.CompleteBuffers()
+	b := host.FindBuffer("/work/b.go")
+	if b == 0 {
+		t.Fatal("the preview did not open b.go")
+	}
+	for _, fb := range host.Buffers {
+		if fb.Info.ID == b {
+			fb.Info.Preview = true
+		}
+	}
+	if err := h.Run(findRefPlugin+".hide_references", nil); err != nil {
+		t.Fatal(err)
+	}
+	if host.FindBuffer("/work/b.go") != 0 {
+		t.Errorf("the preview tab of b.go is still open after hide (calls %v)", host.Calls())
+	}
+}
+
 func TestFindReferencesEmptyAndErrors(t *testing.T) {
 	t.Parallel()
 	t.Run("empty", func(t *testing.T) {

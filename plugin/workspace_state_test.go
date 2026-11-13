@@ -228,3 +228,27 @@ T.command("get", function() T.spy(tostring(gvim.state.get("k"))) end)`)
 		t.Fatalf("B namespace after switch = %v, %v", v, ok)
 	}
 }
+
+// TestWorkspaceStateSwitchKeepsAQueuedWrite: a write that is queued but has not run when the
+// workspace switches still lands in its own file; the switch only supersedes writes of the
+// namespace it enters.
+func TestWorkspaceStateSwitchKeepsAQueuedWrite(t *testing.T) {
+	fos := plugintest.NewFakeOS()
+	pathA := "/sessions/aaaa/plugin-state.json"
+	pathB := "/sessions/bbbb/plugin-state.json"
+	h := startWorkspace(t, fos, pathA, nil, `
+T.command("set", function() gvim.state.set("k", "A") end)`)
+	if err := h.Run("t.set", nil); err != nil {
+		t.Fatal(err)
+	}
+	held := h.AdvanceHold(time.Second) // the debounce fired: the write is queued, not run
+	if len(held) == 0 {
+		t.Fatal("no write was queued")
+	}
+	h.RT.SwitchWorkspaceState(pathB, nil, false)
+	h.RunWork(held)
+	h.Settle()
+	if v, ok := workspaceValue(t, fos, pathA, "t", "k"); !ok || v != "A" {
+		t.Fatalf("A namespace after a switch over a queued write = %v, %v", v, ok)
+	}
+}

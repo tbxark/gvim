@@ -89,3 +89,39 @@ func TestRemoteSetRootDiscardsInFlightProbe(t *testing.T) {
 		t.Fatalf("post-SetRoot probe command = %q, want the new root", last)
 	}
 }
+
+// A capture that ran across a Set stores nothing: its delta belongs to the old recipe.
+func TestRemoteSetDiscardsInFlightCapture(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	capture := func(_ context.Context, command string) (string, error) {
+		if strings.Contains(command, "OLD") {
+			once.Do(func() { close(started) })
+			<-release
+			return "A=1\x00OLD_ONLY=1\x00", nil
+		}
+		if strings.Contains(command, "set -a;") {
+			return "A=1\x00NEW_ONLY=1\x00", nil
+		}
+		return "A=1\x00", nil
+	}
+	detect := func(context.Context, string) (string, error) { return "0\n", nil }
+	p := NewRemote("/remote/proj", remoteGenDetectors(), func() bool { return true }, detect, capture)
+	if err := p.Set("OLD", "", config.EnvKindShell); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan []string)
+	go func() { done <- p.Overlay() }()
+	<-started
+	if err := p.Set("NEW", "", config.EnvKindShell); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if got := <-done; len(got) != 0 {
+		t.Fatalf("the in-flight overlay returned %v, want nothing from the replaced recipe", got)
+	}
+	if got := strings.Join(p.Overlay(), ","); got != "NEW_ONLY=1" {
+		t.Fatalf("overlay after Set = %q, want NEW_ONLY=1", got)
+	}
+}

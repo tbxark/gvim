@@ -6,8 +6,8 @@
 // Enumeration prefers git: inside a work tree, "git ls-files" lists tracked and
 // untracked files that .gitignore does not exclude. Elsewhere, or when git is
 // missing, a walk of the directory honours .gitignore through explorer.
-// Start runs enumeration in the background so the picker can open at once, with
-// the status "Loading files…" until the list is complete.
+// Start runs enumeration in the background so the picker can open at once, while the
+// list is still loading.
 package finder
 
 import (
@@ -25,9 +25,6 @@ import (
 // MaxFiles caps the list. Enumeration stops at this many files, as Fresh's
 // MAX_FILES does.
 const MaxFiles = 50000
-
-// LoadingStatus is the status line shown while enumeration is running.
-const LoadingStatus = "Loading files…"
 
 // skipDirs are the directories the walk never enters. The list is Fresh's
 // IGNORED_DIRS; the git path does not need it, because git's own exclusions
@@ -334,16 +331,6 @@ func (x *Index) Restart() {
 	ctx, cancel := context.WithCancel(x.parent)
 	x.cancel = cancel
 	go x.run(ctx, gen, done)
-}
-
-// add appends one file to the current run. It is the one-file form the older tests use;
-// the running enumeration uses addFor with its own generation so a superseded run cannot
-// inject files after a Restart.
-func (x *Index) add(rel string) bool {
-	x.mu.Lock()
-	gen := x.gen
-	x.mu.Unlock()
-	return x.addFor(gen, rel)
 }
 
 // addFor appends one file of run gen. It returns false when the run was superseded or

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tbxark/gvim/internal/tui/browser"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -170,7 +171,7 @@ func (m *Model) compareMerge(toOther bool) {
 		m.notice = uiText("gvim.notice.compare.cannot_merge", "Compare: this editor cannot merge a change")
 		return
 	}
-	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
+	nodes := [2]*split.Node{m.splits.Root.A, m.splits.Root.B}
 	side := 0
 	if m.splits.Focus == nodes[1] {
 		side = 1

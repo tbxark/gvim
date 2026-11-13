@@ -3,8 +3,9 @@ package tui
 import (
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/theme"
 )
@@ -23,7 +24,7 @@ func TestRemoteExplorerUpdateReadsNothing(t *testing.T) {
 	loader := remoteTreeTestLoader()
 	m, tree := remoteExplorerModel(t, loader)
 	// The initial load is a command as well.
-	init := m.remoteExplorerInitialCmd()
+	init := m.remoteExplorerReloadCmd()
 	if init == nil {
 		t.Fatal("a remote tree got no initial load command")
 	}

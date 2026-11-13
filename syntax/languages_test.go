@@ -192,6 +192,13 @@ func TestLanguageTokens(t *testing.T) {
 			absent: []string{"#define MAX(a, b) ((a) > (b) ? (a) : (b))|keyword"},
 		},
 		{
+			name:   "only the naming c directives paint their operand as a constant",
+			file:   "a.c",
+			src:    "#if FOO\n#elifdef BAR\n#endif\n",
+			want:   []string{"#if|keyword", "#elifdef|keyword", "BAR|constant"},
+			absent: []string{"FOO|constant"},
+		},
+		{
 			name: "java has numbers and annotations",
 			file: "a.java",
 			src:  "@Entity\nclass A {\n    int x = 0x1F + 1_000 + 10L + 3.5f + 1e3 + 0b101;\n    @Override public String s() { return \"s\"; }\n}\n",

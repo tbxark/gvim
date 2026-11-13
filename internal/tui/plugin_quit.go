@@ -9,7 +9,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
-// quit_discard (stage S22, AMENDMENTS C15) is the hidden action behind vi's :qa!. It is not
+// quit_discard is the hidden action behind vi's :qa!. It is not
 // in the palette, the menus or the keymap; a plugin reaches it with gvim.command.run, and
 // it is a reentrant action (plugin_cmds.go), so it runs after the Lua slice that asked.
 //
@@ -18,7 +18,7 @@ import (
 // answer of the unsaved-changes dialog does, and then Model.quit takes the same final path
 // as a quit that discarded its last dirty tab. Nothing is saved.
 
-// quitDiscardTag is the tag of the question, which pluginAnswer routes to quitDiscardAnswer.
+// quitDiscardTag is the tag of the question, which answer routes to quitDiscardAnswer.
 type quitDiscardTag struct{}
 
 // maxNamedTabs is how many tab names the question lists before it counts the rest.
@@ -54,18 +54,9 @@ func (m *Model) quitDiscardAnswer(d prompt.Done) tea.Cmd {
 	if d.Outcome != prompt.Yes {
 		return nil
 	}
-	if t := m.tabPort(); t != nil {
-		tabs := m.ed.Tabs()
-		for i := len(tabs) - 1; i >= 0; i-- {
-			if !tabs[i].Modified {
-				continue
-			}
-			if err := m.closeTab(t, i, true); err != nil {
-				m.notice = err.Error()
-				return nil
-			}
-		}
-		m.syncViewport()
+	if err := m.QuitDiscardModified(); err != nil {
+		m.notice = err.Error()
+		return nil
 	}
 	return m.quit()
 }

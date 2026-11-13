@@ -21,15 +21,11 @@ func SidebarState(s session.Session) *tui.SidebarState {
 		ExplorerScroll:       s.Sidebar.ExplorerScroll,
 		ContentsOpen:         s.Sidebar.ContentsOpen,
 		ContentsCollapsed:    s.Sidebar.ContentsCollapsed,
-		ContentsRows:         s.Sidebar.ContentsRows,
 		ContentsScroll:       s.Sidebar.ContentsScroll,
 		DiagnosticsOpen:      s.Sidebar.DiagnosticsOpen,
 		DiagnosticsCollapsed: s.Sidebar.DiagnosticsCollapsed,
-		DiagnosticsRows:      s.Sidebar.DiagnosticsRows,
-		ExplorerRows:         s.Sidebar.ExplorerRows,
 		SectionRows:          s.Sidebar.SectionRows,
 		PluginOrder:          s.Sidebar.PluginOrder,
-		PluginRows:           s.Sidebar.PluginRows,
 		PluginCollapsed:      s.Sidebar.PluginCollapsed,
 	}
 	if side, ok := explorer.ParseSide(s.Sidebar.Side); ok {
@@ -57,15 +53,11 @@ func SaveSidebarState(st tui.SidebarState) *session.SidebarState {
 		ExplorerScroll:       st.ExplorerScroll,
 		ContentsOpen:         st.ContentsOpen,
 		ContentsCollapsed:    st.ContentsCollapsed,
-		ContentsRows:         st.ContentsRows,
 		ContentsScroll:       st.ContentsScroll,
 		DiagnosticsOpen:      st.DiagnosticsOpen,
 		DiagnosticsCollapsed: st.DiagnosticsCollapsed,
-		DiagnosticsRows:      st.DiagnosticsRows,
-		ExplorerRows:         st.ExplorerRows,
 		SectionRows:          st.SectionRows,
 		PluginOrder:          st.PluginOrder,
-		PluginRows:           st.PluginRows,
 		PluginCollapsed:      st.PluginCollapsed,
 	}
 }

@@ -73,28 +73,8 @@ func NewTargetProvers(fs FileSystem) NewTargetProver {
 	return p
 }
 
-// NoFollowWriteStreamer is the copy-safe variant of WriteStreamer: it opens the same
-// atomic temp-file stream but does NOT resolve a symbolic link at the final destination
-// component. Commit therefore renames the temporary file over the path itself (replacing
-// a link, never following it), which lets a caller that already canonicalized a
-// destination rely on that proof even if another writer swaps in a symlink afterwards.
-//
-// The ordinary WriteStreamer keeps the save behavior of following the final symlink, so
-// this is a separate optional capability: a backend that only follows links cannot prove
-// the copy-safe property and the copy path refuses it.
-type NoFollowWriteStreamer interface {
-	WriteStreamNoFollow(ctx context.Context, path string, o hostos.WriteOptions) (WriteStream, error)
-}
-
-// NoFollowWriteStreams returns the copy-safe streamed-write surface of fs, or nil.
-func NoFollowWriteStreams(fs FileSystem) NoFollowWriteStreamer {
-	s, _ := fs.(NoFollowWriteStreamer)
-	return s
-}
-
 var _ WriteStreamer = (*sshFiles)(nil)
 var _ WriteStreamer = (*local)(nil)
-var _ NoFollowWriteStreamer = (*local)(nil)
 
 // validateStreamOptions rejects the write options a stream cannot honor. A stream is always
 // an atomic replacement (its whole point is a temporary file renamed over the target), so

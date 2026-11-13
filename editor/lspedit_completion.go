@@ -1,6 +1,6 @@
 package editor
 
-// Multi-cursor snippet and auto-import completion acceptance (task-191).
+// Multi-cursor snippet and auto-import completion acceptance.
 //
 // Fresh's insert_completion_text replaces each cursor's own word prefix with the expanded
 // snippet text in one bulk edit and then walks every cursor to $0; its additional edits
@@ -28,22 +28,8 @@ func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int
 	if d == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
-	positions := make([]buffer.Pos, 0, 1+len(d.Cursors()))
-	positions = append(positions, d.Cursor)
-	for _, c := range d.Cursors() {
-		positions = append(positions, c.Cursor)
-	}
-	edits := make([]LSPEdit, 0, len(positions)+len(additional))
-	for _, p := range positions {
-		p = d.Buffer.Clamp(p)
-		line := []rune(d.Buffer.Line(p.Line))
-		col := min(p.Col, len(line))
-		start := col
-		for start > 0 && IsWordRune(line[start-1], wordChars) {
-			start--
-		}
-		edits = append(edits, LSPEdit{From: buffer.Pos{Line: p.Line, Col: start}, To: p, Text: text})
-	}
+	edits := caretPrefixEdits(d, text, wordChars)
+	carets := len(edits)
 	edits = append(edits, additional...)
 	if completionEditsConflict(d, edits) {
 		return 0, ErrOverlappingEdits
@@ -66,7 +52,7 @@ func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int
 			}
 		}
 	}
-	return len(positions), nil
+	return carets, nil
 }
 
 // completionEditsConflict validates the combined per-caret inserts and additional edits

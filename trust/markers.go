@@ -81,12 +81,6 @@ func ExecutableContentMarkers(root string) []string {
 	return found
 }
 
-// HasExecutableContent reports whether root holds any executable-content
-// marker (see ExecutableContentMarkers).
-func HasExecutableContent(root string) bool {
-	return len(ExecutableContentMarkers(root)) > 0
-}
-
 // isRegularFile reports whether path is an existing regular file.
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)

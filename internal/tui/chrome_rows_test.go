@@ -30,8 +30,8 @@ func TestMenuBandPaddingRowTakesTheMenuStyle(t *testing.T) {
 			t.Fatalf("menu cell (%d, %d) bg %+v, want %+v", x, l.MenuBottom, got.BG, want.BG)
 		}
 	}
-	if got := l.Hit(1, l.MenuBottom); got.Kind != hitMenuLabel {
-		t.Errorf("menu row hits %v, want hitMenuLabel", got.Kind)
+	if got := m.menu.SetSize(m.width, m.height).SetRow(l.MenuLabelY).Hit(1, l.MenuBottom); got.Kind != menubar.TargetLabel {
+		t.Errorf("menu row hits %v, want a menu label", got.Kind)
 	}
 	for _, label := range []string{"File", "Edit", "View", "Help"} {
 		if !strings.Contains(g.Plain()[l.MenuLabelY], label) {

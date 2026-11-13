@@ -16,7 +16,7 @@ var errNoWordAtCaret = errors.New("no word at cursor position")
 // occurrence of the selected text already has a caret.
 var errAllMatchesSelected = errors.New("all matches are already selected")
 
-// addNextMatch implements add_cursor_next_match as Fresh does. With no selection
+// AddNextMatch implements add_cursor_next_match as Fresh does. With no selection
 // it selects the word at the caret and adds no caret. With a selection it looks
 // for the selected text after the selection, wrapping to the start of the
 // document. An occurrence that would meet a caret already there is skipped. The

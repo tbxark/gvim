@@ -25,7 +25,6 @@
     "panel.section_mounts": "Mounts",
     "panel.section_host": "Host requirements",
     "panel.unnamed": "unnamed",
-    "panel.no_value": "(not set)",
     "panel.port": "%{port} -> %{protocol}",
     "panel.port_label": " (%{label})",
     "panel.port_forward": " [%{mode}]",

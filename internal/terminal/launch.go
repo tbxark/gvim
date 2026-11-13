@@ -1,5 +1,7 @@
 package terminal
 
+import "unicode/utf8"
+
 // Launch describes the program a dock terminal starts when it is not the plain
 // configured shell: an agent session, or a resume of one. The argv is passed to
 // the PTY as it is, never through a shell, so an entry is one program and its
@@ -32,7 +34,8 @@ const (
 
 // Clean returns l bounded for a start or a save: argv lists are clipped to
 // LaunchArgvMax entries of LaunchTextMax bytes, and the agent name to
-// LaunchAgentMax. It never adds data, only drops what is over the bound.
+// LaunchAgentMax. It never adds data, only drops what is over the bound; a clipped
+// string ends at a rune boundary.
 func (l Launch) Clean() Launch {
 	out := Launch{
 		Argv:       cleanArgv(l.Argv),
@@ -41,13 +44,20 @@ func (l Launch) Clean() Launch {
 		Ephemeral:  l.Ephemeral,
 		Source:     l.Source,
 	}
-	if len(out.Agent) > LaunchAgentMax {
-		out.Agent = out.Agent[:LaunchAgentMax]
-	}
-	if len(out.Source) > LaunchTextMax {
-		out.Source = out.Source[:LaunchTextMax]
-	}
+	out.Agent = clipBytes(out.Agent, LaunchAgentMax)
+	out.Source = clipBytes(out.Source, LaunchTextMax)
 	return out
+}
+
+// clipBytes cuts s to at most n bytes without splitting a UTF-8 rune.
+func clipBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // Empty reports whether l is no program at all: the plain shell. A Launch with
@@ -64,10 +74,7 @@ func cleanArgv(argv []string) []string {
 		if len(out) == LaunchArgvMax {
 			break
 		}
-		if len(a) > LaunchTextMax {
-			a = a[:LaunchTextMax]
-		}
-		out = append(out, a)
+		out = append(out, clipBytes(a, LaunchTextMax))
 	}
 	return out
 }

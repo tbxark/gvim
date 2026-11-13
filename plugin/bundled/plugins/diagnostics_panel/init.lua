@@ -288,6 +288,30 @@ local function build()
   return { root = { kind = "col", key = "root", children = children }, focus_key = "rows" }, rows, node_row
 end
 
+-- sync_to_editor is defined with the other handlers below. cursor_sub is the cursor_moved
+-- subscription that lives while the panel is open: a hot event is computed for every cursor
+-- move while anyone subscribes, so a plugin that is on by default must not hold it idle.
+local sync_to_editor
+local cursor_sub
+
+-- follow_cursor starts or stops the cursor subscription.
+local function follow_cursor(on)
+  if on and not cursor_sub then
+    cursor_sub = gvim.on("cursor_moved", function(ev)
+      sync_to_editor(ev)
+    end)
+  elseif not on and cursor_sub then
+    cursor_sub:off()
+    cursor_sub = nil
+  end
+end
+
+-- forget_panel drops the plugin's record of the panel (the host unmounted it, or it is gone).
+local function forget_panel()
+  follow_cursor(false)
+  state.panel, state.node_row, state.selected_index = nil, {}, nil
+end
+
 -- mount opens the panel with the current filter and keeps its id and rows. Fresh's finder
 -- livePanel: focus, title, ratio 0.3 (the widget card is a percentage of the frame instead).
 local function mount()
@@ -304,6 +328,7 @@ local function mount()
     return nil
   end
   state.panel, state.node_row = id, node_row
+  follow_cursor(true)
   return id, #rows
 end
 
@@ -323,7 +348,7 @@ local function refresh()
   local ok, err = gvim.ui.update_widget_panel(state.panel, spec)
   if not ok then
     gvim.log.debug("update: %s", tostring(err))
-    state.panel, state.node_row = nil, {}
+    forget_panel()
     return 0
   end
   state.node_row = node_row
@@ -387,7 +412,7 @@ end
 -- sync_to_editor is Fresh's syncWithEditor handler: when the editor cursor moves onto a
 -- diagnostic's exact file+line, reveal/select that row. It never opens a preview or moves
 -- the editor; the widget mutation only changes the panel selection.
-local function sync_to_editor(ev)
+sync_to_editor = function(ev)
   if not state.panel or not ev or not ev.pos then
     return
   end
@@ -417,7 +442,7 @@ local function close(notice)
   if state.panel then
     gvim.ui.unmount_widget_panel(state.panel)
   end
-  state.panel, state.node_row, state.selected_index = nil, {}, nil
+  forget_panel()
   if notice then
     gvim.notify(notice)
   end
@@ -491,7 +516,7 @@ gvim.on("widget_event", function(ev)
   elseif ev.event == "cancel" then
     -- The host unmounted the panel already; only the plugin state is left to clear.
     stop_pending_preview()
-    state.panel, state.node_row, state.selected_index = nil, {}, nil
+    forget_panel()
     gvim.notify(t("status.closed"))
   end
 end)
@@ -502,9 +527,6 @@ gvim.on("diagnostics_updated", function()
     refresh()
   end
 end)
-
--- Fresh's syncWithEditor: follow the editor cursor onto a diagnostic line.
-gvim.on("cursor_moved", sync_to_editor)
 
 -- Fresh's buffer_activated handler: the current-file filter follows the active buffer.
 -- Virtual buffers have no path and leave the filter alone, as Fresh's does.

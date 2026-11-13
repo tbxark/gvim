@@ -142,10 +142,13 @@ func (s *Session) SearchScrollbackMode(query string, regex, matchCase bool, limi
 			}
 		}
 		text := strings.TrimRight(b.String(), " ")
-		hit := false
+		var hit bool
 		if re != nil {
 			hit = re.MatchString(text)
 		} else {
+			if !matchCase {
+				text = strings.ToLower(text)
+			}
 			hit = strings.Contains(text, query)
 		}
 		if hit {

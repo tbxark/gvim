@@ -42,7 +42,7 @@ var ErrOverlappingEdits = errors.New("overlapping edits")
 // span of lines in one step, instead of making each edit through the buffer.
 const bulkEditMin = 64
 
-// applyEditList is ApplyEdits on a document. lenient applies overlapping edits one
+// ApplyEditList is ApplyEdits on a document. lenient applies overlapping edits one
 // by one, as ApplyLSPEdits does, instead of refusing them.
 func (d *Document) ApplyEditList(edits []LSPEdit, o EditOptions, lenient bool) error {
 	if d.ReadOnly() {
@@ -220,7 +220,7 @@ func advancePos(p buffer.Pos, text string) buffer.Pos {
 	return buffer.Pos{Line: p.Line + n, Col: len([]rune(last))}
 }
 
-// placeCursor moves the caret to p, as SetCursor does without the jump record.
+// PlaceCursor moves the caret to p, as SetCursor does without the jump record.
 func (d *Document) PlaceCursor(p buffer.Pos, extend bool) {
 	d.Want = -1
 	d.virtual = 0
@@ -240,7 +240,7 @@ func (d *Document) PlaceCursor(p buffer.Pos, extend bool) {
 	d.Seen = d.Cursor
 }
 
-// selectBetween selects anchor..head, as SelectRange does without the jump record.
+// SelectBetween selects anchor..head, as SelectRange does without the jump record.
 func (d *Document) SelectBetween(anchor, head buffer.Pos) {
 	d.SetRange(d.Buffer.Clamp(anchor), d.Buffer.Clamp(head))
 	d.Seen = d.Cursor

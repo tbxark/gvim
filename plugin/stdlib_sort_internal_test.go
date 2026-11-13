@@ -22,8 +22,7 @@ func (c *countingCtx) Err() error {
 	return nil
 }
 
-// TestSortPollsTheContextEveryFewComparisons is the step-count half of sort_cancel (AMENDMENTS
-// C5): the default comparator asks the context once per sortPollEvery comparisons, so a
+// TestSortPollsTheContextEveryFewComparisons is the step-count half of sort_cancel: the default comparator asks the context once per sortPollEvery comparisons, so a
 // cancel that arrives at the third question stops a 500 000 element sort after 3 x 4096
 // comparisons. The bound is in comparisons, and does not depend on how fast the machine is.
 func TestSortPollsTheContextEveryFewComparisons(t *testing.T) {

@@ -12,7 +12,8 @@ import (
 // The git ports ship a manifest with a description, a version and default_enabled, and the
 // library they share is found as gvim.git.
 func TestGitPortsShipManifests(t *testing.T) {
-	for _, name := range []string{"git_gutter", "git_statusbar", "git_find_file", "git_blame"} {
+	// The level a port asks for: the ones with a translation table use gvim.i18n (level 2).
+	for name, api := range map[string]int{"git_gutter": 2, "git_statusbar": 1, "git_find_file": 2, "git_blame": 2} {
 		t.Run(name, func(t *testing.T) {
 			data, err := fs.ReadFile(bundled.FS, "plugins/"+name+"/plugin.json")
 			if err != nil {
@@ -28,7 +29,7 @@ func TestGitPortsShipManifests(t *testing.T) {
 			if err := json.Unmarshal(data, &m); err != nil {
 				t.Fatal(err)
 			}
-			if m.Name != name || m.Version == "" || strings.TrimSpace(m.Description) == "" || m.API != 1 {
+			if m.Name != name || m.Version == "" || strings.TrimSpace(m.Description) == "" || m.API != api {
 				t.Errorf("manifest = %+v", m)
 			}
 			if m.DefaultEnabled == nil || !*m.DefaultEnabled {

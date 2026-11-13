@@ -88,7 +88,7 @@ func TestSettingsDefineAndUserLayer(t *testing.T) {
 
 // TestProjectSettingsOnlyForProjectKeys: the project layer is untrusted input. It overrides
 // the user layer only for keys declared project = true, is type-checked like every value,
-// and every other key is dropped with one warning (AMENDMENTS C11).
+// and every other key is dropped with one warning.
 func TestProjectSettingsOnlyForProjectKeys(t *testing.T) {
 	rows := []struct {
 		name          string

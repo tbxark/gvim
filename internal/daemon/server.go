@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,6 +30,13 @@ import (
 
 // frameWriteTimeout bounds one write to an attached client.
 const frameWriteTimeout = 2 * time.Second
+
+// helloTimeout bounds how long a new connection may take to send its hello; a
+// connection that never does would otherwise hold a goroutine and a descriptor forever.
+// Stored in nanoseconds and read atomically so a test can shorten it while a server runs.
+var helloTimeout atomic.Int64
+
+func init() { helloTimeout.Store(int64(5 * time.Second)) }
 
 // deadlineWriter applies a per-write deadline to a connection, so a frame write cannot
 // block forever on a slow client. FrameWriter serializes the calls, so the deadline set
@@ -64,11 +72,8 @@ type Server struct {
 	mu      sync.Mutex
 	clients map[*clientConn]struct{}
 	prog    *tea.Program
-	// openFiles, when set, opens the paths of a client's open_file frame (the legacy
-	// callback: bare paths only).
-	openFiles func(paths []string)
-	// openFilesAt, when set, receives the full open_file request (client cwd, bare
-	// Paths for older clients, positional Files for current ones).
+	// openFilesAt, when set, receives the full open_file request (client cwd and
+	// positional Files).
 	openFilesAt func(req OpenFile)
 	// workspace, when set, answers the workspace_* frames (list/select/new/close/
 	// rename). The app wires it to the workspace layer; nil means the protocol is not
@@ -96,17 +101,8 @@ func (s *Server) Path() string { return s.path }
 // Name is the socket name of the server: the file name without .sock.
 func (s *Server) Name() string { return strings.TrimSuffix(filepath.Base(s.path), ".sock") }
 
-// OnOpenFiles sets the callback that opens a client's requested paths (the legacy
-// bare-path callback; OnOpenFilesAt takes precedence when both are set).
-func (s *Server) OnOpenFiles(fn func(paths []string)) {
-	s.mu.Lock()
-	s.openFiles = fn
-	s.mu.Unlock()
-}
-
 // OnOpenFilesAt sets the callback that receives the whole open_file request: the client's
-// cwd and either the positional Files or the legacy Paths. The daemon resolves relative
-// paths against req.Cwd.
+// cwd and the positional Files. The daemon resolves relative paths against req.Cwd.
 func (s *Server) OnOpenFilesAt(fn func(req OpenFile)) {
 	s.mu.Lock()
 	s.openFilesAt = fn
@@ -138,14 +134,6 @@ func (s *Server) Serve(ctx context.Context) {
 		}
 		go s.handleConn(conn)
 	}
-}
-
-// negotiatedSize is the size the program is told: the smallest attached client's size
-// (0,0 when no client has sent a valid hello). Tests read it directly.
-func (s *Server) negotiatedSize() (cols, rows int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sizeLocked()
 }
 
 // sizeLocked is the negotiated size: the smallest size among the attached clients. A
@@ -195,13 +183,6 @@ func (s *Server) OnProgram(p *tea.Program) {
 			p.Send(tea.RequestWindowSize())
 		}()
 	}
-}
-
-// Program returns the hosted program, or nil before RunWithIO started it.
-func (s *Server) Program() *tea.Program {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.prog
 }
 
 // Detach sends the detached frame to every attached client and drops them. The hosted
@@ -263,7 +244,9 @@ func (s *Server) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	// One writer for this connection: every server frame to it goes through it.
 	fw := NewFrameWriter(deadlineWriter{conn: conn, timeout: frameWriteTimeout})
+	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(helloTimeout.Load())))
 	f, err := ReadFrame(conn)
+	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil || f.Type != TypeHello {
 		return
 	}
@@ -345,17 +328,14 @@ func (s *Server) handleConn(conn net.Conn) {
 			sendSize(prog, cols, rows)
 		case TypeOpenFile:
 			var req OpenFile
-			if DecodeJSON(f, &req) != nil || (len(req.Paths) == 0 && len(req.Files) == 0) {
+			if DecodeJSON(f, &req) != nil || len(req.Files) == 0 {
 				continue
 			}
 			s.mu.Lock()
-			openAt, open := s.openFilesAt, s.openFiles
+			openAt := s.openFilesAt
 			s.mu.Unlock()
-			switch {
-			case openAt != nil:
+			if openAt != nil {
 				openAt(req)
-			case open != nil:
-				open(req.Paths)
 			}
 		case TypeDetach:
 			_ = fw.WriteFrame(TypeDetached, nil)

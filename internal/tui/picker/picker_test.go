@@ -439,7 +439,7 @@ func TestDrawInTinyFrames(t *testing.T) {
 	}
 }
 
-// TestMovedReportsNoSelectionWhenNoRowIsShown checks S13-4: ranking down to zero rows, and
+// TestMovedReportsNoSelectionWhenNoRowIsShown checks that ranking down to zero rows, and
 // replacing the items with none, tell the owner that nothing is highlighted any more, and a
 // row that appears again is reported again.
 func TestMovedReportsNoSelectionWhenNoRowIsShown(t *testing.T) {
@@ -494,5 +494,32 @@ func TestEnterBeforeRankUsesTheTypedQuery(t *testing.T) {
 	ch, ok := res.Events[0].(Chosen)
 	if !ok || ch.ID != 101 {
 		t.Fatalf("chosen = %v, want the beta row (101)", res.Events[0])
+	}
+}
+
+// TestLivePickerChoosesTheHighlightedRowAfterTyping: a live picker that does not rank has
+// no ranking in flight, so a changed query must not make Enter fall back to the first row.
+func TestLivePickerChoosesTheHighlightedRowAfterTyping(t *testing.T) {
+	t.Parallel()
+	p := New(style.New(theme.Theme{}), Options{Items: items("alpha", "beta", "gamma"), Live: true})
+	p.Init()
+	p.Update(key("x"))
+	p.SetItems(items("alpha", "beta", "gamma"))
+	p.Update(key("down"))
+	res := p.Update(key("enter"))
+	if len(res.Events) != 1 || res.Events[0] != (Chosen{ID: 101}) {
+		t.Fatalf("events = %v, want Chosen{101}", res.Events)
+	}
+}
+
+// TestEnterBeforeTheOpeningRankUsesTheInitialQuery: the opening rows of a fuzzy picker with
+// an initial query are not ranked yet, so Enter before the ranking arrives ranks first.
+func TestEnterBeforeTheOpeningRankUsesTheInitialQuery(t *testing.T) {
+	t.Parallel()
+	p := New(style.New(theme.Theme{}), Options{Items: items("alpha", "beta", "gamma"), Fuzzy: true, InitialQuery: "gam"})
+	p.Init()
+	res := p.Update(key("enter"))
+	if len(res.Events) != 1 || res.Events[0] != (Chosen{ID: 102}) {
+		t.Fatalf("events = %v, want Chosen{102}", res.Events)
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The decoration half of the fake host (stage S15). It keeps what plugins set, per plugin,
+// The decoration half of the fake host. It keeps what plugins set, per plugin,
 // namespace and buffer, and checks what the real host checks: the buffer must be open, and
 // an expected version must be the buffer's. It does not move anchors when a buffer is
 // edited; that is decorations's job, tested there and in the app.

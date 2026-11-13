@@ -2,7 +2,7 @@ package plugintest
 
 import "github.com/tbxark/gvim/pluginapi"
 
-// The workspace part of the fake host (stage S9): root, file index, effective editor
+// The workspace part of the fake host: root, file index, effective editor
 // settings and the theme. Methods the fake does not implement stay pluginapi.Unsupported's.
 
 // FakeWorkspace is the state behind FakeHost.Root, Files, Config, Theme and ThemeColor.

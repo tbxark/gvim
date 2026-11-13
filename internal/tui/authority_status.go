@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/i18n"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/textsafe"
 )
@@ -73,13 +74,13 @@ func (m *Model) invalidateRemotePreviews() {
 func (m *Model) OpenAuthorityTerminalAtStart() { m.authOpenDock = true }
 
 // authoritySegment returns the status-row item of the authority, if it has one.
-func (m *Model) authoritySegment() (statusItem, bool) {
+func (m *Model) authoritySegment() (frame.StatusItem, bool) {
 	if m.auth.Status == nil {
-		return statusItem{}, false
+		return frame.StatusItem{}, false
 	}
 	st := m.auth.Status()
 	if st.Text == "" {
-		return statusItem{}, false
+		return frame.StatusItem{}, false
 	}
 	// The remote SSH label carries the host separately: the status row renders the
 	// catalogue key for the connected/disconnected state with %{userhost}, so a
@@ -89,7 +90,7 @@ func (m *Model) authoritySegment() (statusItem, bool) {
 	// before the status row paints it, as the preview surfaces do.
 	text := textsafe.Clean(st.Text)
 	if st.Connecting {
-		return statusItem{ID: "authority", Text: text + " · reconnecting", Prio: 1 << 20}, true
+		return frame.StatusItem{ID: "authority", Text: text + " · reconnecting", Prio: 1 << 20}, true
 	}
 	if userhost, ok := strings.CutPrefix(text, "SSH:"); ok {
 		key := "gvim.status.remote_ssh"
@@ -100,7 +101,7 @@ func (m *Model) authoritySegment() (statusItem, bool) {
 	} else if !st.Connected {
 		text += " · disconnected"
 	}
-	return statusItem{ID: "authority", Text: text, Prio: 1 << 20}, true
+	return frame.StatusItem{ID: "authority", Text: text, Prio: 1 << 20}, true
 }
 
 // authorityInitCmd opens the dock terminal of a remote launch once the program starts.
@@ -170,7 +171,7 @@ func (m *Model) authorityReconnectCmd(password string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), authorityDialTimeout)
 		defer cancel()
 		return authorityReconnectedMsg{err: fn(ctx, password)}
 	}
@@ -226,6 +227,8 @@ var (
 	authorityPollEvery = 3 * time.Second
 	authorityRetryMin  = time.Second
 	authorityRetryMax  = 30 * time.Second
+	// authorityDialTimeout bounds one reconnect dial.
+	authorityDialTimeout = 30 * time.Second
 )
 
 // authorityPollTickMsg is one poll of the authority snapshot.
@@ -370,7 +373,7 @@ func (m *Model) authorityPassphraseCmd(passphrase string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), authorityDialTimeout)
 		defer cancel()
 		return authorityReconnectedMsg{err: fn(ctx, passphrase)}
 	}
@@ -384,7 +387,7 @@ func (m *Model) authorityAnswersCmd(answers []string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), authorityDialTimeout)
 		defer cancel()
 		return authorityReconnectedMsg{err: fn(ctx, answers)}
 	}

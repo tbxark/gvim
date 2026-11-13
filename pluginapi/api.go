@@ -1,5 +1,5 @@
 // Package pluginapi is the contract between the plugin host in internal/tui and
-// internal/app (host side) and the plugin package (Lua runtime). It holds plain
+// internal/pluginhost (host side) and the plugin package (Lua runtime). It holds plain
 // types, the Host and Runtime interfaces, the error codes and Unsupported, a Host
 // that refuses everything. It imports the standard library only, so both sides
 // and the host packages can depend on it without a cycle.
@@ -513,7 +513,7 @@ type FileDiagnostics struct {
 	Diagnostics []DiagnosticInfo
 }
 
-// ---------- windows, virtual buffers (stages S17, S18) ----------
+// ---------- windows, virtual buffers ----------
 
 // WindowInfo describes one split.
 type WindowInfo struct {

@@ -12,8 +12,6 @@
 //     the explorer.
 //   - Margin(w): the gap between a floating box (palette, popup, list, browser)
 //     and the screen edge. It is 0 below 60 columns, 1 up to 139 and 2 beyond.
-//   - ListMargin(w): the same gap for the boxes that are centred. It is Margin, so
-//     a centred card and an anchored menu sit the same distance from the edge.
 //   - Bar items (status items, filter options) carry PadX on both sides, so two
 //     neighbours are two cells apart.
 //   - Rows of a card: the content starts directly under the top border and the key
@@ -31,6 +29,11 @@ const (
 	PadX = 1
 )
 
+// Clamp limits v to the range lo..hi. An empty range (hi below lo) gives lo.
+func Clamp(v, lo, hi int) int {
+	return max(lo, min(v, hi))
+}
+
 // Margin is the gap between a floating box and the left and right screen edge in a
 // frame w cells wide.
 func Margin(w int) int {
@@ -42,11 +45,6 @@ func Margin(w int) int {
 	}
 	return 2
 }
-
-// ListMargin is the gap between a centred box (a list, a text box, the file browser,
-// a dialog) and the left and right screen edge in a frame w cells wide. It is Margin:
-// one rule for every floating surface, so the chrome does not change with the box.
-func ListMargin(w int) int { return Margin(w) }
 
 // Pad surrounds s with PadX blank cells on each side: the label of a bar item, a tab
 // or a status segment.

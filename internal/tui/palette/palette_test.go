@@ -1413,3 +1413,23 @@ func TestLongQueryStaysInsideTheCard(t *testing.T) {
 		t.Fatalf("border cell on the query row = %q, want the border glyph", got)
 	}
 }
+
+// layoutFor places the palette in a w by h frame. It is the plain mode: no toolbar and
+// no preview column.
+func layoutFor(w, h int) geometry { return layoutForMode(w, h, layoutMode{}) }
+
+// TestFileTickCarriesTheTokenOfTheRanking: the poll tick fires off the update goroutine, so
+// it carries the identity captured when it was scheduled and never reads the palette.
+func TestFileTickCarriesTheTokenOfTheRanking(t *testing.T) {
+	p := New(Options{Query: "a", Files: &fakeFiles{loading: true}, Ranker: &fakeRanker{}})
+	token, seq := p.token, p.seq
+	cmd := p.applyFiles(FileRankedMsg{Token: p.token, Seq: p.seq, Text: "a", Loading: true})
+	if cmd == nil {
+		t.Fatal("a loading result scheduled no poll tick")
+	}
+	p.CancelWork()
+	tick, ok := cmd().(fileTickMsg)
+	if !ok || tick.Token != token || tick.Seq != seq {
+		t.Fatalf("tick = %+v, want token %d seq %d", tick, token, seq)
+	}
+}

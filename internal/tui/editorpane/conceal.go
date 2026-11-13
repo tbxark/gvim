@@ -126,7 +126,9 @@ func (f frame) paintCursorLineOverlay(g *grid.Grid) {
 	}
 	for x := 0; x < f.w-1; x++ {
 		c := g.At(x, y)
-		if c.Text == "" && c.Style == (grid.Style{}) {
+		if c.Text == "" {
+			// The continuation cell of a wide character takes the style with its lead,
+			// and a write of its own would blank the lead.
 			continue
 		}
 		g.Set(x, y, c.Text, PatchStyle(c.Style, patch))

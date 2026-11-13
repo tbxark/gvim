@@ -69,9 +69,17 @@ func startLocalEnvWatch(parent context.Context, provider *env.Provider, root str
 	if provider == nil || root == "" {
 		return nil
 	}
-	watcher, err := filewatch.New(filewatch.Options{Delay: remoteWatchDebounce})
-	return startLocalEnvWatchWith(parent, provider, root, watcher, err)
+	watcher, err := newFileWatcher(filewatch.Options{Delay: remoteWatchDebounce})
+	if err != nil {
+		// A failed constructor returns a nil *Watcher: boxed in the interface it would not
+		// be nil, and the constructor below would close it.
+		return startLocalEnvWatchWith(parent, provider, root, nil, err)
+	}
+	return startLocalEnvWatchWith(parent, provider, root, watcher, nil)
 }
+
+// newFileWatcher starts the fsnotify watcher; a test replaces it to fail the start.
+var newFileWatcher = filewatch.New
 
 func startLocalEnvWatchWith(parent context.Context, provider *env.Provider, root string, watcher envFileWatch, err error) *localEnvWatch {
 	// Ownership of watcher transfers to this constructor: every early return must release

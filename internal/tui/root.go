@@ -43,7 +43,7 @@ func (m *Model) resetLiveGrepResume() {
 // status of the tree, the file watch, the folders of the open documents and the
 // auto-save tick.
 func (m *Model) rootInit() tea.Cmd {
-	cmds := []tea.Cmd{m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd(), m.remoteExplorerInitialCmd(), m.authorityPollCmd()}
+	cmds := []tea.Cmd{m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd(), m.remoteExplorerReloadCmd(), m.authorityPollCmd()}
 	for _, err := range m.root.ports.FullLoadPrompts {
 		cmds = append(cmds, func() tea.Msg { return fullLoadPromptMsg{err: err} })
 	}
@@ -194,23 +194,18 @@ type SidebarState struct {
 	// tree stood (the selection keeps the offset meaningful across frame sizes).
 	ExplorerSelected string
 	ExplorerScroll   int
-	// ExplorerRows is the explorer section's explicit body height (0 = flex).
-	ExplorerRows int
-	// SectionRows is the unified bounded per-section height map (explorer, contents,
-	// diagnostics, plugin:<id>); legacy readers use the fields below.
+	// SectionRows is the bounded per-section explicit body height map (0 or absent =
+	// flex): explorer, contents, diagnostics and plugin:<id> by plugin panel id.
 	SectionRows          map[string]int
 	ContentsOpen         bool
 	ContentsCollapsed    bool
-	ContentsRows         int
 	ContentsScroll       int
 	DiagnosticsOpen      bool
 	DiagnosticsCollapsed bool
-	DiagnosticsRows      int
-	// PluginOrder, PluginRows and PluginCollapsed are the plugin sections' stack
-	// order, requested body rows and folded state, by plugin panel id (R9-4); they
-	// are restored when the sections mount and collected while they are mounted.
+	// PluginOrder and PluginCollapsed are the plugin sections' stack order and folded
+	// state, by plugin panel id; they are restored when the sections mount and
+	// collected while they are mounted.
 	PluginOrder     []string
-	PluginRows      map[string]int
 	PluginCollapsed map[string]bool
 }
 
@@ -249,30 +244,22 @@ func (m *Model) SidebarState() SidebarState {
 	// Capture must not apply the pending plugin restore (it would mutate the model
 	// while the UI is only being snapshotted); the helper folds the pending values
 	// into the snapshot without applying them.
-	st.PluginOrder, st.PluginRows, st.PluginCollapsed = m.pluginSidebarCaptureState()
+	var pluginRows map[string]int
+	st.PluginOrder, pluginRows, st.PluginCollapsed = m.pluginSidebarCaptureState()
 	// Only the reader's explicit heights belong in the session: a config default
 	// contents.rows/diagnostics height must not become an override that beats a later
 	// config edit on restart. The explorer is explicit only after its own drag.
+	rows := map[string]int{}
 	if m.explorerRows > 0 {
-		st.ExplorerRows = clampSectionRows(sidebar.KindExplorer, m.explorerRows)
+		rows["explorer"] = clampSectionRows(sidebar.KindExplorer, m.explorerRows)
 	}
 	if m.contents.RowsOverridden() {
-		st.ContentsRows = clampSectionRows(sidebar.KindContents, m.contents.Rows())
+		rows["contents"] = clampSectionRows(sidebar.KindContents, m.contents.Rows())
 	}
 	if m.diag.rows > 0 {
-		st.DiagnosticsRows = clampSectionRows(sidebar.KindDiagnostics, m.diag.Rows())
+		rows["diagnostics"] = clampSectionRows(sidebar.KindDiagnostics, m.diag.Rows())
 	}
-	rows := map[string]int{}
-	if st.ExplorerRows > 0 {
-		rows["explorer"] = st.ExplorerRows
-	}
-	if st.ContentsRows > 0 {
-		rows["contents"] = st.ContentsRows
-	}
-	if st.DiagnosticsRows > 0 {
-		rows["diagnostics"] = st.DiagnosticsRows
-	}
-	for id, n := range st.PluginRows {
+	for id, n := range pluginRows {
 		rows["plugin:"+id] = clampSectionRows(sidebar.KindPlugin, n)
 	}
 	if len(rows) > 0 {

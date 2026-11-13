@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/tui/list"
 )
 

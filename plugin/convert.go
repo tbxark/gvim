@@ -367,7 +367,7 @@ func clampInt(f float64) int {
 }
 
 // errorText renders an error value for logs and notices without ever calling a
-// metamethod (AMENDMENTS C28): a string or number as is, a table by its string `message`
+// metamethod: a string or number as is, a table by its string `message`
 // field, anything else as a type placeholder.
 func errorText(v lua.LValue) string {
 	switch x := v.(type) {

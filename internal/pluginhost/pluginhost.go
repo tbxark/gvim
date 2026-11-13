@@ -82,26 +82,10 @@ type SpawnGate func(ctx context.Context, argv []string, cwd string, env map[stri
 //
 // With --no-plugins the runtime is still created, with the loader disabled: it discovers
 // and loads nothing but the --plugin paths, and the plugin manager can say why.
-func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document), o Options) *Wiring {
+func New(cfg config.Config, ed *editor.Editor, o Options) *Wiring {
 	ld := loaderOptions(cfg, o)
-	var workspaceState *plugin.WorkspaceState
-	var workspaceStateReadOnly bool
-	var workspaceStateNote string
-	if o.WorkspaceStateFile != "" {
-		st, readOnly, err := parsedWorkspaceState(o)
-		switch {
-		case err != nil:
-			workspaceStateNote = "per-workspace plugin state ignored: " + err.Error()
-		case readOnly:
-			workspaceStateReadOnly = true
-			workspaceStateNote = "per-workspace plugin state is read-only: it was written by a newer gvim"
-		default:
-			workspaceState = st
-		}
-	}
-	var osys hostos.OS = newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
-	osys.(*pluginOS).gate = o.Gate
-	osys.(*pluginOS).logSink = o.LogSink
+	workspaceState, workspaceStateReadOnly, workspaceStateNote := parseWorkspaceState(o)
+	var osys hostos.OS = newLocalOS(o)
 	if o.WrapOS != nil {
 		if wrapped := o.WrapOS(osys); wrapped != nil {
 			osys = wrapped
@@ -122,7 +106,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 			WorkspaceStateReadOnly: workspaceStateReadOnly,
 			WorkspaceStateNote:     workspaceStateNote,
 		}),
-		Editor: newPluginEditor(ed, markEdited),
+		Editor: newPluginEditor(ed),
 		Keys:   pluginKeysFor(cfg, o),
 	}
 }
@@ -134,8 +118,6 @@ func loaderOptions(cfg config.Config, o Options) *plugin.LoaderOptions {
 	ld := &plugin.LoaderOptions{
 		Paths:    o.Paths,
 		Disabled: o.Disabled,
-		Enabled:  map[string]bool{},
-		Settings: map[string]plugin.PluginSettings{},
 	}
 	if cfgDir != "" {
 		ld.UserDir = filepath.Join(cfgDir, "plugins")
@@ -143,25 +125,36 @@ func loaderOptions(cfg config.Config, o Options) *plugin.LoaderOptions {
 	}
 	if stateDir, err := config.StateDir(); err == nil {
 		ld.StateFile = filepath.Join(stateDir, "plugin-state.json")
-		if cfgDir != "" {
-			_ = config.MoveLegacyFile(filepath.Join(cfgDir, "plugin-state.json"), ld.StateFile)
-		}
 	}
-	for name, pc := range cfg.Plugins {
-		if pc.Enabled != nil {
-			ld.Enabled[name] = *pc.Enabled
-		}
-		if pc.Settings != nil || pc.ProjectSettings != nil {
-			ld.Settings[name] = plugin.PluginSettings{User: pc.Settings, Project: pc.ProjectSettings}
-		}
-	}
+	ld.Enabled, ld.Settings, _ = workspacePluginConfig(cfg)
 	return ld
 }
 
-// parsedWorkspaceState parses Options.WorkspaceStateData. A version newer than this binary
-// reports readOnly: the caller refuses writes and never overwrites the file.
-func parsedWorkspaceState(o Options) (*plugin.WorkspaceState, bool, error) {
-	return plugin.ParseWorkspaceState(o.WorkspaceStateData)
+// parseWorkspaceState parses Options.WorkspaceStateData for a runtime that has a
+// per-workspace state file. It returns the state to seed (nil when the file is ignored), whether
+// the runtime must not write it (a version newer than this binary: the file is never
+// overwritten) and the note to log when it is ignored or read-only.
+func parseWorkspaceState(o Options) (st *plugin.WorkspaceState, readOnly bool, note string) {
+	if o.WorkspaceStateFile == "" {
+		return nil, false, ""
+	}
+	st, readOnly, err := plugin.ParseWorkspaceState(o.WorkspaceStateData)
+	switch {
+	case err != nil:
+		return nil, false, "per-workspace plugin state ignored: " + err.Error()
+	case readOnly:
+		return nil, true, "per-workspace plugin state is read-only: it was written by a newer gvim"
+	}
+	return st, false, ""
+}
+
+// newLocalOS is the plugin OS of the machine the editor runs on: its own root, project
+// environment overlay, spawn gate and log sink.
+func newLocalOS(o Options) *pluginOS {
+	osys := newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
+	osys.gate = o.Gate
+	osys.logSink = o.LogSink
+	return osys
 }
 
 // pluginKeysFor builds the keymap builder of a session: the preset, then the plugin

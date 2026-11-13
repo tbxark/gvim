@@ -154,10 +154,7 @@ func TestRevealTranscriptLineSupportsExitedAndRefusesRestored(t *testing.T) {
 
 	restored := identityTabs(t, newFakeTerm())
 	restoredID := restored.TabID(0)
-	restored.Restore(terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"saved line"}}},
-	})
+	restored.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"saved line"}}}})
 	if _, ok := restored.RevealTranscriptLine(TranscriptHit{ID: restoredID, Row: 0}); ok {
 		t.Fatal("a restored no-session tab reported a pager")
 	}

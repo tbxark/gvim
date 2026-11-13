@@ -213,8 +213,31 @@ func TestFSRemoveRefusesProtectedDirectories(t *testing.T) {
 	})
 }
 
+// remoteFakeOS is a FakeOS that claims to work on a remote workspace host.
+type remoteFakeOS struct{ *plugintest.FakeOS }
+
+func (remoteFakeOS) Remote() bool { return true }
+
+// TestFSRemoveIsUnsupportedOnRemoteWorkspaces: the protected-directory rule knows only the
+// local machine, so on a remote workspace fs.remove fails with unsupported and the OS is
+// never asked.
+func TestFSRemoveIsUnsupportedOnRemoteWorkspaces(t *testing.T) {
+	fos := plugintest.NewFakeOS()
+	fos.SetFile("/work/a.txt", "1")
+	h := cmd(t, "", `local v, e = gvim.fs.remove("/work/a.txt") T.spy(tostring(v), gvim.err_code(e), gvim.fs.exists("/work/a.txt"))`,
+		plugintest.Options{OS: remoteFakeOS{fos}})
+	if got := spyText(h); got != "nil unsupported true" {
+		t.Fatalf("spy = %q log=%v", got, h.LogText(""))
+	}
+	for _, c := range fos.Calls() {
+		if strings.HasPrefix(c, "Remove ") {
+			t.Fatalf("the OS was asked to remove: %v", fos.Calls())
+		}
+	}
+}
+
 // TestIOHappensOnWorkGoroutines: no file, process or watcher call of the plugin API reaches
-// the OS on the goroutine that runs Lua (D2: Update does no IO).
+// the OS on the goroutine that runs Lua (Update does no IO).
 func TestIOHappensOnWorkGoroutines(t *testing.T) {
 	fos := plugintest.NewFakeOS()
 	fos.SetFile("/work/a.txt", "1")

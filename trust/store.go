@@ -29,29 +29,14 @@ type Store struct {
 	path string
 }
 
-// DefaultStore returns the per-user state store, moving a legacy config-directory
-// store on first use. It never reads trust decisions from a project.
+// DefaultStore returns the per-user state store. It never reads trust decisions
+// from a project.
 func DefaultStore() (*Store, error) {
 	dir, err := config.StateDir()
 	if err != nil {
 		return nil, fmt.Errorf("trust: state dir: %w", err)
 	}
-	oldDir, err := config.Dir()
-	if err != nil {
-		return nil, fmt.Errorf("trust: config dir: %w", err)
-	}
-	path := filepath.Join(dir, "trust.json")
-	legacy := filepath.Join(oldDir, "trust.json")
-	// A migration failure must not make the store unavailable (callers treat an
-	// unavailable store as trusted), and it must not drop recorded decisions: a
-	// legacy file that cannot move is still read and written in place, and the
-	// next launch tries the move again.
-	if err := config.MoveLegacyFile(legacy, path); err != nil {
-		if _, statErr := os.Stat(legacy); statErr == nil {
-			return NewStore(legacy), nil
-		}
-	}
-	return NewStore(path), nil
+	return NewStore(filepath.Join(dir, "trust.json")), nil
 }
 
 // NewStore returns the store backed by the file at path. The file is read and
@@ -105,8 +90,8 @@ func (s *Store) LevelFor(root string) (level Level, decided bool) {
 }
 
 // Set records level for root and writes the store atomically. The decisions of
-// other workspaces are kept. It creates the config directory when it is
-// missing. An invalid level is an error; nothing is written.
+// other workspaces are kept. It creates the state directory (mode 0700) when it is
+// missing; a new store file is private (mode 0600). An invalid level is an error; nothing is written.
 func (s *Store) Set(root string, level Level) error {
 	if !level.Valid() {
 		return fmt.Errorf("trust: invalid level %q", string(level))
@@ -178,10 +163,10 @@ func (s *Store) write(decisions map[string]Level) error {
 		return fmt.Errorf("trust: encode: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("trust: make config dir: %w", err)
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("trust: make state dir: %w", err)
 	}
-	if _, err := atomicfile.WriteFile(s.path, data); err != nil {
+	if _, err := atomicfile.WriteFileMode(s.path, data, 0o600); err != nil {
 		return fmt.Errorf("trust: save %s: %w", s.path, err)
 	}
 	return nil

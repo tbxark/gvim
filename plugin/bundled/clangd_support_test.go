@@ -157,6 +157,28 @@ func TestClangdSwitchNoMatchAndUnsupported(t *testing.T) {
 	}
 }
 
+// The lookup never leaves the workspace: the include/ and src/ next to the buffer's directory are
+// only tried when that parent is inside the workspace root.
+func TestClangdSwitchStaysInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+	r := clangdRig(t, "/work/a.c", "int f(void);\n", func(o *plugintest.FakeOS) {
+		o.SetDir("/include")
+		o.SetFile("/include/a.h", "int f(void);\n")
+	})
+	r.host.Workspace().RootDir = "/work"
+	r.host.SetFile("/include/a.h", "int f(void);\n")
+	if err := r.h.Run("clangd_support.switch_source_header", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.CompleteBuffers()
+	if id := r.host.FindBuffer("/include/a.h"); id != 0 {
+		t.Errorf("opened /include/a.h outside the workspace root (notices %v)", r.h.NoticeTexts())
+	}
+	if got := lastNoticeText(r.h); !strings.Contains(got, "No corresponding source/header file") {
+		t.Errorf("status = %q", got)
+	}
+}
+
 func TestClangdProjectSetupShowsReadyProject(t *testing.T) {
 	t.Parallel()
 	r := clangdRig(t, "/work/proj/src/a.cpp", "int main() {}\n", func(o *plugintest.FakeOS) {

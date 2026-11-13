@@ -193,7 +193,7 @@ func (d *Document) hidingIn(ranges []fold.Range, line int) (fold.Range, bool) {
 	return fold.Range{}, false
 }
 
-// revealCarets moves every caret off a collapsed fold. from is the line of the
+// RevealCarets moves every caret off a collapsed fold. from is the line of the
 // primary caret before the action. The primary caret, when its head moved down,
 // lands on the first line below the fold, so the arrow keys skip the body. Any
 // other hidden end goes to the fold start with its column kept: the anchor of a

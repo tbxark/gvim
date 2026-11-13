@@ -174,16 +174,21 @@ func TestNormalPaintHasNoAttribution(t *testing.T) {
 	t.Parallel()
 	m := newThemeTestModel(t, nil)
 	normal := m.paint()
-	if normal.CapturingKeys() {
-		t.Fatal("the normal paint enabled key capture")
-	}
 	normalText := normal.Plain()
 	if fg, bg := normal.KeysAt(1, 1); fg != 0 || bg != 0 {
 		t.Errorf("normal paint recorded keys %d/%d", fg, bg)
 	}
 	captured := m.paintCaptured()
-	if !captured.CapturingKeys() {
-		t.Fatal("paintCaptured did not enable capture")
+	recorded := false
+	for y := range captured.Height() {
+		for x := range captured.Width() {
+			if fg, bg := captured.KeysAt(x, y); fg != 0 || bg != 0 {
+				recorded = true
+			}
+		}
+	}
+	if !recorded {
+		t.Fatal("paintCaptured recorded no theme keys")
 	}
 	if got, want := strings.Join(captured.Plain(), "\n"), strings.Join(normalText, "\n"); got != want {
 		t.Errorf("the captured repaint changed the frame text:\n%s\n--- want ---\n%s", got, want)

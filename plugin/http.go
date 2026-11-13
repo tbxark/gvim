@@ -98,20 +98,14 @@ func (h *httpState) release(plugin string) {
 	<-h.pluginSlot(plugin)
 }
 
-// httpPolicyError reports a URL/host/redirect refused by policy (invalid, not IO).
-type httpPolicyError struct{ reason string }
-
-func (e *httpPolicyError) Error() string { return "http: " + e.reason }
-
+// httpPolicy reports a URL/host/redirect refused by policy: code invalid, not io.
 func httpPolicy(reason string, args ...any) error {
-	return &httpPolicyError{reason: fmt.Sprintf(reason, args...)}
+	return pluginapi.Errf(pluginapi.CodeInvalid, "http: "+reason, args...)
 }
 
 // httpTooLarge reports a response over the body cap.
-type httpTooLarge struct{ n int64 }
-
-func (e *httpTooLarge) Error() string {
-	return fmt.Sprintf("http: response is larger than %d bytes", maxHTTPBody)
+func httpTooLarge() error {
+	return pluginapi.Errf(pluginapi.CodeTooLarge, "http: response is larger than %d bytes", maxHTTPBody)
 }
 
 // validateHTTPURL applies the scheme/credential/host-literal policy. Hostnames are only
@@ -341,21 +335,17 @@ func (h *httpState) get(ctx context.Context, pluginName, version, raw string, ti
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.ContentLength > maxHTTPBody {
-		return nil, &httpTooLarge{n: resp.ContentLength}
+		return nil, httpTooLarge()
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBody+1))
 	if err != nil {
-		var large *httpTooLarge
-		if errors.As(err, &large) {
-			return nil, large
-		}
 		if ctx.Err() != nil {
 			return nil, httpError(ctx, err)
 		}
 		return nil, pluginapi.Errf(pluginapi.CodeIO, "http: read: %v", err)
 	}
 	if len(body) > maxHTTPBody {
-		return nil, &httpTooLarge{n: int64(len(body))}
+		return nil, httpTooLarge()
 	}
 	headers := make(map[string]any, len(httpResultHeaders))
 	for name, values := range resp.Header {
@@ -372,16 +362,13 @@ func (h *httpState) get(ctx context.Context, pluginName, version, raw string, ti
 	}, nil
 }
 
-// httpError maps a transport error to a plugin error: policy stays invalid, a deadline is
+// httpError maps a transport error to a plugin error: policy stays invalid (the redirect
+// check and the dialer report it as a plugin error inside the transport's), a deadline is
 // timeout, DNS/resolution and every other network failure is io. No fallback happens here.
 func httpError(ctx context.Context, err error) error {
-	var policy *httpPolicyError
-	if errors.As(err, &policy) {
-		return pluginapi.Errf(pluginapi.CodeInvalid, "%v", err)
-	}
-	var large *httpTooLarge
-	if errors.As(err, &large) {
-		return pluginapi.Errf(pluginapi.CodeTooLarge, "%v", err)
+	var pe *pluginapi.Error
+	if errors.As(err, &pe) {
+		return pe
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 		return pluginapi.Errf(pluginapi.CodeTimeout, "http: timed out")

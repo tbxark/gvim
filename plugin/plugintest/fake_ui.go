@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The prompt, picker and popup part of the fake host (stage S13). The fake keeps every
+// The prompt, picker and popup part of the fake host. The fake keeps every
 // request, and the overlays still open; a test answers one by resolving its token
 // (Harness.Resolve) the way the ui does.
 //

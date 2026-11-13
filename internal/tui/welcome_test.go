@@ -23,13 +23,13 @@ func welcomeModel(t *testing.T, w, h int, recents ...string) (*Model, *tabFake) 
 }
 
 // welcomeRowAt returns the welcome line of item i, or false when it is not drawn.
-func welcomeRowAt(m *Model, i int) (welcomeLine, bool) {
+func welcomeRowAt(m *Model, i int) (frame.WelcomeLine, bool) {
 	for _, r := range m.layout().Welcome {
 		if r.Item == i {
 			return r, true
 		}
 	}
-	return welcomeLine{}, false
+	return frame.WelcomeLine{}, false
 }
 
 // screenRow returns row y of the painted frame as text.
@@ -146,7 +146,7 @@ func TestClosingTheLastTabShowsTheWelcomeScreenAgain(t *testing.T) {
 // tabCloseX is the column of the × of tab i in the strip, or -1.
 func tabCloseX(m *Model, i int) int {
 	for _, r := range m.layout().Strip.Runs {
-		if r.Kind == hitTabClose && r.Index == i {
+		if r.Kind == frame.HitTabClose && r.Index == i {
 			return r.X
 		}
 	}
@@ -320,11 +320,11 @@ func TestWelcomeCompactsOnANarrowPane(t *testing.T) {
 	var title, subtitle, doors int
 	for _, l := range lines {
 		switch l.Role {
-		case welcomeTitleRow:
+		case frame.WelcomeTitleRow:
 			title++
-		case welcomeSubtitle:
+		case frame.WelcomeSubtitle:
 			subtitle++
-		case welcomeDoorRow:
+		case frame.WelcomeDoorRow:
 			doors++
 		}
 		if l.W <= 0 {
@@ -333,7 +333,7 @@ func TestWelcomeCompactsOnANarrowPane(t *testing.T) {
 		if l.X < x0 || l.X+l.W > x0+paneW {
 			t.Errorf("line %q leaves the %d-cell pane: %+v", l.Text, paneW, l)
 		}
-		if l.Role == welcomeDoorRow && l.Key != "" {
+		if l.Role == frame.WelcomeDoorRow && l.Key != "" {
 			t.Errorf("door %q shows the cut key %q", l.Text, l.Key)
 		}
 	}
@@ -347,8 +347,8 @@ func TestWelcomeCompactsOnANarrowPane(t *testing.T) {
 	wide := frame.WelcomeLines(0, 80, 0, 30, nil, keys)
 	var sawTitle, sawKey bool
 	for _, l := range wide {
-		sawTitle = sawTitle || l.Role == welcomeTitleRow
-		sawKey = sawKey || (l.Role == welcomeDoorRow && l.Key == "Ctrl+N")
+		sawTitle = sawTitle || l.Role == frame.WelcomeTitleRow
+		sawKey = sawKey || (l.Role == frame.WelcomeDoorRow && l.Key == "Ctrl+N")
 	}
 	if !sawTitle || !sawKey {
 		t.Errorf("wide welcome: title %v, Ctrl+N key %v", sawTitle, sawKey)
@@ -368,7 +368,7 @@ func TestWelcomeNeverSpillsAtTinyWidths(t *testing.T) {
 			if l.X < 0 || l.X+l.W > paneW {
 				t.Errorf("pane %d: line %q leaves it: %+v", paneW, l.Text, l)
 			}
-			if l.Key != "" && l.Role == welcomeDoorRow {
+			if l.Key != "" && l.Role == frame.WelcomeDoorRow {
 				t.Errorf("pane %d: a door key survived at %q", paneW, l.Key)
 			}
 		}
@@ -378,9 +378,9 @@ func TestWelcomeNeverSpillsAtTinyWidths(t *testing.T) {
 // frame.WelcomeLines places the block on the pane and keeps the title centred.
 func TestWelcomeTitleIsCentredInTheBlock(t *testing.T) {
 	lines := frame.WelcomeLines(0, 80, 0, 30, nil, nil)
-	var title []welcomeLine
+	var title []frame.WelcomeLine
 	for _, r := range lines {
-		if r.Role == welcomeTitleRow {
+		if r.Role == frame.WelcomeTitleRow {
 			title = append(title, r)
 		}
 	}

@@ -70,3 +70,25 @@ func TestDrawNeverPanicsAtAnyWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestNamesDropBidiControls checks that a file name with a right-to-left override paints
+// without it, so the row cannot be made to read as another name.
+func TestNamesDropBidiControls(t *testing.T) {
+	t.Parallel()
+	ft := &fakeTree{
+		root: "/r",
+		rows: []tree.Row{
+			{Name: "r", Path: "/r", IsDir: true, Expanded: true},
+			{Name: "doc.\u202egpj.exe", Path: "/r/x", Depth: 1},
+		},
+	}
+	g := grid.New(28, 6)
+	New(ft, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 28, Bottom: 5})
+	for y := range 6 {
+		for x := range 28 {
+			if strings.ContainsRune(g.At(x, y).Text, '\u202e') {
+				t.Fatalf("cell (%d, %d) carries the override", x, y)
+			}
+		}
+	}
+}

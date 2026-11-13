@@ -32,3 +32,30 @@ func TestLineMouseClickPlacesCaret(t *testing.T) {
 		t.Fatalf("click outside the input + X = %q, want the caret kept at the end", got)
 	}
 }
+
+// TestLineMouseClickAfterTheTextShrank: the click maps through the window of the last
+// Draw, so text that got shorter since then must not index past the end.
+func TestLineMouseClickAfterTheTextShrank(t *testing.T) {
+	t.Parallel()
+	l := NewLine(testStyles(), LineOptions{Label: "Value:", Input: "abcdef"})
+	l.Draw(grid.New(20, 3))
+	l.field.SetValue("ab")
+	l.Update(tea.MouseClickMsg(tea.Mouse{X: l.fieldX + 5, Y: l.fieldY, Button: tea.MouseLeft}))
+	if got := l.field.Position(); got != 2 {
+		t.Fatalf("caret = %d, want the end of the shortened text", got)
+	}
+}
+
+// TestLineCutValueDropsASelectionMadeMeanwhile: a selection made while the clipboard write
+// was in flight must not outlive the cleared text.
+func TestLineCutValueDropsASelectionMadeMeanwhile(t *testing.T) {
+	t.Parallel()
+	l := NewLine(testStyles(), LineOptions{Input: "abc"})
+	l.SelectLeft()
+	if got := l.CutValue(); got != "abc" {
+		t.Fatalf("CutValue = %q", got)
+	}
+	if l.HasSelection() || l.SelectedText() != "" {
+		t.Fatal("the selection survived the cut")
+	}
+}

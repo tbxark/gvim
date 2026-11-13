@@ -2,10 +2,13 @@ package tui
 
 import (
 	"testing"
+
+	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/split"
 )
 
 func TestDropEdgesFollowFreshsZones(t *testing.T) {
-	r := rect{X: 10, Y: 5, W: 40, H: 12} // edges: 10 columns, 3 rows
+	r := space.Rect{X: 10, Y: 5, W: 40, H: 12} // edges: 10 columns, 3 rows
 	tests := []struct {
 		name string
 		x, y int
@@ -43,14 +46,14 @@ func dragTabTo(t *testing.T, m *Model, i, x, y int) {
 func TestDroppingATabOnAPaneEdgeSplitsIt(t *testing.T) {
 	tests := []struct {
 		name        string
-		edge        func(p splitPane) (x, y int)
-		wantDir     splitDir
+		edge        func(p split.Pane) (x, y int)
+		wantDir     split.Dir
 		newPaneLast bool // the pane with the dragged tab is the second child
 	}{
-		{"right", func(p splitPane) (int, int) { return p.X + p.W - 2, p.Y + p.H/2 }, sideBySide, true},
-		{"left", func(p splitPane) (int, int) { return p.X + 1, p.Y + p.H/2 }, sideBySide, false},
-		{"bottom", func(p splitPane) (int, int) { return p.X + p.W/2, p.Y + p.H - 1 }, stacked, true},
-		{"top", func(p splitPane) (int, int) { return p.X + p.W/2, p.Y }, stacked, false},
+		{"right", func(p split.Pane) (int, int) { return p.X + p.W - 2, p.Y + p.H/2 }, split.SideBySide, true},
+		{"left", func(p split.Pane) (int, int) { return p.X + 1, p.Y + p.H/2 }, split.SideBySide, false},
+		{"bottom", func(p split.Pane) (int, int) { return p.X + p.W/2, p.Y + p.H - 1 }, split.Stacked, true},
+		{"top", func(p split.Pane) (int, int) { return p.X + p.W/2, p.Y }, split.Stacked, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

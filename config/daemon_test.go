@@ -98,16 +98,3 @@ func TestDaemonProjectLayerRefused(t *testing.T) {
 		t.Fatalf("project daemon config applied: %+v", cfg.Daemon)
 	}
 }
-
-// TestValidateMaterializedWorkspaces covers the exported check used by non-config callers.
-func TestValidateMaterializedWorkspaces(t *testing.T) {
-	t.Parallel()
-	if err := ValidateMaterializedWorkspaces(DefaultMaterializedWorkspaces); err != nil {
-		t.Fatalf("the default is refused: %v", err)
-	}
-	for _, n := range []int{0, -1, MaxMaterializedWorkspaces + 1} {
-		if err := ValidateMaterializedWorkspaces(n); err == nil {
-			t.Fatalf("ValidateMaterializedWorkspaces(%d) accepted an out-of-range cap", n)
-		}
-	}
-}

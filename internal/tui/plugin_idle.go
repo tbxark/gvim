@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// The idle event (stage S14). While some plugin subscribes to `idle`, the root keeps one
+// The idle event. While some plugin subscribes to `idle`, the root keeps one
 // timer going and raises idle{ms} as the user stays away from the keyboard and mouse.
 //
 // The contract with the runtime (api_events.go, idlePasses): every idle event carries

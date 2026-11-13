@@ -3,6 +3,7 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/textsafe"
 	"github.com/tbxark/gvim/trust"
 )
@@ -18,9 +19,9 @@ import (
 // nothing is shown when no environment is detected. Unlike Fresh the segment is
 // always on rather than an opt-in status-bar element, so the neutral "system"
 // value is omitted to keep the row quiet; docs/parity R13-18 records that.
-func (m *Model) envStatusSegment() (statusItem, bool) {
+func (m *Model) envStatusSegment() (frame.StatusItem, bool) {
 	if m.env == nil {
-		return statusItem{}, false
+		return frame.StatusItem{}, false
 	}
 	active, detected, hasActive, hasDetected, trustLevel := m.env.CachedEnvStatus()
 	name := ""
@@ -42,16 +43,16 @@ func (m *Model) envStatusSegment() (statusItem, bool) {
 		// revoked later: the indicator is informational, it never re-gates or un-applies an
 		// environment (Fresh's envActive branch behaves the same; deactivation is explicit).
 		if name != "" {
-			return statusItem{ID: "env", Text: uiTextVars("gvim.status.env_active", "%{name} ✓", map[string]any{"name": name}), Prio: 1<<20 - 2, Clickable: true}, true
+			return frame.StatusItem{ID: "env", Text: uiTextVars("gvim.status.env_active", "%{name} ✓", map[string]any{"name": name}), Prio: 1<<20 - 2, Clickable: true}, true
 		}
-		return statusItem{ID: "env", Text: uiText("gvim.status.env_active_unknown", "active"), Prio: 1<<20 - 2, Clickable: true}, true
+		return frame.StatusItem{ID: "env", Text: uiText("gvim.status.env_active_unknown", "active"), Prio: 1<<20 - 2, Clickable: true}, true
 	case hasDetected && name != "":
 		if trustLevel == string(trust.Trusted) {
-			return statusItem{ID: "env", Text: uiTextVars("gvim.status.env_detected", "%{name}", map[string]any{"name": name}), Prio: 1<<20 - 2, Clickable: true}, true
+			return frame.StatusItem{ID: "env", Text: uiTextVars("gvim.status.env_detected", "%{name}", map[string]any{"name": name}), Prio: 1<<20 - 2, Clickable: true}, true
 		}
-		return statusItem{ID: "env", Text: uiTextVars("gvim.status.env_locked", "%{name} (locked)", map[string]any{"name": name}), Prio: 1<<20 - 2, Clickable: true}, true
+		return frame.StatusItem{ID: "env", Text: uiTextVars("gvim.status.env_locked", "%{name} (locked)", map[string]any{"name": name}), Prio: 1<<20 - 2, Clickable: true}, true
 	}
-	return statusItem{}, false
+	return frame.StatusItem{}, false
 }
 
 // envStatusClick is the safe click entry of the active-environment segment: an untrusted

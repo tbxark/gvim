@@ -6,11 +6,11 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.lsp (stage S23): what the language servers know, read only.
+// gvim.lsp: what the language servers know, read only.
 //
 //	gvim.lsp.diagnostics(buf?) -> { {range=Range, severity=, message=, source=}, ... } | nil, err
 //	      severity is "error", "warning", "info" or "hint"; the range has byte columns, as
-//	      every range of the API (AMENDMENTS C24); buf defaults to the current buffer
+//	      every range of the API; buf defaults to the current buffer
 //	gvim.lsp.request(method, params, opts?) ⏳ -> result | nil, err
 //	      opts {buf = Buffer}: the buffer whose server is asked (default: the current one);
 //	      params and result are the protocol's own JSON, with its UTF-16 columns

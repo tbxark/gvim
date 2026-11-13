@@ -50,7 +50,7 @@ end)`); err != nil {
 }
 
 func TestBufNewUnsupportedHost(t *testing.T) {
-	// S7's FakeHost implements Do; a host that refuses the "new" action stands for one without it.
+	// The FakeHost implements Do; a host that refuses the "new" action stands for one without it.
 	host := plugintest.NewFakeHost()
 	host.AddBuffer("a.go", "x")
 	host.Cmd().Errors["new"] = pluginapi.Errf(pluginapi.CodeUnsupported, "no new action")

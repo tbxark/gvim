@@ -162,7 +162,7 @@ func (d *Document) blockText(b lineBlock) string {
 	return strings.Join(lines, "\n")
 }
 
-// deleteLine removes the line of every caret with its line break. On the last line
+// DeleteLine removes the line of every caret with its line break. On the last line
 // the text goes but the break before it stays, so the text ends with an empty line.
 // Selections are dropped, and their text is not deleted. Each caret moves to column
 // 0 of the line that takes its line's place.
@@ -198,7 +198,7 @@ func (d *Document) DeleteLine() {
 	}
 }
 
-// duplicateLines copies the lines each caret covers (see caretLines) onto the line
+// DuplicateLines copies the lines each caret covers (see caretLines) onto the line
 // below them, or above them when above is set. The carets and selections move with
 // the copy below, and stay on the line numbers they had above, which now hold the
 // copy. On the last line, the copy below is joined with a new line break. Carets on
@@ -242,7 +242,7 @@ func (d *Document) DuplicateLines(above bool) {
 	}
 }
 
-// moveLines moves the lines each caret covers one line up (dir -1) or down (dir 1),
+// MoveLines moves the lines each caret covers one line up (dir -1) or down (dir 1),
 // past the neighbouring line, as one undo step. Blocks of lines that touch move as
 // one, and a block that has no neighbour to swap with stays. Moving down never
 // passes the empty line after a final line break. Every caret and selection
@@ -315,7 +315,7 @@ func (d *Document) MoveLines(dir int) {
 	}
 }
 
-// dedent removes one indent unit from the start of each selected line, and of the
+// Dedent removes one indent unit from the start of each selected line, and of the
 // line of every caret without a selection. A unit is one leading tab, or up to
 // tabSize leading spaces. A position moves back by what was removed before it on
 // its line.
@@ -370,7 +370,7 @@ func (d *Document) deleteByRange(target func(c caret) (from, to buffer.Pos)) {
 	d.applyPlans(cs, plans)
 }
 
-// deleteWord deletes the selection, or the word before (back) or after each caret.
+// DeleteWord deletes the selection, or the word before (back) or after each caret.
 func (d *Document) DeleteWord(back bool) {
 	d.deleteByRange(func(c caret) (buffer.Pos, buffer.Pos) {
 		if back {
@@ -380,7 +380,7 @@ func (d *Document) DeleteWord(back bool) {
 	})
 }
 
-// deleteToLineStart deletes the selection, or the text from the start of the line to
+// DeleteToLineStart deletes the selection, or the text from the start of the line to
 // each caret. A caret at column 0 deletes the line break before it.
 func (d *Document) DeleteToLineStart() {
 	d.deleteByRange(func(c caret) (buffer.Pos, buffer.Pos) {
@@ -392,7 +392,7 @@ func (d *Document) DeleteToLineStart() {
 	})
 }
 
-// deleteToLineEnd deletes the selection, or the text from each caret to the end of
+// DeleteToLineEnd deletes the selection, or the text from each caret to the end of
 // its line. A caret at the end of the line deletes the line break after it.
 func (d *Document) DeleteToLineEnd() {
 	d.deleteByRange(func(c caret) (buffer.Pos, buffer.Pos) {
@@ -405,8 +405,8 @@ func (d *Document) DeleteToLineEnd() {
 	})
 }
 
-// transposeChars swaps the character before each caret with the one at it, and
-// moves the caret past the pair. At the start or end of a line there is no
+// TransposeChars swaps the character (grapheme cluster) before each caret with the one
+// at it, and moves the caret past the pair. At the start or end of a line there is no
 // character on both sides, so nothing changes. Line breaks are never swapped.
 // A selection is dropped when its caret swaps.
 func (d *Document) TransposeChars() {
@@ -417,15 +417,14 @@ func (d *Document) TransposeChars() {
 		if p.Col == 0 || p.Col >= d.Buffer.LineLen(p.Line) {
 			continue
 		}
-		from := buffer.Pos{Line: p.Line, Col: p.Col - 1}
-		to := buffer.Pos{Line: p.Line, Col: p.Col + 1}
-		pair := []rune(d.Buffer.Range(from, to))
-		plans[i].Edit = &edit{From: from, To: to, Text: string(pair[1]) + string(pair[0])}
+		from := buffer.Pos{Line: p.Line, Col: prevBoundary(d.Buffer, p.Line, p.Col)}
+		to := buffer.Pos{Line: p.Line, Col: nextBoundary(d.Buffer, p.Line, p.Col)}
+		plans[i].Edit = &edit{From: from, To: to, Text: d.Buffer.Range(p, to) + d.Buffer.Range(from, p)}
 	}
 	d.applyPlans(cs, plans)
 }
 
-// transformCase converts the selection of each caret, or else the word at or just
+// TransformCase converts the selection of each caret, or else the word at or just
 // before it, with fn. A selection stays selected over the converted text, in its
 // direction, so the next conversion needs no new selection. A word has no selection,
 // and the caret ends after it. Text that does not change leaves the caret and

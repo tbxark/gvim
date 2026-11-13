@@ -35,7 +35,7 @@ const (
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 
-// MaxLuaFile is the largest .lua file the runtime compiles (AMENDMENTS C20).
+// MaxLuaFile is the largest .lua file the runtime compiles.
 const MaxLuaFile = 256 << 10
 
 // Compiled is one compiled file of a plugin: a state-independent prototype, or the error
@@ -73,7 +73,33 @@ func CompileSource(chunk, src string) (*lua.FunctionProto, error) {
 	if err != nil {
 		return nil, readableCompileError(chunk, src, err)
 	}
+	trimProto(proto)
 	return proto, nil
+}
+
+// trimProto reallocates the slices of a compiled prototype (and of its nested ones) at
+// their exact length: the compiler leaves them in append-grown backing arrays, which gopher-lua
+// then keeps for the life of the plugin (about 17 KiB per Lua function).
+func trimProto(p *lua.FunctionProto) {
+	p.Code = exact(p.Code)
+	p.Constants = exact(p.Constants)
+	p.FunctionPrototypes = exact(p.FunctionPrototypes)
+	p.DbgSourcePositions = exact(p.DbgSourcePositions)
+	p.DbgLocals = exact(p.DbgLocals)
+	p.DbgCalls = exact(p.DbgCalls)
+	p.DbgUpvalues = exact(p.DbgUpvalues)
+	for _, f := range p.FunctionPrototypes {
+		trimProto(f)
+	}
+}
+
+// exact copies s into a slice whose capacity is its length (slices.Clone rounds up to an
+// allocation size class).
+func exact[T any](s []T) []T {
+	if s == nil {
+		return nil
+	}
+	return append(make([]T, 0, len(s)), s...)
 }
 
 // Source describes one plugin to load.
@@ -91,7 +117,7 @@ type Source struct {
 	I18nJSON string
 	Compiled map[string]*Compiled
 	// Settings and ProjectSettings are plugins.<name>.settings of the user and of the project
-	// layer of the config; gvim.settings.define merges them over the defaults (AMENDMENTS C11).
+	// layer of the config; gvim.settings.define merges them over the defaults.
 	Settings, ProjectSettings map[string]any
 }
 
@@ -321,7 +347,7 @@ func (p *plugin) removeSub(s *subscription) {
 // registered rolled back; see Plugins. All files must be compiled (Compile).
 //
 // Call it on the UI goroutine. Discovery, ordering and dependencies are the loader's job
-// (stage S10); this is the entry it builds on.
+// (discover.go, lifecycle.go); this is the entry it builds on.
 func (r *Runtime) LoadPlugin(s Source) error {
 	defer r.enter("LoadPlugin")()
 	if r.stopped {

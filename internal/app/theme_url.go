@@ -44,28 +44,23 @@ const (
 // themeURLClient fetches URL themes; a test replaces it to observe requests or
 // simulate a transport failure. It is never used from the Update loop: only the
 // startup theme resolution and runtime cache reads exist.
-var themeURLClient = &http.Client{Timeout: themeURLTimeout}
+var themeURLClient = &http.Client{Timeout: themeURLTimeout, CheckRedirect: themeURLCheckRedirect}
+
+// themeURLCheckRedirect holds a redirect target to the same transport policy as
+// the first request, so a loopback or https URL cannot bounce to plain http.
+func themeURLCheckRedirect(req *http.Request, _ []*http.Request) error {
+	_, err := updatecheck.ValidateURL(req.URL.String())
+	return err
+}
 
 // themeURLCacheDir is where URL themes are cached for this launch:
-// <user cache dir>/gvim/theme-cache. Move old entries individually so existing
-// cache entries do not hide other themes in the old directory.
+// <user cache dir>/gvim/theme-cache.
 func themeURLCacheDir() (string, error) {
 	dir, err := config.CacheDir()
 	if err != nil {
 		return "", fmt.Errorf("theme: user cache dir: %w", err)
 	}
-	dest := theme.URLCacheDir(dir)
-	if old, err := config.Dir(); err == nil {
-		old = theme.URLCacheDir(old)
-		if entries, err := os.ReadDir(old); err == nil {
-			for _, entry := range entries {
-				if entry.Type().IsRegular() {
-					_ = config.MoveLegacyFile(filepath.Join(old, entry.Name()), filepath.Join(dest, entry.Name()))
-				}
-			}
-		}
-	}
-	return dest, nil
+	return theme.URLCacheDir(dir), nil
 }
 
 // themeURLPolicy applies the update check's transport policy to a theme URL and

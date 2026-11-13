@@ -8,16 +8,16 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.workspace (stage S9):
+// gvim.workspace:
 //
 //	gvim.workspace.root() -> string
 //	gvim.workspace.file_launch() -> boolean   immutable startup invocation property (Fresh editor.fileLaunch())
 //	gvim.workspace.files(opts?) -> {files = {...}, loading = bool}   finder index snapshot, no IO; opts {limit = 50000}
 //	gvim.workspace.grep(query, opts?) ⏳ -> { {path, line, col, text}, ... } | nil, err
 //	      opts {regex = false, case_sensitive = false, max = 2000}; line and col are 0-based, col a
-//	      byte offset into text (the app converts live grep's 1-based rune values, AMENDMENTS C24)
+//	      byte offset into text (the app converts live grep's 1-based rune values)
 //	gvim.workspace.git_root(dir) ⏳ -> root | nil          Services.GitRoot, used by gvim.git when the binary is missing
-//	gvim.workspace.git_branch(root) ⏳ -> name | nil, err  Services.GitBranch, same use (AMENDMENTS C28)
+//	gvim.workspace.git_branch(root) ⏳ -> name | nil, err  Services.GitBranch, same use
 const (
 	defaultFilesLimit = 50_000
 	defaultGrepMax    = 2000

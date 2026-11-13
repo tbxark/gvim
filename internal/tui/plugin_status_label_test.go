@@ -28,9 +28,9 @@ func TestStatusModeLabelIsNotCut(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sv := statusView{
+			sv := frame.StatusView{
 				Position: "Ln 1, Col 1", Message: tt.message, EOL: "LF", Encoding: "UTF-8", Language: "Text", Lines: 10,
-				Extra: []statusItem{{ID: "vi", Plugin: "vi_mode", Text: tt.label}},
+				Extra: []frame.StatusItem{{ID: "vi", Plugin: "vi_mode", Text: tt.label}},
 			}
 			var row strings.Builder
 			for _, r := range frame.StatusRuns(tt.w, sv) {

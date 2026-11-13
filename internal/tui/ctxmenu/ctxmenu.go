@@ -14,6 +14,7 @@ package ctxmenu
 
 import (
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -62,15 +63,7 @@ type Menu struct {
 	items  []Item
 	sel    int // the highlighted row, -1 for none
 	first  int // the first row shown, when the rows do not fit the frame
-	box    rect
-}
-
-// rect is a block of cells.
-type rect struct{ x, y, w, h int }
-
-// contains reports whether the cell (x, y) lies inside r.
-func (r rect) contains(x, y int) bool {
-	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
+	box    space.Rect
 }
 
 // New returns a closed menu painted with the shared overlay frame: the box, the
@@ -102,7 +95,7 @@ func (m *Menu) Items() []Item { return slices.Clone(m.items) }
 
 // Box is the rectangle of the menu at the last draw: its column, row, width and
 // height. The width is 0 before the first draw.
-func (m *Menu) Box() (x, y, w, h int) { return m.box.x, m.box.y, m.box.w, m.box.h }
+func (m *Menu) Box() (x, y, w, h int) { return m.box.X, m.box.Y, m.box.W, m.box.H }
 
 // update handles one key or mouse message and returns the command it starts: Chosen
 // when a row is chosen, or Reroute for a right press outside the menu.
@@ -147,7 +140,7 @@ func (m *Menu) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 }
 
 // visible is the number of rows the box shows.
-func (m *Menu) visible() int { return max(m.box.h-2, 0) }
+func (m *Menu) visible() int { return max(m.box.H-2, 0) }
 
 // reveal keeps the window on the rows that fit the box and the highlighted row in it.
 func (m *Menu) reveal() {
@@ -161,7 +154,7 @@ func (m *Menu) reveal() {
 // wheel scrolls the window by one row per notch. A highlight that leaves the window
 // is dropped, so the next key starts from the rows that are shown.
 func (m *Menu) wheel(mo tea.Mouse) {
-	if !m.box.contains(mo.X, mo.Y) {
+	if !m.box.Contains(mo.X, mo.Y) {
 		return
 	}
 	switch mo.Button {
@@ -183,7 +176,7 @@ func (m *Menu) wheel(mo tea.Mouse) {
 // sent on for the owner to handle.
 func (m *Menu) press(msg tea.MouseClickMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
-	if m.box.contains(mo.X, mo.Y) {
+	if m.box.Contains(mo.X, mo.Y) {
 		if mo.Button != tea.MouseLeft {
 			return nil
 		}
@@ -209,10 +202,10 @@ func (m *Menu) choose(i int) tea.Cmd {
 
 // rowAt is the row that can be chosen under the cell (x, y) in the last draw, or -1.
 func (m *Menu) rowAt(x, y int) int {
-	if !m.box.contains(x, y) || x == m.box.x || x == m.box.x+m.box.w-1 {
+	if !m.box.Contains(x, y) || x == m.box.X || x == m.box.X+m.box.W-1 {
 		return -1
 	}
-	i := y - m.box.y - 1
+	i := y - m.box.Y - 1
 	if i < 0 || i >= m.visible() {
 		return -1
 	}
@@ -268,7 +261,7 @@ func (m *Menu) width(frame int) int {
 // empty box.
 func (m *Menu) place(fw, fh int) {
 	if fw < 5 || fh < 3 {
-		m.box = rect{}
+		m.box = space.Rect{}
 		return
 	}
 	w := m.width(fw)
@@ -280,7 +273,7 @@ func (m *Menu) place(fw, fh int) {
 	if fh < h+2*edgeY {
 		edgeY = 0
 	}
-	m.box = rect{x: max(min(m.x, fw-w-edgeX), edgeX), y: max(min(m.y, fh-h-edgeY), edgeY), w: w, h: h}
+	m.box = space.Rect{X: max(min(m.x, fw-w-edgeX), edgeX), Y: max(min(m.y, fh-h-edgeY), edgeY), W: w, H: h}
 }
 
 // Draw paints the menu over g. It places the box for the size of g first, so that a
@@ -295,23 +288,23 @@ func (m *Menu) Draw(g *grid.Grid) {
 	}
 	m.place(g.Width(), g.Height())
 	b := m.box
-	if b.w == 0 {
+	if b.W == 0 {
 		return
 	}
 	m.reveal()
 	chrome := m.chrome
 	disabled := chrome.Box
 	disabled.Faint = true
-	right := b.x + b.w - 1
+	right := b.X + b.W - 1
 	ruleEnd := right - space.PadX
-	rows := b.h - 2
-	chrome.PaintBox(g, b.x, b.y, b.w, b.h, "")
+	rows := b.H - 2
+	chrome.PaintBox(g, b.X, b.Y, b.W, b.H, "")
 	for k := range rows {
 		i := m.first + k
 		it := m.items[i]
-		y := b.y + 1 + k
+		y := b.Y + 1 + k
 		if it.Separator {
-			start := b.x + 1 + space.PadX
+			start := b.X + 1 + space.PadX
 			g.Put(start, y, ruleEnd, rule(ruleEnd-start), chrome.Box)
 			continue
 		}
@@ -322,22 +315,16 @@ func (m *Menu) Draw(g *grid.Grid) {
 		case it.Disabled:
 			st = disabled
 		}
-		g.Fill(b.x+1, right, y, st)
-		g.Put(b.x+2, y, ruleEnd, it.Label, st)
+		g.Fill(b.X+1, right, y, st)
+		g.Put(b.X+2, y, ruleEnd, it.Label, st)
 	}
 	if m.first > 0 {
-		g.Set(b.x+b.w/2, b.y, "▲", chrome.Border)
+		g.Set(b.X+b.W/2, b.Y, "▲", chrome.Border)
 	}
 	if m.first+rows < len(m.items) {
-		g.Set(b.x+b.w/2, b.y+b.h-1, "▼", chrome.Border)
+		g.Set(b.X+b.W/2, b.Y+b.H-1, "▼", chrome.Border)
 	}
 }
 
 // rule is n cells of the horizontal rule.
-func rule(n int) string {
-	out := make([]rune, max(n, 0))
-	for i := range out {
-		out[i] = '─'
-	}
-	return string(out)
-}
+func rule(n int) string { return strings.Repeat("─", max(n, 0)) }

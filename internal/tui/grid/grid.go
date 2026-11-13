@@ -66,6 +66,19 @@ func New(w, h int) *Grid {
 	return g
 }
 
+// Reset makes every cell blank in the default style again, so a grid can be painted
+// again without allocating a new one. The key capture buffer, if any, is cleared too.
+func (g *Grid) Reset() {
+	for y := range g.cells {
+		for x := range g.cells[y] {
+			g.cells[y][x] = Cell{Text: " "}
+		}
+	}
+	for y := range g.keys {
+		clear(g.keys[y])
+	}
+}
+
 // CaptureKeys allocates the per-cell theme-key buffer and makes the grid record
 // Style.FGKey/BGKey on every write. The theme inspector calls it on the one
 // repaint it attributes; everything else paints without it.
@@ -75,12 +88,6 @@ func (g *Grid) CaptureKeys() {
 		g.keys[y] = make([]cellKeys, g.w)
 	}
 }
-
-// ReleaseKeys stops recording and frees the capture buffer.
-func (g *Grid) ReleaseKeys() { g.keys = nil }
-
-// CapturingKeys reports whether the grid records theme-key ids.
-func (g *Grid) CapturingKeys() bool { return g.keys != nil }
 
 // KeysAt returns the theme-key ids recorded for the cell under the last style
 // written there. (0, 0) means unknown, outside the grid, or capture off.

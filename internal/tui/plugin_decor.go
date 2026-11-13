@@ -15,7 +15,7 @@ import (
 	"github.com/tbxark/gvim/theme"
 )
 
-// Plugin decorations (FINAL X8, AMENDMENTS C4, C13, C23): the pluginHost methods that put
+// Plugin decorations: the pluginHost methods that put
 // them in the decorations.Store, and the hooks that hand them to the pane one line at a time.
 //
 // The store is fed with the edits of every document by a listener that the app registers on
@@ -161,10 +161,9 @@ func (h *pluginHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {
 	}
 }
 
-// plugDecorGone drops the decorations and plugin folds that the plugin (at generation gen)
-// set. A reload starts a new generation, and the new one sets what it needs again.
-func (m *Model) plugDecorGone(plugin string, gen uint64) {
-	_ = gen
+// plugDecorGone drops the decorations and plugin folds that the plugin set. A reload
+// starts a new generation, and the new one sets what it needs again.
+func (m *Model) plugDecorGone(plugin string) {
 	if m.plug.decor != nil {
 		m.plug.decor.DropOwner(plugin)
 	}
@@ -178,13 +177,24 @@ func decorErr(err error) error {
 	return err
 }
 
-// decorSweep forgets the decorations of buffers that are closed. Buffer ids are never
-// reused, so nothing else would ever free them.
+// decorSweep asks for the decorations of closed buffers to be forgotten. The sweep reads
+// every decorated document and flushes the store, so it runs once at the end of the update
+// (plugDecorSweep), not after each of the many calls one slice can make.
 func (h *pluginHost) decorSweep() {
-	st := h.model().plug.decor
-	for _, doc := range st.Docs() {
-		if _, ok := h.ed().Buffer(pluginapi.BufferID(doc)); !ok {
-			st.DropDoc(doc)
+	h.model().plug.decorSweepDue = true
+}
+
+// plugDecorSweep forgets the decorations of buffers that are closed, when a decoration
+// call asked for it. Buffer ids are never reused, so nothing else would ever free them.
+func (m *Model) plugDecorSweep() {
+	p := &m.plug
+	if !p.decorSweepDue || p.decor == nil {
+		return
+	}
+	p.decorSweepDue = false
+	for _, doc := range p.decor.Docs() {
+		if _, ok := p.host.ed().Buffer(pluginapi.BufferID(doc)); !ok {
+			p.decor.DropDoc(doc)
 		}
 	}
 }
@@ -219,8 +229,6 @@ func decorItem(h *pluginHost, id pluginapi.BufferID, info pluginapi.BufferInfo, 
 		PrefixStyle: decorStyle(d.PrefixStyle),
 		GutterText:  d.GutterText,
 		GutterStyle: decorStyle(d.GutterStyle),
-		Collapsed:   d.Collapsed,
-		Placeholder: d.Placeholder,
 	}
 	if d.ScopeEnd >= d.ScopeStart {
 		it.ScopeStart, it.ScopeEnd = line(d.ScopeStart), line(d.ScopeEnd)

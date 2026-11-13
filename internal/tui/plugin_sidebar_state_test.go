@@ -37,7 +37,7 @@ func TestPluginSidebarStateRoundTrip(t *testing.T) {
 	restored, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 24)
 	restored.stashPluginSidebarRestore(SidebarState{
 		PluginOrder:     []string{"2", "1"},
-		PluginRows:      map[string]int{"1": 9, "2": 3},
+		SectionRows:     map[string]int{"plugin:1": 9, "plugin:2": 3},
 		PluginCollapsed: map[string]bool{"1": true},
 	})
 	mountTestSection(restored, 1, 4)
@@ -53,13 +53,37 @@ func TestPluginSidebarStateRoundTrip(t *testing.T) {
 	if !restored.plug.panels.collapsed[1] {
 		t.Fatal("the restored folded section is not folded")
 	}
-	// The restore stays available so a section mounting later still picks up its
-	// saved rows/fold/order; ids already applied are marked.
-	if restored.plug.panels.restore == nil {
-		t.Fatal("the restore was discarded before a late mount could use it")
+	// Every saved section has mounted, so nothing is pending any more and the order is
+	// not ranked again by later layouts.
+	if restored.plug.panels.restore != nil {
+		t.Fatalf("the restore %+v outlived the mount of every saved section", restored.plug.panels.restore)
 	}
-	if !restored.plug.panels.restore.applied[1] || !restored.plug.panels.restore.applied[2] {
-		t.Fatalf("applied ids = %v, want 1 and 2", restored.plug.panels.restore.applied)
+	ps := &restored.plug.panels
+	ps.order[0], ps.order[1] = ps.order[1], ps.order[0]
+	restored.applyPluginSidebarRestore()
+	if got := ps.sidebarOrder(restored); got[0].id != 1 {
+		t.Fatalf("a later layout re-ranked the order: first section %d, want 1", got[0].id)
+	}
+}
+
+// TestPluginSidebarRestoreSkipsRankingWhenNothingMounted checks that while a saved
+// section has not mounted, the pending restore stays, and a call that sees no new
+// section leaves the order alone.
+func TestPluginSidebarRestoreSkipsRankingWhenNothingMounted(t *testing.T) {
+	t.Parallel()
+	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 24)
+	m.stashPluginSidebarRestore(SidebarState{PluginOrder: []string{"2", "1", "3"}})
+	mountTestSection(m, 1, 4)
+	mountTestSection(m, 2, 6)
+	m.applyPluginSidebarRestore()
+	if m.plug.panels.restore == nil {
+		t.Fatal("the restore was dropped while section 3 has not mounted")
+	}
+	ps := &m.plug.panels
+	ps.order[0], ps.order[1] = ps.order[1], ps.order[0]
+	m.applyPluginSidebarRestore()
+	if got := ps.sidebarOrder(m); got[0].id != 1 {
+		t.Fatalf("a call with no new section re-ranked the order: first section %d, want 1", got[0].id)
 	}
 }
 
@@ -72,7 +96,7 @@ func TestPluginSidebarStateIsBounded(t *testing.T) {
 	}
 	m.stashPluginSidebarRestore(SidebarState{
 		PluginOrder:     order,
-		PluginRows:      map[string]int{"79": 5000},
+		SectionRows:     map[string]int{"plugin:79": 5000},
 		PluginCollapsed: map[string]bool{"79": true},
 	})
 	if got := len(m.plug.panels.restore.order); got != maxSessionPluginSections {
@@ -93,7 +117,7 @@ func TestPluginSidebarLateMountRestore(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 24)
 	m.stashPluginSidebarRestore(SidebarState{
 		PluginOrder:     []string{"2", "1"},
-		PluginRows:      map[string]int{"1": 9, "2": 7},
+		SectionRows:     map[string]int{"plugin:1": 9, "plugin:2": 7},
 		PluginCollapsed: map[string]bool{"2": true},
 	})
 	mountTestSection(m, 1, 4)

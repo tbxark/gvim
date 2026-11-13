@@ -49,7 +49,7 @@ func asciiWordRune(r rune) bool {
 // the caret goes. Nil puts the caret at that end.
 type placeFn func(end buffer.Pos) buffer.Pos
 
-// editPlaced makes one edit per caret and puts each caret where its place function
+// EditPlaced makes one edit per caret and puts each caret where its place function
 // says. With extra carets the edits are one undo step, as editAtCarets makes them.
 // A single caret edits the buffer directly, so its typing still merges into the
 // undo step of the typing around it. When the planned edits overlap, which two

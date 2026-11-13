@@ -282,3 +282,47 @@ func TestStatusChordIsPaintedFaint(t *testing.T) {
 		t.Errorf("chord cell %q style = %+v, want faint", got.Text, got.Style)
 	}
 }
+
+// TestStatusFilenameIsCachedBriefly checks that the symlink resolution behind the status
+// file name is not repeated on every frame: a link swapped under the open file shows only
+// once the cached name is older than statusNameTTL.
+func TestStatusFilenameIsCachedBriefly(t *testing.T) {
+	t.Parallel()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"dirA", "dirB"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "f.txt"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(filepath.Join(root, "dirA"), link); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	m := newTestModel(t, newFakeEditor("x"), &statusRootTree{fakeTree: newFakeTree(3), root: root}, 120, 30)
+	now := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	doc := statusPathDoc{&fakeDoc{lines: []string{"x"}}, filepath.Join(link, "f.txt"), false, false}
+	want := filepath.Join("dirA", "f.txt")
+	if got := m.statusFilename(doc); got != want {
+		t.Fatalf("statusFilename = %q, want %q", got, want)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "dirB"), link); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.statusFilename(doc); got != want {
+		t.Fatalf("within the TTL statusFilename = %q, want the cached %q", got, want)
+	}
+	now = now.Add(statusNameTTL + time.Second)
+	if got, fresh := m.statusFilename(doc), filepath.Join("dirB", "f.txt"); got != fresh {
+		t.Fatalf("after the TTL statusFilename = %q, want %q", got, fresh)
+	}
+}

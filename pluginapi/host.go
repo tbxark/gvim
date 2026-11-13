@@ -5,9 +5,9 @@ package pluginapi
 // Stop themselves: a method that could reach such a call is deferred by the ui (it
 // validates, queues a closure and returns), see BufferHost and CommandHost.
 
-// BufferEditor is implemented by internal/app (editorAdapter) and passed through ui as ui.PluginEditor.
-// It speaks API coordinates (byte columns, byte offsets); the app adapter converts with the
-// buffer helpers. Every method returns *Error values (CodeClosed, CodeReadOnly, CodeTooLarge, ...).
+// BufferEditor is implemented by internal/pluginhost (pluginEditor) and passed through ui as
+// ui.PluginEditor. It speaks API coordinates (byte columns, byte offsets); the adapter converts
+// with the buffer helpers. Every method returns *Error values (CodeClosed, CodeReadOnly, CodeTooLarge, ...).
 type BufferEditor interface {
 	ListBuffers() []BufferInfo // tab order
 	Buffer(id BufferID) (BufferInfo, bool)
@@ -43,7 +43,7 @@ type BufferEditor interface {
 	// TakeChanges returns what the document did since this consumer's last call. Every consumer
 	// has its own cursor into the document's ring.
 	TakeChanges(id BufferID, consumer string) Changes
-	// Stage S18 (virtual buffers):
+	// Virtual buffers:
 	CreateBuffer(o CreateBuffer) (BufferID, error)
 	SetReadOnly(id BufferID, ro bool) error // virtual buffers only
 	SetContent(id BufferID, entries []ContentEntry) error
@@ -62,7 +62,7 @@ type BufferHost interface {
 	Revert(t Token, id BufferID) error
 }
 
-// WindowHost is the split API (stage S17).
+// WindowHost is the split API.
 type WindowHost interface {
 	Windows() []WindowInfo
 	CurrentWindow() WinID
@@ -161,7 +161,7 @@ type UIHost interface {
 	OwnerGone(plugin string, gen uint64)
 }
 
-// DecorHost is the decoration API (stage S15).
+// DecorHost is the decoration API.
 type DecorHost interface {
 	// DecorSet replaces everything the namespace has on the buffer. A non-nil expect that differs
 	// from the buffer's Version fails with CodeStale (positions were computed against other text).
@@ -221,9 +221,9 @@ type WorkspaceHost interface {
 	// next theme change; validation errors are reported to the plugin.
 	ThemeOverrides() (map[string]string, bool)
 	SetThemeOverrides(overrides map[string]string) error
-	Diagnostics(id BufferID) ([]DiagnosticInfo, error)                // stage S23
+	Diagnostics(id BufferID) ([]DiagnosticInfo, error)                // LSP
 	AllDiagnostics() ([]FileDiagnostics, error)                       // every open document, by path
-	LSPRequest(t Token, id BufferID, method string, params any) error // stage S23, async
+	LSPRequest(t Token, id BufferID, method string, params any) error // LSP, async
 }
 
 // Host is everything a plugin can reach in the editor.

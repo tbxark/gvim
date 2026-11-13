@@ -694,3 +694,13 @@ func TestLSPEnabledMasterSwitch(t *testing.T) {
 		t.Errorf("a string for lsp_enabled gave %d diagnostics, want 1", len(diags))
 	}
 }
+
+// EditorKeys returns the names of the editor.* options gvim knows, sorted.
+func EditorKeys() []string {
+	keys := make([]string, 0, len(editorOptions))
+	for _, o := range editorOptions {
+		keys = append(keys, o.key)
+	}
+	slices.Sort(keys)
+	return keys
+}

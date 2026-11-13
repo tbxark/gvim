@@ -123,8 +123,7 @@ func ReplaceAt(b *buffer.Buffer, q Query, repl string, m Match) (string, error) 
 	}
 	d := newWindow(first, sb.String())
 	r := result{doc: d, re: re}
-	for _, loc := range d.locate(re, q) {
-		h := d.hit(loc)
+	for _, h := range d.hits(re, q) {
 		if h.Match != m {
 			continue
 		}

@@ -454,3 +454,50 @@ func TestSSHFilesReadCapDetectsOverTheLimit(t *testing.T) {
 		t.Fatalf("over-limit read = %v, want the too-large error", err)
 	}
 }
+
+// TestSSHFilesWriteOverADirectoryFails: an atomic write whose target is a directory is an
+// error, as the local rename is, not a temporary file moved into the directory.
+func TestSSHFilesWriteOverADirectoryFails(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sub")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := fsSlot(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := a.Files().WriteFile(ctx, target, []byte("x"), hostos.WriteOptions{Atomic: true})
+	if err == nil {
+		t.Fatal("WriteFile over a directory succeeded")
+	}
+	entries, rerr := os.ReadDir(target)
+	if rerr != nil || len(entries) != 0 {
+		t.Fatalf("the directory gained entries %v (%v)", entries, rerr)
+	}
+}
+
+// TestSSHWriteStreamOverADirectoryFails: a streamed atomic write whose target is a
+// directory is refused at open, so nothing is renamed into the directory on commit.
+func TestSSHWriteStreamOverADirectoryFails(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sub")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := fsSlot(t)
+	streamer := authority.WriteStreams(a.Files())
+	if streamer == nil {
+		t.Fatal("the SSH backend has no streamed write")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if s, err := streamer.WriteStream(ctx, target, hostos.WriteOptions{Atomic: true}); err == nil {
+		_ = s.Write(ctx, []byte("x"))
+		_ = s.Commit(ctx)
+		t.Fatal("WriteStream over a directory opened")
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("the directory gained entries %v (%v)", entries, err)
+	}
+}

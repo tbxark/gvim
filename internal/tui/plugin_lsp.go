@@ -10,7 +10,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The language-server part of the plugin host (stage S23): the diagnostics a plugin reads
+// The language-server part of the plugin host: the diagnostics a plugin reads
 // (gvim.lsp.diagnostics), the requests it sends (gvim.lsp.request) and the
 // diagnostics_updated event. Both read the state the root keeps for its own LSP features
 // (lspState), so a plugin sees what the user sees.

@@ -94,7 +94,7 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	}
 	if isWheel {
 		p.ClearHover()
-		return p.wheelMouse(mo, row, wheel.Button), true
+		return p.wheelMouse(mo, row), true
 	}
 
 	// A buttonless Ctrl+motion over the output is the link hover: it underlines
@@ -155,18 +155,21 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	} else if isRelease {
 		kind = terminal.MouseRelease
 	}
+	// A release ends the held button even when it is not forwarded (Shift held at the
+	// release, or the shell dropped mouse reporting meanwhile).
+	held := p.pressed
+	if isRelease {
+		p.pressed = 0
+	}
 	if !p.forwardsMouse(kind, mo) {
 		return nil, true
 	}
 	button := mouseButton(mo.Button)
-	if isMotion && p.pressed == 0 {
+	if isMotion && held == 0 {
 		button = terminal.MouseNone
 	}
 	if isPress {
 		p.pressed = button
-	}
-	if isRelease {
-		p.pressed = 0
 	}
 	p.term.SendMouse(terminal.MouseEvent{Kind: kind, X: mo.X, Y: row, Button: button, Mods: mouseMods(mo.Mod)})
 	return nil, true
@@ -199,7 +202,7 @@ func (p *Panel) scrollMouse(mo tea.Mouse, row, dir, count int, l frame.Layout, i
 // asked for the mouse gets the notch, a full-screen program that did not ask for
 // it gets arrow keys (the alternate-scroll rule), and the live main screen of a
 // plain shell enters the scrollback view on an upward notch.
-func (p *Panel) wheelMouse(mo tea.Mouse, row int, button tea.MouseButton) tea.Cmd {
+func (p *Panel) wheelMouse(mo tea.Mouse, row int) tea.Cmd {
 	up := mo.Button == tea.MouseWheelUp
 	if p.scroll.on {
 		if up {
@@ -217,7 +220,7 @@ func (p *Panel) wheelMouse(mo tea.Mouse, row int, button tea.MouseButton) tea.Cm
 	legacy := p.effects.MouseForwarding == MouseForwardAltScreen
 	switch {
 	case reporting || (legacy && alt):
-		p.term.SendMouse(terminal.MouseEvent{Kind: terminal.MouseWheel, X: mo.X, Y: row, Button: mouseButton(button), Mods: mouseMods(mo.Mod)})
+		p.term.SendMouse(terminal.MouseEvent{Kind: terminal.MouseWheel, X: mo.X, Y: row, Button: mouseButton(mo.Button), Mods: mouseMods(mo.Mod)})
 		return nil
 	case alt:
 		// The alternate-scroll rule: a pager that does not use the mouse scrolls
@@ -423,15 +426,16 @@ func plausibleLink(token string) bool {
 
 // resolveLink finds the existing file token names, in Fresh's order: an absolute
 // path (with ~ expanded), then relative to the terminal's OSC 7 working
-// directory, then relative to the editor's working directory.
+// directory, then relative to the editor's working directory. A name that merely
+// starts with a tilde (~backup.txt) is an ordinary relative path.
 func resolveLink(token, termCwd, rootDir string, stat func(string) bool) (string, bool) {
 	if token == "" {
 		return "", false
 	}
 	var candidates []string
-	if strings.HasPrefix(token, "~") {
+	if token == "~" || strings.HasPrefix(token, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
-			candidates = append(candidates, filepath.Join(home, strings.TrimPrefix(token, "~/")))
+			candidates = append(candidates, filepath.Join(home, strings.TrimPrefix(token, "~")))
 		}
 	} else if filepath.IsAbs(token) {
 		candidates = append(candidates, token)

@@ -37,6 +37,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/internal/tui/tabstrip"
 	"github.com/tbxark/gvim/syntax"
@@ -64,7 +65,19 @@ type Model struct {
 	styles style.Styles
 	panes  editorpane.Styles
 	now    func() time.Time
-	theme  theme.Theme
+	// statusName caches the status row's file name, so the two symlink resolutions
+	// behind it do not run on every frame.
+	statusName statusNameCache
+	// rulerMarks caches the overview ruler's diagnostic marks, and themeGen counts the
+	// style rebuilds so the cache sees a theme change.
+	rulerMarks rulerMarkCache
+	// frameLayout is the geometry View computed for the frame it is painting; layout
+	// returns it until View ends.
+	frameLayout *frame.Layout
+	// findMatches caches the find bar's highlight search (see cachedFindMatches).
+	findMatches findMatchCache
+	themeGen    uint64
+	theme       theme.Theme
 	// themeRef is the portable config value of the active theme, and
 	// themeOverrides are the session color overrides layered over it.
 	themeRef       string
@@ -284,11 +297,11 @@ type Model struct {
 // scrollbar thumb, or a split line (split_drag.go). The zero value is no gesture.
 type drag struct {
 	active bool
-	thumb  bool         // the scrollbar thumb: motion moves the viewport
-	hbar   bool         // the horizontal scrollbar: motion pans the view sideways
-	tab    *tabDrag     // a tab of the strip: motion moves it along the strip
-	unit   editor.Unit  // the unit a text drag grows the selection by
-	border *splitBorder // the split line the press took: motion moves its split's ratio
+	thumb  bool          // the scrollbar thumb: motion moves the viewport
+	hbar   bool          // the horizontal scrollbar: motion pans the view sideways
+	tab    *tabDrag      // a tab of the strip: motion moves it along the strip
+	unit   editor.Unit   // the unit a text drag grows the selection by
+	border *split.Border // the split line the press took: motion moves its split's ratio
 	// last is the pointer of the latest motion of a text drag, and tick is the number
 	// of the autoscroll tick in flight, or 0 when none is (see dragSelect).
 	last tea.Mouse
@@ -628,7 +641,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The git marks are re-read with the same reconnect (a remote read through the
 		// authority; a local read stays the ordinary one).
 		cmds := []tea.Cmd{m.startupOpenCmd(), m.gitCmd()}
-		if explorer := m.remoteExplorerReconnectCmd(); explorer != nil {
+		if explorer := m.remoteExplorerReloadCmd(); explorer != nil {
 			cmds = append(cmds, explorer)
 		}
 		if m.auth.AfterReconnect != nil {
@@ -668,7 +681,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.notes.record(before, m.notice)
 	m.noteStatus(beforeStatus)
 	m.reconcileTabs()
-	cmd = tea.Batch(cmd, m.pluginTail(snap, msg), m.pluginIdle(msg))
+	cmd = tea.Batch(cmd, m.pluginTail(snap), m.pluginIdle(msg))
 	m.trackOccurrences()
 	sized := m.bodyRows() != rows
 	moved := m.caretNow() != at
@@ -737,7 +750,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// the update, so the read never blocks an update; a command does the file I/O.
 	cmd = tea.Batch(cmd, m.imageReleaseClosed())
 	cmd = tea.Batch(cmd, m.imageQueue())
-	cmd = tea.Batch(cmd, m.hexReleaseClosedCmd())
+	m.hexReleaseClosed()
 	cmd = tea.Batch(cmd, m.hexQueue())
 	return next, cmd
 }
@@ -1035,39 +1048,28 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// when hidden) and, when possible, reveals the matched transcript row in the
 		// read-only pager. It starts no shell and touches no PTY: the terminal is
 		// already open, the transcript line is only where the match was found.
-		if msg.ID != 0 {
-			// Resolve the stable runtime id once; RevealTranscriptLine itself activates
-			// the tab, so this path must not SetActive separately (it would queue the
-			// dive twice).
-			if _, ok := m.dock.IndexForID(msg.ID); !ok {
-				m.notice = uiText("gvim.palette.terminal_tab_gone", "Live Grep: the terminal tab is no longer open")
-				break
-			}
-			cmd = m.showDock()
-			reveal, located := m.dock.RevealTranscriptLine(dock.TranscriptHit{
-				ID: msg.ID, Row: msg.Row, Total: msg.Total,
-				Text: msg.Text, Before: msg.Before, After: msg.After,
-				BeforeKnown: msg.BeforeKnown, AfterKnown: msg.AfterKnown,
-				Snapshot: msg.Snapshot, Valid: msg.Valid,
-			})
-			if located {
-				cmd = tea.Batch(cmd, reveal)
-			} else {
-				// The tab is there and focused, but a restored read-only tab or a
-				// running alternate-screen program has no pager to position.
-				m.notice = uiText("gvim.palette.terminal_line_unavailable", "Live Grep: the terminal transcript line cannot be located")
-			}
-			m.focusDock()
+		// Resolve the stable runtime id once; RevealTranscriptLine itself activates
+		// the tab, so this path must not SetActive separately (it would queue the
+		// dive twice).
+		if _, ok := m.dock.IndexForID(msg.ID); !ok {
+			m.notice = uiText("gvim.palette.terminal_tab_gone", "Live Grep: the terminal tab is no longer open")
 			break
 		}
-		// A legacy hit without a stable id falls back to the snapshot position (it can
-		// only be right while no other tab closed/moved); it cannot reveal a row.
-		if m.dock.SetActive(msg.Index) {
-			cmd = m.showDock()
-			m.focusDock()
+		cmd = m.showDock()
+		reveal, located := m.dock.RevealTranscriptLine(dock.TranscriptHit{
+			ID: msg.ID, Row: msg.Row, Total: msg.Total,
+			Text: msg.Text, Before: msg.Before, After: msg.After,
+			BeforeKnown: msg.BeforeKnown, AfterKnown: msg.AfterKnown,
+			Snapshot: msg.Snapshot, Valid: msg.Valid,
+		})
+		if located {
+			cmd = tea.Batch(cmd, reveal)
 		} else {
-			m.notice = uiText("gvim.palette.terminal_tab_gone", "Live Grep: the terminal tab is no longer open")
+			// The tab is there and focused, but a restored read-only tab or a
+			// running alternate-screen program has no pager to position.
+			m.notice = uiText("gvim.palette.terminal_line_unavailable", "Live Grep: the terminal transcript line cannot be located")
 		}
+		m.focusDock()
 	case palette.GotoLineMsg:
 		// The ':' mode jumps at once, as Fresh's does: one Enter reaches the line.
 		if msg.Relative {
@@ -1178,8 +1180,7 @@ func failedNotice(f menubar.Failed) string {
 // Run implements menubar.Ports. Explorer and focus actions are handled by the
 // root, and every other action goes to the editor. An action the editor does not
 // know is reported as menubar.ErrUnsupported. A quit is sent after the menu
-// closes, through quitting.
-// Run is the menubar port's action entry: a menu row records usage for the command
+// closes, through quitting. A menu row records usage for the command
 // palette's recency history before it runs. Internal callers (the palette's own
 // runCommand, macro replay) use runAction or dispatch, so they do not record twice or
 // count replay as user usage.
@@ -1253,8 +1254,7 @@ func (m *Model) Holds(name string) bool {
 	case "can_save_all":
 		return slices.ContainsFunc(m.ed.Tabs(), func(t TabInfo) bool { return t.Modified })
 	case "read_only":
-		ro, ok := doc.(interface{ ReadOnly() bool })
-		return ok && ro.ReadOnly()
+		return doc != nil && isDocReadOnly(doc)
 	case "modified":
 		return doc != nil && doc.Modified()
 	case "large":
@@ -1858,6 +1858,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return cmd
 	}
 	switch tag := d.Tag.(type) {
+	case quitDiscardTag:
+		return m.quitDiscardAnswer(d)
 	case viewTag:
 		return m.viewAnswer(tag, d)
 	case terminalTabRenameTag:
@@ -2714,7 +2716,7 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		return m.saveAll(), true
 	case "quit":
 		return m.quitLoop(), true
-	case "detach_daemon":
+	case "detach", "detach_daemon":
 		if m.detach == nil {
 			m.notice = "Not attached to a daemon"
 			break
@@ -2786,7 +2788,7 @@ func (m *Model) explorerAction(action string) (tea.Cmd, bool) {
 }
 
 // explorerGeometry is the panel's place in the frame laid out as l.
-func (m *Model) explorerGeometry(l layout) expanel.Geometry {
+func (m *Model) explorerGeometry(l frame.Layout) expanel.Geometry {
 	top, bottom := l.ExTitleY, l.ExBottom
 	if len(l.Sections) > 0 {
 		// The panel is the explorer's section now: its header row is the title,
@@ -2830,7 +2832,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	}
 	t := m.layout().Hit(mo.X, mo.Y)
 	if mo.Button == tea.MouseMiddle {
-		if t.Kind == hitTab || t.Kind == hitTabClose {
+		if t.Kind == frame.HitTab || t.Kind == frame.HitTabClose {
 			return m.requestClose(t.Index)
 		}
 		return nil
@@ -2850,60 +2852,53 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	m.noteMods(mo)
 	m.drag = drag{}
 	switch t.Kind {
-	case hitTab:
+	case frame.HitTab:
 		m.focusEditor()
 		m.activateTab(t.Index)
 		m.drag = drag{active: true, tab: &tabDrag{index: t.Index, startX: mo.X, startY: mo.Y}}
-	case hitTabClose:
+	case frame.HitTabClose:
 		return m.requestClose(t.Index)
-	case hitTabNew:
+	case frame.HitTabNew:
 		// As Fresh's "+", the button opens a small menu of what a new tab can be.
 		m.showContextMenu(mo, plusMenuItems())
-	case hitTabScrollBefore:
+	case frame.HitTabScrollBefore:
 		m.scrollTabs(-1)
-	case hitTabScrollAfter:
+	case frame.HitTabScrollAfter:
 		m.scrollTabs(1)
-	case hitWelcomeRow:
+	case frame.HitWelcomeRow:
 		m.focusEditor()
 		return m.runWelcome(t.Index)
-	case hitExplorerRow, hitExplorerBody:
+	case frame.HitExplorerRow, frame.HitExplorerBody:
 		// The press is resolved against the tree as it is scrolled now. The focus
 		// comes after it and does not move the view, so a wheel scroll is kept.
 		cmd := m.explorerMouse(msg)
 		m.takeExplorerFocus()
 		return cmd
-	case hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
+	case frame.HitExplorerTitleClose, frame.HitExplorerTitleReload, frame.HitExplorerGrip:
 		return m.explorerMouse(msg)
-	case hitSidebarHeader:
+	case frame.HitSidebarHeader:
 		// Every section header (explorer, Contents, Diagnostics, plugin) is the shared
 		// divider/header: a press starts the height drag, a release without motion folds
 		// the section. Focus follows the pressed section.
 		return m.pressSidebarHeader(t.Section, mo.Y)
-	case hitSidebarClose:
-		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
-			// The Diagnostics section has no close button (NoClose); a stray press
-			// on that cell closes it, as the palette row does.
-			m.diag.open = false
-			m.focusEditor()
-			return nil
-		}
+	case frame.HitSidebarClose:
 		m.closeContents()
 		return nil
-	case hitSidebarRow:
+	case frame.HitSidebarRow:
 		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
 			return m.pressDiagRow(t.Index)
 		}
 		return m.pressContentsRow(t.Index, mo.X)
-	case hitSidebarBody:
+	case frame.HitSidebarBody:
 		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
 			m.takeDiagFocus()
 			return nil
 		}
 		m.takeContentsFocus()
 		return nil
-	case hitStatusPalette:
+	case frame.HitStatusPalette:
 		return m.openPalette(">")
-	case hitStatusSegment:
+	case frame.HitStatusSegment:
 		switch t.Index {
 		case frame.StatusSegmentMessages:
 			// Fresh's {messages} opens the status log; gvim's is the warnings list.
@@ -2912,23 +2907,22 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 			return m.dispatch(Command{Action: "restart_terminal"})
 		}
 		return m.statusSegmentClick(t.Index)
-	case hitStatusPlugin:
+	case frame.HitStatusPlugin:
 		if entry, ok := m.statusExtraEntryAt(t.Index); ok && entry.source == statusExtraEnv {
 			return m.envStatusClick()
 		}
 		return m.plugStatusClick(t.Index)
-	case hitEditorText, hitGutter, hitScrollbarTrack:
-		if h, ok := m.hexAtPane(t.Pane); ok {
+	case frame.HitEditorText, frame.HitGutter, frame.HitScrollbarTrack:
+		if _, ok := m.hexAtPane(t.Pane); ok {
 			m.focusPane(t.Pane)
 			m.focusEditor()
-			if t.Kind == hitScrollbarTrack {
+			if t.Kind == frame.HitScrollbarTrack {
 				m.hexScrollTo(t.Pane, mo.Y)
 			}
-			_ = h
 			return nil
 		}
 		m.pressPane(t.Pane, mo.X, mo.Y, count)
-	case hitSplitBorder:
+	case frame.HitSplitBorder:
 		m.pressBorder(t.Index)
 	}
 	return nil
@@ -3114,14 +3108,12 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	}
 	t := l.Hit(mo.X, mo.Y)
 	switch t.Kind {
-	case hitExplorerRow, hitExplorerBody, hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
+	case frame.HitExplorerRow, frame.HitExplorerBody, frame.HitExplorerTitleClose, frame.HitExplorerTitleReload, frame.HitExplorerGrip:
 		return m.explorerMouse(msg)
-	case hitSidebarRow, hitSidebarBody, hitSidebarHeader:
+	case frame.HitSidebarRow, frame.HitSidebarBody, frame.HitSidebarHeader:
 		m.wheelContents(mo.Button == tea.MouseWheelUp)
 		return nil
-	case hitSidebarClose:
-		return nil
-	case hitEditorText, hitGutter, hitScrollbarTrack:
+	case frame.HitEditorText, frame.HitGutter, frame.HitScrollbarTrack:
 		if m.panWheel(t.Pane, mo) {
 			return nil
 		}
@@ -3196,8 +3188,7 @@ func (m *Model) takeExplorerFocus() {
 	m.diag.focus = false
 }
 
-// focusEditor gives keyboard focus back to the editor. The panel stays visible.
-// focusEditor gives the keyboard to the editor. It also hands the widget-panel
+// focusEditor gives keyboard focus back to the editor. The panel stays visible. It also hands the widget-panel
 // layer back from a focused plugin section; plugin input modes and key captures
 // are plugin state and are documented as such (they do not see keys while a native
 // chrome region owns the keyboard).
@@ -3362,10 +3353,9 @@ func (m *Model) syncViewport() {
 }
 
 // layoutInput gathers the state the geometry depends on.
-func (m *Model) layoutInput() layoutInput {
+func (m *Model) layoutInput() frame.Input {
 	split, leaves := m.splitInput()
-	in := layoutInput{
-		ExplorerFocus:   m.explorerFocus,
+	in := frame.Input{
 		ExplorerWidth:   m.explorerWidth,
 		ExplorerSide:    m.explorerSide,
 		Split:           split,
@@ -3400,7 +3390,10 @@ func (m *Model) layoutInput() layoutInput {
 
 // layout is the geometry of the current frame. Painting and mouse hit testing
 // both read it.
-func (m *Model) layout() layout {
+func (m *Model) layout() frame.Layout {
+	if m.frameLayout != nil {
+		return *m.frameLayout
+	}
 	return frame.ComputeLayout(m.width, m.height, m.layoutInput())
 }
 
@@ -3420,8 +3413,8 @@ func (m *Model) statusHidden() bool {
 // statusView gathers the status row contents for the active document. It runs
 // on every frame, so it does no lexer or text work: the encoding comes from the
 // document and the language is memoized by file name.
-func (m *Model) statusView() statusView {
-	s := statusView{Message: m.ed.Status(), EOL: "LF", Encoding: "UTF-8", Language: "Text"}
+func (m *Model) statusView() frame.StatusView {
+	s := frame.StatusView{Message: m.ed.Status(), EOL: "LF", Encoding: "UTF-8", Language: "Text"}
 	if m.notice != "" {
 		s.Message = m.notice
 	} else if notice := m.hexNotice(); notice != "" {
@@ -3457,9 +3450,7 @@ func (m *Model) statusView() statusView {
 				s.HexView = uiText("gvim.status.binary_hex", "Hex")
 			}
 		}
-		if ro, ok := doc.(interface{ ReadOnly() bool }); ok {
-			s.ReadOnly = ro.ReadOnly()
-		}
+		s.ReadOnly = isDocReadOnly(doc)
 		if cl, ok := doc.(editorpane.CaretLister); ok {
 			s.Cursors += len(cl.Cursors())
 		}
@@ -3568,6 +3559,11 @@ func (m *Model) languageFor(name string) string {
 // terminal caret sits on the editor caret when the editor has the focus and no
 // overlay is open.
 func (m *Model) View() tea.View {
+	// The state is not changed while a frame is painted, so the geometry is computed once
+	// for the paint, the caret and the terminal placement instead of once per use.
+	l := m.layout()
+	m.frameLayout = &l
+	defer func() { m.frameLayout = nil }()
 	content := ""
 	if m.width > 0 && m.height > 0 {
 		content = m.paint().String()
@@ -3600,6 +3596,11 @@ func (m *Model) imageQueue() tea.Cmd {
 		return nil
 	}
 	if m.img.off || m.img.localOnly {
+		return nil
+	}
+	if !m.imageDocShown() {
+		// Computing the layout is the cost of the walk below, and every update comes
+		// here: a session of text files stops at this cheap look at the pane documents.
 		return nil
 	}
 	type imageTarget struct {
@@ -3650,6 +3651,19 @@ func (m *Model) imageQueue() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// imageDocShown reports whether any pane of the split tree shows a document that has
+// a local picture to upload. It reads the split leaves, not the layout.
+func (m *Model) imageDocShown() bool {
+	for _, n := range m.splits.Root.Leaves() {
+		if doc := m.leafDoc(n); doc != nil {
+			if _, ok := m.imagePathOf(doc); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // paint draws the frame into a new grid. The editor pane fills the body to the
 // right of the explorer. Each other band is painted from the layout runs, so the
 // hit map and the paint cannot drift apart. The open overlays are drawn last.
@@ -3665,7 +3679,7 @@ func (m *Model) paint() *grid.Grid {
 func (m *Model) paintInto(g *grid.Grid) {
 	l := m.layout()
 	if l.Gated {
-		g.Put(0, 0, g.Width(), gateText, grid.Style{})
+		g.Put(0, 0, g.Width(), frame.GateText, grid.Style{})
 		return
 	}
 	body := style.TaggedCell(m.styles.Editor, "editor", "fg", "editor", "bg")
@@ -3707,7 +3721,7 @@ func (m *Model) paintInto(g *grid.Grid) {
 
 // paintFrameChrome draws the Style's border outside the workspace cells: the glyphs
 // are the layout's Chrome, which the same Style gave the geometry.
-func (m *Model) paintFrameChrome(g *grid.Grid, l layout) {
+func (m *Model) paintFrameChrome(g *grid.Grid, l frame.Layout) {
 	st := m.splitCell()
 	ch := l.Chrome
 	for x := 1; x < l.W-1; x++ {
@@ -3750,18 +3764,11 @@ func (m *Model) paintFrameChrome(g *grid.Grid, l layout) {
 	}
 }
 
-// pane is the editor pane for doc that fills the focused pane's place. Its highlights
-// are the find bar's matches. While the bar is open it takes the input and the caret,
-// so the paint is the only caller that searches the matches, once per frame.
-func (m *Model) pane(doc Document) editorpane.Pane {
-	return m.paneFor(splitPane{Focused: true, Top: doc.Top()}, doc)
-}
-
 // paintEditor paints the editor panes into the body, to the right of the explorer.
 // Each pane draws its visible lines, the gutter, the text, the selection, the change
 // marks and the scrollbar, and the lines between the panes are drawn in their gaps.
 // With no tab open, the welcome screen is painted instead.
-func (m *Model) paintEditor(g *grid.Grid, l layout) {
+func (m *Model) paintEditor(g *grid.Grid, l frame.Layout) {
 	if m.ed.Active() == nil {
 		paintWelcome(g, m.styles, l, m.welcomeSel)
 		return
@@ -3894,17 +3901,7 @@ func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
 		m.popOverlay()
 		return m.plugDismissed()
 	}
-	top := m.overlays[len(m.overlays)-1]
-	next, cmd := top.Update(msg)
-	if next == nil {
-		m.popOverlay()
-	} else {
-		m.overlays[len(m.overlays)-1] = next
-	}
-	for len(m.overlays) > 0 && !m.overlays[len(m.overlays)-1].Active() {
-		m.popOverlay()
-	}
-	return cmd
+	return m.deliverOverlay(msg)
 }
 
 // popOverlay removes the top overlay. It does nothing on an empty stack.
@@ -3916,11 +3913,7 @@ func (m *Model) popOverlay() {
 	// Resume captures Live Grep's controls as the overlay closes: the query, modes and
 	// scopes. Hits and the selected row are not kept because Resume searches again. The
 	// capture is in memory, so closing starts no search or I/O.
-	if r, ok := m.overlays[n-1].(interface{ LiveResumeState() *palette.LiveResume }); ok {
-		if state := r.LiveResumeState(); state != nil {
-			m.root.lastGrep = state
-		}
-	}
+	m.captureLiveResume(m.overlays[n-1])
 	m.overlays[n-1] = nil
 	m.overlays = m.overlays[:n-1]
 }
@@ -3933,11 +3926,11 @@ func (m *Model) updateChromeHover(mo tea.Mouse) {
 	m.stripHover, m.statusHover, m.gripHover = frame.HitTarget{}, frame.HitTarget{}, false
 	t := m.layout().Hit(mo.X, mo.Y)
 	switch t.Kind {
-	case hitTab, hitTabClose, hitTabNew, hitTabScrollBefore, hitTabScrollAfter:
+	case frame.HitTab, frame.HitTabClose, frame.HitTabNew, frame.HitTabScrollBefore, frame.HitTabScrollAfter:
 		m.stripHover = t
-	case hitStatusSegment, hitStatusPalette, hitStatusPlugin:
+	case frame.HitStatusSegment, frame.HitStatusPalette, frame.HitStatusPlugin:
 		m.statusHover = t
-	case hitExplorerGrip:
+	case frame.HitExplorerGrip:
 		m.gripHover = true
 	}
 }
@@ -3946,7 +3939,7 @@ func (m *Model) updateChromeHover(mo tea.Mouse) {
 // The grip is the column's editor-facing wall on every section body, the cells the
 // hit map reports; the accent is what says the wall can be dragged, since the wall
 // is otherwise a plain border.
-func (m *Model) paintGripHover(g *grid.Grid, l layout) {
+func (m *Model) paintGripHover(g *grid.Grid, l frame.Layout) {
 	if !l.ExplorerOpen || l.Ex <= 0 {
 		return
 	}
@@ -3968,7 +3961,7 @@ func (m *Model) paintGripHover(g *grid.Grid, l layout) {
 
 // paintStatus fills the status row and writes its segments. A hidden status row
 // paints nothing.
-func (m *Model) paintStatus(g *grid.Grid, l layout) {
+func (m *Model) paintStatus(g *grid.Grid, l frame.Layout) {
 	if !l.StatusOn {
 		return
 	}
@@ -4011,7 +4004,7 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 			st = warning
 		case r.Style == frame.StyleMuted:
 			st = muted
-		case r.Kind == hitStatusSegment && r.Index == frame.StatusSegmentTerminalRestart:
+		case r.Kind == frame.HitStatusSegment && r.Index == frame.StatusSegmentTerminalRestart:
 			st = restart
 			if hovered {
 				if c := style.Color(m.theme, "ui", "status_error_indicator_hover_fg"); c != nil {
@@ -4023,7 +4016,7 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 					st.BGKey = style.KeyIDFor("ui", "status_error_indicator_hover_bg")
 				}
 			}
-		case r.Kind == hitStatusPalette:
+		case r.Kind == frame.HitStatusPalette:
 			st = palette
 		}
 		if hovered {
@@ -4118,7 +4111,9 @@ type flow struct {
 // The tags the file dialogs carry back. Each one holds the flow it belongs to.
 type (
 	unsavedTag struct{ f flow }
-	saveAsTag  struct{ f flow }
+	// quitConfirmTag is the tag of the Quit/Cancel dialog of editor.confirm_quit.
+	quitConfirmTag struct{}
+	saveAsTag      struct{ f flow }
 )
 
 // requestClose closes the tab at index. A clean tab closes at once. A modified
@@ -4147,10 +4142,12 @@ func (m *Model) requestClose(index int) tea.Cmd {
 	return nil
 }
 
-// quitLoop asks once about all modified tabs, including those retained by hot exit.
+// quitLoop is the one gate every quit goes through: it asks once about all modified tabs,
+// including those retained by hot exit, and, when none is modified, asks for the
+// confirmation editor.confirm_quit wants. Only a confirmed or forced quit reaches quit.
 func (m *Model) quitLoop() tea.Cmd {
 	if m.tabPort() == nil {
-		return m.quit()
+		return m.quitConfirmed()
 	}
 	count := 0
 	if p, ok := m.workspace.(workspaceQuitPort); ok {
@@ -4163,7 +4160,7 @@ func (m *Model) quitLoop() tea.Cmd {
 		}
 	}
 	if count == 0 {
-		return m.quit()
+		return m.quitConfirmed()
 	}
 	if len(m.large.saves) > 0 && !m.large.quitAfterSave {
 		m.large.quitAfterSave = true
@@ -4171,6 +4168,21 @@ func (m *Model) quitLoop() tea.Cmd {
 		return nil
 	}
 	m.askUnsaved(flow{then: nextQuit}, fmt.Sprintf("%d modified files", count))
+	return nil
+}
+
+// quitConfirmed quits at once, or, with editor.confirm_quit on, asks first: the Quit and
+// Cancel dialog answers through quitConfirmTag. Without a dialog port the quit is refused
+// with a notice, as an unsaved tab is.
+func (m *Model) quitConfirmed() tea.Cmd {
+	if !m.ed.QuitNeedsConfirm() {
+		return m.quit()
+	}
+	if m.dialogs == nil {
+		m.notice = uiText("gvim.notice.quit_unconfirmable", "Quit needs confirmation, and this port cannot ask")
+		return nil
+	}
+	m.pushOverlay(m.dialogs.Quit(quitConfirmTag{}, m.styles.Overlay))
 	return nil
 }
 
@@ -4231,6 +4243,12 @@ func (m *Model) dialogDone(d dialog.Result) tea.Cmd {
 	switch tag := d.Tag.(type) {
 	case unsavedTag:
 		return m.unsavedAnswer(tag.f, d.Choice)
+	case quitConfirmTag:
+		if d.Choice == dialog.ChoiceQuit {
+			return m.quit()
+		}
+		m.notice = uiText("gvim.notice.quit_cancelled", "Quit cancelled")
+		return nil
 	case saveAsTag:
 		switch d.Choice {
 		case dialog.ChoiceSave:
@@ -4415,7 +4433,7 @@ func singleRune(text string) (rune, bool) {
 	return rs[0], true
 }
 
-// lowerIfLetter returns the lower-case letter for r, or r itself as a string.
+// isDocReadOnly reports whether doc says it is read-only.
 func isDocReadOnly(doc Document) bool {
 	if ro, ok := doc.(ReadOnlyDoc); ok {
 		return ro.ReadOnly()
@@ -4423,6 +4441,7 @@ func isDocReadOnly(doc Document) bool {
 	return false
 }
 
+// lowerIfLetter returns the lower-case letter for r, or r itself as a string.
 func lowerIfLetter(r rune) string {
 	if unicode.IsLetter(r) {
 		return string(unicode.ToLower(r))

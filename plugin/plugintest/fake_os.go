@@ -47,6 +47,7 @@ type FakeOS struct {
 
 type fakeNode struct {
 	dir   bool
+	link  string // set for a symbolic link: the absolute path it points to
 	data  []byte
 	mode  fs.FileMode
 	mtime time.Time
@@ -116,6 +117,16 @@ func (f *FakeOS) SetDir(path string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mkdirAll(f.abs(path))
+}
+
+// SetSymlink creates a symbolic link at path that points to target (made absolute against
+// the fake's cwd like every path). The target need not exist: the link is then broken.
+func (f *FakeOS) SetSymlink(path, target string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.abs(path)
+	f.mkdirAll(filepath.Dir(p))
+	f.nodes[p] = &fakeNode{link: f.abs(target), mode: 0o777 | fs.ModeSymlink, mtime: f.tick()}
 }
 
 // File returns the content of a file.
@@ -355,10 +366,25 @@ func (f *FakeOS) WriteFile(_ context.Context, path string, data []byte, o hostos
 }
 
 func kindOf(n *fakeNode) string {
-	if n.dir {
+	switch {
+	case n.link != "":
+		return "symlink"
+	case n.dir:
 		return "dir"
 	}
 	return "file"
+}
+
+// target follows symbolic links from n and returns the node they end at, nil for a broken
+// or looping link.
+func (f *FakeOS) target(n *fakeNode) *fakeNode {
+	for range 16 {
+		if n == nil || n.link == "" {
+			return n
+		}
+		n = f.nodes[n.link]
+	}
+	return nil
 }
 
 // ReadDir implements hostos.OS.
@@ -378,7 +404,13 @@ func (f *FakeOS) ReadDir(_ context.Context, path string, hidden bool) ([]hostos.
 		if q == p || filepath.Dir(q) != p || (!hidden && strings.HasPrefix(name, ".")) {
 			continue
 		}
-		out = append(out, hostos.DirEntry{Name: name, Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime})
+		e := hostos.DirEntry{Name: name, Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime}
+		if n.link != "" {
+			if t := f.target(n); t != nil {
+				e.TargetKind = kindOf(t)
+			}
+		}
+		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
@@ -393,6 +425,9 @@ func (f *FakeOS) Stat(_ context.Context, path string) (hostos.FileStat, error) {
 	n := f.nodes[p]
 	if n == nil {
 		return hostos.FileStat{}, notFound(p)
+	}
+	if t := f.target(n); t != nil {
+		n = t // stat follows links; a broken one stays a symlink
 	}
 	return hostos.FileStat{Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime, Mode: n.mode}, nil
 }
@@ -423,7 +458,12 @@ func (f *FakeOS) below(p string) []string {
 			out = append(out, q)
 		}
 	}
-	sort.Strings(out)
+	// A path separator sorts before every name byte, so a directory is followed by its
+	// content before its next sibling, as in a real depth-first walk.
+	sep := string(filepath.Separator)
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ReplaceAll(out[i], sep, "\x00") < strings.ReplaceAll(out[j], sep, "\x00")
+	})
 	return out
 }
 
@@ -460,6 +500,9 @@ func (f *FakeOS) Rename(_ context.Context, from, to string) error {
 	if f.nodes[filepath.Dir(b)] == nil {
 		return notFound(filepath.Dir(b))
 	}
+	if f.nodes[b] != nil {
+		return pluginapi.Errf(pluginapi.CodeConflict, "%s: already exists", b)
+	}
 	moves := append([]string{a}, f.below(a)...)
 	for _, q := range moves {
 		f.nodes[b+strings.TrimPrefix(q, a)] = f.nodes[q]
@@ -479,6 +522,9 @@ func (f *FakeOS) Copy(_ context.Context, from, to string) error {
 	}
 	if f.nodes[filepath.Dir(b)] == nil {
 		return notFound(filepath.Dir(b))
+	}
+	if f.nodes[b] != nil {
+		return pluginapi.Errf(pluginapi.CodeConflict, "%s: already exists", b)
 	}
 	for _, q := range append([]string{a}, f.below(a)...) {
 		n := *f.nodes[q]
@@ -646,7 +692,7 @@ func (f *FakeOS) Start(_ context.Context, argv []string, o hostos.ProcOptions) (
 		return nil, s.Err
 	}
 	p := &FakeProc{f: f, pid: 1000 + len(f.procs), script: s, stdinOpen: o.OpenStdin}
-	p.chunks = s.Chunks
+	p.chunks = slices.Clone(s.Chunks) // the script is reused by later Starts
 	if p.chunks == nil {
 		if s.Stdout != "" {
 			p.chunks = append(p.chunks, hostos.ProcChunk{Data: []byte(s.Stdout)})

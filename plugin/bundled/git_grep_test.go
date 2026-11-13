@@ -232,6 +232,25 @@ func TestGitGrepErrorsAndEmptyStates(t *testing.T) {
 	})
 }
 
+// Clearing the query goes back to the prompt's hint: the empty query never reaches git grep, so
+// the status must not keep the last search's "No matches found".
+func TestGitGrepClearedQueryShowsTheHint(t *testing.T) {
+	t.Parallel()
+	r := grepRig(t, func(o *plugintest.FakeOS) {
+		grepRepo(o)
+		o.Script(grepArgv(false, "zzz"), plugintest.ProcScript{Code: 1})
+	})
+	o := grepRun(t, r, "zzz")
+	if last := o.Updates[len(o.Updates)-1]; last.Status == nil || *last.Status != "No matches found" {
+		t.Fatalf("status after a search without matches = %+v", last.Status)
+	}
+	r.h.Resolve(pluginapi.Completion{Token: o.Token, Kind: "query", Values: []any{""}, More: true})
+	r.h.Advance(70 * time.Millisecond)
+	if last := o.Updates[len(o.Updates)-1]; last.Status == nil || *last.Status != "Type to search..." {
+		t.Errorf("status after clearing the query = %+v, want the hint", last.Status)
+	}
+}
+
 func TestGitGrepCapsAndColonPaths(t *testing.T) {
 	t.Parallel()
 	var stdout strings.Builder

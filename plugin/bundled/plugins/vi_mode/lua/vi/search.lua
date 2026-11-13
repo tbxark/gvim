@@ -4,7 +4,6 @@ local gvim = require "gvim"
 local D = require "vi.doc"
 local T = require "vi.text"
 local S = require "vi.state"
-local Mo = require "vi.motion"
 
 local M = {}
 

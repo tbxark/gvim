@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/encoding"
 	"io"
@@ -96,7 +97,7 @@ func orDefault(v, def int64) int64 {
 	return v
 }
 
-// isLarge reports whether a file of size bytes opens in large file mode.
+// IsLarge reports whether a file of size bytes opens in large file mode.
 func (s largeSpec) IsLarge(size int64) bool {
 	return s.Threshold > 0 && size >= s.Threshold
 }
@@ -179,8 +180,15 @@ func readSample(path string, src buffer.Source) (sampleInfo, error) {
 	}
 	valid := validUTF8Head(body, truncated)
 	if encoding.IsBinary(body) || (valid && bytes.IndexByte(body, 0) >= 0) {
-		if info, ok := imageInfoOf(body); ok {
-			info.Size = src.Size()
+		more := func(n int64) ([]byte, error) {
+			b := make([]byte, n)
+			got, err := src.ReadAt(b, int64(len(sample)-len(body)))
+			if got == len(b) {
+				return b, nil
+			}
+			return nil, err
+		}
+		if info, ok := imageInfoOfHead(body, src.Size(), more); ok {
 			return sampleInfo{Codec: "binary", Eol: detectEOL(sample), binary: true, Label: info.Label(), image: &info}, nil
 		}
 		return sampleInfo{Codec: "iso-8859-1", Eol: detectEOL(sample), binary: true, Label: "Binary"}, nil
@@ -245,21 +253,18 @@ func readLargeDocument(path string, disk diskState, spec largeSpec) (*Document, 
 		Size: src.Size(), EstLine: spec.EstLine, Batch: spec.Batch, Notes: leftoverTemps(path),
 		Mtime: mtimeNano(disk), Skip: info.Skip, StashDir: spec.StashDir,
 	}
-	if info.binary {
-		d.readOnly, d.binary = true, true
-	}
 	return d, nil
 }
 
 // leftoverTemps names the temporary files that an interrupted save of path left
-// next to it. A save writes ".NAME.gvim-*" in the directory of the file and renames
-// it over the file only when it is complete.
+// next to it. A save writes atomicfile.TempPrefix(NAME) and a random suffix in the
+// directory of the file and renames it over the file only when it is complete.
 func leftoverTemps(path string) []string {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
 		return nil
 	}
-	prefix := "." + filepath.Base(path) + ".gvim-"
+	prefix := atomicfile.TempPrefix(filepath.Base(path))
 	var out []string
 	for _, ent := range entries {
 		if strings.HasPrefix(ent.Name(), prefix) {
@@ -373,7 +378,7 @@ func (d *Document) CheckSource() error {
 	return err
 }
 
-// frozen reports whether the file of a large document changed under it, so that the
+// Frozen reports whether the file of a large document changed under it, so that the
 // document can read no more of it. Such a document is read-only until it is reverted.
 func (d *Document) Frozen() bool {
 	return d.large != nil && d.Buffer.SourceErr() != nil

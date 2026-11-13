@@ -13,6 +13,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
 )
@@ -48,14 +49,14 @@ func TestMovedIndex(t *testing.T) {
 
 // leavesOver sets the split tree to one leaf for each tab index in tabs; the first leaf
 // has the focus. It returns the leaves.
-func leavesOver(m *Model, tabs ...int) []*splitNode {
-	leaves := make([]*splitNode, len(tabs))
+func leavesOver(m *Model, tabs ...int) []*split.Node {
+	leaves := make([]*split.Node, len(tabs))
 	for i, tab := range tabs {
-		leaves[i] = &splitNode{Tab: tab}
+		leaves[i] = &split.Node{Tab: tab}
 	}
 	root := leaves[0]
 	if len(leaves) > 1 {
-		root = &splitNode{A: leaves[0], B: leaves[1]}
+		root = &split.Node{A: leaves[0], B: leaves[1]}
 	}
 	m.splits.Root, m.splits.Focus = root, leaves[0]
 	m.splits.tabs = len(m.ed.Tabs())
@@ -528,7 +529,7 @@ func TestHostUIMethods(t *testing.T) {
 		t.Parallel()
 		m, _ := newPluginModel(t, newFakeRuntime(t))
 		m.plug.host.SetClipboard("copied")
-		// The write is coalesced and emitted by the pump (S13-3), not collected per call.
+		// The write is coalesced and emitted by the pump, not collected per call.
 		if m.pending != nil || len(m.plug.later) != 1 {
 			t.Fatalf("SetClipboard collected %v with %d deferred closures", m.pending != nil, len(m.plug.later))
 		}

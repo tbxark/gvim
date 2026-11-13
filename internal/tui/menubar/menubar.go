@@ -9,9 +9,9 @@
 // Geometry is computed here from the frame size, and Paint and Hit read the
 // same geometry, so a label and its click target cannot drift apart.
 //
-// The menus have no mnemonics: no Alt+letter opens a title and no underlined letter
-// activates a row. They are used with the mouse, with the arrow keys once open, and
-// through the palette command that opens the bar.
+// Bar labels can underline the accelerator letter of the active keymap (see Mnemonicer
+// and WithMnemonics); dropdown rows carry no mnemonics. The menus are used with the
+// mouse, with the arrow keys once open, and through the command that opens the bar.
 package menubar
 
 import (
@@ -195,8 +195,6 @@ func (m Model) SetSize(w, h int) Model {
 	return m
 }
 
-// WithExplorerFocus sets whether the explorer label joins the bar. An open
-// dropdown whose label leaves the bar closes.
 // WithMnemonics sets whether the bar labels underline their accelerator letter.
 // editor.menu_bar_mnemonics is the setting; the letter itself comes from Ports'
 // Mnemonicer.
@@ -205,6 +203,8 @@ func (m Model) WithMnemonics(on bool) Model {
 	return m
 }
 
+// WithExplorerFocus sets whether the explorer label joins the bar. An open
+// dropdown whose label leaves the bar closes.
 func (m Model) WithExplorerFocus(on bool) Model {
 	m.explorerFocus = on
 	if m.title != "" && m.title != moreTitle && !slices.Contains(barLabels(on), m.title) {
@@ -332,8 +332,7 @@ func (m Model) Close() Model {
 
 // Consumes reports whether msg belongs to the open dropdown, so the root must not
 // route it further. A key the dropdown answers is consumed: the arrows, Enter,
-// and Esc. A left press on a label, a
-// row or a border is consumed. A press anywhere else is not, because it closes
+// and Esc. A left press on a label, a row or a border is consumed. A press anywhere else is not, because it closes
 // the dropdown and still reaches what is under it. Hover is not consumed.
 func (m Model) Consumes(msg tea.Msg) bool {
 	if !m.IsOpen() {
@@ -759,10 +758,10 @@ func boxWidth(rows []Row) int { return contentWidth(rows) + 2 + 2*space.PadX }
 
 // Hit returns what is at column x, row y of the frame set by SetSize.
 func (m Model) Hit(x, y int) Target {
-	g := m.geometry(m.w, m.h)
 	if x < 0 || y < 0 || x >= m.w || y >= m.h {
 		return Target{Kind: TargetNone}
 	}
+	g := m.geometry(m.w, m.h)
 	if y == m.row {
 		for i, r := range g.labels {
 			if x >= r.x && x < r.x+r.w {
@@ -806,7 +805,8 @@ func hitBox(box dropBox, x, y int, item, border TargetKind) (Target, bool) {
 
 // Paint draws the bar on the row set by SetRow and, when a dropdown is open, the
 // dropdown below it. The open label takes the active style, and the highlighted row
-// takes the selected style. A disabled row is drawn dim. No cell is underlined.
+// takes the selected style. A disabled row is drawn dim. A label underlines its
+// accelerator letter when mnemonics are on.
 func (m Model) Paint(g *grid.Grid) {
 	geo := m.geometry(g.Width(), g.Height())
 	g.Fill(0, g.Width(), m.row, m.styles.bar)
@@ -833,9 +833,6 @@ func checkGlyph(checked bool) string {
 	return "☐ "
 }
 
-// paintBox draws the rows of box in view on the shared overlay frame: the rounded
-// border with the plain rule of an untitled box on its top border, the rows with their
-// checkboxes and right-aligned shortcuts, and the separator rules inset by PadX.
 // paintLabel draws one bar label. With mnemonics on and a Mnemonicer port, the
 // letter the active keymap binds to menu_open is underlined: Fresh cuts the label into
 // runs so one character can be underlined inside it, and this does the same on the
@@ -891,6 +888,9 @@ func (m Model) mnemonicIndex(label string) int {
 	return -1
 }
 
+// paintBox draws the rows of box in view on the shared overlay frame: the rounded
+// border with the plain rule of an untitled box on its top border, the rows with their
+// checkboxes and right-aligned shortcuts, and the separator rules inset by PadX.
 func (m Model) paintBox(g *grid.Grid, box dropBox) {
 	chrome := m.styles.chrome
 	x0, right := box.x, box.x+box.w-1

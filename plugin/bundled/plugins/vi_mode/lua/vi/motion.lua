@@ -311,7 +311,7 @@ M.table["up"] = M.table["k"]
 M.table["gj"] = M.table["j"]
 M.table["gk"] = M.table["k"]
 
--- first_nonblank_line goes delta lines (the count minus one for _) and lands on the first
+-- line_motion goes delta lines (the count minus one for _) and lands on the first
 -- non-blank character.
 local function line_motion(c, delta, fail_at_end)
   local last = D.count() - 1

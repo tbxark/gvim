@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -33,7 +34,7 @@ func TestOfficialEnvPillSuppressesNativeSegment(t *testing.T) {
 	l := e.m.layout()
 	x := -1
 	for _, r := range l.Status {
-		if r.Kind == hitStatusPlugin && strings.Contains(r.Text, "official env") {
+		if r.Kind == frame.HitStatusPlugin && strings.Contains(r.Text, "official env") {
 			x = r.X
 		}
 	}
@@ -71,7 +72,7 @@ func TestOtherPluginEnvIDDoesNotSuppressNativeSegment(t *testing.T) {
 	l := e.m.layout()
 	pluginX, nativeX := -1, -1
 	for _, r := range l.Status {
-		if r.Kind != hitStatusPlugin {
+		if r.Kind != frame.HitStatusPlugin {
 			continue
 		}
 		switch {
@@ -94,7 +95,7 @@ func TestOtherPluginEnvIDDoesNotSuppressNativeSegment(t *testing.T) {
 	l = e.m.layout()
 	nativeX = -1
 	for _, r := range l.Status {
-		if r.Kind == hitStatusPlugin && strings.Contains(r.Text, "direnv") {
+		if r.Kind == frame.HitStatusPlugin && strings.Contains(r.Text, "direnv") {
 			nativeX = r.X
 		}
 	}

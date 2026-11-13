@@ -4,7 +4,7 @@ package document
 // Names match the action vocabulary in Fresh's keymaps.
 type Action string
 
-// fail sets err as the status of d and marks it as an error.
+// Fail sets err as the status of d and marks it as an error.
 func (d *Document) Fail(err error) {
 	d.Status = err.Error()
 	d.StatusErr = d.Status

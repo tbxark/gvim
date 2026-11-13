@@ -409,7 +409,7 @@ func TestOSTablesRaceFree(t *testing.T) {
 }
 
 // TestTerminateKillsGroupAfterLeaderExit: the delayed KILL of Terminate reaches a grandchild
-// that ignores TERM and holds no pipe, even though the direct child is long gone (S8-3).
+// that ignores TERM and holds no pipe, even though the direct child is long gone.
 func TestTerminateKillsGroupAfterLeaderExit(t *testing.T) {
 	requireProgram(t, "sh")
 	o, dir := newTestOS(t)
@@ -441,7 +441,7 @@ func TestTerminateKillsGroupAfterLeaderExit(t *testing.T) {
 	eventually(t, "the grandchild to be killed after the grace period", func() bool { return !alive(gpid) })
 }
 
-// TestReadFileSpecialFile: a FIFO is refused without blocking (S8-6).
+// TestReadFileSpecialFile: a FIFO is refused without blocking.
 func TestReadFileSpecialFile(t *testing.T) {
 	o, dir := newTestOS(t)
 	fifo := filepath.Join(dir, "ff")
@@ -465,8 +465,34 @@ func TestReadFileSpecialFile(t *testing.T) {
 	}
 }
 
+// TestReadSearchableFIFO: a FIFO in a searched tree (a tracked symlink to one) is skipped
+// without waiting for a writer.
+func TestReadSearchableFIFO(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "ff")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := ReadSearchable(fifo, 0)
+		done <- ok
+	}()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("ReadSearchable accepted a FIFO")
+		}
+	case <-time.After(2 * time.Second):
+		// Release the blocked open so the goroutine ends.
+		if w, err := os.OpenFile(fifo, os.O_RDWR, 0); err == nil {
+			_ = w.Close()
+		}
+		t.Fatal("ReadSearchable blocked on a FIFO")
+	}
+}
+
 // TestCopyOntoItself: copying a file onto itself, a symlink to it or a hard link to it
-// refuses and leaves the data alone (S8-1).
+// refuses and leaves the data alone.
 func TestCopyOntoItself(t *testing.T) {
 	o, dir := newTestOS(t)
 	ctx := context.Background()
@@ -501,7 +527,7 @@ func TestCopyOntoItself(t *testing.T) {
 
 // TestRemoveRefusesProtectedByIdentity: the workspace, home and config directories (and what
 // contains them) are recognised by file identity, not by spelling, so a case variant on a
-// case-insensitive file system or a symlinked spelling does not slip past (S8-5).
+// case-insensitive file system or a symlinked spelling does not slip past.
 func TestRemoveRefusesProtectedByIdentity(t *testing.T) {
 	setup := func(t *testing.T) (o *pluginOS, dir string) {
 		dir, err := filepath.EvalSymlinks(t.TempDir())
@@ -594,5 +620,97 @@ func TestCopyRefusesAFIFOSource(t *testing.T) {
 	}
 	if _, err := os.Stat(dst); err == nil {
 		t.Fatal("Copy created the destination of a refused copy")
+	}
+}
+
+// A write to a FIFO neither blocks nor replaces it, whichever write mode asks, and a
+// reader on the other end does not change that.
+func TestWriteFileRefusesAFIFO(t *testing.T) {
+	o, dir := newTestOS(t)
+	fifo := filepath.Join(dir, "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("no FIFOs here: %v", err)
+	}
+	for name, wo := range map[string]hostos.WriteOptions{
+		"truncate": {},
+		"append":   {Append: true},
+		"atomic":   {Atomic: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() { done <- o.WriteFile(context.Background(), "pipe", []byte("x"), wo) }()
+			select {
+			case err := <-done:
+				if got := codeOf(err); got != pluginapi.CodeIO {
+					t.Fatalf("err = %v (%q), want an io refusal", err, got)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("WriteFile blocked on a FIFO")
+			}
+			if st, err := os.Lstat(fifo); err != nil || st.Mode()&os.ModeNamedPipe == 0 {
+				t.Fatalf("the FIFO was replaced: %v, %v", st, err)
+			}
+		})
+	}
+}
+
+// An atomic write through a dangling symbolic link must not turn the link into a file.
+func TestAtomicWriteRefusesADanglingSymlink(t *testing.T) {
+	o, dir := newTestOS(t)
+	link := filepath.Join(dir, "dangling")
+	if err := os.Symlink(filepath.Join(dir, "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+	err := o.WriteFile(context.Background(), "dangling", []byte("x"), hostos.WriteOptions{Atomic: true})
+	if codeOf(err) != pluginapi.CodeIO {
+		t.Fatalf("err = %v, want an io refusal", err)
+	}
+	if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v, %v", st, err)
+	}
+}
+
+// A process whose output nobody reads does not outlive Shutdown as a stuck reader: after
+// the kill the process is reaped and Wait returns.
+func TestShutdownFreesAnUndrainedProcess(t *testing.T) {
+	requireProgram(t, "yes")
+	o := newPluginOS(nil)
+	p, err := o.Start(context.Background(), []string{"yes"}, hostos.ProcOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // the reader fills its channel and blocks
+	o.Shutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if res, err := p.Wait(ctx); err != nil || res.Signal != "KILL" {
+		t.Fatalf("Wait = %+v, %v; want the killed process", res, err)
+	}
+}
+
+// openFDs counts the descriptors of this process.
+func openFDs(t *testing.T) int {
+	t.Helper()
+	for _, dir := range []string{"/proc/self/fd", "/dev/fd"} {
+		if ents, err := os.ReadDir(dir); err == nil {
+			return len(ents)
+		}
+	}
+	t.Skip("cannot count file descriptors here")
+	return 0
+}
+
+// A Start refused because the OS is shut down leaves no stdin pipe behind.
+func TestStartAfterShutdownLeaksNoDescriptors(t *testing.T) {
+	o := newPluginOS(nil)
+	o.Shutdown()
+	before := openFDs(t)
+	for range 20 {
+		if _, err := o.Start(context.Background(), []string{"cat"}, hostos.ProcOptions{OpenStdin: true}); codeOf(err) != pluginapi.CodeClosed {
+			t.Fatalf("Start after Shutdown: %v", err)
+		}
+	}
+	if after := openFDs(t); after > before {
+		t.Fatalf("descriptors went from %d to %d", before, after)
 	}
 }

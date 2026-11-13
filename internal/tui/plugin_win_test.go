@@ -199,14 +199,14 @@ func TestSplitWindowPlacement(t *testing.T) {
 	tests := []struct {
 		name      string
 		opts      pluginapi.SplitOptions
-		dir       splitDir
+		dir       split.Dir
 		newFirst  bool
 		wantRatio int
 	}{
-		{"right", pluginapi.SplitOptions{Dir: "right"}, sideBySide, false, 50},
-		{"below with a ratio", pluginapi.SplitOptions{Dir: "below", Ratio: 0.3}, stacked, false, 70},
-		{"right before", pluginapi.SplitOptions{Dir: "right", Before: true, Ratio: 0.25}, sideBySide, true, 25},
-		{"the ratio is kept inside the pane", pluginapi.SplitOptions{Dir: "right", Ratio: 0.999}, sideBySide, false, 1},
+		{"right", pluginapi.SplitOptions{Dir: "right"}, split.SideBySide, false, 50},
+		{"below with a ratio", pluginapi.SplitOptions{Dir: "below", Ratio: 0.3}, split.Stacked, false, 70},
+		{"right before", pluginapi.SplitOptions{Dir: "right", Before: true, Ratio: 0.25}, split.SideBySide, true, 25},
+		{"the ratio is kept inside the pane", pluginapi.SplitOptions{Dir: "right", Ratio: 0.999}, split.SideBySide, false, 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -226,14 +226,14 @@ func TestSplitWindowPlacement(t *testing.T) {
 			}
 			// The share of the new window is what the geometry gives it.
 			panes := m.layout().Panes
-			extent := func(p splitPane) int {
-				if tc.dir == stacked {
+			extent := func(p split.Pane) int {
+				if tc.dir == split.Stacked {
 					return p.H
 				}
 				return p.W
 			}
 			total := band.W
-			if tc.dir == stacked {
+			if tc.dir == split.Stacked {
 				total = band.H
 			}
 			first, second := split.Span(total, tc.wantRatio)
@@ -487,21 +487,21 @@ func TestEqualizeAndWindowsAlong(t *testing.T) {
 		}
 	}
 
-	leaf := func() *splitNode { return &splitNode{} }
-	row := &splitNode{Dir: sideBySide, A: leaf(), B: &splitNode{Dir: sideBySide, A: leaf(), B: leaf()}}
-	column := &splitNode{Dir: stacked, A: leaf(), B: leaf()}
+	leaf := func() *split.Node { return &split.Node{} }
+	row := &split.Node{Dir: split.SideBySide, A: leaf(), B: &split.Node{Dir: split.SideBySide, A: leaf(), B: leaf()}}
+	column := &split.Node{Dir: split.Stacked, A: leaf(), B: leaf()}
 	tests := []struct {
 		name string
-		n    *splitNode
-		dir  splitDir
+		n    *split.Node
+		dir  split.Dir
 		want int
 	}{
-		{"a leaf", leaf(), sideBySide, 1},
-		{"a row along the row", row, sideBySide, 3},
-		{"a column along the row", column, sideBySide, 1},
-		{"a column along the column", column, stacked, 2},
-		{"a row inside a column along the column", &splitNode{Dir: stacked, A: row, B: leaf()}, stacked, 2},
-		{"a row inside a column along the row", &splitNode{Dir: stacked, A: row, B: leaf()}, sideBySide, 3},
+		{"a leaf", leaf(), split.SideBySide, 1},
+		{"a row along the row", row, split.SideBySide, 3},
+		{"a column along the row", column, split.SideBySide, 1},
+		{"a column along the column", column, split.Stacked, 2},
+		{"a row inside a column along the column", &split.Node{Dir: split.Stacked, A: row, B: leaf()}, split.Stacked, 2},
+		{"a row inside a column along the row", &split.Node{Dir: split.Stacked, A: row, B: leaf()}, split.SideBySide, 3},
 	}
 	for _, tc := range tests {
 		if got := windowsAlong(tc.n, tc.dir); got != tc.want {

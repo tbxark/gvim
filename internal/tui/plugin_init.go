@@ -21,14 +21,14 @@ import (
 )
 
 // The init.lua commands: Edit init.lua, and the two commands that write a recorded macro
-// into it (FINAL X11). init.lua is the user's own script, loaded last as the plugin
+// into it. init.lua is the user's own script, loaded last as the plugin
 // "init"; Check and Reload go to the runtime (pluginUIAction). Editing and writing it is
 // disk work, so it runs in a tea.Cmd and its result comes back as a message; Update never
 // touches the disk.
 
 // initTemplate is the init.lua that Edit init.lua creates when there is none. It runs as
 // it is (it only has comments), and the examples after the "Examples" line are Lua once
-// the leading "-- " is taken off (TestInitTemplateExamplesParse).
+// the leading "-- " is taken off (TestInitTemplate).
 const initTemplate = `-- init.lua: your own Lua script for gvim. It loads after every other plugin.
 --
 -- Edit it, save it, then run "init: Check init.lua" to look for syntax errors and
@@ -52,9 +52,6 @@ const initTemplate = `-- init.lua: your own Lua script for gvim. It loads after 
 --   gvim.notify("Saved " .. (ev.path or "a buffer"))
 -- end)
 `
-
-// initExamplesMarker is the line of initTemplate after which every line is an example.
-const initExamplesMarker = "-- Examples"
 
 // initCheckControl is the init_check request. When init.lua is open with changes that are not
 // saved, the check reads that buffer: the file on disk is not what the user is about to save.

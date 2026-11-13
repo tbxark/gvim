@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// gvim.agent_sessions (stage S24): the bounded, read-only local agent-session discovery
+// gvim.agent_sessions: the bounded, read-only local agent-session discovery
 // the native "Discover Agent Sessions" picker uses. The app owns the scan and its trust
 // gate; this API only exposes the finished, bounded rows. It never attaches to or resumes
 // a process and carries no attach/resume argv.
@@ -34,10 +34,6 @@ func awaitAgentSessionsDiscover(c *awaitCall) {
 		return
 	}
 	svc := c.r.svc
-	if svc == nil {
-		c.Fail(pluginapi.Errf(pluginapi.CodeUnsupported, "agent_sessions.discover: no discovery service"))
-		return
-	}
 	c.Park(&parkSpec{Work: &pluginapi.Work{Run: func(ctx context.Context) pluginapi.Completion {
 		report, err := svc.DiscoverAgents(ctx)
 		if err != nil {

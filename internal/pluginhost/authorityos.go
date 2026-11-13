@@ -172,12 +172,13 @@ func (o *authorityOS) Mkdir(ctx context.Context, p string, parents bool) error {
 	return mapErr(m.Mkdir(ctx, o.resolve(p), parents), p)
 }
 
-func (o *authorityOS) Remove(ctx context.Context, p string, recursive bool) error {
-	m, err := o.mutations(p)
-	if err != nil {
-		return err
-	}
-	return mapErr(m.Remove(ctx, o.resolve(p), recursive), p)
+// Remote marks the OS as a remote workspace one (hostos.RemoteOS).
+func (o *authorityOS) Remote() bool { return true }
+
+// Remove is unsupported: the protected-directory check of gvim.fs.remove (home, config,
+// working directory) only knows the local machine, so a remote delete would be unguarded.
+func (o *authorityOS) Remove(_ context.Context, p string, _ bool) error {
+	return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: remove is unsupported on remote workspaces", p)
 }
 
 func (o *authorityOS) Rename(ctx context.Context, from, to string) error {

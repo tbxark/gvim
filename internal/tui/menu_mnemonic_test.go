@@ -46,10 +46,36 @@ func mnemonicModel(t *testing.T, keys Keymap, opts *ViewOptions) *Model {
 	return m
 }
 
+// menuLabelRun is one menu bar label as the menu bar's hit map places it.
+type menuLabelRun struct {
+	X, W int
+	Text string
+}
+
+// menuLabelRuns reads the bar's labels back from the menu bar's own hit map, so a
+// test does not repeat the bar's geometry.
+func menuLabelRuns(m *Model) []menuLabelRun {
+	var runs []menuLabelRun
+	y := m.layout().MenuLabelY
+	bar := m.menu.SetSize(m.width, m.height).SetRow(y).WithExplorerFocus(m.explorerFocus)
+	for x := range m.width {
+		t := bar.Hit(x, y)
+		if t.Kind != menubar.TargetLabel {
+			continue
+		}
+		if n := len(runs); n > 0 && runs[n-1].X+runs[n-1].W == x && runs[n-1].Text == menubar.Labels(m.explorerFocus)[t.Index] {
+			runs[n-1].W++
+			continue
+		}
+		runs = append(runs, menuLabelRun{X: x, W: 1, Text: menubar.Labels(m.explorerFocus)[t.Index]})
+	}
+	return runs
+}
+
 // labelCell returns the painted cell of the menu label called title, character i.
 func labelCell(t *testing.T, m *Model, title string, i int) int {
 	t.Helper()
-	for _, r := range m.layout().MenuRuns {
+	for _, r := range menuLabelRuns(m) {
 		if r.Text == title {
 			return r.X + i
 		}
@@ -81,7 +107,7 @@ func TestMenuBarMnemonicsOffDropsUnderlinesAndChords(t *testing.T) {
 		MenuBarMnemonics: false,
 	})
 	g := m.paint()
-	for _, r := range m.layout().MenuRuns {
+	for _, r := range menuLabelRuns(m) {
 		for i := range []rune(r.Text) {
 			if g.At(r.X+i, m.layout().MenuLabelY).Style.Underline {
 				t.Fatalf("%s: column %d underlines a letter with the setting off", r.Text, i)

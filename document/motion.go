@@ -56,13 +56,10 @@ func wordLeft(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
 func wordRight(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
 	q := p
 	if cls := b.ClassAt(q); cls != buffer.ClassSpace {
+		// A character is under q while the class matches, so nextPos always advances; the
+		// end of the document reads as a space and stops the run.
 		for b.ClassAt(q) == cls {
-			next, ok := nextPos(b, q)
-			if !ok {
-				// Word runs to the end of the document.
-				return buffer.Pos{Line: q.Line, Col: q.Col + 1}
-			}
-			q = next
+			q, _ = nextPos(b, q)
 		}
 	}
 	for b.ClassAt(q) == buffer.ClassSpace {

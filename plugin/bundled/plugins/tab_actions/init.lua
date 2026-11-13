@@ -14,8 +14,9 @@ end
 local function close_where(want)
   local tabs = gvim.buf.list()
   local active
+  local current = gvim.buf.current()
   for i, b in ipairs(tabs) do
-    if b == gvim.buf.current() then
+    if b == current then
       active = i
     end
   end

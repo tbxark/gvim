@@ -264,3 +264,20 @@ func TestSaveAsWithoutExistsSavesImmediately(t *testing.T) {
 	_, cmd := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mustClose(t, d, cmd, ChoiceSave, "a.txt")
 }
+
+// TestSaveAsPasteClearsTheRejection: a paste edits the name like typing does, so the
+// message about the old name goes away.
+func TestSaveAsPasteClearsTheRejection(t *testing.T) {
+	t.Parallel()
+	c := newFakeClock()
+	d := NewSaveAs(c.Now, "", nil, PathChecks{}, testOv)
+	c.afterGrace()
+	d.Update(key("enter"))
+	if d.errText == "" {
+		t.Fatal("an empty name was not rejected")
+	}
+	d.Update(tea.PasteMsg{Content: "a.txt"})
+	if d.errText != "" || d.input.value() != "a.txt" {
+		t.Fatalf("after paste: err %q value %q", d.errText, d.input.value())
+	}
+}

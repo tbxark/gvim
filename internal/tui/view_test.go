@@ -16,7 +16,10 @@ import (
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
@@ -48,6 +51,8 @@ func (r realEditor) Tabs() []TabInfo {
 }
 
 func (r realEditor) Status() string { return r.ed.Status() }
+
+func (r realEditor) QuitNeedsConfirm() bool { return r.ed.QuitNeedsConfirm() }
 
 // ClearStatus drops the status message on a key or click, as the app adapter does, so the
 // message that opening the file sets does not stay as a notice band over the body.
@@ -166,7 +171,7 @@ func TestTabBarToggleGivesItsRowToTheBody(t *testing.T) {
 	if strings.Contains(viewRow(m, row), "doc.txt") {
 		t.Fatalf("the tab name is still drawn: %q", viewRow(m, row))
 	}
-	if got := l.Hit(l.TextX, row); got.Kind != hitEditorText {
+	if got := l.Hit(l.TextX, row); got.Kind != frame.HitEditorText {
 		t.Errorf("the freed row hits %v, want the editor text", got.Kind)
 	}
 	if !strings.Contains(viewRow(m, row), "hello") {
@@ -345,11 +350,11 @@ func TestTabIndicatorsHideTheArrowOfATab(t *testing.T) {
 func TestIndentGuidesAndFoldIndicatorsAreStoredPerBuffer(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 8)
 	runAction(t, m, "toggle_indentation_guide_current_buffer")
-	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); !p.IndentGuides {
+	if p := m.viewPane(split.Pane{}, editorpane.Pane{}, m.ed.Active()); !p.IndentGuides {
 		t.Error("indentation guides are not on in the pane after the toggle")
 	}
 	runAction(t, m, "toggle_fold_indicators_current_buffer")
-	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); !p.HideFoldMarkers {
+	if p := m.viewPane(split.Pane{}, editorpane.Pane{}, m.ed.Active()); !p.HideFoldMarkers {
 		t.Error("fold indicators are still drawn after the toggle")
 	}
 }
@@ -431,7 +436,7 @@ func TestConfigRulersReachThePane(t *testing.T) {
 				press(m, typed(tc.remove))
 				settle(t, m, press(m, special(tea.KeyEnter)))
 			}
-			p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active())
+			p := m.viewPane(split.Pane{}, editorpane.Pane{}, m.ed.Active())
 			if !slices.Equal(p.Rulers, tc.want) {
 				t.Errorf("pane rulers = %v, want %v", p.Rulers, tc.want)
 			}
@@ -459,7 +464,7 @@ func TestSetPageWidthStoresTheWidthAndReachesThePane(t *testing.T) {
 	if got := docViewOf(m.ed.Active()).PageWidth; got != 40 {
 		t.Fatalf("page width = %d, want 40", got)
 	}
-	p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active())
+	p := m.viewPane(split.Pane{}, editorpane.Pane{}, m.ed.Active())
 	if !p.PageView.On || p.PageView.Measure != 40 {
 		t.Fatalf("pane page view = %+v, want it on at measure 40", p.PageView)
 	}
@@ -474,7 +479,7 @@ func TestPageViewToggleDrawsAndSaysSo(t *testing.T) {
 	if v := docViewOf(m.ed.Active()).PageView; v == nil || !*v {
 		t.Fatal("page view was not stored")
 	}
-	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); !p.PageView.On {
+	if p := m.viewPane(split.Pane{}, editorpane.Pane{}, m.ed.Active()); !p.PageView.On {
 		t.Fatal("the page view did not reach the pane")
 	}
 	if !frameHas(m, "Page view: on for this buffer") {
@@ -485,7 +490,7 @@ func TestPageViewToggleDrawsAndSaysSo(t *testing.T) {
 	if v := docViewOf(m.ed.Active()).PageView; v == nil || *v {
 		t.Fatal("the second toggle did not turn the page view off")
 	}
-	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); p.PageView.On {
+	if p := m.viewPane(split.Pane{}, editorpane.Pane{}, m.ed.Active()); p.PageView.On {
 		t.Fatal("the pane kept the page view after it was turned off")
 	}
 	if !frameHas(m, "Page view: off for this buffer") {
@@ -654,7 +659,7 @@ func TestMaximizeSplitShowsOnlyTheFocusedPane(t *testing.T) {
 	runAction(t, m, "toggle_maximize_split")
 	shown := 0
 	for _, p := range m.layout().Panes {
-		if p.Rect != (rect{}) {
+		if p.Rect != (space.Rect{}) {
 			shown++
 		}
 	}

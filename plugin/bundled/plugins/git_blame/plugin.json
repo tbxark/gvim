@@ -2,6 +2,6 @@
   "name": "git_blame",
   "version": "1.0.0",
   "description": "Inline git blame for the cursor line, the commit behind it, and its hash",
-  "api": 1,
+  "api": 2,
   "default_enabled": true
 }

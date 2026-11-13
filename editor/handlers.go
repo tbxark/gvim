@@ -240,11 +240,10 @@ func buildHandlers() map[Action]handler {
 		return nil
 	}
 	h["goto_line"] = func(e *Editor, _ map[string]any) error {
-		// The goto_line action reports this message, and the legacy screen S24
-		// requires it. The legacy macOS keymap, which the legacy screens were captured
-		// with, binds Ctrl+G to find_next, and find_next reports this message when
-		// no search is active. The go-to-line prompt is opened from the palette
-		// and the Go menu, and it calls GotoLine.
+		// The goto_line action reports this message: Fresh's macOS keymap binds Ctrl+G to
+		// find_next, and find_next reports this message when no search is active. The
+		// go-to-line prompt is opened from the palette and the Go menu, and it calls
+		// GotoLine.
 		e.setStatus("No active search. Press Ctrl+F to search.")
 		return nil
 	}
@@ -261,12 +260,16 @@ func buildHandlers() map[Action]handler {
 		}
 		return nil
 	}
-	// quit refuses while a tab has unsaved edits, unless force is set. The UI
+	// quit refuses while a tab has unsaved edits, unless force is set. With
+	// Options.ConfirmQuit it also refuses a clean quit (ErrQuitNeedsConfirm). The UI
 	// uses Editor.Quit to get the list of dirty tabs instead.
 	h["quit"] = func(e *Editor, args map[string]any) error {
 		if !forced(args) {
 			if err := unsavedError(e.docs); err != nil {
 				return err
+			}
+			if e.opts.ConfirmQuit {
+				return ErrQuitNeedsConfirm
 			}
 		}
 		e.quit = true

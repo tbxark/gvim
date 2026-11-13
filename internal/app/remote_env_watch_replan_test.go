@@ -107,3 +107,34 @@ func TestRemoteEnvWatchReplanRespectsBounds(t *testing.T) {
 		t.Fatalf("replan bound notice = %q", notice)
 	}
 }
+
+// Reconnected re-arms the watch on the restored carrier and re-captures the
+// environment once, so a change made during the outage is picked up.
+func TestRemoteEnvWatchReconnectedRearmsAndRecaptures(t *testing.T) {
+	var detect atomic.Int32
+	run := func(context.Context, string) (string, error) {
+		detect.Add(1)
+		return "", nil
+	}
+	provider := env.NewRemote("/remote/proj", []config.EnvDetector{{
+		Name: "direnv", Markers: []string{".envrc"}, Kind: config.EnvKindShell, Snippet: "true",
+	}}, func() bool { return true }, run)
+	provider.Warm(context.Background())
+	raw := &fakeWatchFS{}
+	slot := watchSlot(raw)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
+	if watch == nil {
+		t.Fatal("no watcher")
+	}
+	defer watch.Close()
+	waitWatchCount(t, raw, 1)
+	initialDetect := detect.Load()
+
+	watch.Reconnected()
+	waitWatchCount(t, raw, 2)
+	waitDetectIncrease(t, &detect, initialDetect)
+	var nilWatch *remoteEnvWatch
+	nilWatch.Reconnected() // a launch without a watcher reconnects without panicking
+}

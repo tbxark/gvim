@@ -7,7 +7,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// The key part of the fake host (stage S14): the key capture of Host.WaitKey and the mode
+// The key part of the fake host: the key capture of Host.WaitKey and the mode
 // contexts Host.Holds answers. The registrations themselves (SetBindings, SetModes,
 // SetContext, SetStatusItems, SetInputMode) live in fakehost.go.
 

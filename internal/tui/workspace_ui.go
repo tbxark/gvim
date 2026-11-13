@@ -1,6 +1,6 @@
 package tui
 
-// The daemon workspace UI (#19a): the palette actions that list/switch/create/close/rename
+// The daemon workspace UI: the palette actions that list/switch/create/close/rename
 // workspaces, the switcher and picker overlays, and the workspace segment of the status
 // row. The app supplies a WorkspacePort; without it (a direct launch) none of the actions
 // exist and the status row says nothing about workspaces.
@@ -17,6 +17,7 @@ import (
 
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
@@ -327,11 +328,11 @@ func (m *Model) CancelTransientWork() {
 }
 
 // workspaceSegment is the status-row item of the active workspace, if any.
-func (m *Model) workspaceSegment() (statusItem, bool) {
+func (m *Model) workspaceSegment() (frame.StatusItem, bool) {
 	if m.workspace == nil || m.workspaceLabel == "" {
-		return statusItem{}, false
+		return frame.StatusItem{}, false
 	}
-	return statusItem{ID: "workspace", Text: "WS " + m.workspaceLabel, Prio: 1<<20 - 1}, true
+	return frame.StatusItem{ID: "workspace", Text: "WS " + m.workspaceLabel, Prio: 1<<20 - 1}, true
 }
 
 // workspaceAction handles the daemon workspace palette actions. It reports false when the
@@ -459,13 +460,7 @@ func (m *Model) extractWorkspaceTab() tea.Cmd {
 	}
 	cmd, err := p.ExtractTab()
 	if err != nil {
-		// The layer's errors are lower-case (Go error style); the status row is a
-		// sentence, so it capitalizes the first letter for display.
-		msg := err.Error()
-		if r, size := utf8.DecodeRuneInString(msg); size > 0 {
-			msg = string(unicode.ToUpper(r)) + msg[size:]
-		}
-		m.quietNotice(msg)
+		m.workspaceActionError(err)
 		return nil
 	}
 	return cmd

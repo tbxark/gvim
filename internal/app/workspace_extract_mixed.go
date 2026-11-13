@@ -356,8 +356,8 @@ func (m *workspaceManager) runMixedExtractNew(ext *mixedExtract) {
 	_, _ = m.reg.UpdateLayout(id, &layout)
 	if len(ext.terms) > 0 {
 		st := terminal.SavedState{
-			Version: terminal.SavedStateVersion, Open: true,
-			Tabs: append([]terminal.SavedTab(nil), ext.terms...),
+			Version: terminal.SavedStateVersion,
+			Tabs:    append([]terminal.SavedTab(nil), ext.terms...),
 			// The new workspace's dock inherits the migrated search-query history
 			// (bounded/cleaned by SaveTerminal; no process is involved).
 			SearchHistory: append([]string(nil), ext.searchHistory...),

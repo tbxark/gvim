@@ -214,7 +214,7 @@ func noBudgetProblems(t reporter, r *rig, plugin string) {
 	}
 }
 
-// TestGitGutterBigBufferStaysWithinBudgets is the rule C22 sets for the ports: no handler
+// TestGitGutterBigBufferStaysWithinBudgets is the rule for the ports: no handler
 // reads the buffer by lines, and every handler finishes inside the 50 ms event budget (the
 // runtime would otherwise log a timeout and count a strike).
 func TestGitGutterBigBufferStaysWithinBudgets(t *testing.T) {

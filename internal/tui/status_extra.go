@@ -1,5 +1,7 @@
 package tui
 
+import "github.com/tbxark/gvim/internal/tui/frame"
+
 // statusExtraSource is the structural identity of one status-row Extra item. Plugin status
 // items and the native appended segments share the Extra slice, so routing must not depend
 // on a plugin-chosen ID string: only entries built here with source statusExtraEnv reach the
@@ -15,7 +17,7 @@ const (
 )
 
 type statusExtraEntry struct {
-	item   statusItem
+	item   frame.StatusItem
 	source statusExtraSource
 }
 
@@ -51,19 +53,13 @@ func (m *Model) statusExtraEntries() []statusExtraEntry {
 }
 
 // statusExtraItems is the Extra slice the frame receives.
-func (m *Model) statusExtraItems() []statusItem {
+func (m *Model) statusExtraItems() []frame.StatusItem {
 	entries := m.statusExtraEntries()
-	out := make([]statusItem, len(entries))
+	out := make([]frame.StatusItem, len(entries))
 	for i := range entries {
 		out[i] = entries[i].item
 	}
 	return out
-}
-
-// statusExtraItem is the Extra item at the layout index, if any.
-func (m *Model) statusExtraItem(index int) (statusItem, bool) {
-	entry, ok := m.statusExtraEntryAt(index)
-	return entry.item, ok
 }
 
 // statusExtraEntryAt is the structural entry at the layout index.

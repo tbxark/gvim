@@ -11,8 +11,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-// installStdlib applies the repaired standard library to a fresh state (FINAL 8.1 step 4,
-// AMENDMENTS C5/C6): tonumber, math.huge, table.concat/sort/unpack/pack/move,
+// installStdlib applies the repaired standard library to a fresh state: tonumber, math.huge, table.concat/sort/unpack/pack/move,
 // string.rep/format/byte, unpack, a reduced os, and string.find/match/gmatch/gsub from
 // plugin/pattern (step budget, cancel on the slice context, output cap).
 //

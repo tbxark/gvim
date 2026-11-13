@@ -334,3 +334,76 @@ func TestEmptyPanel(t *testing.T) {
 		t.Fatalf("down on an empty panel = %+v", r)
 	}
 }
+
+// TestSanitizeDropsBidiControls checks that a plugin string cannot carry a bidirectional
+// override into a cell, and that a control becomes a space.
+func TestSanitizeDropsBidiControls(t *testing.T) {
+	if got := Sanitize("a\u202eb\u2066c\u200fd\u061ce"); got != "abcde" {
+		t.Fatalf("Sanitize = %q, want the bidi controls removed", got)
+	}
+	if got := Sanitize("a\x1bb\n"); got != "a b " {
+		t.Fatalf("Sanitize = %q, want controls as spaces", got)
+	}
+}
+
+// TestValidateStringFieldCaps checks that the placeholder, title, option and completion
+// strings are capped like the widget text, and the boundary is allowed.
+func TestValidateStringFieldCaps(t *testing.T) {
+	long := strings.Repeat("x", MaxString+1)
+	tests := []struct {
+		name string
+		w    pluginapi.Widget
+	}{
+		{"placeholder", pluginapi.Widget{Kind: pluginapi.WidgetText, Key: "t", Placeholder: long}},
+		{"title", pluginapi.Widget{Kind: pluginapi.WidgetLabeledSection, Title: strings.Repeat("x", MaxTitle+1)}},
+		{"option", pluginapi.Widget{Kind: pluginapi.WidgetDropdown, Key: "d", Options: []string{long}}},
+		{"completion", pluginapi.Widget{Kind: pluginapi.WidgetText, Key: "t", Completions: []string{long}}},
+		{"included", pluginapi.Widget{Kind: pluginapi.WidgetDualList, Key: "d", Included: []string{long}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := Validate(panel(tt.w, "")); err == nil || pluginapi.CodeOf(err) != pluginapi.CodeLimit {
+				t.Fatalf("err = %v, want a limit error", err)
+			}
+		})
+	}
+	ok := pluginapi.Widget{Kind: pluginapi.WidgetText, Key: "t", Placeholder: strings.Repeat("x", MaxString), Completions: []string{strings.Repeat("x", MaxString)}}
+	if err := Validate(panel(ok, "")); err != nil {
+		t.Fatalf("the cap boundary was refused: %v", err)
+	}
+}
+
+// TestPageSurfaceIsReusedWithoutLeftovers checks that a page panel redrawn into its kept
+// surface shows only the new content, at the same size and after a resize.
+func TestPageSurfaceIsReusedWithoutLeftovers(t *testing.T) {
+	col := func(texts ...string) pluginapi.Widget {
+		w := pluginapi.Widget{Kind: pluginapi.WidgetCol}
+		for _, s := range texts {
+			w.Children = append(w.Children, label(s, ""))
+		}
+		return w
+	}
+	p := New(panel(col("first line", "second line", "third line"), ""), Options{Page: true})
+	_, rows := draw(p, 20, 5)
+	if !strings.Contains(rows[0], "first line") || !strings.Contains(rows[2], "third line") {
+		t.Fatalf("rows = %q", rows)
+	}
+	kept := p.scratch
+	p.Update(panel(col("new"), ""))
+	_, rows = draw(p, 20, 5)
+	if !strings.Contains(rows[0], "new") {
+		t.Fatalf("rows = %q, want the new content", rows)
+	}
+	for _, row := range rows[1:] {
+		if strings.TrimSpace(row) != "" {
+			t.Fatalf("rows = %q, the old content is left over", rows)
+		}
+	}
+	if p.scratch != kept {
+		t.Fatal("a redraw at the same size allocated a new surface")
+	}
+	_, rows = draw(p, 30, 5)
+	if !strings.Contains(rows[0], "new") || p.scratch == kept {
+		t.Fatalf("after a resize rows = %q, kept surface %v", rows, p.scratch == kept)
+	}
+}

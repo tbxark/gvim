@@ -643,3 +643,17 @@ func TestMultiRuneTextIsInsertedAsIs(t *testing.T) {
 		t.Fatalf("text = %q, want the selection replaced, not wrapped", got)
 	}
 }
+
+// TestTypeEmptyText: an insert_char with no text changes nothing, whatever the smart
+// rules are, and does not type the replacement character the empty decode returns.
+func TestTypeEmptyText(t *testing.T) {
+	t.Parallel()
+	e := docWith(smartOpts, "ab")
+	e.SetCursor(buffer.Pos{Col: 1}, false)
+	if r := e.Do("insert_char", map[string]any{"text": ""}); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	if got := e.Active().Buffer.Text(); got != "ab" {
+		t.Fatalf("text after typing nothing = %q, want %q", got, "ab")
+	}
+}

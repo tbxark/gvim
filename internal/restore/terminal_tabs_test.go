@@ -13,15 +13,10 @@ import (
 func TestTerminalTabsRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	st := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"active tab"},
-		LaunchArgv: []string{"bash"}, Agent: "claude",
-		Tabs: []terminal.SavedTab{
-			{Name: "build", Open: true, Cwd: "/w", Width: 80, Rows: []string{"first"}, LaunchArgv: []string{"make"}},
-			{Name: "agent", Open: true, Rows: []string{"second"}, Agent: "claude", ResumeArgv: []string{"claude", "--resume"}},
-		},
-		ActiveTab: 1,
-	}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "build", Open: true, Cwd: "/w", Width: 80, Rows: []string{"first"}, LaunchArgv: []string{"make"}},
+		{Name: "agent", Open: true, Rows: []string{"second"}, Agent: "claude", ResumeArgv: []string{"claude", "--resume"}},
+	}, ActiveTab: 1}
 	if err := SaveTerminal(dir, st); err != nil {
 		t.Fatal(err)
 	}
@@ -41,25 +36,18 @@ func TestTerminalTabsRoundTrip(t *testing.T) {
 	if got.Tabs[1].Agent != "claude" || len(got.Tabs[1].ResumeArgv) != 2 {
 		t.Fatalf("launch record not carried into the tab: %+v", got.Tabs[1])
 	}
-	if !strings.Contains(strings.Join(got.Rows, "\n"), "active tab") {
-		t.Fatalf("top-level mirror = %q", got.Rows)
-	}
 }
 
 func TestTerminalTabsMigrationAndBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// An older single-terminal record has no tabs: it loads exactly as before.
-	old := `{"version":1,"open":true,"cwd":"/w","width":80,"rows":["old output"]}`
-	if err := os.WriteFile(filepath.Join(dir, terminalFileName), []byte(old), 0o600); err != nil {
+	// A record with no tabs holds no terminal: it loads as nothing.
+	none := `{"version":1,"open":true,"cwd":"/w","width":80,"rows":["old output"]}`
+	if err := os.WriteFile(filepath.Join(dir, terminalFileName), []byte(none), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := LoadTerminal(dir)
-	if err != nil || !ok {
-		t.Fatalf("old record load = %v, %v", ok, err)
-	}
-	if len(got.Tabs) != 0 || got.Rows[0] != "old output" {
-		t.Fatalf("old record = %+v", got)
+	if _, ok, err := LoadTerminal(dir); err != nil || ok {
+		t.Fatalf("record without tabs load = %v, %v; want no terminal", ok, err)
 	}
 
 	// A corrupt record cannot exceed the tab or row bounds, and control characters
@@ -72,7 +60,7 @@ func TestTerminalTabsMigrationAndBounds(t *testing.T) {
 		}
 		tabs = append(tabs, terminal.SavedTab{Name: "tab", Open: true, Rows: rows})
 	}
-	st := terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Tabs: tabs}
+	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs}
 	data, err := json.Marshal(st)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +68,7 @@ func TestTerminalTabsMigrationAndBounds(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, terminalFileName), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err = LoadTerminal(dir)
+	got, ok, err := LoadTerminal(dir)
 	if err != nil || !ok {
 		t.Fatalf("corrupt record load = %v, %v", ok, err)
 	}

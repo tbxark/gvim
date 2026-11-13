@@ -29,6 +29,9 @@
 //   - loader: discover.go, manifest.go, order.go, lifecycle.go, control.go.
 //     Discovery, plugin.json, dependency order, enable/disable/reload,
 //     plugin-state.json.
+//   - app-facing glue: workspace_config.go (per-workspace plugin config),
+//     workspace_state.go (per-workspace gvim.state file), settings_api.go
+//     (declared settings for the Settings page), uiinfo.go, noservices.go.
 //   - OS port: the hostos package is the file, process and watch interface behind
 //     gvim.fs and gvim.proc; internal/pluginhost implements it for the editor and
 //     plugin/plugintest for tests.

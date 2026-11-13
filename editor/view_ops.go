@@ -138,8 +138,9 @@ func (e *Editor) ActivateTab(i int) {
 }
 
 // CloseTab closes tab i. A modified document is kept, and ErrUnsaved is
-// returned, unless force is true. Closing the last tab leaves a new empty
-// buffer in its place. The error is also written to the status message, as Do
+// returned, unless force is true. Closing the last tab leaves the editor Empty,
+// or a new empty buffer in its place with Options.AutoCreateEmptyBufferOnLastBufferClose.
+// The error is also written to the status message, as Do
 // does for its own failures. An index outside the open tabs returns an error
 // that wraps ErrNoTab.
 func (e *Editor) CloseTab(i int, force bool) error {
@@ -179,7 +180,7 @@ func (e *Editor) DocumentIndexByPath(path string) (int, bool) {
 // closeAt removes tab i and keeps the active tab on the same document where it
 // can. Closing the active tab activates the neighbouring tab and resets the
 // typing state, as switching tabs does. Closing the last tab leaves the editor
-// Empty.
+// Empty, unless Options.AutoCreateEmptyBufferOnLastBufferClose opens an empty buffer.
 func (e *Editor) closeAt(i int, force bool) error {
 	if i < 0 || i >= len(e.docs) {
 		return fmt.Errorf("%w: %d", ErrNoTab, i)
@@ -201,6 +202,7 @@ func (e *Editor) closeAt(i int, force bool) error {
 		e.active = 0
 		e.lastKind = ""
 		e.emptyStatus = ""
+		e.reopenEmpty()
 		return nil
 	}
 	switch {
@@ -211,6 +213,19 @@ func (e *Editor) closeAt(i int, force bool) error {
 		e.switchTo(min(e.active, len(e.docs)-1))
 	}
 	return nil
+}
+
+// reopenEmpty puts a fresh untitled tab in place of the last one that closed, when
+// Options.AutoCreateEmptyBufferOnLastBufferClose asks for it. Otherwise the editor
+// stays Empty.
+func (e *Editor) reopenEmpty() {
+	if !e.opts.AutoCreateEmptyBufferOnLastBufferClose || len(e.docs) != 0 {
+		return
+	}
+	d := newDocument("", "")
+	d.Eol = e.defaultEOL()
+	e.addDoc(d)
+	e.switchTo(0)
 }
 
 // previewIndex returns the index of the preview tab, or -1 when there is none.

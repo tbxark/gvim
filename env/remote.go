@@ -89,7 +89,10 @@ type Remote struct {
 	set       []string
 	unset     []string
 	capturing bool
-	lastErr   error
+	// gen counts invalidations of the capture, so a capture that ran across one is not
+	// stored: its delta belongs to a recipe that is gone.
+	gen     uint64
+	lastErr error
 	// notice is a user-facing fallback/limitation message from the app's runner (for
 	// example "interactive shell failed; using sh -c"); it is shown in the startup
 	// notice and the Settings Environment rows.
@@ -335,15 +338,15 @@ func (p *Remote) Refresh() {
 	p.mu.Unlock()
 }
 
+// remoteDetectTimeout bounds a marker probe triggered from a spawn path (Overlay has no
+// caller context); Warm/refresh probes pass their session/watcher context instead.
+const remoteDetectTimeout = 15 * time.Second
+
 // Overlay returns the set-only remote environment overlay ("KEY=VALUE", sorted): the delta
 // the active recipe made to the remote login environment. It probes and captures lazily on
 // the remote host (bounded by the supplied Runner); while a capture is in flight another
 // caller gets the last cached delta, so no UI path waits. It returns nil when no recipe is
 // active, the workspace is untrusted, or the capture failed.
-// remoteDetectTimeout bounds a marker probe triggered from a spawn path (Overlay has no
-// caller context); Warm/refresh probes pass their session/watcher context instead.
-const remoteDetectTimeout = 15 * time.Second
-
 func (p *Remote) Overlay() []string {
 	detectCtx, cancel := context.WithTimeout(context.Background(), remoteDetectTimeout)
 	p.ensureDetected(detectCtx)
@@ -372,13 +375,19 @@ func (p *Remote) overlay(ctx context.Context) []string {
 		return out
 	}
 	p.capturing = true
-	snippet, dir := p.snippet, p.dir
+	snippet, dir, gen := p.snippet, p.dir, p.gen
 	p.mu.Unlock()
 
 	set, unset, err := p.captureRemote(ctx, snippet, dir)
 
 	p.mu.Lock()
 	p.capturing = false
+	if gen != p.gen {
+		// The recipe changed while the remote shells ran: this delta is not its.
+		out := append([]string(nil), p.set...)
+		p.mu.Unlock()
+		return out
+	}
 	if err != nil && ctx.Err() != nil {
 		// Keep the last captured delta: a cancellation is not a capture change.
 		out := append([]string(nil), p.set...)
@@ -434,10 +443,9 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	p.mu.Unlock()
 
 	var (
-		det        trust.DetectedEnv
-		found      bool
-		incomplete bool
-		err        error
+		det   trust.DetectedEnv
+		found bool
+		err   error
 	)
 	if !trusted && prober == nil {
 		p.mu.Lock()
@@ -452,11 +460,10 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 		return
 	}
 	if !trusted || run == nil {
-		det, found, incomplete, err = detectRemoteProbe(ctx, root, detectors, prober)
+		det, found, err = detectRemoteProbe(ctx, root, detectors, prober)
 	} else {
-		det, found, incomplete, err = detectRemote(ctx, root, detectors, run)
+		det, found, err = detectRemote(ctx, root, detectors, run)
 	}
-	_ = incomplete
 
 	p.mu.Lock()
 	if p.detectionGen != gen {
@@ -480,20 +487,20 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 
 // detectRemoteProbe is the shell-free detection path: one bounded authority probe over the
 // marker+require existence set, then the same trust.DetectEnv rules as the shell path.
-func detectRemoteProbe(ctx context.Context, root string, detectors []config.EnvDetector, prober MarkerProber) (trust.DetectedEnv, bool, bool, error) {
+func detectRemoteProbe(ctx context.Context, root string, detectors []config.EnvDetector, prober MarkerProber) (trust.DetectedEnv, bool, error) {
 	if prober == nil {
-		return trust.DetectedEnv{}, false, false, errors.New("env: no shell-free marker prober")
+		return trust.DetectedEnv{}, false, errors.New("env: no shell-free marker prober")
 	}
 	paths, err := remoteMarkerPaths(detectors)
 	if err != nil {
-		return trust.DetectedEnv{}, false, false, err
+		return trust.DetectedEnv{}, false, err
 	}
 	exists, err := prober(ctx, root, paths)
 	if err != nil {
-		return trust.DetectedEnv{}, false, false, fmt.Errorf("env: probing the remote markers through the authority: %w", err)
+		return trust.DetectedEnv{}, false, fmt.Errorf("env: probing the remote markers through the authority: %w", err)
 	}
-	det, found, incomplete := detectedFromExists(root, detectors, exists)
-	return det, found, incomplete, nil
+	det, found := detectedFromExists(root, detectors, exists)
+	return det, found, nil
 }
 
 // captureRemote runs the remote baseline and activation shell and diffs their
@@ -541,6 +548,7 @@ func (p *Remote) captureRemote(ctx context.Context, snippet, dir string) (set, u
 }
 
 func (p *Remote) invalidateLocked() {
+	p.gen++
 	p.set, p.unset = nil, nil
 	p.lastErr = nil
 }
@@ -575,7 +583,7 @@ func remoteMarkerPaths(detectors []config.EnvDetector) ([]string, error) {
 }
 
 // detectedFromExists applies the trust.DetectEnv order/require rules to an existence set.
-func detectedFromExists(root string, detectors []config.EnvDetector, exists map[string]bool) (trust.DetectedEnv, bool, bool) {
+func detectedFromExists(root string, detectors []config.EnvDetector, exists map[string]bool) (trust.DetectedEnv, bool) {
 	anyExists := func(paths []string) bool {
 		for _, rel := range paths {
 			rel = strings.TrimSpace(rel)
@@ -585,22 +593,17 @@ func detectedFromExists(root string, detectors []config.EnvDetector, exists map[
 		}
 		return false
 	}
-	incomplete := false
 	for _, d := range detectors {
-		if !anyExists(d.Markers) {
-			continue
-		}
-		if len(d.Require) > 0 && !anyExists(d.Require) {
-			incomplete = true
+		if !anyExists(d.Markers) || len(d.Require) > 0 && !anyExists(d.Require) {
 			continue
 		}
 		return trust.DetectedEnv{
 			Name:    d.Name,
 			Kind:    d.Kind,
 			Snippet: strings.ReplaceAll(d.Snippet, "{dir}", root),
-		}, true, incomplete
+		}, true
 	}
-	return trust.DetectedEnv{}, false, incomplete
+	return trust.DetectedEnv{}, false
 }
 
 // detectRemote probes the detector markers on the remote host with ONE bounded shell
@@ -608,13 +611,13 @@ func detectedFromExists(root string, detectors []config.EnvDetector, exists map[
 // as trust.DetectEnv. Marker names come from the validated detector config; each is
 // shell-quoted so a configured name can never become command syntax. This path runs only
 // in a trusted workspace (the authority command gate would refuse it otherwise).
-func detectRemote(ctx context.Context, root string, detectors []config.EnvDetector, run RemoteRunner) (trust.DetectedEnv, bool, bool, error) {
+func detectRemote(ctx context.Context, root string, detectors []config.EnvDetector, run RemoteRunner) (trust.DetectedEnv, bool, error) {
 	if run == nil {
-		return trust.DetectedEnv{}, false, false, errors.New("env: no remote runner")
+		return trust.DetectedEnv{}, false, errors.New("env: no remote runner")
 	}
 	flat, err := remoteMarkerPaths(detectors)
 	if err != nil {
-		return trust.DetectedEnv{}, false, false, err
+		return trust.DetectedEnv{}, false, err
 	}
 	var b strings.Builder
 	b.WriteString("cd " + shellQuoteRemote(root) + " && ")
@@ -630,7 +633,7 @@ func detectRemote(ctx context.Context, root string, detectors []config.EnvDetect
 	}
 	out, err := run(ctx, b.String())
 	if err != nil {
-		return trust.DetectedEnv{}, false, false, fmt.Errorf("env: probing the remote markers: %w", err)
+		return trust.DetectedEnv{}, false, fmt.Errorf("env: probing the remote markers: %w", err)
 	}
 	exists := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
@@ -644,8 +647,8 @@ func detectRemote(ctx context.Context, root string, detectors []config.EnvDetect
 		}
 		exists[flat[idx]] = true
 	}
-	det, found, incomplete := detectedFromExists(root, detectors, exists)
-	return det, found, incomplete, nil
+	det, found := detectedFromExists(root, detectors, exists)
+	return det, found, nil
 }
 
 // shellQuoteRemote quotes a string for one POSIX shell word: single quotes around it, an

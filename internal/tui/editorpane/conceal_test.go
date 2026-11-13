@@ -121,3 +121,22 @@ func TestConcealDoesNotApplyToPlainLayout(t *testing.T) {
 		t.Fatalf("geometry changed by conceal: %v", ln.geom)
 	}
 }
+
+// TestCursorLineOverlayKeepsWideCharacters checks the overlay restyles a wide character
+// of the caret row without blanking it or its continuation cell.
+func TestCursorLineOverlayKeepsWideCharacters(t *testing.T) {
+	doc := newDoc("a世b")
+	p := Pane{
+		Doc: doc,
+		CursorLineOverlay: func() (grid.Style, bool) {
+			return grid.Style{BG: cGray}, true
+		},
+	}
+	g := p.Render(20, 1)
+	if got := cellAt(t, g, textX+1, 0); got.Text != "世" || bgOf(got) != cGray {
+		t.Errorf("wide cell = %q on %v, want the character on the overlay", got.Text, bgOf(got))
+	}
+	if got := cellAt(t, g, textX+2, 0); got.Text != "" || bgOf(got) != cGray {
+		t.Errorf("continuation cell = %q on %v, want an empty cell on the overlay", got.Text, bgOf(got))
+	}
+}

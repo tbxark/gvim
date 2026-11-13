@@ -62,7 +62,7 @@ type caret struct {
 	Pad int
 }
 
-// bounds returns the caret's selection in document order. An empty caret has
+// Bounds returns the caret's selection in document order. An empty caret has
 // lo equal to hi.
 func (c caret) Bounds() (lo, hi buffer.Pos) {
 	if c.Head.Less(c.Anchor) {
@@ -71,7 +71,7 @@ func (c caret) Bounds() (lo, hi buffer.Pos) {
 	return c.Anchor, c.Head
 }
 
-// selection returns the caret's selection, or nil when it has none.
+// Selection returns the caret's selection, or nil when it has none.
 func (c caret) Selection() *buffer.Selection {
 	if c.Anchor == c.Head {
 		return nil
@@ -139,7 +139,7 @@ func comparePos(p, q buffer.Pos) int {
 	return cmp.Or(cmp.Compare(p.Line, q.Line), cmp.Compare(p.Col, q.Col))
 }
 
-// allCarets returns the carets of d in document order, the primary one marked.
+// AllCarets returns the carets of d in document order, the primary one marked.
 // The list is normalized, so no two carets meet.
 //
 // The positions are clamped into the text. An extra caret can be stale after an
@@ -176,7 +176,7 @@ func (d *Document) clampCaret(c caret) caret {
 	return c
 }
 
-// setCarets makes cs the carets of d. The list is normalized first. The
+// SetCarets makes cs the carets of d. The list is normalized first. The
 // primary caret becomes Cursor and Sel, and the others become the extra carets.
 // Each caret keeps its wanted column, and the block selection is reset, so a
 // block step sets its block after it calls setCarets.
@@ -196,7 +196,7 @@ func (d *Document) SetCarets(cs []caret) {
 	}
 }
 
-// hasAnySelection reports whether the primary caret or an extra caret has a
+// HasAnySelection reports whether the primary caret or an extra caret has a
 // selection.
 func (d *Document) HasAnySelection() bool {
 	if d.HasSelection() {
@@ -210,7 +210,7 @@ func (d *Document) HasAnySelection() bool {
 	return false
 }
 
-// clearCarets drops the extra carets and the block selection. The primary
+// ClearCarets drops the extra carets and the block selection. The primary
 // caret and its selection stay.
 func (d *Document) ClearCarets() {
 	d.Extra = nil
@@ -288,7 +288,7 @@ func (d *Document) noteMultiEdit(before buffer.Pos, edits []edit) {
 	}
 }
 
-// placePrimary puts the primary caret at p with no selection. Undo and redo use
+// PlacePrimary puts the primary caret at p with no selection. Undo and redo use
 // it, as they always have.
 func (d *Document) PlacePrimary(p buffer.Pos) {
 	d.Cursor = d.Buffer.Clamp(p)
@@ -296,7 +296,7 @@ func (d *Document) PlacePrimary(p buffer.Pos) {
 	d.Want = -1
 }
 
-// editAtCarets makes one edit per caret, as one undo step. plan returns the
+// EditAtCarets makes one edit per caret, as one undo step. plan returns the
 // edit for a caret. It is called for every caret, in document order, before any
 // edit is applied, so it sees the text as it was. Afterwards each caret sits just
 // after the text its edit inserted, and carets that meet are merged.
@@ -353,7 +353,7 @@ func caretLines(c caret) (first, last int) {
 	return lo.Line, last
 }
 
-// indentSelectedLines indents each line that a selection covers, once per line.
+// IndentSelectedLines indents each line that a selection covers, once per line.
 // Carets without a selection contribute no lines, but they move with their
 // text. An anchor at column 0 of an indented line moves past the indent, as
 // indentLines does, and a caret moves when it is past column 0.
@@ -398,7 +398,7 @@ func indentedPoint(p buffer.Pos, lines map[int]bool, width int, atStart bool) bu
 	return p
 }
 
-// addCaretVertical adds a caret on the line above (dir -1) or below (dir +1) the
+// AddCaretVertical adds a caret on the line above (dir -1) or below (dir +1) the
 // primary caret, at the same display column, clamped to the line length. The new
 // caret becomes the primary caret and the old primary becomes an extra caret, so
 // repeated presses move outwards, as Fresh's add_cursor_above and
@@ -422,7 +422,7 @@ func (d *Document) AddCaretVertical(dir, tabSize int) error {
 	return nil
 }
 
-// cursorsToLineEnds puts a caret at the end of every line that a caret covers:
+// CursorsToLineEnds puts a caret at the end of every line that a caret covers:
 // the line of a caret without a selection, or each line of a selection. The
 // selections are cleared. The primary caret stays on the first line it covers.
 // Carets that land on the same line end merge.

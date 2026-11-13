@@ -191,7 +191,7 @@ T.spy("returned", depth > 50, depth < 400)`)
 	if got := spyText(h); got != "returned true true" {
 		t.Fatalf("spy = %q log=%v", got, h.LogText(""))
 	}
-	// C9: returns in under 50 ms (a CI-safe multiple here) and grows the heap by under 32 MiB.
+	// Returns in under 50 ms (a CI-safe multiple here) and grows the heap by under 32 MiB.
 	if d := time.Since(start); d > 250*time.Millisecond {
 		t.Fatalf("took %v, want about 7 ms (spec bound 50 ms)", d)
 	}

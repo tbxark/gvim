@@ -3,10 +3,8 @@ package search
 import (
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -169,7 +167,7 @@ func (sc *Scan) window1() {
 	sc.line = first + n
 	sc.stats.BytesScanned += int64(len(text))
 	d := newWindow(first, text)
-	cur := posCursor{d: d}
+	cur := newOffsetPos(d.text, buffer.Pos{Line: d.first})
 	for _, loc := range d.locate(sc.re, sc.q) {
 		if len(sc.matches) >= sc.limit {
 			sc.capped = true
@@ -305,31 +303,4 @@ func (sc *Scan) Close() {
 		sc.snap.Release()
 		sc.snap = nil
 	}
-}
-
-// posCursor turns the byte offsets of the matches of one window into positions,
-// in the order they come. Columns count runes. A match that is on the line of the
-// one before it adds only the runes between the two, so a line with many matches
-// is counted once, not once per match.
-type posCursor struct {
-	d       document
-	line    int // line of the last position, an index into d.lineStart
-	off     int // its byte offset in d.text
-	col     int // its column
-	have    bool
-	counted int64 // runes counted
-}
-
-func (c *posCursor) pos(off int) buffer.Pos {
-	line := sort.Search(len(c.d.lineStart), func(i int) bool {
-		return c.d.lineStart[i] > off
-	}) - 1
-	from, col := c.d.lineStart[line], 0
-	if c.have && line == c.line && off >= c.off {
-		from, col = c.off, c.col
-	}
-	n := utf8.RuneCountInString(c.d.text[from:off])
-	c.counted += int64(n)
-	c.line, c.off, c.col, c.have = line, off, col+n, true
-	return buffer.Pos{Line: c.d.first + line, Col: col + n}
 }

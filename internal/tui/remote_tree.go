@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -15,8 +14,7 @@ import (
 	"github.com/tbxark/gvim/explorer"
 )
 
-// Remote explorer browsing (docs/architecture.md): the read-only file tree of a
-// remote workspace. The tree keeps the loaded directories in memory and lists a
+// Remote explorer browsing (docs/architecture.md): the file tree of a remote workspace. The tree keeps the loaded directories in memory and lists a
 // directory only when the user expands it. The listing itself is remote I/O, so it
 // runs in a tea.Cmd, never on the update loop; the command's message carries the
 // entries and a generation, and the root applies it only while the tree and the
@@ -24,10 +22,8 @@ import (
 // from the authority through a RemoteDirLoader, and a loader error is shown as a
 // notice (a disconnected authority says so and the tree is reloaded on reconnect).
 //
-// The tree is read-only: the panel refuses rename/delete/create/cut/copy/paste with
-// one explicit notice, and the app clears the local file-operation port. Fresh's
-// remote explorer supports the full file operations over the authority; those are
-// recorded raw gaps, not hidden local operations.
+// The file operations (create, rename, delete, cut/copy/paste) go through the app's
+// remote file-operation adapter over the authority, never through the local filesystem.
 
 // DefaultRemoteExplorerTimeout bounds one remote directory read. The authority
 // bounds its helper commands too; this is the outer deadline of the command.
@@ -80,7 +76,7 @@ type remoteNode struct {
 	err      error
 }
 
-// RemoteExplorerTree is the read-only explorer tree of a remote workspace. It
+// RemoteExplorerTree is the explorer tree of a remote workspace. It
 // implements the root's ExplorerTree interface. Rows, selection and scrolling read
 // only the cached nodes; ToggleCmd and ReloadCmd return the commands that list
 // remote directories.
@@ -120,16 +116,6 @@ func NewRemoteExplorerTree(root string, loader RemoteDirLoader) *RemoteExplorerT
 
 // Root returns the remote workspace directory.
 func (t *RemoteExplorerTree) Root() string { return t.root }
-
-// ReadOnly reports false: New File, New Directory, Rename, Delete and the clipboard
-// operations (cut/copy/paste/duplicate of remote subtrees) are available on the remote
-// tree through the app's remote file-operation adapter.
-func (t *RemoteExplorerTree) ReadOnly() bool { return false }
-
-// ClipboardDisabled reports false: remote subtrees can be cut, copied, pasted and
-// duplicated through the authority (bounded, no local fallback). It remains for the
-// panel's capability interface so another tree shape can still refuse the clipboard.
-func (t *RemoteExplorerTree) ClipboardDisabled() bool { return false }
 
 // TakeLoadNotice returns and clears a one-shot notice from the loader: degraded remote
 // .gitignore filtering or a backend without directory watching (manual refresh remains).
@@ -613,13 +599,9 @@ func (t *RemoteExplorerTree) applyToggle(msg remoteTreeToggleMsg) error {
 		return nil
 	}
 	delete(t.pending, msg.path)
-	if n != nil {
-		n.loading = false
-	}
+	n.loading = false
 	if msg.err != nil {
-		if n != nil {
-			n.err = msg.err
-		}
+		n.err = msg.err
 		return msg.err
 	}
 	t.mergeLocked(msg.path, msg.entries)
@@ -698,19 +680,10 @@ func (m *Model) remoteTreeLoadDone(msg remoteTreeLoadedMsg) tea.Cmd {
 	return nil
 }
 
-// remoteExplorerInitialCmd loads the remote tree on start. A local tree returns nil
-// (its first level is loaded synchronously by its opener).
-func (m *Model) remoteExplorerInitialCmd() tea.Cmd {
-	if _, ok := m.tree.(remoteExplorerReloader); !ok {
-		return nil
-	}
-	return m.reloadTreeAsync()
-}
-
-// remoteExplorerReconnectCmd reloads the remote tree after the authority
-// reconnected, clearing the disconnected error the last listing showed. A local
-// tree returns nil.
-func (m *Model) remoteExplorerReconnectCmd() tea.Cmd {
+// remoteExplorerReloadCmd loads the remote tree on start and reloads it after the
+// authority reconnected, clearing the disconnected error the last listing showed. A
+// local tree returns nil.
+func (m *Model) remoteExplorerReloadCmd() tea.Cmd {
 	if _, ok := m.tree.(remoteExplorerReloader); !ok {
 		return nil
 	}
@@ -723,8 +696,5 @@ func noticeRemoteExplorerError(err error) string {
 	if errors.Is(err, ErrRemoteExplorerDisconnected) {
 		return ErrRemoteExplorerDisconnected.Error()
 	}
-	if err != nil && strings.Contains(err.Error(), "remote workspace is disconnected") {
-		return err.Error()
-	}
-	return fmt.Sprint(err)
+	return err.Error()
 }

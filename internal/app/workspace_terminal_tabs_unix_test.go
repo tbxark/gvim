@@ -310,19 +310,15 @@ func TestWorkspaceTerminalTabsSavedStateRoundTrip(t *testing.T) {
 
 	idA := m.Entries()[0].ID
 	rtA := tabTestRuntime(t, m, idA)
-	injected := terminal.SavedState{
-		Version: terminal.SavedStateVersion, Open: true,
-		Tabs: []terminal.SavedTab{
-			{Name: "build", Open: true, Cwd: "/w", Rows: []string{"old build"}},
-			{
-				Name: "agent", Open: true, Rows: []string{"agent log"},
-				LaunchArgv: []string{"claude", "--session-id", "s1"},
-				ResumeArgv: []string{"claude", "--resume", "s1"},
-				Agent:      "claude", Ephemeral: true,
-			},
+	injected := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{
+		{Name: "build", Open: true, Cwd: "/w", Rows: []string{"old build"}},
+		{
+			Name: "agent", Open: true, Rows: []string{"agent log"},
+			LaunchArgv: []string{"claude", "--session-id", "s1"},
+			ResumeArgv: []string{"claude", "--resume", "s1"},
+			Agent:      "claude", Ephemeral: true,
 		},
-		ActiveTab: 1,
-	}
+	}, ActiveTab: 1}
 	rtA.model.RestoreTerminal(injected)
 
 	// Switch away twice with a switch back in between.
@@ -396,7 +392,7 @@ func rowsOf(st terminal.SavedState) string {
 			b.WriteByte('\n')
 		}
 	}
-	for _, row := range st.Rows {
+	for _, row := range activeSaved(st).Rows {
 		b.WriteString(row)
 		b.WriteByte('\n')
 	}

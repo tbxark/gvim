@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/theme"
 )
@@ -65,7 +66,7 @@ func TestStatusRowGivesWayToThePalette(t *testing.T) {
 		t.Fatalf("palette open: %d status runs, body bottom %d; want none and %d",
 			len(l.Status), l.BodyBottom, shown.BodyBottom+1)
 	}
-	if got := l.Hit(10, l.BodyBottom); got.Kind != hitEditorText {
+	if got := l.Hit(10, l.BodyBottom); got.Kind != frame.HitEditorText {
 		t.Fatalf("the last body row hits %v with the palette open, want the body", got.Kind)
 	}
 	if ed.rows != l.BodyBottom-l.BodyTop+1 {
@@ -102,7 +103,7 @@ func TestEOLSegmentShowsTheDocumentLineEnding(t *testing.T) {
 }
 
 func TestHiddenMenuBarLayoutMovesTheStripAndTheBodyUp(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{
+	l := layoutFor(80, 24, frame.Input{
 		HideMenuBar: true,
 		Lines:       4,
 		Tabs:        []TabInfo{{Name: "a.txt", Active: true}},
@@ -110,43 +111,43 @@ func TestHiddenMenuBarLayoutMovesTheStripAndTheBodyUp(t *testing.T) {
 	if l.BodyTop != 2 || l.BodyBottom != 21 || l.StatusY != 23 {
 		t.Fatalf("body %d..%d status %d, want 2..21 and 23", l.BodyTop, l.BodyBottom, l.StatusY)
 	}
-	if got := l.Hit(1, 1); got.Kind != hitTab {
+	if got := l.Hit(1, 1); got.Kind != frame.HitTab {
 		t.Fatalf("row 1 at the first tab hits %v, want the tab", got.Kind)
 	}
-	if got := l.Hit(l.TextX, 2); got.Kind != hitEditorText {
+	if got := l.Hit(l.TextX, 2); got.Kind != frame.HitEditorText {
 		t.Fatalf("row 2 at the text hits %v, want the editor text", got.Kind)
 	}
 }
 
 func TestHiddenStatusRowGivesItsRowToTheBody(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{HideStatus: true, Lines: 4})
+	l := layoutFor(80, 24, frame.Input{HideStatus: true, Lines: 4})
 	if l.BodyBottom != 22 {
 		t.Fatalf("body bottom %d, want 22 with the status row hidden", l.BodyBottom)
 	}
 	if len(l.Status) != 0 {
 		t.Fatalf("%d status runs with the status row hidden", len(l.Status))
 	}
-	if got := l.Hit(l.TextX, 22); got.Kind != hitEditorText {
+	if got := l.Hit(l.TextX, 22); got.Kind != frame.HitEditorText {
 		t.Fatalf("row 22 hits %v, want the editor text", got.Kind)
 	}
 }
 
 func TestExplorerRowsStartAtRowTwoWithoutMenuBar(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{ExplorerOpen: true, HideMenuBar: true, ExplorerRows: 10, Lines: 4})
-	if got := l.Hit(3, 1); got.Kind != hitExplorerBody {
+	l := layoutFor(80, 24, frame.Input{ExplorerOpen: true, HideMenuBar: true, ExplorerRows: 10, Lines: 4})
+	if got := l.Hit(3, 1); got.Kind != frame.HitExplorerBody {
 		t.Fatalf("the title row hits %v, want no tree row", got.Kind)
 	}
-	if got := l.Hit(3, 2); got.Kind != hitExplorerRow || got.Index != 0 {
+	if got := l.Hit(3, 2); got.Kind != frame.HitExplorerRow || got.Index != 0 {
 		t.Fatalf("row 2 hits %+v, want the first tree row", got)
 	}
-	if got := l.Hit(3, 0); got.Kind != hitNone {
+	if got := l.Hit(3, 0); got.Kind != frame.HitNone {
 		t.Fatalf("row 0 over the explorer hits %v, want nothing", got.Kind)
 	}
 }
 
 // With the gutter hidden the text starts PadX cells into the pane, not on its first column.
 func TestHiddenLineNumbersLayoutHasNoGutter(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{HideLineNumbers: true, Lines: 4})
+	l := layoutFor(80, 24, frame.Input{HideLineNumbers: true, Lines: 4})
 	if l.Gutter != 0 || l.TextX != 1+space.PadX || l.TextW != 78-space.PadX {
 		t.Fatalf("gutter %d textX %d textW %d, want 0, %d and %d", l.Gutter, l.TextX, l.TextW, 1+space.PadX, 78-space.PadX)
 	}

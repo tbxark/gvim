@@ -192,7 +192,7 @@ func (s *sshNewTargetStream) abortWith(ctx context.Context) {
 const sshNewTargetOpenScript = `
 p=$1
 td=$(dirname "$p") || exit 2
-tmp=$(mktemp "$td/.$(basename "$p").gvim-XXXXXX") || exit 2
+tmp=$(mktemp "$td/.$(basename "$p" | cut -c1-200).gvim-XXXXXX") || exit 2
 printf '%s\0%s\0' "$tmp" "$p"
 `
 

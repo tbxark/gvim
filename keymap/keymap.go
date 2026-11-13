@@ -626,17 +626,6 @@ func (m *Map) lookup(idx map[lookupKey]int, chords []string, ctx Context) (Bindi
 	return Binding{}, false
 }
 
-// BindingsFor returns every binding that runs action, in file order.
-func (m *Map) BindingsFor(action string) []Binding {
-	var out []Binding
-	for _, b := range m.bindings {
-		if b.Action == action {
-			out = append(out, b)
-		}
-	}
-	return out
-}
-
 // Primary returns the binding a UI should show for action. A preset's own binding comes
 // before one it only inherits, so Emacs shows Save As as C-x C-w and not the inherited
 // Ctrl+Shift+S. Among bindings of one origin a single chord beats a multi-key sequence:
