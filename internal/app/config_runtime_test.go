@@ -12,6 +12,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/keymap"
 )
 
@@ -672,5 +673,112 @@ func TestEditorRootIsTheWorkspaceRoot(t *testing.T) {
 	}
 	if got.root != want {
 		t.Errorf("editor root = %q, want the workspace root %q", got.root, want)
+	}
+}
+
+func TestBuildModelFileExplorerPreviewTabs(t *testing.T) {
+	// Test preview_tabs: false
+	optsFalse := projectRoot(t, `{"file_explorer": {"preview_tabs": false}}`)
+	gotFalse, err := buildCaptured(t, optsFalse)
+	if err != nil {
+		t.Fatalf("buildModel() error = %v", err)
+	}
+	if gotFalse.deps.View.Explorer.PreviewTabsEnabled() {
+		t.Fatal("expected View.Explorer.PreviewTabsEnabled() == false")
+	}
+	if tree, ok := gotFalse.deps.Explorer.(interface{ PreviewTabs() bool }); ok {
+		if tree.PreviewTabs() {
+			t.Fatal("expected tree.PreviewTabs() == false")
+		}
+	} else {
+		t.Fatal("expected gotFalse.deps.Explorer to implement PreviewTabs() bool")
+	}
+
+	// Test default preview_tabs: true
+	optsDefault := projectRoot(t, `{}`)
+	gotDefault, err := buildCaptured(t, optsDefault)
+	if err != nil {
+		t.Fatalf("buildModel() error = %v", err)
+	}
+	if !gotDefault.deps.View.Explorer.PreviewTabsEnabled() {
+		t.Fatal("expected View.Explorer.PreviewTabsEnabled() == true by default")
+	}
+	if tree, ok := gotDefault.deps.Explorer.(interface{ PreviewTabs() bool }); ok {
+		if !tree.PreviewTabs() {
+			t.Fatal("expected tree.PreviewTabs() == true by default")
+		}
+	}
+}
+
+func TestBuildModelFileExplorerCustomIgnorePatternsAndRespectGitignore(t *testing.T) {
+	opts := projectRoot(t, `{"file_explorer": {"respect_gitignore": false, "custom_ignore_patterns": ["*.log", "build/"]}}`)
+	// Create test files in workspace
+	writeTestFile(t, filepath.Join(opts.Root, "app.log"), "log line\n")
+	writeTestFile(t, filepath.Join(opts.Root, "build", "app.bin"), "binary line\n")
+	writeTestFile(t, filepath.Join(opts.Root, "src", "main.go"), "main code query\n")
+
+	got, err := buildCaptured(t, opts)
+	if err != nil {
+		t.Fatalf("buildModel() error = %v", err)
+	}
+
+	// 1. Verify View.Explorer options
+	if got.deps.View.Explorer.RespectGitignoreEnabled() {
+		t.Fatal("expected View.Explorer.RespectGitignoreEnabled() == false")
+	}
+	if !slices.Equal(got.deps.View.Explorer.CustomIgnorePatterns, []string{"*.log", "build/"}) {
+		t.Fatalf("expected View.Explorer.CustomIgnorePatterns = [*.log, build/], got %v", got.deps.View.Explorer.CustomIgnorePatterns)
+	}
+
+	// 2. Verify Explorer tree options
+	tree, ok := got.deps.Explorer.(interface {
+		RespectGitignore() bool
+		CustomIgnorePatterns() []string
+	})
+	if !ok {
+		t.Fatal("expected got.deps.Explorer to implement RespectGitignore and CustomIgnorePatterns")
+	}
+	if tree.RespectGitignore() {
+		t.Fatal("expected tree.RespectGitignore() == false")
+	}
+	if !slices.Equal(tree.CustomIgnorePatterns(), []string{"*.log", "build/"}) {
+		t.Fatalf("expected tree.CustomIgnorePatterns() = [*.log, build/], got %v", tree.CustomIgnorePatterns())
+	}
+
+	// 3. Verify Live Grep filtering custom ignore patterns
+	grepper, ok := got.deps.Root.Grep.(palette.Grepper)
+	if !ok {
+		t.Fatal("expected got.deps.Root.Grep to be palette.Grepper")
+	}
+	hits, err := grepper.Search(palette.GrepRequest{
+		Text:    "line",
+		Limit:   10,
+		Root:    opts.Root,
+		Files:   []string{"app.log", "build/app.bin", "src/main.go"},
+		Sources: palette.GrepSources{Files: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hit := range hits {
+		if strings.HasSuffix(hit.Path, ".log") || strings.HasPrefix(hit.Path, "build") {
+			t.Fatalf("grep unexpectedly returned hit from ignored file: %s", hit.Path)
+		}
+	}
+
+	// 4. Verify Quick Open index filtering custom ignore patterns
+	if got.deps.Files != nil {
+		for {
+			_, loading := got.deps.Files.Snapshot()
+			if !loading {
+				break
+			}
+		}
+		files, _ := got.deps.Files.Snapshot()
+		for _, f := range files {
+			if strings.HasSuffix(f, ".log") || strings.HasPrefix(f, "build/") {
+				t.Fatalf("files index unexpectedly contained ignored file: %s", f)
+			}
+		}
 	}
 }

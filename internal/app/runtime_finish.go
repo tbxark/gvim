@@ -7,6 +7,7 @@ import (
 
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/internal/lsphost"
 	"github.com/tbxark/gvim/internal/restore"
@@ -47,6 +48,20 @@ func (b *runtimeBuild) wireSettingsService() {
 	svc := b.settingsSvc
 	svc.env = b.envProvider
 	svc.setEnvWatch(b.envWatch)
+	svc.setConfigReload(func(next config.Config) {
+		if b.projSearch != nil {
+			b.projSearch.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
+		}
+		if b.grep != nil {
+			b.grep.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
+		}
+		if b.files != nil {
+			b.files.SetOptions(b.root, finder.Options{
+				RespectGitignore:     next.FileExplorer.RespectGitignore,
+				CustomIgnorePatterns: next.FileExplorer.CustomIgnorePatterns,
+			})
+		}
+	})
 	if b.localWatchRetryObj != nil {
 		// Install after the settings service exists; SetInstall synchronizes with a retry
 		// that may already have recovered a watcher while the runtime was being built.

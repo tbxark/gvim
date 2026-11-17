@@ -15,8 +15,7 @@ import (
 // (FileExplorerConfig): width defaults to 30% of the terminal, side to the left,
 // follow_active_buffer off, auto_open_on_last_buffer_close on and
 // compact_directories on. respect_gitignore, custom_ignore_patterns, preview_tabs
-// and the tree_indicator glyph keys are still accepted and ignored (documented in
-// docs/sidebar.md).
+// and the tree_indicator glyph keys are configured here.
 type FileExplorerConfig struct {
 	// Width is file_explorer.width: a percentage of the terminal ("30%") or a
 	// column count ("24"); a plain number is a percentage. Default 30%.
@@ -30,16 +29,36 @@ type FileExplorerConfig struct {
 	AutoOpenOnLastBufferClose bool
 	// CompactDirectories is file_explorer.compact_directories, default true.
 	CompactDirectories bool
+	// RespectGitignore is file_explorer.respect_gitignore, default true.
+	RespectGitignore *bool
+	// CustomIgnorePatterns is file_explorer.custom_ignore_patterns.
+	CustomIgnorePatterns []string
+	// PreviewTabs is file_explorer.preview_tabs, default true.
+	PreviewTabs *bool
 }
 
 // DefaultFileExplorer returns Fresh's file_explorer defaults.
 func DefaultFileExplorer() FileExplorerConfig {
+	respectGitignore := true
+	previewTabs := true
 	return FileExplorerConfig{
 		Width:                     ExplorerWidth{Percent: true, Value: 30},
 		Side:                      "left",
 		AutoOpenOnLastBufferClose: true,
 		CompactDirectories:        true,
+		RespectGitignore:          &respectGitignore,
+		PreviewTabs:               &previewTabs,
 	}
+}
+
+// RespectGitignoreEnabled reports whether gitignore is respected (default true).
+func (c FileExplorerConfig) RespectGitignoreEnabled() bool {
+	return c.RespectGitignore == nil || *c.RespectGitignore
+}
+
+// PreviewTabsEnabled reports whether preview tabs are enabled (default true).
+func (c FileExplorerConfig) PreviewTabsEnabled() bool {
+	return c.PreviewTabs == nil || *c.PreviewTabs
 }
 
 // ExplorerWidth is file_explorer.width. Percent says the value is a percentage of
@@ -142,5 +161,25 @@ func setFileExplorerBool(raw json.RawMessage, dst *bool) error {
 		return errors.New("must be true or false")
 	}
 	*dst = v
+	return nil
+}
+
+// setFileExplorerBoolPtr applies one boolean file_explorer key to *dst.
+func setFileExplorerBoolPtr(raw json.RawMessage, dst **bool) error {
+	var v bool
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return errors.New("must be true or false")
+	}
+	*dst = &v
+	return nil
+}
+
+// setFileExplorerStringList applies one string slice file_explorer key to dst.
+func setFileExplorerStringList(raw json.RawMessage, dst *[]string) error {
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return errors.New("must be a list of strings")
+	}
+	*dst = list
 	return nil
 }

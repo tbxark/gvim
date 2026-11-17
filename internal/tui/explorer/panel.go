@@ -147,6 +147,7 @@ type Panel struct {
 	grip   bool       // a grip drag is in progress
 	thumb  bool       // a scrollbar drag is in progress
 	st     *transient // picks, pending cut and search text, shared by the copies of the panel
+	opts   tree.Options
 
 	// A mouse move drag: the rows a press lifted, where it started and the directory
 	// row under the pointer. Release asks for MoveMsg; nothing moves in the panel.
@@ -164,7 +165,46 @@ func New(t Tree, styles style.Styles, now func() time.Time) Panel {
 	if now == nil {
 		now = time.Now
 	}
-	return Panel{tree: t, styles: styles, now: now, st: &transient{}, dropRow: -1}
+	return Panel{
+		tree:    t,
+		styles:  styles,
+		now:     now,
+		st:      &transient{},
+		dropRow: -1,
+		opts:    tree.DefaultOptions(),
+	}
+}
+
+// WithOptions sets the explorer options on the panel.
+func (p Panel) WithOptions(opts tree.Options) Panel {
+	p.opts = opts
+	if op, ok := p.tree.(interface{ SetPreviewTabs(bool) }); ok && opts.PreviewTabs != nil {
+		op.SetPreviewTabs(*opts.PreviewTabs)
+	}
+	return p
+}
+
+// SetOptions sets the explorer options on the panel.
+func (p *Panel) SetOptions(opts tree.Options) {
+	p.opts = opts
+	if op, ok := p.tree.(interface{ SetPreviewTabs(bool) }); ok && opts.PreviewTabs != nil {
+		op.SetPreviewTabs(*opts.PreviewTabs)
+	}
+}
+
+// Options returns the explorer options.
+func (p Panel) Options() tree.Options {
+	return p.opts
+}
+
+func (p Panel) previewTabsEnabled() bool {
+	if p.opts.PreviewTabs != nil {
+		return *p.opts.PreviewTabs
+	}
+	if op, ok := p.tree.(interface{ PreviewTabs() bool }); ok {
+		return op.PreviewTabs()
+	}
+	return p.opts.PreviewTabsEnabled()
 }
 
 // Update handles one mouse message in the panel's geometry g. A press, a drag,
@@ -633,6 +673,9 @@ func (p Panel) rowPress(row, n int) (Panel, tea.Cmd) {
 	}
 	switch n {
 	case 1:
+		if !p.previewTabsEnabled() {
+			return p, emit(FocusMsg{})
+		}
 		return p, previewCmd(r.Path)
 	case 2:
 		return p, emit(OpenFileMsg{Path: r.Path})

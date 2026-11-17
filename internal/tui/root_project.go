@@ -52,7 +52,7 @@ func (m *Model) adoptProject(msg projectOpenedMsg) tea.Cmd {
 	}
 	m.tree = tree
 	m.resetLiveGrepResume()
-	m.explorerPanel = expanel.New(tree, m.styles, m.now)
+	m.explorerPanel = expanel.New(tree, m.styles, m.now).WithOptions(m.view.opts.Explorer)
 	if old != nil {
 		// The pending cut keeps its dimming, as it does when the panel is hidden.
 		m.explorerPanel = m.explorerPanel.CarryCut(prev)

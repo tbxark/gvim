@@ -215,13 +215,14 @@ func (b *runtimeBuild) wireRootDeps() {
 	deps.View = viewOptions(cfg, b.icon.Mode.String())
 	deps.Languages = languageSettings(cfg)
 	deps.MarkdownTOC = markdownTOCConfig(cfg)
-	projSearch := newProjectSearch(b.edOpts)
+	b.projSearch = newProjectSearch(b.edOpts, cfg.FileExplorer.CustomIgnorePatterns)
+	b.grep = grepFor(b.edOpts, cfg.FileExplorer.CustomIgnorePatterns)
 	deps.Root = tui.RootPorts{
 		Projects:       b.proj,
-		Grep:           grepFor(b.edOpts),
+		Grep:           b.grep,
 		Preview:        previewReader{},
-		ProjectSearch:  projSearch,
-		ProjectReplace: projSearch,
+		ProjectSearch:  b.projSearch,
+		ProjectReplace: b.projSearch,
 		GitGrep:        gitGrep{spawnEnv: b.envProvider.Overlay},
 		Git:            uiadapter.GitStatus{},
 		OpenURL:        openURL,

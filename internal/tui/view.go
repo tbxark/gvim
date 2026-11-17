@@ -601,7 +601,7 @@ func (m *Model) rebuildStyles() {
 	m.themeGen++
 	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics).WithThemeChoices(m.themeChoices())
 	if m.tree != nil {
-		m.explorerPanel = expanel.New(m.tree, st, m.now).CarryCut(m.explorerPanel)
+		m.explorerPanel = expanel.New(m.tree, st, m.now).WithOptions(m.view.opts.Explorer).CarryCut(m.explorerPanel)
 	}
 }
 

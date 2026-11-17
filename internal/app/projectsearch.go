@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/pluginhost"
@@ -32,15 +33,52 @@ type projectSearch struct {
 	// previewCache caches one syntax highlighter per previewed file (bounded by
 	// previewHighlighterCache).
 	previewCache previewHighlighterCache
+
+	customPatterns []string
+	customMatcher  gitignore.Matcher
 }
 
 // newProjectSearch returns the project search for an editor with the options o.
-func newProjectSearch(o editor.Options) *projectSearch {
+func newProjectSearch(o editor.Options, customPatterns ...[]string) *projectSearch {
 	s := &projectSearch{}
 	if o.LargeFileMode && o.LargeFileThresholdBytes > 0 {
 		s.skipFrom = int64(o.LargeFileThresholdBytes)
 	}
+	if len(customPatterns) > 0 {
+		s.SetCustomIgnorePatterns(customPatterns[0])
+	}
 	return s
+}
+
+// SetCustomIgnorePatterns configures custom ignore rules (e.g. *.log, build/).
+func (s *projectSearch) SetCustomIgnorePatterns(pats []string) {
+	s.customPatterns = pats
+	var rules []gitignore.Pattern
+	for _, p := range pats {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.HasPrefix(p, "#") {
+			continue
+		}
+		rules = append(rules, gitignore.ParsePattern(p, nil))
+	}
+	if len(rules) > 0 {
+		s.customMatcher = gitignore.NewMatcher(rules)
+	} else {
+		s.customMatcher = nil
+	}
+}
+
+func (s *projectSearch) matchesCustom(rel string) bool {
+	if s.customMatcher == nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for i := 1; i <= len(parts); i++ {
+		if s.customMatcher.Match(parts[:i], i < len(parts)) {
+			return true
+		}
+	}
+	return false
 }
 
 // searchBinaryProbe is how many leading bytes are checked for a NUL when a file is
@@ -213,6 +251,9 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 			scanned++
 			return addFile(req.Current.Path, name, true, req.Current.Text)
 		}
+		if s.matchesCustom(rel) {
+			return false, nil
+		}
 		abs := filepath.Join(req.Root, filepath.FromSlash(rel))
 		if src, ok := open[abs]; ok {
 			scanned++
@@ -312,6 +353,9 @@ func (s *projectSearch) ProjectReplace(req searchpanel.ReplaceRequest) (searchpa
 	for _, f := range req.Files {
 		if edits >= limit {
 			break
+		}
+		if s.matchesCustom(f.Name) {
+			continue
 		}
 		fe := searchpanel.FileEdits{Path: f.Path, Name: f.Name, Dirty: f.Dirty, Hash: f.Hash}
 		var text string

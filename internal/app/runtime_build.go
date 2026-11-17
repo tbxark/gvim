@@ -127,12 +127,14 @@ type runtimeBuild struct {
 	themeWarn string
 
 	// The file index, watcher, projects and log file (startWorkspace).
-	files     *finder.Index
-	watcher   *filewatch.Watcher
-	events    <-chan filewatch.Changed
-	proj      *uiadapter.Projects
-	logFile   *fileLog
-	logNotice string
+	files      *finder.Index
+	watcher    *filewatch.Watcher
+	events     <-chan filewatch.Changed
+	proj       *uiadapter.Projects
+	logFile    *fileLog
+	logNotice  string
+	projSearch *projectSearch
+	grep       *liveGrep
 
 	// The UI dependencies the model is built from (newDeps and every wire stage).
 	deps     tui.Deps
@@ -257,13 +259,20 @@ func (b *runtimeBuild) loadConfig() error {
 // opens the files named on the command line and runs crash recovery.
 func (b *runtimeBuild) openEditor() error {
 	opts, cfg, root, plan := &b.opts, b.cfg, b.root, b.plan
-	tree, err := explorer.Open(root)
+	expOpts := explorerOptions(cfg.FileExplorer)
+	tree, err := explorer.OpenWithOptions(root, expOpts)
 	if err != nil {
 		return err
 	}
 	b.tree = tree
 	tree.SetShowHidden(cfg.ExplorerShowHidden)
 	tree.SetShowIgnored(cfg.ExplorerShowIgnored)
+	if cfg.FileExplorer.RespectGitignore != nil {
+		tree.SetRespectGitignore(*cfg.FileExplorer.RespectGitignore)
+	}
+	if len(cfg.FileExplorer.CustomIgnorePatterns) > 0 {
+		tree.SetCustomIgnorePatterns(cfg.FileExplorer.CustomIgnorePatterns)
+	}
 	// Without files the editor starts empty, and the welcome screen shows.
 	edOpts := editorOptions(cfg, len(opts.Files) == 0 && !opts.StdinLaunch())
 	// Daemon-hosted local workspaces share one cross-workspace buffer registry (#19b
@@ -386,7 +395,10 @@ func (b *runtimeBuild) startWorkspace() {
 		// the placeholder until then.
 		b.files = finder.Idle()
 	} else {
-		b.files = uiadapter.StartFiles(b.ctx, b.root)
+		b.files = uiadapter.StartFiles(b.ctx, b.root, finder.Options{
+			RespectGitignore:     b.cfg.FileExplorer.RespectGitignore,
+			CustomIgnorePatterns: b.cfg.FileExplorer.CustomIgnorePatterns,
+		})
 	}
 	b.watcher, b.events = startWatcher(b.watching)
 	b.proj = uiadapter.NewProjects(b.ctx, b.watcher, b.root, b.files)

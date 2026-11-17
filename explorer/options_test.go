@@ -1,6 +1,9 @@
 package explorer
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestWidthCols checks Fresh's ExplorerWidth rendering: a percentage of the frame
 // (integer division), an exact column count, and no columns for the automatic
@@ -98,8 +101,21 @@ func TestSide(t *testing.T) {
 // (the frame's automatic width applies when no config supplies one).
 func TestDefaultOptions(t *testing.T) {
 	got := DefaultOptions()
-	want := Options{Side: SideLeft, CompactDirectories: true, AutoOpenOnLastBufferClose: true}
-	if got != want {
+	trueVal := true
+	want := Options{
+		Side:                      SideLeft,
+		CompactDirectories:        true,
+		AutoOpenOnLastBufferClose: true,
+		RespectGitignore:          &trueVal,
+		PreviewTabs:               &trueVal,
+	}
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DefaultOptions() = %+v, want %+v", got, want)
+	}
+	if !got.RespectGitignoreEnabled() {
+		t.Errorf("RespectGitignoreEnabled() = false, want true by default")
+	}
+	if !got.PreviewTabsEnabled() {
+		t.Errorf("PreviewTabsEnabled() = false, want true by default")
 	}
 }

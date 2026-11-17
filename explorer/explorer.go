@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -75,11 +76,21 @@ type Tree struct {
 	cachedRows  []Row
 	dirty       bool
 	ignoreCache map[string]ignoreCacheEntry
+
+	respectGitignore     *bool
+	customIgnorePatterns []string
+	previewTabs          *bool
 }
 
 // Open returns a tree rooted at dir, expanded, with its first level loaded.
 // The root row is always shown; its name is the base name of dir.
 func Open(dir string) (*Tree, error) {
+	return OpenWithOptions(dir, Options{})
+}
+
+// OpenWithOptions returns a tree rooted at dir with the given explorer options,
+// expanded, with its first level loaded.
+func OpenWithOptions(dir string, opts Options) (*Tree, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("explorer: open %q: %w", dir, err)
@@ -91,7 +102,15 @@ func Open(dir string) (*Tree, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("explorer: open %q: %w", dir, ErrNotDir)
 	}
-	t := &Tree{byPath: make(map[string]*node), ignoreCache: make(map[string]ignoreCacheEntry), dirty: true}
+	t := &Tree{
+		byPath:               make(map[string]*node),
+		ignoreCache:          make(map[string]ignoreCacheEntry),
+		dirty:                true,
+		compact:              opts.CompactDirectories,
+		respectGitignore:     opts.RespectGitignore,
+		customIgnorePatterns: slices.Clone(opts.CustomIgnorePatterns),
+		previewTabs:          opts.PreviewTabs,
+	}
 	t.root = &node{name: filepath.Base(abs), path: abs, isDir: true, expanded: true}
 	t.byPath[abs] = t.root
 	if err := t.load(t.root); err != nil {
@@ -148,6 +167,44 @@ func (t *Tree) SetCompactDirectories(v bool) {
 	if n, ok := t.byPath[t.selected]; ok {
 		t.selected = t.anchor(n).path
 	}
+}
+
+// RespectGitignore reports whether gitignore is respected (default true).
+func (t *Tree) RespectGitignore() bool {
+	return t.respectGitignore == nil || *t.respectGitignore
+}
+
+// SetRespectGitignore sets whether gitignore is respected.
+func (t *Tree) SetRespectGitignore(v bool) {
+	if t.respectGitignore != nil && *t.respectGitignore == v {
+		return
+	}
+	t.respectGitignore = &v
+	_ = t.Reload()
+}
+
+// CustomIgnorePatterns returns the configured custom wildcard ignore patterns.
+func (t *Tree) CustomIgnorePatterns() []string {
+	return slices.Clone(t.customIgnorePatterns)
+}
+
+// SetCustomIgnorePatterns sets custom wildcard ignore patterns (e.g. *.log, build/).
+func (t *Tree) SetCustomIgnorePatterns(pats []string) {
+	if slices.Equal(t.customIgnorePatterns, pats) {
+		return
+	}
+	t.customIgnorePatterns = slices.Clone(pats)
+	_ = t.Reload()
+}
+
+// PreviewTabs reports whether preview tabs are enabled (default true).
+func (t *Tree) PreviewTabs() bool {
+	return t.previewTabs == nil || *t.previewTabs
+}
+
+// SetPreviewTabs sets whether preview tabs are enabled.
+func (t *Tree) SetPreviewTabs(v bool) {
+	t.previewTabs = &v
 }
 
 // visible reports whether n is drawn under the current options.
@@ -580,7 +637,15 @@ var listDir = ListDir
 // draw. ListDir is given the tree root, so the ignore rules are the .gitignore
 // files on disk from the root down to n, read at this scan.
 func (t *Tree) scan(n *node) ([]*node, error) {
-	entries, err := listDir(n.path, ListOptions{ShowHidden: true, ShowIgnored: true, IgnoreRoot: t.root.path, Fast: true, IgnoreCache: t.ignoreCache})
+	entries, err := listDir(n.path, ListOptions{
+		ShowHidden:           true,
+		ShowIgnored:          true,
+		IgnoreRoot:           t.root.path,
+		Fast:                 true,
+		IgnoreCache:          t.ignoreCache,
+		RespectGitignore:     t.respectGitignore,
+		CustomIgnorePatterns: t.customIgnorePatterns,
+	})
 	if err != nil {
 		return nil, err
 	}

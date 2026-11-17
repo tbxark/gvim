@@ -1,6 +1,8 @@
 package config
 
 import (
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -61,13 +63,8 @@ func TestExplorerWidthRejects(t *testing.T) {
 // off, auto-open on, compact on.
 func TestFileExplorerDefaultsAreFreshs(t *testing.T) {
 	cfg := Defaults()
-	want := FileExplorerConfig{
-		Width:                     ExplorerWidth{Percent: true, Value: 30},
-		Side:                      "left",
-		AutoOpenOnLastBufferClose: true,
-		CompactDirectories:        true,
-	}
-	if cfg.FileExplorer != want {
+	want := DefaultFileExplorer()
+	if !reflect.DeepEqual(cfg.FileExplorer, want) {
 		t.Fatalf("file_explorer defaults = %+v, want %+v", cfg.FileExplorer, want)
 	}
 }
@@ -89,6 +86,15 @@ func TestFileExplorerBehaviourKeys(t *testing.T) {
 	if got.Side != "right" || !got.FollowActiveBuffer || got.AutoOpenOnLastBufferClose || got.CompactDirectories {
 		t.Errorf("file_explorer = %+v", got)
 	}
+	if got.RespectGitignoreEnabled() {
+		t.Errorf("respect_gitignore = true, want false")
+	}
+	if got.PreviewTabsEnabled() {
+		t.Errorf("preview_tabs = true, want false")
+	}
+	if !slices.Equal(got.CustomIgnorePatterns, []string{"build/"}) {
+		t.Errorf("custom_ignore_patterns = %v, want [build/]", got.CustomIgnorePatterns)
+	}
 }
 
 // TestFileExplorerSideRejects checks a bad side name.
@@ -96,5 +102,27 @@ func TestFileExplorerSideRejects(t *testing.T) {
 	_, diags := loadBody(t, "{\"file_explorer\": {\"side\": \"middle\"}}")
 	if len(diags) != 1 || diags[0].Key != "file_explorer.side" || !strings.Contains(diags[0].Message, "left") {
 		t.Fatalf("diags = %+v, want one for file_explorer.side", diags)
+	}
+}
+
+// TestFileExplorerIgnoreAndPreviewSettingsRejects checks invalid types for ignore and preview keys.
+func TestFileExplorerIgnoreAndPreviewSettingsRejects(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantKey string
+	}{
+		{"respect_gitignore string", `{"file_explorer": {"respect_gitignore": "no"}}`, "file_explorer.respect_gitignore"},
+		{"preview_tabs number", `{"file_explorer": {"preview_tabs": 1}}`, "file_explorer.preview_tabs"},
+		{"custom_ignore_patterns string", `{"file_explorer": {"custom_ignore_patterns": "*.log"}}`, "file_explorer.custom_ignore_patterns"},
+		{"custom_ignore_patterns int list", `{"file_explorer": {"custom_ignore_patterns": [123]}}`, "file_explorer.custom_ignore_patterns"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, diags := loadBody(t, tt.body)
+			if len(diags) != 1 || diags[0].Key != tt.wantKey {
+				t.Fatalf("loadBody(%s) diags = %+v, want one for %s", tt.body, diags, tt.wantKey)
+			}
+		})
 	}
 }

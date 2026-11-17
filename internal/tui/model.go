@@ -395,7 +395,7 @@ func New(deps Deps) *Model {
 		c.SetCompactDirectories(m.view.opts.Explorer.CompactDirectories)
 	}
 	if deps.Explorer != nil {
-		m.explorerPanel = expanel.New(deps.Explorer, st, now)
+		m.explorerPanel = expanel.New(deps.Explorer, st, now).WithOptions(m.view.opts.Explorer)
 	}
 	m.initContents(deps)
 	m.dialogs = deps.Dialogs
@@ -3325,7 +3325,7 @@ func (m *Model) closeExplorer() {
 	m.contents.SetFocus(false)
 	m.divider = dividerState{}
 	if m.tree != nil {
-		m.explorerPanel = expanel.New(m.tree, m.styles, m.now).CarryCut(m.explorerPanel)
+		m.explorerPanel = expanel.New(m.tree, m.styles, m.now).WithOptions(m.view.opts.Explorer).CarryCut(m.explorerPanel)
 	}
 	m.syncViewport()
 }

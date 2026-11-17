@@ -2,11 +2,15 @@ package palette
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/syntax"
+	"github.com/tbxark/gvim/theme"
 )
 
 // previewRead is one file the fake previewer answers for.
@@ -264,5 +268,347 @@ func TestPreviewColumnIsNotARow(t *testing.T) {
 	}
 	if i, ok := p.rowAt(geo.prevX, geo.rowsTop); ok {
 		t.Fatalf("a click on the preview column hit row %d", i)
+	}
+}
+
+// wheelAt is one notch of the wheel at (x, y).
+func wheelAt(x, y int, b tea.MouseButton) tea.MouseWheelMsg {
+	return tea.MouseWheelMsg(tea.Mouse{X: x, Y: y, Button: b})
+}
+
+// TestPreviewExpandedCapacity: preview loads up to 128 lines for files > 128 lines (marked truncated),
+// and keeps all lines for files <= 128 lines (not truncated).
+func TestPreviewExpandedCapacity(t *testing.T) {
+	t.Parallel()
+
+	// 1. File with 150 lines (> 128 lines)
+	var lines150 []string
+	for i := 1; i <= 150; i++ {
+		lines150 = append(lines150, fmt.Sprintf("line %d", i))
+	}
+	content150 := strings.Join(lines150, "\n") + "\n"
+
+	// 2. File with exactly 128 lines
+	var lines128 []string
+	for i := 1; i <= 128; i++ {
+		lines128 = append(lines128, fmt.Sprintf("line %d", i))
+	}
+	content128 := strings.Join(lines128, "\n") + "\n"
+
+	// 3. File with 50 lines (< 128 lines)
+	var lines50 []string
+	for i := 1; i <= 50; i++ {
+		lines50 = append(lines50, fmt.Sprintf("line %d", i))
+	}
+	content50 := strings.Join(lines50, "\n") + "\n"
+
+	pv := &fakePreviewer{files: map[string]previewRead{
+		"/w/large.txt": {data: content150},
+		"/w/exact.txt": {data: content128},
+		"/w/small.txt": {data: content50},
+	}}
+
+	// Test large file (>128 lines)
+	pLarge := New(fileOptions("", []string{"large.txt"}, pv))
+	settle(t, pLarge, pLarge.Init(), 8)
+	if !pLarge.preview.ready {
+		t.Fatal("large.txt preview not ready")
+	}
+	if got := len(pLarge.preview.data.Lines); got != 128 {
+		t.Fatalf("large.txt lines = %d, want 128", got)
+	}
+	if !pLarge.preview.data.Truncated {
+		t.Fatal("large.txt truncated = false, want true")
+	}
+
+	// Test exact 128 lines
+	pExact := New(fileOptions("", []string{"exact.txt"}, pv))
+	settle(t, pExact, pExact.Init(), 8)
+	if !pExact.preview.ready {
+		t.Fatal("exact.txt preview not ready")
+	}
+	if got := len(pExact.preview.data.Lines); got != 128 {
+		t.Fatalf("exact.txt lines = %d, want 128", got)
+	}
+	if pExact.preview.data.Truncated {
+		t.Fatal("exact.txt truncated = true, want false")
+	}
+
+	// Test small file (<128 lines)
+	pSmall := New(fileOptions("", []string{"small.txt"}, pv))
+	settle(t, pSmall, pSmall.Init(), 8)
+	if !pSmall.preview.ready {
+		t.Fatal("small.txt preview not ready")
+	}
+	if got := len(pSmall.preview.data.Lines); got != 50 {
+		t.Fatalf("small.txt lines = %d, want 50", got)
+	}
+	if pSmall.preview.data.Truncated {
+		t.Fatal("small.txt truncated = true, want false")
+	}
+}
+
+// TestPreviewSyntaxHighlighting verifies syntax coloring on .go files with theme styling assertions.
+func TestPreviewSyntaxHighlighting(t *testing.T) {
+	t.Parallel()
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatalf("failed to load dark theme: %v", err)
+	}
+
+	pv := &fakePreviewer{files: map[string]previewRead{
+		"/w/main.go": {data: "package main\n\nfunc main() {}\n"},
+	}}
+	opts := fileOptions("", []string{"main.go"}, pv)
+	opts.Theme = th
+	p := New(opts)
+	settle(t, p, p.Init(), 8)
+
+	if !p.preview.ready {
+		t.Fatal("main.go preview not ready")
+	}
+	if len(p.preview.data.Spans) < 3 {
+		t.Fatalf("expected spans for lines, got %d", len(p.preview.data.Spans))
+	}
+
+	geo := p.layout(120, 30)
+	if !geo.preview {
+		t.Fatal("preview column inactive")
+	}
+	g := draw(p, 120, 30)
+
+	// Gutter on row geo.rowsTop is "1 │ "
+	gutterText := "1 │ "
+	packageCellX := geo.prevX + len(gutterText)
+	cell := g.At(packageCellX, geo.rowsTop)
+
+	// Assert keyword style FG matches theme's syntax[KindKeyword].FG
+	kwStyle := p.chrome.syntax[syntax.KindKeyword]
+	if cell.Style.FG != kwStyle.FG {
+		t.Fatalf("package keyword FG = %+v, want %+v", cell.Style.FG, kwStyle.FG)
+	}
+	// Assert gutter cell uses chrome.panel style
+	gutterCell := g.At(geo.prevX, geo.rowsTop)
+	if gutterCell.Style != p.chrome.panel {
+		t.Fatalf("gutter cell style = %+v, want panel style %+v", gutterCell.Style, p.chrome.panel)
+	}
+}
+
+// TestPreviewKeyboardScrolling verifies Alt+Up/Down, PageUp/Down, and boundary clamping.
+func TestPreviewKeyboardScrolling(t *testing.T) {
+	t.Parallel()
+
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("line %02d", i))
+	}
+	content := strings.Join(lines, "\n") + "\n"
+
+	pv := &fakePreviewer{files: map[string]previewRead{
+		"/w/scroll.txt": {data: content},
+	}}
+	p := New(fileOptions("", []string{"scroll.txt"}, pv))
+	settle(t, p, p.Init(), 8)
+	draw(p, 120, 30)
+
+	geo := p.layout(120, 30)
+	if !geo.preview || geo.rows <= 0 {
+		t.Fatal("preview column inactive")
+	}
+	visibleRows := geo.rows
+	maxScroll := 60 - visibleRows
+
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("initial scrollOffset = %d, want 0", p.preview.scrollOffset)
+	}
+
+	// Alt+Down scrolls down by 1
+	p.update(altKey(tea.KeyDown))
+	if p.preview.scrollOffset != 1 {
+		t.Fatalf("scrollOffset after Alt+Down = %d, want 1", p.preview.scrollOffset)
+	}
+	rows := shownPreview(t, p)
+	if !strings.Contains(rows[0], "line 02") {
+		t.Fatalf("expected top row to show line 02, got %q", rows[0])
+	}
+
+	// Alt+Up scrolls back up by 1
+	p.update(altKey(tea.KeyUp))
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("scrollOffset after Alt+Up = %d, want 0", p.preview.scrollOffset)
+	}
+	rows = shownPreview(t, p)
+	if !strings.Contains(rows[0], "line 01") {
+		t.Fatalf("expected top row to show line 01, got %q", rows[0])
+	}
+
+	// Alt+Up at offset 0 clamps at 0
+	p.update(altKey(tea.KeyUp))
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("scrollOffset clamped at top = %d, want 0", p.preview.scrollOffset)
+	}
+
+	// PageDown scrolls by visibleRows
+	p.update(key(tea.KeyPgDown))
+	expected := min(visibleRows, maxScroll)
+	if p.preview.scrollOffset != expected {
+		t.Fatalf("scrollOffset after PageDown = %d, want %d", p.preview.scrollOffset, expected)
+	}
+
+	// PageDown multiple times clamps at maxScroll
+	for i := 0; i < 5; i++ {
+		p.update(key(tea.KeyPgDown))
+	}
+	if p.preview.scrollOffset != maxScroll {
+		t.Fatalf("scrollOffset clamped at maxScroll = %d, want %d", p.preview.scrollOffset, maxScroll)
+	}
+
+	// PageUp scrolls up
+	p.update(key(tea.KeyPgUp))
+	expectedUp := max(0, maxScroll-visibleRows)
+	if p.preview.scrollOffset != expectedUp {
+		t.Fatalf("scrollOffset after PageUp = %d, want %d", p.preview.scrollOffset, expectedUp)
+	}
+
+	// PageUp clamps at 0
+	for i := 0; i < 5; i++ {
+		p.update(key(tea.KeyPgUp))
+	}
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("scrollOffset after PageUp clamp = %d, want 0", p.preview.scrollOffset)
+	}
+
+	// Alt+PgDown and Alt+PgUp
+	p.update(altKey(tea.KeyPgDown))
+	if p.preview.scrollOffset != expected {
+		t.Fatalf("scrollOffset after Alt+PgDown = %d, want %d", p.preview.scrollOffset, expected)
+	}
+	p.update(altKey(tea.KeyPgUp))
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("scrollOffset after Alt+PgUp = %d, want 0", p.preview.scrollOffset)
+	}
+
+	// List candidate selection must remain at 0 throughout
+	if p.nav.Selected() != 0 {
+		t.Fatalf("candidate selection changed to %d, want 0", p.nav.Selected())
+	}
+}
+
+// TestPreviewMouseWheelScrolling verifies wheel inside preview pane vs inside candidate list.
+func TestPreviewMouseWheelScrolling(t *testing.T) {
+	t.Parallel()
+
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("line %02d", i))
+	}
+	content := strings.Join(lines, "\n") + "\n"
+
+	// Create multiple candidate files so candidate list can scroll too
+	var files []string
+	fileMap := make(map[string]previewRead)
+	for i := 1; i <= 50; i++ {
+		name := fmt.Sprintf("file_%02d.txt", i)
+		files = append(files, name)
+		fileMap["/w/"+name] = previewRead{data: content}
+	}
+
+	pv := &fakePreviewer{files: fileMap}
+	p := New(fileOptions("", files, pv))
+	settle(t, p, p.Init(), 8)
+	draw(p, 120, 30)
+
+	geo := p.layout(120, 30)
+	if !geo.preview {
+		t.Fatal("preview column inactive")
+	}
+
+	// 1. Wheel down inside preview pane (X = geo.prevX + 2, Y = geo.rowsTop + 1)
+	previewX := geo.prevX + 2
+	previewY := geo.rowsTop + 1
+	p.update(wheelAt(previewX, previewY, tea.MouseWheelDown))
+
+	if p.preview.scrollOffset != wheelRows {
+		t.Fatalf("preview scrollOffset after wheel down = %d, want %d", p.preview.scrollOffset, wheelRows)
+	}
+	// Candidate list should not have scrolled
+	first, _ := p.nav.Window()
+	if first != 0 {
+		t.Fatalf("candidate list scrolled to %d, want 0", first)
+	}
+
+	// 2. Wheel up inside preview pane
+	p.update(wheelAt(previewX, previewY, tea.MouseWheelUp))
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("preview scrollOffset after wheel up = %d, want 0", p.preview.scrollOffset)
+	}
+
+	// 3. Wheel down inside candidate list pane (X = geo.nameX, Y = geo.rowsTop + 1)
+	listX := geo.nameX
+	listY := geo.rowsTop + 1
+	p.update(wheelAt(listX, listY, tea.MouseWheelDown))
+
+	// Preview scroll offset should remain unchanged
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("preview scrollOffset changed to %d on list wheel, want 0", p.preview.scrollOffset)
+	}
+	// Candidate list should have scrolled by wheelRows
+	first, _ = p.nav.Window()
+	if first != wheelRows {
+		t.Fatalf("candidate list window first = %d, want %d", first, wheelRows)
+	}
+}
+
+// TestPreviewSelectionChangeResetsScrollOffset verifies scrollOffset resets to 0 when selection moves.
+func TestPreviewSelectionChangeResetsScrollOffset(t *testing.T) {
+	t.Parallel()
+
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("line %02d", i))
+	}
+	content := strings.Join(lines, "\n") + "\n"
+
+	pv := &fakePreviewer{files: map[string]previewRead{
+		"/w/a.txt": {data: content},
+		"/w/b.txt": {data: content},
+	}}
+	p := New(fileOptions("", []string{"a.txt", "b.txt"}, pv))
+	settle(t, p, p.Init(), 8)
+	draw(p, 120, 30)
+
+	// Scroll a.txt down
+	for i := 0; i < 5; i++ {
+		p.update(altKey(tea.KeyDown))
+	}
+	if p.preview.scrollOffset != 5 {
+		t.Fatalf("scrollOffset before move = %d, want 5", p.preview.scrollOffset)
+	}
+
+	// Move selection to b.txt
+	settle(t, p, p.update(key(tea.KeyDown)), 8)
+	if p.preview.rel != "b.txt" {
+		t.Fatalf("selected rel = %q, want b.txt", p.preview.rel)
+	}
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("b.txt scrollOffset = %d, want 0", p.preview.scrollOffset)
+	}
+
+	// Scroll b.txt down
+	for i := 0; i < 3; i++ {
+		p.update(altKey(tea.KeyDown))
+	}
+	if p.preview.scrollOffset != 3 {
+		t.Fatalf("b.txt scrollOffset = %d, want 3", p.preview.scrollOffset)
+	}
+
+	// Move back to cached a.txt
+	settle(t, p, p.update(key(tea.KeyUp)), 8)
+	if p.preview.rel != "a.txt" {
+		t.Fatalf("selected rel = %q, want a.txt", p.preview.rel)
+	}
+	// Returning to cached file must also reset scrollOffset to 0
+	if p.preview.scrollOffset != 0 {
+		t.Fatalf("cached a.txt scrollOffset = %d, want 0", p.preview.scrollOffset)
 	}
 }

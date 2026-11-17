@@ -36,14 +36,7 @@ var skipDirs = []string{".git", "node_modules", "target", "__pycache__", ".hg", 
 // when root is inside a work tree and the directory walk otherwise. A file
 // listed by git but deleted from disk is still emitted; git lists the index.
 func Enumerate(ctx context.Context, root string, emit func(rel string) bool) error {
-	done, err := gitFiles(ctx, root, emit)
-	if done {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return explorer.WalkFiles(ctx, root, explorer.WalkOptions{SkipDirs: skipDirs}, emit)
+	return EnumerateWithOptions(ctx, root, Options{}, emit)
 }
 
 // Options selects extra files for a listing.
@@ -53,21 +46,42 @@ type Options struct {
 	ShowHidden bool
 	// ShowIgnored visits files matched by .gitignore.
 	ShowIgnored bool
+	// RespectGitignore controls whether .gitignore files are read and applied. Default true.
+	RespectGitignore *bool
+	// CustomIgnorePatterns are additional wildcard patterns (e.g. *.log, build/).
+	CustomIgnorePatterns []string
+}
+
+// RespectGitignoreEnabled reports whether gitignore is respected (default true).
+func (o Options) RespectGitignoreEnabled() bool {
+	return o.RespectGitignore == nil || *o.RespectGitignore
+}
+
+// EnumerateWithOptions calls emit with each project file under root using the given options.
+func EnumerateWithOptions(ctx context.Context, root string, opts Options, emit func(rel string) bool) error {
+	if opts.RespectGitignoreEnabled() && !opts.ShowHidden && !opts.ShowIgnored {
+		matcher := explorer.NewPatternMatcher(opts.CustomIgnorePatterns)
+		done, err := gitFilesFiltered(ctx, root, matcher, emit)
+		if done {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	return explorer.WalkFiles(ctx, root, explorer.WalkOptions{
+		ShowHidden:           opts.ShowHidden,
+		ShowIgnored:          opts.ShowIgnored,
+		SkipDirs:             skipDirs,
+		RespectGitignore:     opts.RespectGitignore,
+		CustomIgnorePatterns: opts.CustomIgnorePatterns,
+	}, emit)
 }
 
 // EnumerateAll calls emit with each project file under root like Enumerate, but
-// includes the hidden and .gitignore-matched files opts asks for. It always walks the
-// tree when it has to include them: git's ls-files cannot list ignored files alongside
-// the tracked ones. With the zero Options it is Enumerate.
+// includes the hidden and .gitignore-matched files opts asks for.
 func EnumerateAll(ctx context.Context, root string, opts Options, emit func(rel string) bool) error {
-	if !opts.ShowHidden && !opts.ShowIgnored {
-		return Enumerate(ctx, root, emit)
-	}
-	return explorer.WalkFiles(ctx, root, explorer.WalkOptions{
-		ShowHidden:  opts.ShowHidden,
-		ShowIgnored: opts.ShowIgnored,
-		SkipDirs:    skipDirs,
-	}, emit)
+	return EnumerateWithOptions(ctx, root, opts, emit)
 }
 
 // gitFiles runs "git ls-files" in root. done is false when git cannot list the
@@ -75,6 +89,10 @@ func EnumerateAll(ctx context.Context, root string, opts Options, emit func(rel 
 // falls back to the walk. Entries that git lists by name only, such as nested
 // repositories, are left out.
 func gitFiles(ctx context.Context, root string, emit func(rel string) bool) (done bool, err error) {
+	return gitFilesFiltered(ctx, root, nil, emit)
+}
+
+func gitFilesFiltered(ctx context.Context, root string, matcher explorer.PatternMatcher, emit func(rel string) bool) (done bool, err error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return false, nil
 	}
@@ -96,6 +114,9 @@ func gitFiles(ctx context.Context, root string, emit func(rel string) bool) (don
 	for sc.Scan() {
 		p := sc.Text()
 		if p == "" || strings.HasSuffix(p, "/") {
+			continue
+		}
+		if matcher != nil && matcher(p, false) {
 			continue
 		}
 		emitted++
@@ -175,12 +196,34 @@ type Index struct {
 // Start begins enumerating root in a goroutine and returns at once. The index
 // stops when ctx is done or Close is called. Enumeration errors are kept for
 // Err; a partial list is still usable.
-func Start(ctx context.Context, root string) *Index {
+func Start(ctx context.Context, root string, opts ...Options) *Index {
+	var opt Options
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	return StartWithOptions(ctx, root, opt)
+}
+
+// StartWithOptions begins enumerating root with the given options in a goroutine.
+func StartWithOptions(ctx context.Context, root string, opts Options) *Index {
 	x := startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
-		return Enumerate(ctx, root, emit)
+		return EnumerateWithOptions(ctx, root, opts, emit)
 	})
 	x.setLocalProbe(root)
 	return x
+}
+
+// SetOptions updates enumeration options and triggers re-enumeration if running.
+func (x *Index) SetOptions(root string, opts Options) {
+	if x == nil {
+		return
+	}
+	x.lifecycle.Lock()
+	x.enum = func(ctx context.Context, emit func(string) bool, _ func(string)) error {
+		return EnumerateWithOptions(ctx, root, opts, emit)
+	}
+	x.lifecycle.Unlock()
+	x.Restart()
 }
 
 // setLocalProbe installs the local exact/prefix probe for root.

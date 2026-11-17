@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -607,5 +609,78 @@ func TestMenuRunCanStartAnExplorerCommand(t *testing.T) {
 	}
 	if m.pending == nil {
 		t.Error("the refresh command was not kept for the menu")
+	}
+}
+
+type wiringEditor struct {
+	realEditor
+}
+
+func (w wiringEditor) OpenFile(path string) error    { return w.ed.OpenFile(path) }
+func (w wiringEditor) OpenPreview(path string) error { return w.ed.OpenPreview(path) }
+func (w wiringEditor) GotoLine(line, col int) error  { return w.ed.GotoLine(line, col) }
+
+func TestPreviewTabLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.go")
+	pathB := filepath.Join(dir, "b.go")
+	pathC := filepath.Join(dir, "c.go")
+	must(t, os.WriteFile(pathA, []byte("package a\n"), 0o644))
+	must(t, os.WriteFile(pathB, []byte("package b\n"), 0o644))
+	must(t, os.WriteFile(pathC, []byte("package c\n"), 0o644))
+
+	tree, err := explorer.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ed := editor.New(editor.Options{Root: dir, Rows: 24, Cols: 80})
+	viewOpts := DefaultViewOptions()
+	m := New(Deps{
+		Editor:   wiringEditor{realEditor{ed}},
+		Explorer: tree,
+		Keys:     testKeys(),
+		Theme:    theme.Theme{},
+		Clock:    testClock,
+		View:     &viewOpts,
+	})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// 1. Open a.go as preview
+	m.Update(expanel.OpenFileMsg{Path: pathA, Preview: true})
+	tabs := ed.Tabs()
+	if len(tabs) != 1 || !strings.HasSuffix(tabs[0].Name, "(preview)") {
+		t.Fatalf("expected 1 preview tab for a.go, got: %v", tabs)
+	}
+
+	// 2. Open b.go as preview -> replaces a.go preview tab
+	m.Update(expanel.OpenFileMsg{Path: pathB, Preview: true})
+	tabs = ed.Tabs()
+	if len(tabs) != 1 || !strings.HasSuffix(tabs[0].Name, "(preview)") || !strings.Contains(tabs[0].Name, "b.go") {
+		t.Fatalf("expected 1 preview tab replacing with b.go, got: %v", tabs)
+	}
+
+	// 3. Edit b.go -> converts preview tab to permanent (no (preview) suffix)
+	res := ed.Do("insert_char", map[string]any{"text": "x"})
+	if res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	tabs = ed.Tabs()
+	if len(tabs) != 1 || strings.HasSuffix(tabs[0].Name, "(preview)") {
+		t.Fatalf("expected tab for b.go to become permanent on edit, got: %v", tabs)
+	}
+
+	// 4. Open c.go as preview -> now 2 tabs (permanent b.go and preview c.go)
+	m.Update(expanel.OpenFileMsg{Path: pathC, Preview: true})
+	tabs = ed.Tabs()
+	if len(tabs) != 2 || !strings.HasSuffix(tabs[1].Name, "(preview)") || !strings.Contains(tabs[1].Name, "c.go") {
+		t.Fatalf("expected 2 tabs with c.go as preview, got: %v", tabs)
+	}
+
+	// 5. Open c.go as permanent (Enter / double-click) -> promotes c.go to permanent
+	m.Update(expanel.OpenFileMsg{Path: pathC, Preview: false})
+	tabs = ed.Tabs()
+	if len(tabs) != 2 || strings.HasSuffix(tabs[0].Name, "(preview)") || strings.HasSuffix(tabs[1].Name, "(preview)") {
+		t.Fatalf("expected 2 permanent tabs after permanent open, got: %v", tabs)
 	}
 }

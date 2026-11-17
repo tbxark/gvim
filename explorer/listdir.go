@@ -30,6 +30,15 @@ type ListOptions struct {
 	IgnoreRoot  string
 	Fast        bool // skip per-entry lstat calls for regular files; only stat symlinks
 	IgnoreCache map[string]ignoreCacheEntry
+	// RespectGitignore controls whether .gitignore files are read and applied. Default true.
+	RespectGitignore *bool
+	// CustomIgnorePatterns are additional wildcard patterns (e.g. *.log, build/).
+	CustomIgnorePatterns []string
+}
+
+// RespectGitignoreEnabled reports whether gitignore is respected (default true).
+func (o ListOptions) RespectGitignoreEnabled() bool {
+	return o.RespectGitignore == nil || *o.RespectGitignore
 }
 
 // Entry is one directory entry returned by ListDir. For a symbolic link, IsDir,
@@ -69,7 +78,21 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
 	}
-	m := gitignore.NewMatcher(ignoreRules(root, rel, opts.IgnoreCache))
+	var rules []gitignore.Pattern
+	if opts.RespectGitignoreEnabled() {
+		rules = ignoreRules(root, rel, opts.IgnoreCache)
+	}
+	for _, pat := range opts.CustomIgnorePatterns {
+		pat = strings.TrimSpace(pat)
+		if pat == "" || strings.HasPrefix(pat, "#") {
+			continue
+		}
+		rules = append(rules, gitignore.ParsePattern(pat, nil))
+	}
+	var m gitignore.Matcher
+	if len(rules) > 0 {
+		m = gitignore.NewMatcher(rules)
+	}
 
 	out := make([]Entry, 0, len(dirents))
 	for _, d := range dirents {
@@ -103,7 +126,10 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 			size = info.Size()
 			modTime = info.ModTime()
 		}
-		ignored := m.Match(append(slices.Clip(rel), name), isDir)
+		var ignored bool
+		if m != nil {
+			ignored = m.Match(append(slices.Clip(rel), name), isDir)
+		}
 		if ignored && !opts.ShowIgnored {
 			continue
 		}

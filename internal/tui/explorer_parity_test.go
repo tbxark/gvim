@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -196,5 +197,130 @@ func TestExplorerGripKeepsTheWidthForm(t *testing.T) {
 	}
 	if l := cols.layout(); l.Ex != 24 {
 		t.Errorf("layout width after the column drag = %d, want 24", l.Ex)
+	}
+}
+
+// TestExplorerPreviewTabs verifies that preview_tabs controls whether single click and
+// keyboard navigation open a temporary preview tab or not, while double click and Enter
+// always open a permanent tab.
+func TestExplorerPreviewTabs(t *testing.T) {
+	root, file := explorerFixture(t)
+	tree, err := explorer.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Select the file row in the tree
+	if err := tree.Reveal(file); err != nil {
+		t.Fatal(err)
+	}
+
+	trueVal := true
+	falseVal := false
+
+	g := expanel.Geometry{
+		X:      0,
+		Width:  30,
+		Top:    0,
+		Bottom: 20,
+	}
+
+	// 1. When PreviewTabs is ON (default or explicit true)
+	pOn := expanel.New(tree, style.Styles{}, nil).WithOptions(explorer.Options{
+		PreviewTabs: &trueVal,
+	})
+
+	// Arrow navigation should send OpenFileMsg with Preview: true
+	_, cmdOn, ok := pOn.Action("file_explorer_down", g)
+	if !ok || cmdOn == nil {
+		t.Fatalf("pOn down action failed: ok=%v, cmd=%v", ok, cmdOn)
+	}
+	msgOn := cmdOn()
+	openMsgOn, ok := msgOn.(expanel.OpenFileMsg)
+	if !ok || !openMsgOn.Preview || openMsgOn.Path != file {
+		t.Errorf("expected OpenFileMsg{Preview: true}, got %+v", msgOn)
+	}
+
+	// 2. When PreviewTabs is OFF
+	pOff := expanel.New(tree, style.Styles{}, nil).WithOptions(explorer.Options{
+		PreviewTabs: &falseVal,
+	})
+
+	// Arrow navigation should NOT send preview command (cmd is nil)
+	_, cmdOff, ok := pOff.Action("file_explorer_down", g)
+	if !ok {
+		t.Fatalf("pOff down action failed: ok=%v", ok)
+	}
+	if cmdOff != nil {
+		msg := cmdOff()
+		if _, isPreview := msg.(expanel.OpenFileMsg); isPreview {
+			t.Errorf("pOff arrow move unexpectedly returned preview cmd: %+v", msg)
+		}
+	}
+
+	// Pressing Enter (file_explorer_open) always opens permanently (Preview: false)
+	_, cmdOpen, ok := pOff.Action("file_explorer_open", g)
+	if !ok || cmdOpen == nil {
+		t.Fatalf("pOff open action failed: ok=%v, cmd=%v", ok, cmdOpen)
+	}
+	msgOpen := cmdOpen()
+	openMsgPerm, ok := msgOpen.(expanel.OpenFileMsg)
+	if !ok || openMsgPerm.Preview || openMsgPerm.Path != file {
+		t.Errorf("expected OpenFileMsg{Preview: false}, got %+v", msgOpen)
+	}
+
+	// 3. Mouse single-click and double-click behaviour
+	rows := tree.Rows()
+	fileRowIdx := -1
+	for idx, r := range rows {
+		if r.Path == file {
+			fileRowIdx = idx
+			break
+		}
+	}
+	if fileRowIdx < 0 {
+		t.Fatalf("file %s not found in rows: %v", file, rows)
+	}
+	clickY := g.Top + 1 + fileRowIdx
+	clickMsg := tea.MouseClickMsg{Button: tea.MouseLeft, X: 5, Y: clickY}
+
+	// Single-click with PreviewTabs ON -> OpenFileMsg{Preview: true}
+	_, clickCmdOn := pOn.Update(clickMsg, g)
+	if clickCmdOn == nil {
+		t.Fatal("pOn single click returned nil cmd")
+	}
+	if msg := clickCmdOn(); msg != nil {
+		openMsg, ok := msg.(expanel.OpenFileMsg)
+		if !ok || !openMsg.Preview || openMsg.Path != file {
+			t.Errorf("pOn single click expected OpenFileMsg{Preview: true}, got %+v", msg)
+		}
+	}
+
+	// Single-click with PreviewTabs OFF -> FocusMsg (no preview)
+	pOffFresh := expanel.New(tree, style.Styles{}, nil).WithOptions(explorer.Options{
+		PreviewTabs: &falseVal,
+	})
+	pOffFresh, clickCmdOff := pOffFresh.Update(clickMsg, g)
+	if clickCmdOff == nil {
+		t.Fatal("pOff single click returned nil cmd")
+	}
+	if msg := clickCmdOff(); msg != nil {
+		if _, isPreview := msg.(expanel.OpenFileMsg); isPreview {
+			t.Errorf("pOff single click unexpectedly opened preview tab: %+v", msg)
+		}
+		if _, isFocus := msg.(expanel.FocusMsg); !isFocus {
+			t.Errorf("pOff single click expected FocusMsg, got %+v", msg)
+		}
+	}
+
+	// Double-click with PreviewTabs OFF -> OpenFileMsg{Preview: false}
+	_, dblClickCmd := pOffFresh.Update(clickMsg, g)
+	if dblClickCmd == nil {
+		t.Fatal("pOff double click returned nil cmd")
+	}
+	if msg := dblClickCmd(); msg != nil {
+		openMsg, ok := msg.(expanel.OpenFileMsg)
+		if !ok || openMsg.Preview || openMsg.Path != file {
+			t.Errorf("pOff double click expected OpenFileMsg{Preview: false}, got %+v", msg)
+		}
 	}
 }

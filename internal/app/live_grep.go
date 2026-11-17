@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/finder"
@@ -26,6 +27,9 @@ type liveGrep struct {
 	// searched, and a miss in the rest would look like no match. Zero skips none.
 	skipFrom int64
 
+	customPatterns []string
+	customMatcher  gitignore.Matcher
+
 	// mu guards the listing of the hidden and ignored files. That listing walks the
 	// tree, which is expensive, so it is cached for the root last searched, for
 	// ignoredWalkTTL: typing in the palette reuses it, and a file created since is
@@ -41,12 +45,49 @@ const ignoredWalkTTL = 5 * time.Second
 
 // grepFor returns the live grep for an editor with the options o. It skips the
 // files that the editor opens in large file mode.
-func grepFor(o editor.Options) *liveGrep {
+func grepFor(o editor.Options, customPatterns ...[]string) *liveGrep {
 	g := &liveGrep{}
 	if o.LargeFileMode && o.LargeFileThresholdBytes > 0 {
 		g.skipFrom = int64(o.LargeFileThresholdBytes)
 	}
+	if len(customPatterns) > 0 {
+		g.SetCustomIgnorePatterns(customPatterns[0])
+	}
 	return g
+}
+
+// SetCustomIgnorePatterns configures custom ignore rules (e.g. *.log, build/).
+func (g *liveGrep) SetCustomIgnorePatterns(pats []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.customPatterns = pats
+	var rules []gitignore.Pattern
+	for _, p := range pats {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.HasPrefix(p, "#") {
+			continue
+		}
+		rules = append(rules, gitignore.ParsePattern(p, nil))
+	}
+	if len(rules) > 0 {
+		g.customMatcher = gitignore.NewMatcher(rules)
+	} else {
+		g.customMatcher = nil
+	}
+	g.walkList = nil
+}
+
+func (g *liveGrep) matchesCustom(rel string) bool {
+	if g.customMatcher == nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for i := 1; i <= len(parts); i++ {
+		if g.customMatcher.Match(parts[:i], i < len(parts)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Search returns at most req.Limit hits of req.Text, one per matching line: the file
@@ -82,6 +123,15 @@ func (g *liveGrep) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
 			// the file index does not list: the walk lists them, and its result is
 			// cached for the root.
 			files = g.ignoredFiles(req.Root)
+		}
+		if g.customMatcher != nil {
+			filtered := make([]string, 0, len(files))
+			for _, f := range files {
+				if !g.matchesCustom(f) {
+					filtered = append(filtered, f)
+				}
+			}
+			files = filtered
 		}
 		var err error
 		if hits, err = searchFiles(req.Root, files, q, req.Limit, hits, g.skipFrom); err != nil {
@@ -244,6 +294,9 @@ func (g *liveGrep) ignoredFiles(root string) []string {
 	}
 	list := make([]string, 0, 1024)
 	_ = finder.EnumerateAll(context.Background(), root, finder.Options{ShowHidden: true, ShowIgnored: true}, func(rel string) bool {
+		if g.matchesCustom(rel) {
+			return true
+		}
 		list = append(list, rel)
 		return len(list) < finder.MaxFiles
 	})

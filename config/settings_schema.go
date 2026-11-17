@@ -381,6 +381,15 @@ var settingsTable = []Setting{
 	{Path: []string{"file_explorer", "compact_directories"}, Section: SectionFileExplorer, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.FileExplorer.CompactDirectories }), encode: encodeBool},
+	{Path: []string{"file_explorer", "respect_gitignore"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.FileExplorer.RespectGitignoreEnabled() }), encode: encodeBool},
+	{Path: []string{"file_explorer", "custom_ignore_patterns"}, Section: SectionFileExplorer, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileExplorer.CustomIgnorePatterns)) }},
+	{Path: []string{"file_explorer", "preview_tabs"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.FileExplorer.PreviewTabsEnabled() }), encode: encodeBool},
 
 	// Terminal. The terminal reads these while the dock is built, so they are
 	// restart settings. A project config cannot choose the shell program,

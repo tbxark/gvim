@@ -20,6 +20,15 @@ type WalkOptions struct {
 	// SkipDirs names directories that are never entered, such as ".git" or
 	// "node_modules". The match is on the directory's own name at any depth.
 	SkipDirs []string
+	// RespectGitignore controls whether .gitignore files are read and applied. Default true.
+	RespectGitignore *bool
+	// CustomIgnorePatterns are additional wildcard patterns (e.g. *.log, build/).
+	CustomIgnorePatterns []string
+}
+
+// RespectGitignoreEnabled reports whether gitignore is respected (default true).
+func (o WalkOptions) RespectGitignoreEnabled() bool {
+	return o.RespectGitignore == nil || *o.RespectGitignore
 }
 
 // WalkFiles calls fn with the slash-separated path, relative to root, of every
@@ -72,8 +81,19 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
 	}
 	var m gitignore.Matcher
 	if !w.opts.ShowIgnored {
-		rules = slices.Concat(rules, readIgnore(w.fsys, rel))
-		m = gitignore.NewMatcher(rules)
+		if w.opts.RespectGitignoreEnabled() {
+			rules = slices.Concat(rules, readIgnore(w.fsys, rel))
+		}
+		var allRules []gitignore.Pattern
+		allRules = append(allRules, rules...)
+		for _, pat := range w.opts.CustomIgnorePatterns {
+			pat = strings.TrimSpace(pat)
+			if pat == "" || strings.HasPrefix(pat, "#") {
+				continue
+			}
+			allRules = append(allRules, gitignore.ParsePattern(pat, nil))
+		}
+		m = gitignore.NewMatcher(allRules)
 	}
 	for _, e := range entries {
 		name := e.Name()

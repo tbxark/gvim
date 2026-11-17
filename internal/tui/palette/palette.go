@@ -22,6 +22,7 @@ package palette
 import (
 	"cmp"
 	"context"
+	"image/color"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -38,6 +39,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -318,6 +320,66 @@ type chrome struct {
 	selected grid.Style    // the highlighted row
 	input    grid.Style    // the query row and its text
 	muted    grid.Style    // the empty-list message
+	syntax   [syntax.KindCount]grid.Style
+}
+
+func newSyntaxStyles(th theme.Theme, base grid.Style) [syntax.KindCount]grid.Style {
+	var styles [syntax.KindCount]grid.Style
+	for k := range styles {
+		kind := syntax.Kind(k)
+		st := base
+		if kind != syntax.KindPlain && kind != syntax.KindDiffAdd && kind != syntax.KindDiffRemove {
+			if fg := syntaxFG(th, kind, base.FG); fg != nil {
+				st.FG = fg
+			}
+			attrs := kind.Attrs()
+			st.Bold = attrs&syntax.AttrBold != 0
+			st.Italic = attrs&syntax.AttrItalic != 0
+			st.Underline = attrs&syntax.AttrUnderline != 0
+			st.Strike = attrs&syntax.AttrStrike != 0
+			if c, ok := th.Syntax(kind.ThemeKey()); ok {
+				applyAttributeNames(&st, c.Modifiers)
+			}
+		}
+		styles[k] = st
+	}
+	return styles
+}
+
+func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
+	key := kind.ThemeKey()
+	c, ok := th.Syntax(key)
+	if fb := kind.ThemeFallbackKey(); !ok && fb != "" {
+		key = fb
+		c, ok = th.Syntax(key)
+	}
+	switch {
+	case !ok:
+		return base
+	case c.IsTerminalDefault():
+		return nil
+	case c.IsRGB:
+		return style.Color(th, "syntax", key)
+	default:
+		return base
+	}
+}
+
+func applyAttributeNames(st *grid.Style, names []string) {
+	for _, name := range theme.NormalizeModifiers(names) {
+		switch name {
+		case "bold":
+			st.Bold = true
+		case "italic":
+			st.Italic = true
+		case "underlined":
+			st.Underline = true
+		case "dim":
+			st.Faint = true
+		case "reversed":
+			st.Reverse = true
+		}
+	}
 }
 
 // nextPaletteToken numbers palette instances, so a late result of a closed palette
@@ -407,6 +469,7 @@ func New(opts Options) *Palette {
 			selected: ov.Selected,
 			input:    ov.Idle,
 			muted:    ov.Muted,
+			syntax:   newSyntaxStyles(opts.Theme, ov.Box),
 		},
 	}
 	if setter, ok := opts.Files.(interface{ SetProbeShowHidden(bool) }); ok {
@@ -481,6 +544,23 @@ func (p *Palette) update(msg tea.Msg) tea.Cmd {
 			p.nav.Select(i)
 		}
 	case tea.MouseWheelMsg:
+		m := tea.Mouse(msg)
+		if p.height > 0 {
+			w := p.width
+			if w <= 0 {
+				w = 120
+			}
+			geo := p.layout(w, p.height)
+			if geo.preview && m.X >= geo.divX && m.Y >= geo.rowsTop && m.Y < geo.rowsTop+geo.rows {
+				switch m.Button {
+				case tea.MouseWheelUp:
+					p.scrollPreview(-wheelRows)
+				case tea.MouseWheelDown:
+					p.scrollPreview(wheelRows)
+				}
+				break
+			}
+		}
 		switch tea.Mouse(msg).Button {
 		case tea.MouseWheelUp:
 			p.nav.ScrollBy(-wheelRows)
@@ -544,10 +624,30 @@ func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "down":
 		p.nav.Select(p.nav.Selected() + 1)
 		return nil
+	case "alt+up":
+		p.scrollPreview(-1)
+		return nil
+	case "alt+down":
+		p.scrollPreview(1)
+		return nil
+	case "alt+pgup":
+		p.scrollPreview(-p.previewPageRows())
+		return nil
+	case "alt+pgdown":
+		p.scrollPreview(p.previewPageRows())
+		return nil
 	case "pgup":
+		if p.previewWanted() && p.previewScrollable() {
+			p.scrollPreview(-p.previewPageRows())
+			return nil
+		}
 		p.page(-1)
 		return nil
 	case "pgdown":
+		if p.previewWanted() && p.previewScrollable() {
+			p.scrollPreview(p.previewPageRows())
+			return nil
+		}
 		p.page(1)
 		return nil
 	case "tab":

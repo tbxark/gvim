@@ -3,6 +3,7 @@ package explorer
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -11,8 +12,10 @@ import (
 // directories and touches no tree, so it may run in a command. Apply then merges the
 // listing into the tree on the owner's goroutine.
 type Snapshot struct {
-	root string
-	dirs []string // the loaded directories, the root first
+	root                 string
+	dirs                 []string // the loaded directories, the root first
+	respectGitignore     *bool
+	customIgnorePatterns []string
 }
 
 // Snapshot returns the loaded directories of t. It reads nothing from disk.
@@ -31,7 +34,12 @@ func (t *Tree) Snapshot() Snapshot {
 		}
 	}
 	walk(t.root)
-	return Snapshot{root: t.root.path, dirs: dirs}
+	return Snapshot{
+		root:                 t.root.path,
+		dirs:                 dirs,
+		respectGitignore:     t.respectGitignore,
+		customIgnorePatterns: slices.Clone(t.customIgnorePatterns),
+	}
 }
 
 // SnapshotFor is Snapshot plus the folders on the way to path that are not loaded yet.
@@ -57,7 +65,13 @@ type Listing struct {
 func (s Snapshot) Read() Listing {
 	l := Listing{entries: make(map[string][]Entry, len(s.dirs))}
 	for _, dir := range s.dirs {
-		entries, err := listDir(dir, ListOptions{ShowHidden: true, ShowIgnored: true, IgnoreRoot: s.root})
+		entries, err := listDir(dir, ListOptions{
+			ShowHidden:           true,
+			ShowIgnored:          true,
+			IgnoreRoot:           s.root,
+			RespectGitignore:     s.respectGitignore,
+			CustomIgnorePatterns: s.customIgnorePatterns,
+		})
 		if err != nil {
 			l.errs = append(l.errs, err)
 			continue

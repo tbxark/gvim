@@ -1,6 +1,7 @@
 package explorer
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -310,4 +311,67 @@ func expandedDirs(tree *Tree) []string {
 		}
 	}
 	return out
+}
+
+func TestWalkFilesCustomIgnorePatternsAndRespectGitignore(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		".gitignore":    "*.gitignored\n",
+		"a.gitignored":  "content",
+		"b.txt":         "content",
+		"c.log":         "log content",
+		"build/out.bin": "binary",
+		"src/main.go":   "go code",
+	})
+
+	// Default WalkFiles honours .gitignore
+	var walkedDefault []string
+	err := WalkFiles(context.Background(), root, WalkOptions{}, func(rel string) bool {
+		walkedDefault = append(walkedDefault, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(walkedDefault)
+	wantDefault := []string{"b.txt", "build/out.bin", "c.log", "src/main.go"}
+	if !slices.Equal(walkedDefault, wantDefault) {
+		t.Fatalf("walkedDefault = %v, want %v", walkedDefault, wantDefault)
+	}
+
+	// WalkFiles with CustomIgnorePatterns
+	var walkedCustom []string
+	err = WalkFiles(context.Background(), root, WalkOptions{
+		CustomIgnorePatterns: []string{"*.log", "build/"},
+	}, func(rel string) bool {
+		walkedCustom = append(walkedCustom, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(walkedCustom)
+	wantCustom := []string{"b.txt", "src/main.go"}
+	if !slices.Equal(walkedCustom, wantCustom) {
+		t.Fatalf("walkedCustom = %v, want %v", walkedCustom, wantCustom)
+	}
+
+	// WalkFiles with RespectGitignore == false
+	respectFalse := false
+	var walkedNoGitignore []string
+	err = WalkFiles(context.Background(), root, WalkOptions{
+		RespectGitignore:     &respectFalse,
+		CustomIgnorePatterns: []string{"*.log"},
+	}, func(rel string) bool {
+		walkedNoGitignore = append(walkedNoGitignore, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(walkedNoGitignore)
+	wantNoGitignore := []string{"a.gitignored", "b.txt", "build/out.bin", "src/main.go"}
+	if !slices.Equal(walkedNoGitignore, wantNoGitignore) {
+		t.Fatalf("walkedNoGitignore = %v, want %v", walkedNoGitignore, wantNoGitignore)
+	}
 }

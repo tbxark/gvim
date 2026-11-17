@@ -17,8 +17,8 @@ var (
 // StartFiles starts the file index for root in the background and returns at
 // once. The palette reads it through Snapshot. The caller closes the index when
 // the program ends, which stops enumeration.
-func StartFiles(ctx context.Context, root string) *finder.Index {
-	return finder.Start(ctx, root)
+func StartFiles(ctx context.Context, root string, opts ...finder.Options) *finder.Index {
+	return finder.Start(ctx, root, opts...)
 }
 
 // fileRanker is the palette's Ranker over finder. It holds the frecency

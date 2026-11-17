@@ -62,6 +62,7 @@ func (p Panel) CutPending() bool { return len(p.state().cut) > 0 }
 // clipboard does.
 func (p Panel) CarryCut(prev Panel) Panel {
 	p.state().cut = maps.Clone(prev.state().cut)
+	p.opts = prev.opts
 	return p
 }
 
@@ -142,12 +143,18 @@ func (p Panel) searchFirst(g Geometry) {
 func (p Panel) moveCursor(delta int) tea.Cmd {
 	p.state().anchor = ""
 	p.tree.Move(delta)
+	if !p.previewTabsEnabled() {
+		return nil
+	}
 	return p.previewSelected()
 }
 
 // previewSelected returns the preview of the selected file, which is the command
 // a single click sends. A directory has no preview.
 func (p Panel) previewSelected() tea.Cmd {
+	if !p.previewTabsEnabled() {
+		return nil
+	}
 	sel, ok := p.tree.Selected()
 	if !ok || sel.IsDir {
 		return nil

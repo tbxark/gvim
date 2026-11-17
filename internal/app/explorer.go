@@ -1,6 +1,8 @@
 package app
 
 import (
+	"slices"
+
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/explorer"
 )
@@ -25,5 +27,8 @@ func explorerOptions(fe config.FileExplorerConfig) explorer.Options {
 		FollowActiveBuffer:        fe.FollowActiveBuffer,
 		CompactDirectories:        fe.CompactDirectories,
 		AutoOpenOnLastBufferClose: fe.AutoOpenOnLastBufferClose,
+		RespectGitignore:          fe.RespectGitignore,
+		CustomIgnorePatterns:      slices.Clone(fe.CustomIgnorePatterns),
+		PreviewTabs:               fe.PreviewTabs,
 	}
 }

@@ -1172,6 +1172,21 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 		if c, ok := m.tree.(interface{ SetCompactDirectories(bool) }); ok {
 			c.SetCompactDirectories(v.Explorer.CompactDirectories)
 		}
+	case "file_explorer.respect_gitignore":
+		m.view.opts.Explorer.RespectGitignore = v.Explorer.RespectGitignore
+		m.explorerPanel.SetOptions(m.view.opts.Explorer)
+		if c, ok := m.tree.(interface{ SetRespectGitignore(bool) }); ok {
+			c.SetRespectGitignore(v.Explorer.RespectGitignoreEnabled())
+		}
+	case "file_explorer.custom_ignore_patterns":
+		m.view.opts.Explorer.CustomIgnorePatterns = slices.Clone(v.Explorer.CustomIgnorePatterns)
+		m.explorerPanel.SetOptions(m.view.opts.Explorer)
+		if c, ok := m.tree.(interface{ SetCustomIgnorePatterns([]string) }); ok {
+			c.SetCustomIgnorePatterns(v.Explorer.CustomIgnorePatterns)
+		}
+	case "file_explorer.preview_tabs":
+		m.view.opts.Explorer.PreviewTabs = v.Explorer.PreviewTabs
+		m.explorerPanel.SetOptions(m.view.opts.Explorer)
 	}
 	// The rest of the display options are read from the view options by the
 	// painting, the layout, the mouse and the find bar, so they only need the

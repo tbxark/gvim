@@ -719,8 +719,13 @@ func (c *Config) setFileExplorer(key string, raw json.RawMessage) error {
 		return setFileExplorerBool(raw, &c.FileExplorer.AutoOpenOnLastBufferClose)
 	case "compact_directories":
 		return setFileExplorerBool(raw, &c.FileExplorer.CompactDirectories)
-	case "respect_gitignore", "custom_ignore_patterns", "preview_tabs",
-		"tree_indicator_collapsed", "tree_indicator_expanded":
+	case "respect_gitignore":
+		return setFileExplorerBoolPtr(raw, &c.FileExplorer.RespectGitignore)
+	case "custom_ignore_patterns":
+		return setFileExplorerStringList(raw, &c.FileExplorer.CustomIgnorePatterns)
+	case "preview_tabs":
+		return setFileExplorerBoolPtr(raw, &c.FileExplorer.PreviewTabs)
+	case "tree_indicator_collapsed", "tree_indicator_expanded":
 		return nil
 	}
 	return errors.New("unknown setting")

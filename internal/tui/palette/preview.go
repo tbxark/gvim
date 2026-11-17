@@ -10,9 +10,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/textsafe"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // The file preview is the file mode's right-hand column: the start of the selected
@@ -24,10 +26,10 @@ import (
 const (
 	// previewMaxBytes is the head of a file the preview reads. It bounds the read of a
 	// large file, so the preview never loads a whole file, however big it is.
-	previewMaxBytes = 16 << 10
+	previewMaxBytes = 64 << 10
 	// previewMaxLines is the most lines a preview keeps. The column paints at most
 	// maxRows of them; the rest are kept for a taller frame in the same palette.
-	previewMaxLines = 12
+	previewMaxLines = 128
 	// previewCacheSize is the number of previews a palette caches. A palette lives for
 	// one opening, and the cache is dropped with it.
 	previewCacheSize = 64
@@ -118,6 +120,8 @@ type Preview struct {
 	StartLine int
 	// Lines are the first lines of the file, at most previewMaxLines of them.
 	Lines []string
+	// Spans are the syntax highlighting spans for Lines.
+	Spans [][]syntax.Span
 	// Binary reports a file whose head is not text, so Lines is nil.
 	Binary bool
 	// Truncated reports that the file continues past the head or past the lines kept.
@@ -151,7 +155,7 @@ func (p *Palette) invalidatePreviewInstance() {
 // newPreview turns the head of a file into what the preview column paints. A head with
 // a NUL byte or bytes that are not UTF-8 is binary, so it has no lines; text is split
 // into lines, with a partial last line dropped when the file continues past the read.
-func newPreview(data []byte, truncated bool) Preview {
+func newPreview(path string, data []byte, truncated bool) Preview {
 	if isBinary(data) {
 		return Preview{Binary: true, Truncated: truncated}
 	}
@@ -160,16 +164,23 @@ func newPreview(data []byte, truncated bool) Preview {
 		// The head ends in the middle of a line: it is not shown.
 		lines = lines[:len(lines)-1]
 	}
-	if len(lines) > previewMaxLines {
-		lines, truncated = lines[:previewMaxLines], true
-	}
 	if n := len(lines); n > 0 && lines[n-1] == "" {
 		lines = lines[:n-1] // a final line break does not start a line
+	}
+	if len(lines) > previewMaxLines {
+		lines, truncated = lines[:previewMaxLines], true
 	}
 	for i, line := range lines {
 		lines[i] = cleanPreviewLine(line)
 	}
-	return Preview{StartLine: 1, Lines: lines, Truncated: truncated}
+	var spans [][]syntax.Span
+	if len(lines) > 0 {
+		lx := syntax.Detect(path, data)
+		if s, err := syntax.Tokenize(lx, lines); err == nil {
+			spans = s
+		}
+	}
+	return Preview{StartLine: 1, Lines: lines, Spans: spans, Truncated: truncated}
 }
 
 // isBinary reports whether data is not text: a NUL byte or a byte sequence that is not
@@ -207,11 +218,12 @@ type previewState struct {
 	cache map[string]Preview
 	order []string // the cache keys, least recently used first
 
-	rel    string // the file/window the preview is for (a cache key)
-	target int    // the 1-based line to highlight, 0 for none
-	seq    int    // the read started last; older reads are dropped
-	data   Preview
-	ready  bool // data is the preview of rel
+	rel          string // the file/window the preview is for (a cache key)
+	target       int    // the 1-based line to highlight, 0 for none
+	seq          int    // the read started last; older reads are dropped
+	data         Preview
+	ready        bool // data is the preview of rel
+	scrollOffset int  // lines scrolled down within the preview pane
 	// loading is true while the read of rel is running.
 	loading bool
 	// cancel stops the in-flight live window read when the selection moves away.
@@ -225,6 +237,7 @@ func (s *previewState) reset() {
 		s.cancel = nil
 	}
 	s.rel, s.target, s.data, s.ready, s.loading = "", 0, Preview{}, false, false
+	s.scrollOffset = 0
 }
 
 // lookup returns the cached preview of rel and moves rel to the young end of the LRU
@@ -308,6 +321,7 @@ func (p *Palette) previewCmd() tea.Cmd {
 	}
 	if cached, ok := s.lookup(key); ok {
 		s.rel, s.target, s.data, s.ready, s.loading = key, target, cached, true, false
+		s.scrollOffset = 0
 		return nil
 	}
 	s.reset()
@@ -324,7 +338,7 @@ func (p *Palette) previewCmd() tea.Cmd {
 				if err != nil {
 					return previewMsg{Token: token, Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
 				}
-				return previewMsg{Token: token, Seq: seq, Rel: key, Preview: newWindowPreview(data, first, truncated), Owner: owner}
+				return previewMsg{Token: token, Seq: seq, Rel: key, Preview: newWindowPreview(path, data, first, truncated), Owner: owner}
 			}
 		}
 	}
@@ -333,13 +347,13 @@ func (p *Palette) previewCmd() tea.Cmd {
 		if err != nil {
 			return previewMsg{Token: token, Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
 		}
-		return previewMsg{Token: token, Seq: seq, Rel: key, Preview: newPreview(data, truncated), Owner: owner}
+		return previewMsg{Token: token, Seq: seq, Rel: key, Preview: newPreview(path, data, truncated), Owner: owner}
 	}
 }
 
 // newWindowPreview turns a bounded window around a match line into a preview.
-func newWindowPreview(data []byte, firstLine int, truncated bool) Preview {
-	p := newPreview(data, truncated)
+func newWindowPreview(path string, data []byte, firstLine int, truncated bool) Preview {
+	p := newPreview(path, data, truncated)
 	if firstLine < 1 {
 		firstLine = 1
 	}
@@ -385,9 +399,66 @@ func (p *Palette) previewWanted() bool {
 	return p.inFile
 }
 
+// scrollPreview scrolls the preview pane by delta lines, clamped between 0 and
+// max(0, len(s.data.Lines)-geo.rows).
+func (p *Palette) scrollPreview(delta int) {
+	if p == nil {
+		return
+	}
+	s := &p.preview
+	if !s.ready || len(s.data.Lines) == 0 {
+		return
+	}
+	w := p.width
+	if w <= 0 {
+		w = 120
+	}
+	h := p.height
+	if h <= 0 {
+		return
+	}
+	geo := p.layout(w, h)
+	if !geo.preview || geo.rows <= 0 {
+		return
+	}
+	maxScroll := max(0, len(s.data.Lines)-geo.rows)
+	s.scrollOffset = min(max(0, s.scrollOffset+delta), maxScroll)
+}
+
+func (p *Palette) previewPageRows() int {
+	if p == nil || p.height <= 0 {
+		return 1
+	}
+	w := p.width
+	if w <= 0 {
+		w = 120
+	}
+	geo := p.layout(w, p.height)
+	if geo.rows > 0 {
+		return geo.rows
+	}
+	return 1
+}
+
+func (p *Palette) previewScrollable() bool {
+	if p == nil || p.height <= 0 {
+		return false
+	}
+	s := &p.preview
+	if !s.ready || len(s.data.Lines) == 0 {
+		return false
+	}
+	w := p.width
+	if w <= 0 {
+		w = 120
+	}
+	geo := p.layout(w, p.height)
+	return geo.preview && len(s.data.Lines) > geo.rows
+}
+
 // paintPreview draws the preview column inside the card, to the right of the rows: the
-// divider, the selected file's head with a line-number gutter, and the highlighted
-// target line of a "path:line" query. It paints nothing when the layout gave no column.
+// divider, the selected file's head with a line-number gutter, syntax highlighted text,
+// and the highlighted target line of a "path:line" query. It paints nothing when the layout gave no column.
 func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 	if !geo.preview {
 		return
@@ -424,19 +495,60 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 	}
 	lastLine := startLine + len(lines) - 1
 	gutter := len(strconv.Itoa(max(lastLine, target)))
-	for k := 0; k < geo.rows && k < len(lines); k++ {
+	maxScroll := max(0, len(lines)-geo.rows)
+	offset := min(max(0, s.scrollOffset), maxScroll)
+
+	for k := 0; k < geo.rows && (offset+k) < len(lines); k++ {
+		lineIdx := offset + k
 		y := geo.rowsTop + k
-		lineNo := startLine + k
+		lineNo := startLine + lineIdx
 		st := p.chrome.panel
 		if target == lineNo {
 			st = p.chrome.selected
 			g.Fill(geo.prevX, geo.prevEnd, y, st)
 		}
 		num := fmt.Sprintf("%*d", gutter, lineNo)
-		label := num + " │ " + strings.TrimRight(lines[k], " ")
-		g.Put(geo.prevX, y, geo.prevEnd, space.End(label, geo.prevEnd-geo.prevX), st)
+		gutterText := num + " │ "
+		gutterAdv := g.Put(geo.prevX, y, geo.prevEnd, gutterText, st)
+		x := geo.prevX + gutterAdv
+
+		rawLine := lines[lineIdx]
+		line := strings.TrimRight(rawLine, " ")
+		codeWidth := geo.prevEnd - x
+		if codeWidth <= 0 {
+			continue
+		}
+		if lineIdx >= len(s.data.Spans) || len(s.data.Spans[lineIdx]) == 0 {
+			g.Put(x, y, geo.prevEnd, space.End(line, codeWidth), st)
+		} else {
+			trimmedLen := len(line)
+			for _, span := range s.data.Spans[lineIdx] {
+				if span.Start >= trimmedLen {
+					break
+				}
+				start := span.Start
+				end := min(span.End, trimmedLen)
+				if start >= end {
+					continue
+				}
+				chunk := line[start:end]
+				spanSt := st
+				if span.Kind != syntax.KindPlain {
+					spanSt = p.chrome.syntax[span.Kind]
+					spanSt.BG = st.BG
+				}
+				adv := g.Put(x, y, geo.prevEnd, chunk, spanSt)
+				x += adv
+				if x >= geo.prevEnd {
+					break
+				}
+			}
+			if ansi.StringWidth(line) > codeWidth {
+				g.Set(geo.prevEnd-1, y, "…", st)
+			}
+		}
 	}
-	if s.data.Truncated && len(lines) < geo.rows {
-		g.Put(geo.prevX, geo.rowsTop+len(lines), geo.prevEnd, previewMore, muted)
+	if s.data.Truncated && (len(lines)-offset) < geo.rows {
+		g.Put(geo.prevX, geo.rowsTop+(len(lines)-offset), geo.prevEnd, previewMore, muted)
 	}
 }

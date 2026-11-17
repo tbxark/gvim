@@ -409,3 +409,135 @@ func TestDanglingSymlinkIsFile(t *testing.T) {
 		t.Fatalf("dangling symlink rows = %+v", rows)
 	}
 }
+
+func TestTreeOptionsAndDynamicIgnoreRules(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".gitignore"))
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(root, "ignored.txt"))
+	mustWrite(t, filepath.Join(root, "custom.log"))
+	mustWrite(t, filepath.Join(root, "normal.txt"))
+
+	respectFalse := false
+	previewFalse := false
+	opts := Options{
+		RespectGitignore:     &respectFalse,
+		CustomIgnorePatterns: []string{"*.log"},
+		PreviewTabs:          &previewFalse,
+	}
+
+	tree, err := OpenWithOptions(root, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tree.RespectGitignore() {
+		t.Fatal("expected RespectGitignore() == false")
+	}
+	if tree.PreviewTabs() {
+		t.Fatal("expected PreviewTabs() == false")
+	}
+	if !reflect.DeepEqual(tree.CustomIgnorePatterns(), []string{"*.log"}) {
+		t.Fatalf("unexpected custom patterns: %v", tree.CustomIgnorePatterns())
+	}
+
+	// Because RespectGitignore is false, ignored.txt is NOT ignored, but custom.log IS ignored.
+	// tree defaults to showIgnored = false.
+	rows := tree.Rows()
+	hasIgnoredTxt := false
+	hasCustomLog := false
+	hasNormalTxt := false
+	for _, r := range rows {
+		if filepath.Base(r.Path) == "ignored.txt" {
+			hasIgnoredTxt = true
+		}
+		if filepath.Base(r.Path) == "custom.log" {
+			hasCustomLog = true
+		}
+		if filepath.Base(r.Path) == "normal.txt" {
+			hasNormalTxt = true
+		}
+	}
+	if !hasIgnoredTxt || !hasNormalTxt || hasCustomLog {
+		t.Fatalf("initial rows mismatch: ignored.txt=%v, normal.txt=%v, custom.log=%v", hasIgnoredTxt, hasNormalTxt, hasCustomLog)
+	}
+
+	// Test Snapshot carrying ignore rules
+	snap := tree.Snapshot()
+	listing := snap.Read()
+	foundIgnoredInListing := false
+	for _, entry := range listing.entries[root] {
+		if entry.Name == "ignored.txt" && entry.IsIgnored {
+			foundIgnoredInListing = true
+		}
+	}
+	if foundIgnoredInListing {
+		t.Fatal("snapshot listing should not mark ignored.txt as ignored when respectGitignore is false")
+	}
+
+	// Change RespectGitignore to true
+	tree.SetRespectGitignore(true)
+	if !tree.RespectGitignore() {
+		t.Fatal("expected RespectGitignore() == true")
+	}
+	rows = tree.Rows()
+	hasIgnoredTxt = false
+	for _, r := range rows {
+		if filepath.Base(r.Path) == "ignored.txt" {
+			hasIgnoredTxt = true
+		}
+	}
+	if hasIgnoredTxt {
+		t.Fatal("ignored.txt should now be hidden after SetRespectGitignore(true)")
+	}
+
+	// Clear custom ignore patterns
+	tree.SetCustomIgnorePatterns(nil)
+	rows = tree.Rows()
+	hasCustomLog = false
+	for _, r := range rows {
+		if filepath.Base(r.Path) == "custom.log" {
+			hasCustomLog = true
+		}
+	}
+	if !hasCustomLog {
+		t.Fatal("custom.log should now be shown after SetCustomIgnorePatterns(nil)")
+	}
+
+	// Toggle preview tabs
+	tree.SetPreviewTabs(true)
+	if !tree.PreviewTabs() {
+		t.Fatal("expected PreviewTabs() == true")
+	}
+}
+
+func TestPatternMatcher(t *testing.T) {
+	matcher := NewPatternMatcher([]string{"*.log", "build/", "nested/deep/*.tmp"})
+	if matcher == nil {
+		t.Fatal("expected non-nil matcher")
+	}
+
+	if !matcher("app.log", false) {
+		t.Error("expected app.log to match *.log")
+	}
+	if !matcher("subdir/app.log", false) {
+		t.Error("expected subdir/app.log to match *.log")
+	}
+	if !matcher("build/out.bin", false) {
+		t.Error("expected build/out.bin to match build/")
+	}
+	if !matcher("build", true) {
+		t.Error("expected directory build to match build/")
+	}
+	if !matcher("nested/deep/foo.tmp", false) {
+		t.Error("expected nested/deep/foo.tmp to match")
+	}
+	if matcher("other/deep/foo.tmp", false) {
+		t.Error("expected other/deep/foo.tmp to not match")
+	}
+	if matcher("app.txt", false) {
+		t.Error("expected app.txt to not match")
+	}
+}

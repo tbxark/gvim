@@ -137,16 +137,39 @@ type Options struct {
 	// file_explorer.auto_open_on_last_buffer_close: focus the explorer when the
 	// last buffer closes.
 	AutoOpenOnLastBufferClose bool
+	// RespectGitignore is file_explorer.respect_gitignore: whether to filter or
+	// gray out files matching .gitignore rules. Default true.
+	RespectGitignore *bool
+	// CustomIgnorePatterns is file_explorer.custom_ignore_patterns: wildcard
+	// ignore patterns (e.g. *.log, build/).
+	CustomIgnorePatterns []string
+	// PreviewTabs is file_explorer.preview_tabs: whether single-clicking or
+	// navigating files opens a preview tab. Default true.
+	PreviewTabs *bool
 }
 
 // DefaultOptions returns Fresh's defaults for the non-width explorer options:
 // compact directories on, auto-open on the last buffer close on, following off,
-// left side. The width stays automatic, so a frame built without config keeps
-// its own default width (the app always passes the configured width).
+// left side, respect gitignore on, preview tabs on. The width stays automatic,
+// so a frame built without config keeps its own default width (the app always
+// passes the configured width).
 func DefaultOptions() Options {
+	trueVal := true
 	return Options{
 		Side:                      SideLeft,
 		CompactDirectories:        true,
 		AutoOpenOnLastBufferClose: true,
+		RespectGitignore:          &trueVal,
+		PreviewTabs:               &trueVal,
 	}
+}
+
+// RespectGitignoreEnabled reports whether gitignore is respected (default true).
+func (o Options) RespectGitignoreEnabled() bool {
+	return o.RespectGitignore == nil || *o.RespectGitignore
+}
+
+// PreviewTabsEnabled reports whether preview tabs are enabled (default true).
+func (o Options) PreviewTabsEnabled() bool {
+	return o.PreviewTabs == nil || *o.PreviewTabs
 }

@@ -201,3 +201,99 @@ func TestListDirErrors(t *testing.T) {
 		t.Fatal("ListDir with dir outside IgnoreRoot returned no error")
 	}
 }
+
+func TestListDirRespectGitignoreFalse(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		".gitignore": "*.ignored\n",
+		"a.ignored":  "text",
+		"b.go":       "text",
+	})
+
+	// When RespectGitignore is default (nil) or explicitly true: a.ignored is filtered out.
+	gotDefault := listNames(t, root, ListOptions{IgnoreRoot: root})
+	if !reflect.DeepEqual(gotDefault, []string{"b.go"}) {
+		t.Fatalf("default respect gitignore: got %v, want [b.go]", gotDefault)
+	}
+
+	respectTrue := true
+	gotTrue := listNames(t, root, ListOptions{IgnoreRoot: root, RespectGitignore: &respectTrue})
+	if !reflect.DeepEqual(gotTrue, []string{"b.go"}) {
+		t.Fatalf("respect gitignore true: got %v, want [b.go]", gotTrue)
+	}
+
+	// When RespectGitignore is explicitly false: .gitignore is skipped, a.ignored is included and not marked ignored.
+	respectFalse := false
+	gotFalse := listNames(t, root, ListOptions{IgnoreRoot: root, RespectGitignore: &respectFalse})
+	if !reflect.DeepEqual(gotFalse, []string{"a.ignored", "b.go"}) {
+		t.Fatalf("respect gitignore false: got %v, want [a.ignored, b.go]", gotFalse)
+	}
+
+	entries, err := ListDir(root, ListOptions{IgnoreRoot: root, RespectGitignore: &respectFalse, ShowIgnored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name == "a.ignored" && e.IsIgnored {
+			t.Errorf("a.ignored IsIgnored = true with RespectGitignore=false, want false")
+		}
+	}
+}
+
+func TestListDirCustomIgnorePatterns(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"app.log":        "log",
+		"build/out.bin":  "bin",
+		"src/main.go":    "go",
+		"dist/bundle.js": "js",
+	})
+
+	opts := ListOptions{
+		IgnoreRoot:           root,
+		CustomIgnorePatterns: []string{"*.log", "build/", "dist/"},
+	}
+	got := listNames(t, root, opts)
+	if !reflect.DeepEqual(got, []string{"src/"}) {
+		t.Fatalf("CustomIgnorePatterns = %v, want [src/]", got)
+	}
+
+	// With ShowIgnored: true, the custom ignored entries are listed with IsIgnored=true
+	opts.ShowIgnored = true
+	entries, err := ListDir(root, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignoredMap := make(map[string]bool)
+	for _, e := range entries {
+		ignoredMap[e.Name] = e.IsIgnored
+	}
+	if !ignoredMap["app.log"] || !ignoredMap["build"] || !ignoredMap["dist"] {
+		t.Errorf("custom ignored entries not marked IsIgnored: %+v", ignoredMap)
+	}
+	if ignoredMap["src"] {
+		t.Errorf("src unexpectedly marked IsIgnored")
+	}
+}
+
+func TestListDirRespectGitignoreFalseWithCustomPatterns(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		".gitignore": "*.gitignored\n",
+		"a.gitignored": "content",
+		"test.log":     "content",
+		"main.go":      "content",
+	})
+
+	respectFalse := false
+	opts := ListOptions{
+		IgnoreRoot:           root,
+		RespectGitignore:     &respectFalse,
+		CustomIgnorePatterns: []string{"*.log"},
+	}
+	// .gitignore rule (*.gitignored) should be skipped, but custom pattern (*.log) should still filter
+	got := listNames(t, root, opts)
+	if !reflect.DeepEqual(got, []string{"a.gitignored", "main.go"}) {
+		t.Fatalf("got %v, want [a.gitignored, main.go]", got)
+	}
+}

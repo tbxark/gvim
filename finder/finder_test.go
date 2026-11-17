@@ -217,3 +217,105 @@ func TestIndexCapsAtMaxFiles(t *testing.T) {
 		t.Fatalf("len = %d, Truncated = %v", len(files), x.Truncated())
 	}
 }
+
+func TestEnumerateCustomIgnorePatterns(t *testing.T) {
+	// 1. In a git repository
+	requireGit(t)
+	gitRoot := t.TempDir()
+	writeFiles(t, gitRoot, map[string]string{
+		".gitignore":  "gitignored.txt\n",
+		"tracked.txt": "hello",
+		"app.log":     "log",
+		"build/out":   "binary",
+		"sub/deep.log": "deep log",
+		"sub/keep.txt": "keep",
+	})
+	run := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", gitRoot}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	run("config", "user.name", "test")
+	run("config", "user.email", "test@test.local")
+	run("add", ".")
+	run("commit", "-m", "init")
+
+	// Custom ignore patterns should filter app.log, build/out, sub/deep.log even from git enumeration
+	var gitFiltered []string
+	err := EnumerateWithOptions(context.Background(), gitRoot, Options{
+		CustomIgnorePatterns: []string{"*.log", "build/"},
+	}, func(rel string) bool {
+		gitFiltered = append(gitFiltered, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(gitFiltered)
+	wantGit := []string{".gitignore", "sub/keep.txt", "tracked.txt"}
+	if !reflect.DeepEqual(gitFiltered, wantGit) {
+		t.Fatalf("gitFiltered = %v, want %v", gitFiltered, wantGit)
+	}
+
+	// 2. In a plain directory (walk fallback)
+	plainRoot := t.TempDir()
+	writeFiles(t, plainRoot, map[string]string{
+		".gitignore":     "gitignored.txt\n",
+		"gitignored.txt": "ignored by gitignore",
+		"app.log":        "log",
+		"build/out":      "binary",
+		"normal.txt":     "normal",
+	})
+
+	respectFalse := false
+	var walkFiltered []string
+	err = EnumerateWithOptions(context.Background(), plainRoot, Options{
+		RespectGitignore:     &respectFalse,
+		CustomIgnorePatterns: []string{"*.log", "build/"},
+	}, func(rel string) bool {
+		walkFiltered = append(walkFiltered, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(walkFiltered)
+	// Because RespectGitignore is false, gitignored.txt is included, but *.log and build/ are excluded
+	wantWalk := []string{"gitignored.txt", "normal.txt"}
+	if !reflect.DeepEqual(walkFiltered, wantWalk) {
+		t.Fatalf("walkFiltered = %v, want %v", walkFiltered, wantWalk)
+	}
+
+	// 3. Test Index.SetOptions re-enumeration
+	idx := Start(context.Background(), gitRoot, Options{
+		CustomIgnorePatterns: []string{"*.log", "build/"},
+	})
+	defer idx.Close()
+	// Wait until loaded
+	for {
+		_, loading := idx.Snapshot()
+		if !loading {
+			break
+		}
+	}
+	files, _ := idx.Snapshot()
+	slices.Sort(files)
+	if !reflect.DeepEqual(files, wantGit) {
+		t.Fatalf("index files = %v, want %v", files, wantGit)
+	}
+
+	// Re-enumerate with no ignore patterns
+	idx.SetOptions(gitRoot, Options{})
+	for {
+		_, loading := idx.Snapshot()
+		if !loading {
+			break
+		}
+	}
+	files2, _ := idx.Snapshot()
+	if !slices.Contains(files2, "app.log") {
+		t.Fatalf("expected app.log after SetOptions without custom patterns, got %v", files2)
+	}
+}

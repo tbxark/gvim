@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/searchpanel"
 )
 
 // writeTree writes each file under dir, creating the folders it needs.
@@ -348,5 +349,47 @@ func TestLiveGrepIgnoredListingExpires(t *testing.T) {
 	g.walkAt = g.walkAt.Add(-2 * ignoredWalkTTL)
 	if got := g.ignoredFiles(dir); len(got) != 2 {
 		t.Fatalf("an expired cache was reused: %v", got)
+	}
+}
+
+func TestLiveGrepFiltersCustomIgnorePatterns(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"src/main.go":   "needle found\n",
+		"build/out.txt": "needle ignored\n",
+		"app.log":       "needle ignored\n",
+	})
+	files := []string{"src/main.go", "build/out.txt", "app.log"}
+	g := grepFor(editor.Options{}, []string{"*.log", "build/"})
+	req := fileReq(dir, files, "needle")
+	hits, err := g.Search(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Rel != "src/main.go" {
+		t.Fatalf("hits = %+v, want only src/main.go", hits)
+	}
+}
+
+func TestProjectSearchFiltersCustomIgnorePatterns(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"src/main.go":   "needle found\n",
+		"build/out.txt": "needle ignored\n",
+		"app.log":       "needle ignored\n",
+	})
+	ps := newProjectSearch(editor.Options{}, []string{"*.log", "build/"})
+	res, err := ps.ProjectSearch(searchpanel.SearchRequest{
+		Root:  dir,
+		Query: "needle",
+		Files: []string{"src/main.go", "build/out.txt", "app.log"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Files) != 1 || res.Files[0].Name != "src/main.go" {
+		t.Fatalf("res.Files = %+v, want only src/main.go", res.Files)
 	}
 }

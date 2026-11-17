@@ -56,6 +56,7 @@ type settingsService struct {
 	// remote authority watcher). A config Reload that changes env.detectors re-plans its
 	// bounded watch set.
 	envWatch envWatchReplanner
+	configReload func(config.Config)
 
 	// lastDiags are the diagnostics of the last reload, so a write-then-reload
 	// path can verify that the file it wrote still loads (the plugin toggle rolls
@@ -490,9 +491,13 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.cfg = cfg
 	s.lastDiags = diags
 	s.themePreviews = previews
+	reloadFn := s.configReload
 	s.mu.Unlock()
 	if s.rt.lspReload != nil {
 		s.rt.lspReload(cfg)
+	}
+	if reloadFn != nil {
+		reloadFn(cfg)
 	}
 	s.applyEnvDetectorChange(previous, cfg)
 	return change, nil
@@ -509,6 +514,12 @@ type envWatchReplanner interface {
 func (s *settingsService) setEnvWatch(w envWatchReplanner) {
 	s.mu.Lock()
 	s.envWatch = w
+	s.mu.Unlock()
+}
+
+func (s *settingsService) setConfigReload(fn func(config.Config)) {
+	s.mu.Lock()
+	s.configReload = fn
 	s.mu.Unlock()
 }
 
@@ -922,6 +933,8 @@ func structuredSettingChanged(key string, old, next config.Config) bool {
 		return !slices.Equal(old.StatusBar.Right, next.StatusBar.Right)
 	case "terminal.shell.args":
 		return !slices.Equal(old.Terminal.Shell.Args, next.Terminal.Shell.Args)
+	case "file_explorer.custom_ignore_patterns":
+		return !slices.Equal(old.FileExplorer.CustomIgnorePatterns, next.FileExplorer.CustomIgnorePatterns)
 	}
 	return false
 }
