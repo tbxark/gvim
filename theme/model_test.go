@@ -81,7 +81,7 @@ func TestExtendsAParsedTheme(t *testing.T) {
 
 func standaloneThemeBody() string {
 	// A complete standalone theme: every required color named.
-	body := `{"name":"standalone","editor":{"bg":[10,10,10],"fg":[240,240,240],"cursor":[255,0,0],"current_line_bg":[20,20,20],"line_number_bg":[15,15,15],"line_number_fg":[100,100,100],"selection_bg":[30,30,60]},"ui":{"help_bg":[1,1,1],"help_fg":[2,2,2],"help_indicator_bg":[3,3,3],"help_indicator_fg":[4,4,4],"help_key_fg":[5,5,5],"help_separator_fg":[6,6,6],"popup_bg":[7,7,7],"popup_border_fg":[8,8,8],"popup_selection_bg":[9,9,9],"popup_text_fg":[10,10,10],"prompt_bg":[11,11,11],"prompt_fg":[12,12,12],"prompt_selection_bg":[13,13,13],"prompt_selection_fg":[14,14,14],"split_separator_fg":[15,15,15],"status_bar_bg":[16,16,16],"status_bar_fg":[17,17,17],"suggestion_bg":[18,18,18],"suggestion_selected_bg":[19,19,19],"tab_active_bg":[20,20,20],"tab_active_fg":[21,21,21],"tab_inactive_bg":[22,22,22],"tab_inactive_fg":[23,23,23],"tab_separator_bg":[24,24,24]},"syntax":{"comment":[30,30,30],"constant":[31,31,31],"function":[32,32,32],"keyword":[33,33,33],"operator":[34,34,34],"string":[35,35,35],"type":[36,36,36],"variable":[37,37,37]},"diagnostic":{"error_bg":[40,40,40],"error_fg":[41,41,41],"hint_bg":[42,42,42],"hint_fg":[43,43,43],"info_bg":[44,44,44],"info_fg":[45,45,45],"warning_bg":[46,46,46],"warning_fg":[47,47,47]},"search":{"match_bg":[50,50,50],"match_fg":[51,51,51]}}`
+	body := `{"name":"standalone","editor":{"bg":[10,10,10],"fg":[240,240,240],"cursor":[255,0,0],"current_line_bg":[20,20,20],"line_number_bg":[15,15,15],"line_number_fg":[100,100,100],"selection_bg":[30,30,60]},"ui":{"popup_bg":[7,7,7],"popup_border_fg":[8,8,8],"popup_selection_bg":[9,9,9],"popup_text_fg":[10,10,10],"prompt_selection_bg":[13,13,13],"split_separator_fg":[15,15,15],"status_bar_bg":[16,16,16],"status_bar_fg":[17,17,17],"suggestion_selected_bg":[19,19,19],"tab_active_bg":[20,20,20],"tab_active_fg":[21,21,21],"tab_inactive_bg":[22,22,22],"tab_inactive_fg":[23,23,23],"tab_separator_bg":[24,24,24]},"syntax":{"comment":[30,30,30],"constant":[31,31,31],"function":[32,32,32],"keyword":[33,33,33],"operator":[34,34,34],"string":[35,35,35],"type":[36,36,36],"variable":[37,37,37]},"diagnostic":{"error_bg":[40,40,40],"error_fg":[41,41,41],"hint_fg":[43,43,43],"info_bg":[44,44,44],"info_fg":[45,45,45],"warning_bg":[46,46,46],"warning_fg":[47,47,47]},"search":{"match_bg":[50,50,50],"match_fg":[51,51,51]}}`
 	return body
 }
 
@@ -92,10 +92,10 @@ func TestStandaloneFallbackChains(t *testing.T) {
 	if !ok || !sameColor(got, want) {
 		t.Fatalf("inactive_cursor = %+v (ok %v), want the line_number_fg fallback %+v", got, ok, want)
 	}
-	hover, _ := th.Value("ui", "menu_hover_bg")
+	selected, _ := th.Value("ui", "settings_selected_bg")
 	sel, _ := th.Value("ui", "popup_selection_bg")
-	if !sameColor(hover, sel) {
-		t.Fatalf("menu_hover_bg = %+v, want the popup selection %+v", hover, sel)
+	if !sameColor(selected, sel) {
+		t.Fatalf("settings_selected_bg = %+v, want the popup selection %+v", selected, sel)
 	}
 }
 
@@ -171,33 +171,43 @@ func TestWithOverrides(t *testing.T) {
 }
 
 func TestMarshalFileRoundTrips(t *testing.T) {
-	original, err := theme.Load("dark")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := original.MarshalFile("my-copy")
-	if err != nil {
-		t.Fatalf("MarshalFile error = %v", err)
-	}
-	file, err := theme.ParseFile(data)
-	if err != nil {
-		t.Fatalf("ParseFile of the saved theme = %v", err)
-	}
-	saved, err := theme.Resolve(file)
-	if err != nil {
-		t.Fatalf("Resolve of the saved theme = %v", err)
-	}
-	if saved.Name != "my-copy" {
-		t.Errorf("name = %q, want my-copy", saved.Name)
-	}
-	for _, key := range theme.Keys() {
-		before, ok := original.Value(key.Section, key.Key)
-		if !ok {
-			continue
+	for _, name := range []string{"dark", "terminal"} {
+		original, err := theme.Load(name)
+		if err != nil {
+			t.Fatal(err)
 		}
-		after, ok := saved.Value(key.Section, key.Key)
-		if !ok || before.IsRGB != after.IsRGB || before.RGB != after.RGB || before.Name != after.Name || !slices.Equal(before.Modifiers, after.Modifiers) {
-			t.Fatalf("%s: saved %+v, want %+v", key.Name(), after, before)
+		data, err := original.MarshalFile("my-copy")
+		if err != nil {
+			t.Fatalf("MarshalFile(%s) error = %v", name, err)
+		}
+		file, err := theme.ParseFile(data)
+		if err != nil {
+			t.Fatalf("ParseFile(%s) of the saved theme = %v", name, err)
+		}
+		saved, err := theme.Resolve(file)
+		if err != nil {
+			t.Fatalf("Resolve(%s) of the saved theme = %v", name, err)
+		}
+		if saved.Name != "my-copy" {
+			t.Errorf("%s: name = %q, want my-copy", name, saved.Name)
+		}
+		for _, key := range theme.Keys() {
+			before, ok := original.Value(key.Section, key.Key)
+			if !ok {
+				continue
+			}
+			after, ok := saved.Value(key.Section, key.Key)
+			if !ok || before.IsRGB != after.IsRGB || before.RGB != after.RGB || before.Name != after.Name || !slices.Equal(before.Modifiers, after.Modifiers) {
+				t.Fatalf("%s/%s: saved %+v, want %+v", name, key.Name(), after, before)
+			}
+		}
+	}
+}
+
+func TestParseColorJSONRejectsEmptyOrUnknownModifiers(t *testing.T) {
+	for _, raw := range []string{`[]`, `["bogus"]`, `{"color":"Red","modifier":["bogus"]}`} {
+		if _, err := theme.ParseColorJSON([]byte(raw)); err == nil {
+			t.Errorf("ParseColorJSON(%s) succeeded, want error", raw)
 		}
 	}
 }
@@ -205,8 +215,8 @@ func TestMarshalFileRoundTrips(t *testing.T) {
 func TestRegistryUserThemesAndReload(t *testing.T) {
 	dir := t.TempDir()
 	r := theme.NewRegistry(dir)
-	if got := len(r.Infos()); got != 10 {
-		t.Fatalf("Infos = %d, want the 10 bundled themes", got)
+	if got := len(r.Infos()); got != 11 {
+		t.Fatalf("Infos = %d, want the 11 bundled themes", got)
 	}
 	if _, err := r.Load("dark"); err != nil {
 		t.Fatalf("Load(dark) = %v", err)

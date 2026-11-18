@@ -173,13 +173,32 @@ func ParseModifiers(text string) ([]string, error) {
 // FormatModifiers is the theme editor form of an attribute list.
 func FormatModifiers(names []string) string { return strings.Join(NormalizeModifiers(names), ",") }
 
+func parseModifierList(names []string) ([]string, error) {
+	out := make([]string, 0, len(names))
+	for _, raw := range names {
+		norm := NormalizeModifiers([]string{raw})
+		if len(norm) == 0 {
+			return nil, fmt.Errorf("unknown text attribute %q (want bold, italic, underlined, dim or reversed)", strings.TrimSpace(raw))
+		}
+		out = append(out, norm[0])
+	}
+	return out, nil
+}
+
 // ParseColorJSON parses one theme-file value: an [r,g,b] array, a named color
 // string, a {"color":..., "modifier":[...]} bundle, or a bare modifier list
 // (kept for the file's attribute-only keys).
 func ParseColorJSON(raw json.RawMessage) (Color, error) {
 	var mods []string
 	if err := json.Unmarshal(raw, &mods); err == nil {
-		return Color{Modifiers: NormalizeModifiers(mods)}, nil
+		if len(mods) == 0 {
+			return Color{}, fmt.Errorf("modifier list must not be empty")
+		}
+		norm, err := parseModifierList(mods)
+		if err != nil {
+			return Color{}, err
+		}
+		return Color{Modifiers: norm}, nil
 	}
 	var nums []int
 	if err := json.Unmarshal(raw, &nums); err == nil {
@@ -203,17 +222,21 @@ func ParseColorJSON(raw json.RawMessage) (Color, error) {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return Color{}, fmt.Errorf("unrecognized value: %w", err)
 	}
+	modsNorm, err := parseModifierList(obj.Modifier)
+	if err != nil {
+		return Color{}, err
+	}
 	switch {
 	case obj.Color == nil && obj.Modifier == nil:
 		return Color{}, fmt.Errorf("object has neither color nor modifier")
 	case obj.Color == nil:
-		return Color{Modifiers: NormalizeModifiers(obj.Modifier)}, nil
+		return Color{Modifiers: modsNorm}, nil
 	}
 	c, err := ParseColorJSON(obj.Color)
 	if err != nil {
 		return Color{}, err
 	}
-	c.Modifiers = NormalizeModifiers(obj.Modifier)
+	c.Modifiers = modsNorm
 	return c, nil
 }
 

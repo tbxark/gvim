@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/tbxark/gvim/theme"
@@ -11,8 +12,8 @@ import (
 
 func TestEveryBundledThemeLoads(t *testing.T) {
 	names := theme.Names()
-	if len(names) != 10 {
-		t.Fatalf("Names() = %v, want the 10 Fresh themes", names)
+	if len(names) != 11 {
+		t.Fatalf("Names() = %v, want the 11 bundled themes", names)
 	}
 	for _, name := range names {
 		th, err := theme.Load(name)
@@ -142,5 +143,49 @@ func TestDeleteThemeWithoutAUserDirRefusesAFileURL(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the file was removed: %v", err)
+	}
+}
+
+func TestWithoutColorStripsColorsAndKeepsFocusAttributes(t *testing.T) {
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mono := th.WithoutColor()
+	modOnly := theme.ModifierOnlyKeys()
+	for _, sec := range mono.Sections() {
+		for _, k := range mono.Keys() {
+			if k.Section != sec {
+				continue
+			}
+			c, ok := mono.Value(sec, k.Key)
+			if !ok {
+				continue
+			}
+			if slices.Contains(modOnly, k.Name()) {
+				if c.IsRGB || c.Name != "" {
+					t.Fatalf("%s.%s = %+v, want modifier-only empty Name", sec, k.Key, c)
+				}
+				continue
+			}
+			if c.IsRGB || !c.IsTerminalDefault() {
+				t.Fatalf("%s.%s = %+v, want terminal Default", sec, k.Key, c)
+			}
+		}
+	}
+	if sel, ok := mono.Value("editor", "selection_bg"); !ok || len(sel.Modifiers) == 0 {
+		t.Fatalf("selection_bg = %+v, want reversed modifier", sel)
+	}
+	if acc, ok := mono.Value("ui", "accent_bg"); !ok || len(acc.Modifiers) == 0 {
+		t.Fatalf("accent_bg = %+v, want reversed modifier", acc)
+	}
+	if tiSel, ok := mono.Value("ui", "text_input_selection_bg"); !ok || len(tiSel.Modifiers) == 0 {
+		t.Fatalf("text_input_selection_bg = %+v, want reversed modifier", tiSel)
+	}
+	if sem, ok := mono.Value("ui", "semantic_highlight_bg"); !ok || len(sem.Modifiers) == 0 {
+		t.Fatalf("semantic_highlight_bg = %+v, want underlined modifier", sem)
+	}
+	if match, ok := mono.Value("search", "match_bg"); !ok || len(match.Modifiers) == 0 {
+		t.Fatalf("match_bg = %+v, want underlined modifier", match)
 	}
 }

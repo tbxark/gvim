@@ -118,6 +118,9 @@ type Map struct {
 	// binding, and a surface that consults the keymap before its own built-in handler
 	// (the overlays) must swallow the key instead of falling back to that handler.
 	unbound map[lookupKey]bool
+	// primary maps action -> winning Primary(action) binding in O(1), computed after
+	// all bindings and unbinds are populated.
+	primary map[string]Binding
 }
 
 type lookupKey struct {
@@ -484,6 +487,7 @@ func newMap(list []Binding) *Map {
 			m.index[k] = i
 		}
 	}
+	m.buildPrimary()
 	return m
 }
 
@@ -640,12 +644,42 @@ func (m *Map) lookup(idx map[lookupKey]int, chords []string, ctx Context) (Bindi
 // with a twin in actionTwins also counts the twin's bindings: Close Buffer shows the key
 // that closes the tab. ok is false when the action has no such binding.
 func (m *Map) Primary(action string) (Binding, bool) {
-	// best is indexed by origin (own, inherited), kind (single, sequence) and tier (normal,
-	// global, other).
-	var best [2][2][3]*Binding
+	if m == nil {
+		return Binding{}, false
+	}
+	b, ok := m.primary[action]
+	return b, ok
+}
+
+func (m *Map) buildPrimary() {
+	if m == nil || len(m.bindings) == 0 {
+		m.primary = nil
+		return
+	}
+	// Map canonical twins backwards so one pass over m.bindings populates both
+	// the action itself and any twin alias (e.g. "close" -> "close_tab").
+	var twinFor map[string][]string
+	for alias, target := range actionTwins {
+		if twinFor == nil {
+			twinFor = make(map[string][]string, len(actionTwins))
+		}
+		twinFor[target] = append(twinFor[target], alias)
+	}
+	type candidateGrid [2][2][2][3]*Binding
+	cands := make(map[string]*candidateGrid, len(m.bindings)/2+4)
+	record := func(act string, b *Binding, hasArgs, origin, kind, tier int) {
+		grid := cands[act]
+		if grid == nil {
+			grid = &candidateGrid{}
+			cands[act] = grid
+		}
+		if cur := &grid[hasArgs][origin][kind][tier]; *cur == nil || simpler(*b, **cur) {
+			*cur = b
+		}
+	}
 	for i := range m.bindings {
 		b := &m.bindings[i]
-		if (b.Action != action && b.Action != actionTwins[action]) || !m.effective(i) {
+		if b.Action == "" || b.Action == ActionNoop || !m.effective(i) {
 			continue
 		}
 		tier := 2
@@ -655,36 +689,68 @@ func (m *Map) Primary(action string) (Binding, bool) {
 		case ContextGlobal:
 			tier = 1
 		}
-		origin, kind := 0, 0
+		hasArgs, origin, kind := 0, 0, 0
+		if len(b.Args) > 0 {
+			hasArgs = 1
+		}
 		if b.inherited {
 			origin = 1
 		}
 		if b.Sequence != nil {
 			kind = 1
 		}
-		if cur := &best[origin][kind][tier]; *cur == nil || simpler(*b, **cur) {
-			*cur = b
+		record(b.Action, b, hasArgs, origin, kind, tier)
+		for _, alias := range twinFor[b.Action] {
+			record(alias, b, hasArgs, origin, kind, tier)
 		}
 	}
-	// The keys of the editor itself, own before inherited and single before sequence, come
-	// before the keys of other contexts, which a menu or palette does not show.
-	for origin := range best {
-		for kind := range best[origin] {
-			for tier := range 2 {
-				if b := best[origin][kind][tier]; b != nil {
-					return *b, true
+	out := make(map[string]Binding, len(cands))
+	for act, grid := range cands {
+		var winner *Binding
+		for hasArgs := range grid {
+			for origin := range grid[hasArgs] {
+				for kind := range grid[hasArgs][origin] {
+					for tier := range 2 {
+						if b := grid[hasArgs][origin][kind][tier]; b != nil {
+							winner = b
+							break
+						}
+					}
+					if winner != nil {
+						break
+					}
+				}
+				if winner != nil {
+					break
+				}
+			}
+			if winner != nil {
+				break
+			}
+		}
+		if winner == nil {
+			for hasArgs := range grid {
+				for kind := range 2 {
+					for origin := range 2 {
+						if b := grid[hasArgs][origin][kind][2]; b != nil {
+							winner = b
+							break
+						}
+					}
+					if winner != nil {
+						break
+					}
+				}
+				if winner != nil {
+					break
 				}
 			}
 		}
-	}
-	for kind := range 2 {
-		for origin := range best {
-			if b := best[origin][kind][2]; b != nil {
-				return *b, true
-			}
+		if winner != nil {
+			out[act] = *winner
 		}
 	}
-	return Binding{}, false
+	m.primary = out
 }
 
 // simpler reports whether a is the simpler binding to show than b, which has the same

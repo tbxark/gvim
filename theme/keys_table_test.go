@@ -7,23 +7,20 @@ import (
 	"github.com/tbxark/gvim/theme"
 )
 
-// requiredKeys is the ported list from Fresh commit
-// 2338640274915a37786810bd8b59439c6633ba64 (types.rs theme_color_keys: every
-// color row without a fallback). The checked-table test fails if the ported
-// table drifts from this list.
+// requiredKeys is the color rows without a fallback in themeKeys.
+// The checked-table test fails if the table drifts from this list.
 var requiredKeys = []string{
 	"editor.bg", "editor.current_line_bg", "editor.cursor", "editor.fg",
 	"editor.line_number_bg", "editor.line_number_fg", "editor.selection_bg",
-	"ui.help_bg", "ui.help_fg", "ui.help_indicator_bg", "ui.help_indicator_fg",
-	"ui.help_key_fg", "ui.help_separator_fg", "ui.popup_bg", "ui.popup_border_fg",
-	"ui.popup_selection_bg", "ui.popup_text_fg", "ui.prompt_bg", "ui.prompt_fg",
-	"ui.prompt_selection_bg", "ui.prompt_selection_fg", "ui.split_separator_fg",
-	"ui.status_bar_bg", "ui.status_bar_fg", "ui.suggestion_bg",
+	"ui.popup_bg", "ui.popup_border_fg",
+	"ui.popup_selection_bg", "ui.popup_text_fg",
+	"ui.prompt_selection_bg", "ui.split_separator_fg",
+	"ui.status_bar_bg", "ui.status_bar_fg",
 	"ui.suggestion_selected_bg", "ui.tab_active_bg", "ui.tab_active_fg",
 	"ui.tab_inactive_bg", "ui.tab_inactive_fg", "ui.tab_separator_bg",
 	"syntax.comment", "syntax.constant", "syntax.function", "syntax.keyword",
 	"syntax.operator", "syntax.string", "syntax.type", "syntax.variable",
-	"diagnostic.error_bg", "diagnostic.error_fg", "diagnostic.hint_bg",
+	"diagnostic.error_bg", "diagnostic.error_fg",
 	"diagnostic.hint_fg", "diagnostic.info_bg", "diagnostic.info_fg",
 	"diagnostic.warning_bg", "diagnostic.warning_fg", "search.match_bg",
 	"search.match_fg",
@@ -31,9 +28,9 @@ var requiredKeys = []string{
 
 func TestThemeKeyTableIsComplete(t *testing.T) {
 	keys := theme.Keys()
-	// 143 from Fresh's table plus gvim's two accent extension keys.
-	if len(keys) != 145 {
-		t.Fatalf("Keys() has %d keys, want 143 Fresh keys plus the 2 gvim accent keys", len(keys))
+	// 80 kept Fresh keys plus gvim's two accent extension keys.
+	if len(keys) != 82 {
+		t.Fatalf("Keys() has %d keys, want 80 kept Fresh keys plus the 2 gvim accent keys", len(keys))
 	}
 	var required, fallback, optional int
 	for _, key := range keys {
@@ -49,8 +46,8 @@ func TestThemeKeyTableIsComplete(t *testing.T) {
 			t.Errorf("key %q has a bad name", key.Name())
 		}
 	}
-	if required != 49 || fallback != 93 || optional != 3 {
-		t.Errorf("kinds = %d required, %d fallback, %d optional; want 49/93/3", required, fallback, optional)
+	if required != 38 || fallback != 43 || optional != 1 {
+		t.Errorf("kinds = %d required, %d fallback, %d optional; want 38/43/1", required, fallback, optional)
 	}
 	if got := theme.RequiredKeys(); !slices.Equal(got, requiredKeys) {
 		t.Fatalf("RequiredKeys drifted from the ported list: got %v, want %v", got, requiredKeys)

@@ -90,6 +90,31 @@ func TestAccentKeysAreEditorRows(t *testing.T) {
 	}
 }
 
+// TestBundledThemesDeclareAccentExplicitly verifies that every bundled JSON
+// theme declares ui.accent_bg and ui.accent_fg directly (rather than relying
+// only on fallback) and produces zero unknown-key warnings.
+func TestBundledThemesDeclareAccentExplicitly(t *testing.T) {
+	t.Parallel()
+	for _, name := range EmbeddedNames() {
+		raw, err := files.ReadFile("data/" + name + ".json")
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", name, err)
+		}
+		file, err := ParseFile(raw)
+		if err != nil {
+			t.Fatalf("ParseFile(%q): %v", name, err)
+		}
+		if len(file.Warnings) != 0 {
+			t.Errorf("%s: unexpected ParseFile warnings: %v", name, file.Warnings)
+		}
+		for _, key := range []string{"ui.accent_bg", "ui.accent_fg"} {
+			if _, ok := file.Values[key]; !ok {
+				t.Errorf("%s: missing explicit %s declaration", name, key)
+			}
+		}
+	}
+}
+
 // sameModifiers reports whether two modifier lists name the same attributes.
 func sameModifiers(a, b []string) bool {
 	if len(a) != len(b) {

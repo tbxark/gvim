@@ -30,9 +30,10 @@ func TestWithUserBindings(t *testing.T) {
 			chord: "alt+u", ctx: keymap.ContextNormal, want: "to_upper_case",
 		},
 		{
-			name: "the object form still loads", preset: "default",
-			data:  `{"bindings":[{"key":"u","modifiers":["alt"],"action":"to_upper_case","when":"normal"}]}`,
-			chord: "alt+u", ctx: keymap.ContextNormal, want: "to_upper_case",
+			name: "the legacy object form is rejected", preset: "default",
+			data:     `{"bindings":[{"key":"u","modifiers":["alt"],"action":"to_upper_case","when":"normal"}]}`,
+			chord:    "ctrl+s", ctx: keymap.ContextNormal, want: "save",
+			warnings: []string{`keybindings: must be a list of bindings`},
 		},
 		{
 			name: "when defaults to normal", preset: "default",
@@ -321,5 +322,26 @@ func TestUnboundTombstones(t *testing.T) {
 	// The popup's own binding is gone too, so the unbind is not a no-op.
 	if _, ok := m.Resolve("Escape", keymap.ContextPopup); ok {
 		t.Fatal("the popup Escape binding still resolves")
+	}
+	// Global unbind removes normal/context bindings too, and layering preserves earlier tombstones.
+	m2, warnings := base.WithUserBindings([]byte(`[{"key":"b","modifiers":["ctrl"],"action":"unbind","when":"global"}]`), knownTestActions)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if _, ok := m2.Resolve("ctrl+b", keymap.ContextNormal); ok {
+		t.Fatal("global unbind did not remove normal-context ctrl+b")
+	}
+	m3, warnings := m2.WithUserBindings([]byte(`[{"key":"f2","action":"save","when":"normal"}]`), knownTestActions)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if !m3.Unbound("ctrl+b", keymap.ContextNormal) {
+		t.Fatal("stacking WithUserBindings dropped earlier Unbound tombstones")
+	}
+	// Replacements treats differing Args on the same chord+action as a replacement, and ignores non-effective bindings.
+	gui := mustPreset(t, "macos-gui")
+	reps := gui.Replacements([]byte(`[{"key":"o","modifiers":["super","shift"],"action":"command_palette","args":{"filter":"#"},"when":"normal"}]`), nil)
+	if len(reps) != 1 || !strings.Contains(reps[0], `"command_palette"`) {
+		t.Fatalf("Replacements with differing Args = %v, want 1 replacement", reps)
 	}
 }

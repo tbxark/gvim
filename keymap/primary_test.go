@@ -32,6 +32,8 @@ func TestPrimaryLabelsCloseAndPrefersThePresetsOwnBinding(t *testing.T) {
 		{"default", "duplicate_line", "ctrl+shift+d"},
 		{"macos", "duplicate_line", "ctrl+shift+d"},
 		{"macos-gui", "duplicate_line", "shift+super+d"},
+		{"macos-gui", "command_palette", "shift+super+p"},
+		{"default", "cycle_focus", "F7"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.preset+"/"+tc.action, func(t *testing.T) {
@@ -41,5 +43,8 @@ func TestPrimaryLabelsCloseAndPrefersThePresetsOwnBinding(t *testing.T) {
 				t.Errorf("Primary(%s) = %q, %v; want %q", tc.action, b.Chord, ok, tc.want)
 			}
 		})
+	}
+	if b, ok := mustPreset(t, "emacs").Primary("noop"); ok {
+		t.Errorf("Primary(\"noop\") = %+v, true; want false", b)
 	}
 }

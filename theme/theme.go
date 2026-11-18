@@ -13,6 +13,7 @@ package theme
 import (
 	"embed"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -106,3 +107,70 @@ func (c Color) JSON() json.RawMessage { return ColorJSON(c) }
 
 // String is the display form of the color ("#RRGGBB", "Default", "Red").
 func (c Color) String() string { return strings.TrimSpace(c.Hex()) }
+
+// WithoutColor returns a copy of the theme with all color values stripped to
+// terminal default while preserving styling attributes and adding reverse-video
+// or underline attributes to selections, active highlights, and search matches.
+func (t Theme) WithoutColor() Theme {
+	if len(t.sections) == 0 {
+		return t
+	}
+	sections := make(map[string]map[string]Color, len(t.sections))
+	for sec, keys := range t.sections {
+		dst := make(map[string]Color, len(keys))
+		for k, c := range keys {
+			name := "Default"
+			if isModifierOnly(sec + "." + k) {
+				name = ""
+			}
+			dst[k] = Color{
+				Name:      name,
+				Modifiers: NormalizeModifiers(c.Modifiers),
+			}
+		}
+		sections[sec] = dst
+	}
+	addMod := func(sec, key, mod string) {
+		m := sections[sec]
+		if m == nil {
+			m = make(map[string]Color)
+			sections[sec] = m
+		}
+		c, ok := m[key]
+		if !ok {
+			if isModifierOnly(sec + "." + key) {
+				c = Color{}
+			} else {
+				c = Color{Name: "Default"}
+			}
+		}
+		if !slices.Contains(c.Modifiers, mod) {
+			c.Modifiers = append(slices.Clone(c.Modifiers), mod)
+		}
+		m[key] = c
+	}
+	for _, pair := range [][2]string{
+		{"editor", "selection_bg"},
+		{"ui", "accent_bg"},
+		{"ui", "text_input_selection_bg"},
+		{"ui", "popup_selection_bg"},
+		{"ui", "menu_highlight_bg"},
+		{"ui", "settings_selected_bg"},
+		{"ui", "prompt_selection_bg"},
+		{"ui", "suggestion_selected_bg"},
+		{"search", "current_match_bg"},
+	} {
+		addMod(pair[0], pair[1], "reversed")
+	}
+	addMod("search", "match_bg", "underlined")
+	addMod("ui", "semantic_highlight_bg", "underlined")
+	addMod("editor", "selection_modifier", "reversed")
+	addMod("ui", "semantic_highlight_modifier", "underlined")
+	return Theme{
+		Name:     t.Name,
+		sections: sections,
+		dark:     t.dark,
+		darkSet:  t.darkSet,
+		warnings: slices.Clone(t.warnings),
+	}
+}

@@ -72,12 +72,9 @@ func (t Theme) MarshalFile(name string) ([]byte, error) {
 		}
 		values[key.Key] = ColorJSON(color)
 	}
-	// The attribute-only keys without a color of their own keep their value;
-	// the two with a color key are already saved on that color's bundle.
+	// Preserve attribute-only keys whenever they carry modifiers so files that define
+	// editor.selection_modifier or ui.semantic_highlight_modifier round-trip cleanly.
 	for _, name := range modifierOnlyKeys {
-		if _, ok := modifierTarget(name); ok {
-			continue
-		}
 		color, ok := t.value(name)
 		if !ok || len(color.Modifiers) == 0 {
 			continue
