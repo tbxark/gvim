@@ -20,7 +20,9 @@ import (
 // unhandledActions lists the actions that the embedded keymaps bind but the port
 // does not run yet. Pressing their keys shows "Not supported in this port". When a
 // handler lands, TestEveryBoundActionRunsOrIsListed fails until its entry is removed here.
-var unhandledActions = map[string]bool{}
+var unhandledActions = map[string]bool{
+	"cycle_focus": true,
+}
 
 // pluginActions are bound by the embedded keymaps but registered by a default-enabled
 // bundled plugin, which a bare probe model does not load. plugin/bundled tests run them.

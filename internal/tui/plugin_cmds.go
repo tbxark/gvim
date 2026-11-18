@@ -63,6 +63,7 @@ var uiActions = []string{
 	"toggle_file_explorer", "focus_file_explorer", "focus_editor", "new", "menu_activate", "menu_open",
 	"reload_config", "edit_theme", "inspect_theme_at_cursor",
 	"toggle_line_numbers", "scroll_tabs_left", "scroll_tabs_right",
+	"cycle_focus",
 	"file_explorer_search_clear", "file_explorer_search_backspace",
 	"markdown_toc_show", "markdown_toc_close", "markdown_toc_toggle_follow", "markdown_toc_focus",
 	"open", "switch_project", "quick_open", "command_palette", "quick_open_files", "quick_open_buffers",
