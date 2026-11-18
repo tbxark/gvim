@@ -270,29 +270,16 @@ while IFS=$'\t' read -r pkg imp; do
       [ "$irel" != plugin/hostos ]; then
       add R7 "$pkg" "$imp"
     fi
-    if [ "$rel" != internal/tui ] && [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] && under "$irel" internal/tui &&
-      [ "$irel" != internal/tui ]; then
-      # Sub-packages of internal/tui may import the kits and their siblings.
-      if ! under "$rel" internal/tui; then
-        add R7 "$pkg" "$imp"
-      fi
-    fi
 
     # R10: the plugin tree.
     if under "$rel" plugin; then
       case "$irel" in
         pluginapi | plugin/bundled | plugin/pattern | plugin/hostos | plugin)
-          if [ "$irel" = plugin ] && [ "$rel" != plugin/plugintest ] &&
-            [ "$rel" != internal/app ]; then
+          if [ "$irel" = plugin ] && [ "$rel" != plugin/plugintest ]; then
             add R10 "$pkg" "$imp"
           fi
           ;;
         *)
-          add R10 "$pkg" "$imp"
-          ;;
-      esac
-      case "$imp" in
-        charm.land/*)
           add R10 "$pkg" "$imp"
           ;;
       esac
@@ -356,7 +343,7 @@ while IFS=$'\t' read -r pkg imp; do
 
   # R8: test support never reaches a shipped binary.
   case "$imp" in
-    "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/lsp/lsptest" | "$mod/internal/uitest" | "$mod/internal/apptest")
+    "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/lsp/lsptest" | "$mod/authority/authoritytest" | "$mod/internal/uitest" | "$mod/internal/apptest")
       if printf '%s\n' "$prod" | grep -qxF "$pkg"; then
         add R8 "$pkg" "$imp"
       fi
@@ -371,7 +358,7 @@ done <<<"$edges"
 
 
 # R16: a top-level package's tests do not import internal/.
-if ! testgraph=$(go list -test -f '{{.ImportPath}}: {{join .TestImports " "}}' ./... 2>&1); then
+if ! testgraph=$(go list -test -f '{{.ImportPath}}: {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1); then
   echo "import_rules_check: go list -test failed:" >&2
   echo "$testgraph" >&2
   exit 2

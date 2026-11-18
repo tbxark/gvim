@@ -311,6 +311,9 @@ def emit(menus, merged):
 
 
 def main():
+    if "--check" in sys.argv[1:] and not CONFIG_RS.exists():
+        print("gen_menus: refs/fresh is not checked out; skipped the Fresh menu drift check")
+        return
     src = CONFIG_RS.read_text(encoding="utf-8")
     en = json.loads(EN_JSON.read_text(encoding="utf-8"))
     ctx_keys = load_context_keys()

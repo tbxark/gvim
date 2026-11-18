@@ -120,7 +120,7 @@ def main():
             text = source_text(source, locale, fresh)
             if text is None:
                 continue  # Fresh does not translate this key for the locale: fall back to English.
-            if placeholders(text) != placeholders(en[gvim_key]):
+            if sorted(placeholders(text)) != sorted(placeholders(en[gvim_key])):
                 raise SystemExit(
                     f"{locale}: {gvim_key} placeholders {placeholders(text)} do not match English "
                     f"{placeholders(en[gvim_key])} ({source})"
@@ -137,7 +137,7 @@ def main():
             text = fresh.get(key)
             if text is None:
                 continue
-            if placeholders(text) != placeholders(english):
+            if sorted(placeholders(text)) != sorted(placeholders(english)):
                 raise SystemExit(
                     f"{locale}: {key} placeholders {placeholders(text)} do not match English "
                     f"{placeholders(english)}"

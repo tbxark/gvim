@@ -38,3 +38,8 @@ __pycache__/
 
 # The binary `go build -o gvim .` writes
 /gvim
+/gvimdebug
+/dist/
+/code_review
+.DS_Store
+
