@@ -49,12 +49,16 @@ func (b *Buffer) ClassAt(p Pos) Class {
 // class of p before calling.
 func WordBounds(b *Buffer, p Pos) (start, end Pos) {
 	p = b.Clamp(p)
+	n := b.LineLen(p.Line)
+	if n == 0 {
+		return p, p
+	}
+	if p.Col >= n {
+		p.Col = n - 1
+	}
 	line := b.lineRunes(p.Line)
-	if p.Col >= len(line) {
-		if p.Col == 0 {
-			return p, p
-		}
-		p.Col--
+	if n > len(line) {
+		return hugeWordBounds(b, p, n)
 	}
 	cls := classOf(line[p.Col], true)
 	start, end = p, Pos{Line: p.Line, Col: p.Col + 1}
@@ -63,6 +67,49 @@ func WordBounds(b *Buffer, p Pos) (start, end Pos) {
 	}
 	for end.Col < len(line) && classOf(line[end.Col], true) == cls {
 		end.Col++
+	}
+	return start, end
+}
+
+// hugeWordBounds finds the word run around p on a huge line whose decoded prefix
+// stops before the full line length n, reading in stride-sized slices.
+func hugeWordBounds(b *Buffer, p Pos, n int) (start, end Pos) {
+	r, ok := b.RuneAt(p)
+	if !ok {
+		return p, p
+	}
+	cls := classOf(r, true)
+	start, end = p, Pos{Line: p.Line, Col: p.Col + 1}
+	const chunk = 4096
+	for start.Col > 0 {
+		from := max(start.Col-chunk, 0)
+		seg := []rune(b.LineSlice(p.Line, from, start.Col-from))
+		if len(seg) == 0 {
+			break
+		}
+		i := len(seg)
+		for i > 0 && classOf(seg[i-1], true) == cls {
+			i--
+		}
+		start.Col = from + i
+		if i > 0 {
+			break
+		}
+	}
+	for end.Col < n {
+		take := min(chunk, n-end.Col)
+		seg := []rune(b.LineSlice(p.Line, end.Col, take))
+		if len(seg) == 0 {
+			break
+		}
+		i := 0
+		for i < len(seg) && classOf(seg[i], true) == cls {
+			i++
+		}
+		end.Col += i
+		if i < len(seg) {
+			break
+		}
 	}
 	return start, end
 }

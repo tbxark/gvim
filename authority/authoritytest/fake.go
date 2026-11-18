@@ -4,6 +4,7 @@ package authoritytest
 
 import (
 	"context"
+	"sync"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -11,6 +12,8 @@ import (
 
 // Fake is a scriptable authority slot.
 type Fake struct {
+	mu sync.Mutex
+
 	FileSystem authority.FileSystem
 	OneShotter authority.OneShot
 	LongRunner authority.LongRunning
@@ -38,6 +41,8 @@ func New() *Fake {
 
 // Disconnect marks the backend disconnected with a reason.
 func (f *Fake) Disconnect(reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.ConnectedState = false
 	f.ReasonText = reason
 }
@@ -59,6 +64,8 @@ func (f *Fake) Label() string { return f.LabelText }
 
 // State implements authority.Slot.
 func (f *Fake) State() authority.State {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return authority.State{
 		Kind: "fake", Label: f.LabelText, Remote: f.Remote,
 		Connected: f.ConnectedState, Reason: f.ReasonText,
@@ -66,10 +73,16 @@ func (f *Fake) State() authority.State {
 }
 
 // Connected implements authority.Slot.
-func (f *Fake) Connected() bool { return f.ConnectedState }
+func (f *Fake) Connected() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ConnectedState
+}
 
 // Reconnect implements authority.Slot.
 func (f *Fake) Reconnect(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Reconnects++
 	if f.ReconnectErr != nil {
 		return f.ReconnectErr
@@ -80,6 +93,8 @@ func (f *Fake) Reconnect(context.Context) error {
 
 // Close implements authority.Slot.
 func (f *Fake) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Closed = true
 	return nil
 }

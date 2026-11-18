@@ -355,7 +355,7 @@ func (d *Document) CheckSource() error {
 		return nil
 	}
 	err := d.Buffer.CheckSource()
-	if err == nil || err == d.large.Noted {
+	if err == nil || (d.large.Noted != nil && err.Error() == d.large.Noted.Error()) {
 		// The poll calls this again and again; the status says each thing once.
 		return err
 	}

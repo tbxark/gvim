@@ -424,6 +424,13 @@ func TestLanguageInheritedValue(t *testing.T) {
 			t.Errorf("LanguageInheritedValue(%q, %q) = %q, %v; want %q, %v", tt.language, tt.field, got, ok, tt.want, tt.ok)
 		}
 	}
+	// User overrides on a language must not shadow what it inherits from built-in/global defaults.
+	overridden := cfg
+	two := 2
+	overridden.Languages = map[string]LanguageSettings{"go": {TabSize: &two}}
+	if got, ok := overridden.LanguageInheritedValue("go", "tab_size"); !ok || got != "8" {
+		t.Errorf("overridden go tab_size inherited = %q, %v; want \"8\"", got, ok)
+	}
 }
 
 // TestRemovablePathLanguageStructured checks the reset paths of the new

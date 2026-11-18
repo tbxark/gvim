@@ -187,6 +187,9 @@ func (d *Document) DeleteLine() {
 	}
 	before := d.Cursor
 	d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	out := make([]caret, len(lines))
 	for i, line := range lines {
 		p := d.Buffer.Clamp(buffer.Pos{Line: line - i})
@@ -225,6 +228,9 @@ func (d *Document) DuplicateLines(above bool) {
 	}
 	first := d.Cursor
 	d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	out := make([]caret, len(cs))
 	for i, c := range cs {
 		k := blockIndex(blocks, min(c.Anchor.Line, c.Head.Line))
@@ -298,6 +304,9 @@ func (d *Document) MoveLines(dir int) {
 	}
 	before := d.Cursor
 	d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	out := make([]caret, len(cs))
 	for i, c := range cs {
 		lo, hi := c.Bounds()
@@ -343,6 +352,9 @@ func (d *Document) Dedent(tabSize int) {
 	}
 	before := d.Cursor
 	d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	for i := range cs {
 		cs[i].Anchor, cs[i].Head = back(cs[i].Anchor), back(cs[i].Head)
 	}
@@ -492,6 +504,9 @@ func (d *Document) sortLinesAtCarets() {
 	}
 	before := d.Cursor
 	d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	for i, c := range cs {
 		if c.Anchor == c.Head {
 			continue

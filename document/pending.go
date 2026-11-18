@@ -32,6 +32,9 @@ type pending struct {
 // WaitsToSelect reports whether a selection (select_all, select_document_end) is queued
 // for the index of d.
 func (d *Document) WaitsToSelect() bool {
+	if d.large == nil {
+		return false
+	}
 	p := d.large.Pending
 	return p != nil && p.Kind == pendingAction && strings.HasPrefix(string(p.Name), "select_")
 }

@@ -122,6 +122,9 @@ func TestResumeLiveGrepDescriptionMatchesBehavior(t *testing.T) {
 				t.Fatalf("description = %q, want %q", e.Description, want)
 			}
 		}
+		if e.I18nKey != "cmd.resume_live_grep" {
+			t.Fatalf("title i18n key = %q, want cmd.resume_live_grep", e.I18nKey)
+		}
 		if e.DescKey != "gvim.command.resume_live_grep_desc" {
 			t.Fatalf("description key = %q", e.DescKey)
 		}

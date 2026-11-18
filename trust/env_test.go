@@ -88,6 +88,15 @@ func TestEnvMarkersSharedWithTrustMarkers(t *testing.T) {
 	}
 }
 
+func TestExpandSnippetDirQuoting(t *testing.T) {
+	if got := ExpandSnippetDir("source \"{dir}/.venv/bin/activate\"", `/tmp/dir "$(id)"`); got != `source "/tmp/dir \"\$(id)\"/.venv/bin/activate"` {
+		t.Fatalf("double-quoted ExpandSnippetDir = %q", got)
+	}
+	if got := ExpandSnippetDir("activate {dir}", "/tmp/it's proj/$(id)"); got != `activate '/tmp/it'"'"'s proj/$(id)'` {
+		t.Fatalf("unquoted ExpandSnippetDir = %q", got)
+	}
+}
+
 func containsString(list []string, want string) bool {
 	for _, item := range list {
 		if item == want {

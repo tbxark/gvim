@@ -93,6 +93,10 @@ func TestPointerMovementBreaksTypingGroup(t *testing.T) {
 				t.Fatalf("GotoLine: %v", err)
 			}
 		}},
+		{"ToggleCursorAt", func(e *Editor) {
+			e.ToggleCursorAt(buffer.Pos{Line: 0, Col: 0})
+			e.ToggleCursorAt(buffer.Pos{Line: 0, Col: 2})
+		}},
 	}
 	for _, m := range moves {
 		t.Run(m.Name, func(t *testing.T) {
@@ -126,6 +130,38 @@ func TestDragSelectionBreaksTypingGroup(t *testing.T) {
 	run(t, e, "undo")
 	if got := text(e); got != "ab" {
 		t.Fatalf("undo after selection = %q, want %q", got, "ab")
+	}
+}
+
+func TestToggleCursorAtClusterAndSelectionSafety(t *testing.T) {
+	t.Parallel()
+	e := clipEditor(t, "e\u0301x alpha")
+	d := e.Active()
+	e.SetCursor(buffer.Pos{Line: 0, Col: 5}, false)
+	// Snapping inside a combining-mark cluster lands at col 0.
+	if !e.ToggleCursorAt(buffer.Pos{Line: 0, Col: 1}) {
+		t.Fatal("expected ToggleCursorAt to add cursor")
+	}
+	if got := d.Cursor; got != (buffer.Pos{Line: 0, Col: 0}) {
+		t.Fatalf("snapped cursor = %v, want 0:0", got)
+	}
+	if d.Seen != d.Cursor {
+		t.Fatalf("d.Seen = %v, want %v", d.Seen, d.Cursor)
+	}
+	// Clicking same cluster again removes it cleanly.
+	if !e.ToggleCursorAt(buffer.Pos{Line: 0, Col: 1}) {
+		t.Fatal("expected ToggleCursorAt to remove snapped cursor")
+	}
+	if len(d.Cursors()) != 0 {
+		t.Fatalf("extra cursors = %v, want 0", d.Cursors())
+	}
+	// Backward selection must not be flipped or merged when ToggleCursorAt hits inside it.
+	e.SelectRange(buffer.Pos{Line: 0, Col: 8}, buffer.Pos{Line: 0, Col: 4})
+	if e.ToggleCursorAt(buffer.Pos{Line: 0, Col: 6}) {
+		t.Fatal("ToggleCursorAt inside existing selection should return false")
+	}
+	if d.Sel == nil || d.Sel.Anchor != (buffer.Pos{Line: 0, Col: 8}) || d.Sel.Head != (buffer.Pos{Line: 0, Col: 4}) {
+		t.Fatalf("selection corrupted = %+v", d.Sel)
 	}
 }
 

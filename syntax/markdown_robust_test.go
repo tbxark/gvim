@@ -130,3 +130,62 @@ func TestMarkdownUnclosedOpenersAreNotExponential(t *testing.T) {
 		t.Fatal("tokenizeMarkdown did not finish a line of unclosed emphasis openers")
 	}
 }
+
+func TestMarkdownInlineMarkersAndFenceIndentRegressions(t *testing.T) {
+	t.Parallel()
+	// Reference image includes leading '!'.
+	refImg := MarkdownInlineMarkers("![alt][ref]")
+	if len(refImg) != 2 || refImg[0] != (InlineMarker{Start: 0, End: 2, Kind: MarkerLink}) || refImg[1] != (InlineMarker{Start: 5, End: 11, Kind: MarkerLink}) {
+		t.Fatalf("reference image markers = %+v", refImg)
+	}
+	// Asymmetric emphasis marks only the used delimiters, not the extra literal '*'.
+	asym := MarkdownInlineMarkers("**a* and *b**")
+	wantAsym := []InlineMarker{
+		{Start: 1, End: 2, Kind: MarkerEmphasis},
+		{Start: 3, End: 4, Kind: MarkerEmphasis},
+		{Start: 9, End: 10, Kind: MarkerEmphasis},
+		{Start: 11, End: 12, Kind: MarkerEmphasis},
+	}
+	if len(asym) != len(wantAsym) {
+		t.Fatalf("asymmetric markers = %+v, want %+v", asym, wantAsym)
+	}
+	for i := range wantAsym {
+		if asym[i] != wantAsym[i] {
+			t.Fatalf("asymmetric marker %d = %+v, want %+v", i, asym[i], wantAsym[i])
+		}
+	}
+	// Nested emphasis markers are returned sorted by Start.
+	nested := MarkdownInlineMarkers("**a *b***")
+	for i := 1; i < len(nested); i++ {
+		if nested[i].Start < nested[i-1].Start {
+			t.Fatalf("markers not sorted by Start: %+v", nested)
+		}
+	}
+	// Four leading spaces cannot open or close a fenced code block.
+	fences := MarkdownFences([]string{"    ```go", "```go", "    ```", "```"})
+	if fences[0].Kind != FenceNone || fences[1].Kind != FenceOpen || fences[2].Kind != FenceBody || fences[3].Kind != FenceClose {
+		t.Fatalf("fence classification with 4-space indent = %+v", fences)
+	}
+	// Multi-token YAML flow collection keeps quote state across tokens and resets at newline.
+	reg, last, _ := flowRegion([]chroma.Token{
+		{Type: chroma.Punctuation, Value: "{"},
+		{Type: chroma.NameTag, Value: "a"},
+		{Type: chroma.Punctuation, Value: ": "},
+		{Type: chroma.LiteralStringDouble, Value: `"x`},
+		{Type: chroma.LiteralStringDouble, Value: `}`},
+		{Type: chroma.LiteralStringDouble, Value: `y"`},
+		{Type: chroma.Punctuation, Value: "}"},
+	})
+	if reg != `{a: "x}y"}` || last != 6 {
+		t.Fatalf("flowRegion cross-token = %q, last=%d", reg, last)
+	}
+	regNL, lastNL, _ := flowRegion([]chroma.Token{
+		{Type: chroma.Punctuation, Value: "{"},
+		{Type: chroma.LiteralStringDouble, Value: `"unclosed`},
+		{Type: chroma.TextWhitespace, Value: "\n"},
+		{Type: chroma.Punctuation, Value: "}"},
+	})
+	if regNL != "{\"unclosed\n}" || lastNL != 3 {
+		t.Fatalf("flowRegion newline reset = %q, last=%d", regNL, lastNL)
+	}
+}

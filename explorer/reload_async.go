@@ -69,6 +69,7 @@ func (s Snapshot) Read() Listing {
 			ShowHidden:           true,
 			ShowIgnored:          true,
 			IgnoreRoot:           s.root,
+			Fast:                 true,
 			RespectGitignore:     s.respectGitignore,
 			CustomIgnorePatterns: s.customIgnorePatterns,
 		})
@@ -89,6 +90,7 @@ func (s Snapshot) Read() Listing {
 func (t *Tree) Apply(l Listing) error {
 	t.applyListing(t.root, l)
 	t.dirty = true
+	t.promoteSelection()
 	return errors.Join(l.errs...)
 }
 

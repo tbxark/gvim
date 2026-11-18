@@ -44,7 +44,7 @@ func (e *Editor) ReplaceOverlay(d *Document, st document.OverlayStash) error {
 	if !d.Buffer.Modified() && l.Restore == nil {
 		return e.RestoreOverlay(d, st)
 	}
-	fresh, err := readDocument(d.Path, e.loadSpec())
+	fresh, err := loadDocument(d.Path, e.loadSpec())
 	switch {
 	case err != nil:
 		return err

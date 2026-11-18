@@ -144,7 +144,7 @@ func Branch(root string) (string, error) {
 // open opens the repository whose work tree is root. It does not search
 // parent directories.
 func open(root string) (*git.Repository, error) {
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{})
+	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if errors.Is(err, git.ErrRepositoryNotExists) {
 		return nil, ErrNotRepo
 	}

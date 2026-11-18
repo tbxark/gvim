@@ -62,13 +62,37 @@ func RangesFunc(n int, indentOf func(i int) (width int, blank bool)) []Range {
 	return ranges
 }
 
-// Visible returns n flags, one per line, that are true for each line hidden by
+// Hidden returns n flags, one per line, that are true for each line hidden by
 // a folded range. A range whose Start is a key of folded with a true value hides
 // the lines after Start up to End. The Start line itself is not hidden.
-func Visible(n int, ranges []Range, folded map[int]bool) []bool {
+func Hidden(n int, ranges []Range, folded map[int]bool) []bool {
+	if n <= 0 {
+		return []bool{}
+	}
 	hidden := make([]bool, n)
+	coveredUntil := -1
+	prevStart := -1
+	sorted := true
 	for _, r := range ranges {
+		if r.Start < prevStart {
+			sorted = false
+		}
+		prevStart = r.Start
 		if !folded[r.Start] {
+			continue
+		}
+		if sorted {
+			if r.End <= coveredUntil {
+				continue
+			}
+			start := max(r.Start+1, coveredUntil+1, 0)
+			end := min(r.End, n-1)
+			for i := start; i <= end; i++ {
+				hidden[i] = true
+			}
+			if end > coveredUntil {
+				coveredUntil = end
+			}
 			continue
 		}
 		for i := max(r.Start+1, 0); i <= r.End && i < n; i++ {

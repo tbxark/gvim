@@ -90,6 +90,11 @@ func TestParseMalformedRemoteTargets(t *testing.T) {
 			t.Errorf("ParseTarget(%q) = remote %v, err %v; want a remote error", arg, ok, err)
 		}
 	}
+	// ssh://host/path without $USER/$USERNAME must succeed so ~/.ssh/config User resolves.
+	spec, ok, err := authority.ParseTarget("ssh://alias.example/srv/proj")
+	if err != nil || !ok || spec.User != "" || spec.UserExplicit || spec.Host != "alias.example" {
+		t.Fatalf("ParseTarget without $USER = %+v, %v, %v", spec, ok, err)
+	}
 }
 
 // TestRemoteSpecHelpers checks display, workspace and the remote-command composition.
@@ -106,6 +111,15 @@ func TestRemoteSpecHelpers(t *testing.T) {
 	}
 	if got := (authority.RemoteSpec{Path: "~"}).Workspace(); got != "~" {
 		t.Fatalf("Workspace home = %q", got)
+	}
+	if got := (authority.RemoteSpec{Path: "~alice"}).Workspace(); got != "~alice" {
+		t.Fatalf("Workspace ~alice = %q, want ~alice", got)
+	}
+	if got := authority.QuoteDir("~a+b/proj"); got != "'~a+b/proj'" {
+		t.Fatalf("QuoteDir + in user = %q", got)
+	}
+	if got := authority.QuoteDir("~-flag/proj"); got != "'~-flag/proj'" {
+		t.Fatalf("QuoteDir leading - in user = %q", got)
 	}
 	if got := authority.QuoteDir("~/my project"); got != "\"$HOME\"/'my project'" {
 		t.Fatalf("QuoteDir home = %q", got)

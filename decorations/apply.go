@@ -228,6 +228,10 @@ func (e *entry) move(sh shape) bool {
 		p, ok := stepReplace(sh, pos{e.FromLine, e.FromCol})
 		e.FromLine, e.FromCol, e.ToLine, e.ToCol = p.line, p.col, p.line, p.col
 		return ok
+	case SoftBreak:
+		p, ok := stepReplace(sh, pos{e.FromLine, e.FromCol})
+		e.FromLine, e.FromCol, e.ToLine, e.ToCol = p.line, p.col, p.line, 0
+		return ok
 	}
 	return e.moveLine(sh)
 }

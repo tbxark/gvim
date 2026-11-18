@@ -71,6 +71,9 @@ func (e *Editor) toggleComment(d *Document) error {
 			edits = append(edits, lineEdit{Line: line, Col: indent, Removed: n})
 		}
 	})
+	if d.EditRefused() {
+		return nil
+	}
 	adjust := func(p buffer.Pos, strict bool) buffer.Pos {
 		for _, e := range edits {
 			p = e.Move(p, strict)

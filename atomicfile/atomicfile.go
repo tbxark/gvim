@@ -85,6 +85,9 @@ func writeFileStream(path string, fill func(io.Writer) error, onTemp func(os.Fil
 	info, err := os.Stat(target)
 	switch {
 	case err == nil:
+		if info.Mode()&(os.ModeNamedPipe|os.ModeSocket|os.ModeDevice|os.ModeCharDevice) != 0 {
+			return "", fmt.Errorf("atomicfile: %s is a special file", target)
+		}
 		mode, old = info.Mode().Perm(), info
 	case errors.Is(err, fs.ErrNotExist):
 		// A new file is created as open(2) would create it: the umask applies.
@@ -160,13 +163,15 @@ func saveTarget(path string) (string, error) {
 // reports its state to onTemp and closes it. The file is closed on every path. note is
 // what could not be kept of old.
 func writeTemp(f *os.File, mode fs.FileMode, path string, old os.FileInfo, fill func(io.Writer) error, onTemp func(os.FileInfo)) (note string, err error) {
-	err = f.Chmod(mode)
-	if err == nil {
-		err = fill(f)
-	}
+	err = fill(f)
 	if err == nil {
 		note = inheritFile(f, path, old)
-		err = f.Sync()
+		if old == nil {
+			err = f.Chmod(mode)
+		}
+		if err == nil {
+			err = f.Sync()
+		}
 	}
 	if err == nil && onTemp != nil {
 		if fi, statErr := f.Stat(); statErr == nil {

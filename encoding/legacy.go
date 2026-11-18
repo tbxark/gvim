@@ -1,6 +1,7 @@
 package encoding
 
 import (
+	"bytes"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -21,9 +22,7 @@ const (
 
 // hasBOM reports whether data starts with a byte-order mark.
 func hasBOM(data []byte) bool {
-	return slices.ContainsFunc([][]byte{utf8BOM, utf16LEBOM, utf16BEBOM}, func(bom []byte) bool {
-		return len(data) >= len(bom) && string(data[:len(bom)]) == string(bom)
-	})
+	return bytes.HasPrefix(data, utf8BOM) || bytes.HasPrefix(data, utf16LEBOM) || bytes.HasPrefix(data, utf16BEBOM)
 }
 
 // isBinaryControl reports whether b is a control byte that text does not use:

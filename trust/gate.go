@@ -182,6 +182,12 @@ func deniedAbsolute(abs, root string) bool {
 			return true
 		}
 	}
+	if canonDir, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		parentResolved := filepath.Join(canonDir, filepath.Base(abs))
+		if within(root, parentResolved) || within(canonRoot, parentResolved) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -207,8 +213,8 @@ func shellFirstToken(exec string, argv []string) string {
 	if !shellCommands[strings.ToLower(filepath.Base(exec))] || len(argv) < 3 {
 		return ""
 	}
-	switch argv[1] {
-	case "-c", "/c", "-Command":
+	switch strings.ToLower(argv[1]) {
+	case "-c", "/c", "-command":
 	default:
 		return ""
 	}
@@ -216,20 +222,33 @@ func shellFirstToken(exec string, argv []string) string {
 }
 
 func firstCommandToken(command string) string {
-	s := strings.TrimSpace(command)
-	if s == "" {
-		return ""
-	}
-	if c := s[0]; c == '\'' || c == '"' {
-		if i := strings.IndexByte(s[1:], c); i >= 0 {
-			s = s[1 : 1+i]
+	s := command
+	for {
+		s = strings.TrimLeft(s, " \t\n\r;|&()")
+		if s == "" {
+			return ""
 		}
-	} else if i := strings.IndexAny(s, " \t"); i >= 0 {
-		s = s[:i]
+		var tok string
+		if c := s[0]; c == '\'' || c == '"' {
+			if i := strings.IndexByte(s[1:], c); i >= 0 {
+				tok = s[1 : 1+i]
+				s = s[1+i+1:]
+			} else {
+				tok = s[1:]
+				s = ""
+			}
+		} else if i := strings.IndexAny(s, " \t\n\r;|&()"); i >= 0 {
+			tok = s[:i]
+			s = s[i:]
+		} else {
+			tok = s
+			s = ""
+		}
+		// Skip leading environment-assignment prefixes (e.g. PATH=x ./cmd) so an
+		// inline assignment cannot mask the executable that follows.
+		if eq := strings.IndexByte(tok, '='); eq > 0 && !strings.ContainsAny(tok[:eq], "/\\") {
+			continue
+		}
+		return tok
 	}
-	// An environment-assignment prefix (PATH=x cmd) is not a program path.
-	if strings.Contains(s, "=") && !strings.ContainsAny(s, "/\\") {
-		return ""
-	}
-	return s
 }

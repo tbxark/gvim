@@ -930,3 +930,44 @@ func TestCloseByPathRefusedTransferDetachesNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestSharedBuffersEditUnrelatedTabDoesNotCorruptMirror checks that editing an
+// unrelated tab in the owning editor does not forward changes into another file's mirror.
+func TestSharedBuffersEditUnrelatedTabDoesNotCorruptMirror(t *testing.T) {
+	dir := t.TempDir()
+	sharedPath := filepath.Join(dir, "shared.txt")
+	otherPath := filepath.Join(dir, "other.txt")
+	if err := os.WriteFile(sharedPath, []byte("shared line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(otherPath, []byte("other line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shared := NewSharedBuffers()
+	owner := New(Options{Empty: true, Shared: shared})
+	mirrorEd := New(Options{Empty: true, Shared: shared})
+	shared.Focus(owner)
+	if err := owner.OpenFile(sharedPath); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(mirrorEd)
+	if err := mirrorEd.OpenFile(sharedPath); err != nil {
+		t.Fatal(err)
+	}
+	// Transfer ownership back to owner while mirrorEd keeps a mirror, then open an unrelated tab in owner.
+	shared.Focus(owner)
+	if err := owner.OpenFile(otherPath); err != nil {
+		t.Fatal(err)
+	}
+	if owner.Active().Path != otherPath {
+		t.Fatalf("active path = %q, want %q", owner.Active().Path, otherPath)
+	}
+	// Edit the unrelated tab; the mirror of sharedPath must stay untouched.
+	owner.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "EDITED ")
+	if got := mirrorEd.Active().Buffer.Text(); got != "shared line\n" {
+		t.Fatalf("mirror text = %q, want %q", got, "shared line\n")
+	}
+	if mirrorEd.Active().Modified() {
+		t.Fatal("mirror was falsely marked modified by an unrelated tab edit")
+	}
+}

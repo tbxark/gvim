@@ -89,6 +89,10 @@ func (d *Document) SyncMirrorFrom(owner *Document) error {
 	if text != "" {
 		d.Buffer.Insert(buffer.Pos{}, text)
 	}
+	if !owner.Buffer.Modified() {
+		d.Buffer.MarkSaved()
+	}
+	d.ClampToText()
 	d.sharedVersion = owner.Buffer.Version()
 	d.sharedSelfVersion = d.Buffer.Version()
 	d.Codec = owner.Codec
@@ -132,13 +136,15 @@ func (d *Document) ApplyOwnerChange(owner *Document, c buffer.Change) error {
 	d.sharedVersion = c.Version
 	d.sharedSelfVersion = d.Buffer.Version()
 	d.Disk = owner.Disk
-	d.SetSaved(owner.Saved)
+	if d.Saved != owner.Saved {
+		d.SetSaved(owner.Saved)
+	}
 	return nil
 }
 
 // MakeSharedOwner clears the mirror state of a document that has become the owner.
 func (d *Document) MakeSharedOwner() {
-	d.sharedMirror = false
-	d.readOnly = false
 	d.SetSharedMirrorStatus("")
+	d.sharedMirror = false
+	d.readOnly = d.binary || d.image != nil
 }

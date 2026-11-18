@@ -384,6 +384,9 @@ func (d *Document) IndentSelectedLines(unit string) {
 	}
 	before := d.Cursor
 	d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	d.SetCarets(cs)
 	d.noteMultiEdit(before, edits)
 }
@@ -447,4 +450,42 @@ func (d *Document) CursorsToLineEnds() {
 		}
 	}
 	d.SetCarets(out)
+}
+
+// ToggleCursorAt adds a primary caret at p when none sits there yet, or removes
+// that caret when multiple carets exist and one sits at p. It returns whether
+// the caret set changed.
+func (d *Document) ToggleCursorAt(p buffer.Pos) bool {
+	if d == nil || d.large != nil {
+		return false
+	}
+	p = snapToCluster(d.Buffer, d.Buffer.Clamp(p))
+	cs := d.AllCarets()
+	for i, c := range cs {
+		if c.Anchor == p && c.Head == p {
+			if len(cs) == 1 {
+				return false
+			}
+			wasPrimary := c.Primary
+			cs = slices.Delete(cs, i, i+1)
+			if wasPrimary && len(cs) > 0 {
+				cs[min(i, len(cs)-1)].Primary = true
+			}
+			d.Buffer.Break()
+			d.SetCarets(cs)
+			d.Seen = d.Cursor
+			return true
+		}
+		if c.Anchor != c.Head && (caret{Anchor: p, Head: p}).meets(c) {
+			return false
+		}
+	}
+	d.Buffer.Break()
+	for i := range cs {
+		cs[i].Primary = false
+	}
+	cs = append(cs, caret{Anchor: p, Head: p, Primary: true})
+	d.SetCarets(cs)
+	d.Seen = d.Cursor
+	return true
 }

@@ -297,3 +297,31 @@ func TestSwitchReturnsValidRootWhenRecordFails(t *testing.T) {
 		t.Fatalf("Switch root = %q, want %q alongside the save error", r.Path(), resolve(t, dir))
 	}
 }
+
+func TestRecentDeduplicatesCanonicalAndCapsAtMaxRecent(t *testing.T) {
+	isolateConfig(t)
+	base := t.TempDir()
+	var raw []string
+	first := mkdir(t, base, "first")
+	raw = append(raw, first, filepath.Join(base, ".", "first"))
+	for i := range MaxRecent + 4 {
+		raw = append(raw, mkdir(t, base, fmt.Sprintf("extra%02d", i)))
+	}
+	path, err := recentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := write(path, raw); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := Recent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != MaxRecent {
+		t.Fatalf("Recent() = %d entries, want %d", len(roots), MaxRecent)
+	}
+	if roots[0].Path() != resolve(t, first) || roots[1].Path() == roots[0].Path() {
+		t.Fatalf("Recent() did not deduplicate canonical paths: %+v", roots)
+	}
+}

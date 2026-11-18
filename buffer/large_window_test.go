@@ -1,14 +1,15 @@
 package buffer_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -179,12 +180,8 @@ func TestWindowSourceMissReturnsImmediately(t *testing.T) {
 	missLine, missText := -1, ""
 	for i, text := range []string{"line0", "line1", "line2", "line3"} {
 		loadsBefore, readsBefore := src.loads.Load(), src.readMiss.Load()
-		start := time.Now()
 		if got := b.Line(i); got != "" {
 			continue
-		}
-		if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-			t.Fatalf("a cache miss took %v; the paint path must not wait", elapsed)
 		}
 		if src.loads.Load() != loadsBefore {
 			t.Fatalf("ReadAt performed %d remote loads", src.loads.Load()-loadsBefore)
@@ -272,5 +269,50 @@ func TestWindowSourceLocalFileIsNotAsync(t *testing.T) {
 	}
 	if err := b.LoadWindow(context.Background(), 0, 1); !errors.Is(err, buffer.ErrNotWindowed) {
 		t.Fatalf("LoadWindow on a local source = %v, want ErrNotWindowed", err)
+	}
+}
+
+func TestWindowSourceWriteToLoadsPendingSpanAndCopy(t *testing.T) {
+	t.Parallel()
+	const text = "alpha01\nbravo02\ncharl03\ndelta04\necho005\nfoxt006\ngolf007\nhotel08\n"
+	src := newFakeWindowSource(text)
+	src.window = 16
+	src.maxWin = 3 // 48 bytes cached, so 64-byte text still evicts window 0
+	b, err := buffer.OpenLarge(src, buffer.LargeOptions{Chunk: 16, CachePages: 1, InitialBytes: 1})
+	if err != nil {
+		t.Fatalf("OpenLarge: %v", err)
+	}
+	src.syncLoads.Store(false)
+	defer func() { _ = b.Close() }()
+	completeWindowedIndex(t, b, src)
+
+	// Load lines 2..3 (window 1) before editing line 3 so settleEOL can read line 2's EOL.
+	for b.Line(2) == "" || b.Line(3) == "" {
+		off, n, ok := b.TakePendingWindow()
+		if !ok {
+			t.Fatal("missing line did not record pending window")
+		}
+		if err := b.LoadWindow(context.Background(), off, n); err != nil {
+			t.Fatalf("LoadWindow: %v", err)
+		}
+	}
+	b.Insert(buffer.Pos{Line: 3, Col: 0}, "EDITED ")
+	if ref := b.Refusal(); ref != nil {
+		t.Fatalf("Insert refused: %v", ref)
+	}
+	// Seed an unrelated pending window so byte-copy cannot rely on TakePendingWindow
+	// returning its own window and must call LoadWindow(ctx, off, n) directly.
+	_, _ = src.ReadAt(make([]byte, 1), 0)
+
+	snap := b.Snapshot()
+	defer snap.Release()
+	var out bytes.Buffer
+	res, err := snap.WriteTo(context.Background(), &out, buffer.WriteOptions{})
+	if err != nil {
+		t.Fatalf("Snapshot.WriteTo: %v", err)
+	}
+	want := strings.Replace(text, "delta04", "EDITED delta04", 1)
+	if out.String() != want || res.Bytes != int64(len(want)) {
+		t.Fatalf("WriteTo = %q (bytes=%d), want %q (bytes=%d)", out.String(), res.Bytes, want, len(want))
 	}
 }

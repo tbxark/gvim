@@ -26,6 +26,9 @@ func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
 
 // lspDocAt returns the open document whose path is path, or nil.
 func (e *Editor) lspDocAt(path string) *Document {
+	if path == "" {
+		return nil
+	}
 	for _, d := range e.docs {
 		if d.Path == path {
 			return d
@@ -67,10 +70,28 @@ func caretPrefixEdits(d *Document, text, wordChars string) []LSPEdit {
 	for _, p := range positions {
 		p = d.Buffer.Clamp(p)
 		line := []rune(d.Buffer.Line(p.Line))
-		col := min(p.Col, len(line))
-		start := col
-		for start > 0 && IsWordRune(line[start-1], wordChars) {
-			start--
+		start := p.Col
+		if p.Col <= len(line) {
+			for start > 0 && IsWordRune(line[start-1], wordChars) {
+				start--
+			}
+		} else {
+			const chunk = 4096
+			for start > 0 {
+				from := max(start-chunk, 0)
+				seg := []rune(d.Buffer.LineSlice(p.Line, from, start-from))
+				if len(seg) != start-from {
+					break
+				}
+				i := len(seg)
+				for i > 0 && IsWordRune(seg[i-1], wordChars) {
+					i--
+				}
+				start = from + i
+				if i > 0 {
+					break
+				}
+			}
 		}
 		edits = append(edits, LSPEdit{From: buffer.Pos{Line: p.Line, Col: start}, To: p, Text: text})
 	}

@@ -271,3 +271,38 @@ func TestResolveSpawnPath(t *testing.T) {
 		t.Error("a path was resolved as a bare name")
 	}
 }
+
+func TestDecideSpawnSymlinkedCwdAndShellTokenBypassRegressions(t *testing.T) {
+	t.Parallel()
+	f := newGateFixture(t)
+	mustExec(t, filepath.Join(f.root, "gradlew"))
+	mustExec(t, filepath.Join(f.outside, "tool"))
+
+	if err := os.Symlink(filepath.Join(f.outside, "tool"), filepath.Join(f.root, "link-out")); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	cwdAlias := filepath.Join(f.outside, "repo-alias")
+	if err := os.Symlink(f.root, cwdAlias); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	// Workspace symlink pointing outside invoked through a symlinked cwd alias must still be denied.
+	if err := DecideSpawn(Restricted, f.root, cwdAlias, []string{"./link-out"}, ""); err == nil {
+		t.Fatal("allowed workspace symlink to outside invoked via symlinked cwd alias")
+	}
+
+	bypassCases := [][]string{
+		{"sh", "-c", "FOO=1 ./gradlew"},
+		{"sh", "-c", "(./gradlew)"},
+		{"sh", "-c", "./gradlew;echo"},
+		{"sh", "-c", "./gradlew&&true"},
+		{"sh", "-C", "./gradlew"},
+		{"cmd", "/c", "./gradlew"},
+		{"cmd", "/C", "./gradlew"},
+		{"pwsh", "-command", "./gradlew"},
+	}
+	for _, argv := range bypassCases {
+		if err := DecideSpawn(Restricted, f.root, f.root, argv, f.path(f.outsideBin)); err == nil {
+			t.Errorf("allowed restricted shell bypass %v", argv)
+		}
+	}
+}

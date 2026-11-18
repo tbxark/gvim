@@ -112,6 +112,8 @@ func (e *entry) moveComposed(c *composed) bool {
 	switch e.Kind {
 	case Highlight, Conceal:
 		return e.moveRangeComposed(c)
+	case CursorLine:
+		return true
 	case Scroll:
 		if e.ToLine != e.FromLine || e.ToCol != e.FromCol {
 			return e.moveRangeComposed(c)
@@ -119,6 +121,10 @@ func (e *entry) moveComposed(c *composed) bool {
 	case Replace:
 		p, ok := c.walk(pos{e.FromLine, e.FromCol}, stepReplace)
 		e.FromLine, e.FromCol, e.ToLine, e.ToCol = p.line, p.col, p.line, p.col
+		return ok
+	case SoftBreak:
+		p, ok := c.walk(pos{e.FromLine, e.FromCol}, stepReplace)
+		e.FromLine, e.FromCol, e.ToLine, e.ToCol = p.line, p.col, p.line, 0
 		return ok
 	}
 	p, ok := c.walk(pos{e.FromLine, 0}, stepLine)

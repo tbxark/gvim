@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -499,5 +500,35 @@ func TestSSHWriteStreamOverADirectoryFails(t *testing.T) {
 	entries, err := os.ReadDir(target)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("the directory gained entries %v (%v)", entries, err)
+	}
+}
+
+// TestSSHFilesWatchSingleExecPerPollTick verifies directory watching does not issue
+// redundant Stat+ReadDir double SSH sessions per poll tick when no change occurs.
+func TestSSHFilesWatchSingleExecPerPollTick(t *testing.T) {
+	dir := t.TempDir()
+	writeLocal(t, filepath.Join(dir, "a.txt"), "hello")
+	srv := newFakeSSH(t)
+	srv.runLocally()
+	var execCount atomic.Int64
+	origExec := srv.execFunc
+	srv.execFunc = func(cmd string, stdin io.Reader, stdout, stderr io.Writer) int {
+		execCount.Add(1)
+		return origExec(cmd, stdin, stdout, stderr)
+	}
+	a := srv.connect(t, authority.SSHOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	w, err := a.Files().Watch(ctx, dir, hostos.WatchOptions{})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	initial := execCount.Load()
+	time.Sleep(700 * time.Millisecond)
+	w.Stop()
+	// One 500ms tick should execute at most 1 ReadDir session (not Stat+ReadDir = 2).
+	after := execCount.Load()
+	if delta := after - initial; delta > 2 {
+		t.Fatalf("poll tick ran %d SSH execs (initial=%d, after=%d), expected 1 per tick", delta, initial, after)
 	}
 }

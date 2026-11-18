@@ -3,6 +3,7 @@ package search
 import (
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -250,4 +251,56 @@ func TestFindManyMatchesOnOneLine(t *testing.T) {
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("Find took %v: positions are counted from the line start for every match", d)
 	}
+}
+
+func TestFindStringMatchesFind(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		text string
+		q    Query
+	}{
+		{"empty text zero-width regex ^", "", Query{Text: "^", Regex: true}},
+		{"empty text zero-width regex $", "", Query{Text: "$", Regex: true}},
+		{"empty text literal", "", Query{Text: "foo"}},
+		{"case-insensitive literal", "Foo bar FOO baz", Query{Text: "foo"}},
+		{"case-sensitive literal", "Foo bar FOO foo", Query{Text: "foo", CaseSensitive: true}},
+		{"whole word utf8", "café café_2 Café", Query{Text: "café", WholeWord: true}},
+		{"regex multiline", "alpha 1\nbeta 22\n", Query{Text: `[a-z]+\s+\d+`, Regex: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := Find(buffer.New(tc.text), tc.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := FindString(tc.text, tc.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("FindString = %v, want %v", got, want)
+			}
+		})
+	}
+
+	cq, err := CompileQuery(Query{Text: "foo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				ms := cq.FindString("one FOO two foo")
+				if len(ms) != 2 {
+					t.Errorf("concurrent FindString len = %d, want 2", len(ms))
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

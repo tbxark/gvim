@@ -66,6 +66,7 @@ func TestDecode(t *testing.T) {
 		{"windows-1252 euro sign", "windows-1252", []byte{'c', 'a', 'f', 0xe9, ' ', 0x80}, "café €"},
 		{"iso-8859-1 accepts every byte", "iso-8859-1", []byte{0x80, 0xff}, "\u0080ÿ"},
 		{"shift_jis kanji", "shift_jis", []byte{0x93, 0xfa, 0x96, 0x7b}, "日本"},
+		{"gb18030 explicit replacement rune", "gb18030", []byte{0x84, 0x31, 0xa4, 0x37}, "\uFFFD"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -99,6 +100,7 @@ func TestDecodeRejectsInvalidBytes(t *testing.T) {
 		{"windows-1252 undefined byte 0x9d", "windows-1252", []byte{'a', 0x9d}},
 		{"shift_jis truncated lead byte", "shift_jis", []byte{0x81}},
 		{"shift_jis invalid trail byte", "shift_jis", []byte{0x82, 0x20}},
+		{"gb18030 invalid byte mixed with valid U+FFFD", "gb18030", []byte{0x84, 0x31, 0xa4, 0x37, 0x81}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

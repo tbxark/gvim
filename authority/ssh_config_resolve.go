@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/user"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -89,10 +90,26 @@ func (b *sshBackend) resolveDial() (sshResolved, error) {
 	if b.opts.ForwardAgent {
 		res.forwardAgent = true
 	}
+	if res.user == "" {
+		res.user = defaultLocalUser()
+	}
 	if res.port == 0 {
 		res.port = DefaultSSHPort
 	}
 	return res, nil
+}
+
+func defaultLocalUser() string {
+	if u := os.Getenv("USER"); u != "" {
+		return u
+	}
+	if u := os.Getenv("USERNAME"); u != "" {
+		return u
+	}
+	if cu, err := user.Current(); err == nil && cu.Username != "" {
+		return cu.Username
+	}
+	return ""
 }
 
 // parseSSHJump parses ProxyJump: one hop only, [user@]host[:port]. The jump alias
@@ -168,10 +185,10 @@ func (b *sshBackend) openAgent(res sshResolved) (agent.Agent, net.Conn, error) {
 	return agent.NewClient(conn), conn, nil
 }
 
-// authMethodsResolved builds the authentication order for a resolved target. It
-// is used for the target and for the jump hop (the same credentials; a
-// jump-specific IdentityFile is a recorded residual).
-func (b *sshBackend) authMethodsResolved(ctx context.Context, res sshResolved, ag agent.Agent) ([]ssh.AuthMethod, error) {
+// authMethodsResolved builds the authentication order for a resolved target (or its
+// ProxyJump bastion when forJump is true). Target-only credentials (UI password, target
+// keyring password, and target 2FA keyboardAnswers) are omitted for the jump bastion.
+func (b *sshBackend) authMethodsResolved(ctx context.Context, res sshResolved, ag agent.Agent, forJump bool) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 	if ag != nil {
 		methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
@@ -212,6 +229,20 @@ func (b *sshBackend) authMethodsResolved(ctx context.Context, res sshResolved, a
 	}
 	if len(signers) > 0 {
 		methods = append(methods, ssh.PublicKeys(signers...))
+	}
+	if forJump {
+		if b.opts.Password != nil {
+			methods = append(methods, ssh.PasswordCallback(func() (string, error) { return b.opts.Password(ctx) }))
+		}
+		if b.opts.KeyboardInteractive != nil {
+			methods = append(methods, ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+				return b.opts.KeyboardInteractive(ctx, name, instruction, questions, echos)
+			}))
+		}
+		if len(methods) == 0 {
+			return nil, errors.New("ssh: no authentication method for jump host (no agent, no usable identity file, no password callback, no keyboard-interactive callback)")
+		}
+		return methods, nil
 	}
 	b.mu.Lock()
 	stored := b.password

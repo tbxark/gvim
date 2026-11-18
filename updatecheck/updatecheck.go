@@ -52,19 +52,51 @@ type Release struct {
 	URL string
 }
 
-// CurrentVersion returns the version of this build, without the "v" prefix, or
-// "" when the build has no version (a "go run" build or a development binary).
-// A build without a version never checks: it cannot say what "newer" means.
+// Version is overridden at release link time via:
+//
+//	-ldflags "-X github.com/tbxark/gvim/updatecheck.Version=0.1.0"
+//
+// When empty, CurrentVersion falls back to Go build module metadata (returning ""
+// for development or VCS pseudo-version builds; DisplayVersion falls back to
+// DefaultVersion).
+var Version = ""
+
+// DefaultVersion is the fallback version reported for source builds without
+// module version metadata.
+const DefaultVersion = "0.1.0"
+
+// CurrentVersion returns the version of this build, without the "v" prefix.
+// Source builds without release metadata return "" so update polling is disabled.
 func CurrentVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return ""
+	if v := strings.TrimSpace(Version); v != "" {
+		return strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
 	}
-	v := strings.TrimSpace(info.Main.Version)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return moduleReleaseVersion(info.Main.Version)
+	}
+	return ""
+}
+
+func moduleReleaseVersion(raw string) string {
+	v := strings.TrimSpace(raw)
 	if v == "" || v == "(devel)" || v == "devel" {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+	if strings.HasPrefix(trimmed, "0.0.0-") || strings.Contains(trimmed, "+dirty") {
+		return ""
+	}
+	return trimmed
+}
+
+// DisplayVersion returns the user-facing version prefixed with "v" (for example
+// "v0.1.0"), falling back to DefaultVersion when CurrentVersion is empty.
+func DisplayVersion() string {
+	v := CurrentVersion()
+	if v == "" {
+		v = DefaultVersion
+	}
+	return "v" + v
 }
 
 // ReleasesURL returns the feed URL for this launch: ReleasesURLEnv when it is
@@ -162,12 +194,16 @@ func (c *Checker) Due() bool {
 	return c.now().Sub(then) >= c.interval()
 }
 
-// Last returns the release the last successful check recorded, and when that
-// check ran. It reports false when no check has succeeded. This is what lets a
-// launch inside the interval paint the indicator without asking the feed.
+// Last returns the newer release the last successful check recorded, and when
+// that check ran. It reports false when no check has succeeded, no newer version
+// was recorded, or the stored release is not newer than c.Current. This is what
+// lets a launch inside the interval paint the indicator without asking the feed.
 func (c *Checker) Last() (Release, time.Time, bool) {
+	if strings.TrimSpace(c.Current) == "" {
+		return Release{}, time.Time{}, false
+	}
 	st, ok := c.readStamp()
-	if !ok {
+	if !ok || st.Latest == "" || Compare(st.Latest, c.Current) <= 0 {
 		return Release{}, time.Time{}, false
 	}
 	return Release{Version: st.Latest, URL: st.URL}, time.Unix(st.Checked, 0), true
@@ -279,14 +315,27 @@ func (c *Checker) stamp(latest, page string) {
 	if c.StampPath == "" {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(c.StampPath), 0o700); err != nil {
+	dir := filepath.Dir(c.StampPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
 	data, err := json.Marshal(stamp{Checked: c.now().Unix(), Latest: latest, URL: page})
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(c.StampPath, data, 0o600)
+	tmp, err := os.CreateTemp(dir, ".update-check-*.tmp")
+	if err != nil {
+		return
+	}
+	_, werr := tmp.Write(data)
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(tmp.Name())
+		return
+	}
+	if err := os.Rename(tmp.Name(), c.StampPath); err != nil {
+		_ = os.Remove(tmp.Name())
+	}
 }
 
 func (c *Checker) now() time.Time {

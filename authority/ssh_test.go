@@ -50,6 +50,9 @@ type fakeSSH struct {
 	changes  []testSize
 	conns    []*ssh.ServerConn
 	accepted int
+	// passwordCallback, publicKeyCallback, keyboardCallback override the default server auth checks when set.
+	passwordCallback  func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error)
+	publicKeyCallback func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error)
 	// keyboardCallback, when set, answers keyboard-interactive auth challenges; the
 	// 2FA tests use it to require a one-time code.
 	keyboardCallback func(conn ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error)
@@ -64,6 +67,8 @@ type fakeSSH struct {
 	agentRequests int
 	agentSigners  []ssh.PublicKey
 	agentErr      error
+	// signals records signal requests received by fakeSSH sessions.
+	signals []string
 }
 
 // newFakeSSH starts the server on a loopback port.
@@ -80,17 +85,32 @@ func newFakeSSH(t *testing.T) *fakeSSH {
 	s := &fakeSSH{t: t, signer: signer}
 	s.cfg = &ssh.ServerConfig{
 		PasswordCallback: func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			s.mu.Lock()
+			cb := s.passwordCallback
+			s.mu.Unlock()
+			if cb != nil {
+				return cb(conn, pass)
+			}
 			if string(pass) == "pw" {
 				return nil, nil
 			}
 			return nil, errors.New("bad password")
 		},
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			s.mu.Lock()
+			cb := s.publicKeyCallback
+			s.mu.Unlock()
+			if cb != nil {
+				return cb(conn, key)
+			}
 			return nil, nil
 		},
 		KeyboardInteractiveCallback: func(conn ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
-			if s.keyboardCallback != nil {
-				return s.keyboardCallback(conn, challenge)
+			s.mu.Lock()
+			cb := s.keyboardCallback
+			s.mu.Unlock()
+			if cb != nil {
+				return cb(conn, challenge)
 			}
 			return nil, errors.New("keyboard-interactive not configured")
 		},
@@ -218,6 +238,11 @@ func (s *fakeSSH) handleSession(sc *ssh.ServerConn, ch ssh.Channel, reqs <-chan 
 			s.mu.Unlock()
 			reply(req, false)
 		case "signal":
+			var payload struct{ Signal string }
+			_ = ssh.Unmarshal(req.Payload, &payload)
+			s.mu.Lock()
+			s.signals = append(s.signals, payload.Signal)
+			s.mu.Unlock()
 			reply(req, true)
 		case "auth-agent-req@openssh.com":
 			s.mu.Lock()
@@ -529,9 +554,65 @@ func TestSSHLongRunning(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 	p.CloseStdin()
+	if _, ok := p.Output(ctx); ok {
+		t.Fatal("Output returned ok=true after process EOF")
+	}
 	res, err := p.Wait(ctx)
 	if err != nil || res.Code != 0 {
 		t.Fatalf("wait = %+v, %v", res, err)
+	}
+}
+
+func TestSSHLongRunningSignalsAndExitSignal(t *testing.T) {
+	srv := newFakeSSH(t)
+	srv.execFunc = func(_ string, stdin io.Reader, stdout, _ io.Writer) int {
+		_, _ = io.Copy(io.Discard, stdin)
+		_, _ = io.WriteString(stdout, "hi")
+		return 0
+	}
+	a := srv.connect(t, authority.SSHOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p, err := a.LongRunning().Start(ctx, []string{"sig"}, hostos.ProcOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := p.Kill("INT"); err != nil {
+		t.Fatalf("Kill INT: %v", err)
+	}
+	if err := p.Kill("HUP"); err != nil {
+		t.Fatalf("Kill HUP: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		srv.mu.Lock()
+		n := len(srv.signals)
+		srv.mu.Unlock()
+		if n >= 2 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	p.CloseStdin()
+	var out []byte
+	for {
+		c, ok := p.Output(ctx)
+		if !ok {
+			break
+		}
+		out = append(out, c.Data...)
+	}
+	if string(out) != "hi" {
+		t.Fatalf("output = %q, want hi", out)
+	}
+	if _, err := p.Wait(ctx); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	srv.mu.Lock()
+	sigs := append([]string(nil), srv.signals...)
+	srv.mu.Unlock()
+	if len(sigs) < 2 || sigs[0] != "INT" || sigs[1] != "HUP" {
+		t.Fatalf("signals = %v, want [INT HUP]", sigs)
 	}
 }
 

@@ -73,10 +73,11 @@ func MarkdownTables(lines []string) ([]TableLine, []Table) {
 		t.Lines = append(t.Lines, i+1)
 		j := i + 2
 		for ; j < len(lines); j++ {
-			if strings.TrimSpace(lines[j]) == "" || !strings.Contains(lines[j], "|") || mdFence.MatchString(lines[j]) {
+			line := strings.TrimRight(lines[j], "\r")
+			if strings.TrimSpace(line) == "" || !strings.Contains(line, "|") || mdFence.MatchString(line) {
 				break
 			}
-			row := splitTableRow(strings.TrimRight(lines[j], "\r"))
+			row := splitTableRow(line)
 			if len(row.cells) != len(align) {
 				break
 			}
@@ -116,43 +117,51 @@ func splitTableRow(s string) tableRow {
 		return row
 	}
 	// The cell ranges between pipes (or from the line ends when a pipe is
-	// missing).
-	from := 0
-	if len(row.pipes) > 0 && row.pipes[0] == 0 {
-		from = 1
+	// missing), skipping outer spaces/tabs around optional outer pipes.
+	firstNB, lastNB := 0, len(r)-1
+	for firstNB < len(r) && (r[firstNB] == ' ' || r[firstNB] == '\t') {
+		firstNB++
 	}
-	last := len(r)
-	if n := len(row.pipes); n > 0 && row.pipes[n-1] == len(r)-1 {
-		last = len(r) - 1
+	for lastNB >= firstNB && (r[lastNB] == ' ' || r[lastNB] == '\t') {
+		lastNB--
 	}
-	// Walk the cell boundaries: the pipes inside [from, last), then last.
-	bounds := append([]int{}, row.pipes...)
-	bounds = append(bounds, last)
+	if firstNB > lastNB {
+		return row
+	}
+	if len(row.pipes) == 1 && row.pipes[0] == firstNB && row.pipes[0] == lastNB {
+		return row
+	}
+	from, last := 0, len(r)
+	pipes := row.pipes
+	if len(pipes) > 0 && pipes[0] == firstNB {
+		from = pipes[0] + 1
+		pipes = pipes[1:]
+	}
+	if len(pipes) > 0 && pipes[len(pipes)-1] == lastNB {
+		last = pipes[len(pipes)-1]
+		pipes = pipes[:len(pipes)-1]
+	}
+	if from > last {
+		return row
+	}
 	start := from
-	for _, b := range bounds {
-		if b < start || (b == start && b != last) {
-			if b == last {
-				break
-			}
-			if b >= from && b <= last {
-				start = b + 1
-				continue
-			}
-			continue
-		}
-		if b > last {
-			break
+	for k := 0; k <= len(pipes); k++ {
+		b := last
+		if k < len(pipes) {
+			b = pipes[k]
 		}
 		raw := string(r[start:b])
-		lead := len(raw) - len(strings.TrimLeft(raw, " \t"))
-		trail := len(raw) - len(strings.TrimRight(raw, " \t"))
-		contentEnd := b - trail
-		row.cells = append(row.cells, raw[lead:len(raw)-trail])
-		row.starts = append(row.starts, start+lead)
-		row.ends = append(row.ends, max(contentEnd, start+lead))
-		if b == last {
-			break
+		trimmed := strings.Trim(raw, " \t")
+		cellStart, cellEnd := b, b
+		if trimmed != "" {
+			lead := len(raw) - len(strings.TrimLeft(raw, " \t"))
+			trail := len(raw) - len(strings.TrimRight(raw, " \t"))
+			cellStart = start + lead
+			cellEnd = b - trail
 		}
+		row.cells = append(row.cells, trimmed)
+		row.starts = append(row.starts, cellStart)
+		row.ends = append(row.ends, cellEnd)
 		start = b + 1
 	}
 	return row

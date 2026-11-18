@@ -278,8 +278,8 @@ func (s *SharedBuffers) Register(e *Editor, d *document.Document) {
 func (s *SharedBuffers) watchLocked(entry *sharedEntry, owner *Editor) {
 	entry.watchKey = "workspace-shared:" + entry.canonical
 	entry.watchEditor = owner
-	entry.watchRemove = owner.AddChangeListener(entry.watchKey, func(_ DocID, c buffer.Change) {
-		s.onOwnerChange(entry, c)
+	entry.watchRemove = owner.AddChangeListener(entry.watchKey, func(doc DocID, c buffer.Change) {
+		s.onOwnerChange(entry, doc, c)
 	})
 	owner.TrackChanges(entry.watchKey, true)
 }
@@ -295,14 +295,14 @@ func (s *SharedBuffers) unwatchLocked(entry *sharedEntry) {
 
 // onOwnerChange propagates an owner change to every mirror through the document
 // stale-version guard; a mirror that cannot apply it reloads the whole text.
-func (s *SharedBuffers) onOwnerChange(entry *sharedEntry, c buffer.Change) {
+func (s *SharedBuffers) onOwnerChange(entry *sharedEntry, doc DocID, c buffer.Change) {
 	if s == nil || entry == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	owner := entry.owner
-	if owner == nil || entry.doc == nil {
+	if owner == nil || entry.doc == nil || doc != entry.doc.ID() {
 		return
 	}
 	for _, mirror := range entry.mirrors {
@@ -366,6 +366,9 @@ func (s *SharedBuffers) transferLocked(entry *sharedEntry, from, to *Editor) err
 	from.replaceRecent(canonical, snapshot)
 	to.docs[toIdx] = canonical
 	canonical.MakeSharedOwner()
+	if to.opts.ReadOnly {
+		canonical.SetReadOnly(true)
+	}
 	to.adopt(canonical)
 	to.replaceRecent(toMirror, canonical)
 	entry.owner = to
@@ -401,6 +404,9 @@ func (s *SharedBuffers) adoptPendingLocked(e *Editor) {
 			s.entries[canonical] = entry
 			s.watchLocked(entry, e)
 			d.MakeSharedOwner()
+			if e.opts.ReadOnly {
+				d.SetReadOnly(true)
+			}
 			continue
 		}
 		if entry.owner == e {
@@ -411,6 +417,9 @@ func (s *SharedBuffers) adoptPendingLocked(e *Editor) {
 				e.docs[idx] = entry.doc
 				e.replaceRecent(d, entry.doc)
 				entry.doc.MakeSharedOwner()
+				if e.opts.ReadOnly {
+					entry.doc.SetReadOnly(true)
+				}
 				if conflict == nil {
 					e.releaseDoc(d)
 				} else {
@@ -571,6 +580,9 @@ func (s *SharedBuffers) DropEditor(e *Editor) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.active == e {
+		s.active = nil
+	}
 	delete(s.pending, e)
 	for canonical, r := range s.reserved {
 		if r.editor == e {
@@ -626,26 +638,6 @@ func (s *SharedBuffers) saveAsRefusalLocked(e *Editor, d *document.Document, can
 	}
 	return fmt.Errorf("save as: %s is open in %s; save under another name or close it there first",
 		filepath.Base(canonical), s.label(entry.owner))
-}
-
-// CheckSaveAs refuses a Save As target that another workspace owns (or that this
-// workspace owns with a different document) or that another Save As is currently writing.
-// A save-as must never write a file that is live as another workspace's canonical
-// document: the write would silently diverge from the owner's in-memory text, and a later
-// owner save would overwrite the saved copy. A read-only mirror cannot be saved-as either:
-// it is a view of another workspace's buffer, and a copy would fork it without the
-// registry knowing.
-func (s *SharedBuffers) CheckSaveAs(e *Editor, d *document.Document, path string) error {
-	if s == nil || e == nil || d == nil || path == "" {
-		return nil
-	}
-	if d.SharedMirror() {
-		return errors.New("save as: the tab is a read-only mirror of another workspace's buffer; focus its workspace to take ownership first")
-	}
-	canonical := sharedCanonical(path)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveAsRefusalLocked(e, d, canonical)
 }
 
 // ReserveSaveAs claims the Save As target for e before its asynchronous write starts. The

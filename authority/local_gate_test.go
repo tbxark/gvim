@@ -29,7 +29,11 @@ func TestLocalGateRunsBeforeTheLaunch(t *testing.T) {
 	fos := plugintest.NewFakeOS()
 	fos.SetDir("/w")
 	fos.Script([]string{"git", "grep", "x"}, plugintest.ProcScript{})
-	overlay := func() []string { return []string{"PATH=/proj/bin", "FROM_OVERLAY=1"} }
+	envCalls := 0
+	overlay := func() []string {
+		envCalls++
+		return []string{"PATH=/proj/bin", "FROM_OVERLAY=1"}
+	}
 	var calls []gateCall
 	gate := func(_ context.Context, argv []string, cwd string, env map[string]string) error {
 		calls = append(calls, gateCall{argv: argv, cwd: cwd, env: env})
@@ -40,15 +44,36 @@ func TestLocalGateRunsBeforeTheLaunch(t *testing.T) {
 	if _, err := a.OneShot().Run(ctx, []string{"git", "grep", "x"}, hostos.ProcOptions{Cwd: "/w", Env: map[string]string{"EXTRA": "2", "PATH": "/job/bin"}}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	if envCalls != 1 {
+		t.Errorf("EnvProvider called %d times on Run, want 1", envCalls)
+	}
 	if len(calls) != 1 || calls[0].argv[0] != "git" || calls[0].cwd != "/w" {
 		t.Fatalf("gate calls = %+v", calls)
 	}
 	env := calls[0].env
-	if env["PATH"] != "/proj/bin" || env["FROM_OVERLAY"] != "1" || env["EXTRA"] != "2" {
+	if env["PATH"] != "/job/bin" || env["FROM_OVERLAY"] != "1" || env["EXTRA"] != "2" {
 		t.Errorf("gate environment = %+v", env)
+	}
+	if runs := fos.Runs(); len(runs) != 1 || runs[0].Opts.Env["PATH"] != "/job/bin" || runs[0].Opts.Env["FROM_OVERLAY"] != "1" {
+		t.Errorf("run environment = %+v", runs)
 	}
 	if env["HOME"] == "" && len(env) < 5 {
 		t.Errorf("gate environment lacks the parent environment: %+v", env)
+	}
+
+	launch, err := a.Terminal().Launch(ctx, authority.TerminalOptions{
+		Dir:   "/w",
+		Shell: "/bin/sh",
+		Env:   []string{"PATH=/term/bin"},
+	})
+	if err != nil {
+		t.Fatalf("terminal launch: %v", err)
+	}
+	if got := calls[len(calls)-1].env["PATH"]; got != "/term/bin" {
+		t.Errorf("terminal gate PATH = %q, want /term/bin (explicit o.Env wins)", got)
+	}
+	if len(launch.Env) < 2 || launch.Env[len(launch.Env)-1] != "PATH=/term/bin" {
+		t.Errorf("terminal launch.Env = %v, want explicit PATH last", launch.Env)
 	}
 }
 

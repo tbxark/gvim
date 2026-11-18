@@ -37,7 +37,7 @@ func MaxScroll(rows []Row, bodyRows int) int {
 	if bodyRows <= 0 || len(rows) == 0 {
 		return 0
 	}
-	off := 0
+	off := max(0, len(rows)-bodyRows)
 	for off < len(rows)-1 && !reachesEnd(rows, off, bodyRows) {
 		off++
 	}

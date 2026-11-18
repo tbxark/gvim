@@ -89,9 +89,21 @@ func matchTerms(terms []queryTerm, target string) fuzzyResult {
 	return matchPrepared(terms, []rune(target), lowerRunes(target))
 }
 
-// matchPrepared is the shared body of one matching pass. A reusable Matcher owns tc
-// and tl and calls it with its scratch buffers; Score and Pattern convert here.
+type dpScratch struct {
+	arena     []chainNode
+	bestScore []int
+	bestOK    []bool
+	bestNode  []int
+	dpPos     []int
+	subPos    []int
+}
+
 func matchPrepared(terms []queryTerm, tc, tl []rune) fuzzyResult {
+	var sc dpScratch
+	return matchPreparedScratch(terms, tc, tl, &sc)
+}
+
+func matchPreparedScratch(terms []queryTerm, tc, tl []rune, sc *dpScratch) fuzzyResult {
 	// Fast rejection: every term must be a subsequence of the target.
 	for _, t := range terms {
 		if !isSubsequence(t.lower, tl) {
@@ -99,9 +111,9 @@ func matchPrepared(terms []queryTerm, tc, tl []rune) fuzzyResult {
 		}
 	}
 	if len(terms) > 1 {
-		return scoreMultiTerm(terms, tc, tl)
+		return scoreMultiTermScratch(terms, tc, tl, sc)
 	}
-	return scoreSingleTerm(terms[0].lower, tc, tl)
+	return scoreSingleTermScratch(terms[0].lower, tc, tl, sc)
 }
 
 // isASCII reports whether every rune is below 128.
@@ -152,9 +164,9 @@ func isSubsequence(q, tl []rune) bool {
 // scoreSingleTerm picks the better of the DP alignment and the best contiguous
 // substring, then adds the bonuses for contiguity, exact and prefix matches,
 // and path-segment starts.
-func scoreSingleTerm(q, tc, tl []rune) fuzzyResult {
-	dpPos, dpScore, dpOK := findBestMatch(q, tc, tl)
-	subPos, subScore, subOK := findContiguousMatch(q, tc, tl)
+func scoreSingleTermScratch(q, tc, tl []rune, sc *dpScratch) fuzzyResult {
+	dpPos, dpScore, dpOK := findBestMatch(q, tc, tl, sc)
+	subPos, subScore, subOK := findContiguousMatch(q, tc, tl, sc)
 
 	var positions []int
 	var final int
@@ -223,11 +235,11 @@ func scoreSingleTerm(q, tc, tl []rune) fuzzyResult {
 
 // scoreMultiTerm scores each term independently, sums the scores, and adds a
 // tight-span bonus when the terms appear in order and close together.
-func scoreMultiTerm(terms []queryTerm, tc, tl []rune) fuzzyResult {
+func scoreMultiTermScratch(terms []queryTerm, tc, tl []rune, sc *dpScratch) fuzzyResult {
 	total := 0
 	var all []int
 	for _, t := range terms {
-		r := scoreSingleTerm(t.lower, tc, tl)
+		r := scoreSingleTermScratch(t.lower, tc, tl, sc)
 		if !r.matched {
 			return fuzzyResult{}
 		}
@@ -301,7 +313,7 @@ type chainNode struct {
 
 // findBestMatch is the fzf-style DP. It tracks, for every query prefix length,
 // the best-scoring chain of matches ending in the current target position.
-func findBestMatch(q, tc, tl []rune) ([]int, int, bool) {
+func findBestMatch(q, tc, tl []rune, sc *dpScratch) ([]int, int, bool) {
 	n, m := len(tl), len(q)
 	if m == 0 {
 		return nil, 0, true
@@ -310,11 +322,17 @@ func findBestMatch(q, tc, tl []rune) ([]int, int, bool) {
 		return nil, 0, false
 	}
 
-	arena := make([]chainNode, 0, m*4)
-	bestScore := make([]int, m+1)
-	bestOK := make([]bool, m+1)
-	bestNode := make([]int, m+1)
-	for i := range bestNode {
+	arena := sc.arena[:0]
+	if cap(arena) < m*4 {
+		arena = make([]chainNode, 0, m*4)
+	}
+	need := m + 1
+	bestScore := growIntSlice(sc.bestScore, need)
+	bestOK := growBoolSlice(sc.bestOK, need)
+	bestNode := growIntSlice(sc.bestNode, need)
+	clear(bestScore[:need])
+	clear(bestOK[:need])
+	for i := range bestNode[:need] {
 		bestNode[i] = -1
 	}
 	bestOK[0] = true
@@ -367,25 +385,45 @@ func findBestMatch(q, tc, tl []rune) ([]int, int, bool) {
 		}
 	}
 
+	sc.arena = arena
+	sc.bestScore = bestScore
+	sc.bestOK = bestOK
+	sc.bestNode = bestNode
+
 	if !bestOK[m] {
 		return nil, 0, false
 	}
-	positions := make([]int, m)
+	positions := growIntSlice(sc.dpPos, m)
 	for idx, node := m-1, bestNode[m]; node >= 0 && idx >= 0; idx-- {
 		positions[idx] = arena[node].ti
 		node = arena[node].prev
 	}
-	return positions, bestScore[m], true
+	sc.dpPos = positions
+	return positions[:m], bestScore[m], true
+}
+
+func growIntSlice(s []int, n int) []int {
+	if cap(s) >= n {
+		return s[:n]
+	}
+	return make([]int, n)
+}
+
+func growBoolSlice(s []bool, n int) []bool {
+	if cap(s) >= n {
+		return s[:n]
+	}
+	return make([]bool, n)
 }
 
 // findContiguousMatch returns the best-scoring literal occurrence of q in the
 // target. The first occurrence wins ties, as in the Rust scorer.
-func findContiguousMatch(q, tc, tl []rune) ([]int, int, bool) {
+func findContiguousMatch(q, tc, tl []rune, sc *dpScratch) ([]int, int, bool) {
 	m, n := len(q), len(tl)
 	if m == 0 || m > n {
 		return nil, 0, false
 	}
-	var best []int
+	bestStart := -1
 	bestScore := 0
 	for start := 0; start <= n-m; start++ {
 		if !slices.Equal(tl[start:start+m], q) {
@@ -405,15 +443,20 @@ func findContiguousMatch(q, tc, tl []rune) ([]int, int, bool) {
 			}
 		}
 		s += scoreConsecutive * (m - 1)
-		if best == nil || s > bestScore {
-			best = make([]int, m)
-			for i := range best {
-				best[i] = start + i
-			}
+		if bestStart < 0 || s > bestScore {
+			bestStart = start
 			bestScore = s
 		}
 	}
-	return best, bestScore, best != nil
+	if bestStart < 0 {
+		return nil, 0, false
+	}
+	best := growIntSlice(sc.subPos, m)
+	for i := range m {
+		best[i] = bestStart + i
+	}
+	sc.subPos = best
+	return best[:m], bestScore, true
 }
 
 func isWordSeparator(r rune) bool {

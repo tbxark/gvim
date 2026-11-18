@@ -90,10 +90,12 @@ func TestEnvDetectorValidation(t *testing.T) {
 	bad := []EnvDetector{
 		{Name: "", Markers: []string{".venv"}, Kind: EnvKindPathOnly, Snippet: "x"},
 		{Name: "a/b", Markers: []string{"../escape"}, Kind: EnvKindPathOnly, Snippet: "x"},
+		{Name: "nested-escape", Markers: []string{"a/../../escape"}, Kind: EnvKindPathOnly, Snippet: "x"},
+		{Name: "dot-marker", Markers: []string{"."}, Kind: EnvKindPathOnly, Snippet: "x"},
 		{Name: "nokind", Markers: []string{".envrc"}, Snippet: "x"},
 		{Name: "nosnippet", Markers: []string{"Pipfile"}, Kind: EnvKindShell},
 	}
-	if got := ValidateEnvDetectors(bad); len(got) < 4 {
+	if got := ValidateEnvDetectors(bad); len(got) < 6 {
 		t.Errorf("validation problems = %v, want one per bad detector", got)
 	}
 }

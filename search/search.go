@@ -66,6 +66,86 @@ func Find(b *buffer.Buffer, q Query) ([]Match, error) {
 	return out, nil
 }
 
+// CompiledQuery prepares a Query once for repeated concurrent FindString calls
+// across many texts without re-compiling regexes or constructing buffers.
+type CompiledQuery struct {
+	q         Query
+	re        *regexp.Regexp
+	litPrefix string
+	needle    *foldNeedle
+}
+
+// CompileQuery prepares q once for searching raw strings via FindString.
+func CompileQuery(q Query) (*CompiledQuery, error) {
+	if q.Text == "" {
+		return &CompiledQuery{q: q}, nil
+	}
+	if !q.Regex {
+		if q.CaseSensitive {
+			return &CompiledQuery{q: q, litPrefix: q.Text}, nil
+		}
+		return &CompiledQuery{q: q, needle: newFoldNeedle(q.Text)}, nil
+	}
+	re, err := compile(q)
+	if err != nil {
+		return nil, err
+	}
+	prefix, _ := re.LiteralPrefix()
+	return &CompiledQuery{q: q, re: re, litPrefix: prefix}, nil
+}
+
+// FindString searches text without allocating a buffer.Buffer, applying a
+// fast literal-prefix precheck before running the matcher. It is safe for
+// concurrent use across worker goroutines.
+func (cq *CompiledQuery) FindString(text string) []Match {
+	if cq == nil || cq.q.Text == "" || (!cq.q.Regex && text == "") {
+		return nil
+	}
+	if cq.litPrefix != "" && !strings.Contains(text, cq.litPrefix) {
+		return nil
+	}
+	var locs [][]int
+	if !cq.q.Regex {
+		var sc *foldScan
+		if cq.needle != nil {
+			sc = cq.needle.scan("", 0)
+		}
+		offs := (&literalSearch{q: cq.q, sc: sc}).offsets(text, math.MaxInt)
+		if len(offs) == 0 {
+			return nil
+		}
+		locs = make([][]int, len(offs))
+		for i, o := range offs {
+			locs[i] = []int{o[0], o[1]}
+		}
+	} else {
+		d := document{text: text}
+		locs = d.locate(cq.re, cq.q)
+		if len(locs) == 0 {
+			return nil
+		}
+	}
+	cur := newOffsetPos(text, buffer.Pos{})
+	out := make([]Match, len(locs))
+	for i, loc := range locs {
+		out[i] = Match{Start: cur.pos(loc[0]), End: cur.pos(loc[1])}
+	}
+	return out
+}
+
+// FindString compiles q and searches text directly without constructing a
+// buffer.Buffer. Empty queries return no matches and no error.
+func FindString(text string, q Query) ([]Match, error) {
+	if q.Text == "" {
+		return nil, nil
+	}
+	cq, err := CompileQuery(q)
+	if err != nil {
+		return nil, err
+	}
+	return cq.FindString(text), nil
+}
+
 // hit is a match together with what replacement needs: its byte offsets in
 // the document text and the submatch offsets of the same search.
 type hit struct {
@@ -298,8 +378,19 @@ func isWordRune(r rune) bool {
 // repl unchanged. A regex query expands $1, ${name} and the like from the
 // captures of h, after reading \n, \t, \r and \\ as characters.
 func (r result) expansion(h hit, q Query, repl string) string {
+	return r.expandPrepared(h, q, prepareReplacement(q, repl))
+}
+
+func prepareReplacement(q Query, repl string) string {
 	if !q.Regex {
 		return repl
+	}
+	return normalizeReplacement(interpretEscapes(repl))
+}
+
+func (r result) expandPrepared(h hit, q Query, prepared string) string {
+	if !q.Regex {
+		return prepared
 	}
 	groups := make([]int, len(h.groups))
 	for i, g := range h.groups {
@@ -309,8 +400,7 @@ func (r result) expansion(h hit, q Query, repl string) string {
 		}
 		groups[i] = g - h.start
 	}
-	repl = normalizeReplacement(interpretEscapes(repl))
-	return string(r.re.ExpandString(nil, repl, r.doc.text[h.start:h.end], groups))
+	return string(r.re.ExpandString(nil, prepared, r.doc.text[h.start:h.end], groups))
 }
 
 // interpretEscapes turns \n, \t, \r and \\ in a replacement template into the

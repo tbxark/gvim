@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -79,7 +80,14 @@ var languageOverrideFieldKeys = func() map[string]LanguageOverrideField {
 // inherits editor.auto_indent, ...). ok is false for a field whose inherited value
 // has no single display form (the grammar names).
 func (c Config) LanguageInheritedValue(language, field string) (string, bool) {
-	eff := c.EditorFor(language, "")
+	base := c
+	if len(c.Languages) > 0 {
+		stripped := maps.Clone(c.Languages)
+		delete(stripped, language)
+		delete(stripped, LanguageID(language))
+		base.Languages = stripped
+	}
+	eff := base.EditorFor(language, "")
 	switch field {
 	case "tab_size":
 		return strconv.Itoa(eff.TabSize), true
@@ -118,11 +126,18 @@ func (c Config) LanguageInheritedValue(language, field string) (string, bool) {
 // KnownLanguageIDs returns the language ids gvim knows by default, plus "text",
 // sorted. The Settings page offers them when a language entry is added.
 func KnownLanguageIDs() []string {
-	ids := make([]string, 0, len(builtinLanguages)+1)
+	seen := make(map[string]struct{}, len(builtinLanguages)+len(fileLanguages)+1)
+	seen[textLanguage] = struct{}{}
 	for id := range builtinLanguages {
+		seen[id] = struct{}{}
+	}
+	for id := range fileLanguages {
+		seen[id] = struct{}{}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
 		ids = append(ids, id)
 	}
-	ids = append(ids, textLanguage)
 	slices.Sort(ids)
 	return ids
 }
@@ -233,26 +248,23 @@ func explorerWidthText(c Config) string {
 	return strconv.Itoa(w.Value)
 }
 
-// encodeExplorerWidth parses the page's width: "30%" (or "30 %") is a
-// percentage, a bare integer is a percentage too, as the config file reads it;
-// a value in columns is written with a leading "=" exception? No: the page shows
-// a column count as the same bare number, so the file's own form is what a
-// number means (a percentage). To keep the column form explicit the page accepts
-// "24" as columns only when it ends in "cols"?? Keep the config rule: a number
-// is a percentage.
+// encodeExplorerWidth parses the page's width: "30%" (or "30 %") is encoded as a
+// percentage string ("\"30%\""), and a plain integer >= 0 is encoded as a quoted
+// column count string ("\"24\""), matching parseExplorerWidth.
 func encodeExplorerWidth(text string) (json.RawMessage, error) {
 	s := strings.ReplaceAll(strings.TrimSpace(text), " ", "")
 	if pct, ok := strings.CutSuffix(s, "%"); ok {
-		if _, err := parseExplorerPercent(pct); err != nil {
+		n, err := parseExplorerPercent(pct)
+		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(pct + "%")
+		return json.Marshal(strconv.Itoa(n) + "%")
 	}
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 || n > 100 {
-		return nil, fmt.Errorf("must be a percent (\"30%%\") or a column count? use a percent 0-100: got %q", text)
+	if err != nil || n < 0 {
+		return nil, fmt.Errorf("must be a percent (\"30%%\") or a column count: got %q", text)
 	}
-	return json.RawMessage(strconv.Itoa(n)), nil
+	return json.Marshal(strconv.Itoa(n))
 }
 
 // validStatusBarElementNamesText is a test helper? kept private.

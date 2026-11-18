@@ -197,12 +197,26 @@ func (l *local) WriteStream(ctx context.Context, path string, o hostos.WriteOpti
 		mode = fi.Mode().Perm()
 	}
 	// The temporary name carries the target's name, kept short so it fits the file-name limit.
-	base := filepath.Base(target)
-	f, err := os.CreateTemp(filepath.Dir(target), "."+base[:min(len(base), 200)]+".gvim-*")
+	base := truncateUTF8(filepath.Base(target), 200)
+	f, err := os.CreateTemp(filepath.Dir(target), "."+base+".gvim-*")
 	if err != nil {
 		return nil, err
 	}
 	return &localWriteStream{file: f, tmp: f.Name(), target: target, mode: mode}, nil
+}
+
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if i > maxBytes {
+			break
+		}
+		n = i
+	}
+	return s[:n]
 }
 
 // localWriteStream is a local file being streamed into a temporary file and renamed at
@@ -283,30 +297,24 @@ func (l *local) allowed(ctx context.Context, argv []string, cwd string, env map[
 	return l.gate(ctx, argv, cwd)
 }
 
-// effectiveEnv is the environment the child will inherit: the parent environment, the
-// active project overlay, then the launch's entries through envMap — the same merge the
-// OS port receives, so the gate's PATH is the child's PATH.
-func (l *local) effectiveEnv(o hostos.ProcOptions) map[string]string {
-	env := make(map[string]string, len(o.Env)+16)
+// prepareProcEnv merges the EnvProvider overlay with per-call o.Env (explicit per-call
+// o.Env wins) and computes the full effective environment for GateEnv in one pass so
+// l.env() is invoked at most once per launch.
+func (l *local) prepareProcEnv(o hostos.ProcOptions) (hostos.ProcOptions, map[string]string) {
+	merged := l.envMap(o)
+	env := make(map[string]string, len(merged.Env)+16)
 	for _, kv := range os.Environ() {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			env[k] = v
 		}
 	}
-	if l.env != nil {
-		for _, kv := range l.env() {
-			if k, v, ok := strings.Cut(kv, "="); ok {
-				env[k] = v
-			}
-		}
-	}
-	for k, v := range l.envMap(o).Env {
+	for k, v := range merged.Env {
 		env[k] = v
 	}
-	return env
+	return merged, env
 }
 
-// envMap merges the provider's entries into o.Env.
+// envMap merges the provider's entries beneath explicit per-call o.Env.
 func (l *local) envMap(o hostos.ProcOptions) hostos.ProcOptions {
 	if l.env == nil {
 		return o
@@ -315,31 +323,33 @@ func (l *local) envMap(o hostos.ProcOptions) hostos.ProcOptions {
 	if len(extra) == 0 {
 		return o
 	}
-	m := make(map[string]string, len(o.Env)+len(extra))
-	for k, v := range o.Env {
-		m[k] = v
-	}
+	m := make(map[string]string, len(extra)+len(o.Env))
 	for _, entry := range extra {
 		if k, v, ok := strings.Cut(entry, "="); ok {
 			m[k] = v
 		}
+	}
+	for k, v := range o.Env {
+		m[k] = v
 	}
 	o.Env = m
 	return o
 }
 
 func (l *local) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
-	if err := l.allowed(ctx, argv, o.Cwd, l.effectiveEnv(o)); err != nil {
+	merged, gateEnv := l.prepareProcEnv(o)
+	if err := l.allowed(ctx, argv, o.Cwd, gateEnv); err != nil {
 		return hostos.ProcResult{}, err
 	}
-	return l.os.Run(ctx, argv, l.envMap(o))
+	return l.os.Run(ctx, argv, merged)
 }
 
 func (l *local) Start(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.Proc, error) {
-	if err := l.allowed(ctx, argv, o.Cwd, l.effectiveEnv(o)); err != nil {
+	merged, gateEnv := l.prepareProcEnv(o)
+	if err := l.allowed(ctx, argv, o.Cwd, gateEnv); err != nil {
 		return nil, err
 	}
-	return l.os.Start(ctx, argv, l.envMap(o))
+	return l.os.Start(ctx, argv, merged)
 }
 
 // Launch describes the local terminal: the caller starts a local PTY as before.
@@ -348,10 +358,11 @@ func (l *local) Launch(ctx context.Context, o TerminalOptions) (TerminalLaunch, 
 	if shell == "" && l.shell != nil {
 		shell, args = l.shell()
 	}
-	env := append([]string(nil), o.Env...)
+	var env []string
 	if l.env != nil {
 		env = append(env, l.env()...)
 	}
+	env = append(env, o.Env...)
 	// The terminal's shell is supplied separately from the argv shape; gate it by name so
 	// a project-contained shell override is refused under Restricted and a Blocked
 	// workspace refuses the terminal itself.

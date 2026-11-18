@@ -2,6 +2,7 @@ package search
 
 import (
 	"regexp"
+	"regexp/syntax"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -18,31 +19,80 @@ type hugeSpan struct {
 var defaultHuge = hugeSpan{window: 1 << 16, margin: 1 << 12}
 
 // text returns the text that the window of runes [lo, hi) of line i, which has runes runes,
-// is searched in: the window with the margin on each side, clamped to the line. first is the
-// column of the text's first rune.
-func (sp hugeSpan) text(s *buffer.Snapshot, i, runes, lo, hi int) (first int, text string) {
+// is searched in: the window with the margin on each side, clamped to the line. first and end
+// are the rune column bounds of the returned text on line i.
+func (sp hugeSpan) text(s *buffer.Snapshot, i, runes, lo, hi int) (first, end int, text string) {
 	first = max(lo-sp.margin, 0)
-	end := min(hi+sp.margin, runes)
-	return first, s.LineRunes(i, first, end-first)
+	end = min(hi+sp.margin, runes)
+	return first, end, s.LineRunes(i, first, end-first)
 }
 
-// hugeMatches returns the matches of re in text, which holds the runes of line i from column
-// first on, that start in columns [lo, hi), with the positions of the whole line. A match that
-// starts in another window is left to that window, so no match is returned twice.
-func hugeMatches(i, first int, text string, re *regexp.Regexp, q Query, lo, hi int) []Match {
+// hugeMatches returns the matches of re in text, which holds the runes [first, end) of line i
+// (which has runes runes in total), that start in columns [lo, hi), with the positions of the
+// whole line. Line/text anchors (^, \A when first > 0; $, \z when end < runes) are disabled so
+// artificial window edges never produce false anchor matches. A match that starts in another
+// window is left to that window, so no match is returned twice.
+func hugeMatches(i, first, end, runes int, text string, re *regexp.Regexp, q Query, lo, hi int) []Match {
+	if q.Regex {
+		re = maskAnchors(re, first > 0, end < runes)
+	}
 	d := newWindow(i, text)
 	cur := newOffsetPos(d.text, buffer.Pos{Line: d.first})
 	var out []Match
 	for _, loc := range d.locate(re, q) {
 		start := cur.pos(loc[0])
-		end := cur.pos(loc[1])
+		endPos := cur.pos(loc[1])
 		start.Col += first
-		end.Col += first
+		endPos.Col += first
 		if start.Col >= lo && start.Col < hi {
-			out = append(out, Match{Start: start, End: end})
+			out = append(out, Match{Start: start, End: endPos})
 		}
 	}
 	return out
+}
+
+func maskAnchors(re *regexp.Regexp, stripStart, stripEnd bool) *regexp.Regexp {
+	if !stripStart && !stripEnd {
+		return re
+	}
+	ast, err := syntax.Parse(re.String(), syntax.Perl)
+	if err != nil {
+		return re
+	}
+	if !stripAnchorOps(ast, stripStart, stripEnd) {
+		return re
+	}
+	masked, err := regexp.Compile(ast.String())
+	if err != nil {
+		return re
+	}
+	return masked
+}
+
+func stripAnchorOps(re *syntax.Regexp, stripStart, stripEnd bool) bool {
+	changed := false
+	switch re.Op {
+	case syntax.OpBeginLine, syntax.OpBeginText:
+		if stripStart {
+			re.Op = syntax.OpNoMatch
+			re.Rune = nil
+			re.Sub = nil
+			return true
+		}
+	case syntax.OpEndLine, syntax.OpEndText:
+		if stripEnd {
+			re.Op = syntax.OpNoMatch
+			re.Rune = nil
+			re.Sub = nil
+			return true
+		}
+	}
+	for _, sub := range re.Sub {
+		if stripAnchorOps(sub, stripStart, stripEnd) {
+			changed = true
+		}
+	}
+	return changed
 }
 
 // forwardHuge searches the huge line line, which has runes runes, window by window from the
@@ -67,11 +117,11 @@ func (n *nextSearch) forwardHuge(line, runes int, p phase) (Match, bool, bool, e
 			return Match{}, false, false, nil
 		}
 		hi := min(col+n.huge.window, runes)
-		first, text := n.huge.text(n.s, line, runes, col, hi)
+		first, end, text := n.huge.text(n.s, line, runes, col, hi)
 		if err := n.account(text); err != nil {
 			return Match{}, false, false, err
 		}
-		for _, m := range hugeMatches(line, first, text, n.re, n.q, col, hi) {
+		for _, m := range hugeMatches(line, first, end, runes, text, n.re, n.q, col, hi) {
 			if m.Start.Less(n.from) != p.wrapped {
 				if p.wrapped {
 					// Every later match starts at or after from too.
@@ -107,11 +157,11 @@ func (n *nextSearch) backwardHuge(line, runes int, p phase, colHi int) (Match, b
 			return Match{}, false, false, nil
 		}
 		lo := max(hi-n.huge.window, floor)
-		first, text := n.huge.text(n.s, line, runes, lo, hi)
+		first, end, text := n.huge.text(n.s, line, runes, lo, hi)
 		if err := n.account(text); err != nil {
 			return Match{}, false, false, err
 		}
-		ms := hugeMatches(line, first, text, n.re, n.q, lo, hi)
+		ms := hugeMatches(line, first, end, runes, text, n.re, n.q, lo, hi)
 		for i := len(ms) - 1; i >= 0; i-- {
 			m := ms[i]
 			if m.Start.Less(n.from) == p.wrapped {

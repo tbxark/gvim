@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/tbxark/gvim/explorer"
 )
 
 // RemoteEntry is one directory entry of the remote file system: its name and kind
@@ -52,6 +54,7 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 	if fs == nil {
 		return errors.New("finder: remote enumeration without a file system")
 	}
+	matcher := explorer.NewPatternMatcher(opts.CustomIgnorePatterns)
 	stack := []remoteDir{{abs: root}}
 	visited := 0
 	for len(stack) > 0 {
@@ -75,6 +78,7 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 			continue
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+		var dirs []remoteDir
 		for _, e := range entries {
 			if !safeRemoteName(e.Name) {
 				continue
@@ -86,17 +90,24 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 			if d.rel != "" {
 				rel = d.rel + "/" + e.Name
 			}
+			isDir := e.Kind == "dir"
+			if isDir && skipDirName(e.Name) {
+				continue
+			}
+			if matcher != nil && matcher(rel, isDir) {
+				continue
+			}
 			abs := joinRemotePath(d.abs, e.Name)
-			if e.Kind == "dir" {
-				if skipDirName(e.Name) {
-					continue
-				}
-				stack = append(stack, remoteDir{abs: abs, rel: rel, depth: d.depth + 1})
+			if isDir {
+				dirs = append(dirs, remoteDir{abs: abs, rel: rel, depth: d.depth + 1})
 				continue
 			}
 			if !emit(rel) {
 				return nil
 			}
+		}
+		for i := len(dirs) - 1; i >= 0; i-- {
+			stack = append(stack, dirs[i])
 		}
 	}
 	return nil

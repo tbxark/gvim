@@ -11,6 +11,7 @@ package commands
 // commands_gen.go); this table is hand-maintained and grows when a new gvim-only row
 // is added.
 var gvimCommandKeys = map[string]string{
+	"about_gvim":                 "gvim.command.about_gvim",
 	"compare_files":              "gvim.command.compare_files",
 	"compare_with_file":          "gvim.command.compare_with_file",
 	"discover_agent_sessions":    "gvim.command.discover_agent_sessions",
@@ -51,10 +52,13 @@ var gvimCommandKeys = map[string]string{
 	"terminal_tab_rename":        "gvim.command.terminal_tab_rename",
 	"toggle_diagnostics_panel":   "gvim.command.toggle_diagnostics_panel",
 	"toggle_hex_view":            "gvim.command.toggle_hex_view",
+	"toggle_sticky_scroll":       "gvim.command.toggle_sticky_scroll",
+	"update_fresh":               "gvim.command.update_gvim",
 }
 
 // gvimCommandDescKeys is the description half of the table.
 var gvimCommandDescKeys = map[string]string{
+	"about_gvim":                 "gvim.command.about_gvim_desc",
 	"compare_files":              "gvim.command.compare_files_desc",
 	"compare_with_file":          "gvim.command.compare_with_file_desc",
 	"discover_agent_sessions":    "gvim.command.discover_agent_sessions_desc",
@@ -96,4 +100,6 @@ var gvimCommandDescKeys = map[string]string{
 	"terminal_tab_rename":        "gvim.command.terminal_tab_rename_desc",
 	"toggle_diagnostics_panel":   "gvim.command.toggle_diagnostics_panel_desc",
 	"toggle_hex_view":            "gvim.command.toggle_hex_view_desc",
+	"toggle_sticky_scroll":       "gvim.command.toggle_sticky_scroll_desc",
+	"update_fresh":               "gvim.command.update_gvim_desc",
 }

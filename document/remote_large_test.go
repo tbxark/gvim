@@ -126,6 +126,10 @@ func TestRemoteLargeWindowSourceLRUAndCancellation(t *testing.T) {
 	if _, err := src.ReadAt(buf, 0); !errors.Is(err, buffer.ErrSourcePending) {
 		t.Fatalf("ReadAt of the oldest window = %v, want ErrSourcePending (LRU eviction)", err)
 	}
+	// A second miss before TakePendingWindow must not overwrite the first recorded miss.
+	if _, err := src.ReadAt(buf, RemoteWindowSize); !errors.Is(err, buffer.ErrSourcePending) {
+		t.Fatalf("ReadAt of second evicted window = %v, want ErrSourcePending", err)
+	}
 	// The missing window is recorded for the root.
 	off, n, ok := src.TakePendingWindow()
 	if !ok || off != 0 || n != RemoteWindowSize {

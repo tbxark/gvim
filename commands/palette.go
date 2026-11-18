@@ -84,10 +84,14 @@ func Commands(km *keymap.Map) []Entry {
 	for _, c := range slices.Concat(builtinCommands, compareCommands, markdownCommands, terminalCommands, pluginCommands, binaryCommands) {
 		key, descKey := c.Key, c.DescKey
 		if r, ok := gvimRenames[c.Action]; ok {
-			c.Name, c.Description = cmp.Or(r.Name, c.Name), r.Description
-			// Fresh's translation of a renamed row names Fresh's file; use the
-			// gvim-specific key when the extraction table has one.
-			key, descKey = "", ""
+			if r.Name != "" {
+				c.Name = r.Name
+				key = ""
+			}
+			if r.Description != "" || r.Name != "" {
+				c.Description = r.Description
+				descKey = ""
+			}
 		}
 		if k, ok := gvimCommandKeys[c.Action]; ok {
 			key = k

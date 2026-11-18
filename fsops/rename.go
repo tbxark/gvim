@@ -41,12 +41,17 @@ func RenameNoReplaceResult(oldPath, newPath string) (CopyResult, error) {
 	if oldPath == newPath {
 		return CopyResult{}, nil
 	}
-	if newInfo, err := os.Lstat(newPath); err == nil && os.SameFile(oldInfo, newInfo) {
-		// A case-only rename: the "existing target" is the source itself.
-		if err := os.Rename(oldPath, newPath); err != nil {
-			return CopyResult{}, opError("rename", oldPath, err)
+	if newInfo, err := os.Lstat(newPath); err == nil {
+		if os.SameFile(oldInfo, newInfo) &&
+			filepath.Dir(oldPath) == filepath.Dir(newPath) &&
+			strings.EqualFold(filepath.Base(oldPath), filepath.Base(newPath)) {
+			// A case-only rename: the "existing target" is the source itself.
+			if err := os.Rename(oldPath, newPath); err != nil {
+				return CopyResult{}, opError("rename", oldPath, err)
+			}
+			return CopyResult{}, nil
 		}
-		return CopyResult{}, nil
+		return CopyResult{}, fmt.Errorf("fsops: rename to %s: %w", newPath, ErrConflict)
 	}
 	return renameOrCopy("rename", oldPath, newPath)
 }
@@ -69,10 +74,11 @@ func MoveNoReplaceResult(src, dstDir string) (CopyResult, error) {
 	if filepath.Clean(filepath.Dir(src)) == dstDir {
 		return CopyResult{}, nil
 	}
-	if contains(src, dstDir) {
+	dst := filepath.Join(dstDir, filepath.Base(src))
+	if contains(src, dst) {
 		return CopyResult{}, fmt.Errorf("fsops: move %s into %s: %w", src, dstDir, ErrInvalidDest)
 	}
-	return renameOrCopy("move", src, filepath.Join(dstDir, filepath.Base(src)))
+	return renameOrCopy("move", src, dst)
 }
 
 // errNoNativeRename is renameNative's answer on a platform without a no-replace rename.

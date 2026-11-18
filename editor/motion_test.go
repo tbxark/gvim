@@ -76,7 +76,7 @@ func TestDeleteWordForwardAndSelectWord(t *testing.T) {
 
 func TestPageMotionsMoveByPaneHeight(t *testing.T) {
 	t.Parallel()
-	e := New(Options{Rows: 4, Cols: 10})
+	e := New(Options{Rows: 4, Cols: 10, ScrollOffset: 3})
 	for range 20 {
 		run(t, e, "insert_newline")
 	}
@@ -93,7 +93,7 @@ func TestPageMotionsMoveByPaneHeight(t *testing.T) {
 
 func TestPageDownScrollsByPaneMinusThree(t *testing.T) {
 	t.Parallel()
-	e := New(Options{Rows: 27, Cols: 80})
+	e := New(Options{Rows: 27, Cols: 80, ScrollOffset: 3})
 	for range 59 {
 		run(t, e, "insert_newline")
 	}
@@ -105,6 +105,16 @@ func TestPageDownScrollsByPaneMinusThree(t *testing.T) {
 	run(t, e, "move_page_up")
 	if d.Cursor.Line != 3 || d.Top != 0 {
 		t.Fatalf("after page up cursor=%d top=%d, want 3 and 0", d.Cursor.Line, d.Top)
+	}
+
+	// ScrollOffset: 0 keeps zero margin in pageMove as well.
+	e0 := New(Options{Rows: 27, Cols: 80, ScrollOffset: 0})
+	for range 59 {
+		run(t, e0, "insert_newline")
+	}
+	run(t, e0, "move_document_start", "move_page_down")
+	if got := e0.Active(); got.Cursor.Line != 24 || got.Top != 24 {
+		t.Fatalf("zero-margin page down cursor=%d top=%d, want 24 and 24", got.Cursor.Line, got.Top)
 	}
 }
 

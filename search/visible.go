@@ -3,8 +3,6 @@ package search
 import (
 	"errors"
 	"strings"
-
-	"github.com/tbxark/gvim/buffer"
 )
 
 // ErrLargeBuffer is returned by Find, Replace, ReplaceAll and QueryReplace when
@@ -32,8 +30,12 @@ func newWindow(first int, text string) document {
 // Spans does. A negative first is taken as 0, and first after last returns nil.
 func FindVisible(rows func(i int) string, first, last int, q Query) ([]Match, error) {
 	first = max(first, 0)
-	if first > last {
+	if first > last || q.Text == "" {
 		return nil, nil
+	}
+	cq, err := CompileQuery(q)
+	if err != nil {
+		return nil, err
 	}
 	height := last - first + 1
 	lo := max(first-height, 0)
@@ -45,11 +47,7 @@ func FindVisible(rows func(i int) string, first, last int, q Query) ([]Match, er
 		}
 		sb.WriteString(rows(i))
 	}
-	// The temporary buffer is a memory buffer, so Find is not refused.
-	found, err := Find(buffer.New(sb.String()), q)
-	if err != nil {
-		return nil, err
-	}
+	found := cq.FindString(sb.String())
 	var out []Match
 	for _, m := range found {
 		m.Start.Line += lo

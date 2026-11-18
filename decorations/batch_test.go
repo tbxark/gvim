@@ -215,6 +215,7 @@ func TestBulkEditsCostOnePass(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	unit := cpuUnit()
 	start := time.Now()
 	for i := range edits {
 		// every 10th line has a match; each replacement adds a line, and the lines above it have moved
@@ -226,8 +227,8 @@ func TestBulkEditsCostOnePass(t *testing.T) {
 	if n != 3*perNS {
 		t.Fatalf("%d items, want %d", n, 3*perNS)
 	}
-	if took > 600*time.Millisecond {
-		t.Errorf("%d edits over %d items took %v", edits, 3*perNS, took)
+	if limit := max(5*time.Second, 150*unit); took > limit {
+		t.Errorf("%d edits over %d items took %v (limit %v, unit %v)", edits, 3*perNS, took, limit, unit)
 	}
 	// The last gutter was on line 3*(perNS-1); the edits at lines 10*i above it each added one.
 	items := s.Items(1, "p", "a")

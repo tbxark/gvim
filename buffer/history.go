@@ -245,7 +245,7 @@ func (b *Buffer) Group(fn func()) {
 	outer := b.depth == 0
 	var snap txnSnap
 	if outer {
-		snap = txnSnap{redo: b.redo, open: b.open, ver: b.ver}
+		snap = txnSnap{redo: b.redo, open: b.open, ver: b.ver, nonASCII: b.nonASCII}
 		if b.big != nil {
 			snap.sb = b.big.st
 		}
@@ -268,7 +268,7 @@ func (b *Buffer) Group(fn func()) {
 			// A large buffer refused an edit (or a read) inside the group, so
 			// the group is dropped whole: the steps that did succeed would be
 			// half of an action. After a panic the edits stay instead.
-			b.big.st, b.redo, b.open, b.ver = snap.sb, snap.redo, snap.open, snap.ver
+			b.big.st, b.redo, b.open, b.ver, b.nonASCII = snap.sb, snap.redo, snap.open, snap.ver, snap.nonASCII
 			if len(g.ops) > 0 {
 				// The edits that were reported are gone.
 				b.notifyCoarse(false)
@@ -291,10 +291,11 @@ func (b *Buffer) Group(fn func()) {
 // without trace. record replaces redo instead of changing it, so keeping the
 // slice header is enough.
 type txnSnap struct {
-	sb   bigState
-	redo []*group
-	open bool
-	ver  uint64
+	sb       bigState
+	redo     []*group
+	open     bool
+	ver      uint64
+	nonASCII int
 }
 
 // Undo reverts the newest undo group and reports the position where the

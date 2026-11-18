@@ -47,7 +47,7 @@ func enclosingBracket(b *buffer.Buffer, p buffer.Pos, pairs [][2]rune) (pos buff
 		rs := []rune(b.Line(line))
 		col := len(rs) - 1
 		if line == p.Line {
-			col = p.Col - 1
+			col = min(p.Col-1, len(rs)-1)
 		}
 		for ; col >= 0; col-- {
 			for i, pair := range pairs {
@@ -127,7 +127,7 @@ func matchingBracket(b *buffer.Buffer, at buffer.Pos, pairs [][2]rune) (pos buff
 		rs := []rune(b.Line(line))
 		col := len(rs) - 1
 		if line == at.Line {
-			col = at.Col - 1
+			col = min(at.Col-1, len(rs)-1)
 		}
 		for ; col >= 0; col-- {
 			switch rs[col] {

@@ -31,6 +31,31 @@ func TestMemoValueKeepsValuesUntilTheTextChanges(t *testing.T) {
 	}
 }
 
+func TestMemoValueCapacityKeepsHotKeys(t *testing.T) {
+	t.Parallel()
+	e := clipEditor(t, "abc")
+	d := e.Active()
+	hotCalls := 0
+	if got := d.MemoValue("hot", func() any { hotCalls++; return "keep" }); got != "keep" || hotCalls != 1 {
+		t.Fatalf("hot = %v (calls=%d), want keep (1 call)", got, hotCalls)
+	}
+	for i := range 1023 {
+		d.MemoValue(i, func() any { return i })
+	}
+	if len(d.ValueMemo.Vals) != 1024 {
+		t.Fatalf("memo size at cap = %d, want 1024", len(d.ValueMemo.Vals))
+	}
+	// Existing key lookup at full capacity must return cached value without wiping the map.
+	if got := d.MemoValue("hot", func() any { hotCalls++; return "recomputed" }); got != "keep" || hotCalls != 1 {
+		t.Fatalf("hot lookup at full capacity = %v (calls=%d), want keep (1 call)", got, hotCalls)
+	}
+	// Adding a 1025th key evicts a single entry rather than clearing all entries.
+	d.MemoValue("extra", func() any { return "v" })
+	if len(d.ValueMemo.Vals) != 1024 {
+		t.Fatalf("memo size after single eviction = %d, want 1024", len(d.ValueMemo.Vals))
+	}
+}
+
 func TestHasLongLine(t *testing.T) {
 	t.Parallel()
 	e := clipEditor(t, strings.Repeat("é", 11)+"\nshort")

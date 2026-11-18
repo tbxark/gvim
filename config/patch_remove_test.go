@@ -234,6 +234,8 @@ func TestValidateStructuredEdits(t *testing.T) {
 		{name: "an unknown terminal mouse forwarding", edit: Edit{Path: []string{"terminal", "mouse_forwarding"}, Raw: []byte(`"always"`)}, wantErr: "must be"},
 		{name: "a terminal scrollback size", edit: Edit{Path: []string{"terminal", "scrollback_lines"}, Raw: []byte("5000")}},
 		{name: "a terminal scrollback size above the maximum", edit: Edit{Path: []string{"terminal", "scrollback_lines"}, Raw: []byte("999999999")}, wantErr: "between 0 and 1000000"},
+		{name: "remove edit validates cleanly", edit: Edit{Path: []string{"editor", "tab_size"}, Remove: true}},
+		{name: "remove edit with raw value fails", edit: Edit{Path: []string{"editor", "tab_size"}, Raw: []byte("4"), Remove: true}, wantErr: "reset cannot also set a value"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -254,8 +256,23 @@ func TestValidateStructuredEdits(t *testing.T) {
 
 func TestStructuredSettingsHelpers(t *testing.T) {
 	t.Parallel()
-	if !slices.Contains(KnownLanguageIDs(), "go") || !slices.Contains(KnownLanguageIDs(), "text") {
-		t.Errorf("KnownLanguageIDs = %v, want the built-in languages and text", KnownLanguageIDs())
+	if !slices.Contains(KnownLanguageIDs(), "go") || !slices.Contains(KnownLanguageIDs(), "text") || !slices.Contains(KnownLanguageIDs(), "rust") {
+		t.Errorf("KnownLanguageIDs = %v, want built-in, file-table languages (rust), and text", KnownLanguageIDs())
+	}
+	rawCols, err := encodeExplorerWidth("24")
+	if err != nil || string(rawCols) != `"24"` {
+		t.Fatalf("encodeExplorerWidth(\"24\") = (%s, %v), want %q", rawCols, err, `"24"`)
+	}
+	wCols, err := parseExplorerWidth(rawCols)
+	if err != nil || wCols.Percent || wCols.Value != 24 {
+		t.Fatalf("parseExplorerWidth(%s) = (%+v, %v), want 24 cols", rawCols, wCols, err)
+	}
+	rawBigCols, err := encodeExplorerWidth("120")
+	if err != nil || string(rawBigCols) != `"120"` {
+		t.Fatalf("encodeExplorerWidth(\"120\") = (%s, %v), want %q", rawBigCols, err, `"120"`)
+	}
+	if _, err := encodeExplorerWidth("bad"); err == nil || strings.Contains(err.Error(), "?") {
+		t.Fatalf("encodeExplorerWidth(\"bad\") err = %v, want clean error without '?'", err)
 	}
 	if !slices.Contains(StatusBarElementNames(), "filename") || !slices.Contains(StatusBarElementNames(), "trust") {
 		t.Errorf("StatusBarElementNames = %v, want the config's element names", StatusBarElementNames())

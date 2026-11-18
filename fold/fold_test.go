@@ -42,7 +42,7 @@ func TestRanges(t *testing.T) {
 	}
 }
 
-func TestVisible(t *testing.T) {
+func TestHidden(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
@@ -57,6 +57,9 @@ func TestVisible(t *testing.T) {
 		{"fold hides body but not opener", 4, []Range{{0, 2}}, map[int]bool{0: true}, []bool{false, true, true, false}},
 		{"inner fold hides only its body", 5, []Range{{0, 3}, {1, 2}}, map[int]bool{1: true}, []bool{false, false, true, false, false}},
 		{"outer fold hides nested lines", 5, []Range{{0, 3}, {1, 2}}, map[int]bool{0: true}, []bool{false, true, true, true, false}},
+		{"nested both folded skips covered body", 6, []Range{{0, 4}, {1, 3}, {2, 2}}, map[int]bool{0: true, 1: true, 2: true}, []bool{false, true, true, true, true, false}},
+		{"overlapping sorted ranges extend coverage", 6, []Range{{0, 2}, {1, 4}}, map[int]bool{0: true, 1: true}, []bool{false, true, true, true, true, false}},
+		{"unsorted ranges still hide all folded bodies", 6, []Range{{3, 4}, {0, 1}}, map[int]bool{0: true, 3: true}, []bool{false, true, false, false, true, false}},
 		{"fold key with no range", 3, []Range{{0, 2}}, map[int]bool{1: true}, []bool{false, false, false}},
 		{"range past n is clipped", 3, []Range{{0, 5}}, map[int]bool{0: true}, []bool{false, true, true}},
 		{"no ranges", 2, nil, map[int]bool{0: true}, []bool{false, false}},
@@ -64,10 +67,30 @@ func TestVisible(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := Visible(tc.n, tc.ranges, tc.folded)
+			got := Hidden(tc.n, tc.ranges, tc.folded)
 			if !slices.Equal(got, tc.want) {
-				t.Errorf("Visible(%d, %v, %v) = %v, want %v", tc.n, tc.ranges, tc.folded, got, tc.want)
+				t.Errorf("Hidden(%d, %v, %v) = %v, want %v", tc.n, tc.ranges, tc.folded, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestHiddenDeeplyNestedPerformance(t *testing.T) {
+	t.Parallel()
+	const n = 20_000
+	ranges := make([]Range, n/2)
+	folded := make(map[int]bool, n/2)
+	for i := range ranges {
+		ranges[i] = Range{Start: i, End: n - 1 - i}
+		folded[i] = true
+	}
+	got := Hidden(n, ranges, folded)
+	if len(got) != n || got[0] {
+		t.Fatalf("unexpected header hidden=%v len=%d", got[0], len(got))
+	}
+	for i := 1; i < n; i++ {
+		if !got[i] {
+			t.Fatalf("line %d should be hidden", i)
+		}
 	}
 }

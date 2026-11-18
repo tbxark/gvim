@@ -972,7 +972,6 @@
   "gvim.lsp.popup_references": "References",
   "gvim.lsp.applying": "Applying %{title}…",
   "gvim.settings.notice.reload_unavailable": "Config reload is unavailable: the Settings page has no config port",
-  "gvim.settings.notice.keymap_error": "Keymap %{keymap}: %{error}",
   "gvim.settings.notice.no_user_config": "No user config file to open",
   "gvim.settings.notice.error": "Settings: %{error}",
   "gvim.settings.notice.user_config": "Settings: %{name} can only be set in the user config",
@@ -1041,7 +1040,9 @@
   "gvim.plugin.placement_invalid": "placement must be \"float\", \"buffer\" or \"sidebar\", not %{placement}",
   "gvim.notice.update_command_missing": "Update command is not configured (update_command)",
   "gvim.notice.update_running": "Updating…",
-  "gvim.notice.update_no_output": "No update output yet: run Update fresh first",
+  "gvim.notice.update_no_output": "No update output yet: run Update gvim first",
+  "gvim.command.update_gvim": "Update gvim",
+  "gvim.command.update_gvim_desc": "Check for and install the latest gvim release",
   "gvim.notice.update_dock_failed": "Update: the terminal dock could not start the update command",
   "gvim.url.open_confirm": "Open %{url} in the system browser?",
   "gvim.url.unavailable": "Opening URLs is not available in this environment",
@@ -1204,5 +1205,11 @@
   "gvim.notice.lsp.remote_root_depth": "Remote LSP root_markers scan stopped after %{depth} levels; using the workspace root",
   "gvim.notice.lsp.remote_root_changed": "Remote LSP root_markers scan abandoned after the workspace changed; using the workspace root",
   "gvim.browser.detect_encoding_on": "Encoding auto-detection enabled",
-  "gvim.browser.detect_encoding_off": "Encoding auto-detection disabled - will prompt for encoding"
+  "gvim.browser.detect_encoding_off": "Encoding auto-detection disabled - will prompt for encoding",
+  "gvim.command.about_gvim": "Help: About gvim",
+  "gvim.command.about_gvim_desc": "Show gvim version, Go runtime, platform, and architecture details",
+  "gvim.command.toggle_sticky_scroll": "View: Toggle Sticky Scroll",
+  "gvim.command.toggle_sticky_scroll_desc": "Pin the enclosing function or block header at the top of the editor while scrolling",
+  "gvim.menu.about_gvim": "About gvim",
+  "gvim.menu.sticky_scroll": "Sticky Scroll"
 }

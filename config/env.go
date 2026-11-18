@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -181,8 +182,8 @@ func ValidateEnvDetectors(detectors []EnvDetector) []string {
 
 // validateEnvPath rejects a detector path that could escape the workspace root
 // or is not a plain relative path.
-func validateEnvPath(where, path string) []string {
-	trimmed := strings.TrimSpace(path)
+func validateEnvPath(where, rawPath string) []string {
+	trimmed := strings.TrimSpace(rawPath)
 	switch {
 	case trimmed == "":
 		return []string{where + " must not be empty"}
@@ -192,7 +193,9 @@ func validateEnvPath(where, path string) []string {
 		return []string{where + " must not contain control characters"}
 	case filepath.IsAbs(trimmed):
 		return []string{where + " must be relative to the workspace root"}
-	case trimmed == ".." || strings.HasPrefix(trimmed, "../") || strings.HasPrefix(trimmed, "..\\"):
+	}
+	clean := pathpkg.Clean(strings.ReplaceAll(trimmed, "\\", "/"))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return []string{where + " must not leave the workspace root"}
 	}
 	return nil

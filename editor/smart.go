@@ -189,7 +189,7 @@ func (e *Editor) backspace(d *Document) {
 			return edit{From: head, To: head}
 		}
 		line := []rune(d.Buffer.Line(head.Line))
-		if head.Col > 0 && blankPrefix(line, head.Col) {
+		if head.Col > 0 && head.Col <= len(line) && blankPrefix(line, head.Col) {
 			n := 1
 			if line[head.Col-1] != '\t' {
 				n = 0

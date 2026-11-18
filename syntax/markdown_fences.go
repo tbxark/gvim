@@ -41,11 +41,7 @@ type FenceLine struct {
 func MarkdownFences(lines []string) []FenceLine {
 	out := make([]FenceLine, len(lines))
 	for i := 0; i < len(lines); {
-		depth, content, ok := fenceQuotePrefix(strings.TrimRight(lines[i], "\r"))
-		if !ok {
-			i++
-			continue
-		}
+		depth, content := fenceQuotePrefix(strings.TrimRight(lines[i], "\r"))
 		m := mdFence.FindStringSubmatch(content)
 		if m == nil {
 			i++
@@ -75,22 +71,19 @@ func MarkdownFences(lines []string) []FenceLine {
 }
 
 // fenceQuotePrefix strips the blockquote markers of s: up to three blanks, then
-// repeated ">" with at most one blank after each. It returns the depth, the line
-// without the prefix, and false when the first marker is not a quote marker.
-func fenceQuotePrefix(s string) (depth int, rest string, ok bool) {
+// repeated ">" with at most one blank after each. It returns the quote depth
+// (0 for top-level lines) and the remaining line content.
+func fenceQuotePrefix(s string) (depth int, rest string) {
 	rest = s
 	for depth < 8 {
 		trimmed := strings.TrimLeft(rest, " ")
 		if len(rest)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
-			if depth > 0 {
-				return depth, rest, true
-			}
-			return depth, rest, true
+			return depth, rest
 		}
 		rest = strings.TrimPrefix(trimmed[1:], " ")
 		depth++
 	}
-	return depth, rest, true
+	return depth, rest
 }
 
 // stripQuotePrefix removes want blockquote markers from s, or reports false when

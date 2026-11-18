@@ -107,12 +107,33 @@ func (c *dabbrevCycle) replace(d *Document, text string) {
 
 // dabbrevWordStart returns where the word that ends at the caret begins.
 func dabbrevWordStart(d *Document) buffer.Pos {
-	line := []rune(d.Buffer.Line(d.Cursor.Line))
-	col := min(d.Cursor.Col, len(line))
-	for col > 0 && dabbrevIsWord(line[col-1]) {
-		col--
+	p := d.Buffer.Clamp(d.Cursor)
+	line := []rune(d.Buffer.Line(p.Line))
+	if p.Col <= len(line) {
+		col := p.Col
+		for col > 0 && dabbrevIsWord(line[col-1]) {
+			col--
+		}
+		return buffer.Pos{Line: p.Line, Col: col}
 	}
-	return buffer.Pos{Line: d.Cursor.Line, Col: col}
+	const chunk = 4096
+	start := p.Col
+	for start > 0 {
+		from := max(start-chunk, 0)
+		seg := []rune(d.Buffer.LineSlice(p.Line, from, start-from))
+		if len(seg) != start-from {
+			break
+		}
+		i := len(seg)
+		for i > 0 && dabbrevIsWord(seg[i-1]) {
+			i--
+		}
+		start = from + i
+		if i > 0 {
+			break
+		}
+	}
+	return buffer.Pos{Line: p.Line, Col: start}
 }
 
 // dabbrevIsWord reports whether r is a letter, a digit or an underscore.

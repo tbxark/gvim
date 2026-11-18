@@ -194,3 +194,46 @@ func TestHugeLineSearchConcurrentWithTheBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHugeLineRegexAnchorsIgnoreArtificialWindowEdges(t *testing.T) {
+	t.Parallel()
+	// Line 1 is a single huge line longer than largeBuffer's line cap (64 bytes).
+	// Anchor tokens appear near window edges and in the middle of the line; only
+	// genuine line-start (^/\A) and line-end ($/\z) matches may be reported.
+	line := "head needle " + strings.Repeat("mid ", 25) + "tail"
+	b, _ := largeBuffer(t, "alpha\n"+line+"\nomega\n")
+	queries := []Query{
+		{Text: `^mid`, Regex: true},
+		{Text: `\Amid`, Regex: true},
+		{Text: `mid $`, Regex: true},
+		{Text: `mid\z`, Regex: true},
+		{Text: `^head`, Regex: true},
+		{Text: `tail$`, Regex: true},
+		{Text: `\btail$`, Regex: true},
+		{Text: `(?i)^HEAD|TAIL$`, Regex: true},
+	}
+	mem := buffer.New("alpha\n" + line + "\nomega\n")
+	for _, q := range queries {
+		want, err := Find(mem, q)
+		if err != nil {
+			t.Fatalf("%+v: Find: %v", q, err)
+		}
+		for _, span := range []hugeSpan{{window: 16, margin: 4}, {window: 12, margin: 0}} {
+			sc, err := newScan(b.Snapshot(), q, 0, 1<<20, MaxMatches)
+			if err != nil {
+				t.Fatalf("%+v: newScan: %v", q, err)
+			}
+			sc.huge = span
+			for done := false; !done; {
+				if done, err = sc.Step(time.Minute); err != nil {
+					t.Fatalf("%+v: Step: %v", q, err)
+				}
+			}
+			got := sc.Matches()
+			sc.Close()
+			if !equalMatches(got, want) {
+				t.Errorf("%+v span %+v: got %v, want %v", q, span, got, want)
+			}
+		}
+	}
+}

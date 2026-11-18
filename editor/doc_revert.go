@@ -127,7 +127,7 @@ func RunRevert(plan RevertPlan) RevertResult {
 		// must not be.
 		return RevertResult{Err: fmt.Errorf("revert %s: %w", filepath.Base(plan.Path), ErrLargeFile)}
 	}
-	fresh, err := readDocument(plan.Path, spec)
+	fresh, err := loadDocument(plan.Path, spec)
 	if err != nil {
 		return RevertResult{Err: fmt.Errorf("revert: %w", err)}
 	}
@@ -280,7 +280,7 @@ func revertDocument(e *Editor, _ *Document, args map[string]any) error {
 // file may have become small, or small and large; d takes the form of fresh either way.
 func (e *Editor) swapFile(d, fresh *Document) {
 	cursor, top := d.Cursor, d.Top
-	e.releaseDoc(d)
+	e.releaseDocResources(d)
 	d.SetBuffer(fresh.Buffer)
 	d.SetLargeState(fresh.LargeState())
 	d.SetSaved(fresh.Saved)

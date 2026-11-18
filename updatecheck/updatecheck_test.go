@@ -240,16 +240,27 @@ func TestLastSurvivesTheStamp(t *testing.T) {
 	if *count != 1 {
 		t.Fatalf("requests = %d, want 1", *count)
 	}
-	// A check that finds nothing current stores no release, so a later launch does not
-	// paint a stale one.
+	// A check that finds nothing current stores no release, so Last reports false while
+	// Due still debounces inside the interval.
 	current := &Checker{Current: "0.4.2", URL: srv.URL, StampPath: stampPath}
 	if _, err := current.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if rel, _, ok := current.Last(); !ok || rel.Version != "" {
-		t.Fatalf("Last after an up-to-date check = %+v, %v; want a stamp without a release", rel, ok)
+	if _, _, ok := current.Last(); ok {
+		t.Fatal("Last after an up-to-date check reported ok=true")
 	}
-	// An old timestamp-only stamp still debounces and has no release.
+	// Even when a stamp holds a cached release, Last reports false once Current catches up.
+	if _, err := c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := &Checker{Current: "0.4.2", URL: srv.URL, StampPath: stampPath, Now: func() time.Time { return now.Add(time.Hour) }}
+	if upgraded.Due() {
+		t.Fatal("upgraded build inside interval should not be due")
+	}
+	if _, _, ok := upgraded.Last(); ok {
+		t.Fatal("Last reported an older-or-equal cached release")
+	}
+	// An old timestamp-only stamp still debounces and reports no release.
 	legacy := filepath.Join(t.TempDir(), "legacy.json")
 	if err := os.WriteFile(legacy, []byte(`{"checked": 1700000000}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -258,8 +269,8 @@ func TestLastSurvivesTheStamp(t *testing.T) {
 	if old.Due() {
 		t.Fatal("a timestamp-only stamp inside the interval is due")
 	}
-	if _, _, ok := old.Last(); !ok {
-		t.Fatal("a timestamp-only stamp should still be readable")
+	if _, _, ok := old.Last(); ok {
+		t.Fatal("a timestamp-only stamp should not report a release")
 	}
 }
 
@@ -278,5 +289,35 @@ func TestCheckRedirectKeepsTheTransportPolicy(t *testing.T) {
 		if err := checkRedirect(req, nil); (err != nil) != wantErr {
 			t.Errorf("checkRedirect(%q) = %v, want error %v", target, err, wantErr)
 		}
+	}
+}
+
+func TestCurrentVersionAndDisplayVersion(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+
+	Version = ""
+	if got := CurrentVersion(); got != "" {
+		t.Fatalf("CurrentVersion() = %q, want empty for devel build", got)
+	}
+	if got := DisplayVersion(); got != "v"+DefaultVersion {
+		t.Fatalf("DisplayVersion() = %q, want %q", got, "v"+DefaultVersion)
+	}
+
+	Version = "v0.2.3"
+	if got := CurrentVersion(); got != "0.2.3" {
+		t.Fatalf("CurrentVersion() = %q, want 0.2.3", got)
+	}
+	if got := DisplayVersion(); got != "v0.2.3" {
+		t.Fatalf("DisplayVersion() = %q, want v0.2.3", got)
+	}
+
+	for _, pseudo := range []string{"v0.0.0-20260101000000-abcdef012345", "0.0.0-20260101000000-abcdef012345", "v0.1.0+dirty", "(devel)", "devel", ""} {
+		if got := moduleReleaseVersion(pseudo); got != "" {
+			t.Errorf("moduleReleaseVersion(%q) = %q, want empty", pseudo, got)
+		}
+	}
+	if got := moduleReleaseVersion("v0.2.3"); got != "0.2.3" {
+		t.Errorf("moduleReleaseVersion(v0.2.3) = %q, want 0.2.3", got)
 	}
 }

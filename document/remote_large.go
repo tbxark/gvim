@@ -120,8 +120,10 @@ func (s *remoteWindowSource) ReadAt(p []byte, off int64) (int, error) {
 		index := pos / RemoteWindowSize
 		e, ok := s.windows[index]
 		if !ok {
-			windowOff := index * RemoteWindowSize
-			s.pendingOff, s.pendingN, s.pendingOK = windowOff, min(RemoteWindowSize, s.size-windowOff), true
+			if !s.pendingOK {
+				windowOff := index * RemoteWindowSize
+				s.pendingOff, s.pendingN, s.pendingOK = windowOff, min(RemoteWindowSize, s.size-windowOff), true
+			}
 			return read, buffer.ErrSourcePending
 		}
 		data := e.Value.(*remoteWindow).data

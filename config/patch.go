@@ -246,6 +246,12 @@ func editsObject(edits []Edit) (map[string]json.RawMessage, error) {
 		if len(e.Path) == 0 {
 			return nil, errors.New("an edit needs a non-empty path")
 		}
+		if e.Remove {
+			if len(e.Raw) > 0 {
+				return nil, fmt.Errorf("%s: a reset cannot also set a value", strings.Join(e.Path, "."))
+			}
+			continue
+		}
 		if err := setNested(root, e.Path, e.Raw); err != nil {
 			return nil, err
 		}

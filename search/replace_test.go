@@ -2,7 +2,9 @@ package search
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -387,6 +389,45 @@ func TestDecisionFromKey(t *testing.T) {
 		if got != tt.want || ok != tt.ok {
 			t.Errorf("DecisionFromKey(%q) = (%v, %v), want (%v, %v)", tt.key, got, ok, tt.want, tt.ok)
 		}
+	}
+}
+
+func TestQueryReplaceMixedDecisionsManyHits(t *testing.T) {
+	t.Parallel()
+	// 1200 hits across lines exercising same-line, cross-line, skip, multiline insert,
+	// and regex group expansion with cumulative offset tracking.
+	const count = 400
+	var in strings.Builder
+	for i := range count {
+		fmt.Fprintf(&in, "tok%d tok%d tok%d\n", i, i, i)
+	}
+	b := buffer.New(in.String())
+	var seen []Match
+	n, err := QueryReplace(b, Query{Text: `(tok\d+)`, Regex: true}, `$1px\n`, func(m Match, idx int) Decision {
+		seen = append(seen, m)
+		if idx%3 == 1 {
+			return DecisionSkip
+		}
+		return DecisionReplace
+	})
+	if err != nil {
+		t.Fatalf("QueryReplace() error = %v", err)
+	}
+	if n != count*2 {
+		t.Fatalf("replaced %d, want %d", n, count*2)
+	}
+	// Verify every recorded match position was non-decreasing and matched what was replaced.
+	for i := 1; i < len(seen); i++ {
+		if seen[i].Start.Less(seen[i-1].Start) {
+			t.Fatalf("seen[%d]=%v < seen[%d]=%v", i, seen[i], i-1, seen[i-1])
+		}
+	}
+	var want strings.Builder
+	for i := range count {
+		fmt.Fprintf(&want, "tok%dpx\n tok%d tok%dpx\n\n", i, i, i)
+	}
+	if b.Text() != want.String() {
+		t.Fatalf("mismatch after QueryReplace (len got=%d want=%d)", len(b.Text()), len(want.String()))
 	}
 }
 

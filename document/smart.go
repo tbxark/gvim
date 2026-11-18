@@ -76,13 +76,21 @@ func (d *Document) EditPlaced(plan func(c caret) (edit, placeFn), plain func(c c
 		ends = make([]buffer.Pos, len(cs))
 	} else if len(cs) == 1 {
 		x := edits[0]
-		if x.From != x.To {
-			d.Buffer.Delete(x.From, x.To)
+		var end buffer.Pos
+		run := func() {
+			if x.From != x.To {
+				d.Buffer.Delete(x.From, x.To)
+			}
+			end = x.From
+			if x.Text != "" && !d.editRefused() {
+				// A refused delete leaves the text in place, so nothing is typed over it.
+				end = d.Buffer.Insert(x.From, x.Text)
+			}
 		}
-		end := x.From
-		if x.Text != "" && !d.editRefused() {
-			// A refused delete leaves the text in place, so nothing is typed over it.
-			end = d.Buffer.Insert(x.From, x.Text)
+		if x.From != x.To && x.Text != "" {
+			d.Buffer.Group(run)
+		} else {
+			run()
 		}
 		ends = []buffer.Pos{end}
 	} else {

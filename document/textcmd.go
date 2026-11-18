@@ -46,6 +46,9 @@ func (d *Document) SortLines() {
 		d.Buffer.Delete(start, end)
 		after = d.Buffer.Insert(start, strings.Join(sorted, "\n"))
 	})
+	if d.editRefused() {
+		return
+	}
 	d.Want = -1
 	if d.HasSelection() {
 		d.SetRange(start, after)
@@ -212,9 +215,9 @@ func (d *Document) wordAt(p buffer.Pos) (from, to buffer.Pos, ok bool) {
 // reports whether the text changed. The caret and selection are kept inside the
 // text afterwards.
 func (d *Document) TrimTrailing() bool {
-	before := d.ContentMark()
+	before := d.Buffer.Version()
 	d.Buffer.Group(d.trimTrailingWhitespace)
-	if d.ContentMark() == before {
+	if d.Buffer.Version() == before {
 		return false
 	}
 	d.ClampToText()
@@ -224,9 +227,9 @@ func (d *Document) TrimTrailing() bool {
 // EnsureFinalLineBreak adds a final line break when the text lacks one, as one undo
 // step. It reports whether the text changed.
 func (d *Document) EnsureFinalLineBreak() bool {
-	before := d.ContentMark()
+	before := d.Buffer.Version()
 	d.Buffer.Group(d.ensureFinalNewline)
-	return d.ContentMark() != before
+	return d.Buffer.Version() != before
 }
 
 // ClampToText moves the caret and the selection back into the text after an edit

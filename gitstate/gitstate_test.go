@@ -368,3 +368,42 @@ func TestNotRepo(t *testing.T) {
 		t.Fatalf("Branch(outside repository) error = %v, want ErrNotRepo", err)
 	}
 }
+
+func TestLinkedWorktreeCommonDir(t *testing.T) {
+	mainDir, repo, _ := newRepo(t, map[string]string{"tracked.txt": "base\n"})
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtGitDir := filepath.Join(mainDir, ".git", "worktrees", "wt1")
+	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wtDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wtGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtGitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtGitDir, "gitdir"), []byte(filepath.Join(wtDir, ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte("gitdir: "+wtGitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Copy index from main repo or create untracked file and check Branch & Status.
+	_ = head
+	writeFile(t, wtDir, "untracked.txt", "hi\n")
+	branch, err := gitstate.Branch(wtDir)
+	if err != nil || branch != "main" {
+		t.Fatalf("Branch(linked worktree) = %q, %v; want main", branch, err)
+	}
+	st, err := gitstate.Status(wtDir)
+	if err != nil {
+		t.Fatalf("Status(linked worktree) = %v", err)
+	}
+	if st["untracked.txt"] != gitstate.Untracked {
+		t.Fatalf("Status = %+v, want untracked.txt Untracked", st)
+	}
+}

@@ -1,8 +1,8 @@
 // Package config loads gvim's settings from JSON-with-comments files.
 //
 // Three layers are merged, lowest first: the built-in defaults, the user file
-// (Dir()/config.json (~/.config/gvim/config.json)), and the project file (.gvim/config.json
-// in the nearest directory at or above the project root that has one). A layer
+// (Dir()/config.json (~/.config/gvim/config.json)), and the project file
+// (Root/.gvim/config.json). A layer
 // sets only the keys it names. A later layer replaces the value of each key it
 // sets and keeps the others.
 //
@@ -413,9 +413,9 @@ func (d Diagnostic) String() string {
 
 // Options selects the files Load reads.
 type Options struct {
-	// Root is the project directory. The project file is searched for from
-	// Root upward, through each ancestor, and the search stops at the
-	// filesystem root. An empty Root skips the project layer.
+	// Root is the project directory. The project file is read from
+	// Root/.gvim/config.json directly; parent directories are not walked. An
+	// empty Root skips the project layer.
 	Root string
 
 	// UserFile is the user config file. An empty value means the default,

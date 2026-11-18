@@ -17,6 +17,9 @@ func (d *Document) IndentLines(unit string) {
 			d.Buffer.Insert(buffer.Pos{Line: line}, unit)
 		}
 	})
+	if d.editRefused() {
+		return
+	}
 	d.Cursor = indentedPos(d.Cursor, first, last, width, false)
 	if d.Sel != nil {
 		d.Sel.Anchor = indentedPos(d.Sel.Anchor, first, last, width, true)

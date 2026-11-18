@@ -9,8 +9,9 @@ import "unicode"
 // uses one matcher per Rank call.
 type Matcher struct {
 	terms []queryTerm
-	tc    []rune // target runes, upper-case as written
-	tl    []rune // target runes, lower-cased
+	tc    []rune    // target runes, upper-case as written
+	tl    []rune    // target runes, lower-cased
+	dp    dpScratch // reusable DP buffers across targets
 }
 
 // NewMatcher prepares query once. A blank query matches every target with score 0.
@@ -40,8 +41,16 @@ func (m *Matcher) Match(target string) (score int, indexes []int, ok bool) {
 	// rejected there, after one conversion.
 	m.tc = appendRunes(m.tc[:0], target)
 	m.tl = appendLowerRunes(m.tl[:0], target)
-	r := matchPrepared(m.terms, m.tc, m.tl)
-	return r.score, r.positions, r.matched
+	r := matchPreparedScratch(m.terms, m.tc, m.tl, &m.dp)
+	if !r.matched {
+		return 0, nil, false
+	}
+	var out []int
+	if len(r.positions) > 0 {
+		out = make([]int, len(r.positions))
+		copy(out, r.positions)
+	}
+	return r.score, out, true
 }
 
 // isSubsequenceASCIIString is isSubsequenceBytes over a string, without building a

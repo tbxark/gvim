@@ -88,6 +88,7 @@ type Remote struct {
 	kind      config.EnvKind
 	set       []string
 	unset     []string
+	captured  bool
 	capturing bool
 	// gen counts invalidations of the capture, so a capture that ran across one is not
 	// stored: its delta belongs to a recipe that is gone.
@@ -334,7 +335,9 @@ func (p *Remote) Refresh() {
 	p.detected, p.found, p.detectedSet, p.detectedTrusted = trust.DetectedEnv{}, false, false, false
 	p.detectionNotice = ""
 	p.detectionGen++
-	p.invalidateLocked()
+	p.gen++
+	p.captured = false
+	p.lastErr = nil
 	p.mu.Unlock()
 }
 
@@ -369,7 +372,7 @@ func (p *Remote) overlay(ctx context.Context) []string {
 		p.mu.Unlock()
 		return nil
 	}
-	if p.capturing {
+	if p.capturing || p.captured {
 		out := append([]string(nil), p.set...)
 		p.mu.Unlock()
 		return out
@@ -397,9 +400,11 @@ func (p *Remote) overlay(ctx context.Context) []string {
 	if err != nil {
 		p.lastErr = err
 		p.set, p.unset = nil, nil
+		p.captured = false
 	} else {
 		p.lastErr = nil
 		p.set, p.unset = set, unset
+		p.captured = true
 	}
 	out := append([]string(nil), p.set...)
 	p.mu.Unlock()
@@ -549,6 +554,7 @@ func (p *Remote) captureRemote(ctx context.Context, snippet, dir string) (set, u
 
 func (p *Remote) invalidateLocked() {
 	p.gen++
+	p.captured = false
 	p.set, p.unset = nil, nil
 	p.lastErr = nil
 }
@@ -600,7 +606,7 @@ func detectedFromExists(root string, detectors []config.EnvDetector, exists map[
 		return trust.DetectedEnv{
 			Name:    d.Name,
 			Kind:    d.Kind,
-			Snippet: strings.ReplaceAll(d.Snippet, "{dir}", root),
+			Snippet: trust.ExpandSnippetDir(d.Snippet, root),
 		}, true
 	}
 	return trust.DetectedEnv{}, false

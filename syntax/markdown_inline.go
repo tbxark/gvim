@@ -53,7 +53,11 @@ func (p *mdInline) link(i, hi int, base Kind, flush func(int), seg *int) (int, b
 			return 0, false
 		}
 		closeR += after + 1
-		p.mark(i, i+1, MarkerLink)
+		if i > 0 && s[i-1] == '!' && (i < 2 || s[i-2] != '\\') {
+			p.mark(i-1, i+1, MarkerLink)
+		} else {
+			p.mark(i, i+1, MarkerLink)
+		}
 		p.mark(closeB, closeR+1, MarkerLink)
 		flush(i)
 		p.emit(i, i+1, base)
@@ -134,8 +138,8 @@ func (p *mdInline) emphasis(i, hi int, base Kind, flush func(int), seg *int) (in
 	if use >= 2 {
 		markerKind = MarkerStrong
 	}
-	p.mark(i, i+n, markerKind)
-	p.mark(j, j+m, markerKind)
+	p.mark(i+n-use, i+n, markerKind)
+	p.mark(j, j+use, markerKind)
 	flush(i)
 	p.emit(i, i+n-use, base)
 	p.emit(i+n-use, i+n, kind)

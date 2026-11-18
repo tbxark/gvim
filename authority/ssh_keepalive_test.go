@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -93,4 +94,51 @@ func TestSSHKeepaliveMarksTheCarrierDown(t *testing.T) {
 		t.Fatal("not connected after the reconnect")
 	}
 	_ = b.Close()
+}
+
+func TestSSHMarkDownClientIgnoresStaleClientAndPingStopsOnStop(t *testing.T) {
+	srv := newSilentSSH(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	b := &sshBackend{opts: SSHOptions{
+		Spec:            RemoteSpec{User: "u", Host: "127.0.0.1", Port: srv.port(), Path: "/srv/proj"},
+		Timeout:         5 * time.Second,
+		DisableAgent:    true,
+		IdentityFiles:   []string{},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // test server
+		Password:        func(context.Context) (string, error) { return "pw", nil },
+	}, spec: RemoteSpec{User: "u", Host: "127.0.0.1", Port: srv.port(), Path: "/srv/proj"},
+		keepaliveInterval: time.Hour, keepaliveTimeout: 5 * time.Second}
+	if err := b.connect(ctx); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+
+	b.mu.Lock()
+	firstClient := b.client
+	b.mu.Unlock()
+
+	if err := b.Reconnect(ctx); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	// A stale error from firstClient must not flip the new carrier disconnected.
+	b.markDownClient(firstClient, errors.New("stale error"))
+	if !b.Connected() {
+		t.Fatal("stale markDownClient flipped new connection disconnected")
+	}
+
+	// ping must unblock immediately when stop closes instead of waiting keepaliveTimeout (5s).
+	stop := make(chan struct{})
+	close(stop)
+	start := time.Now()
+	b.mu.Lock()
+	curClient := b.client
+	b.mu.Unlock()
+	stopped, err := b.ping(curClient, stop, 5*time.Second)
+	if !stopped || err != nil {
+		t.Fatalf("ping(closed stop) = (%v, %v), want (true, nil)", stopped, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("ping took %v on closed stop, want immediate return", elapsed)
+	}
 }

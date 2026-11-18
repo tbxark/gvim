@@ -221,3 +221,32 @@ func TestIdleIndex(t *testing.T) {
 	}
 	x.Close()
 }
+
+func TestEnumerateRemoteCustomIgnoreAndAlphabeticalOrder(t *testing.T) {
+	fs := newFakeRemote().
+		dir("/w",
+			RemoteEntry{Name: "zeta", Kind: "dir"},
+			RemoteEntry{Name: "alpha", Kind: "dir"},
+			RemoteEntry{Name: "build", Kind: "dir"},
+			RemoteEntry{Name: "root.go", Kind: "file"},
+			RemoteEntry{Name: "debug.log", Kind: "file"},
+		).
+		dir("/w/alpha", RemoteEntry{Name: "a.go", Kind: "file"}, RemoteEntry{Name: "skip.log", Kind: "file"}).
+		dir("/w/zeta", RemoteEntry{Name: "z.go", Kind: "file"}).
+		dir("/w/build", RemoteEntry{Name: "artifact.bin", Kind: "file"})
+
+	var got []string
+	err := EnumerateRemote(context.Background(), fs, "/w", Options{
+		CustomIgnorePatterns: []string{"*.log", "build/"},
+	}, func(rel string) bool {
+		got = append(got, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatalf("EnumerateRemote: %v", err)
+	}
+	want := []string{"root.go", "alpha/a.go", "zeta/z.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

@@ -19,7 +19,7 @@ import (
 // emphasis. A fenced block, an HTML comment and a front-matter block do span lines.
 
 var (
-	mdFence      = regexp.MustCompile("^( *)(`{3,}|~{3,})[ \\t]*([^`]*)$")
+	mdFence      = regexp.MustCompile("^( {0,3})(`{3,}|~{3,})[ \\t]*([^`]*)$")
 	mdHeading    = regexp.MustCompile(`^ {0,3}#{1,6}(?:[ \t]|$)`)
 	mdQuote      = regexp.MustCompile(`^ {0,3}>`)
 	mdList       = regexp.MustCompile(`^( *)([-+*]|\d{1,9}[.)])([ \t]+|$)`)
@@ -204,10 +204,14 @@ func (t *mdTokenizer) fence(i int) int {
 	return end
 }
 
-// closesFence reports whether line closes a fence opened with marker: three or more of
-// its character, at least as many as the opener, and nothing else.
+// closesFence reports whether line closes a fence opened with marker: up to three
+// leading spaces, at least as many of its character as the opener, and nothing else.
 func closesFence(line, marker string) bool {
-	s := strings.TrimRight(strings.TrimLeft(line, " "), " \t")
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		return false
+	}
+	s := strings.TrimRight(trimmed, " \t")
 	return len(s) >= len(marker) && strings.Trim(s, marker[:1]) == ""
 }
 

@@ -182,8 +182,8 @@ func TestRemoteDetectionFailureIsQuiet(t *testing.T) {
 	}
 }
 
-// TestRemoteCaptureFailureClearsTheOverlay: a capture error must not leave a stale delta
-// from a previous recipe.
+// TestRemoteCaptureFailureClearsTheOverlay: a re-capture error after Refresh must not
+// leave a stale delta from the previous capture.
 func TestRemoteCaptureFailureClearsTheOverlay(t *testing.T) {
 	s := &remoteScript{markers: "0\n", baseline: "A=1\x00", active: "A=2\x00"}
 	p := NewRemote("/remote/proj", direnvDetectors(), func() bool { return true }, s.run)
@@ -194,11 +194,40 @@ func TestRemoteCaptureFailureClearsTheOverlay(t *testing.T) {
 		t.Fatalf("overlay = %v", got)
 	}
 	s.actErr = errors.New("remote shell failed")
+	p.Refresh()
 	if got := p.Overlay(); len(got) != 0 {
 		t.Fatalf("overlay after a failed re-capture = %v", got)
 	}
 	if p.LastError() == nil {
 		t.Fatal("the capture error was not recorded")
+	}
+}
+
+func TestRemoteOverlayCachesAndRefreshPreservesDuringInFlightRecapture(t *testing.T) {
+	s := &remoteScript{markers: "0\n", baseline: "A=1\x00", active: "A=2\x00"}
+	p := NewRemote("/remote/proj", direnvDetectors(), func() bool { return true }, s.run)
+	if err := p.Set("true", "", config.EnvKindShell); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Overlay(); len(got) != 1 || got[0] != "A=2" {
+		t.Fatalf("first Overlay = %v", got)
+	}
+	afterFirst := len(s.recorded())
+	if got := p.Overlay(); len(got) != 1 || got[0] != "A=2" {
+		t.Fatalf("cached Overlay = %v", got)
+	}
+	if got := p.Unset(); len(got) != 0 {
+		t.Fatalf("cached Unset = %v", got)
+	}
+	if gotCalls := len(s.recorded()); gotCalls != afterFirst {
+		t.Fatalf("cached Overlay/Unset ran extra remote commands: %d -> %d", afterFirst, gotCalls)
+	}
+	// Refresh keeps previous delta available while recapture is pending or cancelled.
+	p.Refresh()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := p.overlay(ctx); len(got) != 1 || got[0] != "A=2" {
+		t.Fatalf("overlay after cancelled Refresh recapture = %v, want preserved [A=2]", got)
 	}
 }
 

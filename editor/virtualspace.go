@@ -59,6 +59,7 @@ func (e *Editor) virtualBlock(d *Document) bool {
 // first (see Do).
 var virtualSpaceActions = map[Action]bool{
 	"move_left": true, "move_right": true, "move_up": true, "move_down": true,
+	"move_left_in_line": true, "move_right_in_line": true, "vi_move_up": true, "vi_move_down": true,
 	"select_left": true, "select_right": true, "select_up": true, "select_down": true,
 	"block_select_left": true, "block_select_right": true,
 	"block_select_up": true, "block_select_down": true,

@@ -18,6 +18,15 @@ func (e *Editor) releaseDoc(d *Document) {
 		return
 	}
 	e.forgetRecent(d)
+	e.releaseDocResources(d)
+}
+
+// releaseDocResources cancels any pending/in-flight large scan and closes the
+// document's buffer while keeping d's position in e.recent.
+func (e *Editor) releaseDocResources(d *Document) {
+	if d == nil {
+		return
+	}
 	if l := d.LargeState(); l != nil {
 		l.Pending = nil
 		if !l.InFlight {

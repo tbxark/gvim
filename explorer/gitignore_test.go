@@ -68,6 +68,11 @@ func diskEntries(t *testing.T, root string) []string {
 // them. Ignored directories are loaded too, though they are not drawn.
 func expandAll(t *testing.T, tree *Tree, root string) {
 	t.Helper()
+	wasIgnored := tree.ShowIgnored()
+	if !wasIgnored {
+		tree.SetShowIgnored(true)
+		defer tree.SetShowIgnored(false)
+	}
 	for _, e := range diskEntries(t, root) {
 		if before, ok := strings.CutSuffix(e, "/"); ok {
 			if err := tree.Expand(filepath.Join(root, filepath.FromSlash(before))); err != nil {

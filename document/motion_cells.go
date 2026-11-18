@@ -41,6 +41,7 @@ func colAtCell(b *buffer.Buffer, line, target, tab int) int {
 // w is the width uniseg measured, which gives a tab none.
 func clusterCells(cluster string, w, cells, tab int) int {
 	if cluster == "\t" {
+		tab = max(tab, 1)
 		return tab - cells%tab
 	}
 	return w

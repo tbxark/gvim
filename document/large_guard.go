@@ -174,6 +174,10 @@ func (d *Document) editRefused() bool {
 	return d.PlanErr != nil
 }
 
+// EditRefused reports whether the edits just made were not made because planning them
+// failed or the buffer refused one of them.
+func (d *Document) EditRefused() bool { return d.editRefused() }
+
 // cursorSnapshot is the caret state of a document, to put back when an action is refused.
 type cursorSnapshot struct {
 	Cursor    buffer.Pos

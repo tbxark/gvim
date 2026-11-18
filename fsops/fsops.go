@@ -71,14 +71,52 @@ func opError(op, path string, err error) error {
 	return fmt.Errorf("fsops: %s %s: %w", op, path, err)
 }
 
-// contains reports whether child is parent itself or lies inside it, after
-// making both paths absolute. It is lexical and does not resolve symlinks.
+// resolveExisting resolves symlinks on the deepest existing ancestor of abs and
+// appends any non-existent trailing path components.
+func resolveExisting(abs string) string {
+	cur := abs
+	var tail []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+	}
+}
+
+// resolveAncestors returns the absolute form of path with symlinks resolved on its
+// existing ancestor directories, without dereferencing a symlink at path itself.
+func resolveAncestors(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(abs)
+	if dir == abs {
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			return resolved, nil
+		}
+		return abs, nil
+	}
+	return filepath.Join(resolveExisting(dir), filepath.Base(abs)), nil
+}
+
+// contains reports whether child is parent itself or lies inside it, resolving
+// symlinks on existing ancestor directories.
 func contains(parent, child string) bool {
-	p, err := filepath.Abs(parent)
+	p, err := resolveAncestors(parent)
 	if err != nil {
 		return false
 	}
-	c, err := filepath.Abs(child)
+	c, err := resolveAncestors(child)
 	if err != nil {
 		return false
 	}

@@ -134,6 +134,25 @@ func TestSSHConfigTargetOverrides(t *testing.T) {
 	if err != nil || res.host != "h" || res.user != "u" || res.port != DefaultSSHPort || res.jump != nil {
 		t.Fatalf("no-config fallback = %+v, %v", res, err)
 	}
+
+	// Empty spec.User without config falls back to $USER, then $USERNAME, then user.Current().
+	t.Setenv("USER", "env-fallback")
+	t.Setenv("USERNAME", "win-fallback")
+	b = &sshBackend{opts: SSHOptions{Spec: RemoteSpec{Host: "h", Path: "/x"}}}
+	res, err = b.resolveDial()
+	if err != nil || res.user != "env-fallback" {
+		t.Fatalf("$USER fallback = %+v, %v", res, err)
+	}
+	t.Setenv("USER", "")
+	res, err = b.resolveDial()
+	if err != nil || res.user != "win-fallback" {
+		t.Fatalf("$USERNAME fallback = %+v, %v", res, err)
+	}
+	t.Setenv("USERNAME", "")
+	res, err = b.resolveDial()
+	if err != nil || res.user == "" {
+		t.Fatalf("user.Current() fallback = %+v, %v", res, err)
+	}
 }
 
 func TestSSHProxyJumpOneHop(t *testing.T) {

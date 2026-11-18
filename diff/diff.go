@@ -42,8 +42,8 @@ func Lines(a, b []string) []Hunk {
 	open := false
 	oldPos, newPos := 0, 0
 	for _, d := range diffs {
-		// Each rune of d.Text is one line. Runes that are not valid code points
-		// are written as U+FFFD, one per rune, so the count is still exact.
+		// Each rune of d.Text is one line, mapped to valid non-FFFD Unicode code
+		// points by symbol so RuneCountInString equals the line count.
 		n := utf8.RuneCountInString(d.Text)
 		if n == 0 {
 			continue
@@ -90,11 +90,21 @@ func symbols(lines []string, ids map[string]rune) []rune {
 	return out
 }
 
-// symbol returns the rune for the n-th distinct line. Surrogates are skipped, so
-// the rune is a valid code point for every n that fits in the code space.
+// symbol returns the rune for the n-th distinct line. Surrogates and U+FFFD
+// are skipped, and indexes past the Unicode code space clamp to U+FFFD so the
+// result is always a valid rune.
 func symbol(n int) rune {
+	if n < 0 {
+		return utf8.RuneError
+	}
 	if n >= 0xd800 {
 		n += 0x800
+	}
+	if n >= int(utf8.RuneError) {
+		n++
+	}
+	if n > utf8.MaxRune {
+		return utf8.RuneError
 	}
 	return rune(n)
 }
@@ -110,30 +120,4 @@ func withKind(h Hunk) Hunk {
 		h.Kind = Insert
 	}
 	return h
-}
-
-// NextHunk returns the NewStart of the first hunk that starts after line, and
-// false when there is none. It does not wrap around. The caller clamps the line
-// to the text, since a Delete hunk can start at the end of the text.
-func NextHunk(hunks []Hunk, line int) (int, bool) {
-	best, found := 0, false
-	for _, h := range hunks {
-		if h.NewStart > line && (!found || h.NewStart < best) {
-			best, found = h.NewStart, true
-		}
-	}
-	return best, found
-}
-
-// PrevHunk returns the NewStart of the last hunk that starts before line, and
-// false when there is none. A hunk that contains line is included, so from
-// inside a hunk PrevHunk returns that hunk's start. It does not wrap around.
-func PrevHunk(hunks []Hunk, line int) (int, bool) {
-	best, found := 0, false
-	for _, h := range hunks {
-		if h.NewStart < line && (!found || h.NewStart > best) {
-			best, found = h.NewStart, true
-		}
-	}
-	return best, found
 }

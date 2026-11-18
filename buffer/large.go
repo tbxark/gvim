@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strconv"
 	"time"
 )
@@ -184,11 +185,14 @@ func (b *Buffer) CheckSource() error {
 	if s.err != nil {
 		return s.err
 	}
-	switch err := s.src.src.Check(); err {
-	case nil:
+	err := s.src.src.Check()
+	switch {
+	case err == nil:
 		return nil
-	case ErrSourceGrew:
+	case errors.Is(err, ErrSourceGrew):
 		s.grew = true
+		return err
+	case errors.Is(err, fs.ErrClosed):
 		return err
 	default:
 		s.fail(ErrSourceChanged)

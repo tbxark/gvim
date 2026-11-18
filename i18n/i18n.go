@@ -21,6 +21,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,9 +166,10 @@ func Locale() string {
 }
 
 var (
-	catMu      sync.RWMutex
-	catalogues = map[string]map[string]string{}
-	loadOnce   sync.Once
+	catMu           sync.RWMutex
+	catalogues      = map[string]map[string]string{}
+	missingEmbedded = map[string]bool{}
+	loadOnce        sync.Once
 )
 
 //go:embed locales/*.json
@@ -176,10 +178,15 @@ var localeFiles embed.FS
 // Register installs (or replaces) the catalogue of a locale. It is the seam for the
 // translated Fresh JSON files and for tests; the English catalogue is embedded and
 // registered lazily. Tables are copied, so later changes by the caller do not show.
+// Passing an empty or nil table removes any registered override so an embedded
+// locale is not shadowed.
 func Register(locale string, table map[string]string) {
 	code := Normalize(locale)
 	if code == "" {
-		code = locale
+		code = strings.TrimSpace(locale)
+	}
+	if code == "" {
+		return
 	}
 	copyTable := make(map[string]string, len(table))
 	for k, v := range table {
@@ -190,6 +197,11 @@ func Register(locale string, table map[string]string) {
 	ensureEnglish()
 	catMu.Lock()
 	defer catMu.Unlock()
+	if len(copyTable) == 0 {
+		delete(catalogues, code)
+		return
+	}
+	delete(missingEmbedded, code)
 	catalogues[code] = copyTable
 }
 
@@ -279,6 +291,13 @@ func TN(locale, key string, n int, vars map[string]any) string {
 // one/other rule, Fresh's other language rules (ru/uk one/few/many, cs one/few, fr/pt one
 // for 0 and 1, no grammatical number for ja/ko/zh/th/vi).
 func PluralCategory(locale string, n int) string {
+	if n < 0 {
+		if n == math.MinInt {
+			n = 8 // -(-2^63) mod 100
+		} else {
+			n = -n
+		}
+	}
 	lang := strings.ToLower(strings.SplitN(strings.ReplaceAll(locale, "_", "-"), "-", 2)[0])
 	switch lang {
 	case "ja", "ko", "zh", "th", "vi":
@@ -315,11 +334,15 @@ func PluralCategory(locale string, n int) string {
 	}
 }
 
-// chain is the locales a lookup consults: the locale itself, each shorter tag of it, then
-// English. An empty locale means the active one.
+// chain is the locales a lookup consults: the normalized locale itself, each shorter tag
+// of it, then English. An empty locale means the active one.
 func chain(locale string) []string {
 	if locale == "" {
 		locale = Locale()
+	} else if norm := Normalize(locale); norm != "" {
+		locale = norm
+	} else {
+		return []string{DefaultLocale}
 	}
 	var out []string
 	cur := strings.ReplaceAll(locale, "_", "-")
@@ -331,13 +354,16 @@ func chain(locale string) []string {
 		}
 		cur = strings.TrimSuffix(cur[:i], "-x")
 	}
-	out = append(out, DefaultLocale)
+	if len(out) == 0 || out[len(out)-1] != DefaultLocale {
+		out = append(out, DefaultLocale)
+	}
 	return out
 }
 
 // catalogue returns the table of one locale code, or nil. An embedded locale file is
 // loaded lazily the first time its code is consulted, so a session that never uses a
-// translated locale pays only for English. Register tables win over the embedded file.
+// translated locale pays only for English. Register tables win over the embedded file,
+// and missing embedded codes are negative-cached so repeated lookups skip embed.FS reads.
 func catalogue(code string) map[string]string {
 	ensureEnglish()
 	if code == "" {
@@ -345,11 +371,18 @@ func catalogue(code string) map[string]string {
 	}
 	catMu.RLock()
 	table := catalogues[code]
+	missing := missingEmbedded[code]
 	catMu.RUnlock()
 	if table != nil {
 		return table
 	}
+	if missing {
+		return nil
+	}
 	if !hasEmbeddedLocale(code) {
+		catMu.Lock()
+		missingEmbedded[code] = true
+		catMu.Unlock()
 		return nil
 	}
 	table = decodeEmbedded(code)

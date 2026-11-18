@@ -58,7 +58,7 @@ func loadDocument(path string, spec loadSpec) (*Document, error) {
 		d.readOnly = true
 		return d, nil
 	}
-	if !spec.AutoRO || !d.Disk.Exists {
+	if spec.Access != nil || !spec.AutoRO || !d.Disk.Exists {
 		return d, err
 	}
 	if target, err := filepath.EvalSymlinks(path); err == nil && libraryPath(path) && libraryPath(target) {

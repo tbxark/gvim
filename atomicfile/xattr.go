@@ -26,14 +26,19 @@ func copyXattrs(from string, f *os.File) {
 			continue
 		}
 		attr := string(name)
-		n, err := unix.Getxattr(from, attr, nil)
-		if err != nil {
+		sz, err := unix.Getxattr(from, attr, nil)
+		if err != nil || sz < 0 {
 			continue
 		}
-		value := make([]byte, n)
-		if n, err = unix.Getxattr(from, attr, value); err != nil {
+		if sz == 0 {
+			_ = unix.Fsetxattr(int(f.Fd()), attr, []byte{}, 0)
 			continue
 		}
-		_ = unix.Fsetxattr(int(f.Fd()), attr, value[:n], 0)
+		value := make([]byte, max(sz, 1))
+		n, err := unix.Getxattr(from, attr, value)
+		if err != nil || n < 0 {
+			continue
+		}
+		_ = unix.Fsetxattr(int(f.Fd()), attr, value[:min(n, len(value))], 0)
 	}
 }

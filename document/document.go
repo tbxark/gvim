@@ -247,14 +247,21 @@ func (d *Document) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, 
 // of a single edit. At most memoValues are kept.
 func (d *Document) MemoValue(key any, compute func() any) any {
 	m := &d.ValueMemo
-	if ver := (changesKey{Gen: d.Gen(), Ver: d.Buffer.Version()}); m.Vals == nil || m.Key != ver || len(m.Vals) >= memoValues {
+	ver := changesKey{Gen: d.Gen(), Ver: d.Buffer.Version()}
+	if m.Vals == nil || m.Key != ver {
 		m.Key, m.Vals = ver, make(map[any]any)
 	}
-	v, ok := m.Vals[key]
-	if !ok {
-		v = compute()
-		m.Vals[key] = v
+	if v, ok := m.Vals[key]; ok {
+		return v
 	}
+	v := compute()
+	if len(m.Vals) >= memoValues {
+		for k := range m.Vals {
+			delete(m.Vals, k)
+			break
+		}
+	}
+	m.Vals[key] = v
 	return v
 }
 
@@ -287,8 +294,8 @@ type longMemo struct {
 	Limit   int
 }
 
-// memoValues is how many values MemoValue keeps for one text: a screenful and some.
-const memoValues = 256
+// memoValues is how many values MemoValue keeps for one text before evicting one entry at a time.
+const memoValues = 1024
 
 // valueMemo is the values MemoValue keeps for the text of version key.
 type valueMemo struct {
@@ -430,7 +437,7 @@ var ErrChangedOnDisk = errors.New("changed on disk since it was opened; not save
 func readDocument(path string, spec loadSpec) (*Document, error) {
 	// The state is taken before the read. A change between the two then shows
 	// as a difference on save, which is the safe side.
-	disk := diskStateOf(path)
+	var disk diskState
 	if spec.Access != nil {
 		// A non-local document never consults os.Stat/os.ReadFile: its only file I/O is
 		// the access. A missing remote path is an error, not an empty buffer: the editor
@@ -447,6 +454,8 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 			return nil, fmt.Errorf("open %s: is a directory", path)
 		}
 		disk = st.diskState()
+	} else {
+		disk = diskStateOf(path)
 	}
 	if disk.Special {
 		return nil, fmt.Errorf("open %s: not a regular file", path)
@@ -613,7 +622,7 @@ func (d *Document) TidyForSave(o Settings) {
 	if d.large != nil && !d.Index().Complete {
 		return
 	}
-	before := d.ContentMark()
+	before := d.Buffer.Version()
 	d.Buffer.Group(func() {
 		if o.TrimTrailingWhitespace && d.large == nil {
 			d.trimTrailingWhitespace()
@@ -625,23 +634,31 @@ func (d *Document) TidyForSave(o Settings) {
 	if d.large != nil && d.Buffer.Refusal() != nil {
 		d.large.TidyNote = "Saved without final newline: last line not editable"
 	}
-	if d.ContentMark() != before {
+	if d.Buffer.Version() != before {
 		// The edit is the newest undo group now, so a multi-caret record is stale.
 		d.LastMulti = nil
 	}
 	d.ClampToText()
 }
 
-// trimTrailingWhitespace removes the trailing spaces and tabs of every line.
+// trimTrailingWhitespace removes the trailing blanks of every line.
 func (d *Document) trimTrailingWhitespace() {
 	for i := range d.Buffer.Lines() {
+		n := d.Buffer.LineLen(i)
+		if n == 0 {
+			continue
+		}
+		last, ok := d.Buffer.RuneAt(buffer.Pos{Line: i, Col: n - 1})
+		if !ok || (last != ' ' && last != '\t') {
+			continue
+		}
 		line := d.Buffer.Line(i)
 		trimmed := strings.TrimRight(line, " \t")
 		if trimmed == line {
 			continue
 		}
 		from := buffer.Pos{Line: i, Col: utf8.RuneCountInString(trimmed)}
-		d.Buffer.Delete(from, buffer.Pos{Line: i, Col: d.Buffer.LineLen(i)})
+		d.Buffer.Delete(from, buffer.Pos{Line: i, Col: n})
 	}
 }
 

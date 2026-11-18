@@ -7,11 +7,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,5 +120,123 @@ func TestSSHAgentForwarding(t *testing.T) {
 			t.Fatalf("agent forwarding not observed: requests=%d signers=%d", requests, len(signers))
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestSSHProxyJumpStripsTargetCredentials ensures target UI passwords and 2FA
+// keyboardAnswers are never sent to or consumed by the ProxyJump bastion.
+func TestSSHProxyJumpStripsTargetCredentials(t *testing.T) {
+	target := newFakeSSH(t)
+	jump := newFakeSSH(t)
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "id_ed25519")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var jumpGotPassword, jumpGotKbd atomic.Bool
+	jump.mu.Lock()
+	jump.passwordCallback = func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+		jumpGotPassword.Store(true)
+		return nil, errors.New("bastion does not accept passwords")
+	}
+	jump.keyboardCallback = func(conn ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+		jumpGotKbd.Store(true)
+		return nil, errors.New("bastion does not accept keyboard-interactive")
+	}
+	jump.mu.Unlock()
+
+	target.mu.Lock()
+	target.publicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		return nil, errors.New("target rejects pubkey")
+	}
+	target.passwordCallback = func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+		if string(pass) == "target-secret" {
+			return nil, nil
+		}
+		return nil, errors.New("bad password")
+	}
+	target.keyboardCallback = func(_ ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+		answers, cerr := challenge("2FA", "", []string{"Code:"}, []bool{false})
+		if cerr != nil {
+			return nil, cerr
+		}
+		if len(answers) == 1 && answers[0] == "654321" {
+			return nil, nil
+		}
+		return nil, errors.New("bad 2fa code")
+	}
+	target.mu.Unlock()
+
+	cfgPath := filepath.Join(dir, "config")
+	cfg := fmt.Sprintf("Host target\n  HostName 127.0.0.1\n  Port %d\n  User u\n  ProxyJump bastion\n\nHost bastion\n  HostName 127.0.0.1\n  Port %d\n  User u\n", target.port(), jump.port())
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	acceptBoth := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if pk := key.Marshal(); bytes.Equal(pk, target.signer.PublicKey().Marshal()) || bytes.Equal(pk, jump.signer.PublicKey().Marshal()) {
+			return nil
+		}
+		return fmt.Errorf("unknown host key from %s", hostname)
+	}
+
+	t.Setenv("SSH_AUTH_SOCK", "")
+	a := authority.NewSSH(authority.SSHOptions{
+		Spec:            authority.RemoteSpec{Host: "target", Path: "/x"},
+		ConfigPath:      cfgPath,
+		IdentityFiles:   []string{keyPath},
+		DisableAgent:    true,
+		HostKeyCallback: acceptBoth,
+		Timeout:         5 * time.Second,
+	})
+	defer func() { _ = a.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Supply target password; it must never reach the bastion.
+	if err := a.ReconnectWithPassword(ctx, "target-secret"); err != nil {
+		t.Fatalf("ReconnectWithPassword through jump: %v", err)
+	}
+	if jumpGotPassword.Load() || jumpGotKbd.Load() {
+		t.Fatalf("bastion saw target password=%v keyboard=%v", jumpGotPassword.Load(), jumpGotKbd.Load())
+	}
+	_ = a.Close()
+
+	// Also verify 2FA keyboardAnswers are not sent to or consumed by the bastion.
+	target.mu.Lock()
+	target.passwordCallback = func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+		return nil, errors.New("target rejects password")
+	}
+	target.mu.Unlock()
+	a2 := authority.NewSSH(authority.SSHOptions{
+		Spec:            authority.RemoteSpec{Host: "target", Path: "/x"},
+		ConfigPath:      cfgPath,
+		IdentityFiles:   []string{keyPath},
+		DisableAgent:    true,
+		HostKeyCallback: acceptBoth,
+		KeyboardInteractive: func(context.Context, string, string, []string, []bool) ([]string, error) {
+			return nil, authority.ErrNeedsKeyboardInteractive
+		},
+		Timeout: 5 * time.Second,
+	})
+	defer func() { _ = a2.Close() }()
+	_ = a2.Reconnect(ctx)
+	if !a2.NeedsKeyboardInteractive() {
+		t.Fatal("target did not record 2FA challenge")
+	}
+	if err := a2.ReconnectWithAnswers(ctx, []string{"654321"}); err != nil {
+		t.Fatalf("ReconnectWithAnswers through jump: %v", err)
+	}
+	if jumpGotPassword.Load() || jumpGotKbd.Load() {
+		t.Fatalf("bastion saw target credentials on 2FA reconnect: password=%v keyboard=%v", jumpGotPassword.Load(), jumpGotKbd.Load())
 	}
 }

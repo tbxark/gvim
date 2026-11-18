@@ -49,16 +49,16 @@ const maxFlowBytes = 4096
 // region is "" when the collection does not close within maxFlowBytes.
 func flowRegion(toks []chroma.Token) (region string, last int, rest string) {
 	depth := 0
+	quote := byte(0)
 	var b strings.Builder
 	for k, t := range toks {
-		quote := byte(0)
 		for p := 0; p < len(t.Value); p++ {
 			c := t.Value[p]
 			switch {
 			case quote != 0:
 				if c == '\\' && quote == '"' {
 					p++
-				} else if c == quote {
+				} else if c == quote || c == '\n' {
 					quote = 0
 				}
 			case c == '"' || c == '\'':

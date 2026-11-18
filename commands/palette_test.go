@@ -30,9 +30,10 @@ func TestCommandsFromBuiltinTable(t *testing.T) {
 	// the Toggle Diagnostics Sidebar and Diagnostics List rows of lsp_commands.go, the
 	// 4 Plugin: rows of plugin_commands.go, the Run Agent and Discover Agent Sessions
 	// rows of terminal_commands.go and agent_discover_commands.go, and the 7 terminal-tab
-	// rows of terminal_commands.go and the Toggle Hex View row of binary_commands.go.
-	if len(entries) != 243 {
-		t.Fatalf("Commands() = %d entries, want 243", len(entries))
+	// rows of terminal_commands.go, the Toggle Hex View row of binary_commands.go,
+	// and the Sticky Scroll and About gvim rows of gvim_commands.go.
+	if len(entries) != 245 {
+		t.Fatalf("Commands() = %d entries, want 245", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)

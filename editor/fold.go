@@ -1,5 +1,12 @@
 package editor
 
+import (
+	"cmp"
+	"slices"
+
+	"github.com/tbxark/gvim/fold"
+)
+
 // toggleFold collapses the fold that starts on the caret line, or expands it when
 // it is collapsed already. A collapsed start that no longer begins a fold, because
 // the text above it changed, can still be expanded.
@@ -18,14 +25,15 @@ func (e *Editor) toggleFoldAt(d *Document, line int) error {
 		delete(d.FoldedLines(), line)
 		return nil
 	}
-	for _, r := range d.Folds(e.tabSizeOf(d)) {
-		if r.Start == line {
-			if d.FoldedLines() == nil {
-				d.SetFoldedLines(map[int]bool{})
-			}
-			d.FoldedLines()[line] = true
-			return nil
+	ranges := d.Folds(e.tabSizeOf(d))
+	if _, ok := slices.BinarySearchFunc(ranges, line, func(r fold.Range, target int) int {
+		return cmp.Compare(r.Start, target)
+	}); ok {
+		if d.FoldedLines() == nil {
+			d.SetFoldedLines(map[int]bool{})
 		}
+		d.FoldedLines()[line] = true
+		return nil
 	}
 	return ErrNoFold
 }

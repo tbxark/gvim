@@ -254,3 +254,26 @@ func TestWriteStreamWithALongFileName(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalWriteStreamUTF8TempPrefixBoundary(t *testing.T) {
+	dir := t.TempDir()
+	// 199 ASCII bytes + a 3-byte rune so byte 200 falls inside the multi-byte rune.
+	name := strings.Repeat("a", 199) + "中" + "tail.txt"
+	path := filepath.Join(dir, name)
+	local := authority.Local(authority.LocalOptions{})
+	defer func() { _ = local.Close() }()
+	ctx := context.Background()
+	s, err := authority.WriteStreams(local.Files()).WriteStream(ctx, path, hostos.WriteOptions{Atomic: true})
+	if err != nil {
+		t.Fatalf("WriteStream on UTF-8 long name: %v", err)
+	}
+	if err := s.Write(ctx, []byte("ok")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := s.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "ok" {
+		t.Fatalf("content = %q", got)
+	}
+}

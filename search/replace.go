@@ -174,12 +174,20 @@ func QueryReplace(b *buffer.Buffer, q Query, repl string, decide func(m Match, i
 // valid.
 func (r result) replace(b *buffer.Buffer, q Query, repl string, decide func(Match, int) Decision) int {
 	n := 0
+	prepared := prepareReplacement(q, repl)
 	b.Group(func() {
 		all := false
+		hasShifted := false
+		var lastOrigEnd, lastNewEnd buffer.Pos
 		for i := range r.hits {
 			h := r.hits[i]
+			m := h.Match
+			if hasShifted {
+				m.Start = shift(m.Start, lastOrigEnd, lastNewEnd)
+				m.End = shift(m.End, lastOrigEnd, lastNewEnd)
+			}
 			if !all {
-				switch decide(h.Match, i) {
+				switch decide(m, i) {
 				case DecisionSkip:
 					continue
 				case DecisionQuit:
@@ -188,12 +196,11 @@ func (r result) replace(b *buffer.Buffer, q Query, repl string, decide func(Matc
 					all = true
 				}
 			}
-			newEnd := apply(b, h.Match, r.expansion(h, q, repl))
+			newEnd := apply(b, m, r.expandPrepared(h, q, prepared))
 			n++
-			for j := i + 1; j < len(r.hits); j++ {
-				r.hits[j].Start = shift(r.hits[j].Start, h.End, newEnd)
-				r.hits[j].End = shift(r.hits[j].End, h.End, newEnd)
-			}
+			lastOrigEnd = h.End
+			lastNewEnd = newEnd
+			hasShifted = true
 		}
 	})
 	return n

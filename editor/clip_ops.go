@@ -32,15 +32,22 @@ func cutAction(e *Editor, d *Document, _ map[string]any) error {
 	if text == "" {
 		return ErrNothingSelected
 	}
-	e.clipboard, e.resultText = text, text
 	if lines {
 		d.CutLines()
+		if d.EditRefused() {
+			return nil
+		}
+		e.clipboard, e.resultText = text, text
 		e.setStatus(i18n.T("", "clipboard.cut_line", nil))
 		return nil
 	}
 	// The deletion never materializes a virtual block's padding: the gap holds
 	// no text to delete.
 	d.DeleteAtCarets()
+	if d.EditRefused() {
+		return nil
+	}
+	e.clipboard, e.resultText = text, text
 	e.setStatus(i18n.T("", "clipboard.cut", nil))
 	return nil
 }

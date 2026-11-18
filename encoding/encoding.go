@@ -100,11 +100,13 @@ func Decode(name string, data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encoding: decode %s: %w", name, err)
 	}
-	// The x/text decoders write U+FFFD for bytes they do not define. None of the
-	// tables maps a byte sequence to U+FFFD, so its presence means the input
-	// was invalid.
+	// The x/text decoders write U+FFFD for bytes they do not define. Only gb18030
+	// encodes U+FFFD itself (84 31 A4 37), so any extra U+FFFD in the output came
+	// from invalid input bytes.
 	if bytes.ContainsRune(out, utf8.RuneError) {
-		return "", invalidBytes(name)
+		if name != "gb18030" || bytes.Count(out, []byte("\uFFFD")) != bytes.Count(data, []byte{0x84, 0x31, 0xa4, 0x37}) {
+			return "", invalidBytes(name)
+		}
 	}
 	return string(out), nil
 }
@@ -206,16 +208,19 @@ func encodeUTF16(name, text string, order byteOrder, bom bool) ([]byte, error) {
 	if !utf8.ValidString(text) {
 		return nil, invalidText(name)
 	}
-	units := utf16.Encode([]rune(text))
-	var out []byte
+	capBytes := 2 * len(text)
+	if bom {
+		capBytes += 2
+	}
+	out := make([]byte, 0, capBytes)
 	if bom {
 		out = order.AppendUint16(out, 0xfeff)
 	}
-	for _, u := range units {
-		out = order.AppendUint16(out, u)
-	}
-	if out == nil {
-		out = []byte{}
+	var buf [2]uint16
+	for _, r := range text {
+		for _, u := range utf16.AppendRune(buf[:0], r) {
+			out = order.AppendUint16(out, u)
+		}
 	}
 	return out, nil
 }

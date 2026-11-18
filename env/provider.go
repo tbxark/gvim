@@ -10,9 +10,11 @@
 package env
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -485,19 +487,45 @@ func runShell(dir, command string) (string, error) {
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	cmd.WaitDelay = time.Second
-	output, err := cmd.Output()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &cappedWriter{w: &stdout, limit: maxCaptureBytes + 1}
+	cmd.Stderr = &cappedWriter{w: &stderr, limit: 64 << 10}
+	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		err = nil
+	}
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("timed out after %s", captureTimeout)
 	}
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return "", fmt.Errorf("exit status %d: %s", exit.ExitCode(), strings.TrimSpace(string(exit.Stderr)))
+			return "", fmt.Errorf("exit status %d: %s", exit.ExitCode(), strings.TrimSpace(stderr.String()))
 		}
 		return "", err
 	}
-	if len(output) > maxCaptureBytes {
+	if stdout.Len() > maxCaptureBytes {
 		return "", fmt.Errorf("environment output is larger than %d bytes", maxCaptureBytes)
 	}
-	return string(output), nil
+	return stdout.String(), nil
+}
+
+type cappedWriter struct {
+	w       io.Writer
+	limit   int
+	written int
+}
+
+func (c *cappedWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if rem := c.limit - c.written; rem > 0 {
+		if len(p) > rem {
+			p = p[:rem]
+		}
+		if _, err := c.w.Write(p); err != nil {
+			return 0, err
+		}
+		c.written += len(p)
+	}
+	return n, nil
 }

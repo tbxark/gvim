@@ -260,9 +260,30 @@ func (wr *snapWriter) run(ctx context.Context, first, count int) error {
 		return err
 	}
 	r := &wr.g.r
-	start, end, err := r.runSpan(first, count)
-	if err != nil {
-		return err
+	var start, end int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var err error
+		start, end, err = r.runSpan(first, count)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrSourcePending) {
+			return err
+		}
+		ws, ok := r.src.src.(WindowSource)
+		if !ok {
+			return err
+		}
+		poff, pn, pending := ws.TakePendingWindow()
+		if !pending || pn <= 0 {
+			return err
+		}
+		if loadErr := ws.LoadWindow(ctx, poff, pn); loadErr != nil {
+			return loadErr
+		}
 	}
 	wr.line += count
 	for off := start; off < end; {
@@ -285,11 +306,7 @@ func (wr *snapWriter) run(ctx context.Context, first, count int) error {
 			if !ok {
 				return err
 			}
-			poff, pn, pending := ws.TakePendingWindow()
-			if !pending || pn <= 0 {
-				return err
-			}
-			if loadErr := ws.LoadWindow(ctx, poff, pn); loadErr != nil {
+			if loadErr := ws.LoadWindow(ctx, off, n); loadErr != nil {
 				return loadErr
 			}
 			continue

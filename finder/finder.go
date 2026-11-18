@@ -84,14 +84,10 @@ func EnumerateAll(ctx context.Context, root string, opts Options, emit func(rel 
 	return EnumerateWithOptions(ctx, root, opts, emit)
 }
 
-// gitFiles runs "git ls-files" in root. done is false when git cannot list the
-// directory (no git binary, or root is outside a work tree), so the caller
-// falls back to the walk. Entries that git lists by name only, such as nested
-// repositories, are left out.
-func gitFiles(ctx context.Context, root string, emit func(rel string) bool) (done bool, err error) {
-	return gitFilesFiltered(ctx, root, nil, emit)
-}
-
+// gitFilesFiltered runs "git ls-files" in root and optionally filters paths with matcher.
+// done is false when git cannot list the directory (no git binary, or root is outside
+// a work tree), so the caller falls back to the walk. Entries that git lists by name
+// only, such as nested repositories, are left out.
 func gitFilesFiltered(ctx context.Context, root string, matcher explorer.PatternMatcher, emit func(rel string) bool) (done bool, err error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return false, nil
@@ -209,7 +205,7 @@ func StartWithOptions(ctx context.Context, root string, opts Options) *Index {
 	x := startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
 		return EnumerateWithOptions(ctx, root, opts, emit)
 	})
-	x.setLocalProbe(root)
+	x.setLocalProbeOptions(root, opts.ShowHidden)
 	return x
 }
 
@@ -219,18 +215,25 @@ func (x *Index) SetOptions(root string, opts Options) {
 		return
 	}
 	x.lifecycle.Lock()
+	if x.parent == nil {
+		x.parent = context.Background()
+	}
 	x.enum = func(ctx context.Context, emit func(string) bool, _ func(string)) error {
 		return EnumerateWithOptions(ctx, root, opts, emit)
 	}
 	x.lifecycle.Unlock()
+	x.setLocalProbeOptions(root, opts.ShowHidden)
 	x.Restart()
 }
 
-// setLocalProbe installs the local exact/prefix probe for root.
-func (x *Index) setLocalProbe(root string) {
+func (x *Index) setLocalProbeOptions(root string, showHidden bool) {
 	x.probeMu.Lock()
 	x.probeRoot = root
-	x.probe = LocalPrefixProbe(root)
+	if root != "" {
+		x.probe = LocalPrefixProbeOptions(root, showHidden)
+	} else {
+		x.probe = nil
+	}
 	x.probeMu.Unlock()
 }
 
@@ -356,8 +359,12 @@ func (x *Index) Restart() {
 		x.mu.Unlock()
 		return
 	}
+	if x.parent == nil {
+		x.parent = context.Background()
+	}
 	oldDone := x.done
 	old := x.cancel
+	x.idle = false
 	x.gen++
 	gen := x.gen
 	done := make(chan struct{})

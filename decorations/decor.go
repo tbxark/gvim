@@ -324,7 +324,7 @@ type entry struct {
 
 // lastLine is the last line the item can show on.
 func (e *entry) lastLine() int {
-	if e.Kind == Highlight || e.Kind == Scroll {
+	if e.Kind == Highlight || e.Kind == Scroll || e.Kind == Conceal {
 		return e.ToLine
 	}
 	return e.FromLine
@@ -400,6 +400,7 @@ func (s *Store) docIDs() []uint64 {
 func normalize(it Item) (Item, bool) {
 	it.FromLine, it.FromCol = max(it.FromLine, 0), max(it.FromCol, 0)
 	it.ToLine, it.ToCol = max(it.ToLine, 0), max(it.ToCol, 0)
+	it.TextOverlayCount = min(max(it.TextOverlayCount, 0), maxTextOverlays)
 	switch it.Kind {
 	case Highlight:
 		if it.ToLine < it.FromLine || (it.ToLine == it.FromLine && it.ToCol < it.FromCol) {
@@ -422,9 +423,11 @@ func normalize(it Item) (Item, bool) {
 		if it.ToLine == it.FromLine && it.ToCol == it.FromCol {
 			return it, false
 		}
-	case SoftBreak, VirtualLineAbove, VirtualLineBelow, CursorLine:
+	case SoftBreak, VirtualLineAbove, VirtualLineBelow:
 		it.FromLine = max(it.FromLine, 0)
 		it.ToLine, it.ToCol = it.FromLine, 0
+	case CursorLine:
+		it.FromLine, it.FromCol, it.ToLine, it.ToCol = 0, 0, 0, 0
 	default: // a line item
 		it.FromCol, it.ToLine, it.ToCol = 0, it.FromLine, 0
 	}

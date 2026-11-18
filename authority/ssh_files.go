@@ -416,17 +416,36 @@ func (f *sshFiles) snapshot(ctx context.Context, p string) (sshSnapshot, error) 
 		return sshSnapshot{}, err
 	}
 	if st.Kind == "dir" {
-		entries, err := f.ReadDir(ctx, p, true)
-		if err != nil {
-			return sshSnapshot{}, err
-		}
-		m := make(map[string]hostos.DirEntry, len(entries))
-		for _, e := range entries {
-			m[e.Name] = e
-		}
-		return sshSnapshot{dir: true, entries: m}, nil
+		return f.snapshotDir(ctx, p)
 	}
 	return sshSnapshot{entries: map[string]hostos.DirEntry{"": {Name: "", Kind: st.Kind, Size: st.Size, MTime: st.MTime}}}, nil
+}
+
+func (f *sshFiles) snapshotDir(ctx context.Context, p string) (sshSnapshot, error) {
+	entries, err := f.ReadDir(ctx, p, true)
+	if err != nil {
+		return sshSnapshot{}, err
+	}
+	m := make(map[string]hostos.DirEntry, len(entries))
+	for _, e := range entries {
+		m[e.Name] = e
+	}
+	return sshSnapshot{dir: true, entries: m}, nil
+}
+
+func (f *sshFiles) snapshotFile(ctx context.Context, p string) (sshSnapshot, error) {
+	st, err := f.Stat(ctx, p)
+	if err != nil {
+		return sshSnapshot{}, err
+	}
+	return sshSnapshot{entries: map[string]hostos.DirEntry{"": {Name: "", Kind: st.Kind, Size: st.Size, MTime: st.MTime}}}, nil
+}
+
+func (w *sshPollWatch) pollSnapshot(ctx context.Context) (sshSnapshot, error) {
+	if w.dir {
+		return w.files.snapshotDir(ctx, w.root)
+	}
+	return w.files.snapshotFile(ctx, w.root)
 }
 
 // sshPollWatch is the polling watcher of one remote path.
@@ -455,7 +474,7 @@ func (w *sshPollWatch) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		next, err := w.files.snapshot(ctx, w.root)
+		next, err := w.pollSnapshot(ctx)
 		if err != nil {
 			if !w.emit(ctx, hostos.WatchEvent{Path: w.root, Kind: "error", Err: err.Error()}) {
 				return
@@ -469,14 +488,17 @@ func (w *sshPollWatch) loop(ctx context.Context) {
 		}
 		// Coalesce a burst: after the debounce window, diff once more against the same
 		// baseline so the reader sees one settle, not every intermediate state.
+		timer := time.NewTimer(w.debounce)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
 		case <-w.stop:
+			timer.Stop()
 			return
-		case <-time.After(w.debounce):
+		case <-timer.C:
 		}
-		settled, err := w.files.snapshot(ctx, w.root)
+		settled, err := w.pollSnapshot(ctx)
 		if err == nil {
 			next, diff = settled, diffSnapshots(w.root, w.dir, prev, settled.entries)
 		}
@@ -708,10 +730,16 @@ for p in "$d"/* "$d"/.[!.]* "$d"/..?*; do
   nm=${p##*/}
   if [ "$gnu" = 1 ]; then
     l=$(stat -c '%F|%s|%Y' "$p" 2>/dev/null) || continue
-    fk=$(stat -L -c '%F' "$p" 2>/dev/null) || fk=""
+    fk=""
+    if [ -L "$p" ]; then
+      fk=$(stat -L -c '%F' "$p" 2>/dev/null) || fk=""
+    fi
   else
     l=$(stat -f '%HT|%z|%m' "$p" 2>/dev/null) || continue
-    fk=$(stat -L -f '%HT' "$p" 2>/dev/null) || fk=""
+    fk=""
+    if [ -L "$p" ]; then
+      fk=$(stat -L -f '%HT' "$p" 2>/dev/null) || fk=""
+    fi
   fi
   printf '%s\000' "$nm" "$l" "$fk"
 done

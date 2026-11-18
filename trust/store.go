@@ -144,12 +144,15 @@ func (s *Store) SetRecord(key string, level Level) error {
 // is recorded; an undecided workspace with markers stays Restricted with NeedsPrompt.
 // The state's Root is the target text the caller can show.
 func (s *Store) OpenRecord(key string, markers []string) (State, error) {
+	if key == "" {
+		return State{Level: Restricted, Markers: markers}, fmt.Errorf("trust: empty workspace record key")
+	}
 	if level, decided := s.LevelForRecord(key); decided {
 		return State{Root: key, Level: level, Decided: true, Markers: markers}, nil
 	}
 	if len(markers) == 0 {
 		if err := s.SetRecord(key, Trusted); err != nil {
-			return State{Root: key, Level: Trusted, Decided: true}, err
+			return State{Root: key, Level: Restricted, Markers: markers}, err
 		}
 		return State{Root: key, Level: Trusted, Decided: true}, nil
 	}

@@ -133,6 +133,7 @@ func (t *Tree) SetShowHidden(v bool) {
 	if t.showHidden != v {
 		t.showHidden = v
 		t.dirty = true
+		t.promoteSelection()
 	}
 }
 
@@ -146,6 +147,7 @@ func (t *Tree) SetShowIgnored(v bool) {
 	if t.showIgnored != v {
 		t.showIgnored = v
 		t.dirty = true
+		t.promoteSelection()
 	}
 }
 
@@ -463,17 +465,33 @@ func (t *Tree) expandWithChain(n *node) error {
 	if !t.compact {
 		return nil
 	}
-	for {
+	seen := map[string]bool{}
+	if real, err := filepath.EvalSymlinks(n.path); err == nil {
+		seen[real] = true
+	} else {
+		seen[n.path] = true
+	}
+	const maxChainDepth = 64
+	for range maxChainDepth {
 		next := t.singleVisibleDirChild(n)
 		if next == nil {
-			t.promoteSelection()
-			return nil
+			break
 		}
+		key := next.path
+		if real, err := filepath.EvalSymlinks(next.path); err == nil {
+			key = real
+		}
+		if seen[key] {
+			break
+		}
+		seen[key] = true
 		if err := t.expand(next); err != nil {
 			return err
 		}
 		n = next
 	}
+	t.promoteSelection()
+	return nil
 }
 
 // promoteSelection moves the selection onto its row's anchor when compact mode
@@ -529,7 +547,9 @@ func (t *Tree) Toggle(path string) error {
 func (t *Tree) Reload() error {
 	t.ignoreCache = make(map[string]ignoreCacheEntry)
 	t.dirty = true
-	return t.reload(t.root)
+	err := t.reload(t.root)
+	t.promoteSelection()
+	return err
 }
 
 // Refresh is Reload. The UI calls it when the watcher reports a change under the
@@ -582,7 +602,7 @@ func (t *Tree) forget(n *node) {
 
 func (t *Tree) find(path string) (*node, error) {
 	n, ok := t.byPath[path]
-	if !ok || (n.hidden && !t.showHidden) {
+	if !ok || !t.visible(n) {
 		return nil, ErrNotFound
 	}
 	return n, nil

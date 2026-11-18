@@ -666,3 +666,22 @@ func TestCopyOverwriteRollbackFailureNamesBackup(t *testing.T) {
 		t.Fatalf("old destination in backup = %q, want old", got)
 	}
 }
+
+func TestCopyAndMoveThroughSymlinkIntoSelfRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "dir")
+	must(t, Mkdir(src))
+	writeFile(t, filepath.Join(src, "f.txt"), "hi")
+	link := filepath.Join(root, "alias")
+	must(t, os.Symlink(src, link))
+
+	if err := Copy(src, filepath.Join(link, "sub"), Cancel); !errors.Is(err, ErrInvalidDest) {
+		t.Fatalf("Copy into symlinked self = %v, want ErrInvalidDest", err)
+	}
+	if err := MoveNoReplace(src, link); !errors.Is(err, ErrInvalidDest) {
+		t.Fatalf("MoveNoReplace into symlinked self = %v, want ErrInvalidDest", err)
+	}
+}

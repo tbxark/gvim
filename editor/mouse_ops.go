@@ -108,3 +108,28 @@ func (e *Editor) OpenPreview(path string) error {
 	e.setStatus(d.OpenStatus())
 	return nil
 }
+
+// ToggleCursorAt adds a caret at p or removes an existing caret at p when
+// multiple carets are active. It reports whether the caret set changed.
+func (e *Editor) ToggleCursorAt(p buffer.Pos) bool {
+	d := e.Active()
+	if d == nil {
+		return false
+	}
+	if !d.ToggleCursorAt(p) {
+		return false
+	}
+	e.lastKind = ""
+	e.ClearStatus()
+	return true
+}
+
+// ReplaceActiveRange replaces [from, to) in the active document with text as
+// a single undo step while preserving the caret position.
+func (e *Editor) ReplaceActiveRange(from, to buffer.Pos, text string) bool {
+	d := e.Active()
+	if d == nil {
+		return false
+	}
+	return d.ApplyEditList([]LSPEdit{{From: from, To: to, Text: text}}, EditOptions{Cursor: CursorKeep}, false) == nil
+}

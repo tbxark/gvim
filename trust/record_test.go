@@ -51,4 +51,8 @@ func TestRecordKeyedDecisions(t *testing.T) {
 	if level, decided := NewStore(path).LevelFor(root); !decided || level != Trusted {
 		t.Fatalf("local root decision = %v decided=%v", level, decided)
 	}
+	emptyState, err := store.OpenRecord("", nil)
+	if err == nil || emptyState.Level == Trusted || emptyState.Decided {
+		t.Fatalf("OpenRecord(\"\", nil) = (%+v, %v); must fail closed without Trusted", emptyState, err)
+	}
 }

@@ -1,5 +1,10 @@
 package syntax
 
+import (
+	"cmp"
+	"slices"
+)
+
 // InlineMarkerKind is the kind of delimiter an InlineMarker describes.
 type InlineMarkerKind uint8
 
@@ -37,6 +42,12 @@ func MarkdownInlineMarkers(line string) []InlineMarker {
 	if len(p.marks) == 0 {
 		return nil
 	}
+	slices.SortFunc(p.marks, func(a, b mark) int {
+		if c := cmp.Compare(a.start, b.start); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.end, b.end)
+	})
 	out := make([]InlineMarker, len(p.marks))
 	for i, m := range p.marks {
 		out[i] = InlineMarker{

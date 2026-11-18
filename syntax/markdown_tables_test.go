@@ -48,3 +48,24 @@ func TestMarkdownTablesCenterAndNoPipes(t *testing.T) {
 		t.Fatalf("kinds = %v %v", got[0].Kind, got[2].Kind)
 	}
 }
+
+func TestMarkdownTablesBlankEmptySpacesAndCRLF(t *testing.T) {
+	t.Parallel()
+	// Whitespace-only cells must not panic; empty interior cells must be preserved;
+	// outer whitespace and CRLF must work identically across header/separator/body.
+	lines := []string{
+		"  | a |   | c |  \r",
+		"  | --- | --- | --- |  \r",
+		"  | x || z |  \r",
+	}
+	got, tables := MarkdownTables(lines)
+	if len(tables) != 1 || len(tables[0].Lines) != 3 {
+		t.Fatalf("tables = %+v, want 1 table with 3 lines", tables)
+	}
+	if want := []string{"a", "", "c"}; len(got[0].Cells) != 3 || got[0].Cells[0] != want[0] || got[0].Cells[1] != want[1] || got[0].Cells[2] != want[2] {
+		t.Fatalf("header cells = %q, want %q", got[0].Cells, want)
+	}
+	if want := []string{"x", "", "z"}; len(got[2].Cells) != 3 || got[2].Cells[0] != want[0] || got[2].Cells[1] != want[1] || got[2].Cells[2] != want[2] {
+		t.Fatalf("body cells = %q, want %q", got[2].Cells, want)
+	}
+}

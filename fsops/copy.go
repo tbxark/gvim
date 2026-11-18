@@ -99,6 +99,7 @@ func copyWithReport(ctx context.Context, src, dst string, policy ConflictPolicy,
 		return fmt.Errorf("fsops: copy: unknown conflict policy %d", int(policy))
 	}
 	src = cleanPath(src)
+	dst = cleanPath(dst)
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return opError("copy", src, err)

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -127,6 +128,9 @@ type sshBackend struct {
 	keyboardAnswers   []string
 	// connecting is true while a dial runs, for the status row.
 	connecting bool
+	// dialMu serializes Reconnect dials so concurrent reconnects cannot race or leak carriers.
+	dialMu  sync.Mutex
+	connGen atomic.Uint64
 	// keepaliveStop stops the current keepalive loop; nil when none runs.
 	keepaliveStop chan struct{}
 	// keepaliveInterval/keepaliveTimeout override the package defaults for this backend
@@ -183,6 +187,10 @@ func (b *sshBackend) Connected() bool {
 	return b.connected
 }
 
+// ConnectionGen returns a monotonically increasing generation number incremented on each
+// successful SSH client connection.
+func (b *sshBackend) ConnectionGen() uint64 { return b.connGen.Load() }
+
 // Reason is why the connection is down.
 func (b *sshBackend) Reason() string {
 	b.mu.Lock()
@@ -216,13 +224,47 @@ func (b *sshBackend) requestAgentForwarding(sess *ssh.Session) {
 	}
 }
 
-// markDown records a broken carrier; the next operation or the activation hook reconnects.
-func (b *sshBackend) markDown(err error) {
+// markDownClient records a broken carrier only when the failing client is still the
+// backend's active carrier; a stale error from an earlier client never marks a new
+// reconnected carrier down.
+func (b *sshBackend) markDownClient(client *ssh.Client, err error) {
+	if client == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.client != client {
+		return
+	}
 	b.connected = false
 	if err != nil {
 		b.reason = err.Error()
+	}
+}
+
+// dropFailedKeepaliveClient marks client down (if it is still the active carrier),
+// clears and closes any associated jumpClient/agentConn, and closes client itself.
+func (b *sshBackend) dropFailedKeepaliveClient(client *ssh.Client, err error) {
+	var oldJump *ssh.Client
+	var oldAgent net.Conn
+	b.mu.Lock()
+	if b.client == client {
+		b.connected = false
+		if err != nil {
+			b.reason = err.Error()
+		}
+		oldJump = b.jumpClient
+		oldAgent = b.agentConn
+		b.jumpClient = nil
+		b.agentConn = nil
+	}
+	b.mu.Unlock()
+	_ = client.Close()
+	if oldAgent != nil {
+		_ = oldAgent.Close()
+	}
+	if oldJump != nil {
+		_ = oldJump.Close()
 	}
 }
 
@@ -256,7 +298,7 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 			_ = agentConn.Close()
 		}
 	}()
-	auth, err := b.authMethodsResolved(ctx, res, ag)
+	auth, err := b.authMethodsResolved(ctx, res, ag, false)
 	if err != nil {
 		return nil, err
 	}
@@ -266,8 +308,12 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 	var conn net.Conn
 	var jumpClient *ssh.Client
 	if res.jump != nil {
+		jumpAuth, jerr := b.authMethodsResolved(ctx, res, ag, true)
+		if jerr != nil {
+			return nil, jerr
+		}
 		jumpAddr := net.JoinHostPort(res.jump.host, strconv.Itoa(res.jump.port))
-		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: auth, HostKeyCallback: hostKey, HostKeyAlgorithms: algorithms, Timeout: timeout}, timeout)
+		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: jumpAuth, HostKeyCallback: hostKey, HostKeyAlgorithms: algorithms, Timeout: timeout}, timeout)
 		if err != nil {
 			return nil, fmt.Errorf("ssh %s: jump %s: %w", b.spec.Display(), jumpAddr, err)
 		}
@@ -300,14 +346,6 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 		return nil, fmt.Errorf("ssh %s: %w", b.spec.Display(), err)
 	}
 
-	b.mu.Lock()
-	b.resolved = res
-	if b.jumpClient != nil {
-		_ = b.jumpClient.Close()
-	}
-	b.jumpClient = jumpClient
-	b.mu.Unlock()
-
 	if res.forwardAgent {
 		if ag == nil {
 			_ = client.Close()
@@ -322,17 +360,31 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 	}
 	policy, _ := ParseKnownHostsPolicy(b.opts.KnownHostsPolicy)
 	b.mu.Lock()
+	b.resolved = res
+	oldJump := b.jumpClient
+	b.jumpClient = jumpClient
 	b.forwardAgent = res.forwardAgent
-	if b.agentConn != nil {
-		_ = b.agentConn.Close()
+	oldAgent := b.agentConn
+	if res.forwardAgent {
+		b.agentConn = agentConn
+	} else {
+		b.agentConn = nil
 	}
-	b.agentConn = agentConn
 	alg := b.hostKeyAlg
 	if alg == "" {
 		alg = "unknown"
 	}
 	b.detail = fmt.Sprintf("host key %s · known_hosts %s · algorithms %s", alg, policy, strings.Join(algorithms, ", "))
 	b.mu.Unlock()
+	if oldJump != nil {
+		_ = oldJump.Close()
+	}
+	if oldAgent != nil {
+		_ = oldAgent.Close()
+	}
+	if !res.forwardAgent && agentConn != nil {
+		_ = agentConn.Close()
+	}
 	b.storeAcceptedPassword(ctx, res)
 	success = true
 	return client, nil
@@ -397,8 +449,24 @@ func (b *sshBackend) connect(ctx context.Context) error {
 		return err
 	}
 	b.mu.Lock()
+	if b.closed {
+		oldJump := b.jumpClient
+		oldAgent := b.agentConn
+		b.jumpClient, b.agentConn = nil, nil
+		b.connecting = false
+		b.mu.Unlock()
+		_ = client.Close()
+		if oldAgent != nil {
+			_ = oldAgent.Close()
+		}
+		if oldJump != nil {
+			_ = oldJump.Close()
+		}
+		return errors.New("authority: SSH connection is closed")
+	}
 	old := b.client
 	b.client, b.connected, b.reason, b.connecting = client, true, "", false
+	b.connGen.Add(1)
 	b.needsPassword, b.needsPassphrase = false, false
 	b.keyboardChallenge = nil
 	b.mu.Unlock()
@@ -463,26 +531,33 @@ func (b *sshBackend) keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 		}
-		if err := b.ping(client, timeout); err != nil {
-			b.markDown(fmt.Errorf("keepalive failed: %w", err))
-			_ = client.Close()
+		stopped, err := b.ping(client, stop, timeout)
+		if stopped {
+			return
+		}
+		if err != nil {
+			b.dropFailedKeepaliveClient(client, fmt.Errorf("keepalive failed: %w", err))
 			return
 		}
 	}
 }
 
-// ping sends one keepalive global request, bounded by timeout.
-func (b *sshBackend) ping(client *ssh.Client, timeout time.Duration) error {
+// ping sends one keepalive global request, bounded by timeout and stop.
+func (b *sshBackend) ping(client *ssh.Client, stop <-chan struct{}, timeout time.Duration) (bool, error) {
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
 		done <- err
 	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
+	case <-stop:
+		return true, nil
 	case err := <-done:
-		return err
-	case <-time.After(timeout):
-		return errors.New("keepalive timed out")
+		return false, err
+	case <-timer.C:
+		return false, errors.New("keepalive timed out")
 	}
 }
 
@@ -700,17 +775,28 @@ func (b *sshBackend) ReconnectWithPassword(ctx context.Context, password string)
 
 // Reconnect closes the carrier and dials the stored target again.
 func (b *sshBackend) Reconnect(ctx context.Context) error {
+	b.dialMu.Lock()
+	defer b.dialMu.Unlock()
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
 		return errors.New("authority: SSH connection is closed")
 	}
 	old := b.client
-	b.client, b.connected, b.reason = nil, false, "reconnecting"
+	oldJump := b.jumpClient
+	oldAgent := b.agentConn
+	b.client, b.jumpClient, b.agentConn = nil, nil, nil
+	b.connected, b.reason = false, "reconnecting"
 	b.mu.Unlock()
 	b.stopKeepalive()
+	if oldAgent != nil {
+		_ = oldAgent.Close()
+	}
 	if old != nil {
 		_ = old.Close()
+	}
+	if oldJump != nil {
+		_ = oldJump.Close()
 	}
 	return b.connect(ctx)
 }
@@ -766,7 +852,7 @@ func (b *sshBackend) runSessionBuffered(ctx context.Context, argv []string, o ho
 	}
 	sess, err := client.NewSession()
 	if err != nil {
-		b.markDown(err)
+		b.markDownClient(client, err)
 		return hostos.ProcResult{}, err
 	}
 	defer func() { _ = sess.Close() }()
@@ -798,7 +884,7 @@ func (b *sshBackend) runSessionBuffered(ctx context.Context, argv []string, o ho
 			}
 			return res, nil
 		default:
-			b.markDown(err)
+			b.markDownClient(client, err)
 			return hostos.ProcResult{}, err
 		}
 	}
@@ -820,7 +906,7 @@ func (b *sshBackend) Start(ctx context.Context, argv []string, o hostos.ProcOpti
 	}
 	sess, err := client.NewSession()
 	if err != nil {
-		b.markDown(err)
+		b.markDownClient(client, err)
 		return nil, err
 	}
 	b.requestAgentForwarding(sess)
@@ -844,9 +930,14 @@ func (b *sshBackend) Start(ctx context.Context, argv []string, o hostos.ProcOpti
 		_ = sess.Close()
 		return nil, err
 	}
-	p := &sshProc{sess: sess, stdin: stdin, backend: b, chunks: make(chan hostos.ProcChunk, 64), waitDone: make(chan struct{})}
+	p := &sshProc{sess: sess, client: client, stdin: stdin, backend: b, chunks: make(chan hostos.ProcChunk, 64), waitDone: make(chan struct{})}
+	p.pumpWG.Add(2)
 	p.pump(stdout, false)
 	p.pump(stderr, true)
+	go func() {
+		p.pumpWG.Wait()
+		close(p.chunks)
+	}()
 	return p, nil
 }
 
@@ -858,7 +949,7 @@ func (b *sshBackend) Launch(ctx context.Context, o TerminalOptions) (TerminalLau
 	}
 	sess, err := client.NewSession()
 	if err != nil {
-		b.markDown(err)
+		b.markDownClient(client, err)
 		return TerminalLaunch{}, err
 	}
 	b.requestAgentForwarding(sess)
@@ -948,9 +1039,11 @@ func remoteLoginCommandEnv(dir string, env []string) string {
 // sshProc is one long-running stdio child over an ssh session.
 type sshProc struct {
 	sess    *ssh.Session
+	client  *ssh.Client
 	stdin   io.WriteCloser
 	backend *sshBackend
 	chunks  chan hostos.ProcChunk
+	pumpWG  sync.WaitGroup
 	// waitOnce starts the one goroutine that reaps the session; every Wait call
 	// waits for its result, so a second Wait does not start a goroutine that
 	// nothing would ever finish.
@@ -962,6 +1055,7 @@ type sshProc struct {
 // pump copies one stream into the chunk channel.
 func (p *sshProc) pump(r io.Reader, stderr bool) {
 	go func() {
+		defer p.pumpWG.Done()
 		buf := make([]byte, 32<<10)
 		for {
 			n, err := r.Read(buf)
@@ -979,29 +1073,44 @@ func (p *sshProc) PID() int { return 0 }
 func (p *sshProc) Write(data []byte) error {
 	_, err := p.stdin.Write(data)
 	if err != nil {
-		p.backend.markDown(err)
+		p.backend.markDownClient(p.client, err)
 	}
 	return err
 }
 func (p *sshProc) CloseStdin() { _ = p.stdin.Close() }
 func (p *sshProc) Kill(signal string) error {
 	sig := ssh.SIGTERM
-	if signal == "KILL" {
+	switch signal {
+	case "KILL":
 		sig = ssh.SIGKILL
+	case "INT":
+		sig = ssh.SIGINT
+	case "HUP":
+		sig = ssh.SIGHUP
 	}
 	return p.sess.Signal(sig)
 }
 func (p *sshProc) Terminate(grace time.Duration) {
 	go func() {
 		_ = p.Kill("TERM")
-		time.Sleep(grace)
-		_ = p.Kill("KILL")
+		if grace <= 0 {
+			_ = p.Kill("KILL")
+			return
+		}
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case <-p.waitDone:
+			return
+		case <-timer.C:
+			_ = p.Kill("KILL")
+		}
 	}()
 }
 func (p *sshProc) Output(ctx context.Context) (hostos.ProcChunk, bool) {
 	select {
-	case c := <-p.chunks:
-		return c, true
+	case c, ok := <-p.chunks:
+		return c, ok
 	case <-ctx.Done():
 		return hostos.ProcChunk{}, false
 	}
@@ -1010,6 +1119,7 @@ func (p *sshProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
 	p.waitOnce.Do(func() {
 		go func() {
 			p.waitErr = p.sess.Wait()
+			_ = p.sess.Close()
 			close(p.waitDone)
 		}()
 	})
@@ -1025,9 +1135,12 @@ func (p *sshProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
 			return res, nil
 		case errors.As(err, &exit):
 			res.Code = exit.ExitStatus()
+			if exit.Signal() != "" {
+				res.Signal = exit.Signal()
+			}
 			return res, nil
 		default:
-			p.backend.markDown(err)
+			p.backend.markDownClient(p.client, err)
 			return hostos.ProcResult{}, err
 		}
 	}

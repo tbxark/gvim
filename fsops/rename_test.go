@@ -231,3 +231,19 @@ func TestRenameNoReplaceCaseOnly(t *testing.T) {
 		t.Fatalf("renamed content = %q", got)
 	}
 }
+
+func TestRenameNoReplaceDistinctHardLinksConflict(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.txt")
+	b := filepath.Join(root, "b.txt")
+	writeFile(t, a, "data")
+	if err := os.Link(a, b); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+	if err := RenameNoReplace(a, b); !errors.Is(err, ErrConflict) {
+		t.Fatalf("RenameNoReplace across distinct hard links = %v, want ErrConflict", err)
+	}
+	if !exists(a) || !exists(b) {
+		t.Fatal("hard link conflict removed a link")
+	}
+}

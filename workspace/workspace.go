@@ -94,9 +94,16 @@ func Recent() ([]Root, error) {
 		return nil, err
 	}
 	var roots []Root
+	seen := make(map[string]bool, min(len(paths), MaxRecent))
 	for _, p := range paths {
-		if info, err := os.Stat(p); err == nil && info.IsDir() {
-			roots = append(roots, Root{path: p})
+		r, err := Open(p)
+		if err != nil || seen[r.path] {
+			continue
+		}
+		seen[r.path] = true
+		roots = append(roots, r)
+		if len(roots) == MaxRecent {
+			break
 		}
 	}
 	return roots, nil
@@ -176,8 +183,9 @@ func write(path string, roots []string) error {
 		return err
 	}
 	_, werr := tmp.Write(data)
+	serr := tmp.Sync()
 	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr); err != nil {
+	if err := errors.Join(werr, serr, cerr); err != nil {
 		_ = os.Remove(tmp.Name())
 		return err
 	}

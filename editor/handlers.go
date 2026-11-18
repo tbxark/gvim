@@ -304,9 +304,6 @@ func pageHandler(dir int, extend bool) handler {
 // pageOverlap is how many rows of the old page stay visible after a page move.
 const pageOverlap = 3
 
-// scrollOff is the margin the caret keeps from the top and bottom of the pane.
-const scrollOff = 3
-
 // pageMove scrolls the viewport by one page minus the overlap, then places the
 // caret on the same screen row it had before, clamped into the scroll-off margin.
 // The top is clamped to the document, which can leave the caret short of the
@@ -328,7 +325,7 @@ func pageMove(e *Editor, d *Document, dir int, extend bool) {
 		return
 	}
 
-	margin := min(max(scrollOff, e.opts.ScrollOffset), (rows-1)/2)
+	margin := min(e.scrollMargin(), (rows-1)/2)
 	row := d.Cursor.Line - oldTop
 	if row < 0 || row >= rows {
 		row = margin // an off-screen caret lands at the margin

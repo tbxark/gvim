@@ -254,3 +254,22 @@ func TestValueText(t *testing.T) {
 		t.Fatal("no_file_at did not interpolate the token")
 	}
 }
+
+func TestExplicitLocaleNormalizesAndEmptyRegisterDoesNotShadow(t *testing.T) {
+	if got := T("zh_CN.UTF-8", "clipboard.copied", nil); got != "已复制" {
+		t.Fatalf("T(zh_CN.UTF-8) = %q, want 已复制", got)
+	}
+	if got := T("zh-Hans", "clipboard.copied", nil); got != "已复制" {
+		t.Fatalf("T(zh-Hans) = %q, want 已复制", got)
+	}
+	if got := PluralCategory("en", -1); got != "one" {
+		t.Fatalf("PluralCategory(en, -1) = %q, want one", got)
+	}
+	if got := PluralCategory("ru", -2); got != "few" {
+		t.Fatalf("PluralCategory(ru, -2) = %q, want few", got)
+	}
+	Register("zh-CN", nil)
+	if got := T("zh-CN", "clipboard.copied", nil); got != "已复制" {
+		t.Fatalf("Register(zh-CN, nil) shadowed embedded catalogue: %q", got)
+	}
+}

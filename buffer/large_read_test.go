@@ -1065,3 +1065,40 @@ func TestLargeLineSliceReadsOnlyThePrefix(t *testing.T) {
 		t.Errorf("LineSlice cached %d decoded lines", got)
 	}
 }
+
+func TestWordBoundsHugeLine(t *testing.T) {
+	t.Parallel()
+	// A line longer than DefaultMaxLine whose words lie both across and past DefaultMaxLine.
+	prefix := strings.Repeat("a", buffer.DefaultMaxLine-5)
+	mid := " alpha "
+	suffix := strings.Repeat("b", 128)
+	data := []byte(prefix + mid + suffix + "\nnext\n")
+	b, err := buffer.OpenLarge(buffertest.NewMemSource(data), buffer.LargeOptions{})
+	if err != nil {
+		t.Fatalf("OpenLarge: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	indexAll(t, b)
+
+	// At DefaultMaxLine - 2 inside "alpha", spanning across DefaultMaxLine.
+	col := buffer.DefaultMaxLine - 5 + 3
+	start, end := buffer.WordBounds(b, buffer.Pos{Line: 0, Col: col})
+	wantStart := buffer.Pos{Line: 0, Col: buffer.DefaultMaxLine - 5 + 1}
+	wantEnd := buffer.Pos{Line: 0, Col: buffer.DefaultMaxLine - 5 + 6}
+	if start != wantStart || end != wantEnd {
+		t.Fatalf("WordBounds(alpha) = %+v, %+v; want %+v, %+v", start, end, wantStart, wantEnd)
+	}
+
+	// Strictly > DefaultMaxLine inside trailing "b..." word and past EOL.
+	tailStart := len(prefix) + len(mid)
+	for _, probe := range []int{buffer.DefaultMaxLine + 10, tailStart + len(suffix) + 50} {
+		if probe <= buffer.DefaultMaxLine {
+			t.Fatalf("probe %d must exceed DefaultMaxLine %d", probe, buffer.DefaultMaxLine)
+		}
+		s, e := buffer.WordBounds(b, buffer.Pos{Line: 0, Col: probe})
+		ws, we := buffer.Pos{Line: 0, Col: tailStart}, buffer.Pos{Line: 0, Col: tailStart + len(suffix)}
+		if s != ws || e != we {
+			t.Fatalf("WordBounds(col=%d) = %+v, %+v; want %+v, %+v", probe, s, e, ws, we)
+		}
+	}
+}

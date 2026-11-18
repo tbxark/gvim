@@ -131,3 +131,14 @@ func TestUsageRecord(t *testing.T) {
 		t.Fatalf("after two records = %+v", got)
 	}
 }
+
+func TestRankWhitespaceQueryTreatedAsEmpty(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	files := []string{"b.txt", "a.txt"}
+	usage := Usage{"a.txt": {Count: 2, Last: now}}
+	got := paths(Rank(files, "   \t ", usage, now))
+	want := []string{"a.txt", "b.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Rank whitespace = %v, want %v", got, want)
+	}
+}

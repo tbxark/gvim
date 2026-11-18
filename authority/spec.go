@@ -48,6 +48,9 @@ func (s RemoteSpec) Workspace() string {
 	if p == "" || p == "/" || p == "~" {
 		return p
 	}
+	if strings.HasPrefix(p, "~") && !strings.Contains(p, "/") && validTildeUser(p[1:]) {
+		return p
+	}
 	if strings.HasSuffix(p, "/") {
 		return strings.TrimSuffix(p, "/") + "/"
 	}
@@ -225,9 +228,6 @@ func parseSSHURL(arg string) (RemoteSpec, error) {
 		if user == "" {
 			user = os.Getenv("USERNAME")
 		}
-		if user == "" {
-			return RemoteSpec{}, fmt.Errorf("%s: no user in the URL and neither $USER nor $USERNAME is set", arg)
-		}
 	}
 	return RemoteSpec{User: user, Host: host, Port: port, Path: path, Line: line, Col: col, Raw: arg, UserExplicit: userFromURL, PortExplicit: port != 0}, nil
 }
@@ -315,13 +315,13 @@ func ShellQuote(s string) string {
 // a word consisting of the user name, so anything with spaces or metacharacters must be
 // quoted literally instead (the cd then fails safely, rather than shell-splitting).
 func validTildeUser(name string) bool {
-	if name == "" {
+	if name == "" || name[0] == '-' || name[0] == '+' {
 		return false
 	}
 	for _, r := range name {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '_' || r == '-' || r == '.' || r == '+':
+		case r == '_' || r == '-' || r == '.':
 		default:
 			return false
 		}

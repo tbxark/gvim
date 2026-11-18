@@ -246,6 +246,18 @@ func (a *Authority) TakeNotices() []string {
 // Connected reports whether the backend is usable.
 func (a *Authority) Connected() bool { return a.remote == nil || a.remote.Connected() }
 
+// ConnectionGen returns a monotonically increasing connection generation when the
+// underlying backend supports it, or 0 for local/static slots.
+func (a *Authority) ConnectionGen() uint64 {
+	if a == nil || a.remote == nil {
+		return 0
+	}
+	if g, ok := a.remote.(interface{ ConnectionGen() uint64 }); ok {
+		return g.ConnectionGen()
+	}
+	return 0
+}
+
 // Reconnect re-establishes a dropped remote backend; a local slot does nothing.
 func (a *Authority) Reconnect(ctx context.Context) error {
 	if a.remote == nil {

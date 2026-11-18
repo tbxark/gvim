@@ -189,14 +189,14 @@ func (sc *Scan) window1() {
 func (sc *Scan) hugeWindow(runes int) {
 	lo := sc.col
 	hi := min(lo+sc.huge.window, runes)
-	first, text := sc.huge.text(sc.snap, sc.line, runes, lo, hi)
+	first, end, text := sc.huge.text(sc.snap, sc.line, runes, lo, hi)
 	if err := sc.snap.Err(); err != nil {
 		sc.err = err
 		sc.finish()
 		return
 	}
 	sc.stats.BytesScanned += int64(len(text))
-	for _, m := range hugeMatches(sc.line, first, text, sc.re, sc.q, lo, hi) {
+	for _, m := range hugeMatches(sc.line, first, end, runes, text, sc.re, sc.q, lo, hi) {
 		if len(sc.matches) >= sc.limit {
 			sc.capped = true
 			break

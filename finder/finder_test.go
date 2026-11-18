@@ -319,3 +319,36 @@ func TestEnumerateCustomIgnorePatterns(t *testing.T) {
 		t.Fatalf("expected app.log after SetOptions without custom patterns, got %v", files2)
 	}
 }
+
+func TestIndexProbeShowHiddenAndIdleClearOnSetOptions(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"sub/.secret.go": "package sub",
+		"sub/visible.go": "package sub",
+		"main.go":        "package main",
+	})
+
+	idx := StartWithOptions(context.Background(), root, Options{ShowHidden: true})
+	defer idx.Close()
+	<-idx.Done()
+	got, err := idx.Probe(context.Background(), "sub")
+	if err != nil || !slices.Contains(got, "sub/.secret.go") {
+		t.Fatalf("StartWithOptions(ShowHidden: true) probe = %v, %v; want sub/.secret.go", got, err)
+	}
+
+	idx.SetOptions(root, Options{ShowHidden: false})
+	<-idx.Done()
+	got2, err := idx.Probe(context.Background(), "sub")
+	if err != nil || slices.Contains(got2, "sub/.secret.go") || !slices.Contains(got2, "sub/visible.go") {
+		t.Fatalf("SetOptions(ShowHidden: false) probe = %v, %v; want only sub/visible.go", got2, err)
+	}
+
+	idle := Idle()
+	defer idle.Close()
+	idle.SetOptions(root, Options{})
+	<-idle.Done()
+	files, loading, ready, isIdle, _, _, _, err := idle.IndexSnapshot()
+	if err != nil || loading || isIdle || !ready || !slices.Contains(files, "main.go") {
+		t.Fatalf("after Idle.SetOptions: files=%v loading=%v ready=%v idle=%v err=%v", files, loading, ready, isIdle, err)
+	}
+}

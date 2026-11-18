@@ -1,6 +1,7 @@
 package finder
 
 import (
+	"container/heap"
 	"maps"
 	"slices"
 	"strings"
@@ -106,23 +107,55 @@ func Rank(files []string, query string, usage Usage, now time.Time) []Match {
 	return rank(files, query, usage, now, MaxResults)
 }
 
+type rankedMatch struct {
+	m   Match
+	idx int
+}
+
+// matchMinHeap keeps the best matches on top-K selection by putting the worst
+// element at index 0: lower Score is worse; ties put higher file idx at root so
+// earlier files win ties cleanly.
+type matchMinHeap []rankedMatch
+
+func (h matchMinHeap) Len() int { return len(h) }
+func (h matchMinHeap) Less(i, j int) bool {
+	if h[i].m.Score != h[j].m.Score {
+		return h[i].m.Score < h[j].m.Score
+	}
+	return h[i].idx > h[j].idx
+}
+func (h matchMinHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *matchMinHeap) Push(x any)   { *h = append(*h, x.(rankedMatch)) }
+func (h *matchMinHeap) Pop() any {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
+func betterMatch(a, b rankedMatch) bool {
+	if a.m.Score != b.m.Score {
+		return a.m.Score > b.m.Score
+	}
+	return a.idx < b.idx
+}
+
 // rank is Rank with a limit. A limit of zero or less, or above MaxResults, means
 // MaxResults.
 func rank(files []string, query string, usage Usage, now time.Time, limit int) []Match {
 	if limit <= 0 || limit > MaxResults {
 		limit = MaxResults
 	}
-	var out []Match
-	if query == "" {
-		for _, f := range files {
-			u := usage[f]
-			out = append(out, Match{Path: f, Score: rawFrecency(u, now)})
-		}
-		slices.SortStableFunc(out, byScore)
-		return truncate(out, limit)
+	if len(files) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(query) == "" {
+		return rankEmptyQuery(files, usage, now, limit)
 	}
 	matcher := fuzzy.NewMatcher(query)
-	for _, f := range files {
+	h := make(matchMinHeap, 0, min(limit, len(files)))
+	for idx, f := range files {
 		score, pos, ok := matcher.Match(f)
 		if !ok {
 			continue
@@ -131,27 +164,84 @@ func rank(files []string, query string, usage Usage, now time.Time, limit int) [
 		if strings.HasPrefix(f, query) {
 			score += prefixBoost
 		}
-		out = append(out, Match{Path: f, Score: score, Positions: pos})
+		cand := rankedMatch{m: Match{Path: f, Score: score, Positions: pos}, idx: idx}
+		if len(h) < limit {
+			heap.Push(&h, cand)
+		} else if betterMatch(cand, h[0]) {
+			h[0] = cand
+			heap.Fix(&h, 0)
+		}
 	}
-	slices.SortStableFunc(out, byScore)
-	return truncate(out, limit)
+	if len(h) == 0 {
+		return nil
+	}
+	slices.SortFunc(h, func(a, b rankedMatch) int {
+		if a.m.Score != b.m.Score {
+			if a.m.Score > b.m.Score {
+				return -1
+			}
+			return 1
+		}
+		return a.idx - b.idx
+	})
+	out := make([]Match, len(h))
+	for i := range h {
+		out[i] = h[i].m
+	}
+	return out
 }
 
-func byScore(a, b Match) int {
-	switch {
-	case a.Score > b.Score:
-		return -1
-	case a.Score < b.Score:
-		return 1
+func rankEmptyQuery(files []string, usage Usage, now time.Time, limit int) []Match {
+	if len(usage) == 0 {
+		n := min(limit, len(files))
+		out := make([]Match, n)
+		for i := range n {
+			out[i] = Match{Path: files[i]}
+		}
+		return out
 	}
-	return 0
-}
-
-func truncate(m []Match, limit int) []Match {
-	if len(m) > limit {
-		return m[:limit]
+	h := make(matchMinHeap, 0, min(limit, len(usage)))
+	for idx, f := range files {
+		u := usage[f]
+		if u.Count == 0 {
+			continue
+		}
+		sc := rawFrecency(u, now)
+		if sc <= 0 {
+			continue
+		}
+		cand := rankedMatch{m: Match{Path: f, Score: sc}, idx: idx}
+		if len(h) < limit {
+			heap.Push(&h, cand)
+		} else if betterMatch(cand, h[0]) {
+			h[0] = cand
+			heap.Fix(&h, 0)
+		}
 	}
-	return m
+	slices.SortFunc(h, func(a, b rankedMatch) int {
+		if a.m.Score != b.m.Score {
+			if a.m.Score > b.m.Score {
+				return -1
+			}
+			return 1
+		}
+		return a.idx - b.idx
+	})
+	out := make([]Match, 0, min(limit, len(files)))
+	used := make(map[int]bool, len(h))
+	for _, r := range h {
+		out = append(out, r.m)
+		used[r.idx] = true
+	}
+	for idx, f := range files {
+		if len(out) >= limit {
+			break
+		}
+		if !used[idx] {
+			out = append(out, Match{Path: f})
+		}
+	}
+	return out
 }
 
 // frecencyBoost is the bonus added to a matching file: its frecency score

@@ -541,3 +541,29 @@ func TestPatternMatcher(t *testing.T) {
 		t.Error("expected app.txt to not match")
 	}
 }
+
+func TestExpandWithChainStopsOnSymlinkLoopAndFindHidesIgnored(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	mustMkdir(t, a)
+	if err := os.Symlink(a, filepath.Join(a, "loop")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored_dir/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(root, "ignored_dir"))
+	mustWrite(t, filepath.Join(root, "ignored_dir", "f.txt"))
+
+	tree, err := OpenWithOptions(root, Options{CompactDirectories: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Expand(a); err != nil {
+		t.Fatalf("Expand on symlink loop = %v", err)
+	}
+	// Ignored directory must not be found/expanded when showIgnored is false.
+	if err := tree.Expand(filepath.Join(root, "ignored_dir")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Expand ignored dir = %v, want ErrNotFound", err)
+	}
+}

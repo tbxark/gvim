@@ -152,12 +152,17 @@ func (d *docDecor) build(first int) *window {
 		lo, _ := slices.BinarySearchFunc(g.items, first-g.maxSpan, func(e entry, line int) int {
 			return e.FromLine - line
 		})
+		for i := 0; i < lo && g.items[i].FromLine == 0; i++ {
+			if g.items[i].Kind == CursorLine {
+				w.add(&g.items[i])
+			}
+		}
 		for i := lo; i < len(g.items); i++ {
 			e := &g.items[i]
 			if e.FromLine >= end {
 				break
 			}
-			if e.lastLine() >= first {
+			if e.lastLine() >= first || e.Kind == CursorLine {
 				w.add(e)
 			}
 		}
@@ -234,7 +239,7 @@ func (w *window) add(e *entry) {
 		row := VirtualRow{
 			Text: e.Text, Style: e.Style, GutterText: e.GutterText,
 			GutterStyle: e.GutterStyle, Priority: e.Priority, ComposeOnly: e.ComposeOnly,
-			Overlays: append([]TextOverlay(nil), e.TextOverlays[:min(e.TextOverlayCount, maxTextOverlays)]...),
+			Overlays: append([]TextOverlay(nil), e.TextOverlays[:min(max(e.TextOverlayCount, 0), maxTextOverlays)]...),
 		}
 		target := &w.top[i].above
 		if e.Kind == VirtualLineBelow {
@@ -244,7 +249,11 @@ func (w *window) add(e *entry) {
 			target.push(row, e.Priority, e.seq)
 		}
 	case Conceal:
-		for line := max(e.FromLine, w.first); line <= min(e.ToLine, w.first+windowLines-1) && line <= e.ToLine; line++ {
+		last := e.ToLine
+		if e.ToCol == 0 {
+			last-- // the range ends at the start of a line: that line is not in it
+		}
+		for line := max(e.FromLine, w.first); line <= last && line < w.first+windowLines; line++ {
 			i, _ := at(line)
 			if !w.top[i].conceals.wants(e.Priority, e.seq) {
 				continue
@@ -272,8 +281,11 @@ func (w *window) add(e *entry) {
 			}, e.Priority, e.seq)
 		}
 	case CursorLine:
-		if i, ok := at(e.FromLine); ok && w.top[i].cursorLines.wants(e.Priority, e.seq) {
-			w.top[i].cursorLines.push(CursorLineOverlay{Style: e.Style, Priority: e.Priority, ComposeOnly: e.ComposeOnly}, e.Priority, e.seq)
+		overlay := CursorLineOverlay{Style: e.Style, Priority: e.Priority, ComposeOnly: e.ComposeOnly}
+		for i := range w.top {
+			if w.top[i].cursorLines.wants(e.Priority, e.seq) {
+				w.top[i].cursorLines.push(overlay, e.Priority, e.seq)
+			}
 		}
 	}
 }

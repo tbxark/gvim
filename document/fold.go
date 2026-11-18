@@ -82,10 +82,6 @@ func (d *Document) SetExternalFolds(ranges []fold.Range, rev uint64) {
 	d.FoldMemo.Ok = false
 }
 
-// ExternalFolds returns a copy of the fold ranges the external source gave last,
-// for a caller that merges its own view.
-func (d *Document) ExternalFolds() []fold.Range { return slices.Clone(d.externalFolds) }
-
 // SetOutlineFolds replaces the structural fold ranges an outline source gave, tied
 // to the text version they were computed from. The ranges merge into Folds only
 // while the text still has that version: an edit drops them until the source
@@ -186,7 +182,10 @@ func (d *Document) hidingFold(line, tabWidth int) (fold.Range, bool) {
 // hidingIn is hidingFold over ranges, which must be d.Folds for the same text.
 func (d *Document) hidingIn(ranges []fold.Range, line int) (fold.Range, bool) {
 	for _, r := range ranges {
-		if d.folded[r.Start] && r.Start < line && line <= r.End {
+		if r.Start >= line {
+			break
+		}
+		if d.folded[r.Start] && line <= r.End {
 			return r, true
 		}
 	}

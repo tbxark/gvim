@@ -42,10 +42,66 @@ func DetectEnv(root string, detectors []config.EnvDetector) (DetectedEnv, bool) 
 		return DetectedEnv{
 			Name:    d.Name,
 			Kind:    d.Kind,
-			Snippet: strings.ReplaceAll(d.Snippet, "{dir}", root),
+			Snippet: ExpandSnippetDir(d.Snippet, root),
 		}, incomplete
 	}
 	return DetectedEnv{}, incomplete
+}
+
+// ExpandSnippetDir replaces {dir} placeholders in snippet with dir escaped for the
+// surrounding POSIX shell quoting context (single-quoted, double-quoted, or unquoted).
+func ExpandSnippetDir(snippet, dir string) string {
+	const needle = "{dir}"
+	if !strings.Contains(snippet, needle) {
+		return snippet
+	}
+	var out strings.Builder
+	out.Grow(len(snippet) + len(dir) + 4)
+	var quote byte
+	escaped := false
+	for i := 0; i < len(snippet); {
+		if quote != '\'' && escaped {
+			out.WriteByte(snippet[i])
+			escaped = false
+			i++
+			continue
+		}
+		if strings.HasPrefix(snippet[i:], needle) {
+			switch quote {
+			case '\'':
+				out.WriteString(strings.ReplaceAll(dir, "'", `'"'"'`))
+			case '"':
+				for _, r := range []byte(dir) {
+					switch r {
+					case '\\', '"', '$', '`':
+						out.WriteByte('\\')
+					}
+					out.WriteByte(r)
+				}
+			default:
+				if dir == "" {
+					out.WriteString("''")
+				} else {
+					out.WriteByte('\'')
+					out.WriteString(strings.ReplaceAll(dir, "'", `'"'"'`))
+					out.WriteByte('\'')
+				}
+			}
+			i += len(needle)
+			continue
+		}
+		c := snippet[i]
+		if quote != '\'' && c == '\\' {
+			escaped = true
+		} else if quote == 0 && (c == '\'' || c == '"') {
+			quote = c
+		} else if quote == c {
+			quote = 0
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
 }
 
 // EnvMarkers returns the environment marker names of the built-in detectors,
