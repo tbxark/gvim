@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pure-Go build
+        run: |
+          CGO_ENABLED=0 go build ./...
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
+
+      - name: Static checks and package boundaries
+        run: |
+          go vet ./...
+          bash tools/purity_check.sh
+          bash tools/import_rules_check.sh
+          bash tools/i18n_check.sh
+          python3 tools/gen_menus.py --check
+
+      - name: Check Go doc coverage
+        run: |
+          missing="$(go list -f '{{if not .Doc}}{{.ImportPath}}{{end}}' ./...)"
+          if [ -n "$missing" ]; then
+            echo "Missing package doc comments:"
+            echo "$missing"
+            exit 1
+          fi
+
+      - name: Run tests with race detector
+        run: go test -race -p 4 ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest

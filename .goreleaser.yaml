@@ -1,0 +1,51 @@
+version: 2
+
+project_name: gvim
+
+before:
+  hooks:
+    - CGO_ENABLED=0 go build ./...
+
+builds:
+  - id: gvim
+    main: .
+    binary: gvim
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/tbxark/gvim/updatecheck.Version={{ .Version }}
+
+archives:
+  - id: gvim-archive
+    ids:
+      - gvim
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE*
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
