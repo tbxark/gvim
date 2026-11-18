@@ -359,6 +359,33 @@ func (r *Runtime) Wants(event string) bool {
 }
 
 func (r *Runtime) computeWants(event string) bool {
+	if r.hasSubscriber(event) {
+		return true
+	}
+	switch event {
+	case "widget_event":
+		for _, p := range r.order {
+			if !p.muted() && len(p.panels) > 0 {
+				return true
+			}
+		}
+	case "buffer_closed":
+		for _, p := range r.order {
+			if !p.muted() && p.hasScopeBufferPanel() {
+				return true
+			}
+		}
+	case "buffer_group_closed":
+		for _, p := range r.order {
+			if !p.muted() && len(p.groups) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (r *Runtime) hasSubscriber(event string) bool {
 	for _, p := range r.order {
 		if p.muted() {
 			continue
@@ -383,7 +410,8 @@ func (r *Runtime) emit(e pluginapi.Event, from *plugin) {
 	if r.holdReady(e) {
 		return
 	}
-	if e.Name == "buffer_closed" {
+	switch e.Name {
+	case "buffer_closed":
 		// The handle of a closed buffer leaves every state's cache whether or not anyone
 		// listens (a plugin that still holds it sees a dead handle). The handler gets the
 		// old id as a plain number, not a handle: converting it would re-create the entry
@@ -391,6 +419,7 @@ func (r *Runtime) emit(e pluginapi.Event, from *plugin) {
 		if id, ok := wholeNumber(e.Data["id"]); ok && id > 0 {
 			for _, p := range r.order {
 				p.dropHandle(kindBuffer, uint64(id))
+				p.panelsBufferClosed(pluginapi.BufferID(id))
 			}
 			data := make(map[string]any, len(e.Data))
 			for k, v := range e.Data {
@@ -399,12 +428,26 @@ func (r *Runtime) emit(e pluginapi.Event, from *plugin) {
 			data["id"] = id
 			e.Data = data
 		}
+	case "widget_event":
+		if ev, _ := e.Data["event"].(string); ev == "cancel" {
+			if id, ok := wholeNumber(e.Data["panel"]); ok && id > 0 {
+				for _, p := range r.order {
+					p.panelUnmount(pluginapi.PanelID(id))
+				}
+			}
+		}
+	case "buffer_group_closed":
+		if id, ok := wholeNumber(e.Data["group"]); ok && id > 0 {
+			for _, p := range r.order {
+				p.groupClosed(pluginapi.BufferGroupID(id))
+			}
+		}
 	}
 	if e.Target != "" {
 		if p := r.plugins[e.Target]; p == nil || len(p.subs[e.Name]) == 0 {
 			return
 		}
-	} else if !r.Wants(e.Name) {
+	} else if !r.hasSubscriber(e.Name) {
 		return
 	}
 	r.evq = append(r.evq, queuedEvent{e: e, from: from, hot: hotEvents[e.Name]})
@@ -652,10 +695,14 @@ func (r *Runtime) userExhausted() bool { return r.userSpent >= r.userCap }
 func (r *Runtime) runUser() {
 	for n := 0; len(r.userq) > 0 && n < 100_000 && !r.userExhausted(); n++ {
 		it := r.userq[0]
+		r.userq[0] = item{}
 		r.userq = r.userq[1:]
 		start := time.Now()
 		r.runItem(it)
 		r.userSpent += time.Since(start)
+	}
+	if len(r.userq) == 0 {
+		r.userq = nil
 	}
 }
 
@@ -675,7 +722,7 @@ func (r *Runtime) expandEvents(invocations *int) {
 func (r *Runtime) expandEvent(qe queuedEvent, invocations *int) {
 	r.nextBatch++
 	batch := r.nextBatch
-	for _, p := range append([]*plugin(nil), r.order...) {
+	for _, p := range r.order {
 		if p.muted() || (qe.e.Target != "" && qe.e.Target != p.name) {
 			continue
 		}
@@ -716,9 +763,13 @@ func (r *Runtime) runEvents(left time.Duration) time.Duration {
 			// plugins take turns per event.
 			for first := true; len(p.evq) > 0 && (first || (r.lastBatch != 0 && p.evq[0].batch == r.lastBatch && time.Since(start)+spent < left)); first = false {
 				it := p.evq[0]
+				p.evq[0] = item{}
 				p.evq = p.evq[1:]
 				r.lastBatch = it.batch
 				r.runItem(it)
+			}
+			if len(p.evq) == 0 {
+				p.evq = nil
 			}
 			spent += time.Since(start)
 			ran = true

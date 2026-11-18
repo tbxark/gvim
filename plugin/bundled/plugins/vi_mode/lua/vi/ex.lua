@@ -152,7 +152,19 @@ local function resolve(path)
   if path:sub(1, 2) == "~/" then
     return gvim.dirs.home() .. path:sub(2)
   end
-  return gvim.dirs.cwd() .. "/" .. path
+  local root = gvim.workspace.root()
+  if not root or root == "" then
+    root = gvim.dirs.cwd()
+  end
+  return gvim.path.join(root, path)
+end
+
+local function open_checked(path)
+  local buf, err = gvim.buf.open(resolve(path))
+  if not buf then
+    bad("E: " .. tostring(err))
+  end
+  return buf
 end
 
 local function buf_or_fail()
@@ -380,9 +392,10 @@ cmd("bNext", 2, function() run_action("prev_buffer") end)
 cmd("tabnext", 4, function() run_action("next_buffer") end)
 cmd("tabprevious", 4, function() run_action("prev_buffer") end)
 cmd("tabnew", 4, function(x)
-  run_action("new")
   if x.args ~= "" then
-    gvim.buf.open(resolve(x.args))
+    open_checked(x.args)
+  else
+    run_action("new")
   end
 end)
 cmd("tabedit", 4, function(x)
@@ -447,27 +460,29 @@ commands[#commands + 1] = { name = "files", min = 3, fn = commands[#commands].fn
 cmd("split", 2, function(x)
   run_action("split_horizontal")
   if x.args ~= "" then
-    gvim.buf.open(resolve(x.args))
+    open_checked(x.args)
   end
 end)
 cmd("vsplit", 2, function(x)
   run_action("split_vertical")
   if x.args ~= "" then
-    gvim.buf.open(resolve(x.args))
+    open_checked(x.args)
   end
 end)
 cmd("new", 3, function(x)
   run_action("split_horizontal")
-  run_action("new")
   if x.args ~= "" then
-    gvim.buf.open(resolve(x.args))
+    open_checked(x.args)
+  else
+    run_action("new")
   end
 end)
 cmd("vnew", 3, function(x)
   run_action("split_vertical")
-  run_action("new")
   if x.args ~= "" then
-    gvim.buf.open(resolve(x.args))
+    open_checked(x.args)
+  else
+    run_action("new")
   end
 end)
 cmd("only", 2, function() run_action("toggle_maximize_split") end)
@@ -526,10 +541,7 @@ end)
 cmd("registers", 3, function()
   local lines = { "Type  Name  Content" }
   for _, r in ipairs(Reg.list()) do
-    local t = r.value.text:gsub("\n", "^J")
-    if #t > 60 then
-      t = t:sub(1, 60) .. "..."
-    end
+    local t = gvim.text.truncate(r.value.text:gsub("\n", "^J"), 60, "...")
     local kind = r.value.kind == "line" and "l" or (r.value.kind == "block" and "b" or "c")
     lines[#lines + 1] = string.format('  %s   "%s    %s', kind, r.name, t)
   end

@@ -6,9 +6,14 @@ import (
 	"testing/fstest"
 )
 
-func TestEmbedHoldsPlaceholders(t *testing.T) {
+func TestEmbedExcludesMarkdownAndHoldsPluginsAndLibs(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"plugins/README.md", "lib/README.md"} {
+	for _, readme := range []string{"plugins/README.md", "lib/README.md", "plugins/vi_mode/README.md"} {
+		if _, err := fs.Stat(FS, readme); err == nil {
+			t.Errorf("%s should not be embedded into binary rodata", readme)
+		}
+	}
+	for _, name := range []string{"lib/git.lua", "lib/finder.lua", "lib/textsafe.lua", "plugins/vi_mode/lua/vi/ex.lua", "plugins/lsp_help/lua/lsp_help/servers.lua"} {
 		data, err := fs.ReadFile(FS, name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)

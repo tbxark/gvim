@@ -156,10 +156,9 @@ type note struct {
 
 // discovery is the result of the discovery Work: opaque to everyone but the loader.
 type discovery struct {
-	cands  []*candidate // in source order, shadowed duplicates removed
-	legacy []string     // *.js / *.ts files of the user plugin directory
-	notes  []note
-	state  pluginState
+	cands []*candidate // in source order, shadowed duplicates removed
+	notes []note
+	state pluginState
 	// unread names the sources that could not be read at all (SourceUser: the plugin
 	// directory could not be opened or listed) and why. Their plugins are neither new nor
 	// gone: a reload keeps what runs.
@@ -331,8 +330,6 @@ func (l *LoaderOptions) scanUser(ctx context.Context, d *discovery) []*candidate
 			out = append(out, l.scanRef(pluginRef{kind: SourceUser, name: name, dir: full}))
 		case strings.HasSuffix(name, ".lua"):
 			out = append(out, l.scanRef(pluginRef{kind: SourceUser, name: strings.TrimSuffix(name, ".lua"), dir: l.UserDir, file: name}))
-		case (strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".ts")) && !strings.HasSuffix(name, ".d.ts"):
-			d.legacy = append(d.legacy, name)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].name < out[j].name })

@@ -23,10 +23,6 @@ func installURL(e *apiEnv) {
 		if len(raw) > pluginapi.MaxOpenURLLen {
 			return bufRet(L, invalidErr("url longer than %d bytes", pluginapi.MaxOpenURLLen))
 		}
-		opener, ok := host().(pluginapi.URLOpenHost)
-		if !ok {
-			return bufRet(L, pluginapi.Errf(pluginapi.CodeUnsupported, "opening URLs is not supported in this host"))
-		}
-		return bufTrue(L, opener.OpenURL(raw))
+		return bufTrue(L, host().OpenURL(raw))
 	})
 }

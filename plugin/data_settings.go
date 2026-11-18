@@ -114,7 +114,7 @@ func (s *settingSpec) check(v any) (any, error) {
 }
 
 // settingLua converts a canonical setting value to Lua (a fresh table for lists).
-func (p *plugin) settingLua(s *settingSpec, v any) lua.LValue {
+func (p *plugin) settingLua(v any) lua.LValue {
 	switch x := v.(type) {
 	case bool:
 		return lua.LBool(x)
@@ -149,6 +149,12 @@ func (p *plugin) parseSpec(L *lua.LState, key string, t *lua.LTable) *settingSpe
 			return nil
 		case lua.LNumber:
 			f := float64(v)
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				bad("%s must be a finite number", field)
+			}
+			if s.typ == "integer" && math.Trunc(f) != f {
+				bad("%s must be an integer", field)
+			}
 			return &f
 		}
 		bad("%s must be a number", field)
@@ -156,6 +162,9 @@ func (p *plugin) parseSpec(L *lua.LState, key string, t *lua.LTable) *settingSpe
 	}
 	if s.typ == "integer" || s.typ == "number" {
 		s.min, s.max = num("minimum"), num("maximum")
+		if s.min != nil && s.max != nil && *s.min > *s.max {
+			bad("minimum (%v) exceeds maximum (%v)", *s.min, *s.max)
+		}
 	}
 	if s.typ == "enum" {
 		vals, ok := t.RawGetString("values").(*lua.LTable)
@@ -298,8 +307,8 @@ func installSettings(e *apiEnv) {
 		mt.RawSetString("__index", L.NewFunction(func(L *lua.LState) int {
 			key, ok := L.Get(2).(lua.LString)
 			if cur := p.data.settings; ok && cur != nil {
-				if s := cur.specs[string(key)]; s != nil {
-					L.Push(p.settingLua(s, cur.values[string(key)]))
+				if cur.specs[string(key)] != nil {
+					L.Push(p.settingLua(cur.values[string(key)]))
 					return 1
 				}
 			}
@@ -319,7 +328,7 @@ func installSettings(e *apiEnv) {
 		out := L.NewTable()
 		if st := p.data.settings; st != nil {
 			for _, k := range st.keys {
-				out.RawSetString(k, p.settingLua(st.specs[k], st.values[k]))
+				out.RawSetString(k, p.settingLua(st.values[k]))
 			}
 		}
 		L.Push(out)

@@ -14,7 +14,8 @@ func TestSyntaxErrorsNameFileLineAndColumn(t *testing.T) {
 	}{
 		{"stray end", "local x = 1\nreturn x +\nend\n", "p/a.lua:3:3: syntax error near 'end'"},
 		{"double equals", "local x = = 1\n", "p/a.lua:1:11: syntax error near '='"},
-		{"unfinished block", "if true then\n", "p/a.lua:1: syntax error near <eof>"},
+		{"unfinished block", "if true then\n", "p/a.lua:2: syntax error near <eof>"},
+		{"multiline unfinished block", "local a = 1\nlocal b = 2\nif true then\n  return a + b", "p/a.lua:4: syntax error near <eof>"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

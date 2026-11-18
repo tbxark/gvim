@@ -12,19 +12,5 @@
     "cmd.move_to_left_desc": "Move active tab to the left in the current split",
     "cmd.move_to_right": "Move Tab To Right",
     "cmd.move_to_right_desc": "Move active tab to the right in the current split"
-  },
-  "de": {
-    "cmd.close_others": "Andere Tabs schließen",
-    "cmd.close_others_desc": "Andere Tabs im aktuellen Split schließen",
-    "cmd.close_all": "Alle Tabs schließen",
-    "cmd.close_all_desc": "Alle Tabs im aktuellen Split schließen",
-    "cmd.close_to_right": "Tabs rechts schließen",
-    "cmd.close_to_right_desc": "Tabs rechts vom aktuellen Tab schließen",
-    "cmd.close_to_left": "Tabs links schließen",
-    "cmd.close_to_left_desc": "Tabs links vom aktuellen Tab schließen",
-    "cmd.move_to_left": "Tab nach links",
-    "cmd.move_to_left_desc": "Aktiven Tab im Split nach links verschieben",
-    "cmd.move_to_right": "Tab nach rechts",
-    "cmd.move_to_right_desc": "Aktiven Tab im Split nach rechts verschieben"
   }
 }

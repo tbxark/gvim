@@ -1,6 +1,6 @@
 -- Code Tour. A port of Fresh's code-tour plugin.
 --
--- Loads a JSON tour (Fresh's .fresh-tour.json schema or a VS Code CodeTour
+-- Loads a JSON tour (.gvim-tour.json schema or a VS Code CodeTour
 -- .tour file), shows its steps in a floating widget panel, and walks them:
 -- each step opens the file at its line range and highlights it.
 --
@@ -169,7 +169,14 @@ local function parse_manifest(text, path)
       end
     else
       step.title = type(raw.title) == "string" and raw.title or ""
-      step.file = type(raw.file) == "string" and raw.file or (type(raw.uri) == "string" and raw.uri or nil)
+      local file_path = type(raw.file) == "string" and raw.file or nil
+      if not file_path and type(raw.uri) == "string" then
+        local decoded = gvim.path.from_uri(raw.uri)
+        if decoded and decoded ~= "" then
+          file_path = decoded
+        end
+      end
+      step.file = file_path
       step.explanation = type(raw.description) == "string" and raw.description or ""
       local line = tonumber(raw.line)
       local sel = type(raw.selection) == "table" and raw.selection or nil
@@ -180,13 +187,13 @@ local function parse_manifest(text, path)
         end
         local a, b = sel_line("start"), sel_line("end")
         if a and b then
-          step.from, step.to = math.min(a, b) + 1, math.max(a, b) + 1
+          step.from, step.to = math.min(a, b), math.max(a, b)
         elseif a then
-          step.from, step.to = a + 1, a + 1
+          step.from, step.to = a, a
         end
       end
       if not step.from and line then
-        step.from, step.to = line + 1, line + 1
+        step.from, step.to = line, line
       end
     end
     if step.from then
@@ -509,7 +516,7 @@ local function discover_tours()
     if entry.kind == "file" then
       local name = gvim.path.basename(entry.path)
       local is_tour = name:sub(-5) == ".tour"
-        or name:sub(-16) == ".fresh-tour.json"
+        or name:sub(-15) == ".gvim-tour.json"
         or (name:sub(-5) == ".json" and (entry.rel:find("%.tours/") ~= nil or entry.rel:find("/%.tours/") ~= nil))
       if is_tour and not seen[entry.path] then
         seen[entry.path] = true
@@ -580,7 +587,7 @@ local function create_tour()
       {
         title = title,
         file = rel,
-        line = cursor.line,
+        line = cursor.line + 1,
         description = "Describe what this step shows.",
       },
     },
@@ -635,7 +642,7 @@ gvim.command.register {
   run = function()
     local items = discover_tours()
     if #items == 0 then
-      notice(t("error.read_failed", { path = workspace_root() }))
+      notice(t("status.no_tours"))
       return
     end
     local item = gvim.ui.select(items, { title = t("cmd.tour_discover"), filter = "fuzzy" })

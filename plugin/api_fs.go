@@ -486,7 +486,11 @@ func prepFSRemove(c *awaitCall) ioJob {
 		return nil
 	}
 	dirs := c.r.os.Dirs()
-	abs := absPath(dirs.Cwd, path)
+	base := dirs.Root
+	if base == "" {
+		base = dirs.Cwd
+	}
+	abs := absPath(base, path)
 	protected := []string{dirs.Home, dirs.Root, dirs.Config, dirs.Cwd}
 	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		// What is checked is what is removed: the OS gets the cleaned absolute path.
@@ -500,10 +504,10 @@ func prepFSRemove(c *awaitCall) ioJob {
 	}
 }
 
-// absPath makes p absolute against cwd and cleans it.
-func absPath(cwd, p string) string {
-	if !filepath.IsAbs(p) && cwd != "" {
-		p = filepath.Join(cwd, p)
+// absPath makes p absolute against base (workspace root or cwd) and cleans it.
+func absPath(base, p string) string {
+	if !filepath.IsAbs(p) && base != "" {
+		p = filepath.Join(base, p)
 	}
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs

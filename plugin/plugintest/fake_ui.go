@@ -186,7 +186,7 @@ func (f *FakeHost) SetPromptSuggestions(items []pluginapi.PromptSuggestion, sele
 // ClosePopup closes the popup without resolving anything.
 func (f *FakeHost) ClosePopup(id uint64) {
 	f.rec("ClosePopup", id)
-	if o := f.UI().ByID(id); o != nil && o.Kind == "popup" {
+	if o := f.UI().ByID(id); o != nil && (o.Kind == "popup" || o.Kind == "action_popup") {
 		o.Open = false
 	}
 }

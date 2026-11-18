@@ -211,6 +211,39 @@ func TestFSRemoveRefusesProtectedDirectories(t *testing.T) {
 			t.Fatalf("spy = %q log=%v", got, h.LogText(""))
 		}
 	})
+	t.Run("relative path resolves against Root before Cwd", func(t *testing.T) {
+		fos := plugintest.NewFakeOS()
+		fos.Dir.Root = "/repo"
+		fos.Dir.Cwd = "/other"
+		fos.SetDir("/repo")
+		fos.SetDir("/other")
+		fos.SetFile("/repo/sub/a", "1")
+		fos.SetFile("/other/sub/b", "1")
+		h := osCmd(t, fos, "", `local ok = gvim.fs.remove("sub", {recursive = true}) local v, e = gvim.fs.remove(".", {recursive = true}) T.spy(ok, tostring(v), gvim.err_code(e))`)
+		if got := spyText(h); got != "true nil invalid" {
+			t.Fatalf("spy = %q log=%v", got, h.LogText(""))
+		}
+		if fos.Exists("/repo/sub/a") {
+			t.Fatal("/repo/sub/a was not removed")
+		}
+		if !fos.Exists("/other/sub/b") {
+			t.Fatal("/other/sub/b should stay untouched when Root is set")
+		}
+	})
+	t.Run("relative path falls back to Cwd when Root is empty", func(t *testing.T) {
+		fos := plugintest.NewFakeOS()
+		fos.Dir.Root = ""
+		fos.Dir.Cwd = "/other"
+		fos.SetDir("/other")
+		fos.SetFile("/other/sub/b", "1")
+		h := osCmd(t, fos, "", `local ok = gvim.fs.remove("sub", {recursive = true}) local v, e = gvim.fs.remove(".", {recursive = true}) T.spy(ok, tostring(v), gvim.err_code(e))`)
+		if got := spyText(h); got != "true nil invalid" {
+			t.Fatalf("spy = %q log=%v", got, h.LogText(""))
+		}
+		if fos.Exists("/other/sub/b") {
+			t.Fatal("/other/sub/b was not removed")
+		}
+	})
 }
 
 // remoteFakeOS is a FakeOS that claims to work on a remote workspace host.

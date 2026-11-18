@@ -47,7 +47,14 @@ func installPanel(e *apiEnv) {
 			return bufRet(L, err)
 		}
 		id := pluginapi.PanelID(panelSeq.Add(1))
-		if err := p.panelMount(id); err != nil {
+		scopeBuf := pluginapi.BufferID(0)
+		if mount.Scope == pluginapi.ScopeBuffer {
+			scopeBuf = mount.Buffer
+			if scopeBuf == 0 {
+				scopeBuf = p.r.guard.ActiveBuffer()
+			}
+		}
+		if err := p.panelMount(id, scopeBuf); err != nil {
 			return bufRet(L, err)
 		}
 		if err := p.r.guard.MountWidgetPanel(p.name, id, mount); err != nil {
@@ -67,7 +74,14 @@ func installPanel(e *apiEnv) {
 			mount.Title = p.name
 		}
 		id := pluginapi.PanelID(panelSeq.Add(1))
-		if err := p.panelMount(id); err != nil {
+		scopeBuf := pluginapi.BufferID(0)
+		if mount.Scope == pluginapi.ScopeBuffer {
+			scopeBuf = mount.Buffer
+			if scopeBuf == 0 {
+				scopeBuf = p.r.guard.ActiveBuffer()
+			}
+		}
+		if err := p.panelMount(id, scopeBuf); err != nil {
 			return bufRet(L, err)
 		}
 		if err := p.r.guard.MountWidgetPanel(p.name, id, mount); err != nil {
@@ -84,7 +98,11 @@ func installPanel(e *apiEnv) {
 		if err != nil {
 			return bufRet(L, err)
 		}
-		return bufTrue(L, p.r.guard.UpdateWidgetPanel(p.name, id, spec))
+		err = p.r.guard.UpdateWidgetPanel(p.name, id, spec)
+		if pluginapi.CodeOf(err) == pluginapi.CodeClosed {
+			p.panelUnmount(id)
+		}
+		return bufTrue(L, err)
 	})
 
 	e.set(ui, "unmount_widget_panel", func(L *lua.LState) int {
@@ -754,25 +772,56 @@ func selectedFromLua(o *bufTableOpts, n int) (int, error) {
 }
 
 // panelMount records a mounted panel, enforcing the quota.
-func (p *plugin) panelMount(id pluginapi.PanelID) error {
+func (p *plugin) panelMount(id pluginapi.PanelID, scopeBuf pluginapi.BufferID) error {
 	if p.panels == nil {
-		p.panels = map[pluginapi.PanelID]bool{}
+		p.panels = map[pluginapi.PanelID]pluginapi.BufferID{}
 	}
-	if len(p.panels) >= QuotaPanels {
+	if _, exists := p.panels[id]; !exists && len(p.panels) >= QuotaPanels {
 		return pluginapi.Errf(pluginapi.CodeLimit, "panel quota (%d)", QuotaPanels)
 	}
-	p.panels[id] = true
+	p.panels[id] = scopeBuf
+	p.r.wantsChanged()
 	return nil
 }
 
-// panelUnmount forgets a panel the plugin unmounted.
+// panelUnmount forgets a panel that was unmounted or cancelled.
 func (p *plugin) panelUnmount(id pluginapi.PanelID) {
-	delete(p.panels, id)
+	if _, ok := p.panels[id]; ok {
+		delete(p.panels, id)
+		p.r.wantsChanged()
+	}
+}
+
+// panelsBufferClosed forgets buffer-scoped panels belonging to a closed buffer.
+func (p *plugin) panelsBufferClosed(bufID pluginapi.BufferID) {
+	if bufID == 0 || len(p.panels) == 0 {
+		return
+	}
+	changed := false
+	for id, sb := range p.panels {
+		if sb == bufID {
+			delete(p.panels, id)
+			changed = true
+		}
+	}
+	if changed {
+		p.r.wantsChanged()
+	}
+}
+
+// hasScopeBufferPanel reports whether the plugin currently holds any buffer-scoped panel.
+func (p *plugin) hasScopeBufferPanel() bool {
+	for _, sb := range p.panels {
+		if sb != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ownsPanel refuses a panel id the plugin did not mount: panel ids are global.
 func (p *plugin) ownsPanel(id pluginapi.PanelID) error {
-	if !p.panels[id] {
+	if _, ok := p.panels[id]; !ok {
 		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted by this plugin", id)
 	}
 	return nil

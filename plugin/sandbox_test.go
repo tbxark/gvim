@@ -240,6 +240,7 @@ func TestPcallOfGoFunctions(t *testing.T) {
 		{"go error", `local ok, e = pcall(string.rep) T.spy(tostring(ok), type(e))`, "false string"},
 		{"xpcall", `T.spy(xpcall(string.upper, print, "x"))`, "true X"},
 		{"xpcall runs the handler of a Go error", `T.spy(xpcall(string.rep, function(e) return "H:" .. type(e) end))`, "false H:string"},
+		{"xpcall throwing handler", `T.spy(xpcall(string.rep, function() error("boom") end))`, "false error in error handling"},
 		{"xpcall handler not run on success", `T.spy(xpcall(tostring, function() return "H" end, 3))`, "true 3"},
 		{"tostring", `T.spy(pcall(tostring, 3))`, "true 3"},
 		{"string.rep", `T.spy(pcall(string.rep, "x", 3))`, "true xxx"},

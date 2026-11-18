@@ -270,8 +270,12 @@ func (r *Runtime) runTask(t *task, args []lua.LValue) {
 	p := t.p
 	sl := r.newSlice(p.pctx, r.budget(t.origin))
 	defer sl.finish()
-	began := time.Now()
-	defer func() { p.paceRan(time.Since(began)) }()
+	if t.origin == originTimer {
+		began := time.Now()
+		defer func() {
+			p.paceRan(max(time.Since(began)-sl.hostTime, 0))
+		}()
+	}
 	for {
 		res := r.resume(t, sl, args)
 		if t.cancelled {
@@ -687,6 +691,15 @@ func (r *Runtime) strike(p *plugin, why string) (n int, suspended bool) {
 	if n >= strikeLimit && p.status != statusSuspended && p.status != statusFailed {
 		p.status = statusSuspended
 		r.wantsChanged()
+		for _, it := range p.evq {
+			if it.t != nil && !it.t.done {
+				it.t.cancelled = true
+				if !it.t.running {
+					r.retire(it.t)
+					r.settleWaiters(it.t)
+				}
+			}
+		}
 		p.evq = nil
 		_ = r.host.SetInputMode(p.name, "")
 		r.host.SetStatusItems(p.name, nil)

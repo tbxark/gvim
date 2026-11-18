@@ -86,7 +86,6 @@ type WindowHost interface {
 type ViewStateHost interface {
 	GetWindowState(plugin string, id BufferID, key string) (any, bool)
 	SetWindowState(plugin string, id BufferID, key string, value any) error
-	ClearWindowState(plugin string, id BufferID, key string)
 }
 
 // CommandHost runs editor and ui actions.
@@ -159,7 +158,15 @@ type UIHost interface {
 	// OwnerGone removes EVERYTHING (plugin, gen) owns in the ui: commands, bindings, modes, contexts,
 	// status items, decorations, overlays, key waits, input mode. Idempotent.
 	OwnerGone(plugin string, gen uint64)
+	// OpenURL validates raw and, when it is a safe http/https URL, asks the user to
+	// confirm opening it. It returns once the confirmation is queued; the opener runs
+	// asynchronously. An unsafe URL is refused with CodeInvalid; the user may refuse
+	// the confirmation, in which case nothing is opened.
+	OpenURL(raw string) error
 }
+
+// MaxOpenURLLen is the most bytes gvim.url.open accepts.
+const MaxOpenURLLen = 2048
 
 // DecorHost is the decoration API.
 type DecorHost interface {

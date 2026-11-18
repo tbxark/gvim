@@ -250,3 +250,39 @@ func TestHarnessRunsWorkOffTheCallerGoroutine(t *testing.T) {
 		t.Fatalf("Work ran on the test goroutine (%q): it must run like a tea.Cmd", inWork)
 	}
 }
+
+func TestFakeClosePopupAndOwnerGoneCleanup(t *testing.T) {
+	f := plugintest.NewFakeHost()
+	buf := f.AddBuffer("/w/a.go", "one\ntwo\n")
+	if err := f.ShowActionPopup(1, 42, pluginapi.ActionPopupSpec{Title: "Actions"}); err != nil {
+		t.Fatal(err)
+	}
+	f.ClosePopup(42)
+	if len(f.UI().Opened()) != 0 {
+		t.Fatalf("ClosePopup left action_popup open: %+v", f.UI().Opened())
+	}
+
+	if err := f.SetExplorerDecorations("p", "ns", []pluginapi.FileExplorerDecoration{{Path: "/w/a.go", Symbol: "M"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetExplorerSlots("p", "ns", []pluginapi.FileExplorerSlot{{Path: "/w/a.go", SuppressLeading: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetLineTargets("p", buf, []pluginapi.LineTarget{{Line: 0, Path: "/w/a.go"}}); err != nil {
+		t.Fatal(err)
+	}
+	f.ClearLineTargets("other", buf)
+	if len(f.LineTargets(buf)) != 1 {
+		t.Fatal("ClearLineTargets by non-owner removed another plugin's targets")
+	}
+	f.OwnerGone("p", 1)
+	if got := f.ExplorerDecorations("p", "ns"); len(got) != 0 {
+		t.Fatalf("OwnerGone left explorer decorations: %+v", got)
+	}
+	if got := f.ExplorerSlots("p", "ns"); len(got) != 0 {
+		t.Fatalf("OwnerGone left explorer slots: %+v", got)
+	}
+	if got := f.LineTargets(buf); len(got) != 0 {
+		t.Fatalf("OwnerGone left line targets: %+v", got)
+	}
+}

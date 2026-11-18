@@ -236,3 +236,85 @@ T.spy(tostring(err))`)
 		t.Fatalf("number widget = %+v, want Number 7", kids[2])
 	}
 }
+
+func TestPanelQuotasFreeOnHostCancelAndBufferClose(t *testing.T) {
+	// No gvim.on("widget_event", ...) or gvim.on("buffer_closed", ...) subscribers!
+	src := `
+local gvim = require 'gvim'
+local ids = {}
+gvim.command.register{ name = "fill", run = function()
+  local id, err = gvim.ui.mount_widget_panel({ kind = "label", text = "b" }, { scope = "buffer" })
+  if not id then gvim.notify("err:" .. tostring(err)) return end
+  ids[#ids + 1] = id
+  for i = 2, 8 do
+    local p, perr = gvim.ui.mount_widget_panel({ kind = "label", text = tostring(i) })
+    if not p then gvim.notify("err:" .. tostring(perr)) return end
+    ids[#ids + 1] = p
+  end
+  local extra, eerr = gvim.ui.mount_widget_panel({ kind = "label", text = "extra" })
+  gvim.notify("full:" .. tostring(extra) .. ":" .. tostring(eerr))
+  gvim.notify("first:" .. tostring(ids[1]) .. ":second:" .. tostring(ids[2]))
+end }
+gvim.command.register{ name = "extra", run = function()
+  local p, err = gvim.ui.mount_widget_panel({ kind = "label", text = "more" })
+  gvim.notify("more:" .. tostring(p) .. ":" .. tostring(err))
+end }
+`
+	h := plugintest.New(t, plugintest.Files{"q.lua": src}, plugintest.Options{})
+	h.Start()
+	bufID := h.Host.AddBuffer("/w/a.go", "package a\n")
+	if err := h.Run("q.fill", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !h.RT.Wants("widget_event") || !h.RT.Wants("buffer_closed") {
+		t.Fatalf("Wants(widget_event)=%v Wants(buffer_closed)=%v, want true for active panels",
+			h.RT.Wants("widget_event"), h.RT.Wants("buffer_closed"))
+	}
+	var p1, p2 uint64
+	for _, n := range h.NoticeTexts() {
+		if strings.HasPrefix(n, "full:") && !strings.Contains(n, "limit:") {
+			t.Fatalf("9th panel did not hit limit: %q", n)
+		}
+		if strings.HasPrefix(n, "first:") {
+			parts := strings.Split(n, ":")
+			for i := 0; i+1 < len(parts); i += 2 {
+				if parts[i] == "first" {
+					for _, ch := range parts[i+1] {
+						p1 = p1*10 + uint64(ch-'0')
+					}
+				}
+				if parts[i] == "second" {
+					for _, ch := range parts[i+1] {
+						p2 = p2*10 + uint64(ch-'0')
+					}
+				}
+			}
+		}
+	}
+	if p1 == 0 || p2 == 0 {
+		t.Fatalf("missing panel ids in notices: %v", h.NoticeTexts())
+	}
+
+	// Closing panel 2 via widget_event "cancel" frees its slot.
+	h.Emit(pluginapi.Event{Name: "widget_event", Data: map[string]any{"panel": p2, "event": "cancel"}})
+	if err := h.Run("q.extra", nil); err != nil {
+		t.Fatal(err)
+	}
+	notices := h.NoticeTexts()
+	if last := notices[len(notices)-1]; !strings.HasPrefix(last, "more:") || strings.Contains(last, "limit:") {
+		t.Fatalf("after widget_event cancel, extra mount = %q", last)
+	}
+
+	// Closing buffer bufID frees panel 1 (which has scope = "buffer").
+	h.Emit(pluginapi.Event{Name: "buffer_closed", Data: map[string]any{"id": bufID}})
+	if h.RT.Wants("buffer_closed") {
+		t.Fatal("Wants(buffer_closed) remained true after closing the only buffer-scoped panel's buffer")
+	}
+	if err := h.Run("q.extra", nil); err != nil {
+		t.Fatal(err)
+	}
+	notices = h.NoticeTexts()
+	if last := notices[len(notices)-1]; !strings.HasPrefix(last, "more:") || strings.Contains(last, "limit:") {
+		t.Fatalf("after buffer_closed, extra mount = %q", last)
+	}
+}

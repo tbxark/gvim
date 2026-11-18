@@ -13,7 +13,7 @@ import (
 // library they share is found as gvim.git.
 func TestGitPortsShipManifests(t *testing.T) {
 	// The level a port asks for: the ones with a translation table use gvim.i18n (level 2).
-	for name, api := range map[string]int{"git_gutter": 2, "git_statusbar": 1, "git_find_file": 2, "git_blame": 2} {
+	for name, api := range map[string]int{"git_gutter": 2, "git_statusbar": 2, "git_find_file": 2, "git_blame": 2} {
 		t.Run(name, func(t *testing.T) {
 			data, err := fs.ReadFile(bundled.FS, "plugins/"+name+"/plugin.json")
 			if err != nil {

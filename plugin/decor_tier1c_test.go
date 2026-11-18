@@ -189,3 +189,38 @@ end }`}, plugintest.Options{})
 		t.Fatalf("folds = %+v, want one range of kind region", folds)
 	}
 }
+
+func TestDecorErrorPropagationAndVirtualAbove(t *testing.T) {
+	h, host := bufRun(t, "one\ntwo\n", `
+local _, e1 = gvim.decor.add_virtual_line(b, 0, "above", { gutter_color = "error" })
+local _, e2 = gvim.decor.add_virtual_line_below(b, 1, "below")
+local _, e3 = gvim.decor.clear_decorations(b, { namespace = 123 })
+local _, e4 = gvim.decor.clear_folds(b, { namespace = 123 })
+local _, e5 = gvim.decor.set_folding_ranges(b, {{start_line = 0, end_line = 1}}, { namespace = 123 })
+local ns = gvim.decor.namespace("k")
+local _, e6 = ns:set(b, {{ kind = "virtual_line_above", line = 0, text = "s", gutter_style = { fg = 99 } }})
+T.spy(tostring(e1), tostring(e2), tostring(e3), tostring(e4), tostring(e5), tostring(e6))`)
+	items := host.Decor().Items("t", "default", host.ActiveBuffer())
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want 2 virtual lines", items)
+	}
+	if !items[0].Above || items[0].GutterStyle.FG.Key != "error" {
+		t.Fatalf("above virtual line = %+v, want Above=true and GutterStyle.FG.Key=error", items[0])
+	}
+	if items[1].Above {
+		t.Fatalf("below virtual line = %+v, want Above=false", items[1])
+	}
+	got := spyText(h)
+	parts := strings.Split(got, " ")
+	if len(parts) < 6 {
+		t.Fatalf("spy = %q (log %v)", got, h.LogText(""))
+	}
+	if parts[0] != "nil" || parts[1] != "nil" {
+		t.Fatalf("valid virtual lines returned errors: %q", got)
+	}
+	for idx := 2; idx < 6; idx++ {
+		if !strings.HasPrefix(parts[idx], "invalid:") && !strings.Contains(got, "invalid:") {
+			t.Fatalf("spy = %q, expected invalid error for arg %d", got, idx+1)
+		}
+	}
+}

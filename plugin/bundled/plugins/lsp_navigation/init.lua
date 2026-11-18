@@ -116,58 +116,64 @@ local function attach_symbol_line(buf, symbol)
 end
 
 -- parse_symbols reads DocumentSymbol[] or SymbolInformation[] (the two shapes the protocol
--- allows for documentSymbol), bounded to MAX_SYMBOLS rows and the top level only.
+-- allows for documentSymbol), flattening hierarchical DocumentSymbol.children up to MAX_SYMBOLS.
 local function parse_symbols(result, buf)
   local symbols = {}
-  if type(result) ~= "table" then
-    return symbols
-  end
-  for _, raw in ipairs(result) do
-    if #symbols >= MAX_SYMBOLS then
-      break
+  local function collect(list)
+    if type(list) ~= "table" then
+      return
     end
-    if type(raw) == "table" then
-      local name = tostring(raw.name or "")
-      if name ~= "" then
-        local kind = tonumber(raw.kind) or 0
-        local start_line, end_line, name_line, name_char = 0, 0, 0, 0
-        local location = raw.location
-        if type(location) == "table" and type(location.range) == "table" then
-          local start = location.range.start or {}
-          local stop = location.range["end"] or {}
-          start_line = tonumber(start.line) or 0
-          end_line = tonumber(stop.line) or start_line
-          name_line = start_line
-          name_char = tonumber(start.character) or 0
-        else
-          local range = raw.range
-          if type(range) == "table" then
-            local start = range.start or {}
-            local stop = range["end"] or {}
+    for _, raw in ipairs(list) do
+      if #symbols >= MAX_SYMBOLS then
+        return
+      end
+      if type(raw) == "table" then
+        local name = tostring(raw.name or "")
+        if name ~= "" then
+          local kind = tonumber(raw.kind) or 0
+          local start_line, end_line, name_line, name_char = 0, 0, 0, 0
+          local location = raw.location
+          if type(location) == "table" and type(location.range) == "table" then
+            local start = location.range.start or {}
+            local stop = location.range["end"] or {}
             start_line = tonumber(start.line) or 0
             end_line = tonumber(stop.line) or start_line
             name_line = start_line
             name_char = tonumber(start.character) or 0
+          else
+            local range = raw.range
+            if type(range) == "table" then
+              local start = range.start or {}
+              local stop = range["end"] or {}
+              start_line = tonumber(start.line) or 0
+              end_line = tonumber(stop.line) or start_line
+              name_line = start_line
+              name_char = tonumber(start.character) or 0
+            end
+            local selection = raw.selectionRange
+            if type(selection) == "table" and type(selection.start) == "table" then
+              name_line = tonumber(selection.start.line) or name_line
+              name_char = tonumber(selection.start.character) or name_char
+            end
           end
-          local selection = raw.selectionRange
-          if type(selection) == "table" and type(selection.start) == "table" then
-            name_line = tonumber(selection.start.line) or name_line
-            name_char = tonumber(selection.start.character) or name_char
-          end
+          symbols[#symbols + 1] = {
+            name = finder.clip(name, 120),
+            kind = kind,
+            start_line = start_line,
+            end_line = end_line,
+            name_line = name_line,
+            name_char_utf16 = name_char,
+            name_col = 0,
+            line_text = "",
+          }
         end
-        symbols[#symbols + 1] = {
-          name = finder.clip(name, 120),
-          kind = kind,
-          start_line = start_line,
-          end_line = end_line,
-          name_line = name_line,
-          name_char_utf16 = name_char,
-          name_col = 0,
-          line_text = "",
-        }
+        if type(raw.children) == "table" and #symbols < MAX_SYMBOLS then
+          collect(raw.children)
+        end
       end
     end
   end
+  collect(result)
   for _, symbol in ipairs(symbols) do
     attach_symbol_line(buf, symbol)
   end
@@ -413,6 +419,25 @@ local function parse_workspace_symbols(result)
   if type(result) ~= "table" then
     return out
   end
+  local line_cache = {}
+  local cached_files = 0
+  local function line_at(path, line_num)
+    local open = gvim.buf.find(path)
+    if open then
+      return open:line(line_num)
+    end
+    local lines = line_cache[path]
+    if lines == nil and cached_files < finder.MAX_LOCATION_FILES then
+      cached_files = cached_files + 1
+      local raw = gvim.fs.read(path, { max = finder.MAX_LOCATION_BYTES })
+      lines = raw and gvim.text.split(raw, "\n", true) or false
+      line_cache[path] = lines
+    end
+    if type(lines) == "table" then
+      return lines[line_num + 1]
+    end
+    return nil
+  end
   for _, raw in ipairs(result) do
     if #out >= MAX_SYMBOLS then
       break
@@ -427,7 +452,14 @@ local function parse_workspace_symbols(result)
         local start = range.start or {}
         if path and type(start.line) == "number" then
           local line = start.line
-          local col = type(start.character) == "number" and start.character or 0
+          local character = type(start.character) == "number" and start.character or 0
+          local col = 0
+          if character > 0 then
+            local line_text = line_at(path, line)
+            if line_text then
+              col = finder.utf16_to_byte(line_text, character)
+            end
+          end
           local kind = tonumber(raw.kind) or 0
           local kind_name = kind_label(kind)
           local desc = string.format("[%s] %s", kind_name, name)
@@ -453,25 +485,90 @@ local function show_workspace_symbols()
   if not buf then
     return
   end
-  local result, err = gvim.lsp.request("workspace/symbol", {
-    query = "",
-  }, { buf = buf })
-  if result == nil and err then
-    gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
-    return
+  local preview_buf = nil
+  local committed = false
+  local failed_once = false
+  local f
+
+  local function discard_preview()
+    if preview_buf and not committed then
+      local ok, info = pcall(function() return preview_buf:info() end)
+      if ok and info and info.preview then
+        pcall(preview_buf.close, preview_buf)
+      end
+    end
+    preview_buf = nil
   end
-  local symbols = parse_workspace_symbols(result)
-  if #symbols == 0 then
-    gvim.notify(t("status.no_symbols"))
-    return
+
+  local function preview(item)
+    if not item or not item.path then
+      return
+    end
+    discard_preview()
+    local opened = gvim.buf.open(item.path, {
+      preview = true,
+      pos = gvim.pos(item.line or 0, item.col or 0),
+      focus = true,
+    })
+    if opened then
+      preview_buf = opened
+    end
   end
-  finder.read_snippets(symbols)
-  finder.open_locations {
-    title = t("panel.workspace_symbols_title", { count = #symbols }),
+
+  f = finder.new {
+    title = t("panel.workspace_symbols_title", { count = 0 }),
+    placeholder = t("panel.placeholder"),
     footer = t("panel.help"),
-    items = symbols,
-    on_jump = jump_to,
+    min_query = 0,
+    max_results = finder.MAX_RESULTS,
+    search = function(query)
+      if not buf:valid() then
+        return {}
+      end
+      local result, err = gvim.lsp.request("workspace/symbol", {
+        query = query,
+      }, { buf = buf })
+      if result == nil and err then
+        if not failed_once then
+          failed_once = true
+          gvim.notify(t("status.symbols_failed", { error = tostring(err) }), "warn")
+        end
+        return {}
+      end
+      local symbols = parse_workspace_symbols(result)
+      if #symbols > 0 then
+        finder.read_snippets(symbols)
+      end
+      return symbols
+    end,
+    format = function(item)
+      local label = finder.relative_path(item.path) .. ":" .. ((item.line or 0) + 1)
+      return {
+        id = label,
+        label = label,
+        description = finder.cells(item.text or "", 120),
+      }
+    end,
+    on_rows = function(_, total)
+      if f and f.set_footer then
+        f:set_footer(t("panel.workspace_symbols_title", { count = total }) .. "  " .. t("panel.help"))
+      end
+    end,
+    on_move = preview,
+    on_select = function(item)
+      committed = true
+      discard_preview()
+      if item then
+        jump_to(item)
+      end
+    end,
+    on_close = function(reason)
+      if reason ~= "selected" then
+        discard_preview()
+      end
+    end,
   }
+  f:open()
 end
 
 -- ---------------------------------------------------------------------------
@@ -646,7 +743,7 @@ local function open_breadcrumbs_picker()
   for i, s in ipairs(enclosing) do
     items[#items + 1] = {
       path = path,
-      line = s.start_line,
+      line = s.name_line,
       col = s.name_col or 0,
       text = string.format("%d. [%s] %s", i, kind_label(s.kind), s.name),
     }

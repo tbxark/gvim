@@ -1,7 +1,0 @@
-{
-  "name": "live_sessions",
-  "version": "1.0.0",
-  "description": "List live tmux and recorded Claude Code/Codex agent sessions discovered on this machine",
-  "api": 2,
-  "default_enabled": false
-}

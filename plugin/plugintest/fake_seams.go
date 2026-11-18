@@ -85,12 +85,6 @@ func (f *FakeHost) SetWindowState(plugin string, id pluginapi.BufferID, key stri
 	return nil
 }
 
-// ClearWindowState removes one key of a plugin and buffer.
-func (f *FakeHost) ClearWindowState(plugin string, id pluginapi.BufferID, key string) {
-	f.rec("ClearWindowState", plugin, id, key)
-	delete(f.windowState(), fakeStateKey{plugin, id, key})
-}
-
 // WindowStateValue returns a window-state value (a test helper).
 func (f *FakeHost) WindowStateValue(plugin string, id pluginapi.BufferID, key string) (any, bool) {
 	return f.GetWindowState(plugin, id, key)

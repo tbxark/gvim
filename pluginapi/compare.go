@@ -45,10 +45,6 @@ type CompareSpan struct {
 // view paints from.
 type CompareHunk struct {
 	Left, Right CompareSide
-	// EOLOnly says the two sides have the same lines but for their terminators.
-	// gvim normalises line endings when a file is read, so this is always false
-	// here; the field mirrors Fresh and leaves room for a future byte-exact model.
-	EOLOnly bool
 }
 
 // CompareResult is the answer to compare_buffers: the line diff of two buffers,

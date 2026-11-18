@@ -28,7 +28,6 @@ type loader struct {
 
 	cands  []*candidate // load order, then the plugins that are not running
 	byName map[string]*candidate
-	legacy []string
 	state  pluginState
 
 	stateBusy, stateDirty, stateHooked bool
@@ -296,7 +295,6 @@ func (r *Runtime) depLookup(name string) (bool, string) {
 func (r *Runtime) applyDiscovery(d *discovery, startup bool, done func(*batch)) {
 	l := &r.ld
 	l.state = d.state
-	l.legacy = d.legacy
 	for _, n := range d.notes {
 		lvl := pluginapi.LevelInfo
 		if n.warn {
@@ -318,10 +316,6 @@ func (r *Runtime) applyDiscovery(d *discovery, startup bool, done func(*batch)) 
 		// Said by the flush, in the same update as the load errors (see flush).
 		for _, n := range d.notes {
 			b.lead = append(b.lead, n.text)
-		}
-		if len(d.legacy) > 0 {
-			b.lead = append(b.lead, legacyNotice(d.legacy))
-			r.logf("", levelWarn, legacyNotice(d.legacy))
 		}
 	}
 	var set []*candidate
@@ -462,18 +456,6 @@ func (r *Runtime) orderCands(all []*candidate, b *batch) {
 	}
 }
 
-func legacyNotice(names []string) string {
-	shown := names
-	if len(shown) > 5 {
-		shown = shown[:5]
-	}
-	text := fmt.Sprintf("%d JavaScript plugin(s) ignored (gvim plugins are Lua now): %s", len(names), strings.Join(shown, ", "))
-	if len(names) > len(shown) {
-		text += fmt.Sprintf(" and %d more", len(names)-len(shown))
-	}
-	return text
-}
-
 // ---------- batches ----------
 
 type itemState int
@@ -515,7 +497,7 @@ type batch struct {
 	announced  bool     // plugins_loaded was raised
 	shown      int      // errs reported so far
 	noticed    int      // of those, shown by name in the message
-	lead       []string // startup notices not shown yet: discovery notes, ignored JavaScript files
+	lead       []string // startup notices not shown yet: discovery notes
 	releaseTok pluginapi.Token
 }
 
@@ -759,7 +741,7 @@ func (b *batch) flush() {
 	// The notices of one flush reach the host together: the ui shows them as one status
 	// message, which is cut at the width of the status row, and keeps each in the warnings
 	// log. The errors come first, since they are what the user has to act on; the startup
-	// notices that were held back (ignored JavaScript files) follow.
+	// notices that were held back follow.
 	more := 0
 	for _, e := range b.errs[b.shown:] {
 		if b.noticed < 3 {
@@ -823,11 +805,11 @@ func (r *Runtime) replay(name string) {
 // ---------- the manager's view ----------
 
 // pluginRows is Runtime.Plugins: the plugins in load order, those that are not running
-// (disabled, failed, blocked) from what discovery knew, plugins loaded without the loader
-// last, then one row per ignored JavaScript file.
+// (disabled, failed, blocked) from what discovery knew, and plugins loaded without the
+// loader last.
 func (r *Runtime) pluginRows() []pluginapi.PluginInfo {
 	l := &r.ld
-	out := make([]pluginapi.PluginInfo, 0, len(r.order)+len(l.cands)+len(l.legacy))
+	out := make([]pluginapi.PluginInfo, 0, len(r.order)+len(l.cands))
 	seen := map[string]bool{}
 	for _, c := range l.cands {
 		seen[c.name] = true
@@ -847,14 +829,6 @@ func (r *Runtime) pluginRows() []pluginapi.PluginInfo {
 		if !seen[p.name] {
 			out = append(out, p.info())
 		}
-	}
-	dir := ""
-	if l.opt != nil {
-		dir = l.opt.UserDir
-	}
-	for _, name := range l.legacy {
-		out = append(out, pluginapi.PluginInfo{Name: name, Source: SourceUser, Dir: dir, Status: "legacy",
-			Locked: "JavaScript plugins are not supported"})
 	}
 	return out
 }

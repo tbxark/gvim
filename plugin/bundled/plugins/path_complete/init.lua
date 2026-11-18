@@ -29,42 +29,66 @@ local MAX_SUGGESTIONS = 100
 local MAX_SCAN = 20000
 local MAX_INPUT = 4096
 
+local function is_windows()
+  return gvim.platform == "windows"
+end
+
+local function sep_pattern()
+  return is_windows() and "[/\\]" or "/"
+end
+
 -- parse_path mirrors Fresh's parsePath: the directory to list and the prefix pattern.
 local function parse_path(input)
   if input == "" then
     return ".", ""
   end
-  local last_slash = input:match("^.*()/")
+  local pat = is_windows() and "^.*()([/\\])" or "^.*()(/)";
+  local last_slash = input:match(pat)
   if not last_slash then
     return ".", input
   end
   if last_slash == 1 then
-    return "/", input:sub(2)
+    return input:sub(1, 1), input:sub(2)
+  end
+  if is_windows() and input:match("^%a:[/\\]$") then
+    return input, ""
+  end
+  if is_windows() and last_slash == 3 and input:match("^%a:[/\\]") then
+    return input:sub(1, 3), input:sub(4)
   end
   return input:sub(1, last_slash - 1), input:sub(last_slash + 1)
 end
 
--- absolute resolves a possibly relative path against the editor's working directory.
+local function base_dir()
+  local root = gvim.workspace.root()
+  if root and root ~= "" then
+    return root
+  end
+  return gvim.dirs.cwd()
+end
+
+-- absolute resolves a possibly relative path against the workspace root (or cwd).
 local function absolute(path)
   if path == "" then
-    return gvim.dirs.cwd()
+    return base_dir()
   end
   if gvim.path.is_absolute(path) then
     return path
   end
-  return gvim.path.join(gvim.dirs.cwd(), path)
+  return gvim.path.join(base_dir(), path)
 end
 
 -- join_display is the path a suggestion's value carries: the input directory as written
 -- (".", "/", "src" stay as they are), never the resolved working directory.
-local function join_display(dir, name)
+local function join_display(dir, name, sep)
+  sep = sep or "/"
   if dir == "." then
     return name
   end
-  if dir == "/" then
-    return "/" .. name
+  if dir:sub(-1):match(sep_pattern()) then
+    return dir .. name
   end
-  return dir .. "/" .. name
+  return dir .. sep .. name
 end
 
 local function lower(text)
@@ -91,6 +115,10 @@ local function generate(input)
     input = input:sub(1, MAX_INPUT)
   end
   local dir, pattern = parse_path(input)
+  local trailing_sep = "/"
+  if is_windows() and input:find("\\", 1, true) and not input:find("/", 1, true) then
+    trailing_sep = "\\"
+  end
   local show_hidden = pattern:sub(1, 1) == "."
   local entries, readable = list_dir(dir, show_hidden)
   local pattern_lower = lower(pattern)
@@ -102,9 +130,11 @@ local function generate(input)
       break
     end
     local name = tostring(entry.name or "")
-    if name ~= "" and (show_hidden or name:sub(1, 1) ~= ".") and lower(name):sub(1, #pattern_lower) == pattern_lower then
+    local sort_key = name ~= "" and lower(name) or ""
+    if name ~= "" and (show_hidden or name:sub(1, 1) ~= ".") and sort_key:sub(1, #pattern_lower) == pattern_lower then
       matched[#matched + 1] = {
         name = name,
+        sort_key = sort_key,
         -- A symlink to a directory completes as a directory.
         is_dir = entry.kind == "dir" or (entry.kind == "symlink" and entry.target_kind == "dir"),
       }
@@ -114,18 +144,18 @@ local function generate(input)
     if a.is_dir ~= b.is_dir then
       return a.is_dir
     end
-    return lower(a.name) < lower(b.name)
+    return a.sort_key < b.sort_key
   end)
   local suggestions = {}
   for i = 1, math.min(#matched, MAX_SUGGESTIONS) do
     local item = matched[i]
-    local full = join_display(dir, item.name)
+    local full = join_display(dir, item.name, trailing_sep)
     if item.is_dir then
       suggestions[#suggestions + 1] = {
-        id = full .. "/",
-        text = item.name .. "/",
+        id = full .. trailing_sep,
+        text = item.name .. trailing_sep,
         description = t("suggestion.directory"),
-        value = full .. "/",
+        value = full .. trailing_sep,
       }
     else
       suggestions[#suggestions + 1] = {
@@ -177,8 +207,9 @@ local function run_prompt(start)
     local stat = gvim.fs.stat(target)
     if stat and stat.kind == "dir" then
       input = answer
-      if input:sub(-1) ~= "/" then
-        input = input .. "/"
+      if not input:sub(-1):match(sep_pattern()) then
+        local sep = (is_windows() and input:find("\\", 1, true) and not input:find("/", 1, true)) and "\\" or "/"
+        input = input .. sep
       end
     else
       local buf, err = gvim.buf.open(answer, { focus = true })

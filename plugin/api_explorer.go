@@ -51,9 +51,11 @@ func installExplorer(e *apiEnv) {
 			if d.Path == "" || d.Symbol == "" {
 				return bufRet(L, invalidErr("decoration %d: path and symbol are required", i))
 			}
-			if c, err := colorFromLua(row.RawGetString("color")); err == nil {
-				d.Color = c
+			c, err := colorFromLua(row.RawGetString("color"))
+			if err != nil {
+				return bufRet(L, invalidErr("decoration %d: color: %v", i, err))
 			}
+			d.Color = c
 			items = append(items, d)
 		}
 		return bufTrue(L, host().SetExplorerDecorations(p.name, ns, items))
@@ -64,19 +66,24 @@ func installExplorer(e *apiEnv) {
 		return 1
 	})
 
-	slotText := func(t *lua.LTable) *pluginapi.FileExplorerSlotText {
+	slotText := func(t *lua.LTable) (*pluginapi.FileExplorerSlotText, error) {
 		if t == nil {
-			return nil
+			return nil, nil
 		}
 		o := bufTableOpts{t: t}
 		out := &pluginapi.FileExplorerSlotText{
 			Text:     clipText(optString(&o, "text"), pluginapi.MaxExplorerSlotText),
 			MinWidth: o.integer("min_width", 0),
 		}
-		if c, err := colorFromLua(t.RawGetString("color")); err == nil {
-			out.Color = c
+		if o.err != "" {
+			return nil, invalidErr("%s", o.err)
 		}
-		return out
+		c, err := colorFromLua(t.RawGetString("color"))
+		if err != nil {
+			return nil, invalidErr("color: %v", err)
+		}
+		out.Color = c
+		return out, nil
 	}
 	e.set(area, "set_slots", func(L *lua.LState) int {
 		ns := L.CheckString(1)
@@ -104,15 +111,33 @@ func installExplorer(e *apiEnv) {
 			if s.Path == "" {
 				return bufRet(L, invalidErr("slot %d: a path is required", i))
 			}
-			if lt, ok := row.RawGetString("leading").(*lua.LTable); ok {
-				s.Leading = slotText(lt)
+			if v := row.RawGetString("leading"); v != lua.LNil {
+				lt, ok := v.(*lua.LTable)
+				if !ok {
+					return bufRet(L, invalidErr("slot %d: leading must be a table", i))
+				}
+				st, err := slotText(lt)
+				if err != nil {
+					return bufRet(L, invalidErr("slot %d: leading: %v", i, err))
+				}
+				s.Leading = st
 			}
-			if tt, ok := row.RawGetString("trailing").(*lua.LTable); ok {
-				s.Trailing = slotText(tt)
+			if v := row.RawGetString("trailing"); v != lua.LNil {
+				tt, ok := v.(*lua.LTable)
+				if !ok {
+					return bufRet(L, invalidErr("slot %d: trailing must be a table", i))
+				}
+				st, err := slotText(tt)
+				if err != nil {
+					return bufRet(L, invalidErr("slot %d: trailing: %v", i, err))
+				}
+				s.Trailing = st
 			}
-			if c, err := colorFromLua(row.RawGetString("name_color")); err == nil {
-				s.NameColor = c
+			c, err := colorFromLua(row.RawGetString("name_color"))
+			if err != nil {
+				return bufRet(L, invalidErr("slot %d: name_color: %v", i, err))
 			}
+			s.NameColor = c
 			slots = append(slots, s)
 		}
 		return bufTrue(L, host().SetExplorerSlots(p.name, ns, slots))

@@ -681,4 +681,19 @@ func TestMergeConflictResolutionMode(t *testing.T) {
 			t.Errorf("notice = %q", got)
 		}
 	})
+	t.Run("buffer activation exits and re-enters resolve mode", func(t *testing.T) {
+		t.Parallel()
+		e := start(t)
+		cleanBuf := e.h.Host.AddBuffer("/w/clean.txt", "no conflicts here\n")
+		e.h.Emit(pluginapi.Event{Name: "buffer_activated", Data: map[string]any{"buf": cleanBuf}})
+		e.h.Settle()
+		if got := e.h.Host.InputMode["merge_conflict"]; got != "" {
+			t.Fatalf("input mode on non-conflicted buffer = %q, want empty", got)
+		}
+		e.h.Emit(pluginapi.Event{Name: "buffer_activated", Data: map[string]any{"buf": e.buf}})
+		e.h.Settle()
+		if got := e.h.Host.InputMode["merge_conflict"]; got != "resolve" {
+			t.Fatalf("input mode on conflicted buffer = %q, want resolve", got)
+		}
+	})
 }

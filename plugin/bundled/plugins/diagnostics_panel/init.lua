@@ -265,6 +265,7 @@ local function build()
     { kind = "divider", key = "divider" },
   }
   if #rows == 0 then
+    state.selected_index = nil
     children[#children + 1] = { kind = "label", key = "empty", text = t("panel.no_diagnostics") }
     children[#children + 1] = { kind = "hintBar", key = "hints", runs = { { text = t("panel.hint_close") } } }
     return { root = { kind = "col", key = "root", children = children }, focus_key = "scope" }, rows, node_row
@@ -273,7 +274,14 @@ local function build()
   -- Start the selection on the first diagnostic, not on a file header (Fresh's panel opens
   -- on its title line and needs a Down to reach the first entry; an activated header is a
   -- no-op here).
-  local selected = ensure_finder().first_leaf(tree)
+  local selected = state.selected_index
+  if selected then
+    selected = math.max(1, math.min(selected, #nodes))
+  end
+  if not selected or node_row[selected] == nil then
+    selected = ensure_finder().first_leaf(tree)
+  end
+  state.selected_index = selected
   children[#children + 1] = {
     kind = "tree",
     key = "rows",
@@ -310,11 +318,13 @@ end
 local function forget_panel()
   follow_cursor(false)
   state.panel, state.node_row, state.selected_index = nil, {}, nil
+  state.preview_buf, state.origin_buf = nil, nil
 end
 
 -- mount opens the panel with the current filter and keeps its id and rows. Fresh's finder
 -- livePanel: focus, title, ratio 0.3 (the widget card is a percentage of the frame instead).
 local function mount()
+  local origin = gvim.buf.current()
   local spec, rows, node_row = build()
   local id, err = gvim.ui.mount_widget_panel(spec, {
     title = t("panel.header", { filter = filter_label() }),
@@ -328,6 +338,7 @@ local function mount()
     return nil
   end
   state.panel, state.node_row = id, node_row
+  state.origin_buf, state.preview_buf = origin, nil
   follow_cursor(true)
   return id, #rows
 end
@@ -365,6 +376,18 @@ stop_pending_preview = function()
   state.preview_timer, state.preview_row = nil, nil
 end
 
+local function discard_preview()
+  local buf = state.preview_buf
+  state.preview_buf = nil
+  if not buf then
+    return
+  end
+  local ok, info = pcall(function() return buf:info() end)
+  if ok and info and info.preview then
+    pcall(buf.close, buf)
+  end
+end
+
 -- preview_tick is Fresh's debounced previewTick: open the latest selected row in the host's
 -- preview tab without focus or a tab switch. gvim.buf.open is async, so it runs in this timer
 -- task; a superseded target was already replaced by schedule_preview.
@@ -383,7 +406,9 @@ local function preview_tick()
     background = true,
     focus = false,
   })
-  if not buf and err then
+  if buf then
+    state.preview_buf = buf
+  elseif err then
     gvim.log.debug("preview %s: %s", tostring(row.path), tostring(err))
   end
 end
@@ -514,10 +539,12 @@ gvim.on("widget_event", function(ev)
     stop_pending_preview()
     jump(state.node_row[ev.index])
   elseif ev.event == "cancel" then
-    -- The host unmounted the panel already; only the plugin state is left to clear.
-    stop_pending_preview()
-    forget_panel()
-    gvim.notify(t("status.closed"))
+    local origin = state.origin_buf
+    discard_preview()
+    if origin and origin:valid() then
+      pcall(origin.show, origin)
+    end
+    close(t("status.closed"))
   end
 end)
 

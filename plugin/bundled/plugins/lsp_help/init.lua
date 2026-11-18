@@ -1,11 +1,10 @@
 -- LSP install help: a port of Fresh's plugins/lsp_help.ts (660 lines, mostly a table of
 -- per-language server install hints; rust/asm/slang keep their own files in Fresh).
 --
--- Fresh's three handlers map onto gvim's events:
---   lsp_server_error    -> remember the failure, put a Fresh-style status line on the row
---   lsp_status_clicked  -> open an action popup with the entry's message, copyable install
---                          commands and gvim-native LSP quick actions
---   action_popup_result -> copy the chosen command, or run the chosen native action
+-- Fresh's two active handlers map onto gvim's events:
+--   lsp_server_error   -> remember the failure, put a Fresh-style status line on the row
+--   lsp_status_clicked -> open an action popup with the entry's message, copyable install
+--                         commands and gvim-native LSP quick actions, and await its choice
 --
 -- Reduction vs Fresh: gvim's lsp_server_error payload is only {error} (no language,
 -- error_type or server_command), so the language is the active buffer's and the server
@@ -42,10 +41,10 @@ end
 local MAX_COPIES = 8
 local MAX_MESSAGE = 4000
 
--- failures: language -> true once a server of that language failed; pending is the popup
--- whose result is awaited.
+-- failures: language -> true once a server of that language failed; popup_open guards
+-- against stacking duplicate popups while one request is open.
 local failures = {}
-local pending = nil
+local popup_open = false
 
 local function first_line(text)
   text = tostring(text or "")
@@ -61,7 +60,23 @@ local function clip(text, limit)
   if #text <= limit then
     return text
   end
-  return text:sub(1, limit) .. "..."
+  if limit <= 3 then
+    return gvim.text.truncate(text, limit, "")
+  end
+  local cut = text:sub(1, limit - 3)
+  local i = #cut
+  while i > 0 do
+    local b = cut:byte(i)
+    if b < 0x80 then
+      break
+    end
+    if b >= 0xC0 then
+      cut = cut:sub(1, i - 1)
+      break
+    end
+    i = i - 1
+  end
+  return cut .. "..."
 end
 
 local function active_language()
@@ -113,7 +128,7 @@ local function popup_actions(help)
     { id = "act:lsp_restart", label = t("actions.restart") },
     { id = "act:lsp_stop", label = t("actions.stop") },
     { id = "act:lsp_toggle_for_buffer", label = t("actions.toggle_buffer") },
-    { id = "act:lsp_disable_language", label = t("actions.disable", { name = help.name }) },
+    { id = "act:lsp_disable_language_target", label = t("actions.disable", { name = help.name }) },
     { id = "act:lsp_goto_definition", label = t("actions.definition") },
     { id = "act:lsp_references", label = t("actions.references") },
     { id = "dismiss", label = t("actions.dismiss") },
@@ -124,52 +139,10 @@ local function popup_actions(help)
   return actions
 end
 
-local function show_help(language, help)
-  if not failures[language] then
-    return
-  end
-  if pending ~= nil then
-    -- One popup at a time: a second click while ours is up is the same request.
-    return
-  end
-  local actions = popup_actions(help)
-  pending = { language = language, help = help }
-  local title = clip(t("popup.title", { name = help.name }), 120)
-  local message = expand(help.message, help)
-  -- The popup is opened without blocking this handler: the choice comes back through
-  -- action_popup_result (Fresh's design; the blocking return is deliberately unused).
-  gvim.async.spawn(function()
-    local _, err = gvim.ui.action_popup { title = title, message = message, actions = actions }
-    if err then
-      -- The popup never opened, so no result event will clear the request.
-      pending = nil
-    end
-  end)
-end
-
-gvim.on("lsp_status_clicked", function()
-  local language = active_language()
-  if not language then
-    return
-  end
-  local help = help_for(language)
-  if not help or not failures[language] then
-    return
-  end
-  show_help(language, help)
-end)
-
-gvim.on("action_popup_result", function(ev)
-  if pending == nil then
-    return
-  end
-  local handled = pending
-  pending = nil
-  local action = ev and ev.action
+local function handle_action(language, help, action)
   if action == nil or action == "dismiss" then
     return
   end
-  local help = handled.help
   if action:sub(1, 5) == "copy:" then
     local wanted = action:sub(6)
     for _, copy in ipairs(help.copies or {}) do
@@ -183,12 +156,48 @@ gvim.on("action_popup_result", function(ev)
   end
   if action:sub(1, 4) == "act:" then
     local name = action:sub(5)
-    gvim.command.run(name)
-    if name == "lsp_disable_language" then
+    if name == "lsp_disable_language_target" then
+      gvim.command.run(name, { language = language })
       gvim.notify(t("status.disabled", { name = help.name }))
-      failures[handled.language] = nil
+      failures[language] = nil
+    else
+      gvim.command.run(name)
     end
   end
+end
+
+local function show_help(language, help)
+  if not failures[language] then
+    return
+  end
+  if popup_open then
+    -- One popup at a time: a second click while ours is up is the same request.
+    return
+  end
+  local actions = popup_actions(help)
+  popup_open = true
+  local title = clip(t("popup.title", { name = help.name }), 120)
+  local message = expand(help.message, help)
+  gvim.async.spawn(function()
+    local action, err = gvim.ui.action_popup { title = title, message = message, actions = actions }
+    popup_open = false
+    if err then
+      return
+    end
+    handle_action(language, help, action)
+  end)
+end
+
+gvim.on("lsp_status_clicked", function()
+  local language = active_language()
+  if not language then
+    return
+  end
+  local help = help_for(language)
+  if not help or not failures[language] then
+    return
+  end
+  show_help(language, help)
 end)
 
 gvim.log.debug("lsp help plugin loaded")

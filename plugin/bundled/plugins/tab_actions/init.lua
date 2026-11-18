@@ -57,46 +57,46 @@ end
 local commands = {
   {
     name = "close_others",
-    title = t("cmd.close_others"),
-    description = t("cmd.close_others_desc"),
+    title = "%cmd.close_others",
+    description = "%cmd.close_others_desc",
     run = function()
       close_where(function(i, active) return i ~= active end)
     end,
   },
   {
     name = "close_all",
-    title = t("cmd.close_all"),
-    description = t("cmd.close_all_desc"),
+    title = "%cmd.close_all",
+    description = "%cmd.close_all_desc",
     run = function()
       close_where(function() return true end)
     end,
   },
   {
     name = "close_to_right",
-    title = t("cmd.close_to_right"),
-    description = t("cmd.close_to_right_desc"),
+    title = "%cmd.close_to_right",
+    description = "%cmd.close_to_right_desc",
     run = function()
       close_where(function(i, active) return i > active end)
     end,
   },
   {
     name = "close_to_left",
-    title = t("cmd.close_to_left"),
-    description = t("cmd.close_to_left_desc"),
+    title = "%cmd.close_to_left",
+    description = "%cmd.close_to_left_desc",
     run = function()
       close_where(function(i, active) return i < active end)
     end,
   },
   {
     name = "move_to_left",
-    title = t("cmd.move_to_left"),
-    description = t("cmd.move_to_left_desc"),
+    title = "%cmd.move_to_left",
+    description = "%cmd.move_to_left_desc",
     run = function() move_active(-1) end,
   },
   {
     name = "move_to_right",
-    title = t("cmd.move_to_right"),
-    description = t("cmd.move_to_right_desc"),
+    title = "%cmd.move_to_right",
+    description = "%cmd.move_to_right_desc",
     run = function() move_active(1) end,
   },
 }

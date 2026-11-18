@@ -72,3 +72,23 @@ func TestExplorerLuaSurface(t *testing.T) {
 	}
 	_ = pluginapi.MaxExplorerEntries
 }
+
+func TestExplorerValidationErrors(t *testing.T) {
+	h := cmd(t, "", `
+local root = gvim.workspace.root()
+local _, e1 = gvim.explorer.set_decorations("git_explorer", { { path = root .. "/a.go", symbol = "M", color = "#bad" } })
+local _, e2 = gvim.explorer.set_slots("git_explorer", { { path = root .. "/a.go", name_color = "#bad" } })
+local _, e3 = gvim.explorer.set_slots("git_explorer", { { path = root .. "/a.go", leading = "bad" } })
+local _, e4 = gvim.explorer.set_slots("git_explorer", { { path = root .. "/a.go", trailing = { text = "x", color = 123 } } })
+T.spy(tostring(e1) .. "|" .. tostring(e2) .. "|" .. tostring(e3) .. "|" .. tostring(e4))`)
+	got := spyText(h)
+	parts := strings.Split(got, "|")
+	if len(parts) != 4 {
+		t.Fatalf("spy = %q (log %v)", got, h.LogText(""))
+	}
+	for i, part := range parts {
+		if !strings.HasPrefix(part, "invalid:") {
+			t.Errorf("case %d error = %q, want invalid: ...", i+1, part)
+		}
+	}
+}

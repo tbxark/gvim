@@ -168,7 +168,7 @@ type plugin struct {
 	userStorm   int // consecutive cut Drains with this plugin's tasks or commands still queued
 
 	commands map[string]*command
-	panels   map[pluginapi.PanelID]bool // the widget panels the plugin mounted (api_panel.go)
+	panels   map[pluginapi.PanelID]pluginapi.BufferID // mounted panels -> scope buffer (0 if not buffer-scoped)
 	// groups and scrolls are the buffer groups and scroll-sync groups the plugin made
 	// (api_groups.go): the ids are global, so a call naming another plugin's is refused.
 	groups  map[pluginapi.BufferGroupID]bool
@@ -203,7 +203,6 @@ type plugin struct {
 	unloadFns    []*lua.LFunction
 	cleanups     []func()
 	format       lua.LValue // the stock string.format, for logging
-	tostring     lua.LValue // the stock tostring
 }
 
 // muted plugins receive no events, timers or key layers (failed, suspended or gone).

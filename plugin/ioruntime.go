@@ -35,6 +35,8 @@ type ioRuntime struct {
 	wsDirty    bool
 	wsArmed    bool
 	wsBusy     bool
+	wsGen      uint64
+	wsArmStop  func()
 	// wsSeq is the latest write sequence per file. A queued write is invalidated when a
 	// newer write (or the Stop flush) of the same file owns it; a stale Work skips its
 	// write instead of overwriting newer content. A workspace switch does not bump it: the
@@ -458,12 +460,17 @@ func (io *ioRuntime) queueWorkspaceWrite(path string, data []byte) {
 // pending debounce of the old namespace is disarmed (its completion finds no dirty state of
 // the new namespace and writes nothing).
 func (io *ioRuntime) wsSwitch(path string, st *WorkspaceState, readOnly bool) {
+	if io.wsArmStop != nil {
+		io.wsArmStop()
+		io.wsArmStop = nil
+	}
 	if io.wsPath != "" && io.wsDirty {
 		data := io.wsSnapshot()
 		io.wsDirty = false
 		io.wsArmed = false
 		io.queueWorkspaceWrite(io.wsPath, data)
 	}
+	io.wsGen++
 	io.wsPath, io.wsReadOnly = path, readOnly
 	io.wsDirty, io.wsArmed, io.wsBusy = false, false, false
 	io.states = map[string]*stateEntry{}
@@ -525,12 +532,25 @@ func (io *ioRuntime) wsArm() {
 		return
 	}
 	io.wsArmed = true
+	gen, path := io.wsGen, io.wsPath
+	ctx, cancel := context.WithCancel(context.Background())
 	tok := r.newToken()
 	r.expectRuntime(tok, func(pluginapi.Completion) {
+		cancel()
+		if io.wsGen != gen || io.wsPath != path {
+			return
+		}
+		io.wsArmStop = nil
 		io.wsArmed = false
 		io.wsWrite()
 	})
-	r.work = append(r.work, pluginapi.Work{Token: tok, After: stateDebounce, Ctx: context.Background()})
+	io.wsArmStop = func() {
+		if w := r.waits[tok]; w != nil {
+			r.dropWait(w)
+		}
+		cancel()
+	}
+	r.work = append(r.work, pluginapi.Work{Token: tok, After: stateDebounce, Ctx: ctx})
 }
 
 // wsWrite queues one atomic write of the whole workspace state file. The file is bounded by
@@ -549,14 +569,17 @@ func (io *ioRuntime) wsWrite() {
 	}
 	io.wsDirty = false
 	io.wsBusy = true
-	path, osys := io.wsPath, r.os
+	gen, path, osys := io.wsGen, io.wsPath, r.os
 	seq := io.wsNextSeq(path)
 	tok := r.newToken()
 	r.expectRuntime(tok, func(c pluginapi.Completion) {
-		io.wsBusy = false
 		if c.Err != "" {
 			r.logf("", levelWarn, "saving workspace plugin state: "+c.Err)
 		}
+		if io.wsGen != gen || io.wsPath != path {
+			return
+		}
+		io.wsBusy = false
 		if io.wsDirty {
 			io.wsArm()
 		}
@@ -592,10 +615,15 @@ func (io *ioRuntime) wsSnapshot() []byte {
 // wsFlush writes the workspace file synchronously on Stop. It invalidates a queued write so
 // an older snapshot cannot land after it.
 func (io *ioRuntime) wsFlush() {
+	if io.wsArmStop != nil {
+		io.wsArmStop()
+		io.wsArmStop = nil
+	}
 	if io.wsPath == "" || io.wsReadOnly || !io.wsDirty {
 		return
 	}
 	io.wsNextSeq(io.wsPath)
+	io.wsGen++
 	io.wsArmed, io.wsBusy, io.wsDirty = false, false, false
 	data := io.wsSnapshot()
 	if len(data) == 0 || len(data) > maxStateFile {

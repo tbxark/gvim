@@ -59,8 +59,8 @@ func TestBundledPluginsHaveManifests(t *testing.T) {
 			}
 		}
 	}
-	if seen < 2 {
-		t.Errorf("bundled plugins = %d, want at least goto_with_selection and tab_actions", seen)
+	if seen != 27 {
+		t.Errorf("bundled plugins = %d, want 27", seen)
 	}
 }
 

@@ -59,6 +59,9 @@ local function utf8_codepoint(text, i)
 end
 
 local function strip(text)
+  if #text == 0 or not text:find("[^\32-\126]") then
+    return text
+  end
   local out = {}
   local i = 1
   while i <= #text do

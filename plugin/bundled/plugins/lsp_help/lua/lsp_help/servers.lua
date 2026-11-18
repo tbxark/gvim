@@ -29,7 +29,7 @@ return {
   },
   {
     id = "typescript", name = "TypeScript", server = "typescript-language-server",
-    languages = { "typescript", "javascript", "typescriptreact", "javascriptreact" },
+    languages = { "typescript", "javascript", "typescriptreact", "javascriptreact", "tsx", "jsx", "react" },
     message = [["{server}" provides code completion, diagnostics, and navigation for TypeScript/JavaScript files. Copy a command below to install it, or search online for your platform.]],
     copies = {
       { id = "copy_npm", value = "npm install -g typescript-language-server typescript" },

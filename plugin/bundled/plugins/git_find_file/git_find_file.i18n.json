@@ -7,14 +7,5 @@
     "status.loading": "Reloading git files...",
     "status.no_files": "No git-tracked files found",
     "status.showing_first": "Showing the first %{shown} git-tracked files"
-  },
-  "de": {
-    "cmd.find": "Git Datei Finden",
-    "cmd.find_desc": "Git-verfolgte Datei suchen und oeffnen",
-    "cmd.reload": "Git Datei Finden: Neu laden",
-    "cmd.reload_desc": "Git-Dateiindex neu laden",
-    "status.loading": "Lade Git-Dateien...",
-    "status.no_files": "Keine git-verfolgten Dateien gefunden",
-    "status.showing_first": "Zeige die ersten %{shown} git-verfolgten Dateien"
   }
 }

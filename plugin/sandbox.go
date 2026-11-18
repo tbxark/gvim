@@ -84,7 +84,6 @@ func (p *plugin) buildState() error {
 	typeF := L.GetGlobal("type")
 	errorF := L.GetGlobal("error")
 	p.format = str.RawGetString("format")
-	p.tostring = L.GetGlobal("tostring")
 
 	// 2. Strip.
 	for _, n := range stripped {

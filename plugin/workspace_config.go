@@ -129,5 +129,6 @@ func (r *Runtime) ApplyWorkspacePluginConfig(enabled map[string]bool, settings m
 	if enabledN+disabledN+reloadedN > 0 {
 		r.say(pluginapi.LevelInfo, fmt.Sprintf("workspace plugin config: %d enabled, %d disabled, %d reloaded", enabledN, disabledN, reloadedN))
 	}
+	r.work = append(r.work, work...)
 	return work
 }

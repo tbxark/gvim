@@ -74,6 +74,7 @@ func installGroups(e *apiEnv) {
 			p.groups = map[pluginapi.BufferGroupID]bool{}
 		}
 		p.groups[id] = true
+		p.r.wantsChanged()
 		L.Push(lua.LNumber(uint64(id)))
 		return 1
 	})
@@ -139,7 +140,7 @@ func installGroups(e *apiEnv) {
 			return bufRet(L, err)
 		}
 		p.r.guard.CloseBufferGroup(id)
-		delete(p.groups, id)
+		p.groupClosed(id)
 		L.Push(lua.LTrue)
 		return 1
 	})
@@ -287,6 +288,14 @@ func groupLayoutNode(node *bgNode, depth int) (pluginapi.BufferGroupLayout, erro
 		return pluginapi.BufferGroupLayout{Dir: node.Direction, Ratio: ratio, First: &first, Second: &second}, nil
 	}
 	return pluginapi.BufferGroupLayout{}, invalidErr("layout: unknown node type %q", node.Type)
+}
+
+// groupClosed forgets a buffer group that was closed.
+func (p *plugin) groupClosed(id pluginapi.BufferGroupID) {
+	if p.groups[id] {
+		delete(p.groups, id)
+		p.r.wantsChanged()
+	}
 }
 
 // ownsGroup refuses a buffer group id the plugin did not create: group ids are global.

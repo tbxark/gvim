@@ -87,3 +87,22 @@ func TestApplyWorkspacePluginConfigTouchesOnlyAffectedPlugins(t *testing.T) {
 		t.Fatal("a project settings change wrote the editor-wide plugin-state toggles")
 	}
 }
+
+func TestApplyWorkspacePluginConfigQueuesWork(t *testing.T) {
+	e := newEnv(t)
+	e.bundle("alpha", map[string]string{"init.lua": `T.spy("load alpha")`})
+	e.start()
+
+	// Do not pass the returned slice to RunWork; Settle must still drain it via Runtime.Work.
+	e.h.RT.ApplyWorkspacePluginConfig(map[string]bool{"alpha": false}, nil)
+	e.h.Settle()
+	if p := e.info("alpha"); p.Status != "disabled" || p.Enabled {
+		t.Fatalf("alpha after ApplyWorkspacePluginConfig + Settle = %+v, want disabled", p)
+	}
+
+	e.h.RT.ApplyWorkspacePluginConfig(nil, nil)
+	e.h.Settle()
+	if p := e.info("alpha"); p.Status != "loaded" || !p.Enabled {
+		t.Fatalf("alpha after re-enable + Settle = %+v, want loaded", p)
+	}
+}

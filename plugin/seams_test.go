@@ -99,3 +99,47 @@ T.spy(tostring(b), tostring(err))`, plugintest.Options{Host: host})
 		t.Fatalf("spy = %q (log %v)", got, h.LogText(""))
 	}
 }
+
+func TestOpenFileInSplitDirectionsAndValidation(t *testing.T) {
+	cases := []struct {
+		name       string
+		call       string
+		wantAction string
+		wantErr    bool
+	}{
+		{"below maps to split_horizontal", `gvim.buf.open_file_in_split("/w/x.go", {direction = "below"})`, "split_horizontal", false},
+		{"right maps to split_vertical", `gvim.buf.open_file_in_split("/w/x.go", {direction = "right"})`, "split_vertical", false},
+		{"invalid direction rejected pre-split", `gvim.buf.open_file_in_split("/w/x.go", {direction = "diagonal"})`, "", true},
+		{"empty path rejected pre-split", `gvim.buf.open_file_in_split("", {direction = "right"})`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host := plugintest.NewFakeHost()
+			host.SetFile("/w/x.go", "x")
+			h := cmd(t, "", `local ok, b, err = pcall(function() return `+tc.call+` end) T.spy(tostring(ok), tostring(b ~= nil), tostring(err))`, plugintest.Options{Host: host})
+			settleBuffers(h, host)
+			var splitActions []string
+			for _, c := range host.Cmd().Calls {
+				if strings.HasPrefix(c.Action, "split_") {
+					splitActions = append(splitActions, c.Action)
+				}
+			}
+			got := spy(h)
+			if !tc.wantErr {
+				if len(splitActions) != 1 || splitActions[0] != tc.wantAction {
+					t.Fatalf("split actions = %v, want [%q] (spy=%v log=%v)", splitActions, tc.wantAction, got, h.LogText(""))
+				}
+				if len(got) != 1 || got[0] != "true true nil" {
+					t.Fatalf("spy = %q, want true true nil", got)
+				}
+				return
+			}
+			if len(splitActions) != 0 {
+				t.Fatalf("split called on invalid input: actions=%v", splitActions)
+			}
+			if len(got) != 1 || (!strings.HasPrefix(got[0], "false ") && !strings.HasPrefix(got[0], "true false ")) {
+				t.Fatalf("spy = %q, want validation error", got)
+			}
+		})
+	}
+}

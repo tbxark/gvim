@@ -766,3 +766,50 @@ func TestDiagnosticsPanelRefreshCancelsPendingPreview(t *testing.T) {
 		t.Fatalf("opens = %d, want none: only the current selected row may preview", n)
 	}
 }
+
+func TestDiagnosticsPanelCancelClosesPreviewAndRestoresOrigin(t *testing.T) {
+	t.Parallel()
+	host, a, b := diagHost(t)
+	host.Buffers[1].Info.Preview = true
+	host.LSP().Diags[a] = []pluginapi.DiagnosticInfo{diag(0, 0, "error", "in a", "gopls")}
+	host.LSP().Diags[b] = []pluginapi.DiagnosticInfo{diag(0, 2, "warning", "in b", "gopls")}
+	h := startDiagPanel(t, host)
+	if err := h.Run(diagPlugin+".show_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	fp := mountedPanel(t, h)
+	// Switch to all files so /w/b.go diagnostic appears, then preview it.
+	emitWidget(h, fp.ID, map[string]any{"event": "toggle", "widget": "scope", "checked": true})
+	h.Settle()
+	fp = mountedPanel(t, h)
+	// Nodes: 1=a header, 2=a diag, 3=b header, 4=b diag.
+	emitWidget(h, fp.ID, map[string]any{"event": "select", "widget": "rows", "index": 4})
+	h.Advance(100 * time.Millisecond)
+	h.CompleteBuffers()
+	if n := h.Host.CallCount("Open"); n != 1 {
+		t.Fatalf("opens = %d, want 1 preview open", n)
+	}
+
+	// Cancel (Esc): host unmounts panel then delivers "cancel"; plugin discards preview and restores origin.
+	h.Host.UnmountWidgetPanel(fp.ID)
+	emitWidget(h, fp.ID, map[string]any{"event": "cancel"})
+	h.Settle()
+	if mounted := h.Host.Panels().Mounted(); len(mounted) != 0 {
+		t.Fatalf("mounted panels after cancel = %d, want 0", len(mounted))
+	}
+	var closedPreview, restoredOrigin bool
+	for _, c := range h.Host.Calls() {
+		if c.Method == "Close" && c.Args[0] == b {
+			closedPreview = true
+		}
+		if c.Method == "Activate" && c.Args[0] == a {
+			restoredOrigin = true
+		}
+	}
+	if !closedPreview {
+		t.Errorf("expected Close on preview buffer %v; calls = %+v", b, h.Host.Calls())
+	}
+	if !restoredOrigin {
+		t.Errorf("expected Activate on origin buffer %v; calls = %+v", a, h.Host.Calls())
+	}
+}

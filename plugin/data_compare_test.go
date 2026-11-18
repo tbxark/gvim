@@ -16,7 +16,7 @@ T.command("go", function()
   T.spy("counts", r.left_lines, r.right_lines, r.left_len, r.right_len, #r.hunks, r.left_version)
   local h = r.hunks[1]
   T.spy("sides", h.left.start, h.left.count, h.left.from, h.left.to, h.left.jump,
-        h.right.start, h.right.from, h.right.to, h.eol_only)
+        h.right.start, h.right.from, h.right.to)
   T.spy("line", h.left.lines[1][1], h.left.lines[1][2])
   T.spy("span", h.left.spans[1][1], h.left.spans[1][2], h.right.spans[1][1] ~= nil)
   T.spy("replace", gvim.diff.replace_range(b, h.right.from, h.right.to, "b"))
@@ -38,7 +38,7 @@ func TestCompareBuffersAndReplaceRange(t *testing.T) {
 	if err := h.Run("t.go", nil); err != nil {
 		t.Fatal(err)
 	}
-	want := "counts 3 3 5 5 1 1.0|sides 1 1 2 4 2 1 2 4 false|line 2 3|span 2 3 true|replace true|stale false|out false false"
+	want := "counts 3 3 5 5 1 1.0|sides 1 1 2 4 2 1 2 4|line 2 3|span 2 3 true|replace true|stale false|out false false"
 	if got := spyText(h); got != want {
 		t.Fatalf("spy = %q\nwant %q\nlog %v", got, want, h.LogText(""))
 	}

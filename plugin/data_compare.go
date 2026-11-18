@@ -117,7 +117,7 @@ func awaitDiffCompareBuffers(c *awaitCall) {
 // compareResultTable renders a CompareResult as the Lua table compare_buffers
 // returns.
 func compareResultTable(L *lua.LState, res pluginapi.CompareResult) *lua.LTable {
-	t := L.CreateTable(7, 0)
+	t := L.CreateTable(0, 7)
 	hunks := L.CreateTable(len(res.Hunks), 0)
 	for _, h := range res.Hunks {
 		hunks.Append(compareHunkTable(L, h))
@@ -134,10 +134,9 @@ func compareResultTable(L *lua.LState, res pluginapi.CompareResult) *lua.LTable 
 
 // compareHunkTable renders one hunk's two sides.
 func compareHunkTable(L *lua.LState, h pluginapi.CompareHunk) *lua.LTable {
-	t := L.CreateTable(0, 3)
+	t := L.CreateTable(0, 2)
 	t.RawSetString("left", compareSideTable(L, h.Left))
 	t.RawSetString("right", compareSideTable(L, h.Right))
-	t.RawSetString("eol_only", lua.LBool(h.EOLOnly))
 	return t
 }
 
@@ -152,7 +151,7 @@ func compareSideTable(L *lua.LState, s pluginapi.CompareSide) *lua.LTable {
 	t.RawSetString("jump", lua.LNumber(s.Jump))
 	lines := L.CreateTable(len(s.Lines), 0)
 	for _, r := range s.Lines {
-		pair := L.CreateTable(0, 2)
+		pair := L.CreateTable(2, 0)
 		pair.Append(lua.LNumber(r[0]))
 		pair.Append(lua.LNumber(r[1]))
 		lines.Append(pair)
@@ -164,7 +163,7 @@ func compareSideTable(L *lua.LState, s pluginapi.CompareSide) *lua.LTable {
 			spans.Append(lua.LFalse)
 			continue
 		}
-		pair := L.CreateTable(0, 2)
+		pair := L.CreateTable(2, 0)
 		pair.Append(lua.LNumber(span.Start))
 		pair.Append(lua.LNumber(span.End))
 		spans.Append(pair)

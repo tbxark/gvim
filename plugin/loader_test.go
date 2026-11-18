@@ -320,7 +320,7 @@ func TestEnablementPrecedence(t *testing.T) {
 	}
 }
 
-func TestLegacyJavaScriptPluginsAreIgnoredWithOneNotice(t *testing.T) {
+func TestUserNonLuaFilesAreIgnored(t *testing.T) {
 	e := newEnv(t)
 	e.user("old.js", `console.log("x")`)
 	e.user("older.ts", `export {}`)
@@ -328,23 +328,13 @@ func TestLegacyJavaScriptPluginsAreIgnoredWithOneNotice(t *testing.T) {
 	e.user("new.lua", marker("new"))
 	e.start()
 
-	var legacy []string
-	for _, n := range e.notices() {
-		if strings.Contains(n, "JavaScript plugin(s) ignored") {
-			legacy = append(legacy, n)
+	if notices := e.notices(); len(notices) != 0 {
+		t.Fatalf("unexpected notices = %q", notices)
+	}
+	for _, name := range []string{"old.js", "older.ts", "types.d.ts"} {
+		if _, ok := e.h.Plugin(name); ok {
+			t.Errorf("non-Lua file %q was listed as a plugin", name)
 		}
-	}
-	if len(legacy) != 1 || legacy[0] != "2 JavaScript plugin(s) ignored (gvim plugins are Lua now): old.js, older.ts" {
-		t.Fatalf("legacy notices = %q (all %q)", legacy, e.notices())
-	}
-	for _, name := range []string{"old.js", "older.ts"} {
-		p := e.info(name)
-		if p.Status != "legacy" || p.Enabled || p.Locked == "" {
-			t.Errorf("%s = %+v", name, p)
-		}
-	}
-	if _, ok := e.h.Plugin("types.d.ts"); ok {
-		t.Error("a .d.ts file was listed")
 	}
 	if e.info("new").Status != "loaded" {
 		t.Error("the Lua plugin did not load")
@@ -463,9 +453,8 @@ func TestPluginsLoadedWaitsForParkedMainChunks(t *testing.T) {
 }
 
 // TestStartupNoticesComeInOneBurst checks the order and the text of the startup notices:
-// the one about ignored JavaScript files is said together with the load errors, after
-// them, and the count of the errors that are not named is pluralised. (The ui shows the
-// notices of one update as one status message.)
+// the count of the errors that are not named is pluralised. (The ui shows the notices of
+// one update as one status message.)
 func TestStartupNoticesComeInOneBurst(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -475,10 +464,8 @@ func TestStartupNoticesComeInOneBurst(t *testing.T) {
 		{"one more error is singular", map[string]string{"e1.lua": `local x = = 1`, "e2.lua": `local x = = 1`,
 			"e3.lua": `local x = = 1`, "e4.lua": `local x = = 1`},
 			[]string{"plugin 'e1': ", "plugin 'e2': ", "plugin 'e3': ", "1 more plugin error (Plugin: Show Log)"}},
-		{"legacy files come after the errors", map[string]string{"old.js": `x`, "e1.lua": `local x = = 1`},
-			[]string{"plugin 'e1': ", "1 JavaScript plugin(s) ignored (gvim plugins are Lua now): old.js"}},
-		{"legacy files alone", map[string]string{"old.js": `x`},
-			[]string{"1 JavaScript plugin(s) ignored (gvim plugins are Lua now): old.js"}},
+		{"non-lua files produce no notice", map[string]string{"old.js": `x`, "e1.lua": `local x = = 1`},
+			[]string{"plugin 'e1': "}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

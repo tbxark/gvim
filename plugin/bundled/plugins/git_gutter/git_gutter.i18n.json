@@ -7,14 +7,5 @@
     "status.no_changes": "No changes",
     "status.change": "Change %{n}/%{total}",
     "status.change_wrapped": "Change %{n}/%{total} [wrapped]"
-  },
-  "de": {
-    "cmd.next_change": "Nächste Änderung",
-    "cmd.next_change_desc": "Zur nächsten geänderten Region springen",
-    "cmd.prev_change": "Vorherige Änderung",
-    "cmd.prev_change_desc": "Zur vorherigen geänderten Region springen",
-    "status.no_changes": "Keine Änderungen",
-    "status.change": "Änderung %{n}/%{total}",
-    "status.change_wrapped": "Änderung %{n}/%{total} [umgebrochen]"
   }
 }

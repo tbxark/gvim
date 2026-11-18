@@ -24,20 +24,20 @@ func readableCompileError(chunk, src string, err error) error {
 	var ce *lua.CompileError
 	switch {
 	case errors.As(err, &pe):
-		src := chunk
+		source := chunk
 		if pe.Pos.Source != "" {
-			src = pe.Pos.Source
+			source = pe.Pos.Source
 		}
 		msg := strings.TrimSpace(pe.Message)
 		if pe.Pos.Line == parse.EOF {
 			// the error is at the end of the source: its last line is the line the file ends on
-			return fmt.Errorf("%s:%d: %s near <eof>", src, sourceLines(src), msg)
+			return fmt.Errorf("%s:%d: %s near <eof>", source, sourceLines(src), msg)
 		}
 		near := ""
 		if pe.Token != "" {
 			near = " near '" + pe.Token + "'"
 		}
-		return fmt.Errorf("%s:%d:%d: %s%s", src, pe.Pos.Line, pe.Pos.Column, msg, near)
+		return fmt.Errorf("%s:%d:%d: %s%s", source, pe.Pos.Line, pe.Pos.Column, msg, near)
 	case errors.As(err, &ce):
 		return fmt.Errorf("%s:%d: %s", chunk, ce.Line, ce.Message)
 	}

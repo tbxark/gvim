@@ -162,6 +162,7 @@ function Finder:open(opts)
   end
   local f = self
   self.open_ = true
+  self.finished = false
   self.selected_item = nil
   local pick = gvim.ui.picker {
     title = opts.title or self.title or "",
@@ -598,13 +599,7 @@ function M.read_snippets(items)
   for _, item in ipairs(items) do
     if item.path and (item.text == nil or item.text == "") then
       local text = nil
-      local buf = nil
-      for _, open in ipairs(gvim.buf.list()) do
-        if open:path() == item.path then
-          buf = open
-          break
-        end
-      end
+      local buf = gvim.buf.find(item.path)
       if buf then
         local ok, line = pcall(function() return buf:line(item.line or 0) end)
         if ok and line then

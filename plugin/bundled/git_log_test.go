@@ -594,7 +594,7 @@ func TestGitLogEnterOpensFileAtLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	host.SetActive(detailBuf)
-	if err := h.Run(gitLogPlugin+".git_log_detail_open_file", nil); err != nil {
+	if err := h.Run(gitLogPlugin+".git_log_enter", nil); err != nil {
 		t.Fatal(err)
 	}
 	var view *plugintest.FakeBuffer

@@ -57,10 +57,10 @@ func docFiles(t *testing.T) []string {
 	return out
 }
 
-// liveInventory loads a plugin that touches gvim.git and returns what its state exposes.
+// liveInventory loads a plugin that touches bundled library modules and returns what its state exposes.
 func liveInventory(t *testing.T) plugin.Inventory {
 	t.Helper()
-	h := plugintest.New(t, plugintest.Files{"inv.lua": "local gvim = require 'gvim'\nlocal _ = gvim.git"}, plugintest.Options{})
+	h := plugintest.New(t, plugintest.Files{"inv.lua": "local gvim = require 'gvim'\nlocal _ = gvim.git, gvim.finder, gvim.textsafe"}, plugintest.Options{})
 	h.Start()
 	inv, ok := plugin.APIInventory(h.RT, "inv")
 	if !ok {

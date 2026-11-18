@@ -273,7 +273,11 @@ func (f *FakeOS) tick() time.Time {
 
 func (f *FakeOS) abs(p string) string {
 	if !filepath.IsAbs(p) {
-		p = filepath.Join(f.Dir.Cwd, p)
+		base := f.Dir.Root
+		if base == "" {
+			base = f.Dir.Cwd
+		}
+		p = filepath.Join(base, p)
 	}
 	return filepath.Clean(p)
 }

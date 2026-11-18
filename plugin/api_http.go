@@ -65,7 +65,7 @@ func awaitHTTPGet(c *awaitCall) {
 		c.Fail(err)
 		return
 	}
-	if err := c.CheckPark(false); err != nil {
+	if err := c.CheckPark(true); err != nil {
 		c.Fail(err)
 		return
 	}

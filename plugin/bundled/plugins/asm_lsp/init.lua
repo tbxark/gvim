@@ -314,8 +314,8 @@ end
 
 gvim.command.register({
   name = "create_config",
-  title = t("cmd.create_config"),
-  description = t("cmd.create_config_desc"),
+  title = "%cmd.create_config",
+  description = "%cmd.create_config_desc",
   run = function()
     local buf = active_buffer()
     if not buf or not asm_language_for_path(buf:path()) then
@@ -328,8 +328,8 @@ gvim.command.register({
 
 gvim.command.register({
   name = "show_help",
-  title = t("cmd.show_help"),
-  description = t("cmd.show_help_desc"),
+  title = "%cmd.show_help",
+  description = "%cmd.show_help_desc",
   run = function()
     show_help()
   end,

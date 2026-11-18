@@ -94,24 +94,36 @@ func installSeams(e *apiEnv) {
 // awaitBufOpenInSplit is gvim.buf.open_file_in_split: split the focused window (right by
 // default, below with direction="below"), then open the file in it.
 func awaitBufOpenInSplit(c *awaitCall) {
+	req, t, ok := parseBufOpenRequest(c, "open_file_in_split")
+	if !ok {
+		return
+	}
 	dir := "right"
-	if t, ok := bufOptional(c, 1, "open_file_in_split"); ok {
+	if t != nil {
 		o := bufTableOpts{t: t}
-		if s, ok := o.str("direction"); ok {
+		if s, has := o.str("direction"); has {
 			dir = s
+		}
+		if o.err != "" {
+			c.Bad(2, "open_file_in_split", o.err)
+			return
 		}
 		if dir != "right" && dir != "below" {
 			c.Bad(2, "open_file_in_split", "option 'direction' must be \"right\" or \"below\"")
 			return
 		}
 	}
-	action := "split_horizontal"
+	if err := c.CheckPark(true); err != nil {
+		c.Fail(err)
+		return
+	}
+	action := "split_vertical"
 	if dir == "below" {
-		action = "split_vertical"
+		action = "split_horizontal"
 	}
 	if err := c.r.guard.Do(action, nil, 1); err != nil {
 		c.Fail(err)
 		return
 	}
-	awaitBufOpen(c)
+	startBufOpen(c, req)
 }

@@ -166,17 +166,13 @@ func TestLSPHelpPopupAndCopy(t *testing.T) {
 		}
 	}
 	// Choose an install command: it goes to the clipboard and is reported.
-	h.Emit(pluginapi.Event{Name: "action_popup_result", Data: map[string]any{
-		"popup": uint64(ov.ID), "action": "copy:copy_go",
-	}})
+	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"copy:copy_go"}})
 	if host.Clipboard != "go install golang.org/x/tools/gopls@latest" {
 		t.Errorf("clipboard = %q", host.Clipboard)
 	}
 	if got := lastNoticeText(h); got != "Copied: go install golang.org/x/tools/gopls@latest" {
 		t.Errorf("copy notice = %q", got)
 	}
-	// Let the parked popup request finish (the real host closes the popup on a choice).
-	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"copy:copy_go"}})
 }
 
 // A popup the host refuses to open must not block the next click: the request is cleared.
@@ -207,9 +203,7 @@ func TestLSPHelpNativeActionsAndDisable(t *testing.T) {
 	if ov == nil {
 		t.Fatal("no action popup was opened")
 	}
-	h.Emit(pluginapi.Event{Name: "action_popup_result", Data: map[string]any{
-		"popup": uint64(ov.ID), "action": "act:lsp_restart",
-	}})
+	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_restart"}})
 	found := false
 	for _, call := range h.Host.Cmd().Calls {
 		if call.Action == "lsp_restart" {
@@ -219,23 +213,20 @@ func TestLSPHelpNativeActionsAndDisable(t *testing.T) {
 	if !found {
 		t.Errorf("actions = %v, want a lsp_restart dispatch", h.Host.Cmd().Calls)
 	}
-	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_restart"}})
 
-	// Disable: the native action runs, the notice says so and the failure is forgotten, so
-	// a second status click opens nothing.
+	// Disable: the native targeted action runs for go, the notice says so and the failure is
+	// forgotten, so a second status click opens nothing.
 	h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
 	ov = h.Host.UI().Last("action_popup")
-	h.Emit(pluginapi.Event{Name: "action_popup_result", Data: map[string]any{
-		"popup": uint64(ov.ID), "action": "act:lsp_disable_language",
-	}})
+	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language_target"}})
 	disabled := false
 	for _, call := range h.Host.Cmd().Calls {
-		if call.Action == "lsp_disable_language" {
+		if call.Action == "lsp_disable_language_target" && call.Args["language"] == "go" {
 			disabled = true
 		}
 	}
 	if !disabled {
-		t.Errorf("actions = %v, want a lsp_disable_language dispatch", h.Host.Cmd().Calls)
+		t.Errorf("actions = %v, want a lsp_disable_language_target dispatch for go", h.Host.Cmd().Calls)
 	}
 	if got := lastNoticeText(h); got != "Go LSP disabled" {
 		t.Errorf("disable notice = %q", got)
@@ -266,9 +257,7 @@ func TestLSPHelpIgnoresUnknownAndQuietCases(t *testing.T) {
 		t.Fatal("no popup for the failure")
 	}
 	calls := len(h.Host.Cmd().Calls)
-	h.Emit(pluginapi.Event{Name: "action_popup_result", Data: map[string]any{
-		"popup": uint64(ov.ID), "action": "dismiss",
-	}})
+	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"dismiss"}})
 	if got := len(h.Host.Cmd().Calls); got != calls {
 		t.Errorf("dismiss dispatched %d actions", got-calls)
 	}

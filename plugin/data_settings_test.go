@@ -1,10 +1,12 @@
 package plugin_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/plugin/plugintest"
 )
 
@@ -169,6 +171,11 @@ func TestSettingsDefineErrors(t *testing.T) {
 		{"default out of range", `T.spy(pcall(gvim.settings.define, {a = {type = "integer", default = 5, maximum = 3}}))`, "~setting 'a': default: 5 is above the maximum 3"},
 		{"default not in the enum", `T.spy(pcall(gvim.settings.define, {a = {type = "enum", values = {"x"}, default = "y"}}))`, "~setting 'a': default: expected one of"},
 		{"minimum not a number", `T.spy(pcall(gvim.settings.define, {a = {type = "integer", minimum = "1"}}))`, "~minimum must be a number"},
+		{"nan minimum", `T.spy(pcall(gvim.settings.define, {a = {type = "number", minimum = 0/0}}))`, "~minimum must be a finite number"},
+		{"inf maximum", `T.spy(pcall(gvim.settings.define, {a = {type = "number", maximum = 1/0}}))`, "~maximum must be a finite number"},
+		{"min above max", `T.spy(pcall(gvim.settings.define, {a = {type = "integer", minimum = 5, maximum = 2}}))`, "~exceeds maximum"},
+		{"fractional integer minimum", `T.spy(pcall(gvim.settings.define, {a = {type = "integer", minimum = 1.5}}))`, "~minimum must be an integer"},
+		{"fractional integer maximum", `T.spy(pcall(gvim.settings.define, {a = {type = "integer", maximum = 3.5}}))`, "~maximum must be an integer"},
 		{"project not a boolean", `T.spy(pcall(gvim.settings.define, {a = {type = "string", project = "yes"}}))`, "~project must be a boolean"},
 		{"schema entry not a table", `T.spy(pcall(gvim.settings.define, {a = 1}))`, "~the schema maps setting names to tables"},
 		{"twice", `gvim.settings.define{} T.spy(pcall(gvim.settings.define, {}))`, "~was already called"},
@@ -176,4 +183,48 @@ func TestSettingsDefineErrors(t *testing.T) {
 			T.spy(tostring(s.b), s.i, s.s == "", s.e, #s.l)`, "false 2 true z 0"},
 	}
 	luaRows(t, gvimRows(rows))
+}
+
+func TestSettingsSchemaAndValuesCloneSlices(t *testing.T) {
+	h := settingsHarness(t, nil, nil)
+	schema, ok := h.RT.SettingsSchema("t")
+	if !ok {
+		t.Fatal("SettingsSchema returned ok=false")
+	}
+	for i := range schema {
+		switch schema[i].Key {
+		case "mode":
+			schema[i].Choices[0] = "mutated"
+		case "names":
+			def := schema[i].Default.([]string)
+			def[0] = "mutated"
+		}
+	}
+	vals, ok := h.RT.SettingsValues("t")
+	if !ok {
+		t.Fatal("SettingsValues returned ok=false")
+	}
+	for i := range vals {
+		if vals[i].Key == "names" {
+			list := vals[i].Value.([]string)
+			list[0] = "mutated-val"
+		}
+	}
+
+	schema2, _ := h.RT.SettingsSchema("t")
+	for _, s := range schema2 {
+		if s.Key == "mode" && !slices.Equal(s.Choices, []string{"a", "b"}) {
+			t.Fatalf("schema choices mutated: %v", s.Choices)
+		}
+		if s.Key == "names" && !slices.Equal(s.Default.([]string), []string{"p", "q"}) {
+			t.Fatalf("schema default mutated: %v", s.Default)
+		}
+	}
+	vals2, _ := h.RT.SettingsValues("t")
+	for _, v := range vals2 {
+		if v.Key == "names" && !slices.Equal(v.Value.([]string), []string{"p", "q"}) {
+			t.Fatalf("values slice mutated: %v", v.Value)
+		}
+	}
+	_ = plugin.DefaultTimeout
 }

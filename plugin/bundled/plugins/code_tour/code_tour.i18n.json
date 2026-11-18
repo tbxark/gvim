@@ -1,9 +1,9 @@
 {
   "en": {
     "cmd.tour_load": "Tour: Load Definition...",
-    "cmd.tour_load_desc": "Load a tour file (.fresh-tour.json or VS Code CodeTour .tour) to start a guided code tour",
+    "cmd.tour_load_desc": "Load a tour file (.gvim-tour.json or VS Code CodeTour .tour) to start a guided code tour",
     "cmd.tour_discover": "Tour: Open Workspace Tour...",
-    "cmd.tour_discover_desc": "Browse for a tour file to open (.fresh-tour.json or VS Code CodeTour .tour)",
+    "cmd.tour_discover_desc": "Browse for a tour file to open (.gvim-tour.json or VS Code CodeTour .tour)",
     "cmd.tour_next": "Tour: Next Step",
     "cmd.tour_next_desc": "Go to the next step in the tour",
     "cmd.tour_prev": "Tour: Previous Step",
@@ -28,6 +28,7 @@
     "status.jumped": "Jumped to %{file}:%{line}",
     "status.created": "Tour written to %{path}",
     "status.current_step": "Step %{step} of %{total}",
+    "status.no_tours": "No tours found",
     "error.read_failed": "Failed to read tour file: %{path}",
     "error.parse_failed": "Failed to parse %{path}: %{error}",
     "error.bad_version": "Unsupported tour schema version: %{version}",

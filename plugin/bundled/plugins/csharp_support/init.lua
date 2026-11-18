@@ -185,8 +185,8 @@ end
 
 gvim.command.register({
   name = "restore_project",
-  title = t("cmd.restore"),
-  description = t("cmd.restore_desc"),
+  title = "%cmd.restore",
+  description = "%cmd.restore_desc",
   run = function()
     local buf = active_csharp_buffer()
     if not buf then
@@ -203,8 +203,8 @@ gvim.command.register({
 
 gvim.command.register({
   name = "show_help",
-  title = t("cmd.show_help"),
-  description = t("cmd.show_help_desc"),
+  title = "%cmd.show_help",
+  description = "%cmd.show_help_desc",
   run = function()
     show_help()
   end,

@@ -139,7 +139,7 @@ func TestDashboardAutoOpensAndShowsSections(t *testing.T) {
 		t.Errorf("active buffer = %d, want the dashboard %d", got, id)
 	}
 	text := dashboardText(t, r.host)
-	for _, want := range []string{"FRESH", "Git", "branch", "main", "tracking", "↑2 ↓4", "working tree", "1 changed", "1 untracked", "↑3 ↓2", "Actions", "Show Dashboard"} {
+	for _, want := range []string{"GVIM", "Git", "branch", "main", "tracking", "↑2 ↓4", "working tree", "1 changed", "1 untracked", "↑3 ↓2", "Actions", "Show Dashboard"} {
 		if want == "Show Dashboard" {
 			continue // the dashboard content lists actions, not the palette title
 		}

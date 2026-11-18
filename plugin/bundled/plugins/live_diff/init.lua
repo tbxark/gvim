@@ -1380,7 +1380,7 @@ end)
 -- refresh when they are activated (REFRESH_AFTER_MS) or when HEAD moves (watch_git).
 gvim.on("focus_gained", function()
   local b = gvim.buf.current()
-  local st = b and b:valid() and states[b:info().id]
+  local st = b and b:valid() and states[b.id]
   if not st then
     return
   end

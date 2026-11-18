@@ -252,3 +252,39 @@ T.command("set", function() gvim.state.set("k", "A") end)`)
 		t.Fatalf("A namespace after a switch over a queued write = %v, %v", v, ok)
 	}
 }
+
+func TestWorkspaceStateSwitchCancelsPendingTimer(t *testing.T) {
+	fos := plugintest.NewFakeOS()
+	pathA := "/sessions/aaaa/plugin-state.json"
+	pathB := "/sessions/bbbb/plugin-state.json"
+	h := startWorkspace(t, fos, pathA, nil, `
+T.command("set", function() gvim.state.set("k", "A") end)`)
+	if err := h.Run("t.set", nil); err != nil {
+		t.Fatal(err)
+	}
+	if h.PendingTimers() != 1 {
+		t.Fatalf("pending timers before switch = %d, want 1", h.PendingTimers())
+	}
+	h.RT.SwitchWorkspaceState(pathB, nil, false)
+	if h.PendingTimers() != 0 {
+		t.Fatalf("pending timers after switch = %d, want 0 (stale debounce timer leaked)", h.PendingTimers())
+	}
+	h.Settle() // drain A's queued switch-flush write
+	if v, ok := workspaceValue(t, fos, pathA, "t", "k"); !ok || v != "A" {
+		t.Fatalf("A namespace after switch flush = %v, %v", v, ok)
+	}
+	countWrites := func() int {
+		n := 0
+		for _, c := range fos.Calls() {
+			if strings.HasPrefix(c, "WriteFile ") {
+				n++
+			}
+		}
+		return n
+	}
+	beforeWrites := countWrites()
+	h.Advance(time.Second)
+	if afterWrites := countWrites(); afterWrites != beforeWrites {
+		t.Fatalf("WriteFile count after Advance = %d, want %d (cancelled timer wrote after switch)", afterWrites, beforeWrites)
+	}
+}

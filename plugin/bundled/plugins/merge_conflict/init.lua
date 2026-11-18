@@ -358,6 +358,8 @@ local function shift(st, edits)
   return { lo = math.max(lo, 0), hi = math.max(hi, 0) }, lines
 end
 
+local resolve_bufs = {}
+
 local function on_open(ev)
   local st = state_for(ev.buf)
   if not st then
@@ -368,6 +370,21 @@ local function on_open(ev)
   end
   if st.dirty then
     update(st)
+  end
+end
+
+local function on_activated(ev)
+  on_open(ev)
+  local b = ev and ev.buf or gvim.buf.current()
+  local id = b and b.id or nil
+  local st = b and state_for(b) or nil
+  local active_resolve = id ~= nil and resolve_bufs[id] == true and st ~= nil and #st.conflicts > 0
+  if active_resolve then
+    if gvim.mode.current() ~= "resolve" then
+      gvim.mode.enter "resolve"
+    end
+  elseif gvim.mode.current() == "resolve" then
+    gvim.mode.leave()
   end
 end
 
@@ -406,11 +423,12 @@ local function on_changed(ev)
 end
 
 gvim.on("after_file_open", on_open)
-gvim.on("buffer_activated", on_open)
+gvim.on("buffer_activated", on_activated)
 gvim.on("after_file_revert", on_revert)
 gvim.on("buffer_changed", on_changed, { debounce = DEBOUNCE_MS })
 gvim.on("buffer_closed", function(ev)
   states[ev.id] = nil
+  resolve_bufs[ev.id] = nil
 end)
 
 -- ---------- commands ----------
@@ -522,6 +540,10 @@ local CHOICES = {
 }
 
 local function leave_mode()
+  local cur = gvim.buf.current()
+  if cur then
+    resolve_bufs[cur.id] = nil
+  end
   if gvim.mode.current() == "resolve" then
     gvim.mode.leave()
   end
@@ -600,6 +622,7 @@ local function start()
   if not containing(st, b:cursor().line) then
     goto_conflict(1)
   end
+  resolve_bufs[b.id] = true
   gvim.mode.enter "resolve"
   gvim.notify(("%d conflict%s. %s"):format(n, n == 1 and "" or "s", HELP))
 end

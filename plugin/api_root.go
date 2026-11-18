@@ -200,9 +200,11 @@ func (p *plugin) formatArgs(L *lua.LState) string {
 	return strings.Join(parts, " ")
 }
 
+var notifyNewlineReplacer = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
 // notifyUser implements gvim.notify: newlines become spaces and the message is clipped.
 func (p *plugin) notifyUser(level pluginapi.Level, msg string) {
-	msg = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(msg)
+	msg = notifyNewlineReplacer.Replace(msg)
 	msg = clipMsg(msg, maxNotify)
 	p.r.logf(p.name, string(level), msg)
 	p.r.host.Notify(p.name, level, msg)

@@ -294,7 +294,8 @@ func TestBinaryBundledPluginsLoad(t *testing.T) {
 	// live_diff is opt-in like Fresh's; vi_mode ships with "default_enabled": false too, and
 	// git_log is off for the idle-heap gate (it pushed the default set over 8 MiB).
 	offByDefault := map[string]bool{
-		"env_manager": true, "flash": true, "vi_mode": true, "live_diff": true, "git_log": true, "compare_files": true, "lsp_navigation": true, "find_references": true, "dashboard": true, "code_tour": true, "merge_conflict": true, "git_grep": true, "git_explorer": true, "asm_lsp": true, "csharp_support": true, "clangd_support": true, "welcome": true, "welcome_screen": true, "markdown_source": true, "rust_lsp": true, "deno_lsp": true, "diff_nav": true, "slang_lsp": true, "live_sessions": true, "audit_mode": true, "devcontainer": true, "k8s_workspace": true, "pkg": true}
+		"env_manager": true, "flash": true, "vi_mode": true, "live_diff": true, "git_log": true, "lsp_navigation": true, "find_references": true, "dashboard": true, "code_tour": true, "merge_conflict": true, "git_grep": true, "git_explorer": true, "asm_lsp": true, "csharp_support": true, "clangd_support": true, "diff_nav": true, "slang_lsp": true, "audit_mode": true,
+	}
 	var names []string
 	for _, r := range e.h.RT.Plugins() {
 		switch {
@@ -308,6 +309,9 @@ func TestBinaryBundledPluginsLoad(t *testing.T) {
 			t.Errorf("bundled row %+v, want an enabled, loaded bundled plugin", r)
 		}
 		names = append(names, r.Name)
+	}
+	if len(names) != 27 {
+		t.Errorf("bundled plugin count = %d (%v), want 27", len(names), names)
 	}
 	for _, want := range []string{"goto_with_selection", "tab_actions", "flash", "merge_conflict", "vi_mode"} {
 		if !slices.Contains(names, want) {

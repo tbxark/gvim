@@ -1100,8 +1100,8 @@ func (r *Runtime) rootPath(path string) string {
 	return path
 }
 
-// awaitBufOpen is gvim.buf.open(path, opts?).
-func awaitBufOpen(c *awaitCall) {
+// parseBufOpenRequest validates the path and open options for buf.open / buf.open_file_in_split.
+func parseBufOpenRequest(c *awaitCall, fn string) (pluginapi.OpenRequest, *lua.LTable, bool) {
 	var req pluginapi.OpenRequest
 	var s lua.LString
 	ok := false
@@ -1109,17 +1109,17 @@ func awaitBufOpen(c *awaitCall) {
 		s, ok = c.args[0].(lua.LString)
 	}
 	if !ok {
-		c.Bad(1, "open", "string expected")
-		return
+		c.Bad(1, fn, "string expected")
+		return req, nil, false
 	}
 	if s == "" {
 		c.Fail(pluginapi.Errf(pluginapi.CodeInvalid, "empty path"))
-		return
+		return req, nil, false
 	}
 	req.Path = c.r.rootPath(string(s))
-	t, ok := bufOptional(c, 1, "open")
+	t, ok := bufOptional(c, 1, fn)
 	if !ok {
-		return
+		return req, nil, false
 	}
 	opts := bufTableOpts{t: t}
 	req.Focus = opts.boolean("focus", true)
@@ -1128,19 +1128,20 @@ func awaitBufOpen(c *awaitCall) {
 	if pv := opts.get("pos"); pv != lua.LNil {
 		pos, err := posFromLua(pv)
 		if err != nil {
-			c.Bad(2, "open", "option 'pos': "+err.Error())
-			return
+			c.Bad(2, fn, "option 'pos': "+err.Error())
+			return req, nil, false
 		}
 		req.Pos = &pos
 	}
 	if opts.err != "" {
-		c.Bad(2, "open", opts.err)
-		return
+		c.Bad(2, fn, opts.err)
+		return req, nil, false
 	}
-	if err := c.CheckPark(false); err != nil {
-		c.Fail(err)
-		return
-	}
+	return req, t, true
+}
+
+// startBufOpen issues Host.Open and parks c until completion.
+func startBufOpen(c *awaitCall, req pluginapi.OpenRequest) {
 	tok := c.NewToken()
 	if err := c.r.guard.Open(tok, req); err != nil {
 		c.Fail(err)
@@ -1158,6 +1159,19 @@ func awaitBufOpen(c *awaitCall) {
 		}
 		return []lua.LValue{lua.LTrue, lua.LNil, lua.LString("io: open finished without a buffer")}
 	}})
+}
+
+// awaitBufOpen is gvim.buf.open(path, opts?).
+func awaitBufOpen(c *awaitCall) {
+	req, _, ok := parseBufOpenRequest(c, "open")
+	if !ok {
+		return
+	}
+	if err := c.CheckPark(false); err != nil {
+		c.Fail(err)
+		return
+	}
+	startBufOpen(c, req)
 }
 
 // awaitBufSave is b:save(path?).

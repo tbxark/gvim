@@ -100,7 +100,6 @@ func (Unsupported) GetWindowState(string, BufferID, string) (any, bool) {
 func (Unsupported) SetWindowState(string, BufferID, string, any) error {
 	return unsupported("SetWindowState")
 }
-func (Unsupported) ClearWindowState(string, BufferID, string) {}
 func (Unsupported) SetLineTargets(string, BufferID, []LineTarget) error {
 	return unsupported("SetLineTargets")
 }
@@ -151,6 +150,7 @@ func (Unsupported) UnmountWidgetPanel(PanelID)                 {}
 func (Unsupported) WidgetCommand(PanelID, WidgetAction) error  { return unsupported("WidgetCommand") }
 func (Unsupported) WidgetMutate(PanelID, WidgetMutation) error { return unsupported("WidgetMutate") }
 func (Unsupported) CancelWait(Token)                           {}
+func (Unsupported) OpenURL(string) error                       { return unsupported("OpenURL") }
 func (Unsupported) SetCommands(string, []CommandInfo)          {}
 func (Unsupported) SetBindings(string, []Binding)              {}
 func (Unsupported) SetModes(string, []ModeInfo)                {}

@@ -849,7 +849,7 @@ local function fetch_disk()
   if root ~= "" then
     table.insert(candidates, root)
   end
-  local home = gvim.env.get("HOME")
+  local home = gvim.dirs.home()
   if home and home ~= "" then
     table.insert(candidates, home)
   end
@@ -1222,7 +1222,7 @@ local function paint()
     line[#line + 1] = { text = border_right, style = STYLE.frame }
     frame[#frame + 1] = { segments = line }
   end
-  local title = " FRESH "
+  local title = " GVIM "
   local stamp = " " .. clock() .. " "
   local fill = math.max(inner - 2 - visual_width(title) - visual_width(stamp), 2)
   local top = {
@@ -1558,10 +1558,13 @@ local function open_dashboard(auto)
   pcall(buf.set_option, buf, "wrap", false)
   pcall(buf.set_mode, buf, "dashboard")
   state.timer = gvim.timer.every(math.max(settings.refresh_seconds, 1) * 1000, function()
-    if valid_buf() then
-      refresh(false)
-    else
+    if not valid_buf() then
       stop_timer()
+      return
+    end
+    local cur = gvim.buf.current()
+    if cur and cur.id == state.buf.id then
+      refresh(false)
     end
   end)
   refresh(true)
@@ -1604,9 +1607,11 @@ local function activate_row()
     return
   end
   if row.kind == "action" and row.action then
-    local ok, err = pcall(gvim.command.run, row.action, nil)
+    local ok, res, run_err = pcall(gvim.command.run, row.action, nil)
     if not ok then
-      notify("Dashboard: " .. tostring(err))
+      notify("Dashboard: " .. tostring(res))
+    elseif not res then
+      notify("Dashboard: " .. tostring(run_err))
     end
   end
 end
@@ -1701,6 +1706,7 @@ gvim.mode.define {
   fallthrough = true,
   bindings = {
     tab = "dashboard.focus_next",
+    ["shift+tab"] = "dashboard.focus_prev",
     down = "dashboard.focus_next",
     j = "dashboard.focus_next",
     up = "dashboard.focus_prev",

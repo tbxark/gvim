@@ -224,6 +224,17 @@ local function clamp(v, lo, hi)
   return v
 end
 
+local function utf8_take(s, count)
+  local i, taken = 1, 0
+  while i <= #s and taken < count do
+    local b = s:byte(i)
+    local w = b < 0x80 and 1 or (b < 0xE0 and 2 or (b < 0xF0 and 3 or 4))
+    i = i + w
+    taken = taken + 1
+  end
+  return s:sub(1, math.min(i - 1, #s))
+end
+
 -- Fresh's authorInitials: "Ann Author" -> "AA", one word -> its first two letters.
 local function author_initials(author)
   local cleaned = author:gsub("[<>].*", ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -238,11 +249,11 @@ local function author_initials(author)
     return "??"
   end
   if #parts == 1 then
-    return clip(parts[1]:upper(), 2)
+    return gvim.text.upper(utf8_take(parts[1], 2))
   end
-  local first = parts[1]:sub(1, 1)
-  local last = parts[#parts]:sub(1, 1)
-  return (first .. last):upper()
+  local first = utf8_take(parts[1], 1)
+  local last = utf8_take(parts[#parts], 1)
+  return gvim.text.upper(first .. last)
 end
 
 local function short_hash(hash)
@@ -1038,10 +1049,32 @@ load_detail = function(index)
       buf:set_read_only(false)
       buf:set_text(text)
       buf:set_read_only(true)
-      detail.lines = 0
-      for _ in text:gmatch("\n") do
-        detail.lines = detail.lines + 1
+      local start, idx = 1, 0
+      while start <= #text do
+        local nl = text:find("\n", start, true)
+        if not nl and start > #text then
+          break
+        end
+        if nl == nil and start == #text + 1 then
+          break
+        end
+        local line = nl and text:sub(start, nl - 1) or text:sub(start)
+        if idx < MAX_DIFF_LINES then
+          classify_one_line(line, idx)
+          detail.last_line = idx
+        end
+        idx = idx + 1
+        if not nl then
+          break
+        end
+        start = nl + 1
       end
+      detail.lines = idx
+      if detail.last_line >= 0 then
+        close_run(detail.last_line)
+        close_fold_file(detail.last_line)
+      end
+      detail.hunks, detail.folds = {}, {}
       detail.done = true
       apply_meta(sha)
       restore_window_state(sha)
@@ -1201,6 +1234,10 @@ local function unsubscribe()
     state.closed_sub:off()
     state.closed_sub = nil
   end
+  if state.group_closed_sub then
+    state.group_closed_sub:off()
+    state.group_closed_sub = nil
+  end
 end
 
 local function on_buffer_closed(ev)
@@ -1300,6 +1337,12 @@ local function bind_group(group, bufs)
     schedule_detail(line)
   end, { buf = bufs.log })
   state.closed_sub = gvim.on("buffer_closed", on_buffer_closed)
+  state.group_closed_sub = gvim.on("buffer_group_closed", function(ev)
+    if state.open and ev.group == state.group then
+      close_log(true)
+      gvim.notify(t("status.closed"))
+    end
+  end)
   gvim.buf.set_group_title(group, {
     { text = "Git Log" },
     { text = state.path_filter and (": " .. gvim.path.basename(state.path_filter)) or "" },
@@ -1448,39 +1491,6 @@ local function copy_hash()
   gvim.notify(t("status.hash_copied", { short = commit.short_hash, full = commit.hash }))
 end
 
-local function log_window_rows()
-  local group = state.group
-  if not group then
-    return 10
-  end
-  local panels = gvim.buf.group_panels(group)
-  for _, panel in ipairs(panels or {}) do
-    if panel.name == "log" and panel.window then
-      local ok, size = pcall(function() return panel.window:size() end)
-      if ok and type(size) == "table" and type(size.height) == "number" and size.height > 0 then
-        return size.height
-      end
-    end
-  end
-  return 10
-end
-
-local function move_page(delta)
-  if not state.open or not state.bufs.log or #state.commits == 0 then
-    return
-  end
-  local rows = math.max(log_window_rows(), 1)
-  local line = state.bufs.log:cursor().line
-  set_cursor(state.bufs.log, clamp(line + delta * rows, 0, #state.commits - 1), true)
-end
-
-local function move_edge(last)
-  if not state.open or not state.bufs.log or #state.commits == 0 then
-    return
-  end
-  set_cursor(state.bufs.log, last and (#state.commits - 1) or 0, true)
-end
-
 local function file_view_close()
   local buf = gvim.buf.current()
   if buf then
@@ -1611,15 +1621,10 @@ local function register_commands()
   local hidden = {
     { "git_log_prev", function() move_selection(-1) end },
     { "git_log_next", function() move_selection(1) end },
-    { "git_log_page_up", function() move_page(-1) end },
-    { "git_log_page_down", function() move_page(1) end },
-    { "git_log_first", function() move_edge(false) end },
-    { "git_log_last", function() move_edge(true) end },
     { "git_log_enter", function() enter_pane() end },
     { "git_log_tab", function() switch_pane() end },
     { "git_log_copy_hash", function() copy_hash() end },
     { "git_log_file_view_close", function() file_view_close() end },
-    { "git_log_detail_open_file", function() detail_open_at_cursor() end },
     { "detail_up", function() step_detail(-1) end },
     { "detail_down", function() step_detail(1) end },
   }

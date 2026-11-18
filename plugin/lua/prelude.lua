@@ -100,7 +100,9 @@ end
 function M.xpcall(f, handler, ...)
   local r = pack(M.pcall(f, ...))
   if r[1] then return unpack(r, 1, r.n) end
-  return false, handler(r[2])
+  local ok, res = M.pcall(handler, r[2])
+  if not ok then return false, "error in error handling" end
+  return false, res
 end
 
 -- mk(kind) makes an async function that returns one value, or (nil, err) on failure.

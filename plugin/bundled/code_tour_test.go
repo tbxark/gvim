@@ -100,11 +100,11 @@ func codeTourJSON() string {
 	]}`
 }
 
-// vscodeTourJSON is a two-step VS Code CodeTour manifest (0-based line).
+// vscodeTourJSON is a two-step VS Code CodeTour manifest (1-based line per CodeTour spec).
 func vscodeTourJSON() string {
 	return `{"title":"VS Tour","steps":[
-	  {"title":"vs one","file":"src/a.go","line":0,"description":"first"},
-	  {"title":"vs two","file":"src/a.go","line":2,"description":"second"}
+	  {"title":"vs one","file":"src/a.go","line":1,"description":"first"},
+	  {"title":"vs two","file":"src/a.go","line":3,"description":"second"}
 	]}`
 }
 
@@ -162,12 +162,12 @@ func TestCodeTourManifestAndLoad(t *testing.T) {
 func TestCodeTourLoadsAndWalksSteps(t *testing.T) {
 	t.Parallel()
 	host, os := codeTourHost(t)
-	os.SetFile("/w/demo.fresh-tour.json", codeTourJSON())
+	os.SetFile("/w/demo.gvim-tour.json", codeTourJSON())
 	h := startCodeTour(t, host, os)
 	if err := h.Run(codeTourPlugin+".load", nil); err != nil {
 		t.Fatal(err)
 	}
-	resolvePrompt(t, h, "demo.fresh-tour.json")
+	resolvePrompt(t, h, "demo.gvim-tour.json")
 	h.CompleteBuffers()
 	h.Advance(20 * time.Millisecond)
 
@@ -229,12 +229,12 @@ func TestCodeTourLoadsAndWalksSteps(t *testing.T) {
 func TestCodeTourTitleRunIsStyled(t *testing.T) {
 	t.Parallel()
 	host, os := codeTourHost(t)
-	os.SetFile("/w/demo.fresh-tour.json", codeTourJSON())
+	os.SetFile("/w/demo.gvim-tour.json", codeTourJSON())
 	h := startCodeTour(t, host, os)
 	if err := h.Run(codeTourPlugin+".load", nil); err != nil {
 		t.Fatal(err)
 	}
-	resolvePrompt(t, h, "demo.fresh-tour.json")
+	resolvePrompt(t, h, "demo.gvim-tour.json")
 	h.CompleteBuffers()
 	h.Advance(20 * time.Millisecond)
 	panels := codeTourPanels(h)
@@ -281,7 +281,7 @@ func TestCodeTourErrors(t *testing.T) {
 	host, os := codeTourHost(t)
 	os.SetFile("/w/bad.tour", "{ not json")
 	os.SetFile("/w/empty.tour", `{"title":"none","steps":[]}`)
-	os.SetFile("/w/version.fresh-tour.json", `{"title":"x","schema_version":"9.0","steps":[{"title":"s"}]}`)
+	os.SetFile("/w/version.gvim-tour.json", `{"title":"x","schema_version":"9.0","steps":[{"title":"s"}]}`)
 	h := startCodeTour(t, host, os)
 	cases := []struct {
 		path string
@@ -290,7 +290,7 @@ func TestCodeTourErrors(t *testing.T) {
 		{"missing.tour", "Failed to read tour file"},
 		{"bad.tour", "Failed to parse"},
 		{"empty.tour", "Tour has no steps"},
-		{"version.fresh-tour.json", "Unsupported tour schema version"},
+		{"version.gvim-tour.json", "Unsupported tour schema version"},
 	}
 	for _, tc := range cases {
 		if err := h.Run(codeTourPlugin+".load", nil); err != nil {
@@ -380,4 +380,30 @@ func TestCodeTourCommitDriftMatchesHEADPrefix(t *testing.T) {
 	if text := widgetText(panels[0].Panel.Root); strings.Contains(text, "recorded at") {
 		t.Fatalf("panel text = %q, want no drift warning for a matching HEAD", text)
 	}
+}
+
+func TestCodeTourDiscoverIgnoresFreshTourFiles(t *testing.T) {
+	t.Parallel()
+	host, os := codeTourHost(t)
+	os.SetFile("/w/app.gvim-tour.json", codeTourJSON())
+	os.SetFile("/w/legacy.fresh-tour.json", codeTourJSON())
+	os.SetFile("/w/.tours/walkthrough.tour", vscodeTourJSON())
+	os.SetFile("/w/.tours/extra.json", vscodeTourJSON())
+	h := startCodeTour(t, host, os)
+	if err := h.Run(codeTourPlugin+".discover", nil); err != nil {
+		t.Fatal(err)
+	}
+	pick := h.Host.UI().Last("picker")
+	if pick == nil || !pick.Open {
+		t.Fatalf("no tour discovery picker open (notices %v log %v)", h.NoticeTexts(), h.LogText(""))
+	}
+	var details []string
+	for _, it := range pick.Picker.Items {
+		details = append(details, it.Detail)
+	}
+	want := []string{".tours/extra.json", ".tours/walkthrough.tour", "app.gvim-tour.json"}
+	if !slices.Equal(details, want) {
+		t.Fatalf("discovered tours = %v, want %v", details, want)
+	}
+	h.Resolve(pluginapi.Completion{Token: pick.Token})
 }

@@ -101,7 +101,7 @@ local function parse(root, output)
     i = i + 1
     if #entry >= 3 then
       local x, y, path = entry:sub(1, 1), entry:sub(2, 2), entry:sub(4)
-      if (x == "R" or x == "C") and i <= #entries then
+      if (x == "R" or x == "C" or y == "R" or y == "C") and i <= #entries then
         i = i + 1 -- the original path of a rename/copy follows as its own entry
       end
       local d = status_to_decoration(x, y)
@@ -447,8 +447,6 @@ gvim.on("after_file_save", refresh)
 gvim.on("after_file_revert", refresh)
 gvim.on("focus_gained", refresh)
 gvim.on("config_changed", refresh)
-
-refresh()
 
 -- Stop the watcher and make any yielded discovery/status step stop applying its result
 -- once the plugin is unloaded.

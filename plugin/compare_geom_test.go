@@ -103,9 +103,6 @@ func TestBuildCompareResult(t *testing.T) {
 	if len(insert.Left.Spans) != 0 || len(insert.Right.Spans) != 0 {
 		t.Fatalf("insert spans = %v / %v, want none", insert.Left.Spans, insert.Right.Spans)
 	}
-	if res.Hunks[0].EOLOnly || res.Hunks[1].EOLOnly {
-		t.Fatal("gvim normalises line endings; eol_only must stay false")
-	}
 }
 
 // TestCompareSpansAreUTF8Safe checks the span of a pair that differs in the middle

@@ -163,8 +163,8 @@ end
 
 gvim.command.register({
   name = "check",
-  title = t("cmd.check"),
-  description = t("cmd.check_desc"),
+  title = "%cmd.check",
+  description = "%cmd.check_desc",
   run = function()
     check_slang()
   end,
@@ -172,8 +172,8 @@ gvim.command.register({
 
 gvim.command.register({
   name = "copy_install",
-  title = t("cmd.copy_install"),
-  description = t("cmd.copy_install_desc"),
+  title = "%cmd.copy_install",
+  description = "%cmd.copy_install_desc",
   run = function()
     copy_install()
   end,
@@ -181,8 +181,8 @@ gvim.command.register({
 
 gvim.command.register({
   name = "help",
-  title = t("cmd.help"),
-  description = t("cmd.help_desc"),
+  title = "%cmd.help",
+  description = "%cmd.help_desc",
   run = function()
     show_help()
   end,

@@ -11,8 +11,9 @@ import (
 )
 
 // FS holds the embedded plugin and library files. Paths start with "plugins/" or "lib/".
+// Markdown READMEs are excluded so documentation does not inflate the binary.
 //
-//go:embed all:plugins all:lib
+//go:embed plugins/*/*.lua plugins/*/*.json plugins/*/lua/*/*.lua lib/*.lua
 var FS embed.FS
 
 // Lib returns the source of the bundled Lua module lib/<name>.lua, which the runtime's

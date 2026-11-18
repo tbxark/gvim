@@ -85,15 +85,15 @@ end
 
 gvim.command.register {
   name = "find",
-  title = t("cmd.find"),
-  description = t("cmd.find_desc"),
+  title = "%cmd.find",
+  description = "%cmd.find_desc",
   run = find_file,
 }
 
 gvim.command.register {
   name = "reload",
-  title = t("cmd.reload"),
-  description = t("cmd.reload_desc"),
+  title = "%cmd.reload",
+  description = "%cmd.reload_desc",
   run = function()
     gvim.notify(t("status.loading"))
     find_file()

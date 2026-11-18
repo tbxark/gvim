@@ -1,6 +1,11 @@
 package plugintest
 
-import "github.com/tbxark/gvim/pluginapi"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/tbxark/gvim/pluginapi"
+)
 
 // File explorer decorations and slots of the fake host (task-61).
 
@@ -16,7 +21,12 @@ func explorerSets(f *FakeHost, key string) map[string]any {
 // SetExplorerDecorations records a namespace's decorated rows.
 func (f *FakeHost) SetExplorerDecorations(plugin, ns string, decorations []pluginapi.FileExplorerDecoration) error {
 	f.rec("SetExplorerDecorations", plugin, ns, len(decorations))
-	explorerSets(f, "explorertdeco")[plugin+"\x00"+ns] = append([]pluginapi.FileExplorerDecoration(nil), decorations...)
+	m := explorerSets(f, "explorertdeco")
+	if len(decorations) == 0 {
+		delete(m, plugin+"\x00"+ns)
+		return nil
+	}
+	m[plugin+"\x00"+ns] = append([]pluginapi.FileExplorerDecoration(nil), decorations...)
 	return nil
 }
 
@@ -29,7 +39,12 @@ func (f *FakeHost) ClearExplorerDecorations(plugin, ns string) {
 // SetExplorerSlots records a namespace's slot overrides.
 func (f *FakeHost) SetExplorerSlots(plugin, ns string, slots []pluginapi.FileExplorerSlot) error {
 	f.rec("SetExplorerSlots", plugin, ns, len(slots))
-	explorerSets(f, "explorerslots")[plugin+"\x00"+ns] = append([]pluginapi.FileExplorerSlot(nil), slots...)
+	m := explorerSets(f, "explorerslots")
+	if len(slots) == 0 {
+		delete(m, plugin+"\x00"+ns)
+		return nil
+	}
+	m[plugin+"\x00"+ns] = append([]pluginapi.FileExplorerSlot(nil), slots...)
 	return nil
 }
 
@@ -49,4 +64,34 @@ func (f *FakeHost) ExplorerDecorations(plugin, ns string) []pluginapi.FileExplor
 func (f *FakeHost) ExplorerSlots(plugin, ns string) []pluginapi.FileExplorerSlot {
 	v, _ := explorerSets(f, "explorerslots")[plugin+"\x00"+ns].([]pluginapi.FileExplorerSlot)
 	return append([]pluginapi.FileExplorerSlot(nil), v...)
+}
+
+func (f *FakeHost) dropExplorer(plugin string) {
+	prefix := plugin + "\x00"
+	for _, key := range []string{"explorertdeco", "explorerslots"} {
+		m, _ := f.Ext[key].(map[string]any)
+		for k := range m {
+			if strings.HasPrefix(k, prefix) {
+				delete(m, k)
+			}
+		}
+	}
+}
+
+func init() {
+	RegisterResourceKind(func(f *FakeHost) []string {
+		var out []string
+		for _, pair := range []struct{ key, prefix string }{
+			{"explorertdeco", "explorer_decor:"},
+			{"explorerslots", "explorer_slots:"},
+		} {
+			m, _ := f.Ext[pair.key].(map[string]any)
+			for k := range m {
+				p, ns, _ := strings.Cut(k, "\x00")
+				out = append(out, fmt.Sprintf("%s%s/%s", pair.prefix, p, ns))
+			}
+		}
+		return out
+	})
+	OnOwnerGone(func(f *FakeHost, plugin string, _ uint64) { f.dropExplorer(plugin) })
 }

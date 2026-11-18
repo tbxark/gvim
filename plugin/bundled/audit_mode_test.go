@@ -1742,6 +1742,34 @@ func runAllWork(h *plugintest.Harness) {
 	}
 }
 
+// runnableWork drains until the runtime hands out a Work with a Run closure, ignoring
+// queued timers, so tests can interleave host completions around async work.
+func runnableWork(h *plugintest.Harness) *pluginapi.Work {
+	for i := 0; i < 20; i++ {
+		work, more := h.RT.Drain(100 * time.Millisecond)
+		for j := range work {
+			if work[j].Run != nil {
+				return &work[j]
+			}
+		}
+		if !more {
+			return nil
+		}
+	}
+	return nil
+}
+
+// drainRuntime pumps the runtime without running any Work so async scans can be stepped
+// by hand alongside host completions.
+func drainRuntime(h *plugintest.Harness) {
+	for i := 0; i < 20; i++ {
+		work, more := h.RT.Drain(100 * time.Millisecond)
+		if len(work) == 0 && !more {
+			return
+		}
+	}
+}
+
 func TestAuditModeSaveReloadSetContentErrorVisible(t *testing.T) {
 	t.Parallel()
 	host, os := auditHost(t)

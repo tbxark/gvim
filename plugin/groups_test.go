@@ -176,3 +176,35 @@ func TestPluginsCannotTouchEachOthersGroups(t *testing.T) {
 		t.Fatalf("the owner's scroll sync = %+v, want it kept", sg)
 	}
 }
+
+func TestBufferGroupClosedFreesTrackingWithoutSubscriber(t *testing.T) {
+	src := `
+local gvim = require 'gvim'
+gvim.command.register{ name = "open", run = function()
+  local layout = gvim.json.encode{ type = "scrollable", id = "files" }
+  local id = gvim.buf.create_group("G", layout)
+  gvim.notify("id:" .. tostring(id))
+end }
+`
+	h := plugintest.New(t, plugintest.Files{"g.lua": src}, plugintest.Options{})
+	h.Start()
+	if err := h.Run("g.open", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !h.RT.Wants("buffer_group_closed") {
+		t.Fatal("Wants(buffer_group_closed) = false while group is open")
+	}
+	var gid uint64
+	for _, n := range h.NoticeTexts() {
+		if rest, ok := strings.CutPrefix(n, "id:"); ok {
+			_, _ = fmt.Sscanf(rest, "%d", &gid)
+		}
+	}
+	if gid == 0 {
+		t.Fatalf("no group id in %v", h.NoticeTexts())
+	}
+	h.Emit(pluginapi.Event{Name: "buffer_group_closed", Data: map[string]any{"group": gid}})
+	if h.RT.Wants("buffer_group_closed") {
+		t.Fatal("Wants(buffer_group_closed) stayed true after buffer_group_closed")
+	}
+}
