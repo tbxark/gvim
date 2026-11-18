@@ -1,8 +1,11 @@
 package lsphost
 
 import (
+	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -168,7 +171,11 @@ func TestDiagnosticTextTakesPlainAndMarkupMessages(t *testing.T) {
 
 func TestWorkspaceEditConvertsTextAndResourceOperations(t *testing.T) {
 	t.Parallel()
-	port := newPort(lspPlan{}, true, nil)
+	port := newPort(lspPlan{
+		servers: map[string][]manager.ServerConfig{
+			"go": {{Command: []string{"gopls"}}},
+		},
+	}, true, nil)
 	text := "x := foo\n"
 	port.docs["/p/b.go"] = lspDocRec{lang: "go", text: text, lines: newTextLines(text)}
 	version := int32(3)
@@ -217,7 +224,11 @@ func TestWorkspaceEditConvertsTextAndResourceOperations(t *testing.T) {
 // the root drains it later.
 func TestServerApplyEditIsQueuedAndDrained(t *testing.T) {
 	t.Parallel()
-	port := newPort(lspPlan{}, true, nil)
+	port := newPort(lspPlan{
+		servers: map[string][]manager.ServerConfig{
+			"go": {{Command: []string{"gopls"}}},
+		},
+	}, true, nil)
 	label := "organize"
 	if applied, reason := port.enqueueEdit("go", protocol.ApplyWorkspaceEditParams{Label: &label, Edit: protocol.WorkspaceEdit{}}); !applied {
 		t.Fatalf("the queue refused an edit: %s", reason)
@@ -235,7 +246,11 @@ func TestServerApplyEditIsQueuedAndDrained(t *testing.T) {
 // cannot convert is answered as not applied instead of being queued and dropped.
 func TestServerApplyEditRefusesAnUnconvertibleEdit(t *testing.T) {
 	t.Parallel()
-	port := newPort(lspPlan{}, true, nil)
+	port := newPort(lspPlan{
+		servers: map[string][]manager.ServerConfig{
+			"go": {{Command: []string{"gopls"}}},
+		},
+	}, true, nil)
 	bad := protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
 		&protocol.TextDocumentEdit{
 			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: "file:///p/a.go"}},
@@ -275,5 +290,135 @@ func TestRangesOverlapForCodeActionContext(t *testing.T) {
 				t.Fatalf("rangesOverlap = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWorkspaceEditTracksRenameAndRefusesUnreadableUnopenedFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldFile := filepath.Join(dir, "old.go")
+	newFile := filepath.Join(dir, "new.go")
+	if err := os.WriteFile(oldFile, []byte("package p\r\nvar x = \U0001F600 + old\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	port := newPort(lspPlan{
+		servers: map[string][]manager.ServerConfig{
+			"go": {{Command: []string{"gopls"}}},
+		},
+	}, true, nil)
+	uriOf := func(p string) uri.URI { return uri.URI(lsp.PathURI(p)) }
+
+	// Rename old.go -> new.go, then edit new.go; CRLF must normalize and rune cols must map from old's text.
+	edit := &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
+		&protocol.RenameFile{Kind: "rename", OldURI: uriOf(oldFile), NewURI: uriOf(newFile)},
+		&protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uriOf(newFile)}},
+			Edits: []protocol.TextDocumentEditElement{&protocol.TextEdit{
+				Range:   protocol.Range{Start: protocol.Position{Line: 1, Character: 13}, End: protocol.Position{Line: 1, Character: 16}},
+				NewText: "renamed",
+			}},
+		},
+	}}
+	got, err := port.workspaceEdit(edit, "rename")
+	if err != nil {
+		t.Fatalf("workspaceEdit rename+edit: %v", err)
+	}
+	if len(got.Ops) != 2 || got.Ops[1].Edits[0].From != (buffer.Pos{Line: 1, Col: 12}) || got.Ops[1].Edits[0].To != (buffer.Pos{Line: 1, Col: 15}) {
+		t.Fatalf("ops = %+v, want rune cols 12..15 after emoji", got.Ops)
+	}
+
+	// An unopened file that cannot be read must be refused rather than silently clamping columns to 0.
+	missing := filepath.Join(dir, "missing.go")
+	bad := &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
+		&protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uriOf(missing)}},
+			Edits: []protocol.TextDocumentEditElement{&protocol.TextEdit{
+				Range:   protocol.Range{Start: protocol.Position{Line: 0, Character: 4}, End: protocol.Position{Line: 0, Character: 7}},
+				NewText: "y",
+			}},
+		},
+	}}
+	if _, err := port.workspaceEdit(bad, "bad"); err == nil {
+		t.Fatal("workspaceEdit succeeded for unreadable unopened file, want refusal")
+	}
+}
+
+func TestRemoteReadFileAndSetSpawnEnvAndServersPriority(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	localOnly := filepath.Join(dir, "local.go")
+	if err := os.WriteFile(localOnly, []byte("from local disk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	port := newPort(lspPlan{
+		servers: map[string][]manager.ServerConfig{
+			"go": {{Command: []string{"gopls"}}},
+		},
+	}, true, nil)
+	port.SetRemoteReadFile(func(_ context.Context, p string) ([]byte, error) {
+		if p == "/remote/a.go" {
+			return []byte("line1\r\nline2\r\n"), nil
+		}
+		return nil, errors.New("not found")
+	})
+	if got := port.textOf("/remote/a.go"); got != "line1\nline2\n" {
+		t.Fatalf("remote textOf = %q, want normalized LF", got)
+	}
+	if got := port.textOf(localOnly); got != "" {
+		t.Fatalf("remote textOf read local file %q: %q", localOnly, got)
+	}
+
+	// SetSpawnEnv propagates to already-created managers.
+	mgr := port.managerFor(dir)
+	var called int
+	port.SetSpawnEnv(func() []string { called++; return []string{"FROM_PORT=1"} })
+	mgr.SetSpawner(func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
+		if !strings.Contains(strings.Join(cfg.Env, ","), "FROM_PORT=1") {
+			t.Errorf("live manager env = %v, want FROM_PORT=1", cfg.Env)
+		}
+		return nil, errors.New("stop")
+	})
+	_ = mgr.StartLanguage("go")
+	if called == 0 {
+		t.Fatal("updated spawnEnv was not propagated to live manager")
+	}
+}
+
+func TestServerStatePriorityPrefersRunningOverStopped(t *testing.T) {
+	t.Parallel()
+	if serverStatePriority(manager.ServerRunning) <= serverStatePriority(manager.ServerStopped) {
+		t.Fatal("ServerRunning priority must exceed ServerStopped")
+	}
+	if serverStatePriority(manager.ServerRunning) <= serverStatePriority(manager.ServerError) {
+		t.Fatal("ServerRunning priority must exceed ServerError")
+	}
+	if serverStatePriority(manager.ServerStarting) <= serverStatePriority(manager.ServerError) {
+		t.Fatal("ServerStarting priority must exceed ServerError")
+	}
+}
+
+func TestResetReopenedDocClearsCachesAndSyncsVersion(t *testing.T) {
+	t.Parallel()
+	port := newPort(lspPlan{
+		servers: map[string][]manager.ServerConfig{
+			"go": {{Command: []string{"gopls"}}},
+		},
+	}, true, nil)
+	mgr := port.managerFor("/w")
+	port.docs["/w/a.go"] = lspDocRec{root: "/w", lang: "go", text: "package a\n", version: 7}
+	port.sem["/w/a.go"] = semanticCache{version: 7, resultID: "stale", data: []uint32{1, 2, 3}}
+	port.pulled["/w/a.go"] = pulledDiagnostics{version: 7}
+
+	rec := port.resetReopenedDoc("/w/a.go", mgr)
+	if rec.version != 1 {
+		t.Fatalf("reopened version = %d, want 1", rec.version)
+	}
+	if _, ok := port.sem["/w/a.go"]; ok {
+		t.Fatal("stale semantic cache survived reopen")
+	}
+	if _, ok := port.pulled["/w/a.go"]; ok {
+		t.Fatal("stale pulled diagnostics cache survived reopen")
 	}
 }

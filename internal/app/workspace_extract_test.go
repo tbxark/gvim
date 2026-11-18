@@ -282,32 +282,44 @@ func TestWorkspaceExtractRestartRestoresCoTenants(t *testing.T) {
 		}
 	}
 	// The registered workspaces are materializable after restart, each with its own
-	// session: the co-tenant restores the extracted file at its saved cursor.
-	var coTenant string
+	// session: the extracted foreground co-tenant restores the extracted file, while
+	// the dormant source workspace restores cleanly without duplicating it.
+	var fgID, dormantID string
 	for _, e := range after {
-		if !e.Active {
-			coTenant = e.ID
+		if e.Active {
+			fgID = e.ID
+		} else {
+			dormantID = e.ID
 		}
 	}
-	if coTenant == "" {
-		coTenant = after[0].ID
+	if fgID == "" || dormantID == "" {
+		t.Fatalf("after restart entries = %+v, want one active and one dormant workspace", after)
 	}
-	cmd, err := reopened.Select(coTenant)
-	runWorkspaceCmd(t, cmd, err)
 	reopened.mu.Lock()
-	sess := reopened.sessions[coTenant]
+	fgSess := reopened.sessions[fgID]
 	reopened.mu.Unlock()
-	if sess == nil {
-		t.Fatalf("the restored co-tenant %s is not materialized", coTenant)
+	if fgSess == nil {
+		t.Fatalf("the active extracted workspace %s is not materialized", fgID)
 	}
 	found := false
-	for _, tab := range sess.rt.ed.Tabs() {
+	for _, tab := range fgSess.rt.ed.Tabs() {
 		if tab.Path == path {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("the co-tenant's session did not restore %s", path)
+		t.Fatalf("the extracted foreground workspace %s did not restore %s", fgID, path)
+	}
+	cmd, err := reopened.Select(dormantID)
+	runWorkspaceCmd(t, cmd, err)
+	reopened.mu.Lock()
+	dormantSess := reopened.sessions[dormantID]
+	reopened.mu.Unlock()
+	if dormantSess == nil {
+		t.Fatalf("the restored dormant workspace %s is not materialized", dormantID)
+	}
+	if tabs := dormantSess.rt.ed.Tabs(); len(tabs) != 0 {
+		t.Fatalf("dormant source workspace tabs = %+v, want 0 (extracted tab moved out)", tabs)
 	}
 }
 

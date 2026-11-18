@@ -97,10 +97,80 @@ func TestWriteScreenshots(t *testing.T) {
 		s := shotSession(t, Options{Files: files})
 		shot(t, s, "10-twelve-tabs")
 	})
+
+	goFile := filepath.Join(root, "src/handler.go")
+	goSrc := `package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+// RenderSummary builds a formatted status line for the editor buffer.
+func RenderSummary(name string, count int) string {
+	if count <= 0 {
+		return "empty"
+	}
+	var b strings.Builder
+	for i := range count {
+		fmt.Fprintf(&b, "%s:%d ", name, i+1)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func main() {
+	fmt.Println(RenderSummary("gvim", 3))
+}
+`
+	if err := os.WriteFile(goFile, []byte(goSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("11-welcome-gopher", func(t *testing.T) {
+		s := shotSessionSize(t, Options{Theme: "gopher", Root: root}, 120, 34)
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("New File") })
+		shot(t, s, "11-welcome-gopher")
+	})
+	t.Run("12-editor-split-gopher", func(t *testing.T) {
+		s := shotSessionSize(t, Options{Theme: "gopher", Root: root, Files: []FileTarget{{Path: goFile}}}, 120, 34)
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("RenderSummary") })
+		// Fold RenderSummary body or split vertically and run search to verify contrast and layout.
+		after(s, "ctrl+\\")
+		s.Key("ctrl+f")
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Search:") })
+		s.Type("count")
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Match 1 of 3") })
+		shot(t, s, "12-editor-split-gopher")
+	})
+	t.Run("13-quick-open-gopher", func(t *testing.T) {
+		s := shotSessionSize(t, Options{Theme: "gopher", Root: root, Files: []FileTarget{{Path: goFile}}}, 120, 34)
+		s.Key("ctrl+p")
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("file · >command") })
+		s.Key("backspace")
+		s.Type("handler.go:10")
+		s.WaitFor(func(sc uitest.Screen) bool {
+			return !sc.Contains("README.md") && sc.Contains(" 9 │ func RenderSummary") && sc.Contains("10 │")
+		})
+		shot(t, s, "13-quick-open-gopher")
+	})
+	t.Run("14-about-gopher", func(t *testing.T) {
+		s := shotSessionSize(t, Options{Theme: "gopher", Files: []FileTarget{{Path: goFile}}}, 120, 34)
+		s.Key("ctrl+shift+p")
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Commands") })
+		s.Type("About gvim")
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Help: About gvim") })
+		s.Key("enter")
+		s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Pure Go") })
+		shot(t, s, "14-about-gopher")
+	})
 }
 
 // shotSession runs the real UI, as buildModel builds it, at 100 by 30.
 func shotSession(t *testing.T, opts Options) *uitest.Session {
+	return shotSessionSize(t, opts, 100, 30)
+}
+
+func shotSessionSize(t *testing.T, opts Options, w, h int) *uitest.Session {
 	t.Helper()
 	isolateConfig(t)
 	m, files, err := buildModel(t.Context(), opts)
@@ -108,7 +178,7 @@ func shotSession(t *testing.T, opts Options) *uitest.Session {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { files.Close() })
-	return uitest.Start(t, m, 100, 30)
+	return uitest.Start(t, m, w, h)
 }
 
 // shotProject writes a small project tree for the explorer and returns its root.

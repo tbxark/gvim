@@ -1,6 +1,8 @@
 package editorpane
 
 import (
+	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/tbxark/gvim/fold"
@@ -39,6 +41,7 @@ func (f *frame) setFolds(doc Document) {
 		}
 	}
 	// Plugin folding ranges merge with the document's (ids tie: the document's win).
+	var pluginPlaceholders map[int]string
 	if f.pluginFolds != nil {
 		extra, extraCollapsed, placeholder := f.pluginFolds()
 		// Clip: the document's slice is shared, and the sort below must not reorder it.
@@ -49,6 +52,7 @@ func (f *frame) setFolds(doc Document) {
 			}
 		}
 		f.foldPlaceholder = placeholder
+		pluginPlaceholders = placeholder
 	}
 	if len(ranges) == 0 {
 		return
@@ -60,11 +64,22 @@ func (f *frame) setFolds(doc Document) {
 		return a.End - b.End
 	})
 	f.folds = make(map[int]bool, len(ranges))
+	copiedPlaceholder := false
 	for _, r := range ranges {
 		f.folds[r.Start] = collapsed[r.Start]
+		if collapsed[r.Start] && f.opts.FoldLineCount && pluginPlaceholders[r.Start] == "" {
+			if !copiedPlaceholder {
+				f.foldPlaceholder = maps.Clone(f.foldPlaceholder)
+				if f.foldPlaceholder == nil {
+					f.foldPlaceholder = make(map[int]string)
+				}
+				copiedPlaceholder = true
+			}
+			f.foldPlaceholder[r.Start] = fmt.Sprintf(" ⋯ %d lines", max(r.End-r.Start, 1))
+		}
 	}
 	if len(collapsed) > 0 {
-		f.hidden = fold.Visible(f.lines, ranges, collapsed)
+		f.hidden = fold.Hidden(f.lines, ranges, collapsed)
 	}
 }
 

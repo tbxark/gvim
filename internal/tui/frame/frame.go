@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
@@ -71,6 +72,7 @@ type Input struct {
 	HideStatus      bool       // a suggestion list or the file browser is open
 	HideLineNumbers bool       // the gutter is not drawn
 	DockOpen        bool       // the terminal dock is shown (internal/tui/dock); it takes rows under the body
+	DockRows        int        // optional user-dragged height of the terminal dock; 0 uses default third
 	HideTabBar      bool       // the tab Strip row is not drawn; the body takes it
 	Style           Style      // the frame's look; nil is Classic, the workbench frame
 	ShowPromptLine  bool       // reserve the prompt row under the status row (only while a prompt is open)
@@ -307,6 +309,7 @@ type RunStyle int
 const (
 	StyleDefault RunStyle = iota // the surface's own style
 	StyleWarning                 // the theme's warning role: a warning state, such as a restricted workspace
+	StyleError                   // the theme's error role: active errors or alert badges
 	StyleMuted                   // the surface's style, faint: a secondary value such as a pending chord
 )
 
@@ -314,11 +317,12 @@ const (
 // reaches. The painter draws runs and the hit test reads them, so a label and
 // its click target cannot drift apart.
 type Run struct {
-	X, W  int // first column and width in cells
-	Text  string
-	Kind  HitKind
-	Index int
-	Style RunStyle
+	X, W    int // first column and width in cells
+	Text    string
+	Kind    HitKind
+	Index   int
+	Style   RunStyle
+	Preview bool // tab run represents a preview tab (painted italic)
 }
 
 // Covers reports whether column x falls inside the Run.
@@ -500,7 +504,7 @@ func ComputeLayout(w, h int, in Input) Layout {
 		l.BodyBottom--
 	}
 	if in.DockOpen {
-		l.setDock()
+		l.setDock(in.DockRows)
 	}
 
 	// The explorer column comes first: its side decides the editor rectangle the
@@ -628,6 +632,16 @@ func wrapText(s string, width int) []string {
 			case room > 0:
 				// Longer than any row: the room left takes its start.
 				head := ansi.Truncate(word, room, "")
+				if head == "" {
+					if cur != "" {
+						rows = append(rows, cur)
+						cur = ""
+						continue
+					}
+					head, word, _, _ = uniseg.FirstGraphemeClusterInString(word, -1)
+					rows = append(rows, head)
+					continue
+				}
 				cur += sep + head
 				word = ansi.TruncateLeft(word, ansi.StringWidth(head), "")
 				rows = append(rows, cur)
@@ -663,20 +677,23 @@ const (
 // dockHeight is the rows the dock takes from the bottom of a body of bodyRows rows: a
 // third of the body and at least dockMinRows. It is zero when the body left over
 // would have fewer than dockMinBody rows.
-func dockHeight(bodyRows int) int {
-	h := max(bodyRows/3, dockMinRows)
-	if bodyRows-h < dockMinBody {
+func dockHeight(bodyRows, override int) int {
+	if bodyRows-dockMinRows < dockMinBody {
 		return 0
 	}
-	return h
+	h := max(bodyRows/3, dockMinRows)
+	if override > 0 {
+		h = override
+	}
+	return min(max(h, dockMinRows), bodyRows-dockMinBody)
 }
 
 // setDock takes the dock's rows from the bottom of the editor column. It does
 // nothing when the dock does not fit. The explorer column keeps its rows: the dock
 // belongs to the workspace, so it never cuts the navigator. DockX and the dock's
 // width follow the editor column, which is placed after this call.
-func (l *Layout) setDock() {
-	h := dockHeight(l.BodyBottom - l.BodyTop + 1)
+func (l *Layout) setDock(override int) {
+	h := dockHeight(l.BodyBottom-l.BodyTop+1, override)
 	if h == 0 {
 		return
 	}
@@ -956,7 +973,13 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 	case StatusElementDiagnostics:
 		switch {
 		case s.Diags.Any():
-			return statusSeg{text: pad("[" + s.Diags.Text() + "]")}, true
+			seg := statusSeg{text: pad("[" + s.Diags.Text() + "]")}
+			if s.Diags.Errors > 0 {
+				seg.style = StyleError
+			} else if s.Diags.Warnings > 0 {
+				seg.style = StyleWarning
+			}
+			return seg, true
 		case s.DiagSlot:
 			return statusSeg{text: strings.Repeat(" ", diagBlankWidth)}, true
 		}
@@ -1157,7 +1180,9 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 
 	x = w - rightWidth()
 	for _, seg := range right {
-		runs = append(runs, newRun(x, seg.text, seg.kind, seg.id))
+		r := newRun(x, seg.text, seg.kind, seg.id)
+		r.Style = seg.style
+		runs = append(runs, r)
 		x += ansi.StringWidth(seg.text)
 	}
 	return runs, cut

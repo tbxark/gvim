@@ -112,9 +112,9 @@ func (m *Model) completionAskedFrom(doc Document, src completionSources) tea.Cmd
 			// server cannot serve the buffer, and the existing actions say so too.
 			m.notice = "LSP: " + lspLargeReason(doc)
 		case src.large:
-			m.notice = "Buffer-word completion is not available in large files yet"
+			m.notice = uiText("gvim.notice.completion.buffer_word_large", "Buffer-word completion is not available in large files yet")
 		default:
-			m.notice = "No completions"
+			m.notice = uiText("gvim.notice.lsp.no_completions", "No completions")
 		}
 		return nil
 	}

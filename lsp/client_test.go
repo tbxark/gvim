@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -463,4 +466,35 @@ func TestCloseReleasesGoroutines(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestStartSetsWorkingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test requires sh")
+	}
+	dir := t.TempDir()
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		resolvedDir = dir
+	}
+	outFile := filepath.Join(dir, "pwd.txt")
+	c, err := Start(context.Background(), Config{
+		Command: []string{"sh", "-c", "pwd -P > " + outFile + "; sleep 0.2"},
+		Dir:     dir,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, rerr := os.ReadFile(outFile); rerr == nil && strings.TrimSpace(string(data)) != "" {
+			if got := strings.TrimSpace(string(data)); got != resolvedDir {
+				t.Fatalf("pwd = %q, want %q", got, resolvedDir)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server did not write pwd to %s", outFile)
 }

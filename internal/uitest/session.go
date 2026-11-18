@@ -248,22 +248,34 @@ func (s *Session) Screen() Screen {
 	sc := Screen{w: s.w, h: s.h, cells: make([][]Cell, s.h)}
 	for y := 0; y < s.h; y++ {
 		row := make([]Cell, s.w)
+		skip := 0
 		for x := 0; x < s.w; x++ {
-			row[x] = cellAt(s.emu, x, y)
+			c := s.emu.CellAt(x, y)
+			if skip > 0 {
+				row[x] = cellFromUV(c, true)
+				skip--
+				continue
+			}
+			row[x] = cellFromUV(c, false)
+			if c != nil && c.Width > 1 {
+				skip = c.Width - 1
+			}
 		}
 		sc.cells[y] = row
 	}
 	return sc
 }
 
-// cellAt converts one emulator cell. A missing cell is a blank.
-func cellAt(e *vt.Emulator, x, y int) Cell {
-	c := e.CellAt(x, y)
+func cellFromUV(c *uv.Cell, continuation bool) Cell {
 	if c == nil {
-		return blankCell()
+		b := blankCell()
+		if continuation {
+			b.Char = ""
+		}
+		return b
 	}
 	ch := c.Content
-	if ch == "" {
+	if ch == "" && !continuation {
 		ch = " "
 	}
 	cell := Cell{

@@ -35,6 +35,23 @@ func (fw *FrameWriter) WriteFrame(typ byte, payload []byte) error {
 	return WriteFrame(fw.w, typ, payload)
 }
 
+// WriteChunked writes payload across one or more frames of at most MaxPayload bytes under
+// the writer's lock so oversized payloads succeed without interleaving.
+func (fw *FrameWriter) WriteChunked(typ byte, payload []byte) error {
+	if len(payload) <= MaxPayload {
+		return fw.WriteFrame(typ, payload)
+	}
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	for off := 0; off < len(payload); off += MaxPayload {
+		end := min(off+MaxPayload, len(payload))
+		if err := WriteFrame(fw.w, typ, payload[off:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // WriteJSON writes a frame whose payload is the JSON of v.
 func (fw *FrameWriter) WriteJSON(typ byte, v any) error {
 	payload, err := json.Marshal(v)

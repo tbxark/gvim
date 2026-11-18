@@ -46,6 +46,9 @@ type Config struct {
 	// RootURI is the workspace root sent in initialize, for example
 	// "file:///home/u/proj". Empty means no root.
 	RootURI string
+	// Dir sets the working directory of the server process launched by Start.
+	// Empty inherits the current process working directory.
+	Dir string
 	// Env, when non-nil, is appended to the parent environment of the server
 	// process.
 	Env []string
@@ -179,6 +182,7 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 		}
 	}
 	cmd := exec.Command(command[0], command[1:]...) //nolint:gosec // the caller chooses the server command
+	cmd.Dir = cfg.Dir
 	stderr := &tailBuffer{max: stderrKeep}
 	cmd.Stderr = stderr
 	// A grandchild that keeps the error pipe open must not keep Close waiting.

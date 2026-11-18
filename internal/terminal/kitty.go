@@ -71,10 +71,11 @@ func (k *kittyKeyboard) flags() uint8 {
 }
 
 // scan consumes one read of child output and returns the replies to queue back
-// to the child. It only looks at CSI sequences whose final byte is u: the query
-// (CSI ? u), push (CSI > flags u), pop (CSI < n u) and set (CSI = flags ; mode u).
-// All other bytes, including other control sequences, pass through untouched; the
-// bytes are still written to the emulator by the caller.
+// to the child. It tracks CSI u progressive-enhancement controls (query
+// CSI ? u, push CSI > flags u, pop CSI < n u, set CSI = flags ; mode u) as
+// well as DECSET/DECRST alternate-screen transitions (CSI ? 47/1047/1049 h/l)
+// inline in byte-stream order so push/pop operations always target the screen
+// active at that byte offset.
 func (k *kittyKeyboard) scan(p []byte) [][]byte {
 	data := p
 	if len(k.pending) > 0 {
@@ -100,21 +101,48 @@ func (k *kittyKeyboard) scan(p []byte) [][]byte {
 		}
 		// A CSI sequence ends at the first byte in 0x40..0x7e.
 		j := i + 2
+		aborted := false
 		for j < len(data) && (data[j] < 0x40 || data[j] > 0x7e) {
+			if data[j] == 0x1b {
+				aborted = true
+				break
+			}
 			j++
+		}
+		if aborted {
+			i = j
+			continue
 		}
 		if j >= len(data) {
 			k.keepPending(data[i:])
 			return replies
 		}
-		if data[j] == 'u' {
-			if reply := k.command(string(data[i+2 : j])); reply != nil {
+		body := string(data[i+2 : j])
+		switch data[j] {
+		case 'u':
+			if reply := k.command(body); reply != nil {
 				replies = append(replies, reply)
 			}
+		case 'h', 'l':
+			k.applyPrivateMode(body, data[j] == 'h')
 		}
 		i = j + 1
 	}
 	return replies
+}
+
+// applyPrivateMode tracks inline DECSET/DECRST switches between the main and
+// alternate screen buffers (modes 47, 1047, 1049).
+func (k *kittyKeyboard) applyPrivateMode(body string, on bool) {
+	if !strings.HasPrefix(body, "?") {
+		return
+	}
+	for param := range strings.SplitSeq(body[1:], ";") {
+		switch param {
+		case "47", "1047", "1049":
+			k.setAltScreen(on)
+		}
+	}
 }
 
 // keepPending remembers an incomplete sequence for the next read, unless it is

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/list"
+	"github.com/tbxark/gvim/theme"
 )
 
 // helpKeys is a keymap with a few bindings in three contexts, one action bound
@@ -159,7 +160,7 @@ func TestHelpEnterDoesNotRunEditorAction(t *testing.T) {
 
 func TestEveryUtilityOverlayClosesOnEsc(t *testing.T) {
 	actions := []string{
-		"show_help", "keyboard_shortcuts", "open_keybinding_editor", "switch_keybinding_map",
+		"show_help", "keyboard_shortcuts", "about_gvim", "open_keybinding_editor", "switch_keybinding_map",
 		"select_keybinding_map", "open_settings", "tour_next", "show_remote_indicator_menu",
 		"calibrate_input", "event_debug",
 	}
@@ -176,5 +177,26 @@ func TestEveryUtilityOverlayClosesOnEsc(t *testing.T) {
 				t.Fatalf("Esc left %d overlays open", len(m.overlays))
 			}
 		})
+	}
+}
+
+func TestAboutGvimAndEnrichedHelp(t *testing.T) {
+	if _, err := theme.Load("gopher"); err != nil {
+		t.Fatal(err)
+	}
+	ed := newFakeEditor("hello")
+	m := newUtilityModel(t, ed, helpKeys(), testSettings(), nil)
+	m.applyTheme("gopher")
+	runAction(t, m, "about_gvim")
+	for _, want := range []string{"About gvim", "v0.1.0", "Pure Go", "gopher"} {
+		if !frameHas(m, want) {
+			t.Fatalf("About gvim frame lacks %q", want)
+		}
+	}
+	press(m, special(tea.KeyEscape))
+
+	runAction(t, m, "show_help")
+	if !frameHas(m, "Mouse Shortcuts") {
+		t.Fatal("show_help frame lacks Mouse Shortcuts reference")
 	}
 }

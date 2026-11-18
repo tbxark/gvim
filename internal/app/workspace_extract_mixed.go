@@ -50,6 +50,9 @@ func (m *workspaceManager) ExtractMixed(sel tui.ExtractSelection, targetID strin
 	if sess == nil {
 		return nil, errors.New("cannot extract: the daemon is not ready")
 	}
+	if sess.ws.File.AuthoritySpec != "" {
+		return nil, errors.New("cannot extract: extracting tabs from a remote workspace is not supported")
+	}
 	ext := &mixedExtract{sourceID: sess.ws.File.StableID, destID: targetID}
 	seen := make(map[string]bool, len(sel.Files))
 	for _, p := range sel.Files {
@@ -123,6 +126,10 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 	target, ok, err := m.reg.Get(ext.destID)
 	if err != nil || !ok {
 		m.notify(errors.New("cannot extract: the target workspace is gone; nothing was moved"))
+		return nil
+	}
+	if target.File.AuthoritySpec != "" {
+		m.notify(errors.New("cannot extract: the target workspace is remote; nothing was moved"))
 		return nil
 	}
 	sourceRoot, err := daemon.CanonicalRoot(source.ws.File.Root)

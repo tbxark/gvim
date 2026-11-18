@@ -279,7 +279,7 @@ func TestRemoteIgnoreDepthBound(t *testing.T) {
 // no directory adds, while the listing still works (manual refresh).
 func TestRemoteWatchUnsupportedNotice(t *testing.T) {
 	fs := ignoreFixture()
-	fs.watchErr = errors.New("watch unsupported")
+	fs.watchErr = authority.ErrUnsupportedFileIO
 	loader := newAuthorityDirLoader(ignoreSlot(fs), nil, "/remote/w")
 	watcher := &addWatcher{}
 	loader.setWatcher(watcher)

@@ -94,7 +94,7 @@ func New(th theme.Theme) Styles {
 		Status:         build(th, ref{"ui", "status_bar_fg"}, ref{"ui", "status_bar_bg"}),
 		Scrollbar:      build(th, ref{"ui", "scrollbar_track_fg"}, ed),
 		ScrollbarThumb: build(th, ref{"ui", "scrollbar_thumb_fg"}, ed),
-		Match:          build(th, ref{}, ref{"search", "match_bg"}),
+		Match:          build(th, ref{"search", "match_fg"}, ref{"search", "match_bg"}),
 		CurrentMatch:   build(th, ref{"search", "current_match_fg"}, ref{"search", "current_match_bg"}),
 		CurrentLine:    build(th, ref{}, refCurrentLine),
 		SecondaryCaret: build(th, ref{"editor", "fg"}, refInactiveCursor),
@@ -239,6 +239,7 @@ func Cell(st lipgloss.Style) grid.Style {
 		Faint:     st.GetFaint(),
 		Italic:    st.GetItalic(),
 		Underline: st.GetUnderline(),
+		Strike:    st.GetStrikethrough(),
 		Reverse:   st.GetReverse(),
 	}
 }

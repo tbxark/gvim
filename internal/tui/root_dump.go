@@ -96,11 +96,17 @@ func (m *Model) focusName() string {
 	switch {
 	case len(m.overlays) > 0:
 		return "overlay"
+	case m.plug.panels.focus != 0:
+		return "panel"
 	case m.explorerFocus:
 		return "explorer"
+	case m.contentsFocus:
+		return "contents"
+	case m.diag.focus:
+		return "diagnostics"
 	case m.tabFocus:
 		return "tabs"
-	case m.dock.Focus():
+	case m.dockKeyboard():
 		return "dock"
 	case m.menu.IsOpen():
 		return "menu"

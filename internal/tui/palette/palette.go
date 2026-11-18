@@ -32,11 +32,13 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fuzzy"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/syntax"
@@ -176,6 +178,8 @@ type Options struct {
 	// Preview reads the start of a file for the file mode's preview column. Nil paints
 	// no column.
 	Preview Previewer
+	// Icons selects Nerd Font file icons in file rows when set to icons.Nerd.
+	Icons icons.Mode
 }
 
 // RunCommandMsg asks the root to run a command by its Fresh action name. It is
@@ -358,9 +362,10 @@ func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
 		return base
 	case c.IsTerminalDefault():
 		return nil
-	case c.IsRGB:
-		return style.Color(th, "syntax", key)
 	default:
+		if col := style.Color(th, "syntax", key); col != nil {
+			return col
+		}
 		return base
 	}
 }
@@ -803,11 +808,33 @@ func fileQueryText(text string) string {
 	return text
 }
 
-// click runs the row under a left click. Other buttons, and clicks that miss the
-// rows, change nothing.
+// click runs the row under a left click, toggles clicked Live Grep chips, or
+// moves the query caret when clicking inside the input row.
 func (p *Palette) click(m tea.Mouse) tea.Cmd {
 	if m.Button != tea.MouseLeft {
 		return nil
+	}
+	if p.width > 0 && p.height > 0 {
+		geo := p.layout(p.width, p.height).fitColumns(p.rows)
+		if p.live && geo.toolbarY >= 0 && m.Y == geo.toolbarY {
+			x := geo.nameX
+			for _, seg := range p.toolbarSegments() {
+				if x >= geo.textEnd {
+					break
+				}
+				w := ansi.StringWidth(seg.text)
+				if seg.key != "" && m.X >= x && m.X < min(x+w, geo.textEnd) {
+					cmd, _ := p.liveKey(seg.key)
+					return cmd
+				}
+				x += w
+			}
+			return nil
+		}
+		if m.Y == geo.inputY && m.X > geo.left && m.X < geo.right {
+			p.clickInput(geo, m.X)
+			return nil
+		}
 	}
 	i, ok := p.rowAt(m.X, m.Y)
 	if !ok {
@@ -815,6 +842,28 @@ func (p *Palette) click(m tea.Mouse) tea.Cmd {
 	}
 	p.nav.Select(i)
 	return p.run(i)
+}
+
+func (p *Palette) clickInput(geo geometry, clickX int) {
+	runes := []rune(p.input.Value())
+	pos := min(max(p.input.Position(), 0), len(runes))
+	w := min(geo.textEnd, p.width)
+	x0 := min(geo.nameX, max(w-1, 0))
+	start := 0
+	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
+		start++
+	}
+	x := x0
+	target := start
+	for i := start; i < len(runes); i++ {
+		cw := max(ansi.StringWidth(string(runes[i])), 1)
+		if x+cw > w || clickX < x+cw {
+			break
+		}
+		x += cw
+		target = i + 1
+	}
+	p.input.SetCursor(min(max(target, 0), len(runes)))
 }
 
 // run closes the palette and returns the command of row i. With no rows it only

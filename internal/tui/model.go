@@ -74,6 +74,16 @@ type Model struct {
 	// frameLayout is the geometry View computed for the frame it is painting; layout
 	// returns it until View ends.
 	frameLayout *frame.Layout
+	// paintGrid is reused by View across frames to avoid allocating a full cell slice
+	// on every redraw.
+	paintGrid          grid.Grid
+	motionSkipView     bool
+	motionCachedView   string
+	motionCachedW      int
+	motionCachedH      int
+	motionCachedCaretX int
+	motionCachedCaretY int
+	motionCachedCaret  bool
 	// findMatches caches the find bar's highlight search (see cachedFindMatches).
 	findMatches findMatchCache
 	themeGen    uint64
@@ -121,6 +131,9 @@ type Model struct {
 	statusHover   frame.HitTarget
 	stripHover    frame.HitTarget
 	gripHover     bool
+	borderHover   int
+	hover         mouseHoverState
+	dockRows      int
 	explorerOpen  bool // the panel is shown
 	explorerFocus bool // the panel has keyboard focus
 	tabFocus      bool // the tab strip has keyboard focus (F7 chrome cycle)
@@ -296,12 +309,14 @@ type Model struct {
 // drag is the pointer gesture in progress: a text selection, or a grab of the
 // scrollbar thumb, or a split line (split_drag.go). The zero value is no gesture.
 type drag struct {
-	active bool
-	thumb  bool          // the scrollbar thumb: motion moves the viewport
-	hbar   bool          // the horizontal scrollbar: motion pans the view sideways
-	tab    *tabDrag      // a tab of the strip: motion moves it along the strip
-	unit   editor.Unit   // the unit a text drag grows the selection by
-	border *split.Border // the split line the press took: motion moves its split's ratio
+	active          bool
+	thumb           bool          // the scrollbar thumb: motion moves the viewport
+	hbar            bool          // the horizontal scrollbar: motion pans the view sideways
+	gutterLine      bool          // a gutter press/drag extending by whole lines once dragged
+	gutterStartLine int           // anchor line of a gutter line drag
+	tab             *tabDrag      // a tab of the strip: motion moves it along the strip
+	unit            editor.Unit   // the unit a text drag grows the selection by
+	border          *split.Border // the split line the press took: motion moves its split's ratio
 	// last is the pointer of the latest motion of a text drag, and tick is the number
 	// of the autoscroll tick in flight, or 0 when none is (see dragSelect).
 	last tea.Mouse
@@ -333,6 +348,7 @@ func New(deps Deps) *Model {
 		styles:          st,
 		panes:           editorpane.NewStyles(deps.Theme),
 		now:             now,
+		borderHover:     -1,
 		theme:           deps.Theme,
 		themeRef:        deps.ThemeRef,
 		themeOverrides:  map[string]string{},
@@ -433,14 +449,6 @@ func Run(ctx context.Context, m *Model) error {
 // runProgram so the cursor-shape reset and the window-size handshake behave alike.
 func RunWithInput(ctx context.Context, m *Model, in io.Reader) error {
 	return runProgram(ctx, m, os.Stdout, tea.WithInput(in))
-}
-
-// RunWithIO runs m with in as the keyboard and out as the frame output, and calls
-// onProgram once with the program handle before it runs. The daemon hosts one program
-// this way: in and out are the client socket, and onProgram turns an attach or a resize
-// into a window-size message so the daemon repaints the attached client.
-func RunWithIO(ctx context.Context, m *Model, in io.Reader, out io.Writer, onProgram func(*tea.Program)) error {
-	return runProgramIO(ctx, m, out, onProgram, tea.WithInput(in), tea.WithOutput(out))
 }
 
 // RunWorkspaceHost runs a WorkspaceHost as the daemon's one program: the host swaps the
@@ -554,6 +562,11 @@ func (m *Model) Init() tea.Cmd {
 // marker changes neither, so it is not undone here. The viewport is not re-synced on
 // every message, because the editor moves it to the caret.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.motionSkipView = false
+	m.hover.pendingTick = nil
+	if _, isMotion := msg.(tea.MouseMotionMsg); !isMotion {
+		m.motionCachedView = ""
+	}
 	if owned, ok := msg.(palette.OwnedMsg); ok {
 		owner := owned.PaletteOwner()
 		// A palette always stamps its workspace/model generation. A zero owner is a
@@ -669,6 +682,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	at, top := m.caretNow(), m.viewTop()
 	snap := m.pluginSnapshot()
 	_, resized := msg.(tea.WindowSizeMsg)
+	moMsg, isMotion := msg.(tea.MouseMotionMsg)
+	var prevStrip, prevStatus frame.HitTarget
+	var prevGrip, prevDockHover, prevExDrag bool
+	prevBorderHover := -1
+	if isMotion {
+		prevStrip, prevStatus, prevGrip, prevBorderHover, prevDockHover = m.stripHover, m.statusHover, m.gripHover, m.borderHover, m.dock.Hovered()
+		prevExDrag = m.explorerPanel.Dragging()
+	}
 	m.util.recordEvent(msg)
 	before, beforeStatus := m.notice, m.ed.Status()
 	m.plug.ui.updates++
@@ -681,6 +702,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.notes.record(before, m.notice)
 	m.noteStatus(beforeStatus)
 	m.reconcileTabs()
+	m.plugGroupsReconcile()
 	cmd = tea.Batch(cmd, m.pluginTail(snap), m.pluginIdle(msg))
 	m.trackOccurrences()
 	sized := m.bodyRows() != rows
@@ -752,7 +774,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.imageQueue())
 	m.hexReleaseClosed()
 	cmd = tea.Batch(cmd, m.hexQueue())
+	if isMotion && m.canSkipMotionView(moMsg, prevStrip, prevStatus, prevGrip, prevBorderHover, prevDockHover, prevExDrag, before, beforeStatus, cmd) {
+		m.motionSkipView = true
+	} else {
+		m.motionCachedView = ""
+	}
+	if m.hover.pendingTick != nil {
+		cmd = tea.Batch(cmd, m.hover.pendingTick)
+		m.hover.pendingTick = nil
+	}
 	return next, cmd
+}
+
+func (m *Model) canSkipMotionView(mo tea.MouseMotionMsg, prevStrip, prevStatus frame.HitTarget, prevGrip bool, prevBorderHover int, prevDockHover, prevExDrag bool, prevNotice, prevStatusText string, cmd tea.Cmd) bool {
+	if cmd != nil || tea.Mouse(mo).Button != tea.MouseNone || m.drag.active || m.divider.active || m.drag.tab != nil ||
+		prevExDrag || m.explorerPanel.Dragging() || m.dock.MouseDragging() || m.dock.Hovered() != prevDockHover ||
+		m.notice != prevNotice || m.ed.Status() != prevStatusText {
+		return false
+	}
+	if len(m.overlays) > 0 || m.menu.IsOpen() || m.welcomeVisible() {
+		return false
+	}
+	if len(m.plug.panels.order) > 0 || m.stripHover != prevStrip || m.statusHover != prevStatus || m.gripHover != prevGrip || m.borderHover != prevBorderHover {
+		return false
+	}
+	if m.motionCachedView == "" || m.motionCachedW != m.width || m.motionCachedH != m.height {
+		return false
+	}
+	cx, cy, cok := m.caret()
+	if cok != m.motionCachedCaret || (cok && (cx != m.motionCachedCaretX || cy != m.motionCachedCaretY)) {
+		return false
+	}
+	return m.layout().Hit(mo.X, mo.Y).Kind == frame.HitEditorText
 }
 
 // emitHostFocusEvent queues a host-window focus event for the plugins that subscribe
@@ -870,12 +923,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		// The cells under the pointer moved with the frame; the next motion names
 		// the new target.
-		m.stripHover, m.statusHover, m.gripHover = frame.HitTarget{}, frame.HitTarget{}, false
+		m.stripHover, m.statusHover, m.gripHover, m.borderHover = frame.HitTarget{}, frame.HitTarget{}, false, -1
+		m.cancelMouseHover()
 		m.syncMenu()
 		m.syncViewport()
 		m.followSelection()
 		m.pluginReady()
 	case tea.KeyPressMsg:
+		m.cancelMouseHover()
 		m.expireStatus()
 		return m, m.handleKey(tea.Key(msg))
 	case tea.KeyReleaseMsg:
@@ -888,6 +943,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseClickMsg:
+		m.cancelMouseHover()
 		// The band is hit-tested before the message expires: once it is gone the
 		// click would land on the body cell that was under it.
 		onBand := m.layout().OnNotice(msg.X, msg.Y)
@@ -916,6 +972,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
 		}
 		m.updateChromeHover(msg.Mouse())
+		m.hover.pendingTick = m.armMouseHover(msg.Mouse())
+	case mouseHoverTickMsg:
+		cmd = m.triggerMouseHover(msg)
+	case dock.ResizeMsg:
+		m.dockRows = msg.Rows
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
@@ -1240,11 +1301,12 @@ func (m *Model) Holds(name string) bool {
 	}
 	doc := m.ed.Active()
 	switch name {
-	case "has_buffer", "has_text_buffer":
+	case "has_buffer":
 		return doc != nil
-	case "can_edit", "can_paste", "line_numbers", "vertical_scrollbar",
-		"horizontal_scrollbar", "mouse_capture":
-		return true
+	case "has_text_buffer":
+		return doc != nil && !isBinaryDoc(doc) && !isImageDoc(doc)
+	case "can_edit", "can_paste":
+		return doc != nil && !isDocReadOnly(doc) && !isBinaryDoc(doc) && !isImageDoc(doc)
 	case "keymap_default", "keymap_emacs", "keymap_vscode", "keymap_macos_gui":
 		return m.util.keymapChecked(name)
 	case "inlay_hints":
@@ -2238,6 +2300,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 		Files:      m.files,
 		Ranker:     m.ranker,
 		Preview:    preview,
+		Icons:      m.view.icons,
 		Theme:      m.theme,
 	})
 	m.pushOverlay(p)
@@ -2254,7 +2317,10 @@ func (m *Model) paletteState() commands.State {
 	if doc == nil {
 		return st
 	}
-	st.TextBuffer, st.Editable, st.HasPath = true, true, hasPath(doc)
+	isText := !isBinaryDoc(doc) && !isImageDoc(doc)
+	st.TextBuffer = isText
+	st.Editable = isText && !isDocReadOnly(doc)
+	st.HasPath = hasPath(doc)
 	st.Modified = doc.Modified()
 	_, _, st.SelectionActive = doc.Selection()
 	if m.lsp.port != nil {
@@ -2659,10 +2725,9 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 			m.clip = nil
 		}
 	case "file_explorer_search_backspace":
-		if !m.explorerOpen || !m.explorerFocus {
-			return nil, false
+		if m.explorerOpen && m.explorerFocus {
+			m.explorerPanel.SearchBackspace(m.explorerGeometry(m.layout()))
 		}
-		m.explorerPanel.SearchBackspace(m.explorerGeometry(m.layout()))
 	case "markdown_toc_show":
 		m.markdownTOCShown()
 	case "markdown_toc_toggle":
@@ -2823,7 +2888,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	// selection and the editor's word/line selection both read the count once.
 	count := 0
 	if mo.Button == tea.MouseLeft {
-		count = m.clicks.press(m.now(), mo.X, mo.Y)
+		count = m.clicks.pressWindow(m.now(), mo.X, mo.Y, m.doubleClickWindow())
 	}
 	// The dock's rows belong to the shell: the dock decides whether the press is
 	// forwarded, opens a link, scrolls the scrollback or only takes the focus.
@@ -2832,12 +2897,17 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	}
 	t := m.layout().Hit(mo.X, mo.Y)
 	if mo.Button == tea.MouseMiddle {
+		m.mx.extend, m.mx.alt, m.mx.ctrl, m.mx.super = false, false, false, false
 		if t.Kind == frame.HitTab || t.Kind == frame.HitTabClose {
 			return m.requestClose(t.Index)
+		}
+		if t.Kind == frame.HitEditorText {
+			return m.middleClickPane(t.Pane, mo.X, mo.Y)
 		}
 		return nil
 	}
 	if mo.Button == tea.MouseRight {
+		m.mx.extend, m.mx.alt, m.mx.ctrl, m.mx.super = false, false, false, false
 		// Ctrl+Right-click inspects the theme colors at the clicked cell; a plain
 		// right click opens the context menu.
 		if mo.Mod&tea.ModCtrl != 0 {
@@ -2882,17 +2952,37 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		// the section. Focus follows the pressed section.
 		return m.pressSidebarHeader(t.Section, mo.Y)
 	case frame.HitSidebarClose:
+		if sec, ok := m.sidebarSection(t.Section); ok {
+			switch sec.Kind {
+			case sidebar.KindDiagnostics:
+				m.closeDiagPanel()
+				return nil
+			case sidebar.KindPlugin:
+				m.closePluginSection(t.Section)
+				return nil
+			}
+		}
 		m.closeContents()
 		return nil
 	case frame.HitSidebarRow:
-		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
-			return m.pressDiagRow(t.Index)
+		if sec, ok := m.sidebarSection(t.Section); ok {
+			switch sec.Kind {
+			case sidebar.KindDiagnostics:
+				return m.pressDiagRow(t.Index)
+			case sidebar.KindPlugin:
+				return m.pressPluginSection(t.Section, mo)
+			}
 		}
 		return m.pressContentsRow(t.Index, mo.X)
 	case frame.HitSidebarBody:
-		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
-			m.takeDiagFocus()
-			return nil
+		if sec, ok := m.sidebarSection(t.Section); ok {
+			switch sec.Kind {
+			case sidebar.KindDiagnostics:
+				m.takeDiagFocus()
+				return nil
+			case sidebar.KindPlugin:
+				return m.pressPluginSection(t.Section, mo)
+			}
 		}
 		m.takeContentsFocus()
 		return nil
@@ -2921,9 +3011,22 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 			}
 			return nil
 		}
-		m.pressPane(t.Pane, mo.X, mo.Y, count)
+		return m.pressPane(t.Pane, mo.X, mo.Y, count)
 	case frame.HitSplitBorder:
-		m.pressBorder(t.Index)
+		m.pressBorder(t.Index, count)
+	case frame.HitNone:
+		l := m.layout()
+		if mo.Y == l.StatusY {
+			for _, r := range l.Status {
+				if !r.Covers(mo.X) {
+					continue
+				}
+				txt := strings.TrimSpace(r.Text)
+				if r.Style == frame.StyleError || strings.HasPrefix(txt, "[E:") || strings.HasPrefix(txt, "[W:") || strings.HasPrefix(txt, "[I:") {
+					return m.toggleDiagnosticsPanel()
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -2966,6 +3069,41 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) te
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
 			return nil
 		}
+		if hit.Kind == editorpane.HitText && count == 1 {
+			if m.mx.alt && !m.mx.ctrl && !m.mx.super {
+				if mc, ok := m.ed.(multiCursorEditor); ok && hit.Below == 0 {
+					mc.ToggleCursorAt(hit.Pos)
+					m.drag = drag{}
+					return nil
+				}
+			}
+			if m.mx.super && hit.Below == 0 {
+				if doc := m.ed.Active(); doc != nil {
+					if u, ok := urlAtRuneCol(doc.Line(hit.Pos.Line), hit.Pos.Col); ok {
+						m.drag = drag{}
+						m.confirmOpenURL(u)
+						return nil
+					}
+				}
+				m.collapseCarets()
+				m.ed.SetCursor(hit.Pos, false)
+				m.drag = drag{}
+				return m.dispatch(Command{Action: "lsp_goto_definition"})
+			}
+			if m.mx.ctrl && !m.mx.alt && hit.Below == 0 {
+				if doc := m.ed.Active(); doc != nil {
+					if u, ok := urlAtRuneCol(doc.Line(hit.Pos.Line), hit.Pos.Col); ok {
+						m.drag = drag{}
+						m.confirmOpenURL(u)
+						return nil
+					}
+				}
+			}
+			if !m.mx.extend && !m.mx.alt && !m.mx.super && hit.Below == 0 && m.toggleMarkdownCheckboxAt(hit.Pos) {
+				m.drag = drag{}
+				return nil
+			}
+		}
 		if count == 1 && !m.mx.extend {
 			if t, ok := m.lineTargetAt(m.ed.Active(), hit.Pos.Line); ok {
 				m.drag = drag{}
@@ -2975,9 +3113,42 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) te
 		if hit.Below > 0 && count == 1 && !m.mx.extend && m.placeVirtualLine(hit) {
 			return nil
 		}
-		m.drag = m.placeCaret(hit.Pos, count, hit.Virtual)
+		d := m.placeCaret(hit.Pos, count, hit.Virtual)
+		if hit.Kind == editorpane.HitGutter && count == 1 && !m.mx.extend {
+			d.gutterLine = true
+			d.gutterStartLine = hit.Pos.Line
+		}
+		m.drag = d
 	}
 	return nil
+}
+
+// middleClickPane focuses pane i, places the caret at (x, y) if on text, and pastes
+// into writable buffers.
+func (m *Model) middleClickPane(i, x, y int) tea.Cmd {
+	if _, ok := m.hexAtPane(i); ok {
+		m.focusPane(i)
+		m.focusEditor()
+		return nil
+	}
+	p, hit, top, ok := m.paneHitIn(i, x, y)
+	m.focusPane(i)
+	m.focusEditor()
+	if ok {
+		m.ed.ScrollTo(top)
+		if m.splits.comparing {
+			m.setTopRow(p.TopRow)
+		}
+		if hit.Kind == editorpane.HitText {
+			m.collapseCarets()
+			m.ed.SetCursor(hit.Pos, false)
+		}
+	}
+	m.drag = drag{}
+	if m.Holds("read_only") {
+		return nil
+	}
+	return m.dispatch(Command{Action: "paste"})
 }
 
 // placeCaret moves the caret to pos, or selects the word or the line under it
@@ -3091,12 +3262,13 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 // viewport over the editor body, by wheelRows per notch. The caret stays where
 // it is in both cases, and a wheel over an unfocused split pane scrolls that pane.
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	m.cancelMouseHover()
 	mo := tea.Mouse(msg)
 	l := m.layout()
 	if cmd, taken := m.dockMouse(msg, mo.X, mo.Y, 1); taken {
 		return cmd
 	}
-	if mo.Y == l.StripY && mo.X >= l.EditorX {
+	if mo.Y == l.StripY && mo.X >= l.EditorX && mo.X < l.EditorX+l.EditorW {
 		// The tab row scrolls the strip one tab per notch.
 		switch mo.Button {
 		case tea.MouseWheelUp:
@@ -3111,6 +3283,18 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	case frame.HitExplorerRow, frame.HitExplorerBody, frame.HitExplorerTitleClose, frame.HitExplorerTitleReload, frame.HitExplorerGrip:
 		return m.explorerMouse(msg)
 	case frame.HitSidebarRow, frame.HitSidebarBody, frame.HitSidebarHeader:
+		if sec, ok := m.sidebarSection(t.Section); ok {
+			switch sec.Kind {
+			case sidebar.KindDiagnostics:
+				m.wheelDiagPanel(mo.Button == tea.MouseWheelUp)
+				return nil
+			case sidebar.KindPlugin:
+				if t.Kind != frame.HitSidebarHeader {
+					return m.wheelPluginSection(t.Section, mo)
+				}
+				return nil
+			}
+		}
 		m.wheelContents(mo.Button == tea.MouseWheelUp)
 		return nil
 	case frame.HitEditorText, frame.HitGutter, frame.HitScrollbarTrack:
@@ -3118,11 +3302,12 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			return nil
 		}
 		delta := 0
+		rows := m.wheelRows()
 		switch mo.Button {
 		case tea.MouseWheelUp:
-			delta = -wheelRows
+			delta = -rows
 		case tea.MouseWheelDown:
-			delta = wheelRows
+			delta = rows
 		}
 		if delta != 0 {
 			if leaves := m.layout().Panes; t.Pane >= 0 && t.Pane < len(leaves) {
@@ -3176,6 +3361,7 @@ func (m *Model) takeExplorerFocus() {
 		return
 	}
 	m.blurPluginPanels()
+	m.menu = m.menu.Close()
 	if !m.explorerOpen {
 		m.explorerOpen = true
 		m.syncViewport()
@@ -3323,6 +3509,9 @@ func (m *Model) closeExplorer() {
 	m.explorerAutoOpened = false
 	m.contentsFocus = false
 	m.contents.SetFocus(false)
+	m.diag.focus = false
+	m.blurPluginPanels()
+	m.menu = m.menu.Close()
 	m.divider = dividerState{}
 	if m.tree != nil {
 		m.explorerPanel = expanel.New(m.tree, m.styles, m.now).WithOptions(m.view.opts.Explorer).CarryCut(m.explorerPanel)
@@ -3371,6 +3560,7 @@ func (m *Model) layoutInput() frame.Input {
 		HideStatus:      m.statusHidden(),
 		HideLineNumbers: m.hideLineNumbers,
 		DockOpen:        m.dock.Open(),
+		DockRows:        m.dockRows,
 		Maximized:       m.splits.maximized,
 	}
 	if m.findOpen() {
@@ -3559,6 +3749,17 @@ func (m *Model) languageFor(name string) string {
 // terminal caret sits on the editor caret when the editor has the focus and no
 // overlay is open.
 func (m *Model) View() tea.View {
+	if m.motionSkipView && m.width > 0 && m.height > 0 && m.width == m.motionCachedW && m.height == m.motionCachedH {
+		v := tea.NewView(m.motionCachedView)
+		v.AltScreen = true
+		v.ReportFocus = true
+		v.MouseMode = tea.MouseModeAllMotion
+		if m.motionCachedCaret {
+			v.Cursor = tea.NewCursor(m.motionCachedCaretX, m.motionCachedCaretY)
+		}
+		m.viewTerminal(&v)
+		return v
+	}
 	// The state is not changed while a frame is painted, so the geometry is computed once
 	// for the paint, the caret and the terminal placement instead of once per use.
 	l := m.layout()
@@ -3566,7 +3767,9 @@ func (m *Model) View() tea.View {
 	defer func() { m.frameLayout = nil }()
 	content := ""
 	if m.width > 0 && m.height > 0 {
-		content = m.paint().String()
+		m.paintGrid.Resize(m.width, m.height)
+		m.paintInto(&m.paintGrid)
+		content = m.paintGrid.String()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -3576,8 +3779,14 @@ func (m *Model) View() tea.View {
 	// when the window is activated.
 	v.ReportFocus = true
 	v.MouseMode = tea.MouseModeAllMotion
-	if x, y, ok := m.caret(); ok {
-		v.Cursor = tea.NewCursor(x, y)
+	cx, cy, cok := m.caret()
+	if cok {
+		v.Cursor = tea.NewCursor(cx, cy)
+	}
+	if m.width > 0 && m.height > 0 {
+		m.motionCachedView = content
+		m.motionCachedW, m.motionCachedH = m.width, m.height
+		m.motionCachedCaret, m.motionCachedCaretX, m.motionCachedCaretY = cok, cx, cy
 	}
 	m.viewTerminal(&v)
 	return v
@@ -3683,9 +3892,7 @@ func (m *Model) paintInto(g *grid.Grid) {
 		return
 	}
 	body := style.TaggedCell(m.styles.Editor, "editor", "fg", "editor", "bg")
-	for y := range g.Height() {
-		g.Fill(0, g.Width(), y, body)
-	}
+	g.Clear(body)
 	m.paintEditor(g, l)
 	m.paintDropZone(g)
 	m.dock.Draw(g, l, m.styles)
@@ -3789,7 +3996,7 @@ func (m *Model) caret() (x, y int, ok bool) {
 		}
 		return 0, 0, false
 	}
-	if m.explorerFocus || m.contentsFocus {
+	if m.explorerFocus || m.contentsFocus || m.diag.focus || m.menu.IsOpen() {
 		return 0, 0, false
 	}
 	// A mounted widget panel with the keyboard owns it: the editor caret under the panel
@@ -3887,9 +4094,10 @@ func (m *Model) routeSettingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 // is no longer active is popped. Esc pops the top overlay and is not forwarded,
 // unless the overlay asks for it (see takesEscape).
 func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyPressMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok && !m.pluginCancelKey(tea.Key(k)) {
 		// The overlay contexts consult the keymap before the auto-cancel and the built-in
-		// handler; an unbound key falls through to both.
+		// handler; an unbound key falls through to both, while ctrl+c on a plugin overlay
+		// always cancels the modal wait (see pluginCancelKey).
 		if cmd, handled := m.overlayKey(tea.Key(k)); handled {
 			return cmd
 		}
@@ -3923,7 +4131,7 @@ func (m *Model) popOverlay() {
 // the explorer's resize grip takes the accent. The hit map decides all three, so
 // the feedback and the click target are always the same cells.
 func (m *Model) updateChromeHover(mo tea.Mouse) {
-	m.stripHover, m.statusHover, m.gripHover = frame.HitTarget{}, frame.HitTarget{}, false
+	m.stripHover, m.statusHover, m.gripHover, m.borderHover = frame.HitTarget{}, frame.HitTarget{}, false, -1
 	t := m.layout().Hit(mo.X, mo.Y)
 	switch t.Kind {
 	case frame.HitTab, frame.HitTabClose, frame.HitTabNew, frame.HitTabScrollBefore, frame.HitTabScrollAfter:
@@ -3932,6 +4140,10 @@ func (m *Model) updateChromeHover(mo tea.Mouse) {
 		m.statusHover = t
 	case frame.HitExplorerGrip:
 		m.gripHover = true
+	case frame.HitSplitBorder:
+		m.borderHover = t.Index
+	case frame.HitWelcomeRow:
+		m.welcomeSel = t.Index
 	}
 }
 
@@ -4000,6 +4212,8 @@ func (m *Model) paintStatus(g *grid.Grid, l frame.Layout) {
 		hovered := m.statusHover.Kind != frame.HitNone &&
 			m.statusHover.Kind == r.Kind && m.statusHover.Index == r.Index
 		switch {
+		case r.Style == frame.StyleError:
+			st = restart
 		case r.Style == frame.StyleWarning:
 			st = warning
 		case r.Style == frame.StyleMuted:
@@ -4457,9 +4671,42 @@ type clickCounter struct {
 	n    int
 }
 
-// press records a left press at (x, y) at time at and returns its count.
+// wheelRows returns the configured mouse wheel scroll lines (default 3).
+func (m *Model) wheelRows() int {
+	if m.view.opts.MouseWheelScrollLines > 0 {
+		return m.view.opts.MouseWheelScrollLines
+	}
+	return wheelRows
+}
+
+// doubleClickWindow returns the configured multi-click detection window (default 500ms).
+func (m *Model) doubleClickWindow() time.Duration {
+	if m.view.opts.DoubleClickTimeMS > 0 {
+		return time.Duration(m.view.opts.DoubleClickTimeMS) * time.Millisecond
+	}
+	return doubleClickWindow
+}
+
+// clearMouseHover clears all chrome hover highlights and in-flight drag state.
+func (m *Model) clearMouseHover() {
+	m.stripHover, m.statusHover, m.gripHover, m.borderHover = frame.HitTarget{}, frame.HitTarget{}, false, -1
+	m.cancelMouseHover()
+	m.drag = drag{}
+	m.dock.ClearHover()
+}
+
+// press records a left press at (x, y) at time at using the default window.
 func (c *clickCounter) press(at time.Time, x, y int) int {
-	if c.n > 0 && at.Sub(c.at) <= doubleClickWindow && c.x == x && c.y == y {
+	return c.pressWindow(at, x, y, doubleClickWindow)
+}
+
+// pressWindow records a left press at (x, y) at time at with an explicit window
+// and returns its count.
+func (c *clickCounter) pressWindow(at time.Time, x, y int, window time.Duration) int {
+	if window <= 0 {
+		window = doubleClickWindow
+	}
+	if c.n > 0 && at.Sub(c.at) <= window && c.x == x && c.y == y {
 		c.n = c.n%3 + 1
 	} else {
 		c.n = 1

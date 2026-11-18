@@ -26,7 +26,7 @@ const (
 
 // osc52Parser is a streaming parser for OSC 52 sequences in child output.
 type osc52Parser struct {
-	state int // oscGround, oscStart, oscBody, oscDiscard
+	state int // oscGround, oscStart, oscBody, oscEsc, oscDiscard
 	body  []byte
 }
 
@@ -34,6 +34,7 @@ const (
 	oscGround = iota
 	oscStart
 	oscBody
+	oscEsc
 	oscDiscard
 )
 
@@ -62,8 +63,8 @@ func (p *osc52Parser) scan(data []byte, emit func(selection, text string), query
 			switch b {
 			case 0x07: // BEL terminates
 				p.finish(emit, query)
-			case 0x1b: // ESC \ (ST) terminates; the \ is the next byte
-				p.finishAtST(emit, query)
+			case 0x1b: // ESC might be the start of ST (ESC \)
+				p.state = oscEsc
 			default:
 				if len(p.body) >= maxOSC52Sequence {
 					p.state = oscDiscard
@@ -72,8 +73,22 @@ func (p *osc52Parser) scan(data []byte, emit func(selection, text string), query
 				}
 				p.body = append(p.body, b)
 			}
+		case oscEsc:
+			switch b {
+			case '\\': // ST (ESC \) completes the OSC sequence
+				p.finish(emit, query)
+			case 0x1b: // Interrupted by another ESC; discard truncated body
+				p.body = p.body[:0]
+				p.state = oscStart
+			case ']': // Interrupted by a new OSC introducer; discard truncated body
+				p.body = p.body[:0]
+				p.state = oscBody
+			default: // Any other sequence (e.g. ESC [) aborts the truncated OSC body
+				p.body = p.body[:0]
+				p.state = oscGround
+			}
 		case oscDiscard:
-			// Drop until the sequence's terminator; a BEL or ESC + \\ ends it.
+			// Drop until the sequence's terminator; a BEL or ESC + \ ends it.
 			switch b {
 			case 0x07:
 				p.state = oscGround
@@ -84,21 +99,12 @@ func (p *osc52Parser) scan(data []byte, emit func(selection, text string), query
 	}
 }
 
-// finishAtST handles an ESC seen inside an OSC: it may be the ST (ESC \)
-// terminator. The parser switches to oscStart so the following \ can complete
-// it, but an ST inside an OSC must not restart collection as a new OSC, so the
-// sequence is finished here and the next byte is handled as ground.
-func (p *osc52Parser) finishAtST(emit func(selection, text string), query func(selection string)) {
-	p.finish(emit, query)
-	p.state = oscGround
-}
-
 // finish parses and emits the collected OSC body.
 func (p *osc52Parser) finish(emit func(selection, text string), query func(selection string)) {
 	body := p.body
 	p.body = nil
 	p.state = oscGround
-	if emit == nil {
+	if emit == nil && query == nil {
 		return
 	}
 	rest, ok := bytes.CutPrefix(body, []byte("52;"))
@@ -110,10 +116,9 @@ func (p *osc52Parser) finish(emit func(selection, text string), query func(selec
 		return
 	}
 	sel := string(selection)
-	// "c" and the empty selection name the clipboard; p/s are the primary and
-	// select selections, which gvim does not have, and numbered cut buffers are
-	// not a terminal-wide surface. Decode only the clipboard ones.
-	if sel != "" && sel != "c" {
+	// "c" (alone or combined, e.g. "pc"/"cp") and the empty selection name the
+	// clipboard; p/s alone and numbered cut buffers are not handled.
+	if len(selection) > 0 && !bytes.ContainsRune(selection, 'c') {
 		return
 	}
 	// A "?" payload is a read request: the terminal is asked to put clipboard
@@ -122,6 +127,9 @@ func (p *osc52Parser) finish(emit func(selection, text string), query func(selec
 		if query != nil {
 			query(sel)
 		}
+		return
+	}
+	if emit == nil {
 		return
 	}
 	text, decoder := decodeOSC52(data)

@@ -205,12 +205,12 @@ func (m *Model) pluginPump() tea.Cmd {
 	var cmds []tea.Cmd
 	more := false
 	ran := 0
-	deadline := time.Now().Add(pumpBudget)
+	deadline := m.now().Add(pumpBudget)
 	cmds = append(cmds, m.collect(func() {
 		p.quiet++
 		defer func() { p.quiet-- }()
 		for range pumpRounds {
-			left := time.Until(deadline)
+			left := deadline.Sub(m.now())
 			if left <= 0 {
 				break
 			}
@@ -387,7 +387,7 @@ func (m *Model) pluginSaveGate(source string) (cancel bool, reason string, cmd t
 	data := map[string]any{"source": source}
 	if pe := m.plug.pe; pe != nil {
 		id := pe.ActiveBuffer()
-		data["buf"] = id
+		data["buf"] = m.gb(id)
 		if info, ok := pe.Buffer(id); ok {
 			data["path"] = info.Path
 		}

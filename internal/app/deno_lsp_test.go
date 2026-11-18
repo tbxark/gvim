@@ -14,8 +14,10 @@ import (
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/authority/authoritytest"
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp/manager"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/trust"
 )
 
 // denoFakeFiles answers Stat from a map; every other file operation is unsupported. It is
@@ -358,4 +360,58 @@ func TestDenoProviderRefusesDisconnectedAuthority(t *testing.T) {
 	if _, ok := provider("javascript"); ok {
 		t.Fatal("a disconnected authority still provided the selection")
 	}
+}
+
+type denoFakeLSP struct {
+	tui.LSPSession
+	*denoFakePort
+}
+
+type denoFakeEnv struct {
+	workspaceEnv
+}
+
+func (denoFakeEnv) Overlay() []string { return nil }
+
+// TestTrustGrantStartsDenoAutoAndRevokeClears verifies that granting trust live re-triggers
+// Deno auto-selection (blocked while Restricted) and revoking clears any installed provider.
+func TestTrustGrantStartsDenoAutoAndRevokeClears(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	store, state, _ := openTrust(dir)
+	state.Level = trust.Restricted
+	ctl := newTrustController(store, state)
+	files := &denoFakeFiles{present: map[string]hostos.FileStat{filepath.Join(dir, "deno.json"): {Kind: "file"}}}
+	one := &fakeOneShot{script: func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
+		return hostos.ProcResult{Code: 0}, nil
+	}}
+	port := &denoFakePort{}
+	b := &runtimeBuild{
+		ctx:         context.Background(),
+		root:        dir,
+		denoRoot:    dir,
+		trustCtl:    ctl,
+		trustState:  state,
+		authSlot:    newDenoSelectorSlot(files, one),
+		envProvider: denoFakeEnv{},
+	}
+	b.deps.LSP = denoFakeLSP{denoFakePort: port}
+	b.settingsSvc = newSettingsService(dir, Options{}, nil, nil, config.Defaults(), nil, settingsRuntime{})
+	b.wireTrustLSP()
+	b.wireLSPExtras()
+
+	// Restricted startup must not install Deno.
+	time.Sleep(30 * time.Millisecond)
+	if port.provider(dir) != nil {
+		t.Fatal("Deno provider installed while workspace is Restricted")
+	}
+	if _, err := ctl.Decide(trust.Trusted); err != nil {
+		t.Fatal(err)
+	}
+	waitDenoProvider(t, port, dir, true)
+
+	if _, err := ctl.Decide(trust.Restricted); err != nil {
+		t.Fatal(err)
+	}
+	waitDenoProvider(t, port, dir, false)
 }

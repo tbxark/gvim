@@ -82,3 +82,44 @@ func TestMultiSelectDrawsCheckboxes(t *testing.T) {
 		t.Fatalf("checkbox markers not painted: %q", rows)
 	}
 }
+
+func TestMultiSelectPreservesMarksAcrossFiltering(t *testing.T) {
+	t.Parallel()
+	rows := []Row{
+		{Left: "alpha", Value: "a"},
+		{Left: "beta", Value: "b"},
+		{Left: "gamma", Value: "g"},
+	}
+	var got []Row
+	v := New("T", rows, style.Overlay{}, nil)
+	v.Multi = true
+	v.ChooseMany = func(_ *View, marked []Row) tea.Cmd {
+		got = append([]Row(nil), marked...)
+		return nil
+	}
+	// Mark alpha (row 0) before filtering.
+	v.update(tea.KeyPressMsg{Code: tea.KeySpace})
+	// Filter to "am" so only gamma is shown at shown[0].
+	v.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	v.update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	g := grid.New(80, 24)
+	v.Draw(g)
+	if strings.Contains(strings.Join(g.Plain(), "\n"), "[x] gamma") {
+		t.Fatalf("filtering transferred alpha's mark to gamma:\n%s", strings.Join(g.Plain(), "\n"))
+	}
+	// Mark gamma too while filtered, then submit.
+	v.update(tea.KeyPressMsg{Code: tea.KeySpace})
+	v.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(got) != 2 || got[0].Value != "a" || got[1].Value != "g" {
+		t.Fatalf("marked rows after filtered mark = %+v, want [alpha gamma]", got)
+	}
+	// Clear filter and verify alpha and gamma are marked, beta is not.
+	v.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	v.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	g = grid.New(80, 24)
+	v.Draw(g)
+	plain := strings.Join(g.Plain(), "\n")
+	if !strings.Contains(plain, "[x] alpha") || !strings.Contains(plain, "[ ] beta") || !strings.Contains(plain, "[x] gamma") {
+		t.Fatalf("unexpected checkboxes after clearing filter:\n%s", plain)
+	}
+}

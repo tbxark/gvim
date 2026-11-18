@@ -746,11 +746,10 @@ func TestBuildModelFileExplorerCustomIgnorePatternsAndRespectGitignore(t *testin
 	}
 
 	// 3. Verify Live Grep filtering custom ignore patterns
-	grepper, ok := got.deps.Root.Grep.(palette.Grepper)
-	if !ok {
-		t.Fatal("expected got.deps.Root.Grep to be palette.Grepper")
+	if got.deps.Root.Grep == nil {
+		t.Fatal("expected got.deps.Root.Grep != nil")
 	}
-	hits, err := grepper.Search(palette.GrepRequest{
+	hits, err := got.deps.Root.Grep.Search(palette.GrepRequest{
 		Text:    "line",
 		Limit:   10,
 		Root:    opts.Root,

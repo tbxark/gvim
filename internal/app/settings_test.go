@@ -152,3 +152,25 @@ func TestConfigAutoSaveReachesEditorAndUI(t *testing.T) {
 		t.Errorf("auto-save = editor %v, ui %v, want 5s", got.editor.AutoSaveInterval, got.deps.Root.AutoSave)
 	}
 }
+
+func TestChangedSettingsDetectsNerdFontIconsAlias(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "config.json")
+	writeTestFile(t, userFile, `{}`)
+	got, err := buildRecorded(t, Options{Root: dir, Config: userFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, userFile, `{"editor": {"nerd_font_icons": true}}`)
+	change, err := got.deps.SettingsPort.Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(change.Live, "ui_icons") {
+		t.Fatalf("Live = %v, want ui_icons when editor.nerd_font_icons changes", change.Live)
+	}
+	if change.UIIconsMode != "nerd" {
+		t.Fatalf("UIIconsMode = %q, want nerd", change.UIIconsMode)
+	}
+}

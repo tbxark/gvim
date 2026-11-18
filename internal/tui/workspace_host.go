@@ -481,17 +481,12 @@ type openFileAtMsg struct {
 	source *Model
 }
 
-// PostOpenFile sends a client's open-file request to the active model through the program
-// queue. The manager uses the target-bound PostOpenFileAt for workspace-routed opens.
-func (h *WorkspaceHost) PostOpenFile(path string) bool {
-	return h.PostOpenFileAt(h.Active(), path, 0, 0)
-}
-
-// PostOpenFileAt is PostOpenFile with a position: line/col are moved to after the file is
-// focused (line 0 keeps the restored/existing caret). source is the model the manager
-// selected for this open; binding it makes a later switch before delivery harmless. It
-// returns false when the bounded host queue did not accept the request (no program, stuck
-// UI, or timeout), so a socket goroutine never blocks indefinitely.
+// PostOpenFileAt sends a file open request to source (or the active model when source is
+// nil) with a position: line/col are moved to after the file is focused (line 0 keeps the
+// restored/existing caret). source is the model the manager selected for this open; binding
+// it makes a later switch before delivery harmless. It returns false when the bounded host
+// queue did not accept the request (no program, stuck UI, or timeout), so a socket goroutine
+// never blocks indefinitely.
 func (h *WorkspaceHost) PostOpenFileAt(source *Model, path string, line, col int) bool {
 	return h.PostOpenFileAtWithTimeout(source, path, line, col, defaultPostOpenTimeout)
 }
@@ -592,6 +587,9 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return h, cmd
 	default:
 		active := h.Active()
+		if active == nil {
+			break
+		}
 		next, c := active.Update(msg)
 		if m, ok := next.(*Model); ok {
 			h.mu.Lock()
@@ -628,4 +626,10 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements tea.Model.
-func (h *WorkspaceHost) View() tea.View { return h.Active().View() }
+func (h *WorkspaceHost) View() tea.View {
+	active := h.Active()
+	if active == nil {
+		return tea.NewView("")
+	}
+	return active.View()
+}

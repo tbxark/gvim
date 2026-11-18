@@ -13,15 +13,15 @@ const (
 	WelcomeRecentMax    = 5  // the recent folders listed
 	welcomeLabelW       = 18 // columns a door's label takes before its key
 	welcomePathMin      = 6  // cells a recent folder's path tail needs to say anything
-	WelcomeSubtitleText = "a terminal editor"
+	WelcomeSubtitleText = "v0.1.0 · Go editor"
 	welcomeRecent       = "Recent"
 )
 
-// WelcomeTitle is the three-line ASCII title.
+// WelcomeTitle is the three-line block wordmark for gvim.
 var WelcomeTitle = [3]string{
-	"  __ __   _(_)_ __ ___",
-	" / _` \\ \\ / / | '_ ` _ \\",
-	"| (_| |\\ V /| | | | | | |",
+	"▄▀▀▀  █   █  ▀█▀  █▄ ▄█",
+	"█ ▀█  ▀▄ ▄▀   █   █ ▀ █",
+	"▀▄▄▀   ▀▄▀   ▄█▄  █   █",
 }
 
 // WelcomeItem is one row that a click or Enter runs: a door, or a recent folder.

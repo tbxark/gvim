@@ -22,8 +22,10 @@ func TestDaemonFlags(t *testing.T) {
 	}{
 		{name: "daemon default name", args: []string{"--daemon"}, mode: app.DaemonServe},
 		{name: "daemon named", args: []string{"--daemon=work"}, mode: app.DaemonServe, sockName: "work"},
+		{name: "daemon literal dash", args: []string{"--daemon=-"}, mode: app.DaemonServe, sockName: "-"},
 		{name: "attach short", args: []string{"-a"}, mode: app.DaemonAttach},
 		{name: "attach named", args: []string{"--attach=work"}, mode: app.DaemonAttach, sockName: "work"},
+		{name: "attach literal dash", args: []string{"--attach=-"}, mode: app.DaemonAttach, sockName: "-"},
 		{name: "attach named short equals", args: []string{"-a=work"}, mode: app.DaemonAttach, sockName: "work"},
 		{name: "attach with a file", args: []string{"-a", "a.go"}, mode: app.DaemonAttach, files: 1},
 		{name: "attach space name is a file", args: []string{"-a", "work"}, mode: app.DaemonAttach, files: 1},

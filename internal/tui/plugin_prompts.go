@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -13,6 +14,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/picker"
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -113,19 +115,21 @@ type pluginPopupData struct {
 	line bool // a text line: choosing it only closes the popup
 }
 
-// cleanText replaces the control characters of text that a plugin supplied with spaces: the
-// grid writes its cells to the terminal as they are, so an escape sequence in a label or a
-// file name would otherwise reach the terminal.
+// cleanText replaces control characters with spaces and strips format/bidi overrides
+// and invalid UTF-8 bytes so plugin-supplied labels cannot spoof surrounding chrome.
 func cleanText(s string) string {
-	if !strings.ContainsFunc(s, unicode.IsControl) {
-		return s
+	if strings.ContainsFunc(s, unicode.IsControl) {
+		s = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, s)
 	}
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, s)
+	if !utf8.ValidString(s) || strings.ContainsFunc(s, func(r rune) bool { return unicode.Is(unicode.Cf, r) }) {
+		s = textsafe.Clean(s)
+	}
+	return s
 }
 
 // doneCmd returns the command that reports d.

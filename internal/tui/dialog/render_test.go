@@ -29,9 +29,7 @@ func allDialogs() []Overlay {
 	c := newFakeClock()
 	return []Overlay{
 		NewUnsavedChanges(c.Now, "a.txt", nil, testOv),
-		NewConfirmTrash(c.Now, "a.txt", nil, testOv),
 		NewSaveAs(c.Now, "a.txt", nil, PathChecks{Exists: func(string) bool { return true }}, testOv),
-		NewOpenFolder(c.Now, []string{"/a"}, "/a", nil, nil, testOv),
 		NewErrorDialog(c.Now, "boom", nil, testOv),
 	}
 }
@@ -41,11 +39,7 @@ func buttonsOf(o Overlay) []button {
 	switch d := o.(type) {
 	case *UnsavedChanges:
 		return d.buttons
-	case *ConfirmTrash:
-		return d.buttons
 	case *SaveAs:
-		return d.buttons
-	case *OpenFolder:
 		return d.buttons
 	case *ErrorDialog:
 		return d.buttons
@@ -257,8 +251,7 @@ func TestChoiceString(t *testing.T) {
 	t.Parallel()
 	want := map[Choice]string{
 		ChoiceCancel: "cancel", ChoiceSave: "save", ChoiceDiscard: "discard",
-		ChoiceReplace: "replace", ChoiceMoveToTrash: "move-to-trash",
-		ChoiceOpen: "open", ChoiceOK: "ok", Choice(99): "unknown",
+		ChoiceReplace: "replace", ChoiceOK: "ok", ChoiceQuit: "quit", Choice(99): "unknown",
 	}
 	for c, s := range want {
 		if c.String() != s {

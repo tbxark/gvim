@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/search"
 )
 
 // remoteReplaceFake is an in-memory authority.FileSystem for the remote replace tests.
@@ -313,5 +315,35 @@ func TestRemoteReplaceBounds(t *testing.T) {
 		searchpanel.ReplaceFile{Path: "/elsewhere/a.go", Hash: hashText("package a // old\n")},
 	)); err == nil {
 		t.Fatal("a path outside the remote workspace was accepted")
+	}
+}
+
+func TestRemoteReplaceTextLargeAndMultiline(t *testing.T) {
+	t.Parallel()
+	const lines = 4000
+	var sb strings.Builder
+	for i := range lines {
+		if i == 0 {
+			sb.WriteString("café a b café a\n")
+		} else {
+			sb.WriteString("héllo line\n")
+		}
+	}
+	// Multiple edits on line 0 plus an edit on the last line.
+	edits := []search.Edit{
+		{From: buffer.Pos{Line: 0, Col: 5}, To: buffer.Pos{Line: 0, Col: 6}, Text: "X"},
+		{From: buffer.Pos{Line: 0, Col: 14}, To: buffer.Pos{Line: 0, Col: 15}, Text: "Y"},
+		{From: buffer.Pos{Line: lines - 1, Col: 0}, To: buffer.Pos{Line: lines - 1, Col: 5}, Text: "bye"},
+	}
+	got, err := remoteReplaceText(sb.String(), edits)
+	if err != nil {
+		t.Fatalf("remoteReplaceText: %v", err)
+	}
+	gotLines := strings.Split(got, "\n")
+	if gotLines[0] != "café X b café Y" {
+		t.Fatalf("line 0 = %q, want %q", gotLines[0], "café X b café Y")
+	}
+	if gotLines[lines-1] != "bye line" {
+		t.Fatalf("last line = %q, want %q", gotLines[lines-1], "bye line")
 	}
 }

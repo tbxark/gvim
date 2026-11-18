@@ -654,3 +654,80 @@ func TestWorkspaceCloseReleasesTheRuntime(t *testing.T) {
 		t.Fatal("the closed workspace's file index is still running")
 	}
 }
+
+func TestEnqueueCaptureConcurrentRetireNeverHangsOrSilentlyDrops(t *testing.T) {
+	m, id := newWorkspaceManagerTest(t)
+	m.mu.Lock()
+	sess := m.sessions[id]
+	m.mu.Unlock()
+	for range 50 {
+		var written int
+		var mu sync.Mutex
+		m.writeSnapshotFn = func(*workspaceSession, *captureSnapshot) error {
+			mu.Lock()
+			written++
+			mu.Unlock()
+			return nil
+		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var job *saveJob
+		go func() {
+			defer wg.Done()
+			job = m.enqueueCapture(sess)
+		}()
+		go func() {
+			defer wg.Done()
+			m.retireWriter(id)
+		}()
+		wg.Wait()
+		if job == nil {
+			t.Fatal("enqueueCapture returned nil job")
+		}
+		select {
+		case <-job.done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("job.done hung on concurrent retire")
+		}
+		mu.Lock()
+		w := written
+		mu.Unlock()
+		if job.err == nil && w == 0 {
+			t.Fatal("job completed with nil error even though snapshot was not written")
+		}
+	}
+}
+
+func TestSnapshotCapturePreservesLiveTabMRU(t *testing.T) {
+	m, id := newWorkspaceManagerTest(t)
+	m.mu.Lock()
+	sess := m.sessions[id]
+	m.mu.Unlock()
+	root := sess.ws.File.Root
+	paths := []string{
+		filepath.Join(root, "a.txt"),
+		filepath.Join(root, "b.txt"),
+		filepath.Join(root, "c.txt"),
+	}
+	for _, p := range paths {
+		if err := os.WriteFile(p, []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		openInModel(t, sess.rt.model, p)
+	}
+	sess.rt.ed.ActivateTab(1)
+	sess.rt.ed.ActivateTab(0)
+	before := sess.rt.ed.RecentTabIndices()
+
+	snap, err := m.snapshotCapture(sess)
+	if err != nil {
+		t.Fatalf("snapshotCapture: %v", err)
+	}
+	after := sess.rt.ed.RecentTabIndices()
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("live MRU changed by snapshotCapture: got %v, want %v", after, before)
+	}
+	if len(snap.layout.Files) != 3 {
+		t.Fatalf("captured files = %d, want 3", len(snap.layout.Files))
+	}
+}

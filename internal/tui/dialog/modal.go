@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
@@ -34,9 +35,9 @@ func newButton(label string, under int, c Choice) button {
 }
 
 // modal is the state every dialog shares: the title, the buttons and their
-// focus, the grace period, the optional text field and recent list, and the
+// focus, the grace period, the optional text field, and the
 // geometry of the last draw. Focus is a stop index. The field (when there is
-// one) is stop 0, the list (when there is one) comes next, and then the buttons.
+// one) is stop 0, and then the buttons.
 type modal struct {
 	clock    Clock
 	title    string
@@ -51,9 +52,7 @@ type modal struct {
 	hover    int // the button under the pointer, or -1
 	errText  string
 	field    *field
-	list     *recentList
 	onPress  func(i int) tea.Cmd // activates button i
-	onPick   func() tea.Cmd      // Enter on the list
 
 	// Geometry of the last draw, used for hit tests and the caret.
 	box     rect
@@ -147,9 +146,6 @@ func (m *modal) key(kp tea.KeyPressMsg) tea.Cmd {
 		if i, ok := m.buttonFocus(); ok {
 			return m.onPress(i)
 		}
-		if m.listFocused() {
-			return m.onPick()
-		}
 		return m.onPress(0)
 	case "tab":
 		m.step(1)
@@ -165,16 +161,6 @@ func (m *modal) key(kp tea.KeyPressMsg) tea.Cmd {
 			}
 			n := len(m.buttons)
 			m.focus = m.lead() + (i+d+n)%n
-			return nil
-		}
-	case "up", "down":
-		if m.list != nil {
-			d := 1
-			if keystroke == "up" {
-				d = -1
-			}
-			m.focus = m.listStop()
-			m.list.move(d)
 			return nil
 		}
 	}
@@ -232,12 +218,6 @@ func (m *modal) click(x, y int) tea.Cmd {
 		m.focus = 0
 		return nil
 	}
-	if m.list != nil {
-		if k := m.list.rowAt(x, y); k >= 0 {
-			m.focus = m.listStop()
-			m.list.sel = m.list.top + k
-		}
-	}
 	return nil
 }
 
@@ -279,13 +259,8 @@ func (m *modal) choose(i int) tea.Cmd {
 	return m.finish(m.buttons[i].choice, "")
 }
 
-// lead is the number of stops before the buttons: the field and the list.
+// lead is the number of stops before the buttons: the optional field.
 func (m *modal) lead() int {
-	return b2i(m.field != nil) + b2i(m.list != nil)
-}
-
-// listStop is the stop index of the list. It follows the field when there is one.
-func (m *modal) listStop() int {
 	return b2i(m.field != nil)
 }
 
@@ -294,13 +269,8 @@ func (m *modal) fieldFocused() bool {
 	return m.field != nil && m.focus == 0
 }
 
-// listFocused reports whether the list has the focus.
-func (m *modal) listFocused() bool {
-	return m.list != nil && m.focus == m.listStop()
-}
-
-// buttonFocus returns the index of the focused button, and false when a field
-// or the list has the focus.
+// buttonFocus returns the index of the focused button, and false when the field
+// has the focus.
 func (m *modal) buttonFocus() (int, bool) {
 	if m.focus < m.lead() {
 		return 0, false
@@ -325,4 +295,18 @@ func b2i(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// fieldRow paints the text field across w cells and records its hit rect and caret.
+func (m *modal) fieldRow() row {
+	return func(g *grid.Grid, x, y, w int) {
+		m.fieldAt = rect{X: x, Y: y, W: w, H: 1}
+		st := m.ov.Box
+		if m.fieldFocused() {
+			st = m.ov.Idle
+		}
+		cx, ok := m.field.draw(g, x, y, w, st)
+		m.caret = point{x: cx, y: y}
+		m.caretOK = ok
+	}
 }

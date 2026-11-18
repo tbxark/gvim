@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
@@ -34,8 +36,8 @@ type projectSearch struct {
 	// previewHighlighterCache).
 	previewCache previewHighlighterCache
 
-	customPatterns []string
-	customMatcher  gitignore.Matcher
+	mu            sync.Mutex
+	customMatcher gitignore.Matcher
 }
 
 // newProjectSearch returns the project search for an editor with the options o.
@@ -52,7 +54,6 @@ func newProjectSearch(o editor.Options, customPatterns ...[]string) *projectSear
 
 // SetCustomIgnorePatterns configures custom ignore rules (e.g. *.log, build/).
 func (s *projectSearch) SetCustomIgnorePatterns(pats []string) {
-	s.customPatterns = pats
 	var rules []gitignore.Pattern
 	for _, p := range pats {
 		p = strings.TrimSpace(p)
@@ -61,20 +62,28 @@ func (s *projectSearch) SetCustomIgnorePatterns(pats []string) {
 		}
 		rules = append(rules, gitignore.ParsePattern(p, nil))
 	}
+	var matcher gitignore.Matcher
 	if len(rules) > 0 {
-		s.customMatcher = gitignore.NewMatcher(rules)
-	} else {
-		s.customMatcher = nil
+		matcher = gitignore.NewMatcher(rules)
 	}
+	s.mu.Lock()
+	s.customMatcher = matcher
+	s.mu.Unlock()
 }
 
-func (s *projectSearch) matchesCustom(rel string) bool {
-	if s.customMatcher == nil {
+func (s *projectSearch) customIgnoreMatcher() gitignore.Matcher {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.customMatcher
+}
+
+func matchIgnoreMatcher(m gitignore.Matcher, rel string) bool {
+	if m == nil {
 		return false
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	for i := 1; i <= len(parts); i++ {
-		if s.customMatcher.Match(parts[:i], i < len(parts)) {
+		if m.Match(parts[:i], i < len(parts)) {
 			return true
 		}
 	}
@@ -156,6 +165,11 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
 		return
 	}
+	cq, err := search.CompileQuery(q)
+	if err != nil {
+		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
+		return
+	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = searchpanel.DefaultLimit
@@ -206,43 +220,61 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 		pending, pendingMatches = nil, 0
 		return true
 	}
-	// addFile searches one file's text and queues its matches. It reports whether the match
-	// cap stopped the walk, and an error only for a query the search cannot run (already
-	// pre-validated).
-	addFile := func(path, name string, dirty bool, text string) (bool, error) {
-		b := buffer.New(text)
-		matches, err := search.Find(b, q)
-		if err != nil {
-			return false, err
-		}
+	matchText := func(path, name string, dirty bool, text string) (searchpanel.FileMatches, bool) {
+		matches := cq.FindString(text)
 		if len(matches) == 0 {
-			return false, nil
+			return searchpanel.FileMatches{}, false
 		}
+		cur := newLineCursor(text)
 		fm := searchpanel.FileMatches{Path: path, Name: name, Hash: hashText(text), Dirty: dirty}
 		for _, m := range matches {
+			rawLine := cur.lineAtRaw(m.Start.Line)
 			fm.Matches = append(fm.Matches, searchpanel.Match{
 				Line:    m.Start.Line + 1,
 				Col:     m.Start.Col + 1,
-				Len:     matchRunes(b, m),
-				Text:    strings.TrimRight(b.Line(m.Start.Line), "\r"),
+				Len:     matchRunesText(rawLine, m),
+				Text:    strings.TrimRight(rawLine, "\r"),
 				EndLine: m.End.Line + 1,
 				EndCol:  m.End.Col + 1,
 			})
-			if totalMatches+len(fm.Matches) >= limit {
+		}
+		return fm, true
+	}
+	appendFileMatches := func(fm searchpanel.FileMatches) bool {
+		if len(fm.Matches) == 0 {
+			return false
+		}
+		avail := limit - totalMatches
+		if avail <= 0 {
+			truncated = true
+			return true
+		}
+		if len(fm.Matches) >= avail {
+			if len(fm.Matches) > avail || totalMatches+len(fm.Matches) >= limit {
+				fm.Matches = fm.Matches[:avail]
 				truncated = true
-				break
 			}
 		}
 		totalMatches += len(fm.Matches)
 		pending = append(pending, fm)
 		pendingMatches += len(fm.Matches)
-		return totalMatches >= limit, nil
+		return totalMatches >= limit
 	}
+	// addFile searches one file's text and queues its matches. It reports whether the match
+	// cap stopped the walk.
+	addFile := func(path, name string, dirty bool, text string) bool {
+		fm, ok := matchText(path, name, dirty, text)
+		if !ok {
+			return false
+		}
+		return appendFileMatches(fm)
+	}
+	matcher := s.customIgnoreMatcher()
 	// walk searches one candidate file (the current buffer included).
-	walk := func(rel string) (bool, error) {
+	walk := func(rel string) bool {
 		if req.Scope == searchpanel.CurrentFile {
 			if req.Current == nil {
-				return false, nil
+				return false
 			}
 			name := req.Current.Name
 			if name == "" {
@@ -251,8 +283,8 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 			scanned++
 			return addFile(req.Current.Path, name, true, req.Current.Text)
 		}
-		if s.matchesCustom(rel) {
-			return false, nil
+		if matchIgnoreMatcher(matcher, rel) {
+			return false
 		}
 		abs := filepath.Join(req.Root, filepath.FromSlash(rel))
 		if src, ok := open[abs]; ok {
@@ -263,7 +295,7 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 		scanned++
 		if reason != "" {
 			skips.add(reason)
-			return false, nil
+			return false
 		}
 		return addFile(abs, rel, false, text)
 	}
@@ -284,26 +316,84 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 				name = "[No Name]"
 			}
 			scanned++
-			reached, err := addFile(src.Path, name, true, src.Text)
-			if err != nil {
-				flush(true, err.Error())
-				return
-			}
-			if reached || !flushAfter() {
+			if addFile(src.Path, name, true, src.Text) || !flushAfter() {
 				break
 			}
 		}
-	} else {
+	} else if workers := min(max(goruntime.NumCPU(), 1), 8); req.Scope == searchpanel.CurrentFile || len(files) <= 4 || limit <= 4 || workers <= 1 {
 		for _, rel := range files {
 			if !next() {
 				return
 			}
-			reached, err := walk(rel)
-			if err != nil {
-				flush(true, err.Error())
+			if walk(rel) || !flushAfter() {
+				break
+			}
+		}
+	} else {
+		type searchSlot struct {
+			scanned bool
+			reason  string
+			fm      searchpanel.FileMatches
+		}
+		window := min(workers*4, len(files))
+		for base := 0; base < len(files); base += window {
+			if !next() {
 				return
 			}
-			if reached || !flushAfter() {
+			end := min(base+window, len(files))
+			count := end - base
+			slots := make([]searchSlot, count)
+			var nextIdx atomic.Int64
+			var wg sync.WaitGroup
+			wCount := min(workers, count)
+			wg.Add(wCount)
+			for range wCount {
+				go func() {
+					defer wg.Done()
+					for {
+						idx := int(nextIdx.Add(1) - 1)
+						if idx >= count || !next() {
+							return
+						}
+						rel := files[base+idx]
+						if matchIgnoreMatcher(matcher, rel) {
+							continue
+						}
+						abs := filepath.Join(req.Root, filepath.FromSlash(rel))
+						if src, ok := open[abs]; ok {
+							fm, _ := matchText(abs, rel, src.Dirty, src.Text)
+							slots[idx] = searchSlot{scanned: true, fm: fm}
+							continue
+						}
+						text, reason := readSearchableFile(abs, s.skipFrom)
+						if reason != "" {
+							slots[idx] = searchSlot{scanned: true, reason: reason}
+							continue
+						}
+						fm, _ := matchText(abs, rel, false, text)
+						slots[idx] = searchSlot{scanned: true, fm: fm}
+					}
+				}()
+			}
+			wg.Wait()
+			stopped := false
+			for _, sl := range slots {
+				if !next() {
+					return
+				}
+				if sl.scanned {
+					scanned++
+				}
+				if sl.reason != "" {
+					skips.add(sl.reason)
+					continue
+				}
+				if appendFileMatches(sl.fm) || !flushAfter() {
+					stopped = true
+					break
+				}
+			}
+			if stopped {
 				break
 			}
 		}
@@ -349,12 +439,13 @@ func (s *projectSearch) ProjectReplace(req searchpanel.ReplaceRequest) (searchpa
 	if limit <= 0 {
 		limit = searchpanel.DefaultLimit
 	}
+	matcher := s.customIgnoreMatcher()
 	edits := 0
 	for _, f := range req.Files {
 		if edits >= limit {
 			break
 		}
-		if s.matchesCustom(f.Name) {
+		if matchIgnoreMatcher(matcher, f.Name) {
 			continue
 		}
 		fe := searchpanel.FileEdits{Path: f.Path, Name: f.Name, Dirty: f.Dirty, Hash: f.Hash}
@@ -427,10 +518,9 @@ func (s *projectSearch) PreviewContext(ctx context.Context, req searchpanel.Prev
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
-	text := req.Text
-	if text == "" {
+	if req.Text == "" {
 		var reason string
-		text, reason = readSearchableFile(req.Path, s.skipFrom)
+		text, reason := readSearchableFile(req.Path, s.skipFrom)
 		if reason != "" {
 			out.Err = reason
 			return out, nil
@@ -438,39 +528,9 @@ func (s *projectSearch) PreviewContext(ctx context.Context, req searchpanel.Prev
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
+		req.Text = text
 	}
-	lines := strings.Split(text, "\n")
-	if n := len(lines); n > 1 && lines[n-1] == "" {
-		// A trailing line break does not add a line to preview.
-		lines = lines[:n-1]
-	}
-	total := len(lines)
-	out.Total = total
-	start := clampInt(req.Line-1, 0, max(total-1, 0))
-	end := req.EndLine - 1
-	if end < start {
-		end = start
-	}
-	first := 0
-	if req.Start >= 0 {
-		// An explicit window, from the panel scrolling through the file.
-		first = clampInt(req.Start, 0, max(total-req.Lines, 0))
-	} else {
-		// Centre the window on the match; a match longer than the window starts at its
-		// first line, so the panel pages through it from the start.
-		span := end - start + 1
-		first = start
-		if span < req.Lines {
-			first = start - (req.Lines-span)/2
-		}
-		first = clampInt(first, 0, max(total-req.Lines, 0))
-	}
-	out.Start = first
-	for k := first; k < total && k < first+req.Lines; k++ {
-		out.Lines = append(out.Lines, strings.TrimRight(lines[k], "\r"))
-	}
-	out.Spans = s.previewCache.spans(req.Path, text, lines, first, len(out.Lines))
-	return out, nil
+	return previewStoredText(req, &s.previewCache), nil
 }
 
 // clampInt clamps v into [lo, hi].
@@ -511,24 +571,23 @@ func openSourcesByPath(files []searchpanel.SourceFile) map[string]searchpanel.So
 // looks binary, and one that is not UTF-8. The second return is the skip reason, empty
 // when the text is returned.
 func readSearchableFile(path string, skipFrom int64) (string, string) {
-	f, err := os.Open(path)
+	f, info, err := openRegularFile(path)
 	if err != nil {
 		return "", "unreadable file"
 	}
 	defer func() { _ = f.Close() }()
-	if info, err := f.Stat(); err == nil {
-		switch {
-		case info.IsDir():
-			return "", "unreadable file"
-		case info.Size() >= pluginhost.GrepMaxFileBytes:
-			return "", "large file"
-		case skipFrom > 0 && info.Size() >= skipFrom:
-			return "", "large file"
-		}
+	switch {
+	case info.Size() >= pluginhost.GrepMaxFileBytes:
+		return "", "large file"
+	case skipFrom > 0 && info.Size() >= skipFrom:
+		return "", "large file"
 	}
-	data, err := io.ReadAll(io.LimitReader(f, pluginhost.GrepMaxFileBytes))
+	data, err := io.ReadAll(io.LimitReader(f, pluginhost.GrepMaxFileBytes+1))
 	if err != nil {
 		return "", "unreadable file"
+	}
+	if len(data) >= pluginhost.GrepMaxFileBytes {
+		return "", "large file"
 	}
 	probe := data[:min(len(data), searchBinaryProbe)]
 	if bytes.IndexByte(probe, 0) >= 0 {
@@ -565,6 +624,13 @@ func hashText(text string) uint64 {
 // line for a multi-line match, which a result row shows from its first line.
 func matchRunes(b *buffer.Buffer, m search.Match) int {
 	line := b.Line(m.Start.Line)
+	if m.End.Line == m.Start.Line {
+		return max(m.End.Col-m.Start.Col, 1)
+	}
+	return max(utf8.RuneCountInString(line)-m.Start.Col, 1)
+}
+
+func matchRunesText(line string, m search.Match) int {
 	if m.End.Line == m.Start.Line {
 		return max(m.End.Col-m.Start.Col, 1)
 	}

@@ -97,6 +97,9 @@ func (e *remoteCopyPartialError) Unwrap() error { return e.err }
 
 // copyContext bounds a subtree transfer; the caller's context still cancels it.
 func (o *remoteExplorerOps) copyContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return context.WithTimeout(ctx, remoteCopyTimeout)
 }
 
@@ -211,7 +214,11 @@ func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name stri
 				}
 				return dst, nil
 			case expanel.ConflictOverwrite:
-				if err := o.muts.Remove(opCtx, dst, dstStat.Kind == "dir"); err != nil {
+				muts := authority.Mutations(o.currentFiles())
+				if muts == nil {
+					return "", errors.New("remote file operations: the backend does not support changing the tree")
+				}
+				if err := muts.Remove(opCtx, dst, dstStat.Kind == "dir"); err != nil {
 					return "", fmt.Errorf("remote paste overwrite: remove %s: %w", dst, err)
 				}
 			default:
@@ -241,7 +248,11 @@ func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name stri
 		return "", &remoteCopyPartialError{dst: dst, files: written, err: err}
 	}
 	if move {
-		if err := o.muts.Remove(opCtx, src, st.Kind == "dir"); err != nil {
+		muts := authority.Mutations(o.currentFiles())
+		if muts == nil {
+			return "", fmt.Errorf("remote move: copied %s to %s but removing the source failed: backend does not support changing the tree; the copy is kept", src, dst)
+		}
+		if err := muts.Remove(opCtx, src, st.Kind == "dir"); err != nil {
 			return "", fmt.Errorf("remote move: copied %s to %s but removing the source failed: %w; the copy is kept", src, dst, err)
 		}
 	}
@@ -255,7 +266,11 @@ func (o *remoteExplorerOps) symlink(ctx context.Context, p string, st hostos.Fil
 	if st.Kind == "symlink" {
 		return true, nil
 	}
-	entries, err := o.files.ReadDir(ctx, path.Dir(p), true)
+	files := o.currentFiles()
+	if files == nil {
+		return false, errors.New("remote file operations: the workspace authority mounts no file system")
+	}
+	entries, err := files.ReadDir(ctx, path.Dir(p), true)
 	if err != nil {
 		return false, fmt.Errorf("remote file operation: list %s: %w", path.Dir(p), err)
 	}
@@ -307,12 +322,16 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 	if st.Kind != "dir" {
 		return nil, fmt.Errorf("remote copy refused: %s is not a file or directory", src)
 	}
+	files := o.currentFiles()
+	if files == nil {
+		return nil, errors.New("remote file operations: the workspace authority mounts no file system")
+	}
 	var walk func(dir, rel string, depth int) error
 	walk = func(dir, rel string, depth int) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entries, err := o.files.ReadDir(ctx, dir, true)
+		entries, err := files.ReadDir(ctx, dir, true)
 		if err != nil {
 			return fmt.Errorf("remote copy: list %s: %w", dir, err)
 		}
@@ -330,7 +349,7 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 				return fmt.Errorf("remote copy refused: %s contains a symbolic link (%s); remote copy does not follow links", src, e.Name)
 			}
 			childMode, childTime := fs.FileMode(0), e.MTime
-			if cs, serr := o.files.Stat(ctx, path.Join(dir, e.Name)); serr == nil {
+			if cs, serr := files.Stat(ctx, path.Join(dir, e.Name)); serr == nil {
 				// Best effort: metadata is a nice-to-have, and a backend that cannot
 				// stat an entry still copies its bytes.
 				childMode, childTime = cs.Mode, cs.MTime
@@ -373,8 +392,9 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 // created. A backend without them refuses the paste instead of falling back to the
 // check-to-create race.
 func (o *remoteExplorerOps) requireExclusiveCopy(dst string, nodes []remoteCopyNode) error {
-	content := authority.ContentCreators(o.files)
-	dirs := authority.DirectoryCreators(o.files)
+	files := o.currentFiles()
+	content := authority.ContentCreators(files)
+	dirs := authority.DirectoryCreators(files)
 	for _, node := range nodes {
 		switch node.kind {
 		case "dir":
@@ -402,8 +422,13 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 	written := 0
 	started := false
 	bytes := int64(0)
-	dirs := authority.DirectoryCreators(o.files)
-	content := authority.ContentCreators(o.files)
+	files := o.currentFiles()
+	if files == nil {
+		return written, started, errors.New("remote file operations: the workspace authority mounts no file system")
+	}
+	muts := authority.Mutations(files)
+	dirs := authority.DirectoryCreators(files)
+	content := authority.ContentCreators(files)
 	for _, node := range nodes {
 		if err := ctx.Err(); err != nil {
 			return written, started, err
@@ -416,8 +441,10 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 			var err error
 			if exclusive {
 				err = dirs.MkdirNew(ctx, to)
+			} else if muts == nil {
+				err = errors.New("remote file operations: the backend does not support changing the tree")
 			} else {
-				err = o.muts.Mkdir(ctx, to, false)
+				err = muts.Mkdir(ctx, to, false)
 			}
 			if err != nil {
 				if exclusive && node.rel == "" && errors.Is(err, fs.ErrExist) {
@@ -437,7 +464,7 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 		if node.rel != "" {
 			from = path.Join(src, node.rel)
 		}
-		data, err := o.files.ReadFile(ctx, from, limits.MaxBytes+1)
+		data, err := files.ReadFile(ctx, from, limits.MaxBytes+1)
 		if err != nil {
 			return written, started, fmt.Errorf("read %s: %w", from, err)
 		}
@@ -451,7 +478,7 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 		if exclusive {
 			err = content.CreateNewWithContent(ctx, to, data, hostos.WriteOptions{Atomic: true, Mode: node.mode})
 		} else {
-			err = o.files.WriteFile(ctx, to, data, hostos.WriteOptions{Atomic: true, Parents: true, Mode: node.mode})
+			err = files.WriteFile(ctx, to, data, hostos.WriteOptions{Atomic: true, Parents: true, Mode: node.mode})
 		}
 		if err != nil {
 			if exclusive && node.rel == "" && errors.Is(err, fs.ErrExist) {
@@ -477,7 +504,7 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 // copy and is not claimed to preserve metadata. Any failure is collected into the
 // non-fatal copy warning the TUI surfaces; it never turns a completed copy into an error.
 func (o *remoteExplorerOps) applyCopyMetadata(ctx context.Context, dst string, nodes []remoteCopyNode) {
-	meta := authority.Metadata(o.files)
+	meta := authority.Metadata(o.currentFiles())
 	if meta == nil {
 		return
 	}

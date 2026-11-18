@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
@@ -15,6 +16,14 @@ import (
 
 // ToggleFoldAt makes realEditor the foldToggler the app adapter is.
 func (r realEditor) ToggleFoldAt(line int) bool { return r.ed.ToggleFoldAt(line) }
+
+// ToggleCursorAt exposes Alt+Click multi-cursor toggling in tests.
+func (r realEditor) ToggleCursorAt(p buffer.Pos) bool { return r.ed.ToggleCursorAt(p) }
+
+// ReplaceActiveRange exposes range edits (e.g. Markdown checkboxes) in tests.
+func (r realEditor) ReplaceActiveRange(from, to buffer.Pos, text string) bool {
+	return r.ed.ReplaceActiveRange(from, to, text)
+}
 
 // mouseAt sends a left press with the modifiers mod at the text cell (col, row) of the
 // body, where row 0 is the first body row.
@@ -405,5 +414,49 @@ func TestDragTickIsIgnoredAfterReleaseOrReturn(t *testing.T) {
 	}
 	if _, now, _ := selectionOf(ed); now != head {
 		t.Fatalf("a tick after the release moved the head to %v from %v", now, head)
+	}
+}
+
+func TestMotionSkipViewInvalidatesAfterStateUpdateBeforeView(t *testing.T) {
+	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 12)
+	// Populate motionCachedView via View().
+	_ = m.View()
+	l := m.layout()
+
+	// Process a keystroke that mutates the buffer, then immediately process a plain
+	// MouseMotionMsg over the editor text before calling View().
+	m.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 1, Y: l.BodyTop, Button: tea.MouseNone}))
+	if m.motionSkipView {
+		t.Fatal("motionSkipView stayed true after an unrendered state change")
+	}
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "Zabc") {
+		t.Fatalf("View() served stale cached frame without 'Zabc':\n%s", view)
+	}
+}
+
+func TestCanSkipMotionViewWithHoverDebounceTick(t *testing.T) {
+	port := newDetectLSP("go")
+	lt := newDetectTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package main", "func hello() {}"}})
+	lt.feed(lspOpenedMsg{path: "/p/a.go", text: "package main\nfunc hello() {}"})
+	lt.m.view.mouseHover = true
+	lt.m.clockArmed = true
+	lt.m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	_ = lt.m.View()
+
+	l := lt.m.layout()
+	_, cmd := lt.m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 6, Y: l.BodyTop + 1, Button: tea.MouseNone}))
+	if cmd == nil {
+		t.Fatal("motion with mouseHover on did not emit hover debounce tick cmd")
+	}
+	if !lt.m.motionSkipView {
+		t.Fatal("motionSkipView was false when only hover debounce tick was emitted")
+	}
+	// An unrelated command (non-nil cmd passed to canSkipMotionView) must invalidate View skipping.
+	if lt.m.canSkipMotionView(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 6, Y: l.BodyTop + 1}), lt.m.stripHover, lt.m.statusHover, lt.m.gripHover, lt.m.borderHover, lt.m.dock.Hovered(), lt.m.explorerPanel.Dragging(), lt.m.notice, lt.m.ed.Status(), cmd) {
+		t.Fatal("canSkipMotionView allowed skipping View when a general cmd was emitted")
+	}
+	if lt.m.canSkipMotionView(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 6, Y: l.BodyTop + 1}), lt.m.stripHover, lt.m.statusHover, lt.m.gripHover, lt.m.borderHover, lt.m.dock.Hovered(), lt.m.explorerPanel.Dragging(), "different notice", lt.m.ed.Status(), nil) {
+		t.Fatal("canSkipMotionView allowed skipping View after notice changed")
 	}
 }

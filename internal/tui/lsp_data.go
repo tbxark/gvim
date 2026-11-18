@@ -2,6 +2,7 @@ package tui
 
 import (
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -162,9 +163,11 @@ func (m *Model) lspHints(msg lspHintsDoneMsg) {
 	}
 	if len(msg.hints) == 0 {
 		delete(s.hints, msg.path)
+		delete(s.renderCache, msg.path)
 		return
 	}
 	s.hints[msg.path] = msg.hints
+	delete(s.renderCache, msg.path)
 }
 
 // lspTokens stores the tokens of the document they were asked for. The reply of a
@@ -191,9 +194,11 @@ func (m *Model) lspTokens(msg lspTokensDoneMsg) {
 	}
 	if len(msg.tokens) == 0 {
 		delete(s.tokens, msg.path)
+		delete(s.renderCache, msg.path)
 		return
 	}
 	s.tokens[msg.path] = msg.tokens
+	delete(s.renderCache, msg.path)
 }
 
 // lspDocFor returns the document of the open tab of the editor at path.
@@ -254,6 +259,62 @@ func lspInlayHintCells(h InlayHint, lineLen int) string {
 // of the pane are composed, never replaced, so a plugin's decorations keep
 // painting. The spans have priority -1: they paint below the plugin decorations
 // (priority 0 and up) and above the syntax colors.
+func sameTokenSlice(a, b []SemanticToken) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
+}
+
+func sameHintSlice(a, b []InlayHint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
+}
+
+func (m *Model) lspDocCacheFor(path string, hints []InlayHint, tokens []SemanticToken) *lspDocRenderCache {
+	if m.lsp.renderCache == nil {
+		m.lsp.renderCache = make(map[string]*lspDocRenderCache)
+	}
+	rc := m.lsp.renderCache[path]
+	if rc == nil || !sameTokenSlice(rc.tokens, tokens) {
+		var rawTokens map[int][]SemanticToken
+		if len(tokens) > 0 {
+			rawTokens = make(map[int][]SemanticToken, len(tokens))
+			for _, tok := range tokens {
+				rawTokens[tok.Line] = append(rawTokens[tok.Line], tok)
+			}
+		}
+		var rawHints map[int][]InlayHint
+		if rc != nil && sameHintSlice(rc.hints, hints) {
+			rawHints = rc.rawHintsLn
+		}
+		rc = &lspDocRenderCache{
+			tokens:      tokens,
+			hints:       hints,
+			rawTokensLn: rawTokens,
+			rawHintsLn:  rawHints,
+		}
+		m.lsp.renderCache[path] = rc
+	}
+	if (rc.rawHintsLn == nil && len(hints) > 0) || !sameHintSlice(rc.hints, hints) {
+		if len(hints) == 0 {
+			rc.rawHintsLn = nil
+		} else {
+			rawHints := make(map[int][]InlayHint, len(hints))
+			for _, h := range hints {
+				if h.Line >= 0 {
+					rawHints[h.Line] = append(rawHints[h.Line], h)
+				}
+			}
+			rc.rawHintsLn = rawHints
+		}
+		rc.hints = hints
+	}
+	return rc
+}
+
 func (m *Model) lspData(pane editorpane.Pane, doc Document) editorpane.Pane {
 	path := docPath(doc)
 	hints := m.lsp.hints[path]
@@ -261,47 +322,62 @@ func (m *Model) lspData(pane editorpane.Pane, doc Document) editorpane.Pane {
 	if len(hints) == 0 && len(tokens) == 0 {
 		return pane
 	}
-	tokenByLine := make(map[int][]editorpane.StyledSpan, len(tokens))
-	for _, tok := range tokens {
-		tokenByLine[tok.Line] = append(tokenByLine[tok.Line], editorpane.StyledSpan{
-			Start: tok.Start, End: tok.End, Style: m.semanticTokenStyle(tok), Priority: -1,
-		})
-	}
+	rc := m.lspDocCacheFor(path, hints, tokens)
 	if len(hints) > 0 {
-		// Tier 2: the hints are display-only cells spliced into their rows at the
-		// protocol position; the pane paints a hint at the end of the line when its row
-		// cannot take the cells (page view, a windowed or tall line, a panned row, no
-		// room, a concealed insertion point).
+		// Tier 2: build InlineHint cells lazily per visible line so off-screen lines
+		// never allocate doc.Line strings on every paint.
 		hintStyle := m.panes.Text
 		hintStyle.Faint = true
-		hintByLine := make(map[int][]editorpane.InlineHint, len(hints))
-		for _, h := range hints {
-			if h.Line < 0 || h.Line >= doc.LineCount() {
-				continue
-			}
-			lineLen := len([]rune(doc.Line(h.Line)))
-			hintByLine[h.Line] = append(hintByLine[h.Line], editorpane.InlineHint{
-				Col:   min(max(h.Col, 0), lineLen),
-				Text:  lspInlayHintCells(h, lineLen),
-				Style: hintStyle,
-			})
-		}
+		rawHintsLn := rc.rawHintsLn
 		inner := pane.InlineHints
 		pane.InlineHints = func(line int) []editorpane.InlineHint {
-			if inner == nil {
-				return hintByLine[line]
+			raw := rawHintsLn[line]
+			if len(raw) == 0 {
+				if inner == nil {
+					return nil
+				}
+				return inner(line)
 			}
-			return append(inner(line), hintByLine[line]...)
+			if line < 0 || line >= doc.LineCount() {
+				if inner == nil {
+					return nil
+				}
+				return inner(line)
+			}
+			lineLen := 0
+			if ll, ok := doc.(interface{ LineLen(int) int }); ok {
+				lineLen = ll.LineLen(line)
+			} else {
+				lineLen = utf8.RuneCountInString(doc.Line(line))
+			}
+			built := make([]editorpane.InlineHint, 0, len(raw))
+			for _, h := range raw {
+				built = append(built, editorpane.InlineHint{
+					Col:   min(max(h.Col, 0), lineLen),
+					Text:  lspInlayHintCells(h, lineLen),
+					Style: hintStyle,
+				})
+			}
+			if inner == nil {
+				return built
+			}
+			return append(inner(line), built...)
 		}
 	}
 	if len(tokens) > 0 {
+		rawTokensLn := rc.rawTokensLn
 		inner := pane.Overlays
 		pane.Overlays = func(line int) []editorpane.StyledSpan {
 			var out []editorpane.StyledSpan
 			if inner != nil {
 				out = append(out, inner(line)...)
 			}
-			return append(out, tokenByLine[line]...)
+			for _, tok := range rawTokensLn[line] {
+				out = append(out, editorpane.StyledSpan{
+					Start: tok.Start, End: tok.End, Style: m.semanticTokenStyle(tok), Priority: -1,
+				})
+			}
+			return out
 		}
 	}
 	return pane
@@ -394,6 +470,7 @@ type externalFoldSetter interface {
 func (m *Model) lspDropData(path string) {
 	delete(m.lsp.hints, path)
 	delete(m.lsp.tokens, path)
+	delete(m.lsp.renderCache, path)
 	if setter, ok := m.ed.(externalFoldSetter); ok {
 		setter.SetExternalFolds(path, nil)
 	}

@@ -12,7 +12,7 @@ func (p Pane) RowStarts(w, h, line int) []int {
 	if len(ln.spans) < 2 {
 		return nil
 	}
-	raw := []rune(f.doc.Line(line))
+	raw := ln.raw
 	out := make([]int, len(ln.spans))
 	col, expanded, cells := 0, 0, 0
 	for k, sp := range ln.spans {
@@ -26,7 +26,7 @@ func (p Pane) RowStarts(w, h, line int) []int {
 			}
 			col++
 		}
-		out[k] = col
+		out[k] = mapDispColumn(ln, col)
 	}
 	return out
 }

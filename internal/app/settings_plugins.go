@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"slices"
@@ -227,6 +228,13 @@ func (s *settingsService) setPluginEnabled(name string, enabled bool) error {
 		return errors.New("settings: no user config file is known")
 	}
 	previous, readErr := os.ReadFile(path)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return fmt.Errorf("config: read %s: %w", path, readErr)
+	}
+	perm := fs.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		perm = st.Mode().Perm()
+	}
 	raw, err := json.Marshal(enabled)
 	if err != nil {
 		return err
@@ -235,25 +243,36 @@ func (s *settingsService) setPluginEnabled(name string, enabled bool) error {
 	if err := patchConfigFileFn(path, patch); err != nil {
 		return err
 	}
-	rollback := func() {
+	rollback := func() error {
 		// The previous bytes when there was a file, otherwise remove the one the
 		// patch created.
-		if readErr != nil {
-			_ = os.Remove(path)
+		var werr error
+		if errors.Is(readErr, fs.ErrNotExist) {
+			werr = os.Remove(path)
+			if errors.Is(werr, fs.ErrNotExist) {
+				werr = nil
+			}
 		} else {
-			_ = os.WriteFile(path, previous, 0o644)
+			werr = os.WriteFile(path, previous, perm)
 		}
+		_, _ = s.reloadUnlocked([]string{"plugins." + name + ".enabled"}, "user")
+		return werr
 	}
 	if _, err := s.reloadUnlocked([]string{"plugins." + name + ".enabled"}, "user"); err != nil {
-		rollback()
+		if rerr := rollback(); rerr != nil {
+			return fmt.Errorf("%w (rollback failed: %v)", err, rerr)
+		}
 		return err
 	}
 	// Writing the flag must leave a config file that still loads; a diagnostic in
 	// the file we just wrote means the toggle would run the runtime on a config the
 	// next start rejects, so it is rolled back too.
 	if diags := s.diagnosticsOf(path); len(diags) > 0 {
-		rollback()
-		return fmt.Errorf("the config file does not load after the write: %s", diags[0])
+		err := fmt.Errorf("the config file does not load after the write: %s", diags[0])
+		if rerr := rollback(); rerr != nil {
+			return fmt.Errorf("%w (rollback failed: %v)", err, rerr)
+		}
+		return err
 	}
 	return nil
 }

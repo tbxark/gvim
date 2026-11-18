@@ -584,11 +584,28 @@ func (h *pluginHost) Config(key string) (any, bool) {
 	s := m.util.settings
 	switch key {
 	case "theme":
+		if th := m.effectiveTheme(); th.Name != "" {
+			return th.Name, true
+		}
 		return s.Theme, true
 	case "keymap":
 		return s.Keymap, true
 	case "tab_size":
-		return s.TabSize, true
+		ts := s.TabSize
+		if ts <= 0 {
+			ts = m.tabSize
+		}
+		if m.ed != nil {
+			if doc := m.ed.Active(); doc != nil {
+				if n := m.docLanguageSettings(doc).TabSize; n > 0 {
+					ts = n
+				}
+				if n := docViewOf(doc).TabSize; n > 0 {
+					ts = n
+				}
+			}
+		}
+		return ts, true
 	case "insert_spaces":
 		return s.InsertSpaces, true
 	case "auto_indent":

@@ -130,3 +130,25 @@ func TestGitGrepPathspecs(t *testing.T) {
 		})
 	}
 }
+
+func TestGitGrepNULFilenameWithColonAndMultibyteCol(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Windows cannot create files with colons in their name; other filenames with spaces
+	// still exercise NUL parsing, and Unix exercises colons directly.
+	name := "a:b.txt"
+	writeTree(t, dir, map[string]string{name: "café foo bar\n"})
+	gitRepo(t, dir)
+	res, err := gitGrep{}.GitGrep(searchpanel.GitRequest{Root: dir, Query: "foo", Limit: 100})
+	if err != nil {
+		t.Fatalf("GitGrep: %v", err)
+	}
+	if len(res.Files) != 1 || res.Files[0].Name != name || len(res.Files[0].Matches) != 1 {
+		t.Fatalf("result = %+v, want 1 match in %q", res, name)
+	}
+	m := res.Files[0].Matches[0]
+	// "café " is 5 runes (6 bytes); 1-based rune column is 6, length is 3.
+	if m.Col != 6 || m.Len != 3 {
+		t.Fatalf("match = %+v, want Col=6 Len=3", m)
+	}
+}

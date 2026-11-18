@@ -6,23 +6,20 @@ import (
 	"runtime/debug"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tbxark/gvim/internal/app"
 )
 
-// versionString returns the module version from the build info. A binary built
-// from a working tree reports "(devel)".
+// versionString returns the user-facing gvim release or build version.
 func versionString() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok || info.Main.Version == "" {
-		return "unknown"
-	}
-	return info.Main.Version
+	return app.Version()
 }
 
 // buildInfoLines describes how the binary was built: the Go toolchain, the
 // platform, and the VCS state when the build recorded it.
 func buildInfoLines() []string {
 	lines := []string{
-		"go " + runtime.Version(),
+		runtime.Version(),
 		"platform " + runtime.GOOS + "/" + runtime.GOARCH,
 	}
 	info, ok := debug.ReadBuildInfo()
@@ -45,6 +42,7 @@ func newVersionCommand() *cobra.Command {
 		Short: "Print the version and build information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			w := cmd.OutOrStdout()
 			if _, err := fmt.Fprintf(w, "gvim version %s\n", versionString()); err != nil {
 				return err

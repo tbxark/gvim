@@ -421,7 +421,7 @@ func (p *themeEditorPage) openRef(ref string) tea.Cmd {
 	catalog := p.model.util.themeCatalog
 	return func() tea.Msg {
 		loaded, err := catalog.Load(ref)
-		return themeEditorOpenDoneMsg{page: p, theme: loaded, err: err}
+		return themeEditorOpenDoneMsg{page: p, ref: ref, theme: loaded, err: err}
 	}
 }
 
@@ -452,6 +452,7 @@ type themeEditorSaveDoneMsg struct {
 // themeEditorOpenDoneMsg is the result of opening another theme.
 type themeEditorOpenDoneMsg struct {
 	page  *themeEditorPage
+	ref   string
 	theme theme.Theme
 	err   error
 }
@@ -469,7 +470,7 @@ func (p *themeEditorPage) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 				p.sel = i
 				// A click on the row's own swatch opens the colour picker for it,
 				// as Fresh's editor does; clicking elsewhere only selects the row.
-				if mo.X <= p.box.X+3 {
+				if mo.X >= p.box.X+2 && mo.X <= p.box.X+3 {
 					cmd = p.openColorPicker()
 				}
 			}
@@ -603,11 +604,15 @@ func (p *themeEditorPage) openDone(msg themeEditorOpenDoneMsg) tea.Cmd {
 	p.working = msg.theme
 	p.values = make(map[string]theme.Color)
 	p.name = msg.theme.Name
-	p.ref = p.model.currentThemeRef()
+	p.ref = msg.ref
+	if p.name == "" {
+		p.name = p.ref
+	}
 	p.readOnly = p.isBuiltin()
 	p.dirty = false
 	p.layout()
 	p.model.theme = msg.theme
+	p.model.themeRef = msg.ref
 	p.model.rebuildTheme()
 	return nil
 }
@@ -665,7 +670,7 @@ func (p *themeEditorPage) Draw(g *grid.Grid) {
 		}
 		sw := st
 		sw.FG = style.RenderedColor(value)
-		g.Put(box.X+2, y, box.X+3, "██", sw)
+		g.Put(box.X+2, y, box.X+4, "██", sw)
 		text := value.Hex()
 		if attrs := theme.FormatModifiers(value.Modifiers); attrs != "" {
 			text += " " + attrs

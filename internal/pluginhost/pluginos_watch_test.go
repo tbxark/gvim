@@ -58,7 +58,7 @@ func (l *eventLog) count(path, kind string) int {
 // file that was created and then written is reported as created.
 func TestWatchDebounceCoalesces(t *testing.T) {
 	o, dir := newTestOS(t)
-	w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{Debounce: 150 * time.Millisecond})
+	w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{Debounce: 250 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,10 +69,10 @@ func TestWatchDebounceCoalesces(t *testing.T) {
 		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(time.Millisecond)
 	}
 	eventually(t, "the coalesced event", func() bool { return log.count(path, "") >= 1 })
-	time.Sleep(400 * time.Millisecond) // nothing more may follow from the same burst
+	time.Sleep(350 * time.Millisecond) // nothing more may follow from the same burst
 	evs := log.snapshot()
 	if n := log.count(path, ""); n != 1 {
 		t.Fatalf("events = %+v, want exactly one for the burst", evs)
@@ -89,7 +89,7 @@ func TestWatchDebounceCoalesces(t *testing.T) {
 
 func TestWatchKinds(t *testing.T) {
 	o, dir := newTestOS(t)
-	w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{Debounce: 20 * time.Millisecond})
+	w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{Debounce: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestWatchKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "create", func() bool { return log.count(path, "create") == 1 })
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}

@@ -23,16 +23,21 @@ func paintWelcome(g *grid.Grid, st style.Styles, l frame.Layout, sel int) {
 		switch r.Role {
 		case frame.WelcomeBlank:
 		case frame.WelcomeTitleRow:
-			g.Put(r.X, r.Y, g.Width(), r.Text, text)
+			titleStyle := text
+			titleStyle.Bold = true
+			if accentFG := style.Cell(st.Accent).BG; accentFG != nil {
+				titleStyle.FG = accentFG
+			}
+			g.Put(r.X, r.Y, r.X+r.W, r.Text, titleStyle)
 		case frame.WelcomeSubtitle, frame.WelcomeHeadingRow:
-			g.Put(r.X, r.Y, g.Width(), r.Text, dim)
+			g.Put(r.X, r.Y, r.X+r.W, r.Text, dim)
 		case frame.WelcomeDoorRow, frame.WelcomeRecentRow:
 			rowStyle := base
 			if r.Item == sel {
 				rowStyle = selected
 			}
 			g.Fill(r.X, r.X+r.W, r.Y, rowStyle)
-			g.Put(r.LabelX, r.Y, g.Width(), r.Text, rowStyle)
+			g.Put(r.LabelX, r.Y, r.X+r.W, r.Text, rowStyle)
 			keyStyle := chip
 			switch {
 			case r.Item == sel:
@@ -40,7 +45,7 @@ func paintWelcome(g *grid.Grid, st style.Styles, l frame.Layout, sel int) {
 			case r.Role == frame.WelcomeRecentRow:
 				keyStyle = dim
 			}
-			g.Put(r.KeyX, r.Y, g.Width(), r.Key, keyStyle)
+			g.Put(r.KeyX, r.Y, r.X+r.W, r.Key, keyStyle)
 		}
 	}
 }

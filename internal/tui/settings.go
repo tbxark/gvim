@@ -845,8 +845,20 @@ func (p *settingsPage) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
 			mo := tea.Mouse(msg)
+			if p.box.W > 0 && mo.Y == p.box.Y && mo.X >= p.box.X && mo.X < p.box.X+p.box.W {
+				p.toggleLayer()
+				break
+			}
 			if i, ok := p.rowAt(mo.X, mo.Y); ok && !p.rows[i].header {
+				already := p.sel == i
 				p.sel = i
+				it := p.rows[i].item
+				end := p.box.X + p.box.W - 2
+				valStart := end - ansi.StringWidth(it.Value) - 2
+				inVal := mo.X >= valStart && mo.X <= end
+				if already || (inVal && (it.Kind == "bool" || it.Kind == "enum" || it.Kind == "page")) {
+					cmd = p.edit()
+				}
 			}
 		}
 	case tea.MouseWheelMsg:
@@ -1135,8 +1147,14 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 		}
 	case "mouse_capture":
 		m.view.mouseCapture = v.MouseCapture
+		if !m.view.mouseCapture {
+			m.clearMouseHover()
+		}
 	case "editor.mouse_hover_enabled":
 		m.view.mouseHover = v.MouseHover
+		if !m.view.mouseHover {
+			m.cancelMouseHover()
+		}
 	case "scroll_sync":
 		m.view.scrollSync = v.ScrollSync
 	case "explorer_show_hidden":

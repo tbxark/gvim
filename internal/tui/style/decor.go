@@ -24,7 +24,9 @@ type Decor struct {
 	// BracketPair holds the attributes of the pair at the caret when the brackets
 	// are colored by depth: editor.bracket_rainbow_match_modifier, bold and
 	// underlined when the theme gives none.
-	BracketPair lipgloss.Style
+	BracketPair     lipgloss.Style
+	TabHoverBG      lipgloss.Style // ui.tab_hover_bg
+	TabCloseHoverFG lipgloss.Style // ui.tab_close_hover_fg
 }
 
 // syntaxFallbacks are the syntax keys that the bracket rainbow levels fall back to.
@@ -37,6 +39,8 @@ func newDecor(th theme.Theme) Decor {
 		IndentGuide:        firstFG(th, ref{"editor", "indentation_guide_fg"}, refWhitespace),
 		BracketMatch:       firstFG(th, ref{"editor", "bracket_match_fg"}, ref{"editor", "cursor"}),
 		BracketPair:        lipgloss.NewStyle().Bold(true).Underline(true),
+		TabHoverBG:         build(th, ref{}, ref{"ui", "tab_hover_bg"}),
+		TabCloseHoverFG:    firstFG(th, ref{"ui", "tab_close_hover_fg"}),
 	}
 	for i := range RainbowLevels {
 		n := strconv.Itoa(i + 1)

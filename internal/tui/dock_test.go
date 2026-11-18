@@ -34,6 +34,7 @@ const (
 // resize. Its Updates channel starts with one pending signal, so a wait for output
 // returns at once. Its Done channel stays open until a test closes it.
 type fakeTerm struct {
+	mu        sync.Mutex
 	writes    []string
 	pastes    []string
 	resizes   [][2]int
@@ -73,6 +74,8 @@ func newFakeTerm() *fakeTerm {
 }
 
 func (f *fakeTerm) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.writeErr != nil {
 		return 0, f.writeErr
 	}
@@ -80,12 +83,22 @@ func (f *fakeTerm) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (f *fakeTerm) WritesSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.writes)
+}
+
 func (f *fakeTerm) Paste(text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.pastes = append(f.pastes, text)
 	return nil
 }
 
 func (f *fakeTerm) Resize(cols, rows int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.resizes = append(f.resizes, [2]int{cols, rows})
 	return nil
 }
@@ -100,8 +113,11 @@ func (f *fakeTerm) ForegroundProcessSupported() bool {
 	return f.fgSupported
 }
 func (f *fakeTerm) ForegroundProcessName() (string, bool) {
+	f.mu.Lock()
 	f.fgCalls++
-	return f.fgName, f.fgOK
+	name, ok := f.fgName, f.fgOK
+	f.mu.Unlock()
+	return name, ok
 }
 func (f *fakeTerm) Focus(focused bool) { f.focusCalls = append(f.focusCalls, focused) }
 func (f *fakeTerm) Close() error       { f.closed = true; return nil }

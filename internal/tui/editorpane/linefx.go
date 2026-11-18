@@ -20,7 +20,7 @@ const guideReachLines = 200
 // line, in order from the top line.
 func (f frame) decorate(i int, raw []rune, kinds []syntax.Kind, ln *line) {
 	f.markWhitespace(ln.cells)
-	f.bracketsOf(i, raw, kinds, ln.cells)
+	f.bracketsOf(i, raw, kinds, ln)
 	cols := f.lineGuides(i, string(raw))
 	f.applyGuides(ln.cells, cols)
 	tail := f.breakCells(i, raw)
@@ -160,7 +160,10 @@ func (f frame) setActiveGuide() {
 		return
 	}
 	for _, r := range fl.Folds(f.tab) {
-		if r.Start <= f.caret.Line && f.caret.Line <= r.End {
+		if r.Start > f.caret.Line {
+			break
+		}
+		if f.caret.Line <= r.End {
 			w, _ := textlayout.LineIndent(f.head(r.Start), f.tab)
 			fx.activeCol, fx.activeFrom, fx.activeTo, fx.hasActive = w, r.Start+1, r.End, true
 		}

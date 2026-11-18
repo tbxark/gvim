@@ -101,7 +101,7 @@ type View struct {
 	active bool
 	chrome style.Overlay
 	run    func(v *View, r Row) tea.Cmd // nil: choosing a row does nothing
-	marked map[int]bool                 // Multi: shown indexes marked with Space
+	marked map[int]bool                 // Multi: Rows indexes marked with Space
 }
 
 // The kit's two views are overlays of the root's stack.
@@ -241,9 +241,24 @@ func (v *View) update(msg tea.Msg) tea.Cmd {
 		v.typeText(msg.Content)
 	case tea.MouseClickMsg:
 		m := tea.Mouse(msg)
-		if k, ok := v.rowAt(m.X, m.Y); ok && m.Button == tea.MouseLeft {
-			v.sel = k
-			return v.chooseSelected()
+		if m.Button == tea.MouseLeft {
+			if k, ok := v.rowAt(m.X, m.Y); ok {
+				v.sel = k
+				if v.Multi {
+					v.toggleMark()
+					return nil
+				}
+				return v.chooseSelected()
+			}
+			if v.Multi && v.Box.Contains(m.X, m.Y) && m.Y == v.Box.Y+v.Box.H-1 {
+				if rows := v.markedRows(); len(rows) > 0 {
+					if v.ChooseMany != nil {
+						return v.ChooseMany(v, rows)
+					}
+					return nil
+				}
+				return v.chooseSelected()
+			}
 		}
 	case tea.MouseWheelMsg:
 		switch tea.Mouse(msg).Button {
@@ -357,15 +372,16 @@ func (v *View) toggleMark() {
 	if v.marked == nil {
 		v.marked = make(map[int]bool)
 	}
-	v.marked[v.sel] = !v.marked[v.sel]
+	idx := v.shown[v.sel]
+	v.marked[idx] = !v.marked[idx]
 }
 
-// markedRows returns the marked items in display order, for ChooseMany.
+// markedRows returns the marked items in Rows order, for ChooseMany.
 func (v *View) markedRows() []Row {
 	var out []Row
-	for i, idx := range v.shown {
-		if v.marked[i] && !v.Rows[idx].Header {
-			out = append(out, v.Rows[idx])
+	for i, r := range v.Rows {
+		if v.marked[i] && !r.Header {
+			out = append(out, r)
 		}
 	}
 	return out
@@ -454,7 +470,7 @@ func (v *View) draw(g *grid.Grid) {
 		left, room := r.Left, end-box.X-2
 		if v.Multi && !r.Header {
 			mark := "[ ] "
-			if v.marked[idx] {
+			if v.marked[v.shown[idx]] {
 				mark = "[x] "
 			}
 			g.Put(box.X+2, y, end, mark, st)

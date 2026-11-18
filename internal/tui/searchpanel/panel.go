@@ -344,6 +344,10 @@ func newField(value string) textinput.Model {
 // Active reports whether the panel is open.
 func (p *Panel) Active() bool { return p.open }
 
+// ExclusiveOverlay marks the project search panel as a transient interaction. See
+// overlay.Exclusive.
+func (*Panel) ExclusiveOverlay() {}
+
 // SetNotice shows text on the bottom border in place of the key hints, until the next
 // key. The root uses it for a summary that would otherwise be covered by the panel.
 func (p *Panel) SetNotice(text string) { p.notice = text }
@@ -931,17 +935,32 @@ func (p *Panel) scrollPreviewTo(first int) tea.Cmd {
 	return p.showPreviewAt(target)
 }
 
-// previewWheel scrolls the preview when the wheel notch is over its column.
+// previewWheel scrolls the preview when the wheel notch is over its column,
+// or the results list when over the results rows.
 func (p *Panel) previewWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	mo := msg.Mouse()
-	if !p.previewBox.contains(mo.X, mo.Y) {
+	if p.previewBox.contains(mo.X, mo.Y) {
+		switch mo.Button {
+		case tea.MouseWheelUp:
+			return p.scrollPreview(-previewWheelRows)
+		case tea.MouseWheelDown:
+			return p.scrollPreview(previewWheelRows)
+		}
 		return nil
 	}
-	switch mo.Button {
-	case tea.MouseWheelUp:
-		return p.scrollPreview(-previewWheelRows)
-	case tea.MouseWheelDown:
-		return p.scrollPreview(previewWheelRows)
+	g := p.mouseGeo
+	if g.results > 0 && mo.X >= g.x0 && mo.X < g.listEnd && mo.Y >= g.resultsTop && mo.Y < g.resultsTop+g.results {
+		delta := 0
+		switch mo.Button {
+		case tea.MouseWheelUp:
+			delta = -previewWheelRows
+		case tea.MouseWheelDown:
+			delta = previewWheelRows
+		}
+		if delta != 0 {
+			h := p.resultsHeight()
+			p.top = space.Clamp(p.top+delta, 0, max(len(p.rows)-h, 0))
+		}
 	}
 	return nil
 }

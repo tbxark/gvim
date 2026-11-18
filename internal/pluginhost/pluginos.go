@@ -455,17 +455,24 @@ func (o *pluginOS) Rename(ctx context.Context, from, to string) error {
 		return err
 	}
 	a, b := o.abs(from), o.abs(to)
-	if _, err := os.Lstat(b); err == nil {
-		return pluginapi.Errf(pluginapi.CodeConflict, "%s: already exists", b)
+	if filepath.Dir(a) == a {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "refusing to rename the filesystem root")
 	}
-	err := os.Rename(a, b)
-	if err == nil || !errors.Is(err, syscall.EXDEV) {
-		return mapErr(err, a)
-	}
-	if err := o.Copy(ctx, a, b); err != nil {
+	if err := o.refuseProtected(a); err != nil {
 		return err
 	}
-	return o.Remove(ctx, a, true)
+	res, err := fsops.RenameNoReplaceResult(a, b)
+	o.warnCopy(res.Warning)
+	if err != nil {
+		if errors.Is(err, fsops.ErrConflict) {
+			return pluginapi.Errf(pluginapi.CodeConflict, "%s: already exists", b)
+		}
+		if errors.Is(err, fsops.ErrInvalidDest) {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "%s", err)
+		}
+		return mapErr(err, a)
+	}
+	return nil
 }
 
 // RealPath implements hostos.OS.

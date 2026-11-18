@@ -8,6 +8,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/find"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
@@ -59,11 +60,14 @@ var overlayActionNames = []string{
 // consults the keymap before its own handler.
 func overlayContextOf(o Overlay) (KeyContext, bool) {
 	switch o.(type) {
-	case *prompt.Line, *prompt.Confirm:
+	case *prompt.Line, *prompt.Confirm, *prompt.Choice, *pluginLineOverlay, *pluginConfirmOverlay:
 		return KeyContextPrompt, true
 	case *find.Bar:
 		return KeyContextSearchPrompt, true
-	case *palette.Palette, *list.View, *browser.Browser:
+	case *palette.Palette, *list.View, *browser.Browser, *popup.Popup,
+		*pluginPickerOverlay, *pluginPopupOverlay, *pluginActionPopupOverlay,
+		*agentPickerOverlay, *agentActionPickerOverlay, *agentDiscoverOverlay,
+		*bookmarksOverlay, *managerOverlay:
 		return KeyContextPopup, true
 	case *ctxmenu.Menu:
 		return KeyContextMenu, true

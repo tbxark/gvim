@@ -60,7 +60,7 @@ func TestSyntaxForegroundRules(t *testing.T) {
 		want color.Color
 	}{
 		{name: "rgb value", kind: syntax.KindKeyword, want: color.RGBA{R: 1, G: 2, B: 3, A: 255}},
-		{name: "named value falls back to the editor foreground", kind: syntax.KindString, want: editorFG},
+		{name: "named value uses ANSI color", kind: syntax.KindString, want: style.RenderedColor(theme.Color{Name: "Yellow"})},
 		{name: "terminal default has no foreground", kind: syntax.KindComment, want: nil},
 		// A partial theme is layered on a builtin base, so a syntax key it does
 		// not name is the base's (dark's function color), not the editor fg.
@@ -91,6 +91,20 @@ func TestNewStylesSearchMatchColors(t *testing.T) {
 	st := NewStyles(th)
 	if st.Match.BG != (color.RGBA{R: 82, G: 65, B: 27, A: 255}) {
 		t.Errorf("match bg = %v, want the dark theme match color", st.Match.BG)
+	}
+	if st.Match.FG != (color.RGBA{R: 230, G: 237, B: 243, A: 255}) {
+		t.Errorf("match fg = %v, want the dark theme match fg", st.Match.FG)
+	}
+	term, err := theme.Load("terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tst := NewStyles(term)
+	if tst.Syntax[syntax.KindKeyword].FG != style.RenderedColor(theme.Color{Name: "Red"}) {
+		t.Errorf("terminal keyword fg = %v, want ANSI Red", tst.Syntax[syntax.KindKeyword].FG)
+	}
+	if tst.Match.FG != style.RenderedColor(theme.Color{Name: "Black"}) {
+		t.Errorf("terminal match fg = %v, want ANSI Black", tst.Match.FG)
 	}
 	if st.CurrentMatch.BG != (color.RGBA{R: 227, G: 179, B: 65, A: 255}) {
 		t.Errorf("current match bg = %v, want the dark theme current match color", st.CurrentMatch.BG)

@@ -267,3 +267,52 @@ func TestInlineHintPannedRowKeepsTheFallbackRule(t *testing.T) {
 		t.Fatalf("row = %q, a panned row must not splice a hint", g.Plain()[0])
 	}
 }
+
+func TestInlineCacheMemoHitAndWideRuneContinuationCells(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	p := Pane{
+		Doc: newDoc("ab"),
+		InlineHints: func(i int) []InlineHint {
+			calls++
+			if i == 0 {
+				return []InlineHint{{Col: 1, Text: "中", Style: hintStyle}}
+			}
+			return nil
+		},
+	}
+	f, ok := p.newFrame(30, 2)
+	if !ok {
+		t.Fatal("newFrame failed")
+	}
+	ln := f.layoutLine(0, false)
+	_ = f.inlineData(0, ln)
+	_ = f.inlineData(0, ln)
+	if calls != 1 {
+		t.Fatalf("InlineHints called %d times for cached line 0, want 1", calls)
+	}
+	// Also verify memoization when inlineAvailable is false (narrow pane / panned).
+	calls = 0
+	pNarrow := p
+	pNarrow.Left = 1
+	fn, ok := pNarrow.newFrame(30, 2)
+	if !ok {
+		t.Fatal("narrow newFrame failed")
+	}
+	lnNarrow := fn.layoutLine(0, false)
+	_ = fn.inlineData(0, lnNarrow)
+	_ = fn.inlineData(0, lnNarrow)
+	if calls != 1 {
+		t.Fatalf("InlineHints called %d times when !inlineAvailable, want 1", calls)
+	}
+	g := p.Render(30, 2)
+	if got := cellAt(t, g, textX+1, 0).Text; got != "中" {
+		t.Fatalf("hint lead cell = %q, want 中", got)
+	}
+	if got := cellAt(t, g, textX+2, 0).Text; got != "" {
+		t.Fatalf("hint continuation cell = %q, want empty continuation", got)
+	}
+	if got := cellAt(t, g, textX+3, 0).Text; got != "b" {
+		t.Fatalf("post-hint cell = %q, want b at +3", got)
+	}
+}

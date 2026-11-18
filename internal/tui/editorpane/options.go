@@ -38,6 +38,17 @@ type Options struct {
 	// RainbowBrackets colors every bracket by its nesting depth, and then the pair
 	// at the caret is marked by bold and underline. It needs HighlightBrackets.
 	RainbowBrackets bool
+	// FoldLineCount renders " ⋯ N lines" placeholders on collapsed indentation folds
+	// when no plugin placeholder is provided.
+	FoldLineCount bool
+	// HideTilde suppresses the "~" gutter markers on rows past EOF.
+	HideTilde bool
+	// HideSyntax ignores LineSpans when laying out and painting text.
+	HideSyntax bool
+	// HideCurrentLineOnSelection disables the current-line highlight while a selection is active.
+	HideCurrentLineOnSelection bool
+	// HighlightCurrentColumn tints the caret column vertically across body rows.
+	HighlightCurrentColumn bool
 }
 
 // Whitespace says which whitespace marks the pane draws: a middle dot for a space,

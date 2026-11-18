@@ -196,7 +196,11 @@ func (m *Model) copyFormatted(args map[string]any, text string) tea.Cmd {
 			m.notice = uiTextVars("gvim.notice.clipboard.theme_not_found", "Copied as plain text: theme %{theme} not found", map[string]any{"theme": fmt.Sprintf("%q", n)})
 			return nil
 		}
-		st, name = editorpane.NewStyles(th), th.Name
+		if len(m.themeOverrides) == 0 && th.Name == m.theme.Name && n == m.theme.Name {
+			st, name = m.panes, th.Name
+		} else {
+			st, name = editorpane.NewStyles(th), th.Name
+		}
 	}
 	html, ok := editorpane.SelectionHTML(m.ed.Active(), st, text)
 	if !ok {
@@ -223,7 +227,7 @@ func (m *Model) copyFormatted(args map[string]any, text string) tea.Cmd {
 // macro replay does not read it either: the read arrives after the steps that follow the
 // paste, so the paste runs now, from the editor's register.
 func (m *Model) editorPaste(action string, args map[string]any) (tea.Cmd, bool) {
-	if action != "paste" || args["text"] != nil || m.dock.Clipboard() == nil || m.ed.Active() == nil || m.root.macro.playing {
+	if action != "paste" || args["text"] != nil || m.dock.Clipboard() == nil || (m.ed.Active() == nil && m.plug.panels.focus == 0) || m.root.macro.playing {
 		return nil, false
 	}
 	cb := m.dock.Clipboard()
@@ -250,7 +254,16 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 	case promptCopyMsg:
 		return m.promptCopyResult(msg), true
 	case editorPasteMsg:
-		if m.explorerFocus {
+		if len(m.overlays) > 0 {
+			return nil, true
+		}
+		if m.plug.panels.focus != 0 {
+			if msg.err == nil && msg.text != "" {
+				m.pastePluginPanel(msg.text)
+			}
+			return nil, true
+		}
+		if !m.editorFocused() {
 			return nil, true
 		}
 		var args map[string]any
@@ -264,7 +277,10 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 		// An overlay has the message already: the update routed it there. A popup takes
 		// no text, so it closes and the editor gets the paste, as it does for a key.
 		m.closeTopPopups()
-		if len(m.overlays) > 0 || m.explorerFocus {
+		if len(m.overlays) > 0 || m.explorerFocus || m.contentsFocus || m.diag.focus || m.tabFocus || m.menu.IsOpen() {
+			return nil, true
+		}
+		if m.pastePluginPanel(msg.Content) {
 			return nil, true
 		}
 		if m.dockKeyboard() {
@@ -371,4 +387,22 @@ func (m *Model) closeTopPopups() {
 			m.popOverlay()
 		}
 	}
+}
+
+// copyPath runs the copy action of the file path, the absolute one or the one relative to
+// the editor's root. The editor works out the text, since it knows its root, and it also
+// sets its own clipboard. The text goes to the terminal clipboard with tea.SetClipboard, as
+// OSC 52. A refusal of the editor is the notice.
+func (m *Model) copyPath(a editor.Action) tea.Cmd {
+	if m.ed.Active() == nil {
+		m.notice = noDocumentNotice
+		return nil
+	}
+	res := m.editorDo(a, nil)
+	if res.Err != nil {
+		m.notice = res.Err.Error()
+		return nil
+	}
+	m.notice = i18n.T("", "clipboard.copied_path", map[string]any{"path": res.Text})
+	return tea.SetClipboard(res.Text)
 }

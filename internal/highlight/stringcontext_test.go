@@ -181,3 +181,19 @@ func TestStringWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestContextPairSharesWindowLex(t *testing.T) {
+	t.Parallel()
+	ed := openText(t, "a.go", "package main\nfunc f() { s := \"hi\" // c\n}\n")
+	doc := ed.Active()
+	var c stringCache
+	if !c.inString(doc, buffer.Pos{Line: 1, Col: 18}) {
+		t.Fatal("expected inside string")
+	}
+	if mask := c.nonCode(doc, 1); len(mask) == 0 || !mask[18] {
+		t.Fatalf("nonCode mask = %v, expected masked string col", mask)
+	}
+	if c.lexed != 1 {
+		t.Fatalf("c.lexed = %d, want 1 shared lex across inString+nonCode", c.lexed)
+	}
+}

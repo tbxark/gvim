@@ -105,36 +105,49 @@ func Run(ctx context.Context, opts Options) error {
 		// is built against it and binds itself on a switch (#19b shared-runtime slice).
 		opts.PluginDaemon = pluginhost.NewDaemon()
 		opts.PluginShared = tui.NewPluginShared()
-		namedRoot, err := resolveRoot(opts.Root)
-		if err != nil {
-			return err
-		}
 		name := opts.Daemon.Name
-		if name == "" {
-			name = daemon.DefaultName(namedRoot)
+		canonicalRoot := ""
+		if opts.Remote != nil {
+			// A remote jump-box daemon hosts the remote workspace, never the caller's cwd:
+			// derive the default socket name from the remote target and do not claim cwd
+			// with a local host mark.
+			if name == "" {
+				if specText, serr := authoritySpecText(opts.Remote); serr == nil && specText != "" {
+					name = daemon.DefaultName(specText)
+				} else {
+					name = daemon.DefaultName(opts.Remote.Display() + ":" + opts.Remote.Workspace())
+				}
+			}
+		} else {
+			namedRoot, err := resolveRoot(opts.Root)
+			if err != nil {
+				return err
+			}
+			if name == "" {
+				name = daemon.DefaultName(namedRoot)
+			}
+			canonicalRoot = namedRoot
+			if resolved, cerr := daemon.CanonicalRoot(namedRoot); cerr == nil {
+				canonicalRoot = resolved
+			}
 		}
 		ln, path, err := daemon.Listen(name)
 		if err != nil {
 			return err
 		}
-		// Claim the workspace for this daemon until the checked exit save is done: a
-		// direct launch reads the mark (daemon_hosts.go) and refuses instead of becoming
-		// a second writer of the daemon's unsaved buffers. The mark covers an explicitly
-		// named daemon too. A failed registration refuses to start (and closes the
-		// listener): without the mark a direct launch could miss this daemon and race it,
-		// which is the data loss this daemon mode rule exists to prevent.
-		canonicalRoot := namedRoot
-		if resolved, cerr := daemon.CanonicalRoot(namedRoot); cerr == nil {
-			canonicalRoot = resolved
-		}
-		if err := writeHostMark(canonicalRoot, name); err != nil {
-			_ = ln.Close()
-			return fmt.Errorf("daemon: cannot record the workspace host mark (a direct launch would miss this daemon, so it refuses to start): %w", err)
+		if canonicalRoot != "" {
+			// Claim the workspace for this daemon until the checked exit save is done: a
+			// direct launch reads the mark (daemon_hosts.go) and refuses instead of becoming
+			// a second writer of the daemon's unsaved buffers.
+			if err := writeHostMark(canonicalRoot, name); err != nil {
+				_ = ln.Close()
+				return fmt.Errorf("daemon: cannot record the workspace host mark (a direct launch would miss this daemon, so it refuses to start): %w", err)
+			}
+			defer clearHostMark(canonicalRoot, name)
 		}
 		srv = daemon.NewServer(ln, path)
 		defer func() { _ = srv.Close() }()
 		opts.Daemon.Detach = srv.Detach
-		defer clearHostMark(canonicalRoot, name)
 		_, _ = fmt.Fprintf(os.Stderr, "gvim: daemon listening on %s\n", path)
 	}
 	if srv != nil {
@@ -271,10 +284,21 @@ type runtime struct {
 	// remoteFiles is the remote workspace's file index of a remote launch; nil for a
 	// local launch, whose index is owned by Projects.
 	remoteFiles *finder.Index
+	// cancel tears down runtime-scoped background loops (e.g. baseline updaters).
+	cancel          context.CancelFunc
+	localWatchRetry *localEnvWatchRetry
+	remoteEnv       *remoteEnvWatch
 }
 
 // close stops the file index of the current root, the watcher and the remote watch.
 func (r *runtime) close() {
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.localWatchRetry.Close()
+	if r.remoteEnv != nil {
+		r.remoteEnv.Close()
+	}
 	r.projects.Close()
 	if r.watcher != nil {
 		_ = r.watcher.Close()
@@ -570,6 +594,9 @@ func runTheme(ctx context.Context, flag string, cfg config.Config, reg *theme.Re
 		if err != nil {
 			return theme.Theme{}, "", "", err
 		}
+		if flag == "" && os.Getenv("NO_COLOR") != "" {
+			th = th.WithoutColor()
+		}
 		return th, strings.TrimSpace(ref), warning, nil
 	}
 	th, err := reg.Load(ref)
@@ -582,6 +609,9 @@ func runTheme(ctx context.Context, flag string, cfg config.Config, reg *theme.Re
 	canonical, err := reg.Canonical(ref)
 	if err != nil {
 		canonical = ref
+	}
+	if flag == "" && os.Getenv("NO_COLOR") != "" {
+		th = th.WithoutColor()
 	}
 	return th, canonical, "", nil
 }

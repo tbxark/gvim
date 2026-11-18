@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
@@ -47,14 +48,24 @@ import (
 // The work is a fixed sequence of stages on one runtimeBuild; the order of the
 // stages is the order of the side effects, so do not reorder them.
 func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, error) {
-	b := &runtimeBuild{ctx: ctx, opts: opts, watching: watching}
+	rctx, cancel := context.WithCancel(ctx)
+	b := &runtimeBuild{ctx: rctx, cancel: cancel, opts: opts, watching: watching}
 	if err := b.loadConfig(); err != nil {
+		cancel()
 		return nil, err
 	}
 	if err := b.openEditor(); err != nil {
+		if b.ed != nil {
+			b.ed.Close()
+		}
+		cancel()
 		return nil, err
 	}
 	if err := b.chooseAppearance(); err != nil {
+		if b.ed != nil {
+			b.ed.Close()
+		}
+		cancel()
 		return nil, err
 	}
 	b.startWorkspace()
@@ -86,6 +97,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 // inputs, which the first stage adjusts for a remote or sessionless launch.
 type runtimeBuild struct {
 	ctx      context.Context
+	cancel   context.CancelFunc
 	opts     Options
 	watching bool
 
@@ -142,6 +154,7 @@ type runtimeBuild struct {
 
 	// The project environment (wireEnvironment). envRemote, envShell and remoteEnv are
 	// set for a remote launch only; localWatchRetry for a local launch that watches.
+	slotRef            *authoritySlotRef
 	authSlot           authority.Slot
 	envProvider        workspaceEnv
 	envRemote          *env.Remote
@@ -151,8 +164,11 @@ type runtimeBuild struct {
 	localWatchRetry    func()
 	localWatchRetryObj *localEnvWatchRetry
 
-	icon icons.Resolution
-	keys *keybindings.Store
+	icon           icons.Resolution
+	keys           *keybindings.Store
+	liveCfg        *liveConfigRef
+	liveCfgFn      func() config.Config
+	initFormatters map[string]string
 
 	// The plugin wiring (buildPlugins).
 	pw              *pluginhost.Wiring
@@ -169,6 +185,7 @@ type runtimeBuild struct {
 	// The settings service and the LSP helpers built on it.
 	settingsSvc *settingsService
 	lspBase     *lspBaselineUpdater
+	denoSlot    *atomic.Pointer[denoAutoSelector]
 	denoAuto    *denoAutoSelector
 
 	model *tui.Model
@@ -287,11 +304,13 @@ func (b *runtimeBuild) openEditor() error {
 	b.edOpts = edOpts
 	ed := newEditor(edOpts)
 	b.ed = ed
-	ed.SetFormatters(formattersFor(cfg, lookPath))
+	b.initFormatters = formattersFor(cfg, lookPath)
+	ed.SetFormatters(b.initFormatters)
 	ed.SetLanguageNamer(syntax.CachedFileLanguage())
 	ed.SetLanguageSettings(languageSettings(cfg))
-	ed.SetStringContext(highlight.NewStringContext())
-	ed.SetNonCodeContext(highlight.NewNonCodeContext())
+	stringCtx, nonCodeCtx := highlight.NewContextPair()
+	ed.SetStringContext(stringCtx)
+	ed.SetNonCodeContext(nonCodeCtx)
 	ed.SetEphemeralFilePatterns(cfg.EphemeralFilePatterns)
 	ed.SetRulers(cfg.Rulers)
 	if plan.load {
@@ -365,6 +384,7 @@ func (b *runtimeBuild) chooseAppearance() error {
 		themeReg.SetURLCacheDir(dir)
 	}
 	b.themeCat = newThemeCatalog(themeReg)
+	b.themeCat.noColor = opts.Theme == "" && os.Getenv("NO_COLOR") != ""
 	b.th, b.themeRef, b.themeWarn, err = runTheme(b.ctx, opts.Theme, cfg, themeReg)
 	if err != nil {
 		// A URL theme that cannot be fetched or read from its cache falls back to the
@@ -374,6 +394,9 @@ func (b *runtimeBuild) chooseAppearance() error {
 		if theme.IsURLForm(effectiveThemeRef(opts.Theme, cfg)) {
 			b.themeWarn = fmt.Sprintf("%v; using %q", err, "dark")
 			b.th, err = themeReg.Load("dark")
+			if err == nil && opts.Theme == "" && os.Getenv("NO_COLOR") != "" {
+				b.th = b.th.WithoutColor()
+			}
 			b.themeRef = "dark"
 		}
 		if err != nil {

@@ -61,15 +61,15 @@ func newConfigShowCommand(d configDeps, configPath, keymapName, themeName *strin
 		Short: "Print the effective configuration",
 		Long: `Print the effective configuration as JSON. The user file and, when the
 workspace is trusted, the project file (.gvim/config.json in the working
-directory or a parent) are merged over the built-in defaults. An untrusted or
-undecided workspace omits the project layer and says so on stderr, exactly as
-the editor gates it. A file that cannot be read is skipped and reported as a
+directory) are merged over the built-in defaults. An untrusted or undecided
+workspace omits the project layer and says so on stderr, exactly as the
+editor gates it. A file that cannot be read is skipped and reported as a
 warning.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			root, err := d.cwd()
 			if err != nil {
-				cmd.SilenceUsage = true
 				return err
 			}
 			trusted := false
@@ -80,7 +80,6 @@ warning.`,
 			}
 			view, err := d.load(root, configview.Options{Config: *configPath, Keymap: *keymapName, Theme: *themeName, Trusted: &trusted})
 			if err != nil {
-				cmd.SilenceUsage = true
 				return err
 			}
 			for _, w := range view.Warnings {
@@ -101,19 +100,17 @@ func newConfigPathsCommand(d configDeps, configPath *string) *cobra.Command {
 		Use:   "paths",
 		Short: "Print the config file paths",
 		Long: `Print the user config file and the project config file, and whether each
-exists. The project file is the nearest .gvim/config.json at or above the
-working directory. When there is none, its path is shown under the working
-directory with "missing".`,
+exists. The project file is .gvim/config.json in the working directory. When
+there is none, its path is shown under the working directory with "missing".`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			root, err := d.cwd()
 			if err != nil {
-				cmd.SilenceUsage = true
 				return err
 			}
 			files, err := d.paths(root, *configPath)
 			if err != nil {
-				cmd.SilenceUsage = true
 				return err
 			}
 			for _, f := range files {

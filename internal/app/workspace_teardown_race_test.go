@@ -91,9 +91,19 @@ func TestCloseHostRaceHiddenEnvelopeQuiesce(t *testing.T) {
 		t.Fatal("hidden A command did not start")
 	}
 
+	quiesceEntered := make(chan struct{})
+	m.quiesceFn = func(s *workspaceSession) error {
+		close(quiesceEntered)
+		m.quiesceFn = nil
+		return m.quiesceModelForTeardown(s)
+	}
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- m.closeWorkspace(idA) }()
-	time.Sleep(20 * time.Millisecond) // let close reach quiesce/write work
+	select {
+	case <-quiesceEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("closeWorkspace did not reach quiesceModelForTeardown")
+	}
 	close(release)
 	select {
 	case err := <-closeDone:
@@ -201,8 +211,11 @@ func TestHostQuiesceRealTimeoutDiscardsQueuedTeardown(t *testing.T) {
 	}
 	releaseUI()
 	<-blockerDone // the original started UI call finishes (Do waits after its timeout)
-	// The queued closure is now processed as a canceled hostCallMsg: it must be a no-op.
-	time.Sleep(100 * time.Millisecond)
+	// Drain the host outbound queue synchronously: the canceled hostCallMsg ahead of
+	// this barrier must be processed as a no-op before Do returns.
+	if !host.Do(func() {}) {
+		t.Fatal("host.Do barrier failed")
+	}
 	if sessA.rt.model.Closed() {
 		t.Fatal("the timed-out queued MarkClosed ran after the workspace was retained")
 	}

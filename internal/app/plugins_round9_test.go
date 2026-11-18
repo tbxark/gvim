@@ -22,7 +22,7 @@ func TestRealHostDashboard(t *testing.T) {
 	root := t.TempDir()
 	s := newSession(t, Options{Root: root})
 	s.waitStatus("dashboard", "loaded")
-	s.until("the dashboard frame", func() bool { return s.screenHas("FRESH") && s.screenHas("Actions") })
+	s.until("the dashboard frame", func() bool { return s.screenHas("GVIM") && s.screenHas("Actions") })
 	// The buffer-local dashboard mode binds Enter to the focused row (Open Settings).
 	s.press(enterKey())
 	s.settle(80 * time.Millisecond)
@@ -30,7 +30,7 @@ func TestRealHostDashboard(t *testing.T) {
 	// Opening a file replaces the automatic dashboard.
 	s.openFile("a.txt", "text\n")
 	s.settle(150 * time.Millisecond)
-	if s.screenHas("FRESH") && s.screenHas("Actions") {
+	if s.screenHas("GVIM") && s.screenHas("Actions") {
 		t.Errorf("the auto dashboard is still painted after opening a file")
 	}
 }

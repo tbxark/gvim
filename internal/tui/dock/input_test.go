@@ -504,3 +504,21 @@ func TestResolveLinkTilde(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardedMouseDragOutsideHorizontalBoundsClampsX(t *testing.T) {
+	t.Parallel()
+	p, term := livePanel(t, "hello")
+	term.mouse = true
+	term.drag = true
+	l := scrollLayout()
+	l.DockX, l.EditorW = 20, 60
+	p.Mouse(clickAt(22, 1, 0, tea.MouseLeft), l, 1)
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 1, Button: tea.MouseLeft}), l, 1)
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 5, Y: 1, Button: tea.MouseLeft}), l, 1)
+	if len(term.mice) != 3 {
+		t.Fatalf("forwarded events = %+v, want 3", term.mice)
+	}
+	if term.mice[1].X != 0 || term.mice[2].X != 0 {
+		t.Fatalf("out-of-bounds drag/release forwarded unclamped X: %+v", term.mice)
+	}
+}

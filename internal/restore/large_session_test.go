@@ -74,8 +74,13 @@ func TestLargeSessionKeepsAStashForAFileThatChanged(t *testing.T) {
 	if len(failed) != 1 || failed[0].File.OverlayFile != stash {
 		t.Fatalf("failed = %+v, want the overlay stash kept as unrestored", failed)
 	}
-	if d := ed2.Active(); d == nil || d.Modified() || d.Buffer.Line(3) == "" {
-		t.Fatalf("the stash of another version of the file changed the document")
+	if len(ed2.Tabs()) != 0 {
+		t.Fatalf("tabs = %d, want failed RestoreOverlay tab closed", len(ed2.Tabs()))
+	}
+	diskNow, err := os.ReadFile(path)
+	apptest.Must(t, err)
+	if !strings.Contains(string(diskNow), "appended by someone else") {
+		t.Fatalf("the file on disk was modified")
 	}
 	if n := RestoreNotice(failed); !strings.Contains(n, "big.txt") || !strings.Contains(n, "changed") {
 		t.Errorf("notice = %q, want the file and the reason", n)
@@ -83,8 +88,13 @@ func TestLargeSessionKeepsAStashForAFileThatChanged(t *testing.T) {
 	if n := RestoreNotice(failed); !strings.Contains(n, filepath.Join(sess, stash)) {
 		t.Errorf("notice = %q, want the path of the stash file", n)
 	}
-	// Saving the session again keeps the stash file that could not be restored.
+	// Saving the session again keeps only the failed overlay entry (no duplicate clean tab).
 	apptest.Must(t, WriteSession(ed2, sess, tui.ExplorerState{}, keptFiles(failed)))
+	s2, ok, err := session.Load(sess)
+	apptest.Must(t, err)
+	if !ok || len(s2.Files) != 1 || s2.Files[0].OverlayFile != stash {
+		t.Fatalf("saved session = %+v (ok=%v), want single kept overlay entry", s2, ok)
+	}
 	if _, err := os.Stat(filepath.Join(sess, stash)); err != nil {
 		t.Errorf("the stash that could not be restored was removed: %v", err)
 	}
@@ -273,4 +283,36 @@ func keptFiles(failed []Unrestored) []session.FileState {
 		files[i] = u.File
 	}
 	return files
+}
+
+func TestRestoreOverlayFailureClosesOnlyNewlyOpenedTab(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ed, path := apptest.LargeSessionFile(t, dir)
+	other := filepath.Join(dir, "other.txt")
+	apptest.Must(t, os.WriteFile(other, []byte("other\n"), 0o644))
+	sess := filepath.Join(dir, "session")
+	apptest.Must(t, WriteSession(ed, sess, tui.ExplorerState{}, nil))
+	s, _, err := session.Load(sess)
+	apptest.Must(t, err)
+
+	disk, err := os.ReadFile(path)
+	apptest.Must(t, err)
+	apptest.Must(t, os.WriteFile(path, append(disk, "changed\n"...), 0o644))
+
+	// Case 1: another tab was already active and big.txt was NOT open -> big.txt is closed.
+	edFresh := editor.New(apptest.LargeOpts())
+	apptest.Must(t, edFresh.OpenFile(other))
+	failed := RestoreSession(edFresh, sess, s)
+	if len(failed) != 1 || len(edFresh.Tabs()) != 1 || edFresh.Active().Path != other {
+		t.Fatalf("after failed new-tab restore: failed=%v tabs=%+v active=%v", failed, edFresh.Tabs(), edFresh.Active())
+	}
+
+	// Case 2: big.txt was already open before recovery -> pre-existing tab stays open.
+	edOpen := editor.New(apptest.LargeOpts())
+	apptest.Must(t, edOpen.OpenFile(path))
+	failedOpen, _ := recoverCrash(edOpen, sess)
+	if len(failedOpen) != 1 || len(edOpen.Tabs()) != 1 || edOpen.Active().Path != path {
+		t.Fatalf("after failed already-open crash recovery: failed=%v tabs=%+v", failedOpen, edOpen.Tabs())
+	}
 }

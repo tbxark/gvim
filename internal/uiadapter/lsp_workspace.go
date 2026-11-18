@@ -2,10 +2,12 @@ package uiadapter
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/fsops"
 )
 
 // ApplyLSPEditsExpect applies the edits of a language server to the open document
@@ -25,6 +27,9 @@ func (a *Editor) DocumentVersion(path string) (editor.Version, bool) {
 // overwrites: an existing file is an error, or nothing when ignoreIfExists is
 // set. It is the root's workspaceFileOps port.
 func (a *Editor) CreateFile(path string, ignoreIfExists bool) error {
+	if a != nil && a.remote {
+		return errors.New("creating " + path + " was refused: remote LSP file creation is not supported")
+	}
 	if _, err := os.Lstat(path); err == nil {
 		if ignoreIfExists {
 			return nil
@@ -36,6 +41,9 @@ func (a *Editor) CreateFile(path string, ignoreIfExists bool) error {
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
+		if ignoreIfExists && errors.Is(err, fs.ErrExist) {
+			return nil
+		}
 		return err
 	}
 	return f.Close()
@@ -46,6 +54,9 @@ func (a *Editor) CreateFile(path string, ignoreIfExists bool) error {
 // nothing when ignoreIfExists is set. The rename is refused whole when an open tab
 // would collide.
 func (a *Editor) RenameFile(oldPath, newPath string, ignoreIfExists bool) error {
+	if a != nil && a.remote {
+		return errors.New("renaming " + oldPath + " was refused: remote LSP file rename is not supported")
+	}
 	if _, err := os.Lstat(newPath); err == nil {
 		if ignoreIfExists {
 			return nil
@@ -58,7 +69,10 @@ func (a *Editor) RenameFile(oldPath, newPath string, ignoreIfExists bool) error 
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(oldPath, newPath); err != nil {
+	if _, err := fsops.RenameNoReplaceResult(oldPath, newPath); err != nil {
+		if ignoreIfExists && errors.Is(err, fsops.ErrConflict) {
+			return nil
+		}
 		return err
 	}
 	return a.ed.RenamePath(oldPath, newPath)

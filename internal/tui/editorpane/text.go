@@ -101,10 +101,14 @@ type line struct {
 }
 
 // layoutKey is what the layout of a line without paint attributes depends on besides
-// the text of the line: the wrap geometry and the tab stops.
+// the text of the line: the wrap geometry, tab stops, and active page compose/reveal state.
 type layoutKey struct {
 	line, wrapW, tab int
 	wrap, hang       bool
+	pageCompose      bool
+	pageMeasure      int
+	revealed         bool
+	caretOnLine      bool
 }
 
 // LayoutMemo is implemented by a Document that keeps values until its text changes, as
@@ -130,7 +134,20 @@ func (f frame) layoutLine(i int, styled bool) line {
 	}
 	var ln line
 	if lm, ok := f.doc.(LayoutMemo); ok && !isLarge(f.doc) {
-		key := layoutKey{line: i, wrapW: f.wrapW, tab: f.tab, wrap: f.wrap, hang: f.fx.hang}
+		pageCompose := f.pageOn && f.pageMarkdown
+		pageMeasure := 0
+		revealed, caretOnLine := false, false
+		if pageCompose {
+			pageMeasure = f.pageMeasure
+			if !f.noPageReveal {
+				revealed = f.revealed(i)
+				caretOnLine = f.caret.Line == i
+			}
+		}
+		key := layoutKey{
+			line: i, wrapW: f.wrapW, tab: f.tab, wrap: f.wrap, hang: f.fx.hang,
+			pageCompose: pageCompose, pageMeasure: pageMeasure, revealed: revealed, caretOnLine: caretOnLine,
+		}
 		ln = lm.MemoValue(key, func() any { return f.layout(i, false) }).(line)
 	} else {
 		ln = f.layout(i, false)
@@ -182,10 +199,12 @@ func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, 
 		// The spans of the syntax are byte offsets into the whole line, so a window or a
 		// segment of it has none of those. The document may lex its text from the text around it.
 		var spans []syntax.Span
-		if long {
-			spans = f.segmentSpans(i, off, text)
-		} else {
-			spans = f.doc.LineSpans(i)
+		if !f.opts.HideSyntax {
+			if long {
+				spans = f.segmentSpans(i, off, text)
+			} else {
+				spans = f.doc.LineSpans(i)
+			}
 		}
 		kinds := kindsPerRune(text, spans)
 		ln.diffAdd, ln.diffRemove = diffLineKind(kinds)

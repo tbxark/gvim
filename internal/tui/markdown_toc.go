@@ -619,7 +619,8 @@ func (m *Model) markdownTOCToggleFollow() {
 // editorFocused reports whether the editor pane, not the chrome, has the
 // keyboard: the Contents selection follows the pane top when it does not.
 func (m *Model) editorFocused() bool {
-	return !m.explorerFocus && !m.contentsFocus && !m.tabFocus && !m.dockKeyboard() && len(m.overlays) == 0
+	return !m.explorerFocus && !m.contentsFocus && !m.diag.focus && !m.tabFocus && !m.dockKeyboard() &&
+		m.plug.panels.focus == 0 && !m.menu.IsOpen() && len(m.overlays) == 0
 }
 
 // jumpContents moves the caret to the selected heading. It is Enter on a row
@@ -677,6 +678,7 @@ func (m *Model) takeContentsFocus() {
 		m.syncViewport()
 	}
 	m.blurPluginPanels()
+	m.menu = m.menu.Close()
 	m.tabFocus = false
 	m.explorerFocus = false
 	m.dock.SetFocus(false)
@@ -830,7 +832,7 @@ func (m *Model) pressContentsRow(row, x int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if r.HasChildren && x == r.GlyphX {
+	if r.HasChildren && x-m.layout().ExX == r.GlyphX {
 		m.contents.ToggleFoldPos(m.contents.Scroll() + row)
 		return nil
 	}
@@ -841,9 +843,9 @@ func (m *Model) pressContentsRow(row, x int) tea.Cmd {
 
 // wheelContents scrolls the Contents body by a wheel notch.
 func (m *Model) wheelContents(up bool) {
-	delta := wheelRows
+	delta := m.wheelRows()
 	if up {
-		delta = -wheelRows
+		delta = -delta
 	}
 	m.contents.Wheel(delta)
 }

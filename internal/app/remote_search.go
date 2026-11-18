@@ -13,6 +13,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -47,15 +49,30 @@ const remoteNestedMaxRepos = 8
 // remoteSearch is the project-wide search over a remote workspace: a searchpanel.Searcher
 // and BatchSearcher that runs ripgrep (or grep) through the authority's one-shot surface
 // with the remote workspace as cwd. The local project search is never consulted.
+type probeGenKey struct {
+	conn   uint64
+	manual uint64
+}
+
 type remoteSearch struct {
 	one      authority.OneShot
 	files    authority.FileSystem // for the preview head; nil in tests that do not preview
 	root     string               // absolute remote workspace root
 	timeout  time.Duration        // bounds one search run (remoteSearchTimeout unless a test says otherwise)
 	spawnEnv func() []string
+	connGen  func() uint64
 	// previewCache caches the syntax highlighters of preview windows (local and remote
 	// heads); syntax colour is CPU-only, bounded by the shared preview caps.
 	previewCache previewHighlighterCache
+
+	manualGen  atomic.Uint64
+	probeMu    sync.Mutex
+	toolGen    probeGenKey
+	cachedTool string
+	gitGen     probeGenKey
+	gitProbed  bool
+	isGitRepo  bool
+	gitNotRepo bool
 }
 
 // newRemoteProjectSearch returns the remote project search over root.
@@ -71,6 +88,24 @@ func newRemoteProjectSearch(one authority.OneShot, root string, spawnEnv ...func
 func (s *remoteSearch) withFiles(files authority.FileSystem) *remoteSearch {
 	s.files = files
 	return s
+}
+
+func (s *remoteSearch) withConnGen(fn func() uint64) *remoteSearch {
+	s.connGen = fn
+	return s
+}
+
+// Invalidate drops cached connection-scoped tool/git probes (used on reconnect).
+func (s *remoteSearch) Invalidate() {
+	s.manualGen.Add(1)
+}
+
+func (s *remoteSearch) currentGen() probeGenKey {
+	var cg uint64
+	if s.connGen != nil {
+		cg = s.connGen()
+	}
+	return probeGenKey{conn: cg, manual: s.manualGen.Load() + 1}
 }
 
 // ProjectSearchBatches starts one remote search and returns the channel its whole-file
@@ -130,7 +165,8 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		WholeWord:     req.Options.WholeWord,
 		Regex:         req.Options.Regex,
 	}
-	if err := validateQuery(q); err != nil {
+	cq, err := search.CompileQuery(q)
+	if err != nil {
 		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
 		return
 	}
@@ -423,7 +459,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 			currentRel = rel
 			current = &searchpanel.FileMatches{Name: rel, Path: joinRemotePath(s.root, rel)}
 		}
-		matches := remoteLineMatches(q, lineNo, lineText, byteCol, totalMatches+len(current.Matches), limit)
+		matches := remoteLineMatchesCompiled(cq, q.Text, lineNo, lineText, byteCol, totalMatches+len(current.Matches), limit)
 		current.Matches = append(current.Matches, matches...)
 		totalMatches += len(matches)
 		if totalMatches >= limit {
@@ -615,6 +651,39 @@ type remoteProjectResultScope struct {
 	notice           string
 }
 
+func (s *remoteSearch) probeGitRepo(ctx context.Context) (isRepo, isNotRepo bool, notice string) {
+	gen := s.currentGen()
+	s.probeMu.Lock()
+	if s.gitProbed && s.gitGen == gen {
+		isRepo, isNotRepo = s.isGitRepo, s.gitNotRepo
+		s.probeMu.Unlock()
+		return isRepo, isNotRepo, ""
+	}
+	s.probeMu.Unlock()
+	res, err := s.run(ctx, s.root, []string{"git", "rev-parse", "--is-inside-work-tree"})
+	if err != nil {
+		return false, false, appText("gvim.notice.remote_ignore_git_unavailable", "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted")
+	}
+	if res.Code != 0 {
+		if strings.Contains(strings.ToLower(string(res.Stderr)), "not a git repository") {
+			s.probeMu.Lock()
+			if s.currentGen() == gen {
+				s.gitGen, s.gitProbed, s.isGitRepo, s.gitNotRepo = gen, true, false, true
+			}
+			s.probeMu.Unlock()
+			return false, true, ""
+		}
+		return false, false, appText("gvim.notice.remote_ignore_git_unavailable", "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted")
+	}
+	inside := strings.TrimSpace(string(res.Stdout)) == "true"
+	s.probeMu.Lock()
+	if s.currentGen() == gen {
+		s.gitGen, s.gitProbed, s.isGitRepo, s.gitNotRepo = gen, true, inside, !inside
+	}
+	s.probeMu.Unlock()
+	return inside, !inside, ""
+}
+
 // newProjectResultScope probes the remote workspace and, in a git work tree, reads the same
 // bounded candidate list Fresh's project_files uses. Any failure (missing git, not a
 // repository, error, truncation) leaves listed false, so the scope only drops hidden
@@ -625,19 +694,12 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 	if s.files == nil {
 		return scope
 	}
-	res, err := s.run(ctx, s.root, []string{"git", "rev-parse", "--is-inside-work-tree"})
-	if err != nil {
-		scope.notice = appText("gvim.notice.remote_ignore_git_unavailable", "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted")
+	isRepo, isNotRepo, notice := s.probeGitRepo(ctx)
+	if notice != "" {
+		scope.notice = notice
 		return scope
 	}
-	if res.Code != 0 {
-		if strings.Contains(strings.ToLower(string(res.Stderr)), "not a git repository") {
-			return scope // a plain non-git workspace: Fresh's walk applies, no degradation
-		}
-		scope.notice = appText("gvim.notice.remote_ignore_git_unavailable", "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted")
-		return scope
-	}
-	if strings.TrimSpace(string(res.Stdout)) != "true" {
+	if isNotRepo || !isRepo {
 		return scope
 	}
 	scope.gitRepo = true
@@ -941,6 +1003,14 @@ func remoteAllowedFiles(files []string) map[string]bool {
 // probe is one bounded POSIX sh command (constant script, no user text) so both tools and
 // their absence are distinguished reliably.
 func (s *remoteSearch) probeTool(ctx context.Context) (string, error) {
+	gen := s.currentGen()
+	s.probeMu.Lock()
+	if s.toolGen == gen && s.cachedTool != "" {
+		tool := s.cachedTool
+		s.probeMu.Unlock()
+		return tool, nil
+	}
+	s.probeMu.Unlock()
 	probeCtx, stop := context.WithTimeout(ctx, remoteToolProbeTimeout)
 	defer stop()
 	const script = "if command -v rg >/dev/null 2>&1; then printf rg; elif command -v grep >/dev/null 2>&1; then printf grep; else printf none; fi"
@@ -948,14 +1018,22 @@ func (s *remoteSearch) probeTool(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("remote search tool probe failed: %w", err)
 	}
+	var tool string
 	switch strings.TrimSpace(string(res.Stdout)) {
 	case "rg":
-		return "rg", nil
+		tool = "rg"
 	case "grep":
-		return "grep", nil
+		tool = "grep"
 	default:
 		return "", errors.New("no search tool on the remote host: install ripgrep (rg) or grep")
 	}
+	s.probeMu.Lock()
+	if s.currentGen() == gen {
+		s.toolGen = gen
+		s.cachedTool = tool
+	}
+	s.probeMu.Unlock()
+	return tool, nil
 }
 
 const (
@@ -1292,6 +1370,11 @@ func cleanRemoteDisplayText(s string) string {
 // engine finds nothing (for example a regex the line split broke), a synthetic match at
 // the reported byte column keeps the hit visible. It returns at most limit-total matches.
 func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, limit int) []searchpanel.Match {
+	cq, _ := search.CompileQuery(q)
+	return remoteLineMatchesCompiled(cq, q.Text, lineNo, line, byteCol, total, limit)
+}
+
+func remoteLineMatchesCompiled(cq *search.CompiledQuery, queryText string, lineNo int, line string, byteCol, total, limit int) []searchpanel.Match {
 	line = strings.TrimRight(line, "\r")
 	remaining := limit - total
 	if remaining <= 0 {
@@ -1301,8 +1384,10 @@ func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, 
 	// sanitizer: a control/format rune removed before a match must not shift the painted
 	// highlight (col/len are display-rune coordinates, the same as Text).
 	clean, mapping := cleanRemoteDisplayTextWithMap(line)
-	b := buffer.New(line)
-	matches, err := search.Find(b, q)
+	var matches []search.Match
+	if cq != nil {
+		matches = cq.FindString(line)
+	}
 	var out []searchpanel.Match
 	mapIndex := func(i int) int {
 		if i < 0 {
@@ -1313,33 +1398,31 @@ func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, 
 		}
 		return mapping[i]
 	}
-	if err == nil {
-		for _, m := range matches {
-			if len(out) >= remaining {
-				break
-			}
-			startCol, endCol := mapIndex(m.Start.Col), mapIndex(m.End.Col)
-			if endCol <= startCol {
-				// The whole match was made of stripped characters; there is no readable span
-				// to paint.
-				continue
-			}
-			out = append(out, searchpanel.Match{
-				Line:    lineNo,
-				Col:     startCol + 1,
-				Len:     endCol - startCol,
-				Text:    clean,
-				EndLine: lineNo,
-				EndCol:  endCol + 1,
-			})
+	for _, m := range matches {
+		if len(out) >= remaining {
+			break
 		}
+		startCol, endCol := mapIndex(m.Start.Col), mapIndex(m.End.Col)
+		if endCol <= startCol {
+			// The whole match was made of stripped characters; there is no readable span
+			// to paint.
+			continue
+		}
+		out = append(out, searchpanel.Match{
+			Line:    lineNo,
+			Col:     startCol + 1,
+			Len:     endCol - startCol,
+			Text:    clean,
+			EndLine: lineNo,
+			EndCol:  endCol + 1,
+		})
 	}
 	if len(out) == 0 {
 		// The synthetic fallback has no engine span to map, so its column/length must be
 		// clamped to the sanitized text itself. An entirely stripped line (clean rune
 		// count 0) or a query made only of stripped characters has no readable span:
 		// drop the fallback instead of reporting a highlight outside Text.
-		displayQuery := cleanRemoteDisplayText(q.Text)
+		displayQuery := cleanRemoteDisplayText(queryText)
 		cleanCount := utf8.RuneCountInString(clean)
 		if cleanCount == 0 || utf8.RuneCountInString(displayQuery) == 0 {
 			return nil
@@ -1397,11 +1480,57 @@ type remoteGitGrep struct {
 	one      authority.OneShot
 	root     string // absolute remote workspace root
 	spawnEnv func() []string
+	connGen  func() uint64
+
+	manualGen  atomic.Uint64
+	probeMu    sync.Mutex
+	repoGen    probeGenKey
+	cachedRepo string
 }
 
 // newRemoteGitGrep returns the remote git grep over root.
 func newRemoteGitGrep(one authority.OneShot, root string, spawnEnv func() []string) *remoteGitGrep {
 	return &remoteGitGrep{one: one, root: root, spawnEnv: spawnEnv}
+}
+
+func (g *remoteGitGrep) withConnGen(fn func() uint64) *remoteGitGrep {
+	g.connGen = fn
+	return g
+}
+
+func (g *remoteGitGrep) currentGen() probeGenKey {
+	var cg uint64
+	if g.connGen != nil {
+		cg = g.connGen()
+	}
+	return probeGenKey{conn: cg, manual: g.manualGen.Load() + 1}
+}
+
+func (g *remoteGitGrep) resolveRepo(extraEnv []string) (string, error) {
+	gen := g.currentGen()
+	g.probeMu.Lock()
+	if g.repoGen == gen && g.cachedRepo != "" {
+		repo := g.cachedRepo
+		g.probeMu.Unlock()
+		return repo, nil
+	}
+	g.probeMu.Unlock()
+	top, code, err := runGitGrepOneShot(g.one, g.root,
+		[]string{"git", "-c", "core.quotePath=false", "rev-parse", "--show-toplevel"}, extraEnv, gitGrepTimeout)
+	if err != nil {
+		return "", err
+	}
+	repo := strings.TrimSpace(top)
+	if code != 0 || repo == "" {
+		return "", fmt.Errorf("not a git repository: %s", g.root)
+	}
+	g.probeMu.Lock()
+	if g.currentGen() == gen {
+		g.repoGen = gen
+		g.cachedRepo = repo
+	}
+	g.probeMu.Unlock()
+	return repo, nil
 }
 
 // GitGrep implements searchpanel.GitGrepper.
@@ -1414,14 +1543,9 @@ func (g *remoteGitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResu
 	if g.spawnEnv != nil {
 		extraEnv = g.spawnEnv()
 	}
-	top, code, err := runGitGrepOneShot(g.one, g.root,
-		[]string{"git", "-c", "core.quotePath=false", "rev-parse", "--show-toplevel"}, extraEnv, gitGrepTimeout)
+	repo, err := g.resolveRepo(extraEnv)
 	if err != nil {
 		return out, err
-	}
-	repo := strings.TrimSpace(top)
-	if code != 0 || repo == "" {
-		return out, fmt.Errorf("not a git repository: %s", g.root)
 	}
 	limit := req.Limit
 	if limit <= 0 {

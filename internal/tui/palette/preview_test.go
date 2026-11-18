@@ -612,3 +612,56 @@ func TestPreviewSelectionChangeResetsScrollOffset(t *testing.T) {
 		t.Fatalf("cached a.txt scrollOffset = %d, want 0", p.preview.scrollOffset)
 	}
 }
+
+func TestPreviewTargetLineContrastAndWideRuneClipping(t *testing.T) {
+	t.Parallel()
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cjk := "func 测() { /* " + strings.Repeat("汉", 40) + " */ }"
+	pv := &fakePreviewer{files: map[string]previewRead{
+		"/w/main.go": {data: "package main\n" + cjk + "\n"},
+	}}
+	opts := fileOptions("main.go:2", []string{"main.go"}, pv)
+	opts.Theme = th
+	p := New(opts)
+	settle(t, p, p.Init(), 8)
+	geo := p.layout(100, 24)
+	if !geo.preview {
+		t.Fatal("preview column inactive")
+	}
+	g := draw(p, 100, 24)
+	row := geo.rowsTop + 1
+	cellX := geo.prevX + len("2 │ ")
+	cell := g.At(cellX, row)
+	if cell.Style.FG != p.chrome.selected.FG {
+		t.Fatalf("target line keyword FG = %+v, want selected FG %+v", cell.Style.FG, p.chrome.selected.FG)
+	}
+	if endCell := g.At(geo.prevEnd-1, row); endCell.Text != "…" {
+		t.Fatalf("truncated preview end cell = %q, want …", endCell.Text)
+	}
+}
+
+func TestPreviewKeepsCombiningMarksInSyntaxChunks(t *testing.T) {
+	t.Parallel()
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pv := &fakePreviewer{files: map[string]previewRead{
+		"/w/main.go": {data: "package main\n// e\u0301\n"},
+	}}
+	opts := fileOptions("main.go", []string{"main.go"}, pv)
+	opts.Theme = th
+	p := New(opts)
+	settle(t, p, p.Init(), 8)
+	geo := p.layout(100, 24)
+	g := draw(p, 100, 24)
+	row := geo.rowsTop + 1
+	// Line 2 renders "// é" after "2 │ " (7 display cells before 'e').
+	cellX := geo.prevX + 7
+	if got := g.At(cellX, row).Text; got != "e\u0301" {
+		t.Fatalf("combining mark cell = %q, want %q (row=%q)", got, "e\u0301", rowText(g, row))
+	}
+}

@@ -58,7 +58,7 @@ func (m *Model) showRemoteMenu() {
 			popup.Item{Label: uiText("gvim.remote.no_remote_authority", "No remote authority in this session"), Detail: uiText("gvim.remote.local_hint", "start gvim with an SSH workspace to connect")},
 		)
 	}
-	m.ShowPopup(popup.Point{X: 0, Y: m.height - 1}, uiText("gvim.remote.title", "Remote"), items)
+	m.ShowPopup(popup.Point{X: 0, Y: max(m.height-1, 0)}, uiText("gvim.remote.title", "Remote"), items)
 }
 
 // remoteLine makes one untrusted authority field paintable in one popup row: textsafe

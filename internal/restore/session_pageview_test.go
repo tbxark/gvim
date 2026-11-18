@@ -24,7 +24,7 @@ func TestSessionRoundTripKeepsPageView(t *testing.T) {
 	view.PageView = &on
 	view.PageWidth = 64
 	ed.Active().SetView(*view)
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	restored := apptest.NewSessionEditor()
 	s, ok, err := session.Load(sessDir)
@@ -50,7 +50,7 @@ func TestSessionPageViewFieldsAreOptional(t *testing.T) {
 	ed := apptest.NewSessionEditor()
 	apptest.Must(t, ed.OpenFile(p))
 	sessDir := filepath.Join(dir, "session")
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 	s, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)
 	if !ok || len(s.Files) != 1 {

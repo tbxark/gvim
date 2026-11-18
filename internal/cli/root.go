@@ -22,26 +22,16 @@ import (
 // production Runner is app.Run.
 type Runner func(ctx context.Context, opts app.Options) error
 
-// Exit codes. exitError carries a non-default code; any other error exits 1.
+// Exit codes. Any error exits 1 unless the context is cancelled.
 const (
 	exitOK          = 0
 	exitFailure     = 1
 	exitInterrupted = 130
 )
 
-// exitError is an error that Execute reports with a specific exit code.
-type exitError struct {
-	code int
-	err  error
-}
-
-func (e *exitError) Error() string { return e.err.Error() }
-
-func (e *exitError) Unwrap() error { return e.err }
-
 // daemonDefaultName is the NoOptDefVal of --daemon/-a: it marks a flag given with no
 // NAME, which means the per-root default socket name.
-const daemonDefaultName = "-"
+const daemonDefaultName = "\x00default"
 
 // NewRootCommand returns the gvim command tree. The root opens the editor with
 // the positional arguments and the flags. run is called once per invocation
@@ -129,6 +119,9 @@ command drops this client and leaves the editor running.`,
 		Version:       versionString(),
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once flag parsing reaches RunE, validation and runtime errors must not
+			// bury the actionable message under the full usage dump.
+			cmd.SilenceUsage = true
 			// "-" is standard input among the file arguments (Fresh's alternative to
 			// --stdin); it is not a path to stat. At most one may be given.
 			files := make([]string, 0, len(args))
@@ -194,10 +187,6 @@ command drops this client and leaves the editor running.`,
 				}
 				opts.Daemon = &app.DaemonOptions{Mode: app.DaemonAttach, Name: name}
 			}
-			// From here no error prints the usage text: a validation message names the
-			// flag and the valid values, which the usage would only bury, and runtime
-			// errors are not usage errors.
-			cmd.SilenceUsage = true
 			if err := opts.Validate(); err != nil {
 				return err
 			}
@@ -208,22 +197,24 @@ command drops this client and leaves the editor running.`,
 		},
 	}
 
-	flags := root.PersistentFlags()
-	flags.StringVar(&configPath, "config", "", "config file `PATH` (default: the platform config directory)")
-	flags.StringVar(&keymapName, "keymap", "", "keymap `NAME`: default, macos, macos-gui, emacs or vscode (default: the platform keymap)")
-	flags.StringVar(&themeName, "theme", "", "theme `NAME` (default: dark)")
+	pflags := root.PersistentFlags()
+	pflags.StringVar(&configPath, "config", "", "config file `PATH` (default: the platform config directory)")
+	pflags.StringVar(&keymapName, "keymap", "", "keymap `NAME`: default, macos, macos-gui, emacs or vscode (default: the platform keymap)")
+	pflags.StringVar(&themeName, "theme", "", "theme `NAME` (default: dark)")
+
+	flags := root.Flags()
 	flags.StringVar(&logFile, "log-file", "", "append the status-row notices and the plugin log to `PATH`")
-	root.Flags().BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
-	root.Flags().BoolVarP(&readOnly, "read-only", "R", false, "open in read-only / code-viewer mode (protect files from edits)")
-	root.Flags().BoolVar(&readOnly, "view", false, "alias for -R / --read-only")
-	root.Flags().BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")
-	root.Flags().StringArrayVar(&pluginPath, "plugin", nil, "load the plugin at `PATH` (a .lua file or a plugin directory); repeatable")
-	root.Flags().BoolVar(&restore, "restore", false, "restore the previous session even when editor.restore_previous_session is off; makes a launch with files a session launch")
-	root.Flags().BoolVar(&noRestore, "no-restore", false, "do not restore the previous session for this run; its unsaved text still comes back")
-	root.Flags().BoolVar(&noRestore, "no-session", false, "alias for --no-restore")
-	root.Flags().BoolVar(&simple, "simple", false, "open just what is named: no session restored or saved and no file explorer")
-	root.Flags().BoolVar(&stdin, "stdin", false, "read a [stdin] buffer from standard input (bounded at 32 MiB); the keyboard comes from the terminal")
-	root.Flags().StringVar(&stdinName, "stdin-name", "", "name the [stdin] buffer `NAME`, for the language and the Save-As suggestion")
+	flags.BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
+	flags.BoolVarP(&readOnly, "read-only", "R", false, "open in read-only / code-viewer mode (protect files from edits)")
+	flags.BoolVar(&readOnly, "view", false, "alias for -R / --read-only")
+	flags.BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")
+	flags.StringArrayVar(&pluginPath, "plugin", nil, "load the plugin at `PATH` (a .lua file or a plugin directory); repeatable")
+	flags.BoolVar(&restore, "restore", false, "restore the previous session even when editor.restore_previous_session is off; makes a launch with files a session launch")
+	flags.BoolVar(&noRestore, "no-restore", false, "do not restore the previous session for this run; its unsaved text still comes back")
+	flags.BoolVar(&noRestore, "no-session", false, "alias for --no-restore")
+	flags.BoolVar(&simple, "simple", false, "open just what is named: no session restored or saved and no file explorer")
+	flags.BoolVar(&stdin, "stdin", false, "read a [stdin] buffer from standard input (bounded at 32 MiB); the keyboard comes from the terminal")
+	flags.StringVar(&stdinName, "stdin-name", "", "name the [stdin] buffer `NAME`, for the language and the Save-As suggestion")
 	flags.StringVar(&daemonName, "daemon", "", "run the editor as a daemon on a socket (foreground); use `--daemon=NAME` for a socket name other than this workspace's default")
 	flags.Lookup("daemon").NoOptDefVal = daemonDefaultName
 	flags.StringVarP(&attachName, "attach", "a", "", "attach this terminal to a running daemon; use `--attach=NAME` (or `-a=NAME`) for a named daemon, `-a` alone for this workspace's default")
@@ -265,10 +256,6 @@ func exitCode(stderr io.Writer, err error) int {
 	if errors.Is(err, context.Canceled) {
 		return exitInterrupted
 	}
-	code := exitFailure
-	if ee, ok := errors.AsType[*exitError](err); ok {
-		code = ee.code
-	}
 	_, _ = fmt.Fprintln(stderr, "gvim:", err)
-	return code
+	return exitFailure
 }

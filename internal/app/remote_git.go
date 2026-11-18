@@ -105,6 +105,15 @@ func (g *remoteGitStatus) read(root string) (map[string]rune, error) {
 	if g.spawnEnv != nil {
 		env = remoteEnvMap(g.spawnEnv())
 	}
+	base := root
+	if topRes, topErr := g.one.Run(ctx, []string{"git", "rev-parse", "--show-toplevel"},
+		hostos.ProcOptions{Cwd: root, Env: env, MaxOutput: 4096}); topErr == nil && topRes.Code == 0 {
+		if top := strings.TrimSpace(string(topRes.Stdout)); top != "" {
+			base = top
+		}
+	} else if ctx.Err() != nil {
+		return nil, fmt.Errorf("git status timed out after %s", deadline)
+	}
 	res, err := g.one.Run(ctx, []string{"git", "status", "--porcelain=v1", "-z"},
 		hostos.ProcOptions{Cwd: root, Env: env, MaxOutput: remoteGitStatusMaxOutput})
 	if err != nil {
@@ -123,7 +132,7 @@ func (g *remoteGitStatus) read(root string) (map[string]rune, error) {
 		}
 		return nil, fmt.Errorf("git status failed (exit %d)", res.Code)
 	}
-	return parseRemoteGitStatus(res.Stdout, root), nil
+	return parseRemoteGitStatus(res.Stdout, base), nil
 }
 
 // parseRemoteGitStatus parses git status --porcelain=v1 -z into the explorer's letters,

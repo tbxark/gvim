@@ -18,6 +18,7 @@ type promptFakeSlot struct {
 	*authoritytest.Fake
 	mu         sync.Mutex
 	mode       string // password, passphrase, keyboard or fail
+	wantSecret string
 	connected  bool
 	reconnects int
 	secret     string
@@ -58,6 +59,9 @@ func (s *promptFakeSlot) ReconnectWithPassword(_ context.Context, password strin
 	defer s.mu.Unlock()
 	if password == "" {
 		return errors.New("empty password")
+	}
+	if s.wantSecret != "" && password != s.wantSecret {
+		return errors.New("wrong password")
 	}
 	s.secret, s.connected = password, true
 	return nil
@@ -173,6 +177,9 @@ func TestConnectDaemonAuthorityFailures(t *testing.T) {
 	if len(p.secretQ) != 0 || len(p.lineQ) != 0 {
 		t.Fatalf("a non-prompt failure asked for credentials: %v %v", p.secretQ, p.lineQ)
 	}
+	if slot.reconnects != 1 {
+		t.Fatalf("non-prompt failure dialed %d times, want 1", slot.reconnects)
+	}
 	connected := promptSlot(t, "password")
 	connected.connected = true
 	if err := connectDaemonAuthority(context.Background(), connected, p); err != nil {
@@ -180,6 +187,23 @@ func TestConnectDaemonAuthorityFailures(t *testing.T) {
 	}
 	if connected.reconnects != 0 {
 		t.Fatalf("a connected slot was redialed %d times", connected.reconnects)
+	}
+}
+
+func TestConnectDaemonAuthorityDoesNotRedialBetweenPasswordPrompts(t *testing.T) {
+	slot := promptSlot(t, "password")
+	slot.wantSecret = "correct"
+	p := &fakePrompter{secret: "wrong"}
+	err := connectDaemonAuthority(context.Background(), slot, p)
+	if err == nil {
+		t.Fatal("expected failure on wrong password")
+	}
+	// Initial connect (1) + 5 password prompt submissions -> Reconnect called ONLY once!
+	if slot.reconnects != 1 {
+		t.Fatalf("slot.Reconnect called %d times across prompt loop, want 1", slot.reconnects)
+	}
+	if len(p.secretQ) != 5 {
+		t.Fatalf("prompted %d times, want 5", len(p.secretQ))
 	}
 }
 

@@ -154,7 +154,12 @@ func (m *Model) focusDock() {
 	if !m.dock.Running() && !m.dock.Exited() && !m.dock.Restored() {
 		return
 	}
+	m.blurPluginPanels()
+	m.menu = m.menu.Close()
 	m.explorerFocus = false
+	m.contentsFocus = false
+	m.contents.SetFocus(false)
+	m.diag.focus = false
 	m.tabFocus = false
 	m.dock.SetFocus(true)
 }
@@ -273,7 +278,7 @@ func (m *Model) dockMouse(msg tea.Msg, x, y, count int) (tea.Cmd, bool) {
 		// A drag that left the dock keeps the dock's mouse handling until the
 		// release, so the selection can auto-scroll past the edges. Anything else
 		// outside the cells ends the link hover.
-		if !m.dock.SelectionDragging() {
+		if !m.dock.MouseDragging() {
 			m.dock.ClearHover()
 			return nil, false
 		}

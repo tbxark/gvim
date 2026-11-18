@@ -25,7 +25,7 @@ func TestSessionRoundTripKeepsTheVirtualCaretPosition(t *testing.T) {
 	if got := ed.Active().SetVirtualLines(4, 9); got != 4 {
 		t.Fatalf("SetVirtualLines took %d rows, want 4", got)
 	}
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	s, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)

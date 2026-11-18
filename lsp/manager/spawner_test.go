@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +15,14 @@ import (
 // that the workspace spawn gate still runs before it: a denied spawn never reaches the
 // spawner.
 func TestSetSpawnerStartsThroughIt(t *testing.T) {
-	m := NewManager("", map[string][]ServerConfig{
+	bin := t.TempDir()
+	localExe := filepath.Join(bin, "fake-lsp")
+	if err := os.WriteFile(localExe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	root := t.TempDir()
+	m := NewManager(root, map[string][]ServerConfig{
 		"go": {{Command: []string{"fake-lsp"}}},
 	}, nil)
 	var calls int
@@ -32,6 +41,12 @@ func TestSetSpawnerStartsThroughIt(t *testing.T) {
 	}
 	if len(got.Command) == 0 || got.Command[0] != "fake-lsp" {
 		t.Fatalf("spawner config Command = %v", got.Command)
+	}
+	if got.Dir != root {
+		t.Fatalf("spawner config Dir = %q, want %q", got.Dir, root)
+	}
+	if got.Program != "" {
+		t.Fatalf("spawner config Program = %q, want empty (local ResolveSpawnPath must be skipped for custom spawner)", got.Program)
 	}
 
 	// The gate decides first: a denial must not reach the spawner.

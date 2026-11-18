@@ -35,9 +35,10 @@ type settingsStructurePage struct {
 	filter  []rune            // the typed row filter (st.Filter)
 	rows    []structureRow
 	sel     int
-	top     int
-	page    int
-	seq     int // generation of the child structure request in flight
+	top      int
+	page     int
+	startRow int
+	seq      int // generation of the child structure request in flight
 	active  bool
 	box     space.Rect
 }
@@ -49,6 +50,7 @@ type structureRow struct {
 	title  string // a group header
 	add    bool
 	group  string // "left", "right" or "available" for a dual list
+	index  int    // element index within list or dual group (-1 if not indexed)
 	item   SettingsStructureRow
 }
 
@@ -138,7 +140,7 @@ func (p *settingsStructurePage) layout() {
 	case "list":
 		path := p.listPath()
 		for i, item := range p.items {
-			rows = append(rows, structureRow{item: SettingsStructureRow{Path: path, Name: strconv.Itoa(i + 1), Value: item}})
+			rows = append(rows, structureRow{index: i, item: SettingsStructureRow{Path: path, Name: strconv.Itoa(i + 1), Value: item}})
 		}
 	case "languages":
 		for _, name := range p.entries {
@@ -159,17 +161,17 @@ func (p *settingsStructurePage) layout() {
 			rows = append(rows, structureRow{item: row})
 		}
 	case "dual":
-		rows = append(rows, structureRow{header: true, title: "Left", group: "left"})
-		for _, name := range p.left {
-			rows = append(rows, structureRow{group: "left", item: SettingsStructureRow{Path: []string{"editor", "status_bar", "left"}, Name: name}})
+		rows = append(rows, structureRow{header: true, title: "Left", group: "left", index: -1})
+		for i, name := range p.left {
+			rows = append(rows, structureRow{group: "left", index: i, item: SettingsStructureRow{Path: []string{"editor", "status_bar", "left"}, Name: name}})
 		}
-		rows = append(rows, structureRow{header: true, title: "Right", group: "right"})
-		for _, name := range p.right {
-			rows = append(rows, structureRow{group: "right", item: SettingsStructureRow{Path: []string{"editor", "status_bar", "right"}, Name: name}})
+		rows = append(rows, structureRow{header: true, title: "Right", group: "right", index: -1})
+		for i, name := range p.right {
+			rows = append(rows, structureRow{group: "right", index: i, item: SettingsStructureRow{Path: []string{"editor", "status_bar", "right"}, Name: name}})
 		}
-		rows = append(rows, structureRow{header: true, title: "Available", group: "available"})
+		rows = append(rows, structureRow{header: true, title: "Available", group: "available", index: -1})
 		for _, name := range p.available() {
-			rows = append(rows, structureRow{group: "available", item: SettingsStructureRow{Name: name}})
+			rows = append(rows, structureRow{group: "available", index: -1, item: SettingsStructureRow{Name: name}})
 		}
 	}
 	if p.st.Filter && len(p.filter) > 0 {
@@ -407,7 +409,7 @@ func (p *settingsStructurePage) edit() tea.Cmd {
 		return p.runAction(row.item)
 	}
 	if p.st.Kind == "dual" {
-		p.moveDual(row.group, row.item.Name)
+		p.moveDual(row.group, row.index, row.item.Name)
 		return nil
 	}
 	if p.st.Kind == "languages" || row.item.Child != "" {
@@ -417,7 +419,7 @@ func (p *settingsStructurePage) edit() tea.Cmd {
 	case "map":
 		return p.promptValue(row.item.Path, uiText("gvim.prompt.value", "Value: "), p.values[pathID(row.item.Path)], "string")
 	case "list":
-		return p.promptList(row.item.Path, row.item.Value)
+		return p.promptList(row.index, row.item.Value)
 	case "fields":
 		return p.editField(row.item)
 	}
@@ -426,16 +428,22 @@ func (p *settingsStructurePage) edit() tea.Cmd {
 
 // moveDual moves an element between the two sides, or from Available into the
 // focused side.
-func (p *settingsStructurePage) moveDual(group, name string) {
+func (p *settingsStructurePage) moveDual(group string, index int, name string) {
 	switch group {
-	case "left", "right":
-		if group == "left" {
-			p.left = removeString(p.left, name)
-			p.right = append(p.right, name)
-		} else {
-			p.right = removeString(p.right, name)
-			p.left = append(p.left, name)
+	case "left":
+		if index >= 0 && index < len(p.left) {
+			p.left = slices.Delete(p.left, index, index+1)
+		} else if i := slices.Index(p.left, name); i >= 0 {
+			p.left = slices.Delete(p.left, i, i+1)
 		}
+		p.right = append(p.right, name)
+	case "right":
+		if index >= 0 && index < len(p.right) {
+			p.right = slices.Delete(p.right, index, index+1)
+		} else if i := slices.Index(p.right, name); i >= 0 {
+			p.right = slices.Delete(p.right, i, i+1)
+		}
+		p.left = append(p.left, name)
 	default: // available
 		if p.side == "right" {
 			p.right = append(p.right, name)
@@ -492,12 +500,12 @@ type structureOverlayMsg struct {
 }
 
 // promptList opens the item prompt of a list row.
-func (p *settingsStructurePage) promptList(path []string, item string) tea.Cmd {
+func (p *settingsStructurePage) promptList(index int, item string) tea.Cmd {
 	return structurePrompt(p, prompt.LineOptions{
 		Label:     uiText("gvim.prompt.item", "Item: "),
 		Input:     item,
 		SelectAll: true,
-		Tag:       structurePromptTag{page: p, action: "edit-item", path: []string{item}, kind: "string"},
+		Tag:       structurePromptTag{page: p, action: "edit-item", index: index, kind: "string"},
 	})
 }
 
@@ -723,14 +731,20 @@ func (p *settingsStructurePage) remove() {
 		p.parent.setPendingRemove(row.item.Path)
 		p.entries = removeString(p.entries, row.item.Name)
 	case "list":
-		p.items = removeString(p.items, row.item.Value)
-		p.writeList()
+		if row.index >= 0 && row.index < len(p.items) {
+			p.items = slices.Delete(p.items, row.index, row.index+1)
+			p.writeList()
+		}
 	case "dual":
 		if row.group == "left" || row.group == "right" {
 			if row.group == "left" {
-				p.left = removeString(p.left, row.item.Name)
+				if row.index >= 0 && row.index < len(p.left) {
+					p.left = slices.Delete(p.left, row.index, row.index+1)
+				}
 			} else {
-				p.right = removeString(p.right, row.item.Name)
+				if row.index >= 0 && row.index < len(p.right) {
+					p.right = slices.Delete(p.right, row.index, row.index+1)
+				}
 			}
 			p.writeDual()
 		}
@@ -744,20 +758,26 @@ func (p *settingsStructurePage) reorder(d int) {
 	if !ok || row.header || row.add {
 		return
 	}
+	targetGroup := row.group
+	var targetIndex int
 	switch p.st.Kind {
 	case "list":
-		i := slices.Index(p.items, row.item.Value)
+		i := row.index
 		if i < 0 || i+d < 0 || i+d >= len(p.items) {
 			return
 		}
 		p.items[i], p.items[i+d] = p.items[i+d], p.items[i]
+		targetIndex = i + d
 		p.writeList()
 	case "dual":
+		if row.group != "left" && row.group != "right" {
+			return
+		}
 		side := p.left
 		if row.group == "right" {
 			side = p.right
 		}
-		i := slices.Index(side, row.item.Name)
+		i := row.index
 		if i < 0 || i+d < 0 || i+d >= len(side) {
 			return
 		}
@@ -767,10 +787,20 @@ func (p *settingsStructurePage) reorder(d int) {
 		} else {
 			p.left = side
 		}
+		targetIndex = i + d
 		p.writeDual()
+	default:
+		return
 	}
 	p.layout()
-	p.sel = max(0, min(p.sel+d, len(p.rows)-1))
+	if targetIndex >= 0 {
+		for k, r := range p.rows {
+			if !r.header && !r.add && r.group == targetGroup && r.index == targetIndex {
+				p.sel = k
+				break
+			}
+		}
+	}
 	p.keepVisible()
 }
 
@@ -831,6 +861,7 @@ type structurePromptTag struct {
 	page   *settingsStructurePage
 	action string
 	path   []string
+	index  int
 	kind   string
 }
 
@@ -873,12 +904,8 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 	case "edit":
 		p.setField(tag.path, done.Text, tag.kind)
 	case "edit-item":
-		old := tag.path[0]
-		for i, item := range p.items {
-			if item == old {
-				p.items[i] = done.Text
-				break
-			}
+		if tag.index >= 0 && tag.index < len(p.items) {
+			p.items[tag.index] = done.Text
 		}
 		p.writeList()
 		p.layout()
@@ -896,7 +923,11 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 		})
 	case "add-value":
 		name := tag.path[0]
-		path := []string{"formatters", name}
+		base := slices.Clone(p.st.Path)
+		if len(base) == 0 && p.st.Key != "" {
+			base = strings.Split(p.st.Key, ".")
+		}
+		path := append(base, name)
 		raw, err := json.Marshal(done.Text)
 		if err != nil {
 			return nil
@@ -941,10 +972,11 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 // rowAt returns the row at (x, y) of the last draw.
 func (p *settingsStructurePage) rowAt(x, y int) (int, bool) {
 	b := p.box
-	if !b.Contains(x, y) || y < b.Y+2 || y >= b.Y+b.H-1 {
+	start := min(max(p.startRow, 2), max(b.H-1, 2))
+	if !b.Contains(x, y) || y < b.Y+start || y >= b.Y+b.H-1 {
 		return 0, false
 	}
-	i := p.top + (y - b.Y - 2)
+	i := p.top + (y - b.Y - start)
 	if i < 0 || i >= len(p.rows) {
 		return 0, false
 	}
@@ -970,6 +1002,9 @@ func (p *settingsStructurePage) Draw(g *grid.Grid) {
 	// typed filter.
 	startRow := 2
 	head := func(text string) {
+		if startRow-1 >= box.H-1 {
+			return
+		}
 		g.Fill(box.X+1, box.X+box.W-1, box.Y+startRow-1, ov.Box)
 		g.Put(box.X+2, box.Y+startRow-1, end, text, ov.Muted)
 		startRow++
@@ -983,7 +1018,8 @@ func (p *settingsStructurePage) Draw(g *grid.Grid) {
 	if p.st.Filter && len(p.filter) > 0 {
 		head("Filter: " + string(p.filter))
 	}
-	p.page = box.H - startRow
+	p.startRow = min(startRow, box.H-1)
+	p.page = max(box.H-1-p.startRow, 0)
 	p.keepVisible()
 	for k := 0; k < p.page && p.top+k < len(p.rows); k++ {
 		row := p.rows[p.top+k]

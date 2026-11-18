@@ -15,6 +15,12 @@ import "github.com/tbxark/gvim/syntax"
 // column widths (memoized per text version) size both. A page too narrow for the
 // table gets no borders: its rows wrap, and a border would not line up.
 func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter, measure int) ExtraRows {
+	return PageViewTableBordersFor(doc, styles, false)
+}
+
+// PageViewTableBordersFor is PageViewTableBorders with explicit control over whether the
+// caret's line reveals raw cell/fence text (false for an unfocused dual-view pane).
+func PageViewTableBordersFor(doc Document, styles Styles, noCaretReveal bool) func(line, width, gutter, measure int) ExtraRows {
 	if doc == nil {
 		return nil
 	}
@@ -33,8 +39,10 @@ func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter,
 			if fl.Kind != syntax.FenceBody {
 				return ExtraRows{}
 			}
-			if cur := doc.Cursor(); line == cur.Line || (line+1 == cur.Line && cur.Col == 0) {
-				return ExtraRows{}
+			if !noCaretReveal {
+				if cur := doc.Cursor(); line == cur.Line || (line+1 == cur.Line && cur.Col == 0) {
+					return ExtraRows{}
+				}
 			}
 			depth := max(fl.QuoteDepth, 0)
 			raw := []rune(doc.Line(line))
@@ -66,7 +74,7 @@ func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter,
 		}
 		cur := doc.Cursor()
 		// The caret's line renders raw, so its wrapped continuation rows stand down.
-		revealed := line == cur.Line || (line+1 == cur.Line && cur.Col == 0)
+		revealed := !noCaretReveal && (line == cur.Line || (line+1 == cur.Line && cur.Col == 0))
 		var above, below []ExtraRow
 		if line == lines[0] {
 			above = append(above, ExtraRow{Text: tableBorder(layout.widths, "┌", "┬", "┐"), Style: text})

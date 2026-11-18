@@ -2,7 +2,9 @@ package tui
 
 import (
 	"strconv"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -105,5 +107,36 @@ func TestExplorerHostStore(t *testing.T) {
 	h.OwnerGone("p", 1)
 	if got := m.explorerRowDecor(a); got.Trailing != "" || got.NameColor != nil || got.SuppressLeading {
 		t.Fatalf("unload left explorer decoration: %+v", got)
+	}
+}
+
+func TestExplorerAndFoldUTF8RuneSafeTruncation(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime(t)
+	m, _, pe := newPluginEditorModel(t, rt)
+	h := m.plug.host
+	// "中文啊" is 9 UTF-8 bytes; MaxExplorerSymbol is 8 -> must cut at 6 ("中文"), not split "啊".
+	if err := h.SetExplorerDecorations("p", "utf8", []pluginapi.FileExplorerDecoration{{Path: "/w/a.go", Symbol: "中文啊"}}); err != nil {
+		t.Fatal(err)
+	}
+	gotSym := m.explorerRowDecor("/w/a.go").Trailing
+	if !utf8.ValidString(gotSym) || gotSym != "中文" {
+		t.Fatalf("symbol = %q (valid=%v), want valid rune boundary 中文", gotSym, utf8.ValidString(gotSym))
+	}
+	longFold := strings.Repeat("字", decorMaxText/3+2)
+	id := pe.ActiveBuffer()
+	for i := range pe.bufs {
+		if pe.bufs[i].ID == id && pe.bufs[i].LineCount < 3 {
+			pe.bufs[i].LineCount = 3
+		}
+	}
+	if err := h.DecorSetFoldingRanges("p", "utf8", id, []pluginapi.FoldRange{{
+		Range: pluginapi.Range{From: pluginapi.Pos{Line: 0}, To: pluginapi.Pos{Line: 1}}, Placeholder: longFold,
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ph := m.plug.folds.byBuffer[id][0].ranges[0].Placeholder
+	if len(ph) > decorMaxText || !utf8.ValidString(ph) {
+		t.Fatalf("fold placeholder len=%d valid=%v", len(ph), utf8.ValidString(ph))
 	}
 }

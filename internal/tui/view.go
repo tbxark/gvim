@@ -335,15 +335,19 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 		m.openLocales()
 	case "toggle_scroll_sync":
 		m.view.scrollSync = !m.view.scrollSync
-		m.notice = onOffNotice("Scroll sync", m.view.scrollSync) + " (the compare view does not read it yet)"
+		m.notice = onOffNotice("Scroll sync", m.view.scrollSync)
 	case "toggle_mouse_hover":
 		m.view.mouseHover = !m.view.mouseHover
-		m.notice = onOffNotice("Mouse hover", m.view.mouseHover) + " (hover on mouse movement is not built in this port)"
+		if !m.view.mouseHover {
+			m.cancelMouseHover()
+		}
+		m.notice = onOffNotice("Mouse hover", m.view.mouseHover)
 	case "toggle_mouse_capture":
 		m.view.mouseCapture = !m.view.mouseCapture
 		if m.view.mouseCapture {
 			m.notice = uiText("gvim.notice.mouse.capture_on", "Mouse capture on: gvim takes the mouse")
 		} else {
+			m.clearMouseHover()
 			m.notice = uiText("gvim.notice.mouse.capture_off", "Mouse capture off: the terminal keeps the mouse")
 		}
 	case "toggle_file_explorer_side":
@@ -727,7 +731,7 @@ func (m *Model) viewPane(sp split.Pane, p editorpane.Pane, doc Document) editorp
 	if p.PageView.On && p.PageView.Markdown {
 		// The Markdown table's top and bottom borders and the wrapped-cell rows are
 		// display rows no source line owns; the shared inserted-row hook adds them.
-		p.PageExtraRows = editorpane.PageViewTableBorders(doc, p.Styles)
+		p.PageExtraRows = editorpane.PageViewTableBordersFor(doc, p.Styles, p.PageView.NoCaretReveal)
 		p.TrackMarks = m.markdownHeadingMarks(doc, p)
 	}
 	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes
@@ -897,6 +901,20 @@ func (m *Model) viewTerminal(v *tea.View) {
 	if v.Cursor != nil {
 		v.Cursor.Shape = m.cursorShape()
 	}
+	if m.view.opts.SetWindowTitle {
+		if doc := m.ed.Active(); doc != nil {
+			title := doc.Name()
+			if title == "" {
+				title = frame.NoNameLabel
+			}
+			if doc.Modified() {
+				title = "● " + title
+			}
+			v.WindowTitle = title + " — gvim"
+		} else {
+			v.WindowTitle = "gvim"
+		}
+	}
 }
 
 // viewStatus replaces the status message with the highlight ranges of the caret line
@@ -958,6 +976,8 @@ func (m *Model) viewHolds(name string) (bool, bool) {
 		return m.view.mouseHover, true
 	case "scroll_sync":
 		return m.view.scrollSync, true
+	case "sticky_scroll":
+		return m.stickyScroll, true
 	}
 	return false, false
 }

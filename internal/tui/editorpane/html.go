@@ -141,8 +141,13 @@ func kindCSS(st grid.Style, def string) string {
 	if st.Italic {
 		css += "font-style:italic;"
 	}
-	if st.Underline {
+	switch {
+	case st.Underline && st.Strike:
+		css += "text-decoration:underline line-through;"
+	case st.Underline:
 		css += "text-decoration:underline;"
+	case st.Strike:
+		css += "text-decoration:line-through;"
 	}
 	return css
 }

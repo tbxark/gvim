@@ -16,6 +16,8 @@ import (
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/split"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -32,10 +34,18 @@ type multiFake struct {
 type fakeFolderDoc struct {
 	*fakeDoc
 	folds []fold.Range
+	spans func(int) []syntax.Span
 }
 
 func (d *fakeFolderDoc) Folds(tabWidth int) []fold.Range {
 	return d.folds
+}
+
+func (d *fakeFolderDoc) LineSpans(line int) []syntax.Span {
+	if d.spans != nil {
+		return d.spans(line)
+	}
+	return nil
 }
 
 func (d *fakeFolderDoc) Folded(line int) bool {
@@ -70,6 +80,42 @@ func TestStickyScrollPaintsHeader(t *testing.T) {
 	row2 := g2.Plain()[1]
 	if strings.Contains(row2, "func MyFunction()") {
 		t.Fatalf("row 1 = %q, want empty when sticky scroll is disabled", row2)
+	}
+}
+
+func TestStickyScrollGutterAlignmentAndSyntax(t *testing.T) {
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(Deps{Theme: th})
+	m.width = 80
+	m.height = 24
+	g := grid.New(80, 24)
+	doc := &fakeFolderDoc{
+		fakeDoc: &fakeDoc{
+			lines: []string{"\tfunc MyFunction() {", "\t\tline 1", "\t\tline 2", "\t\tline 3", "}"},
+		},
+		folds: []fold.Range{{Start: 0, End: 4}},
+		spans: func(line int) []syntax.Span {
+			if line == 0 {
+				return []syntax.Span{{Start: 1, End: 5, Kind: syntax.KindKeyword}}
+			}
+			return nil
+		},
+	}
+	p := split.Pane{X: 0, Y: 1, W: 80, H: 20, Top: 2}
+	m.paintStickyScroll(g, p, doc)
+	row := g.Plain()[1]
+	if !strings.HasPrefix(row, "  1 │     func MyFunction() {") {
+		t.Fatalf("sticky row = %q, want gutter aligned and tab expanded", row)
+	}
+	kwCell := g.At(10, 1) // "  1 │     "(10 cells) -> 'f' of func
+	if kwCell.Style.FG != m.panes.Syntax[syntax.KindKeyword].FG {
+		t.Fatalf("sticky keyword FG = %+v, want %+v", kwCell.Style.FG, m.panes.Syntax[syntax.KindKeyword].FG)
+	}
+	if !kwCell.Style.Italic {
+		t.Fatal("sticky keyword should keep italic style")
 	}
 }
 
@@ -611,5 +657,57 @@ func TestSplitAndCompareActionsAreHandled(t *testing.T) {
 		if err := m.Run(a); err != nil {
 			t.Errorf("Run(%q) = %v, want the action handled", a, err)
 		}
+	}
+}
+
+type stickyPlugDoc struct {
+	*fakeDoc
+	id pluginapi.BufferID
+}
+
+func (d stickyPlugDoc) BufferID() pluginapi.BufferID { return d.id }
+
+func TestStickyScrollSuppressedAtTopComparingAndUsesPlugFolds(t *testing.T) {
+	t.Parallel()
+	m := New(Deps{Editor: newFakeEditor("a"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+	m.width, m.height = 80, 24
+	m.stickyScroll = true
+	m.tabSize = 2
+	base := &fakeDoc{lines: []string{"\tfunc Top() {\u202E", "\t\tbody1", "\t\tbody2", "\t}"}}
+	base.cursor = buffer.Pos{Line: 3, Col: 0}
+	doc := &fakeFolderDoc{fakeDoc: base, folds: []fold.Range{{Start: 0, End: 3}}}
+	p := split.Pane{Top: 2}
+	p.X, p.Y, p.W, p.H = 0, 1, 80, 10
+
+	if line, ok := m.stickyScrollLine(p, doc); !ok || line != 0 {
+		t.Fatalf("stickyScrollLine = (%d, %v), want (0, true) when cursor > p.Top", line, ok)
+	}
+	base.cursor = buffer.Pos{Line: 2, Col: 0}
+	if _, ok := m.stickyScrollLine(p, doc); ok {
+		t.Fatal("sticky scroll must be suppressed when Cursor().Line == p.Top")
+	}
+	base.cursor = buffer.Pos{Line: 3, Col: 0}
+	m.splits.comparing = true
+	if _, ok := m.stickyScrollLine(p, doc); ok {
+		t.Fatal("sticky scroll must be suppressed when comparing")
+	}
+	m.splits.comparing = false
+
+	// Non-folder doc with plugin folds must still produce a sticky header, cleaned of Cf bidi,
+	// aligned to pane.TabSize = 2.
+	plainBase := &fakeDoc{lines: []string{"\tplugFold() {\u202E", "\t\ta", "\t\tb", "\t}"}}
+	plainBase.cursor = buffer.Pos{Line: 3, Col: 0}
+	plain := stickyPlugDoc{fakeDoc: plainBase, id: 7}
+	m.plug.folds.byBuffer = map[pluginapi.BufferID][]*foldNamespace{
+		plain.BufferID(): {{
+			owner: "p", ns: "ns",
+			ranges: []pluginapi.FoldRange{{Range: pluginapi.Range{From: pluginapi.Pos{Line: 0}, To: pluginapi.Pos{Line: 3}}}},
+		}},
+	}
+	g := grid.New(80, 24)
+	m.paintStickyScroll(g, p, plain)
+	row := g.Plain()[1]
+	if strings.ContainsRune(row, '\u202E') || !strings.Contains(row, "1 │   plugFold() {") {
+		t.Fatalf("sticky plugin fold row = %q, want TabSize=2 + cleaned Cf rune", row)
 	}
 }

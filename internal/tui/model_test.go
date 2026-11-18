@@ -55,6 +55,9 @@ func (f *fakeEditor) Active() Document {
 	if f.docAlt != nil {
 		return f.docAlt
 	}
+	if f.doc == nil {
+		return nil
+	}
 	return f.doc
 }
 func (f *fakeEditor) Tabs() []TabInfo       { return f.tabs }

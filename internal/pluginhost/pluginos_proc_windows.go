@@ -3,10 +3,15 @@
 package pluginhost
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
 )
+
+func isProcessDoneErr(err error) bool {
+	return errors.Is(err, os.ErrProcessDone)
+}
 
 // setProcAttr gives the child a process group of its own. Windows has no signals: every
 // signal ends the process (this file is only compile-checked).

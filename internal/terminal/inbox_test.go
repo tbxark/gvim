@@ -70,3 +70,26 @@ func TestInboxTakeBlocksUntilPushOrClose(t *testing.T) {
 		})
 	}
 }
+
+func TestInboxBounded(t *testing.T) {
+	q := newInbox()
+	chunk := make([]byte, maxInboxBytes/2)
+	for range 2 {
+		if !q.push(chunk) {
+			t.Fatal("pushes up to maxInboxBytes failed")
+		}
+	}
+	if err := q.tryPush([]byte("overflow")); err != errInboxFull {
+		t.Fatalf("tryPush past cap = %v, want %v", err, errInboxFull)
+	}
+	if q.push([]byte("overflow")) {
+		t.Fatal("push past cap = true, want false")
+	}
+	got, ok := q.take()
+	if !ok || len(got) != maxInboxBytes {
+		t.Fatalf("take() len = %d ok = %v, want %d true", len(got), ok, maxInboxBytes)
+	}
+	if !q.push([]byte("after")) {
+		t.Fatal("push after drain = false, want true")
+	}
+}

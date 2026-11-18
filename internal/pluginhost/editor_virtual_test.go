@@ -530,7 +530,7 @@ func TestSessionLeavesOutVirtualBuffers(t *testing.T) {
 	apptest.Must(t, ed.ActivateID(id))
 	apptest.Must(t, ed.ApplyEdits(id, []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "X"}}, editor.EditOptions{}))
 	sess := filepath.Join(dir, "session")
-	apptest.Must(t, restore.SaveSession(ed, sess, tui.ExplorerState{}))
+	apptest.Must(t, restore.WriteSession(ed, sess, tui.ExplorerState{}, nil))
 	s, ok, err := session.Load(sess)
 	apptest.Must(t, err)
 	if !ok || len(s.Files) != 1 || s.Files[0].Path != file {

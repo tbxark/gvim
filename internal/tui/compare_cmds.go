@@ -81,7 +81,7 @@ func (m *Model) compareFiles(left, right string) {
 	if pc, ok := m.ed.(pathClassifier); ok {
 		for _, p := range []string{left, right} {
 			if pc.IsLargePath(p) {
-				m.notice = filepath.Base(p) + " is too large to compare"
+				m.notice = uiTextVars("gvim.notice.compare.too_large", "%{name} is too large to compare", map[string]any{"name": filepath.Base(p)})
 				return
 			}
 		}

@@ -52,6 +52,20 @@ func (m *MuxOS) Register(osys hostos.OS) {
 	m.mu.Unlock()
 }
 
+// Unregister drops a torn-down workspace OS (closed or evicted) from Shutdown's set
+// and clears active if it still pointed at osys.
+func (m *MuxOS) Unregister(osys hostos.OS) {
+	if osys == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.active == osys {
+		m.active = nil
+	}
+	m.all = slices.DeleteFunc(m.all, func(item hostos.OS) bool { return item == osys })
+	m.mu.Unlock()
+}
+
 func (m *MuxOS) current() hostos.OS {
 	m.mu.RLock()
 	osys := m.active
@@ -177,7 +191,7 @@ func (d *Daemon) Ensure(cfg config.Config, o Options) (*plugin.Runtime, func(str
 		d.runtime = plugin.New(plugin.Options{
 			Timeout:            cfg.PluginTimeout,
 			OS:                 d.mux,
-			Services:           pluginServices{agentDiscover: o.AgentDiscover},
+			Services:           pluginServices{agentDiscover: o.AgentDiscover, remote: o.Remote},
 			Version:            o.Version,
 			LogSink:            o.LogSink,
 			Loader:             ld,

@@ -482,3 +482,17 @@ func TestPluginOSEnvironment(t *testing.T) {
 		t.Fatal("Now")
 	}
 }
+
+func TestPluginDirsHandlesNilRootAndRenameRefusesProtected(t *testing.T) {
+	t.Parallel()
+	dirs := pluginDirs("/tmp/cfg", nil)()
+	if dirs.Root != "" {
+		t.Fatalf("pluginDirs(nil).Root = %q, want empty", dirs.Root)
+	}
+	o, dir := newTestOS(t)
+	ctx := context.Background()
+	parent := filepath.Dir(dir)
+	if err := o.Rename(ctx, dir, filepath.Join(parent, "moved-protected")); codeOf(err) != pluginapi.CodeInvalid {
+		t.Fatalf("Rename protected dir = %v, want CodeInvalid", err)
+	}
+}

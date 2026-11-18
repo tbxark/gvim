@@ -56,6 +56,12 @@ type settingsRuntime struct {
 	// lspReload pushes a reloaded config into the LSP port so future managers and
 	// explicit Start/Restart use the new baseline. Existing managers are not rebuilt.
 	lspReload func(cfg config.Config)
+	// initialFormatters caches startup LookPath results off the UI goroutine.
+	initialFormatters map[string]string
+	// keysReload and withKeybindings keep the session keybinding store synchronized
+	// with Settings reload/snapshot calls.
+	keysReload      func(cfg config.Config)
+	withKeybindings func(cfg config.Config) config.Config
 }
 
 // projectEnvFacts are the Environment rows of the project environment: which
@@ -218,7 +224,7 @@ func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection
 	}}})
 	out = append(out, tui.SettingsSection{Name: "Keybindings", Items: []tui.SettingsItem{{
 		Key: "keybindings", Path: []string{"keybindings"}, Name: "Keybindings", Section: "Keybindings",
-		Kind: "page", Value: s.keybindingsSummary(), Layers: []string{tui.SettingsLayerUser},
+		Kind: "page", Value: s.keybindingsSummary(cfg), Layers: []string{tui.SettingsLayerUser},
 	}}})
 	items := make([]tui.SettingsItem, 0, 8)
 	for _, fact := range s.envFacts(cfg) {
@@ -285,16 +291,21 @@ func (s *settingsService) pluginSummary() string {
 
 // keybindingsSummary is the Keybindings page row's value: the effective binding
 // count and the preset.
-func (s *settingsService) keybindingsSummary() string {
+func (s *settingsService) keybindingsSummary(cfg config.Config) string {
+	cfg = s.effectiveKeybindingsConfig(cfg)
 	count := 0
-	if s.rt.keymapOf != nil && s.cfg.Keybindings != nil {
-		if lister, ok := s.rt.keymapOf(s.cfg).(tui.BindingLister); ok {
+	if s.rt.keymapOf != nil {
+		if lister, ok := s.rt.keymapOf(cfg).(tui.BindingLister); ok {
 			count = len(lister.Bindings())
 		}
 	}
 	summary := strconv.Itoa(count) + " bindings"
-	if s.rt.presetName != "" {
-		summary += " · " + s.rt.presetName
+	preset := effectiveKeymap(s.opts, cfg)
+	if preset == "" {
+		preset = s.rt.presetName
+	}
+	if preset != "" {
+		summary += " · " + preset
 	}
 	return summary
 }

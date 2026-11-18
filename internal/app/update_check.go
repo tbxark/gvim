@@ -31,9 +31,10 @@ var updateVersion = updatecheck.CurrentVersion
 // fields are guarded because the startup check, the command and the status-row
 // render run on different goroutines.
 type updateTracker struct {
-	mu      sync.Mutex
-	checker *updatecheck.Checker
-	st      tui.UpdateStatus
+	mu       sync.Mutex
+	inFlight bool
+	checker  *updatecheck.Checker
+	st       tui.UpdateStatus
 }
 
 // newUpdateTracker builds the checker of this launch and seeds the state from the
@@ -58,8 +59,22 @@ func newUpdateTracker(cfg *config.Config) *updateTracker {
 
 // run performs one check and records what it found. dueOnly is the startup check
 // (it respects the daily debounce and does nothing when a check is not due); a
-// command check always asks the feed.
+// command check always asks the feed. Concurrent calls skip duplicate in-flight checks.
 func (t *updateTracker) run(ctx context.Context, dueOnly bool) tui.UpdateStatus {
+	t.mu.Lock()
+	if t.inFlight {
+		st := t.st
+		t.mu.Unlock()
+		return st
+	}
+	t.inFlight = true
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		t.inFlight = false
+		t.mu.Unlock()
+	}()
+
 	if dueOnly && !t.checker.Due() {
 		return t.status()
 	}

@@ -49,7 +49,8 @@ type Tabs struct {
 	nextID uint64
 	// drag is the in-flight strip drag: the Fresh tab-drag gesture reorders a tab
 	// by pressing its label, moving past the threshold and releasing over the strip.
-	drag tabDrag
+	drag   tabDrag
+	resize dockResize
 	// dive is the restored tab the user just switched to or focused: on the next
 	// Sync its live revival starts (a tea.Cmd, so Update never blocks on the spawn).
 	// A second dive before the sync replaces it with the newest target.
@@ -466,8 +467,12 @@ func (t *Tabs) SetActive(i int) bool {
 		return true
 	}
 	wasFocused := t.Active() != nil && t.Active().Focus()
+	wasOpen := t.Open()
 	t.Active().SetFocus(false)
 	t.active = i
+	if wasOpen {
+		t.tabs[i].open = true
+	}
 	if wasFocused {
 		t.Active().SetFocus(true)
 	}
@@ -571,11 +576,18 @@ func (t *Tabs) CloseTab() {
 	t.removeAt(t.active)
 }
 
+// CloseAt closes tab i and shuts down its shell. Out-of-range indices are ignored.
+func (t *Tabs) CloseAt(i int) {
+	t.removeAt(i)
+}
+
 // removeAt closes and removes tab i.
 func (t *Tabs) removeAt(i int) {
 	if i < 0 || i >= len(t.tabs) {
 		return
 	}
+	t.drag = tabDrag{}
+	t.resize = dockResize{}
 	tab := t.tabs[i]
 	if t.dive == tab {
 		t.dive = nil
@@ -601,6 +613,9 @@ func (t *Tabs) Show() tea.Cmd {
 	if len(t.tabs) == 0 {
 		return t.NewTab()
 	}
+	for _, p := range t.tabs {
+		p.open = true
+	}
 	t.queueDive(t.Active())
 	return t.Active().Show()
 }
@@ -622,6 +637,8 @@ func (t *Tabs) Close() {
 	t.ids = nil
 	t.active = 0
 	t.dive = nil
+	t.drag = tabDrag{}
+	t.resize = dockResize{}
 }
 
 // Restart restarts the active tab's shell, keeping its transcript. The start is
@@ -822,11 +839,37 @@ func (t *Tabs) Selection() bool { p := t.Active(); return p != nil && p.Selectio
 // SelectionDragging reports whether a selection drag is in flight.
 func (t *Tabs) SelectionDragging() bool { p := t.Active(); return p != nil && p.SelectionDragging() }
 
+// MouseDragging reports whether the dock holds a tab drag, selection drag, or
+// forwarded mouse button press.
+func (t *Tabs) MouseDragging() bool {
+	if t.drag.on || t.resize.on {
+		return true
+	}
+	p := t.Active()
+	return p != nil && p.MouseDragging()
+}
+
+// ResizeMsg asks the root to change the dock's height in terminal rows.
+type ResizeMsg struct{ Rows int }
+
+type dockResize struct {
+	on     bool
+	active bool
+	startY int
+	startH int
+}
+
 // ClearHover clears the active tab's Ctrl+hover link.
 func (t *Tabs) ClearHover() {
 	if p := t.Active(); p != nil {
 		p.ClearHover()
 	}
+}
+
+// Hovered reports whether the active tab currently highlights a Ctrl+hover link.
+func (t *Tabs) Hovered() bool {
+	p := t.Active()
+	return p != nil && p.hover.on
 }
 
 // ScrollKey forwards a scrollback/pager key to the active tab.
@@ -983,35 +1026,68 @@ func (t *Tabs) TabKey(k tea.Key) bool {
 func (t *Tabs) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	switch m := msg.(type) {
 	case tea.MouseClickMsg:
-		if l.DockOn && m.Button == tea.MouseLeft && m.Y == l.DockY && l.InEditor(m.X) {
+		if l.DockOn && m.Y == l.DockY && l.InEditor(m.X) {
 			x := m.X - l.DockX
-			if i, ok := t.tabAtX(l.EditorW, x); ok {
-				t.SetActive(i)
-				t.drag = tabDrag{from: i, startX: x, x: x, on: true}
-				// A press on the strip is still a press on the dock: it takes the
-				// keyboard when a shell runs (the host's focus gate refuses otherwise).
+			if m.Button == tea.MouseMiddle {
+				if i, ok := t.tabAtX(l.EditorW, x); ok {
+					t.CloseAt(i)
+					return nil, true
+				}
+				return nil, true
+			}
+			if m.Button == tea.MouseLeft {
+				if bx, ok := t.newBtnX(l.EditorW); ok && x >= bx && x < bx+3 {
+					t.drag = tabDrag{}
+					t.resize = dockResize{}
+					return t.NewTab(), true
+				}
+				if i, ok := t.tabAtX(l.EditorW, x); ok {
+					t.SetActive(i)
+					t.drag = tabDrag{from: i, startX: x, x: x, on: true}
+					t.resize = dockResize{on: true, startY: m.Y, startH: l.DockH}
+					// A press on the strip is still a press on the dock: it takes the
+					// keyboard when a shell runs (the host's focus gate refuses otherwise).
+					if t.host.Focus != nil {
+						t.host.Focus()
+					}
+					return nil, true
+				}
+				t.drag = tabDrag{}
+				t.resize = dockResize{on: true, startY: m.Y, startH: l.DockH}
 				if t.host.Focus != nil {
 					t.host.Focus()
 				}
 				return nil, true
 			}
-			t.drag = tabDrag{}
-			return nil, true
 		}
 	case tea.MouseMotionMsg:
-		if t.drag.on {
-			t.drag.x = m.X - l.DockX
-			if !t.drag.active && dragDistance(t.drag.x-t.drag.startX) > tabDragThreshold {
-				t.drag.active = true
+		if t.drag.on || t.resize.on {
+			x := m.X - l.DockX
+			if t.drag.on {
+				t.drag.x = x
+				if !t.drag.active && dragDistance(x-t.drag.startX) > tabDragThreshold {
+					t.drag.active = true
+					t.resize = dockResize{}
+				}
+			}
+			canResize := !t.drag.on || (!t.drag.active && dragDistance(m.Y-t.resize.startY) >= 2 && dragDistance(m.Y-t.resize.startY) > dragDistance(x-t.drag.startX))
+			if t.resize.on && (t.resize.active || canResize) {
+				if m.Y != t.resize.startY || t.resize.active {
+					t.resize.active = true
+					t.drag = tabDrag{}
+					rows := max(t.resize.startH+(t.resize.startY-m.Y), 4)
+					return func() tea.Msg { return ResizeMsg{Rows: rows} }, true
+				}
 			}
 			// The drag owns the pointer until release, even when it leaves the strip:
 			// a body motion must not start a selection under the dragged label.
 			return nil, true
 		}
 	case tea.MouseReleaseMsg:
-		if t.drag.on {
+		if t.drag.on || t.resize.on {
 			drag := t.drag
 			t.drag = tabDrag{}
+			t.resize = dockResize{}
 			if drag.active && l.DockOn && m.Y == l.DockY && l.InEditor(m.X) {
 				t.dropTab(drag.from, t.tabInsertAtX(l.EditorW, m.X-l.DockX))
 			}
@@ -1023,6 +1099,18 @@ func (t *Tabs) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 		return nil, false
 	}
 	return p.Mouse(msg, l, count)
+}
+
+func (t *Tabs) newBtnX(w int) (int, bool) {
+	runs, _, moreAfter := t.stripRuns(w)
+	if len(runs) == 0 || moreAfter {
+		return 0, false
+	}
+	x := runs[len(runs)-1].x + runs[len(runs)-1].w
+	if x+3 > w-1 {
+		return 0, false
+	}
+	return x, true
 }
 
 // dragDistance is the absolute distance of a drag move.
@@ -1142,13 +1230,17 @@ func (t *Tabs) tabAtX(w, x int) (int, bool) {
 	return 0, false
 }
 
-// Draw paints the active tab and then the tab strip over the dock's title row.
+// Draw paints the active tab and then the tab strip over the dock's title row, unless
+// scrollback search owns the title row to show or edit its /query prompt.
 func (t *Tabs) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	p := t.Active()
 	if p == nil || !l.DockOn {
 		return
 	}
 	p.Draw(g, l, st)
+	if p.scroll.on && (p.scroll.typing || p.scroll.search != "") {
+		return
+	}
 	t.drawStrip(g, l, st)
 }
 
@@ -1202,6 +1294,10 @@ func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
 		// drag, so the gesture is visible before the button is released.
 		if col := t.tabInsertCol(w, t.drag.x); col < w {
 			g.Put(x0+col, l.DockY, min(x0+col+1, x0+w), "┃", active)
+		}
+	} else if !moreAfter && len(runs) > 0 {
+		if bx := runs[len(runs)-1].x + runs[len(runs)-1].w; bx+3 <= w-1 {
+			g.Put(x0+bx, l.DockY, x0+bx+3, " + ", bar)
 		}
 	}
 }
@@ -1337,6 +1433,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 	t.history.restore(st.SearchHistory)
 	t.Close()
 	t.drag = tabDrag{} // a strip drag referred to the tabs that just closed
+	t.resize = dockResize{}
 	for _, tab := range st.Tabs {
 		t.tabs = append(t.tabs, t.restoredPanel(tab))
 		t.names = append(t.names, tab.Name)

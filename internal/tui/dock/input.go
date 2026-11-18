@@ -67,7 +67,7 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	// The title row is the dock's but not the shell's: a press there only takes
 	// the focus. Cells outside the dock's columns are not ours unless a selection
 	// drag is held: then the motion still extends it and the release ends it.
-	selecting := p.sel.pending || p.sel.dragging
+	selecting := p.sel.pending || p.sel.dragging || ((isMotion || isRelease) && p.pressed != 0)
 	if (mo.X < 0 || mo.X >= l.EditorW) && !selecting {
 		return nil, false
 	}
@@ -171,7 +171,8 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 	if isPress {
 		p.pressed = button
 	}
-	p.term.SendMouse(terminal.MouseEvent{Kind: kind, X: mo.X, Y: row, Button: button, Mods: mouseMods(mo.Mod)})
+	x := min(max(mo.X, 0), max(l.EditorW-1, 0))
+	p.term.SendMouse(terminal.MouseEvent{Kind: kind, X: x, Y: row, Button: button, Mods: mouseMods(mo.Mod)})
 	return nil, true
 }
 

@@ -141,7 +141,7 @@ func srcColToDisp(cp composedLine, srcCol int) int {
 // page view (docs/markdown.md).
 func (f frame) decorateComposed(i int, raw []rune, kinds []syntax.Kind, ln *line) {
 	f.markWhitespace(ln.cells)
-	f.bracketsOf(i, raw, kinds, ln.cells)
+	f.bracketsOf(i, raw, kinds, ln)
 	ln.cells = append(ln.cells, f.breakCells(i, raw)...)
 	if ln.indent > 0 {
 		pad := make([]cell, ln.indent)

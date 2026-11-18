@@ -58,8 +58,8 @@ func (c *Cache) Lines(doc *editor.Document) [][]syntax.Span {
 		return nil
 	}
 	c.useLexer(doc)
-	if c.plain || c.Windowed(doc) {
-		// A large document is never lexed whole: see window.
+	if c.plain || c.Windowed(doc) || c.hl.Language() == "" || syntax.IsPlain(c.hl.Language()) {
+		// Plain/fallback or windowed documents are never lexed whole: see window.
 		return nil
 	}
 	// Only a change of the text lexes again.

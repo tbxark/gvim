@@ -26,7 +26,7 @@ func TestSessionRoundTripKeepsTabsCursorsActiveAndUnsavedText(t *testing.T) {
 	if res := ed.Do("insert_char", map[string]any{"text": "Z"}); res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true}, nil))
 
 	restored := apptest.NewSessionEditor()
 	s, ok, err := session.Load(sessDir)
@@ -78,7 +78,7 @@ func TestSessionRestoresUnsavedUntitledText(t *testing.T) {
 	if res := ed.Do("insert_char", map[string]any{"text": "hello"}); res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	s, _, err := session.Load(sessDir)
 	apptest.Must(t, err)
@@ -101,7 +101,7 @@ func TestSessionDropsEmptyUntitledTabs(t *testing.T) {
 	ed := apptest.NewSessionEditor()
 	apptest.Must(t, ed.OpenFile(file))
 	ed.Do("new", nil)
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	s, _, err := session.Load(sessDir)
 	apptest.Must(t, err)
@@ -122,7 +122,7 @@ func TestSessionRoundTripKeepsUntitledBufferLabel(t *testing.T) {
 		t.Fatal(res.Err)
 	}
 	ed.Active().SetLabel("[shared conflict] shared.txt")
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	s, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)

@@ -72,12 +72,15 @@ type SavedRow struct {
 // terminal's colors are RGB after the emulator resolves SGR), empty for the
 // terminal default; Rune 0 is blank or a wide-character continuation half.
 type SavedCell struct {
-	Rune      rune   `json:"r,omitempty"`
-	Fg        string `json:"fg,omitempty"`
-	Bg        string `json:"bg,omitempty"`
-	Bold      bool   `json:"bold,omitempty"`
-	Underline bool   `json:"underline,omitempty"`
-	Reverse   bool   `json:"reverse,omitempty"`
+	Rune          rune   `json:"r,omitempty"`
+	Fg            string `json:"fg,omitempty"`
+	Bg            string `json:"bg,omitempty"`
+	Bold          bool   `json:"bold,omitempty"`
+	Italic        bool   `json:"italic,omitempty"`
+	Faint         bool   `json:"faint,omitempty"`
+	Underline     bool   `json:"underline,omitempty"`
+	Strikethrough bool   `json:"strikethrough,omitempty"`
+	Reverse       bool   `json:"reverse,omitempty"`
 }
 
 // SnapshotScreen returns the bounded styled snapshot of sc, or nil for an empty
@@ -260,11 +263,14 @@ func linesFromSavedRows(rows []SavedRow, cols int) []Line {
 // savedStyle converts a saved cell's style.
 func savedStyle(sc SavedCell) Style {
 	return Style{
-		Fg:        savedColor(sc.Fg),
-		Bg:        savedColor(sc.Bg),
-		Bold:      sc.Bold,
-		Underline: sc.Underline,
-		Reverse:   sc.Reverse,
+		Fg:            savedColor(sc.Fg),
+		Bg:            savedColor(sc.Bg),
+		Bold:          sc.Bold,
+		Italic:        sc.Italic,
+		Faint:         sc.Faint,
+		Underline:     sc.Underline,
+		Strikethrough: sc.Strikethrough,
+		Reverse:       sc.Reverse,
 	}
 }
 
@@ -420,12 +426,15 @@ func savedCursorOf(sc Screen, keptRows int) SavedCursor {
 // savedCellOf converts one terminal cell to its saved form.
 func savedCellOf(c Cell) SavedCell {
 	return SavedCell{
-		Rune:      cleanSavedRune(c.Rune),
-		Fg:        savedColorHex(c.Style.Fg),
-		Bg:        savedColorHex(c.Style.Bg),
-		Bold:      c.Style.Bold,
-		Underline: c.Style.Underline,
-		Reverse:   c.Style.Reverse,
+		Rune:          cleanSavedRune(c.Rune),
+		Fg:            savedColorHex(c.Style.Fg),
+		Bg:            savedColorHex(c.Style.Bg),
+		Bold:          c.Style.Bold,
+		Italic:        c.Style.Italic,
+		Faint:         c.Style.Faint,
+		Underline:     c.Style.Underline,
+		Strikethrough: c.Style.Strikethrough,
+		Reverse:       c.Style.Reverse,
 	}
 }
 
@@ -443,7 +452,8 @@ func cleanSavedRune(r rune) rune {
 
 // blankSavedCell reports whether c carries no text and no style (trailing padding).
 func blankSavedCell(c SavedCell) bool {
-	return c.Rune == 0 && c.Fg == "" && c.Bg == "" && !c.Bold && !c.Underline && !c.Reverse
+	return c.Rune == 0 && c.Fg == "" && c.Bg == "" &&
+		!c.Bold && !c.Italic && !c.Faint && !c.Underline && !c.Strikethrough && !c.Reverse
 }
 
 // savedColorHex is the #rrggbb form of a colour, or "" for the terminal default.

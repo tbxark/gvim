@@ -60,7 +60,7 @@ func NewStyles(th theme.Theme) Styles {
 		Gutter:       tagged(chrome.Gutter, "editor", "line_number_fg", "editor", "line_number_bg"),
 		Scrollbar:    tagged(chrome.Scrollbar, "ui", "scrollbar_track_fg", "editor", "bg"),
 		Thumb:        tagged(chrome.ScrollbarThumb, "ui", "scrollbar_thumb_fg", "editor", "bg"),
-		Match:        tagged(chrome.Match, "", "", "search", "match_bg"),
+		Match:        tagged(chrome.Match, "search", "match_fg", "search", "match_bg"),
 		CurrentMatch: tagged(chrome.CurrentMatch, "search", "current_match_fg", "search", "current_match_bg"),
 
 		SecondaryCaret: tagged(chrome.SecondaryCaret, "editor", "fg", "editor", "inactive_cursor"),
@@ -83,8 +83,8 @@ func NewStyles(th theme.Theme) Styles {
 			continue
 		}
 		st.Syntax[k].FG = syntaxFG(th, kind, text.FG)
-		// The syntax kind's theme key is the provenance even when its colour is
-		// named/terminal (the painter falls back to the editor foreground).
+		// Record the theme key for provenance; terminal default or unrecognized values
+		// fall back to the editor foreground.
 		if section, key, ok := syntaxThemeKey(th, kind); ok {
 			st.Syntax[k].FGKey = style.KeyIDFor(section, key)
 		} else {
@@ -119,7 +119,7 @@ func syntaxThemeKey(th theme.Theme, kind syntax.Kind) (section, key string, ok b
 }
 
 // syntaxFG resolves the foreground of one syntax kind. base is the editor
-// foreground, which a missing or named value falls back to.
+// foreground, which a missing or unknown value falls back to.
 func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
 	key := kind.ThemeKey()
 	c, ok := th.Syntax(key)
@@ -132,9 +132,10 @@ func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
 		return base
 	case c.IsTerminalDefault():
 		return nil
-	case c.IsRGB:
-		return style.Color(th, "syntax", key)
 	default:
+		if col := style.Color(th, "syntax", key); col != nil {
+			return col
+		}
 		return base
 	}
 }

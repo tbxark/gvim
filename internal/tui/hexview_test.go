@@ -520,3 +520,37 @@ func TestHexPaneReservesTheHelpRowForShortPanes(t *testing.T) {
 		t.Errorf("five-row pane = %d, want 4 (one help row)", got)
 	}
 }
+
+func TestHexViewScrollbarAndUnfocusedWheel(t *testing.T) {
+	t.Parallel()
+	data := make([]byte, hexBytesPerRow*40)
+	m, ed, doc := newHexModel(t, data)
+	m.Update(firstOf[hexWindowMsg](t, collect(m.toggleHexView())))
+
+	g := grid.New(80, 12)
+	p := split.Pane{X: 0, Y: 0, W: 80, H: 10, Focused: false}
+	if !m.hexPane(g, p, doc) {
+		t.Fatal("hexPane returned false")
+	}
+	last := g.At(79, 0).Text
+	if last != "┃" && last != "│" {
+		t.Fatalf("hex pane right column cell = %q, want scrollbar thumb or track", last)
+	}
+
+	// Open a second tab and split so pane 0 is unfocused displaying the binary doc;
+	// mouse wheel over pane 0 must scroll its hex view.
+	other := newFakeEditor("other").doc
+	ed.tabs = []TabInfo{{Name: "blob.bin"}, {Name: "other.txt", Active: true}}
+	ed.tabDocs = []Document{doc, other}
+	ed.docAlt = other
+	runAction(t, m, "split_vertical")
+	m.splits.Root.A.Tab = 0
+	m.splits.Root.B.Tab = 1
+	m.focusLeaf(m.splits.Root.B)
+	if !m.hexPaneWheel(0, 3) {
+		t.Fatal("hexPaneWheel refused unfocused hex pane")
+	}
+	if h := m.hexStateFor(doc.path); h == nil || h.top != 3 {
+		t.Fatalf("unfocused hex top = %+v, want 3", h)
+	}
+}

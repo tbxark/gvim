@@ -136,6 +136,16 @@ type lspState struct {
 	// server then runs although it does not start on its own: lsp_enabled is off, the language
 	// is muted, or the server is manual.
 	forced map[string]bool
+	// renderCache indexes tokens and raw hints by line per path so paint frames do
+	// not rebuild maps or measure off-screen lines every frame.
+	renderCache map[string]*lspDocRenderCache
+}
+
+type lspDocRenderCache struct {
+	tokens      []SemanticToken
+	hints       []InlayHint
+	rawTokensLn map[int][]SemanticToken
+	rawHintsLn  map[int][]InlayHint
 }
 
 // lspLayout is the tab layout a sync saw: the number of tabs, the active one and
@@ -248,6 +258,7 @@ const (
 )
 
 const lspAskPeekDefinition lspAsk = lspAskResolveCodeAction + 2
+const lspAskMouseHover lspAsk = lspAskResolveCodeAction + 3
 
 // lspPick is the tag of a popup row. Chosen runs what the row stands for. A
 // completion row carries its list, so the choice still inserts after the root has
@@ -851,6 +862,9 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 // code actions.
 func (m *Model) lspReply(r lspReplyMsg) tea.Cmd {
 	if r.err != nil {
+		if r.ask == lspAskMouseHover {
+			return nil
+		}
 		m.notice = r.err.Error()
 		return nil
 	}
@@ -859,6 +873,8 @@ func (m *Model) lspReply(r lspReplyMsg) tea.Cmd {
 		return m.lspLocations(r)
 	case lspAskHover:
 		m.lspHover(r.path, r.at, r.text)
+	case lspAskMouseHover:
+		m.lspHoverSilent(r.path, r.at, r.text)
 	case lspAskCompletion:
 		m.lspCompletions(r)
 	case lspAskRename:
@@ -879,9 +895,9 @@ func (m *Model) lspReply(r lspReplyMsg) tea.Cmd {
 // It returns the command of the jump, if there is one.
 func (m *Model) lspLocations(r lspReplyMsg) tea.Cmd {
 	none := map[lspAsk]string{
-		lspAskDefinition:     "No definition found",
-		lspAskImplementation: "No implementation found",
-		lspAskReferences:     "No references found",
+		lspAskDefinition:     uiText("gvim.lsp.no_definition", "No definition found"),
+		lspAskImplementation: uiText("gvim.lsp.no_implementation", "No implementation found"),
+		lspAskReferences:     uiText("gvim.lsp.no_references", "No references found"),
 	}
 	switch len(r.locs) {
 	case 0:
@@ -896,12 +912,12 @@ func (m *Model) lspLocations(r lspReplyMsg) tea.Cmd {
 				Data:  lspPick{ask: r.ask, loc: loc},
 			}
 		}
-		title := "Definitions"
+		title := uiText("gvim.lsp.popup_definitions", "Definitions")
 		switch r.ask {
 		case lspAskImplementation:
-			title = "Implementations"
+			title = uiText("gvim.lsp.popup_implementations", "Implementations")
 		case lspAskReferences:
-			title = "References"
+			title = uiText("gvim.lsp.popup_references", "References")
 		}
 		m.lspPopup(title, items)
 	}
@@ -1051,7 +1067,7 @@ func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 			add(line)
 		}
 	}
-	m.lspPopup("Hover", items)
+	m.lspPopup(uiText("gvim.lsp.popup_hover", "Hover"), items)
 }
 
 // lspCompletions lists the completion items in a popup. The choice is accepted by
@@ -1099,7 +1115,7 @@ func (m *Model) openCompletionList(path string, at buffer.Pos, all, shown []Comp
 	for i, it := range shown {
 		rows[i] = popup.Item{Label: it.Label, Detail: it.Detail, Data: lspPick{ask: lspAskCompletion, comp: c, item: i}}
 	}
-	c.pop = m.lspPopupSelected("Completions", rows, selected)
+	c.pop = m.lspPopupSelected(uiText("gvim.lsp.popup_completions", "Completions"), rows, selected)
 	m.lsp.comp = c
 	return c
 }
@@ -1108,7 +1124,7 @@ func (m *Model) openCompletionList(path string, at buffer.Pos, all, shown []Comp
 // kind of the action, with a preferred action marked.
 func (m *Model) lspCodeActions(path string, actions []CodeAction) {
 	if len(actions) == 0 {
-		m.notice = "No code actions"
+		m.notice = uiText("gvim.lsp.no_code_actions", "No code actions")
 		return
 	}
 	items := make([]popup.Item, len(actions))
@@ -1123,7 +1139,7 @@ func (m *Model) lspCodeActions(path string, actions []CodeAction) {
 		items[i] = popup.Item{Label: a.Title, Detail: detail, Data: lspPick{ask: lspAskCodeActions, action: a}}
 	}
 	m.lsp.popupPath = path
-	m.lspPopup("Code Actions", items)
+	m.lspPopup(uiText("gvim.lsp.popup_code_actions", "Code Actions"), items)
 }
 
 // lspChosen runs the choice of a popup row. It returns the command the choice starts,
@@ -1172,7 +1188,7 @@ func (m *Model) applyCodeAction(path string, action CodeAction) tea.Cmd {
 	if action.Edit == nil {
 		return after(FileEditResult{})
 	}
-	m.notice = "Applying " + action.Title + "…"
+	m.notice = uiTextVars("gvim.lsp.applying", "Applying %{title}…", map[string]any{"title": action.Title})
 	return m.applyWorkspaceEdit(*action.Edit, after)
 }
 
@@ -1253,6 +1269,10 @@ func (m *Model) lspPopupSelected(title string, items []popup.Item, selected int)
 	if x, y, ok := m.caret(); ok {
 		anchor = popup.Point{X: x, Y: y}
 	}
+	return m.lspPopupAt(anchor, title, items, selected)
+}
+
+func (m *Model) lspPopupAt(anchor popup.Point, title string, items []popup.Item, selected int) *popup.Popup {
 	p := popup.New(popupStyles(m.styles))
 	p.Show(anchor, title, items)
 	p.Select(selected)
@@ -1811,7 +1831,7 @@ func (m *Model) lspRequest(ask lspAsk, path string, at buffer.Pos, name string) 
 			r.locs, r.err = port.Implementation(path, at)
 		case lspAskReferences:
 			r.locs, r.err = port.References(path, at)
-		case lspAskHover:
+		case lspAskHover, lspAskMouseHover:
 			r.text, r.err = port.Hover(path, at)
 		case lspAskRename:
 			r.edits, r.err = port.Rename(path, at, name)
@@ -2237,6 +2257,7 @@ func (m *Model) lspToggleInlayHints() tea.Cmd {
 	s.inlay = !s.inlay
 	if !s.inlay {
 		s.hints = nil
+		s.renderCache = nil
 		m.notice = i18n.T("", "gvim.lsp.inlay_hints_off", nil)
 		return nil
 	}

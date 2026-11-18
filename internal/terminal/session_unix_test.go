@@ -417,16 +417,19 @@ func TestWaitReportsExitStatus(t *testing.T) {
 // styleFlags is the subset of Style that tests compare: the boolean
 // attributes, and whether a colour is set at all.
 type styleFlags struct {
-	bold, underline, reverse, fg, bg bool
+	bold, italic, faint, underline, strikethrough, reverse, fg, bg bool
 }
 
 func flagsOf(st Style) styleFlags {
 	return styleFlags{
-		bold:      st.Bold,
-		underline: st.Underline,
-		reverse:   st.Reverse,
-		fg:        st.Fg != nil,
-		bg:        st.Bg != nil,
+		bold:          st.Bold,
+		italic:        st.Italic,
+		faint:         st.Faint,
+		underline:     st.Underline,
+		strikethrough: st.Strikethrough,
+		reverse:       st.Reverse,
+		fg:            st.Fg != nil,
+		bg:            st.Bg != nil,
 	}
 }
 
@@ -438,8 +441,11 @@ func TestScreenCellStyle(t *testing.T) {
 	}{
 		{name: "plain", sgr: "", want: styleFlags{}},
 		{name: "bold", sgr: "\x1b[1m", want: styleFlags{bold: true}},
+		{name: "faint", sgr: "\x1b[2m", want: styleFlags{faint: true}},
+		{name: "italic", sgr: "\x1b[3m", want: styleFlags{italic: true}},
 		{name: "underline", sgr: "\x1b[4m", want: styleFlags{underline: true}},
 		{name: "reverse", sgr: "\x1b[7m", want: styleFlags{reverse: true}},
+		{name: "strikethrough", sgr: "\x1b[9m", want: styleFlags{strikethrough: true}},
 		{name: "foreground", sgr: "\x1b[31m", want: styleFlags{fg: true}},
 		{name: "background", sgr: "\x1b[42m", want: styleFlags{bg: true}},
 	}

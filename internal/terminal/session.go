@@ -10,7 +10,10 @@ import (
 	"github.com/charmbracelet/x/vt"
 )
 
-var errClosed = errors.New("term: session closed")
+var (
+	errClosed    = errors.New("term: session closed")
+	errInboxFull = errors.New("term: input buffer full")
+)
 
 // Session is a program running in a pseudo-terminal. Its methods are safe for
 // concurrent use.
@@ -112,8 +115,8 @@ func newSession(pty ptyProc, cols, rows, scrollbackLines int) *Session {
 // for the child to read the bytes, so it is safe to call from a UI update. It
 // fails once the session is closed or the child's input has gone away.
 func (s *Session) Write(p []byte) (int, error) {
-	if !s.in.push(p) {
-		return 0, errClosed
+	if err := s.in.tryPush(p); err != nil {
+		return 0, err
 	}
 	return len(p), nil
 }
@@ -385,12 +388,12 @@ func (s *Session) feed(p []byte) bool {
 	if s.closed {
 		return false
 	}
+	// Run the kitty scanner before emu.Write while tracking DECSET/DECRST alt-screen
+	// switches inline in stream order, so a combined chunk like Pop+LeaveAltScreen
+	// applies each operation against the screen active at its exact byte offset.
+	replies := s.kitty.scan(p)
 	_, _ = s.emu.Write(p)
-	// The emulator has consumed the bytes (and may have switched screens through
-	// the AltScreen callback), so parse the child's kitty keyboard controls now.
-	// The replies go into the same inbox as the emulator's own query answers: the
-	// inbox is the only writer to the PTY, so they cannot interleave.
-	for _, reply := range s.kitty.scan(p) {
+	for _, reply := range replies {
 		s.in.push(reply)
 	}
 	// The child may just have enabled focus reporting; tell it it is focused once,
@@ -451,7 +454,11 @@ func (s *Session) reap() {
 	close(s.done)
 }
 
-// inbox is an unbounded FIFO of bytes for the child. push never blocks, so
+// maxInboxBytes caps the pending input/reply queue so runaway terminal queries
+// behind an unresponsive child cannot exhaust memory.
+const maxInboxBytes = 4 << 20
+
+// inbox is a bounded FIFO of bytes for the child. push never blocks, so
 // neither a UI update calling Write nor the emulator's reply path can stall
 // behind a child that is not reading its input.
 type inbox struct {
@@ -467,16 +474,24 @@ func newInbox() *inbox {
 	return q
 }
 
-// push appends p. It reports false once the inbox is closed.
+// push appends p. It reports false once the inbox is closed or full.
 func (q *inbox) push(p []byte) bool {
+	return q.tryPush(p) == nil
+}
+
+// tryPush appends p unless the inbox is closed or adding p would exceed maxInboxBytes.
+func (q *inbox) tryPush(p []byte) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {
-		return false
+		return errClosed
+	}
+	if len(p) > maxInboxBytes-len(q.buf) {
+		return errInboxFull
 	}
 	q.buf = append(q.buf, p...)
 	q.avail.Signal()
-	return true
+	return nil
 }
 
 // take blocks until there is data, then returns all of it. It reports false

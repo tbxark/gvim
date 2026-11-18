@@ -10,66 +10,45 @@ package tui
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// waitRegistry is the cross-workspace wait ownership map of each shared host. It lives
-// beside PluginShared rather than inside its struct so the daemon-wide host and the
-// workspace-scoped chrome work can edit plugin_shared.go independently.
-var waitRegistry = struct {
-	mu   sync.Mutex
-	byID map[*PluginShared]map[pluginapi.Token]*Model
-}{byID: map[*PluginShared]map[pluginapi.Token]*Model{}}
-
-// sharedWaits returns the ownership map of s, creating it on first use.
-func sharedWaits(s *PluginShared) map[pluginapi.Token]*Model {
-	waitRegistry.mu.Lock()
-	defer waitRegistry.mu.Unlock()
-	m := waitRegistry.byID[s]
-	if m == nil {
-		m = map[pluginapi.Token]*Model{}
-		waitRegistry.byID[s] = m
-	}
-	return m
-}
-
 // registerWait records that t is open in m. A token may be open in only one workspace: the
 // runtime's tokens are global, so a second owner is a plugin bug, not a new wait.
 func (s *PluginShared) registerWait(t pluginapi.Token, m *Model) error {
-	waits := sharedWaits(s)
-	waitRegistry.mu.Lock()
-	defer waitRegistry.mu.Unlock()
-	if owner, ok := waits[t]; ok && owner != m {
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	if s.waits == nil {
+		s.waits = map[pluginapi.Token]*Model{}
+	}
+	if owner, ok := s.waits[t]; ok && owner != m {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "token %d is already waiting in another workspace", t)
 	}
-	waits[t] = m
+	s.waits[t] = m
 	return nil
 }
 
 // unregisterWait forgets t if m is its owner (a stale completion from another workspace
 // must not drop a wait of the real owner).
 func (s *PluginShared) unregisterWait(t pluginapi.Token, m *Model) {
-	waits := sharedWaits(s)
-	waitRegistry.mu.Lock()
-	defer waitRegistry.mu.Unlock()
-	if waits[t] == m {
-		delete(waits, t)
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	if s.waits[t] == m {
+		delete(s.waits, t)
 	}
 }
 
 // takeWaitsFor removes and returns the waits owned by m: the workspace is closing, so no
 // completion can ever come from its overlays.
 func (s *PluginShared) takeWaitsFor(m *Model) []pluginapi.Token {
-	waits := sharedWaits(s)
-	waitRegistry.mu.Lock()
-	defer waitRegistry.mu.Unlock()
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
 	var out []pluginapi.Token
-	for t, owner := range waits {
+	for t, owner := range s.waits {
 		if owner == m {
 			out = append(out, t)
-			delete(waits, t)
+			delete(s.waits, t)
 		}
 	}
 	return out

@@ -43,6 +43,7 @@ func newGrammarListCommand(d grammarDeps) *cobra.Command {
 		Short: "List the available grammars",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			names := slices.Clone(d.names())
 			slices.Sort(names)
 			names = slices.Compact(names)

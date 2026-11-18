@@ -20,9 +20,7 @@ import (
 // unhandledActions lists the actions that the embedded keymaps bind but the port
 // does not run yet. Pressing their keys shows "Not supported in this port". When a
 // handler lands, TestEveryBoundActionRunsOrIsListed fails until its entry is removed here.
-var unhandledActions = map[string]bool{
-	"file_explorer_search_backspace": true,
-}
+var unhandledActions = map[string]bool{}
 
 // pluginActions are bound by the embedded keymaps but registered by a default-enabled
 // bundled plugin, which a bare probe model does not load. plugin/bundled tests run them.
@@ -32,10 +30,11 @@ var pluginActions = map[string]bool{
 }
 
 // probedContexts are the when-clauses a model with no overlay open can reach.
-// Bindings in other contexts (prompt, popup, menu, settings, terminal, and so
-// on) belong to an overlay, so running them on a bare model proves nothing.
+// Bindings in overlay contexts (prompt, searchPrompt, popup, menu, settings) are verified
+// against tui.KnownActions() below so no dead action escapes undetected.
 var probedContexts = []keymap.Context{
 	keymap.ContextGlobal, keymap.ContextNormal, keymap.ContextFileExplorer,
+	keymap.ContextTerminal, keymap.ContextDock,
 }
 
 // boundActions returns every action named by a probed binding in any embedded
@@ -137,4 +136,37 @@ func TestEveryPaletteActionRunsOrIsListed(t *testing.T) {
 	}
 	slices.Sort(unhandled)
 	t.Logf("unhandled palette actions: %d: %v", len(unhandled), unhandled)
+}
+
+// TestEveryConsultedBindingActionIsKnown covers all remaining ConsultedContexts (prompt,
+// searchPrompt, popup, menu, settings, etc.) across every embedded keymap so no binding
+// names an unknown or dead action.
+func TestEveryConsultedBindingActionIsKnown(t *testing.T) {
+	dir := t.TempDir()
+	known := make(map[string]bool)
+	for _, a := range tui.KnownActions() {
+		known[a] = true
+	}
+	seen := make(map[string]bool)
+	for _, name := range keybindings.BuiltinKeymaps {
+		km, err := keymap.ByName(name)
+		if err != nil {
+			t.Fatalf("ByName(%q): %v", name, err)
+		}
+		for _, b := range km.Bindings() {
+			if !keymap.Consulted(b.When) {
+				continue
+			}
+			if b.Action == "" || b.Action == keymap.ActionNoop || b.Action == keymap.ActionUnbind || pluginActions[b.Action] {
+				continue
+			}
+			if known[b.Action] || seen[b.Action] {
+				continue
+			}
+			seen[b.Action] = true
+			if errors.Is(newProbeModel(t, dir).Run(b.Action), menubar.ErrUnsupported) {
+				t.Errorf("keymap %q context %q binds unknown/unhandled action %q", name, b.When, b.Action)
+			}
+		}
+	}
 }

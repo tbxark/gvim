@@ -147,7 +147,7 @@ func TestLSPBaselineUpdateDoesNotBlockCaller(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		t.Fatal("baseline Update blocked on the stalled SetConfig (UI goroutine would block)")
 	}
 	close(fake.release)

@@ -118,7 +118,7 @@ func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key st
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a window state key is 1 to %d bytes", maxViewStateKey)
 	}
 	if value == nil {
-		h.ClearWindowState(plugin, id, key)
+		h.clearWindowState(plugin, id, key)
 		return nil
 	}
 	switch v := value.(type) {
@@ -144,8 +144,8 @@ func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key st
 	return nil
 }
 
-// ClearWindowState removes one key, or every key of the plugin when key is empty.
-func (h *pluginHost) ClearWindowState(plugin string, id pluginapi.BufferID, key string) {
+// clearWindowState removes one key, or every key of the plugin when key is empty.
+func (h *pluginHost) clearWindowState(plugin string, id pluginapi.BufferID, key string) {
 	local, err := h.model().pluginResolveBuffer(id)
 	if err != nil {
 		return

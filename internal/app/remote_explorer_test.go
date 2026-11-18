@@ -11,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/authority/authoritytest"
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
@@ -21,8 +22,10 @@ import (
 type remoteExplorerFake struct {
 	mu      sync.Mutex
 	dirs    map[string][]hostos.DirEntry
+	files   map[string][]byte
 	reads   []string
 	readErr error
+	watchFn func(context.Context, string, hostos.WatchOptions) (hostos.Watch, error)
 }
 
 func newRemoteExplorerFake() *remoteExplorerFake {
@@ -60,8 +63,13 @@ func (f *remoteExplorerFake) ReadRange(context.Context, string, int64, int64) ([
 	return nil, errors.New("not used by the explorer")
 }
 
-func (f *remoteExplorerFake) ReadFile(context.Context, string, int64) ([]byte, error) {
-	return nil, errors.New("not used by the explorer")
+func (f *remoteExplorerFake) ReadFile(_ context.Context, path string, _ int64) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if data, ok := f.files[path]; ok {
+		return append([]byte(nil), data...), nil
+	}
+	return nil, os.ErrNotExist
 }
 func (f *remoteExplorerFake) WriteFile(context.Context, string, []byte, hostos.WriteOptions) error {
 	return errors.New("not used by the explorer")
@@ -69,7 +77,10 @@ func (f *remoteExplorerFake) WriteFile(context.Context, string, []byte, hostos.W
 func (f *remoteExplorerFake) Stat(context.Context, string) (hostos.FileStat, error) {
 	return hostos.FileStat{}, errors.New("not used by the explorer")
 }
-func (f *remoteExplorerFake) Watch(context.Context, string, hostos.WatchOptions) (hostos.Watch, error) {
+func (f *remoteExplorerFake) Watch(ctx context.Context, p string, o hostos.WatchOptions) (hostos.Watch, error) {
+	if f.watchFn != nil {
+		return f.watchFn(ctx, p, o)
+	}
 	return nil, errors.New("not used by the explorer")
 }
 
@@ -212,6 +223,103 @@ func containsAll(s string, parts ...string) bool {
 		}
 	}
 	return true
+}
+
+type noopRemoteWatch struct{}
+
+func (noopRemoteWatch) Next(context.Context) (hostos.WatchEvent, bool) {
+	return hostos.WatchEvent{}, false
+}
+func (noopRemoteWatch) Stop() {}
+
+type fakeWatcherAdder struct{ dirs []string }
+
+func (a *fakeWatcherAdder) Add(dir string) error {
+	a.dirs = append(a.dirs, dir)
+	return nil
+}
+
+func TestAuthorityDirLoaderProbeWatchAndIgnoreOptions(t *testing.T) {
+	t.Parallel()
+	fsFake := newRemoteExplorerFake().dir("/srv/proj",
+		hostos.DirEntry{Name: "app.log", Kind: "file"},
+		hostos.DirEntry{Name: "ignored.txt", Kind: "file"},
+		hostos.DirEntry{Name: "main.go", Kind: "file"},
+	)
+	fsFake.files = map[string][]byte{"/srv/proj/.gitignore": []byte("ignored.txt\n")}
+	attempts := 0
+	fsFake.watchFn = func(context.Context, string, hostos.WatchOptions) (hostos.Watch, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.New("transient ssh timeout")
+		}
+		return noopRemoteWatch{}, nil
+	}
+	slot := explorerSlot(fsFake)
+	loader := newAuthorityDirLoader(slot, nil, "/srv/proj")
+	adder := &fakeWatcherAdder{}
+	loader.setWatcher(adder)
+
+	// Transient Watch failure must not permanently mark watching as unsupported.
+	if _, err := loader.ReadDirs(context.Background(), []string{"/srv/proj"}); err != nil {
+		t.Fatalf("first ReadDirs: %v", err)
+	}
+	if len(adder.dirs) != 0 {
+		t.Fatalf("dirs added on transient watch failure = %v, want none", adder.dirs)
+	}
+	if _, err := loader.ReadDirs(context.Background(), []string{"/srv/proj"}); err != nil {
+		t.Fatalf("second ReadDirs: %v", err)
+	}
+	if len(adder.dirs) != 1 || adder.dirs[0] != "/srv/proj" {
+		t.Fatalf("dirs added after watch recovered = %v, want [/srv/proj]", adder.dirs)
+	}
+
+	// CustomIgnorePatterns + RespectGitignore=false.
+	respectFalse := false
+	loader.SetIgnoreOptions(&respectFalse, []string{"*.log"})
+	got, err := loader.ReadDirs(context.Background(), []string{"/srv/proj"})
+	if err != nil {
+		t.Fatalf("ReadDirs custom ignore: %v", err)
+	}
+	ignored := map[string]bool{}
+	for _, e := range got["/srv/proj"] {
+		ignored[e.Name] = e.Ignored
+	}
+	if !ignored["app.log"] || ignored["ignored.txt"] || ignored["main.go"] {
+		t.Fatalf("ignored flags with respectGitignore=false, custom=[*.log]: %v", ignored)
+	}
+
+	// Unsupported Watch permanently marks unsupported and emits one notice.
+	fsUnsup := newRemoteExplorerFake().dir("/srv/proj", hostos.DirEntry{Name: "main.go", Kind: "file"})
+	unsupCalls := 0
+	fsUnsup.watchFn = func(context.Context, string, hostos.WatchOptions) (hostos.Watch, error) {
+		unsupCalls++
+		return nil, authority.ErrUnsupportedFileIO
+	}
+	loader2 := newAuthorityDirLoader(explorerSlot(fsUnsup), nil, "/srv/proj")
+	loader2.setWatcher(&fakeWatcherAdder{})
+	for range 2 {
+		if _, err := loader2.ReadDirs(context.Background(), []string{"/srv/proj"}); err != nil {
+			t.Fatalf("ReadDirs unsupported: %v", err)
+		}
+	}
+	if unsupCalls != 1 {
+		t.Fatalf("unsupported Watch probed %d times, want 1", unsupCalls)
+	}
+	if notice := loader2.TakeNotice(); !strings.Contains(notice, "not supported") {
+		t.Fatalf("notice = %q, want unsupported notice", notice)
+	}
+
+	// installRemoteExplorer honors showExplorer and ExplorerShowHidden.
+	var deps tui.Deps
+	cfg := config.Config{ExplorerShowHidden: true}
+	installRemoteExplorer(&deps, explorerSlot(fsFake), "/srv/proj", nil, nil, cfg, false)
+	if deps.ShowExplorer {
+		t.Fatal("expected deps.ShowExplorer=false when showExplorer=false")
+	}
+	if !deps.Explorer.ShowHidden() {
+		t.Fatal("expected remote explorer ShowHidden=true from config")
+	}
 }
 
 var _ authority.FileSystem = (*remoteExplorerFake)(nil)

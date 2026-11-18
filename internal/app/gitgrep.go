@@ -3,10 +3,8 @@ package app
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/gitstate"
@@ -29,10 +27,6 @@ type gitGrep struct {
 // gitGrepTimeout bounds one git grep run.
 const gitGrepTimeout = 20 * time.Second
 
-// gitGrepLine is one line of git grep's output with -n --column: path, line, column and
-// the line's text, where the path may itself hold colons.
-var gitGrepLine = regexp.MustCompile(`^(.+?):([0-9]+):([0-9]+):(.*)$`)
-
 // GitGrep searches the tracked files of the work tree that holds req.Root. git grep's
 // exit codes are honored: 0 means matches, 1 means none (a successful search), and 2 or
 // more is an error. Only the workspace root's work tree is searched; a root outside a
@@ -50,7 +44,7 @@ func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, err
 	if limit <= 0 {
 		limit = 100
 	}
-	argv := gitGrepArgv(req)
+	argv := gitGrepNullArgv(req)
 	var extraEnv []string
 	if g.spawnEnv != nil {
 		extraEnv = g.spawnEnv()
@@ -72,7 +66,7 @@ func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, err
 	if code == 1 || text == "" {
 		return out, nil
 	}
-	return parseGitGrepOutput(text, limit, len([]rune(req.Query)), func(rel string) string {
+	return parseGitGrepNullOutput(text, limit, utf8.RuneCountInString(cleanRemoteDisplayText(req.Query)), func(rel string) string {
 		return filepath.Join(root, filepath.FromSlash(rel))
 	}), nil
 }
@@ -90,46 +84,4 @@ func gitGrepArgv(req searchpanel.GitRequest) []string {
 		argv = append(argv, req.Pathspecs...)
 	}
 	return argv
-}
-
-// parseGitGrepOutput parses git grep -n --column output into whole-file matches, at most
-// limit matches. abs maps a repo-relative path (as git prints it) to the path the editor
-// opens; Name stays the repo-relative path. Both the local and remote adapters share it.
-func parseGitGrepOutput(text string, limit, matchLen int, abs func(rel string) string) searchpanel.GitResult {
-	var out searchpanel.GitResult
-	byPath := map[string]int{}
-	total := 0
-	for _, line := range strings.Split(text, "\n") {
-		if total >= limit {
-			break
-		}
-		if line == "" {
-			continue
-		}
-		m := gitGrepLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		lineNo, errLine := strconv.Atoi(m[2])
-		col, errCol := strconv.Atoi(m[3])
-		if errLine != nil || errCol != nil {
-			continue
-		}
-		rel := m[1]
-		idx, ok := byPath[rel]
-		if !ok {
-			idx = len(out.Files)
-			byPath[rel] = idx
-			out.Files = append(out.Files, searchpanel.FileMatches{Path: abs(rel), Name: rel})
-		}
-		content := strings.TrimRight(m[4], "\r")
-		out.Files[idx].Matches = append(out.Files[idx].Matches, searchpanel.Match{
-			Line: lineNo,
-			Col:  col,
-			Len:  matchLen,
-			Text: content,
-		})
-		total++
-	}
-	return out
 }

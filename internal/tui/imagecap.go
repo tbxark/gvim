@@ -375,7 +375,10 @@ func (m *Model) imageMessage(msg tea.Msg) (tea.Cmd, bool) {
 			m.img.markFailed(msg.path, msg.id)
 			return nil, true
 		}
-		seq := imageUploadSequence(msg.data, msg.id)
+		seq := msg.seq
+		if !msg.seqReady {
+			seq = imageUploadSequence(msg.data, msg.id)
+		}
 		if seq == "" {
 			m.img.markFailed(msg.path, msg.id)
 			return nil, true

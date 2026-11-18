@@ -30,6 +30,8 @@ func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, hover frame.H
 	barStyle := style.Cell(st.TabBar)
 	g.Fill(x0, g.Width(), y, barStyle)
 	tab, active := style.Cell(st.Tab), style.Cell(st.TabActive)
+	hoverBG := style.Cell(st.Decor.TabHoverBG).BG
+	closeHoverFG := style.Cell(st.Decor.TabCloseHoverFG).FG
 	for i, r := range s.Runs {
 		cell := tab
 		switch {
@@ -41,8 +43,18 @@ func Draw(g *grid.Grid, st style.Styles, x0, y int, s frame.Strip, hover frame.H
 			cell = active
 			cell.Bold = true
 		}
+		if r.Preview && r.Kind != frame.HitTabScrollBefore && r.Kind != frame.HitTabScrollAfter && r.Kind != frame.HitTabNew {
+			cell.Italic = true
+		}
+		isTabHover := hover.Kind != frame.HitNone && (hover.Kind == frame.HitTab || hover.Kind == frame.HitTabClose) && hover.Index == r.Index
+		if isTabHover && r.Index != s.Active && hoverBG != nil && (r.Kind == frame.HitTab || r.Kind == frame.HitTabClose) {
+			cell.BG = hoverBG
+		}
 		if hover.Kind != frame.HitNone && hover.Kind == r.Kind && hover.Index == r.Index {
 			cell.Underline = true
+			if r.Kind == frame.HitTabClose && closeHoverFG != nil {
+				cell.FG = closeHoverFG
+			}
 		}
 		g.Put(r.X, y, g.Width(), r.Text, cell)
 		// Put the divider at the start of the next tab, leaving a blank after ×.

@@ -3,10 +3,15 @@
 package pluginhost
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
 )
+
+func isProcessDoneErr(err error) bool {
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
 
 // setProcAttr puts the child in a process group of its own, so signalProc reaches every
 // process the child started.

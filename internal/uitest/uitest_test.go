@@ -78,6 +78,23 @@ func TestFindReturnsCellPosition(t *testing.T) {
 	}
 }
 
+func TestWideCharactersPreserveContinuationCellsAndDisplayColumns(t *testing.T) {
+	s := Start(t, &fakeModel{text: "中文after"}, 40, 4)
+	sc := s.Screen()
+	if !sc.Contains("中文after") {
+		t.Fatalf("Contains(中文after) = false, row0 = %q", sc.Row(0))
+	}
+	if got := sc.Cell(5, 0).Char; got != "中" {
+		t.Fatalf("lead cell (5,0) = %q, want 中", got)
+	}
+	if got := sc.Cell(6, 0).Char; got != "" {
+		t.Fatalf("continuation cell (6,0) = %q, want empty", got)
+	}
+	if x, y, ok := sc.Find("after"); !ok || x != 9 || y != 0 {
+		t.Fatalf("Find(after) after File + two wide chars = %d,%d,%v, want 9,0,true", x, y, ok)
+	}
+}
+
 func TestParseKey(t *testing.T) {
 	cases := []struct {
 		spec string
@@ -86,6 +103,9 @@ func TestParseKey(t *testing.T) {
 		text string
 	}{
 		{"x", 'x', 0, "x"},
+		{"+", '+', 0, "+"},
+		{"ctrl++", '+', tea.ModCtrl, ""},
+		{"shift++", '+', tea.ModShift, "+"},
 		{"enter", tea.KeyEnter, 0, ""},
 		{"ctrl+s", 's', tea.ModCtrl, ""},
 		{"alt+f", 'f', tea.ModAlt, ""},
@@ -103,11 +123,13 @@ func TestParseKey(t *testing.T) {
 				c.spec, got.Code, got.Mod, got.Text, c.code, c.mod, c.text)
 		}
 	}
+	for _, bad := range []string{"hyper+x", "bogus", "ctrl+", "++"} {
+		if _, err := ParseKey(bad); err == nil {
+			t.Fatalf("ParseKey(%q) unexpectedly succeeded", bad)
+		}
+	}
 	if _, err := ParseKey("hyper+x"); err == nil || !strings.Contains(err.Error(), "hyper") {
 		t.Fatalf("unknown modifier not rejected: %v", err)
-	}
-	if _, err := ParseKey("bogus"); err == nil {
-		t.Fatal("unknown key name not rejected")
 	}
 }
 

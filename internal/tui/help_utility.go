@@ -33,6 +33,8 @@ func (m *Model) utilityAction(action string) bool {
 		m.openHelp("Help")
 	case "keyboard_shortcuts":
 		m.openHelp("Keyboard Shortcuts")
+	case "about_gvim":
+		m.openAbout()
 	case "open_keybinding_editor":
 		m.openKeybindingEditor()
 	case "switch_keybinding_map", "select_keybinding_map":

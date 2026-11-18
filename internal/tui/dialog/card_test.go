@@ -58,7 +58,6 @@ func TestDialogBodyStartsUnderTheTopBorder(t *testing.T) {
 	for _, d := range []Overlay{
 		NewSaveAs(c.Now, "a.txt", nil, PathChecks{}, testOv),
 		NewErrorDialog(c.Now, "boom", nil, testOv),
-		NewOpenFolder(c.Now, []string{"/recent"}, "/src", nil, nil, testOv),
 	} {
 		g := draw(d, 80, 24)
 		var box rect
@@ -66,8 +65,6 @@ func TestDialogBodyStartsUnderTheTopBorder(t *testing.T) {
 		case *SaveAs:
 			box = v.box
 		case *ErrorDialog:
-			box = v.box
-		case *OpenFolder:
 			box = v.box
 		}
 		rows := g.Plain()

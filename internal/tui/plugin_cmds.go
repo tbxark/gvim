@@ -37,7 +37,7 @@ const maxDoTime = 250 * time.Millisecond
 // doDeadline is when the Do or DoAll that starts now has to stop repeating.
 func (m *Model) doDeadline() time.Time {
 	budget := cmp.Or(m.plug.doBudget, maxDoTime)
-	return time.Now().Add(budget)
+	return m.now().Add(budget)
 }
 
 // reentrantActions are the actions that can reach the runtime: they end in Model.save,
@@ -258,7 +258,7 @@ func (m *Model) doActionUntil(action string, args map[string]any, count int, hoo
 		if err != nil {
 			return tea.Batch(cmds...), err
 		}
-		if i < n && time.Now().After(deadline) {
+		if i < n && m.now().After(deadline) {
 			return tea.Batch(cmds...), pluginapi.Errf(pluginapi.CodeTimeout,
 				"action %q stopped after %d of %d repetitions: over the time limit", action, i, n)
 		}
@@ -408,7 +408,7 @@ func (m *Model) doSteps(steps []pluginapi.Step, hook bool) (tea.Cmd, error) {
 		for i, s := range steps {
 			var cmd tea.Cmd
 			var err error
-			if i > 0 && time.Now().After(deadline) {
+			if i > 0 && m.now().After(deadline) {
 				return pluginapi.Errf(pluginapi.CodeTimeout, "run_all stopped after %d of %d steps: over the time limit", i, len(steps))
 			}
 			if rt := m.plug.rt; hook && rt != nil && rt.Owns(s.Action) {

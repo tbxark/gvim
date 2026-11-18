@@ -49,8 +49,10 @@ const (
 // ignoreBatch reads and caches the remote ignore files of one listing/walk, and the
 // matcher of each directory listed.
 type ignoreBatch struct {
-	files func() authority.FileSystem
-	root  string
+	files            func() authority.FileSystem
+	root             string
+	respectGitignore bool
+	customMatcher    gitignore.Matcher
 
 	mu       sync.Mutex
 	cache    map[string][]gitignore.Pattern
@@ -58,11 +60,37 @@ type ignoreBatch struct {
 	notice   string
 }
 
+func parseRemoteCustomIgnore(pats []string) []gitignore.Pattern {
+	var rules []gitignore.Pattern
+	for _, p := range pats {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.HasPrefix(p, "#") {
+			continue
+		}
+		rules = append(rules, gitignore.ParsePattern(p, nil))
+	}
+	return rules
+}
+
 // newIgnoreBatch returns a batch for the remote workspace root over files. files is a
 // function so a reconnected authority resolves the current carrier; a nil result is
 // treated as "no ignore files" (filtering is not applicable), never a local fallback.
 func newIgnoreBatch(files func() authority.FileSystem, root string) *ignoreBatch {
-	return &ignoreBatch{files: files, root: root, cache: map[string][]gitignore.Pattern{}, matchers: map[string]gitignore.Matcher{}}
+	return newIgnoreBatchWithOptions(files, root, true, nil)
+}
+
+func newIgnoreBatchWithOptions(files func() authority.FileSystem, root string, respectGitignore bool, customPatterns []string) *ignoreBatch {
+	b := &ignoreBatch{
+		files:            files,
+		root:             root,
+		respectGitignore: respectGitignore,
+		cache:            map[string][]gitignore.Pattern{},
+		matchers:         map[string]gitignore.Matcher{},
+	}
+	if rules := parseRemoteCustomIgnore(customPatterns); len(rules) > 0 {
+		b.customMatcher = gitignore.NewMatcher(rules)
+	}
+	return b
 }
 
 // Notice returns the one-shot degradation notice, if any.
@@ -89,14 +117,13 @@ func (b *ignoreBatch) setNotice(text string) {
 func (b *ignoreBatch) relParts(dir string) []string {
 	root := path.Clean(b.root)
 	clean := path.Clean(dir)
-	if clean == root {
+	if !remoteInside(root, clean) || clean == root {
 		return nil
 	}
-	prefix := root + "/"
-	if !strings.HasPrefix(clean, prefix) {
-		return nil
+	if root == "/" {
+		return strings.Split(clean[1:], "/")
 	}
-	return strings.Split(strings.TrimPrefix(clean, prefix), "/")
+	return strings.Split(clean[len(root)+1:], "/")
 }
 
 // rulesFor returns the patterns that apply to dir: the .gitignore of every directory on
@@ -181,6 +208,15 @@ func (b *ignoreBatch) matcher(ctx context.Context, dir string) gitignore.Matcher
 // to dir. The path handed to the matcher is relative to the workspace root, as go-git
 // expects.
 func (b *ignoreBatch) ignored(ctx context.Context, dir, name string, isDir bool) bool {
+	if b.customMatcher == nil && !b.respectGitignore {
+		return false
+	}
 	rel := append(append([]string(nil), b.relParts(dir)...), name)
+	if b.customMatcher != nil && b.customMatcher.Match(rel, isDir) {
+		return true
+	}
+	if !b.respectGitignore {
+		return false
+	}
 	return b.matcher(ctx, dir).Match(rel, isDir)
 }

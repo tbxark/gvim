@@ -541,3 +541,18 @@ func TestLocalEnvWatchFailedStartDegrades(t *testing.T) {
 		t.Fatalf("watch notice = %q, want the failure", notice)
 	}
 }
+
+func TestLocalEnvWatchRetryDoesNotRestartAfterClose(t *testing.T) {
+	calls := 0
+	retry := &localEnvWatchRetry{
+		start: func() *localEnvWatch {
+			calls++
+			return &localEnvWatch{}
+		},
+	}
+	retry.Close()
+	retry.Retry()
+	if calls != 0 {
+		t.Fatalf("start called %d times after Close, want 0", calls)
+	}
+}

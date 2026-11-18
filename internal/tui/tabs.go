@@ -2,9 +2,13 @@ package tui
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/split"
 )
 
@@ -15,13 +19,27 @@ func (m *Model) stripTabs() []TabInfo {
 	tabs := m.ed.Tabs()
 	plain := m.view.icons.FileIcon("", false, false) == ""
 	pair := m.splits.comparing && !m.splits.Root.Leaf()
-	if plain && !pair {
+	anyRO := false
+	for i := range tabs {
+		if !tabs[i].ReadOnly {
+			if doc := m.docAt(i); doc != nil && isDocReadOnly(doc) {
+				anyRO = true
+				break
+			}
+		}
+	}
+	if plain && !pair && !anyRO {
 		return tabs
 	}
 	out := slices.Clone(tabs)
 	for i := range out {
 		if !plain {
 			out[i].Icon = m.view.icons.FileIcon(strings.TrimSuffix(out[i].Name, frame.PreviewSuffix), false, false)
+		}
+		if !out[i].ReadOnly {
+			if doc := m.docAt(i); doc != nil && isDocReadOnly(doc) {
+				out[i].ReadOnly = true
+			}
 		}
 	}
 	if pair {
@@ -33,4 +51,31 @@ func (m *Model) stripTabs() []TabInfo {
 		}
 	}
 	return out
+}
+
+// openTabList opens the list of the tab names for Switch to Tab by Name. Choosing a row
+// activates that tab. With no tab open the notice says so, and no list opens.
+func (m *Model) openTabList() tea.Cmd {
+	tabs := m.ed.Tabs()
+	if len(tabs) == 0 {
+		m.notice = "No open tabs to switch to"
+		return nil
+	}
+	rows := make([]list.Row, len(tabs))
+	for i, t := range tabs {
+		rows[i] = list.Row{Left: t.Name, Value: strconv.Itoa(i)}
+	}
+	run := func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		i, err := strconv.Atoi(r.Value)
+		if err != nil {
+			return nil
+		}
+		m.activateTab(i)
+		m.focusEditor()
+		m.notice = "Switched to " + r.Left
+		return nil
+	}
+	m.pushOverlay(list.New("Switch to tab", rows, m.listChrome(), run))
+	return nil
 }

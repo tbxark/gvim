@@ -258,6 +258,9 @@ func (m *Model) findOpen() bool {
 // bar before.
 func (m *Model) openFind(withReplace bool) {
 	if m.findOpen() {
+		if withReplace && m.findBar != nil {
+			m.findBar.ShowReplace()
+		}
 		return
 	}
 	m.findBar = m.newFindBar(withReplace)

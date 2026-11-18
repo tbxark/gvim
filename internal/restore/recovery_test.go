@@ -330,7 +330,7 @@ func TestRestoreSessionKeepsTheBaselineOfStashedText(t *testing.T) {
 	ed := apptest.NewSessionEditor()
 	apptest.Must(t, ed.OpenFile(a))
 	ed.Do("insert_char", map[string]any{"text": "Z"})
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 	apptest.Must(t, os.WriteFile(a, []byte("one\nnew\n"), 0o644))
 
 	s, ok, err := session.Load(sessDir)
@@ -554,5 +554,23 @@ func TestRecoverAbandonedLegacyFailureKeepsLiveCopies(t *testing.T) {
 	}
 	if s, ok, err := session.Load(live); err != nil || !ok || len(s.Files) != 1 {
 		t.Fatalf("the running process's copy = %+v (found %v, err %v), want it in place", s, ok, err)
+	}
+}
+
+func TestRecoverAbandonedIgnoresNonPositivePIDs(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "recovery")
+	a := filepath.Join(dir, "a.txt")
+	apptest.Must(t, os.WriteFile(a, []byte("one\n"), 0o644))
+	writeCrashCopy(t, a, "zero", filepath.Join(root, "0"))
+	writeCrashCopy(t, a, "neg", filepath.Join(root, "-1"))
+
+	var probed []int
+	failed, n := recoverAbandoned(apptest.NewSessionEditor(), root, func(pid int) bool {
+		probed = append(probed, pid)
+		return true
+	}, nil)
+	if len(failed) != 0 || n != 0 || len(probed) != 0 {
+		t.Fatalf("recoverAbandoned probed %v (n=%d, failed=%v), want 0 and no probes", probed, n, failed)
 	}
 }

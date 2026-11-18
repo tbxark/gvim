@@ -179,6 +179,7 @@ func (s *Server) OnProgram(p *tea.Program) {
 		// Send from a goroutine: Program.Send before Run blocks until the program's
 		// loop starts, and OnProgram runs before Run in the daemon host.
 		go func() {
+			p.Send(tea.ClearScreen())
 			p.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
 			p.Send(tea.RequestWindowSize())
 		}()
@@ -272,8 +273,8 @@ func (s *Server) handleConn(conn net.Conn) {
 	s.mu.Unlock()
 	if prog != nil {
 		// Sends must happen without s.mu: see sendSize.
+		prog.Send(tea.ClearScreen())
 		sendSize(prog, cols, rows)
-		// A fresh frame for the new client (and a shared repaint at the negotiated size).
 		prog.Send(tea.RequestWindowSize())
 	}
 	defer s.removeClient(c)
@@ -393,7 +394,7 @@ func (s *Server) Write(p []byte) (int, error) {
 	}
 	s.mu.Unlock()
 	for _, c := range clients {
-		if err := c.fw.WriteFrame(TypeOutput, p); err != nil {
+		if err := c.fw.WriteChunked(TypeOutput, p); err != nil {
 			// Closing the connection ends its handleConn too: a dropped client must
 			// not keep sending input to a program whose frames it no longer gets, and
 			// a later frame must not land in the middle of a truncated one.

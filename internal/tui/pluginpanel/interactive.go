@@ -211,6 +211,29 @@ func (p *Panel) moveCaret(w pluginapi.Widget, name string, extend bool) {
 	p.setText(w, text, caret)
 }
 
+// HandlePaste inserts pasted text into the focused editable text widget, or
+// consumes the paste when the panel owns focus on a read-only or non-text widget.
+func (p *Panel) HandlePaste(s string) Result {
+	if !p.focused {
+		return Result{}
+	}
+	w, ok := p.focusedWidget()
+	if !ok || w.Kind != pluginapi.WidgetText || w.ReadOnly {
+		return Result{Handled: true}
+	}
+	p.setCompletionsOpen(w, false)
+	if w.Rows <= 1 && w.MaxRows <= 1 {
+		s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
+	} else {
+		s = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(s)
+	}
+	if s == "" {
+		return Result{Handled: true}
+	}
+	p.insertText(w, s)
+	return Result{Handled: true, Events: []pluginapi.WidgetEvent{p.evInteractive("change", w)}}
+}
+
 // editFocusedText applies one editing key or typed text to a focused text widget.
 func (p *Panel) editFocusedText(w pluginapi.Widget, k Key) (Result, bool) {
 	if w.ReadOnly {

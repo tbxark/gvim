@@ -43,6 +43,25 @@ func TestSessionKittyKeyboard(t *testing.T) {
 	if got := s.KittyKeyboardFlags(); got != 1 {
 		t.Fatalf("main flags after leaving the alternate screen = %d, want 1", got)
 	}
+
+	// Combined sequences in a single chunk must target the screen active at
+	// each byte offset in stream order.
+	s.feed([]byte("\x1b[?1049h\x1b[>4u"))
+	if got := s.KittyKeyboardFlags(); got != 4 {
+		t.Fatalf("combined enter+push flags = %d, want 4", got)
+	}
+	s.feed([]byte("\x1b[<u\x1b[?1049l"))
+	if got := s.KittyKeyboardFlags(); got != 1 {
+		t.Fatalf("combined pop+leave main flags = %d, want 1", got)
+	}
+	s.feed([]byte("\x1b[?1049h"))
+	if got := s.KittyKeyboardFlags(); got != 2 {
+		t.Fatalf("re-entered alt flags after pop+leave = %d, want 2", got)
+	}
+	s.feed([]byte("\x1b[<u\x1b[?1049l"))
+	if got := s.KittyKeyboardFlags(); got != 1 {
+		t.Fatalf("main flags after second pop+leave = %d, want 1", got)
+	}
 }
 
 // TestKittyKeyboardWire drives the protocol over a real PTY: a child enables the

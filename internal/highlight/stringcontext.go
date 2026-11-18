@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
@@ -44,6 +45,7 @@ type stringCache struct {
 	lang  string
 	path  string
 	lexer chroma.Lexer
+	plain bool
 
 	valid      bool
 	start, end int // the lines [start, end) that spans cover
@@ -52,14 +54,20 @@ type stringCache struct {
 	lexed      int // how many windows were lexed, for tests
 }
 
+// NewContextPair returns paired StringContext and NonCodeContext hooks backed by
+// one shared window cache so queries on the same version and window reuse one lex.
+func NewContextPair() (editor.StringContext, editor.NonCodeContext) {
+	c := &stringCache{}
+	return c.inString, c.nonCode
+}
+
 // NewStringContext returns the editor.StringContext that the editor installs.
 func NewStringContext() editor.StringContext {
 	c := &stringCache{}
 	return c.inString
 }
 
-// NewNonCodeContext returns the editor.NonCodeContext that the editor installs. It shares no
-// state with NewStringContext, so each keeps its own window.
+// NewNonCodeContext returns the editor.NonCodeContext that the editor installs.
 func NewNonCodeContext() editor.NonCodeContext {
 	c := &stringCache{}
 	return c.nonCode
@@ -91,7 +99,11 @@ func (c *stringCache) refresh(doc *editor.Document, line int) bool {
 	if c.doc != doc || c.lang != doc.Language() || c.path != doc.Path {
 		c.doc, c.lang, c.path = doc, doc.Language(), doc.Path
 		c.lexer, _ = documentLexer(doc)
+		c.plain = c.lexer == nil || c.lexer == lexers.Fallback || c.lexer.Config().Name == "" || syntax.IsPlain(c.lexer.Config().Name)
 		c.valid = false
+	}
+	if c.plain {
+		return false
 	}
 	if c.valid && c.version == b.Version() && c.gen == gen && line >= c.start && line < c.end {
 		return true
@@ -205,17 +217,32 @@ func (c *stringCache) inString(doc *editor.Document, p buffer.Pos) bool {
 	}
 	i := p.Line - c.start
 	// Spans hold byte offsets, and p holds a rune column.
-	line := []rune(c.lines[i])
-	if p.Col < 0 || p.Col >= len(line) {
+	offset, ok := runeByteOffset(c.lines[i], p.Col)
+	if !ok {
 		return false
 	}
-	offset := len(string(line[:p.Col]))
 	for _, s := range c.spans[i] {
 		if s.Start <= offset && offset < s.End {
 			return s.Kind == syntax.KindString
 		}
 	}
 	return false
+}
+
+// runeByteOffset returns the UTF-8 byte offset of rune column col within s, or false
+// when col is negative or past the end of s.
+func runeByteOffset(s string, col int) (int, bool) {
+	if col < 0 {
+		return 0, false
+	}
+	n := 0
+	for off := range s {
+		if n == col {
+			return off, true
+		}
+		n++
+	}
+	return 0, false
 }
 
 // nonCode is the editor.NonCodeContext: for each rune column of the line, whether the
@@ -231,22 +258,24 @@ func (c *stringCache) nonCode(doc *editor.Document, line int) []bool {
 		return nil
 	}
 	i := line - c.start
+	lineText := c.lines[i]
+	spans := c.spans[i]
 	var mask []bool
-	offset := 0 // the byte offset of the rune at col
-	k := 0      // the first span that may cover offset
-	for col, r := range []rune(c.lines[i]) {
-		for k < len(c.spans[i]) && c.spans[i][k].End <= offset {
+	k := 0 // the first span that may cover offset
+	col := 0
+	for offset := range lineText {
+		for k < len(spans) && spans[k].End <= offset {
 			k++
 		}
-		if k < len(c.spans[i]) && c.spans[i][k].Start <= offset {
-			if kind := c.spans[i][k].Kind; kind == syntax.KindString || kind == syntax.KindComment {
+		if k < len(spans) && spans[k].Start <= offset {
+			if kind := spans[k].Kind; kind == syntax.KindString || kind == syntax.KindComment {
 				if mask == nil {
-					mask = make([]bool, len([]rune(c.lines[i])))
+					mask = make([]bool, utf8.RuneCountInString(lineText))
 				}
 				mask[col] = true
 			}
 		}
-		offset += utf8.RuneLen(r)
+		col++
 	}
 	return mask
 }

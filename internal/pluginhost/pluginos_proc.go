@@ -3,7 +3,6 @@ package pluginhost
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,9 +39,10 @@ type osProc struct {
 	cmd  *exec.Cmd
 	opts hostos.ProcOptions
 
-	smu      sync.Mutex // guards started and cmd.Process against a Shutdown that races launch
-	started  bool       // cmd.Start succeeded
-	exited   atomic.Bool
+	smu       sync.Mutex // guards started, cmd.Process, and termTimer against Shutdown/Terminate races
+	started   bool       // cmd.Start succeeded
+	termTimer *time.Timer
+	exited    atomic.Bool
 	timedOut atomic.Bool
 	termOnce sync.Once
 	quitOnce sync.Once
@@ -210,7 +210,18 @@ func (o *pluginOS) launch(argv []string, opts hostos.ProcOptions, cmd *exec.Cmd)
 
 // finish records the result once the child is reaped.
 func (p *osProc) finish(waitErr error) {
+	p.smu.Lock()
 	p.exited.Store(true)
+	t := p.termTimer
+	if t != nil && (p.cmd.Process == nil || !groupAlive(p.cmd.Process)) {
+		p.termTimer = nil
+	} else {
+		t = nil
+	}
+	p.smu.Unlock()
+	if t != nil {
+		t.Stop()
+	}
 	p.os.unregister(p)
 	if ps := p.cmd.ProcessState; ps != nil {
 		p.res.Code, p.res.Signal = exitInfo(ps)
@@ -512,10 +523,15 @@ func (p *osProc) writeLoop() {
 
 // Kill implements hostos.Proc.
 func (p *osProc) Kill(signal string) error {
-	if p.exited.Load() {
+	p.smu.Lock()
+	defer p.smu.Unlock()
+	if !p.started || p.exited.Load() || p.cmd.Process == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "process has exited")
 	}
-	if err := signalProc(p.cmd.Process, signal); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := signalProc(p.cmd.Process, signal); err != nil {
+		if isProcessDoneErr(err) {
+			return pluginapi.Errf(pluginapi.CodeClosed, "process has exited")
+		}
 		return mapErr(err, "")
 	}
 	return nil
@@ -551,7 +567,11 @@ func (p *osProc) Terminate(grace time.Duration) {
 	p.termOnce.Do(func() {
 		p.discardOutput()
 		p.killGroup("TERM")
-		time.AfterFunc(grace, p.killGroupAfterGrace)
+		p.smu.Lock()
+		if p.started && (!p.exited.Load() || groupAlive(p.cmd.Process)) {
+			p.termTimer = time.AfterFunc(grace, p.killGroupAfterGrace)
+		}
+		p.smu.Unlock()
 	})
 }
 

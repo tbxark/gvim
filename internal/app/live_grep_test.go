@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tbxark/gvim/editor"
@@ -392,4 +393,66 @@ func TestProjectSearchFiltersCustomIgnorePatterns(t *testing.T) {
 	if len(res.Files) != 1 || res.Files[0].Name != "src/main.go" {
 		t.Fatalf("res.Files = %+v, want only src/main.go", res.Files)
 	}
+}
+
+func TestLiveGrepParallelWorkerWindowOrderAndLimit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tree := make(map[string]string, 40)
+	files := make([]string, 0, 40)
+	for i := range 40 {
+		rel := fmt.Sprintf("f%02d.txt", i)
+		files = append(files, rel)
+		tree[rel] = fmt.Sprintf("alpha\nneedle %02d\nomega\n", i)
+	}
+	writeTree(t, dir, tree)
+
+	g := grepFor(editor.Options{})
+	req := fileReq(dir, files, "needle")
+	req.Limit = 15
+	hits, err := g.Search(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 15 {
+		t.Fatalf("hits = %d, want 15", len(hits))
+	}
+	for i, h := range hits {
+		want := fmt.Sprintf("f%02d.txt", i)
+		if h.Rel != want {
+			t.Fatalf("hit[%d].Rel = %q, want %q", i, h.Rel, want)
+		}
+	}
+
+	ps := newProjectSearch(editor.Options{})
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := range 20 {
+			var pats []string
+			if i%2 == 0 {
+				pats = []string{"*.ignored"}
+			}
+			g.SetCustomIgnorePatterns(pats)
+			ps.SetCustomIgnorePatterns(pats)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 10 {
+			if _, err := g.Search(req); err != nil {
+				t.Errorf("concurrent liveGrep.Search: %v", err)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 10 {
+			if _, err := ps.ProjectSearch(searchpanel.SearchRequest{Root: dir, Query: "needle", Files: files, Limit: 20}); err != nil {
+				t.Errorf("concurrent projectSearch: %v", err)
+			}
+		}
+	}()
+	wg.Wait()
 }

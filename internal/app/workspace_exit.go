@@ -106,9 +106,9 @@ func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
 			// capture), skip this runtime's own exit save so it cannot race it either, and
 			// keep the recovery copy as the last resort.
 			c.inFlight = true
-			errs = append(errs, fmt.Errorf("%w; the newest capture is still in flight (it holds the workspace's write lock) and is left to finish; %s", base, recoveryNote(m, c.sess)))
+			errs = append(errs, fmt.Errorf("%w; the newest capture is still in flight (it holds the workspace's write lock) and is left to finish; %s", base, recoveryNote(c.sess)))
 		case ferr != nil:
-			errs = append(errs, fmt.Errorf("%w and the fallback save failed (%v); %s", base, ferr, recoveryNote(m, c.sess)))
+			errs = append(errs, fmt.Errorf("%w and the fallback save failed (%v); %s", base, ferr, recoveryNote(c.sess)))
 		default:
 			errs = append(errs, fmt.Errorf("%w; the synchronous fallback save kept the session and queued older snapshots were superseded", base))
 		}
@@ -136,7 +136,15 @@ func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
 	for _, s := range rest {
 		delete(m.sessions, s.ws.File.StableID)
 	}
+	writers := make([]*captureWriter, 0, len(m.writers))
+	for _, w := range m.writers {
+		writers = append(writers, w)
+	}
+	m.writers = map[string]*captureWriter{}
 	m.mu.Unlock()
+	for _, w := range writers {
+		w.retire()
+	}
 	return errors.Join(errs...)
 }
 
@@ -197,7 +205,7 @@ func (m *workspaceManager) tryCommitExitCapture(s *workspaceSession) (committed 
 // recoveryNote writes the runtime's crash-recovery copy for an exit save that could not be
 // confirmed and returns the sentence the exit error carries: where the copy is, or why it
 // could not be written.
-func recoveryNote(m *workspaceManager, s *workspaceSession) string {
+func recoveryNote(s *workspaceSession) string {
 	if s.rt.recoveryWriter == nil {
 		return "no crash-recovery copy is available"
 	}

@@ -424,3 +424,17 @@ func TestGotoPromptSelectsAndOtherJumpsDoNot(t *testing.T) {
 		t.Fatalf("prompt: selecting = %v, line = %d; the prompt must use GotoLineSelecting", ed.selecting, ed.line)
 	}
 }
+
+func TestOpenFindWithReplaceSwitchesOpenBarToReplace(t *testing.T) {
+	t.Parallel()
+	sf := &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor("foo bar")}}
+	m := newRouteModel(t, sf)
+	m.openFind(false)
+	if !m.findOpen() || m.findBar.Rows(24) != 4 {
+		t.Fatalf("after openFind(false): open=%v rows=%d, want 4", m.findOpen(), m.findBar.Rows(24))
+	}
+	m.openFind(true)
+	if !m.findOpen() || m.findBar.Rows(24) != 5 {
+		t.Fatalf("after openFind(true): open=%v rows=%d, want 5 (replace row open)", m.findOpen(), m.findBar.Rows(24))
+	}
+}

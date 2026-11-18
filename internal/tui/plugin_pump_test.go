@@ -507,9 +507,11 @@ func TestPumpSharesOneDrainBudget(t *testing.T) {
 		t.Parallel()
 		rt := newFakeRuntime(t, "x.cmd")
 		m, _ := newPluginModel(t, rt)
+		now := testClock()
+		m.now = func() time.Time { return now }
 		rounds := 0
 		rt.onDrain = func() ([]pluginapi.Work, bool) {
-			time.Sleep(20 * time.Millisecond)
+			now = now.Add(20 * time.Millisecond)
 			if rounds++; rounds < 3 {
 				m.plug.later = append(m.plug.later, func() tea.Cmd { return nil })
 			}

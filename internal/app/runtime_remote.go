@@ -6,6 +6,7 @@ import (
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/lsp"
 )
 
@@ -51,6 +52,16 @@ func (b *runtimeBuild) wireRemote() {
 		}); ok {
 			setter.SetRemoteMarkerChecker(remoteLSMarkerChecker(authSlot))
 		}
+		if setter, ok := deps.LSP.(interface {
+			SetRemoteReadFile(func(ctx context.Context, path string) ([]byte, error))
+		}); ok {
+			setter.SetRemoteReadFile(remoteLSReadFile(authSlot))
+		}
+		if setter, ok := deps.LSP.(interface {
+			SetRemoteReadDir(func(ctx context.Context, dir string) ([]string, error))
+		}); ok {
+			setter.SetRemoteReadDir(remoteLSReadDir(authSlot))
+		}
 	}
 	// The quick-open file list comes from the remote workspace through the
 	// authority file system (streaming, bounded, no local fallback); the palette
@@ -92,6 +103,14 @@ func (b *runtimeBuild) wireRemote() {
 	// files skipped, cancellation and a partial-write report. The local ports stay
 	// cleared by remoteRootPorts for every other caller.
 	installRemoteSearchPorts(&deps.Root, authSlot.OneShot(), authSlot.Files(), b.authGate, remoteRoot, authSlot.Label(), b.envProvider.Overlay)
+	if cg, ok := any(authSlot).(interface{ ConnectionGen() uint64 }); ok {
+		if rs, ok := deps.Root.ProjectSearch.(*remoteSearch); ok {
+			rs.withConnGen(cg.ConnectionGen)
+		}
+		if rg, ok := deps.Root.GitGrep.(*remoteGitGrep); ok {
+			rg.withConnGen(cg.ConnectionGen)
+		}
+	}
 	// The read-only remote explorer: the tree lists the remote directories through
 	// the authority file system, one command at a time, so the update loop never
 	// waits on the remote host. No local fallback: every listing is remote, the
@@ -100,7 +119,11 @@ func (b *runtimeBuild) wireRemote() {
 	// Delete, and the Copy and Move of subtrees (copy/cut/paste and drag/move) run
 	// through the authority's FileMutations surface; the local file-operation adapter
 	// is never used for remote paths.
-	b.remoteExplorerLoader = installRemoteExplorer(deps, authSlot, remoteRoot, b.authGate, ed)
+	deps.Dialogs = uiadapter.RemoteDialogs()
+	if edAdapter, ok := deps.Editor.(*uiadapter.Editor); ok {
+		edAdapter.SetRemote(true)
+	}
+	b.remoteExplorerLoader = installRemoteExplorer(deps, authSlot, remoteRoot, b.authGate, ed, b.cfg, b.plan.explorer && (!b.restored || !b.plan.tabs || b.sess.Explorer))
 	// Remote git marks and the quick-open file preview run through the same authority
 	// (remote cwd, remote env delta, spawn/trust gate), never through the local git or
 	// the local file system. The git read is briefly cached so save/watch/reload bursts
@@ -160,6 +183,8 @@ func (b *runtimeBuild) wireRemoteWatch() {
 // the remote authority and opens the SSH terminal at the remote workspace.
 func (b *runtimeBuild) wireRemoteHooks() {
 	ctx, slot := b.ctx, b.authSlot
+	envShell, remoteWatch, remoteEnv := b.envShell, b.remoteFileWatch, b.remoteEnv
+	remoteGit, remoteFiles, denoAuto, lspPort := b.remoteGit, b.remoteFiles, b.denoAuto, b.deps.LSP
 	needsPassword := func() bool {
 		p, ok := slot.(interface{ NeedsPassword() bool })
 		return ok && p.NeedsPassword()
@@ -226,27 +251,27 @@ func (b *runtimeBuild) wireRemoteHooks() {
 			// (a probe that failed at startup must not pin the session to sh -c). The
 			// activation capture itself stays trust-gated and the probe is a fixed
 			// pass-through command, never a project snippet.
-			if b.envShell != nil {
-				go b.envShell.Reprobes(ctx)
+			if envShell != nil {
+				go envShell.Reprobes(ctx)
 			}
-			b.remoteFileWatch.Reconnected()
-			b.remoteEnv.Reconnected()
+			remoteWatch.Reconnected()
+			remoteEnv.Reconnected()
 			// The remote git markers and the file list were read from the carrier
 			// that just dropped: invalidate the cached status (the TUI re-reads the
 			// marks in its reconnect command) and re-enumerate the remote files on
 			// the restored carrier (the palette's loading poll picks the new list up).
-			if b.remoteGit != nil {
-				b.remoteGit.Invalidate()
+			if remoteGit != nil {
+				remoteGit.Invalidate()
 			}
-			if b.remoteFiles != nil {
-				b.remoteFiles.Restart()
+			if remoteFiles != nil {
+				remoteFiles.Restart()
 			}
-			if b.denoAuto != nil {
+			if denoAuto != nil {
 				// New carrier: clear the old decision and probe again; a late answer from
 				// the dropped carrier cannot apply because the generation moves.
-				b.denoAuto.Start(ctx)
+				denoAuto.Start(ctx)
 			}
-			return restartLSPAfterReconnect(slot, b.deps.LSP)
+			return restartLSPAfterReconnect(slot, lspPort)
 		},
 	})
 	b.model.OpenAuthorityTerminalAtStart()

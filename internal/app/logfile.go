@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/updatecheck"
 )
 
 // fileLog is --log-file PATH: the notices of the status row and the plugin log, one line each,
@@ -181,9 +181,11 @@ func startLogFile(path string, diags []config.Diagnostic) (*fileLog, string) {
 }
 
 // gvimVersion is the module version of the binary, or "dev" for a build from a work tree.
+// Version returns the human-readable build version of gvim (e.g. "v0.1.0").
+func Version() string {
+	return updatecheck.DisplayVersion()
+}
+
 func gvimVersion() string {
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
-	return "dev"
+	return updatecheck.DisplayVersion()
 }

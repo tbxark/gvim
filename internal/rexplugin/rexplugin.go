@@ -83,6 +83,10 @@ func (i Installer) Install() (Report, error) {
 	if err := checkOwned(rep.RexPlugin); err != nil {
 		return rep, err
 	}
+	prevPlugin, pluginExisted, err := readFile(rep.RexPlugin)
+	if err != nil {
+		return rep, err
+	}
 	next, err := withBlock(previous, loader(rep.RexPlugin, bin))
 	if err != nil {
 		return rep, err
@@ -91,15 +95,27 @@ func (i Installer) Install() (Report, error) {
 	if err != nil {
 		return rep, err
 	}
+	rollbackPlugin := func() {
+		if !pluginExisted {
+			_ = removeOwned(rep.RexPlugin)
+			_ = os.Remove(filepath.Dir(rep.RexPlugin))
+			return
+		}
+		if changed {
+			_, _ = writeOwned(rep.RexPlugin, []byte(prevPlugin))
+		}
+	}
 	rep.Changed = changed
 	if next != previous {
 		if err := writeFile(rep.RexConfig, next); err != nil {
+			rollbackPlugin()
 			return rep, err
 		}
 		rep.Changed = true
 	}
 	if _, err := i.rex("config", "check", rep.RexConfig); err != nil {
 		restore(rep.RexConfig, previous, existed)
+		rollbackPlugin()
 		return rep, fmt.Errorf("gvim rex: rex rejected the new init.lua: %w", err)
 	}
 	if rep.Changed {
@@ -282,11 +298,34 @@ func blockBounds(content string) (start, end int, ok bool, err error) {
 	return start, stop + len(endMarker), true, nil
 }
 
-// luaString quotes s for a Lua string literal.
+// luaString quotes s for a Lua string literal, escaping backslashes, quotes,
+// newlines, tabs, NUL, and remaining ASCII control characters.
 func luaString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if c < 0x20 || c == 0x7f {
+				fmt.Fprintf(&b, `\%03d`, c)
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // readFile returns the file's text and whether it exists.

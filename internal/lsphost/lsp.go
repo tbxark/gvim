@@ -120,6 +120,11 @@ type lspPort struct {
 	// of the local filesystem. It is used only for a remote workspace; nil keeps the local
 	// serverRoot walk.
 	remoteMarkers func(ctx context.Context, dir string, markers []string) (bool, error)
+	// remoteReadFile and remoteReadDir read unopened files and header sibling directories
+	// through the workspace authority for remote workspaces so local os.ReadFile/os.ReadDir
+	// are never called on remote paths.
+	remoteReadFile func(ctx context.Context, path string) ([]byte, error)
+	remoteReadDir  func(ctx context.Context, dir string) ([]string, error)
 	// externalOpener resolves non-file LSP locations (slang-synth and similar) to
 	// generated local content; nil means no provider.
 	externalOpener ExternalLocationOpener
@@ -301,6 +306,22 @@ func (p *lspPort) SetRemoteMarkerChecker(fn func(ctx context.Context, dir string
 	p.mu.Unlock()
 }
 
+// SetRemoteReadFile installs an authority-backed file reader for a remote workspace so
+// unopened documents are read through the authority instead of local os.ReadFile.
+func (p *lspPort) SetRemoteReadFile(fn func(ctx context.Context, path string) ([]byte, error)) {
+	p.mu.Lock()
+	p.remoteReadFile = fn
+	p.mu.Unlock()
+}
+
+// SetRemoteReadDir installs an authority-backed directory entry reader (returning non-dir
+// entry names) for a remote workspace so C/C++ header sibling checks never read local disk.
+func (p *lspPort) SetRemoteReadDir(fn func(ctx context.Context, dir string) ([]string, error)) {
+	p.mu.Lock()
+	p.remoteReadDir = fn
+	p.mu.Unlock()
+}
+
 // TakeLSPNotice returns and clears the pending non-fatal root-marker notice.
 func (p *lspPort) TakeLSPNotice() tui.LSPNotice {
 	p.mu.Lock()
@@ -411,7 +432,7 @@ func (p *lspPort) Open(path, lang, text string) (int32, error) {
 	p.WaitBaseline()
 	p.selectionMu.Lock()
 	defer p.selectionMu.Unlock()
-	lang = openLanguage(path, lang)
+	lang = p.openLanguage(path, lang)
 	p.mu.Lock()
 	workspace := p.root
 	checker := p.remoteMarkers
@@ -423,12 +444,8 @@ func (p *lspPort) Open(path, lang, text string) (int32, error) {
 		p.dropDoc(path)
 		return 0, unavailable(lang, err)
 	}
-	version, ok := mgr.DocumentVersion(path)
-	if !ok {
-		version = 1
-	}
-	p.updateDocVersion(path, version)
-	return version, nil
+	rec := p.resetReopenedDoc(path, mgr)
+	return rec.version, nil
 }
 
 // Change sends the new full text of the open document at path. A document whose
@@ -801,9 +818,28 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 	if edit == nil {
 		return out, nil
 	}
+	virtualText := make(map[string]string)
+	deleted := make(map[string]bool)
+	resolveText := func(file string) (string, error) {
+		if txt, ok := virtualText[file]; ok {
+			return txt, nil
+		}
+		if deleted[file] {
+			return "", fmt.Errorf("lsp: cannot edit deleted file %s", file)
+		}
+		txt, ok := p.lookupTextOf(file)
+		if !ok {
+			return "", fmt.Errorf("lsp: cannot read %s for workspace edit", file)
+		}
+		return txt, nil
+	}
 	appendText := func(docURI string, version *int32, els []protocol.TextDocumentEditElement) error {
 		file := uri.URI(docURI).FsPath()
-		lines := newTextLines(p.textOf(file))
+		txt, err := resolveText(file)
+		if err != nil {
+			return err
+		}
+		lines := newTextLines(txt)
 		op := tui.WorkspaceOp{Kind: tui.WorkspaceOpText, Path: file, Version: version}
 		for _, el := range els {
 			te, err := plainTextEdit(el)
@@ -827,21 +863,43 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 					return tui.WorkspaceEdit{}, err
 				}
 			case *protocol.CreateFile:
-				op := tui.WorkspaceOp{Kind: tui.WorkspaceOpCreate, Path: uri.URI(change.URI).FsPath()}
+				file := uri.URI(change.URI).FsPath()
+				op := tui.WorkspaceOp{Kind: tui.WorkspaceOpCreate, Path: file}
 				if change.Options != nil {
 					op.Overwrite = boolValue(change.Options.Overwrite)
 					op.IgnoreIfExists = boolValue(change.Options.IgnoreIfExists)
 				}
+				if op.IgnoreIfExists && !op.Overwrite {
+					if existing, err := resolveText(file); err == nil {
+						virtualText[file] = existing
+					} else {
+						virtualText[file] = ""
+					}
+				} else {
+					virtualText[file] = ""
+				}
+				delete(deleted, file)
 				out.Ops = append(out.Ops, op)
 			case *protocol.RenameFile:
-				op := tui.WorkspaceOp{Kind: tui.WorkspaceOpRename, Path: uri.URI(change.OldURI).FsPath(), NewPath: uri.URI(change.NewURI).FsPath()}
+				oldPath := uri.URI(change.OldURI).FsPath()
+				newPath := uri.URI(change.NewURI).FsPath()
+				op := tui.WorkspaceOp{Kind: tui.WorkspaceOpRename, Path: oldPath, NewPath: newPath}
 				if change.Options != nil {
 					op.Overwrite = boolValue(change.Options.Overwrite)
 					op.IgnoreIfExists = boolValue(change.Options.IgnoreIfExists)
 				}
+				if txt, err := resolveText(oldPath); err == nil {
+					virtualText[newPath] = txt
+				}
+				delete(virtualText, oldPath)
+				deleted[oldPath] = true
+				delete(deleted, newPath)
 				out.Ops = append(out.Ops, op)
 			case *protocol.DeleteFile:
-				out.Ops = append(out.Ops, tui.WorkspaceOp{Kind: tui.WorkspaceOpDelete, Path: uri.URI(change.URI).FsPath()})
+				file := uri.URI(change.URI).FsPath()
+				delete(virtualText, file)
+				deleted[file] = true
+				out.Ops = append(out.Ops, tui.WorkspaceOp{Kind: tui.WorkspaceOpDelete, Path: file})
 			default:
 				return tui.WorkspaceEdit{}, fmt.Errorf("lsp: unsupported document change %T", dc)
 			}
@@ -969,6 +1027,7 @@ func (p *lspPort) Request(path, method string, params any) (any, error) {
 			}
 			return nil, err
 		}
+		p.resetReopenedDoc(path, mgr)
 		if h, ok = mgr.HandleForPath(path); !ok {
 			return nil, pluginapi.Errf(pluginapi.CodeNotFound, "%v: %s", manager.ErrNotOpen, path)
 		}
@@ -1145,14 +1204,21 @@ func (p *lspPort) Stop() error {
 // Servers lists every configured server with its state, for the status popup.
 func (p *lspPort) Servers() []tui.LSPServerStatus {
 	p.mu.Lock()
-	mgrs := slices.Collect(maps.Values(p.managers))
+	roots := slices.Sorted(maps.Keys(p.managers))
+	mgrs := make([]*manager.Manager, 0, len(roots))
+	for _, root := range roots {
+		mgrs = append(mgrs, p.managers[root])
+	}
 	muted := maps.Clone(p.muted)
 	status := p.status
 	p.mu.Unlock()
 	running := make(map[string]manager.ServerStatus)
 	for _, mgr := range mgrs {
 		for _, st := range mgr.Servers() {
-			running[st.Language+"\x00"+st.Name] = st
+			k := st.Language + "\x00" + st.Name
+			if prev, exists := running[k]; !exists || serverStatePriority(st.State) > serverStatePriority(prev.State) {
+				running[k] = st
+			}
 		}
 	}
 	out := make([]tui.LSPServerStatus, 0, len(status))
@@ -1168,6 +1234,19 @@ func (p *lspPort) Servers() []tui.LSPServerStatus {
 		out = append(out, st)
 	}
 	return out
+}
+
+func serverStatePriority(s manager.ServerState) int {
+	switch s {
+	case manager.ServerRunning:
+		return 4
+	case manager.ServerStarting:
+		return 3
+	case manager.ServerError:
+		return 2
+	default:
+		return 1
+	}
 }
 
 // runState converts the manager's state to the port's.
@@ -1420,6 +1499,7 @@ func (p *lspPort) handles(path string, feature manager.Feature) ([]*manager.Hand
 		if err := mgr.Open(path, rec.lang, rec.text); err != nil {
 			return nil, rec, err
 		}
+		rec = p.resetReopenedDoc(path, mgr)
 		if feature.Merged() {
 			hs = mgr.AllFor(path, feature)
 		} else if h, ok := mgr.FirstFor(path, feature); ok {
@@ -1460,16 +1540,38 @@ func (p *lspPort) handlesFor(language string) []*manager.Handle {
 }
 
 // textOf returns the text of the document at path: the text the server holds when
-// it is open, else the file on disk. A file that cannot be read has no text.
+// it is open, else the file on disk (or remote authority when wired). A file that
+// cannot be read has no text.
 func (p *lspPort) textOf(path string) string {
+	txt, _ := p.lookupTextOf(path)
+	return txt
+}
+
+func (p *lspPort) lookupTextOf(path string) (string, bool) {
 	if rec, ok := p.doc(path); ok {
-		return rec.text
+		return rec.text, true
 	}
-	data, err := os.ReadFile(path)
+	p.mu.Lock()
+	remoteRead := p.remoteReadFile
+	isRemote := p.remoteMarkers != nil || p.remoteReadDir != nil || remoteRead != nil
+	p.mu.Unlock()
+	var (
+		data []byte
+		err  error
+	)
+	if remoteRead != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+		data, err = remoteRead(ctx, path)
+		cancel()
+	} else if isRemote {
+		return "", false
+	} else {
+		data, err = os.ReadFile(path)
+	}
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return string(data)
+	return strings.ReplaceAll(string(data), "\r\n", "\n"), true
 }
 
 // rootMarkers returns the root markers a server uses for language, from the first
@@ -1642,7 +1744,11 @@ func (p *lspPort) enqueueEdit(language string, params protocol.ApplyWorkspaceEdi
 func (p *lspPort) SetSpawnEnv(overlay func() []string) {
 	p.mu.Lock()
 	p.spawnEnv = overlay
+	managers := slices.Collect(maps.Values(p.managers))
 	p.mu.Unlock()
+	for _, mgr := range managers {
+		mgr.SetSpawnEnv(overlay)
+	}
 }
 
 // SetSpawnGate installs the workspace trust spawn gate for the servers this port starts
@@ -1776,6 +1882,23 @@ func (p *lspPort) updateDocVersion(path string, version int32) {
 		rec.version = version
 		p.docs[path] = rec
 	}
+}
+
+// resetReopenedDoc clears stale semantic-token and pulled-diagnostic caches after a
+// server crash/reopen and syncs the document's protocol version with mgr.
+func (p *lspPort) resetReopenedDoc(path string, mgr *manager.Manager) lspDocRec {
+	version, ok := mgr.DocumentVersion(path)
+	if !ok {
+		version = 1
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.sem, path)
+	delete(p.pulled, path)
+	rec := p.docs[path]
+	rec.version = version
+	p.docs[path] = rec
+	return rec
 }
 
 // dropDoc forgets the document at path and the data cached for it: semantic tokens

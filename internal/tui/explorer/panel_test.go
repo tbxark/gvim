@@ -726,3 +726,50 @@ func TestDrawMarkerIsTheAccent(t *testing.T) {
 		t.Fatalf("marker cell %q has fg %v, want the accent %v", c.Text, c.Style.FG, want)
 	}
 }
+
+func TestCompactChainAncestorClickAndTrailingGitMarkHitWidth(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "r")
+	must(t, os.MkdirAll(filepath.Join(dir, "alpha", "beta", "gamma"), 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "alpha", "beta", "gamma", "leaf.txt"), nil, 0o644))
+	tr := openTree(t, dir)
+	tr.SetCompactDirectories(true)
+	if err := tr.Toggle(filepath.Join(dir, "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	rows := tr.Rows()
+	if len(rows) < 2 || len(rows[1].Chain) != 2 {
+		t.Fatalf("expected compact chain on row 1, got rows = %+v", rows)
+	}
+
+	p := New(tr, style.Styles{}, nil)
+	geo := Geometry{Top: 1, Width: 30, Bottom: 7}
+	// Row 1 is at y = geo.Top + 2 (title at Top, root at Top+1, compact row at Top+2).
+	// Click on the "alpha" segment.
+	nameX := 1 + 1 + 2*rows[1].Depth + 2
+	p, _ = p.Update(click(nameX+1, geo.Top+2), geo)
+	sel, ok := tr.Selected()
+	if !ok || sel.Path != filepath.Join(dir, "alpha") {
+		t.Fatalf("selected after clicking compact ancestor = %+v (%v), want alpha", sel, ok)
+	}
+
+	// Trailing git mark reduces chain hit width to match drawRow.
+	marks := map[string]rune{rows[1].Path: 'M'}
+	geoNarrow := Geometry{Top: 1, Width: 24, Bottom: 7, Marks: marks, Icons: icons.Nerd}
+	if _, hit := p.chainSegmentAt(geoNarrow, rows[1], geoNarrow.X+geoNarrow.Width-3); hit {
+		t.Fatal("click on trailing git mark column matched a compact chain segment")
+	}
+}
+
+func TestThumbOfZeroAndLargeLines(t *testing.T) {
+	t.Parallel()
+	if s, l := thumbOf(0, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("thumbOf(0,6,0) = %d,%d, want 0,0", s, l)
+	}
+	if s, l := thumbOf(-3, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("thumbOf(-3,6,0) = %d,%d, want 0,0", s, l)
+	}
+	if s, l := thumbOf(10_000_000, 1_000_000, 5_000_000); s < 400_000 || s > 600_000 || l < 1 {
+		t.Fatalf("thumbOf large = %d,%d, unexpected overflow or clamp", s, l)
+	}
+}

@@ -20,11 +20,17 @@ type macroState struct {
 }
 
 // macroCtx is the focus a command was issued in: whether an overlay is on top, and
-// which of the explorer and the tab strip has the keyboard.
+// which chrome surface (explorer, tab strip, contents, diagnostics, dock, panel, menu)
+// has the keyboard.
 type macroCtx struct {
 	overlay  bool
 	explorer bool
 	tabs     bool
+	contents bool
+	diag     bool
+	dock     bool
+	panel    bool
+	menu     bool
 }
 
 // macroStep is one recorded command and the focus it was issued in.
@@ -38,7 +44,8 @@ type macroStep struct {
 // focus_editor and the clipboard) and the application-wide actions, and it takes the
 // rest as search text. A copy, cut or paste means a file in the explorer and text in
 // the editor, so it runs only on the side it was recorded on. The tab strip takes typed
-// text, so insert_char does not run while it has focus.
+// text, so insert_char does not run while it has focus. Other chrome panels (Contents,
+// Diagnostics, Dock, plugin widget panels, menu) block editor steps while they own keys.
 func (s macroStep) canRun(now macroCtx) bool {
 	a := s.cmd.Action
 	switch {
@@ -47,10 +54,10 @@ func (s macroStep) canRun(now macroCtx) bool {
 	case strings.HasPrefix(a, "file_explorer_"):
 		return now.explorer
 	case clipboardActions[a]:
-		return s.ctx.explorer == now.explorer
+		return s.ctx.explorer == now.explorer && !now.contents && !now.diag && !now.dock && !now.panel && !now.menu
 	case a == "focus_editor" || explorerFallthrough[a]:
 		return true
-	case now.explorer:
+	case now.explorer || now.contents || now.diag || now.dock || now.panel || now.menu:
 		return false
 	case now.tabs && a == "insert_char":
 		return false
@@ -152,10 +159,19 @@ func (m *Model) playMacro() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// macroContext is the focus now: whether an overlay is on top, and which of the
-// explorer and the tab strip has the keyboard.
+// macroContext is the focus now: whether an overlay is on top, and which chrome
+// surface owns the keyboard.
 func (m *Model) macroContext() macroCtx {
-	return macroCtx{overlay: len(m.overlays) > 0, explorer: m.explorerFocus, tabs: m.tabFocus}
+	return macroCtx{
+		overlay:  len(m.overlays) > 0,
+		explorer: m.explorerFocus,
+		tabs:     m.tabFocus,
+		contents: m.contentsFocus,
+		diag:     m.diag.focus,
+		dock:     m.dockKeyboard(),
+		panel:    m.plug.panels.focus != 0,
+		menu:     m.menu.IsOpen(),
+	}
 }
 
 // recordCommand adds cmd to the recording, with the focus it is issued in, when a

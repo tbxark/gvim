@@ -33,11 +33,11 @@ func authoritySpecText(spec *authority.RemoteSpec) (string, error) {
 			return spec.Raw, nil
 		}
 	}
-	if spec.User == "" || spec.Host == "" || spec.Path == "" {
-		return "", errors.New("remote target needs a user, a host and a path")
+	if spec.Host == "" || spec.Path == "" {
+		return "", errors.New("remote target needs a host and a path")
 	}
 	pos := remotePositionSuffix(spec)
-	if spec.Port == 0 || spec.Port == authority.DefaultSSHPort {
+	if spec.User != "" && (spec.Port == 0 || spec.Port == authority.DefaultSSHPort) && !strings.Contains(spec.Host, ":") {
 		// The scp form carries no port; the default port needs none.
 		text := spec.User + "@" + spec.Host + ":" + spec.Path + pos
 		if parsed, err := authority.ParseRemote(text); err == nil && sameRemoteSpec(parsed, *spec) {
@@ -45,7 +45,18 @@ func authoritySpecText(spec *authority.RemoteSpec) (string, error) {
 		}
 	}
 	if strings.HasPrefix(spec.Path, "/") {
-		text := "ssh://" + spec.Display() + spec.Path + pos
+		hostPart := spec.Host
+		if strings.Contains(hostPart, ":") && !strings.HasPrefix(hostPart, "[") {
+			hostPart = "[" + hostPart + "]"
+		}
+		if spec.Port != 0 && spec.Port != authority.DefaultSSHPort {
+			hostPart += ":" + strconv.Itoa(spec.Port)
+		}
+		authorityPart := hostPart
+		if spec.User != "" {
+			authorityPart = spec.User + "@" + hostPart
+		}
+		text := "ssh://" + authorityPart + spec.Path + pos
 		if parsed, err := authority.ParseRemote(text); err == nil && sameRemoteSpec(parsed, *spec) {
 			return text, nil
 		}
@@ -180,13 +191,11 @@ func connectDaemonAuthority(ctx context.Context, slot authority.Slot, prompter d
 		return slot.Reconnect(ctx)
 	}
 	const attempts = 5
-	var last error
+	last := slot.Reconnect(ctx)
+	if last == nil {
+		return nil
+	}
 	for attempt := 0; attempt < attempts; attempt++ {
-		err := slot.Reconnect(ctx)
-		if err == nil {
-			return nil
-		}
-		last = err
 		switch {
 		case needsPassword():
 			answer, perr := prompter.Secret("SSH password for " + slot.Label() + ": ")

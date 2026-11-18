@@ -15,6 +15,7 @@ import (
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/authority/authoritytest"
+	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
 
@@ -779,5 +780,48 @@ func TestRemoteExplorerMkdirConcurrentSameName(t *testing.T) {
 	}
 	if len(fake.mkdirNews) != 1 || !fake.dirs["/remote/w/race"] {
 		t.Fatalf("atomic creates = %v dirs=%v", fake.mkdirNews, fake.dirs)
+	}
+}
+
+func TestRemoteExplorerConflictAndDynamicSlotAndContext(t *testing.T) {
+	t.Parallel()
+	fake1 := newRemoteOpsFake().put("/remote/w/a.go", "one")
+	slot := authoritytest.New()
+	slot.FileSystem = fake1
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+
+	if _, err := ops.CreateFile(context.Background(), "/remote/w", "a.go"); !errors.Is(err, expanel.ErrConflict) || !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("CreateFile existing error = %v, want expanel.ErrConflict + fs.ErrExist", err)
+	}
+	if _, err := ops.Mkdir(context.Background(), "/remote/w", "sub"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ops.Mkdir(context.Background(), "/remote/w", "sub"); !errors.Is(err, expanel.ErrConflict) || !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("Mkdir existing error = %v, want expanel.ErrConflict + fs.ErrExist", err)
+	}
+
+	// Swapping slot.FileSystem (simulating reconnect) must be visible to ops without recreating ops.
+	fake2 := newRemoteOpsFake()
+	slot.FileSystem = fake2
+	if _, err := ops.CreateFile(context.Background(), "/remote/w", "reconnected.go"); err != nil {
+		t.Fatalf("CreateFile after carrier swap: %v", err)
+	}
+	if _, ok := fake2.files["/remote/w/reconnected.go"]; !ok {
+		t.Fatal("CreateFile used stale FileSystem snapshot instead of slot.Files()")
+	}
+
+	// Caller cancellation must cancel the opContext rather than using context.Background().
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	canceledFake := newRemoteOpsFake()
+	canceledSlot := authoritytest.New()
+	canceledSlot.FileSystem = canceledFake
+	var seenCtxErr error
+	canceledOps := newRemoteExplorerOps(canceledSlot, "/remote/w", "SSH:u@h", func(ctx context.Context, _ []string, _ string) error {
+		seenCtxErr = ctx.Err()
+		return ctx.Err()
+	}, nil)
+	if _, err := canceledOps.CreateFile(canceled, "/remote/w", "c.go"); !errors.Is(err, context.Canceled) || !errors.Is(seenCtxErr, context.Canceled) {
+		t.Fatalf("canceled op err=%v seenCtxErr=%v, want context.Canceled", err, seenCtxErr)
 	}
 }

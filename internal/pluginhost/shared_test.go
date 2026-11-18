@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/plugin/plugintest"
 )
 
@@ -85,4 +86,51 @@ func TestDaemonAppliesWorkspacePluginConfigOnActivate(t *testing.T) {
 	if d.Activate(wsB) {
 		t.Fatal("reactivating the same config asked for another reload")
 	}
+}
+
+func TestMuxOSUnregisterRemovesAndClearsActive(t *testing.T) {
+	a := plugintest.NewFakeOS()
+	b := plugintest.NewFakeOS()
+	mux := &MuxOS{}
+	mux.Register(a)
+	mux.Register(b)
+	mux.SetActive(a)
+	mux.Unregister(a)
+
+	mux.mu.RLock()
+	active := mux.active
+	count := len(mux.all)
+	mux.mu.RUnlock()
+	if active != nil {
+		t.Fatalf("active after Unregister = %v, want nil", active)
+	}
+	if count != 1 {
+		t.Fatalf("registered count = %d, want 1", count)
+	}
+	mux.Shutdown()
+	if a.ShutdownCalled() {
+		t.Fatal("unregistered OS received Shutdown")
+	}
+	if !b.ShutdownCalled() {
+		t.Fatal("remaining OS did not receive Shutdown")
+	}
+}
+
+func TestDaemonWiredUsesWorkspaceKeys(t *testing.T) {
+	d := NewDaemon()
+	cfg := config.Config{}
+	_, sharedKeys := d.Ensure(cfg, Options{Version: "test", Root: func() string { return "/w1" }})
+	defer d.Stop()
+
+	ed := editor.New(editor.Options{})
+	defer ed.Close()
+	ws2 := NewWorkspace(cfg, ed, Options{Version: "test", Root: func() string { return "/w2" }})
+	wired := d.Wired(ws2)
+	if wired.Keys == nil {
+		t.Fatal("Wired returned nil Keys")
+	}
+	if wired.OS != ws2.OS || wired.Editor != ws2.Editor {
+		t.Fatal("Wired did not bind ws2 OS/Editor")
+	}
+	_ = sharedKeys
 }

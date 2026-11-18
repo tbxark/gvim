@@ -18,16 +18,20 @@ import (
 func TestRemoteGitStatusMarks(t *testing.T) {
 	output := " M src/a.go\x00?? new.txt\x00R  moved.go\x00old.go\x00UU conflict.go\x00 D gone.go\x00!! ignored.log\x00 M dir with space/file.go\x00"
 	one := &fakeOneShot{script: func(_ context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
-		if strings.Join(argv, " ") != "git status --porcelain=v1 -z" {
-			return hostos.ProcResult{}, errors.New("unexpected command: " + strings.Join(argv, " "))
-		}
 		if o.Cwd != "/remote/w" {
 			return hostos.ProcResult{}, errors.New("cwd = " + o.Cwd)
 		}
 		if o.Env["PATH"] != "/remote/bin" {
 			return hostos.ProcResult{}, errors.New("env overlay missing PATH=/remote/bin")
 		}
-		return hostos.ProcResult{Stdout: []byte(output)}, nil
+		switch strings.Join(argv, " ") {
+		case "git rev-parse --show-toplevel":
+			return hostos.ProcResult{Stdout: []byte("/remote/w\n")}, nil
+		case "git status --porcelain=v1 -z":
+			return hostos.ProcResult{Stdout: []byte(output)}, nil
+		default:
+			return hostos.ProcResult{}, errors.New("unexpected command: " + strings.Join(argv, " "))
+		}
 	}}
 	g := newRemoteGitStatus(one, "/remote/w", func() []string { return []string{"PATH=/remote/bin"} })
 	// A caller passing a local-looking dir must not redirect the read to the local host.
@@ -58,8 +62,34 @@ func TestRemoteGitStatusMarks(t *testing.T) {
 		t.Fatal("an ignored path was marked")
 	}
 	calls := one.recorded()
-	if len(calls) != 1 || calls[0].cwd != "/remote/w" {
+	if len(calls) != 2 || calls[0].cwd != "/remote/w" || calls[1].cwd != "/remote/w" {
 		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+// TestRemoteGitStatusSubdirOfRepo verifies porcelain paths are resolved relative to the
+// repository top-level when the remote workspace is a subdirectory of a git repo.
+func TestRemoteGitStatusSubdirOfRepo(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if o.Cwd != "/remote/repo/sub" {
+			return hostos.ProcResult{}, errors.New("cwd = " + o.Cwd)
+		}
+		switch strings.Join(argv, " ") {
+		case "git rev-parse --show-toplevel":
+			return hostos.ProcResult{Stdout: []byte("/remote/repo\n")}, nil
+		case "git status --porcelain=v1 -z":
+			return hostos.ProcResult{Stdout: []byte(" M sub/a.go\x00A  other/b.go\x00")}, nil
+		default:
+			return hostos.ProcResult{}, errors.New("unexpected command: " + strings.Join(argv, " "))
+		}
+	}}
+	g := newRemoteGitStatus(one, "/remote/repo/sub", nil)
+	marks, err := g.Marks("")
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if marks["/remote/repo/sub/a.go"] != 'M' || marks["/remote/repo/other/b.go"] != 'A' || len(marks) != 2 {
+		t.Fatalf("marks = %v, want entries rooted at /remote/repo", marks)
 	}
 }
 
@@ -68,9 +98,16 @@ func TestRemoteGitStatusMarks(t *testing.T) {
 func TestRemoteGitStatusCacheAndInvalidate(t *testing.T) {
 	now := time.Unix(1000, 0)
 	read := 0
-	one := &fakeOneShot{script: func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
-		read++
-		return hostos.ProcResult{Stdout: []byte(" M a.go\x00")}, nil
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		switch strings.Join(argv, " ") {
+		case "git rev-parse --show-toplevel":
+			return hostos.ProcResult{Stdout: []byte("/remote/w\n")}, nil
+		case "git status --porcelain=v1 -z":
+			read++
+			return hostos.ProcResult{Stdout: []byte(" M a.go\x00")}, nil
+		default:
+			return hostos.ProcResult{}, errors.New("unexpected command: " + strings.Join(argv, " "))
+		}
 	}}
 	g := newRemoteGitStatus(one, "/remote/w", nil)
 	g.now = func() time.Time { return now }

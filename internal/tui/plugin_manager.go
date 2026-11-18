@@ -52,7 +52,7 @@ const noPluginsNotice = "Plugins are not available in this session"
 // over. It returns the command the action starts.
 func (m *Model) pluginUIAction(action string) tea.Cmd {
 	if m.plug.rt == nil {
-		m.notice = noPluginsNotice
+		m.notice = uiText("gvim.plugin_manager.unavailable", noPluginsNotice)
 		return nil
 	}
 	switch action {
@@ -166,24 +166,26 @@ func (m *Model) openPluginManager(mode managerMode) tea.Cmd {
 	switch {
 	case len(infos) > 0:
 	case mode == managerReload:
-		m.notice = "No plugin can be reloaded"
+		m.notice = uiText("gvim.plugin_manager.cannot_reload", "No plugin can be reloaded")
 		return nil
 	case off:
-		m.notice = "Plugins are disabled by --no-plugins"
+		m.notice = uiText("gvim.plugin_manager.disabled", "Plugins are disabled by --no-plugins")
 		return nil
 	default:
-		m.notice = "No plugins found"
+		m.notice = uiText("gvim.plugin_manager.none_found", "No plugins found")
 		return nil
 	}
-	title, footer := "Plugins", "Enter: actions    Esc: close"
+	title := uiText("gvim.plugin_manager.title", "Plugins")
+	footer := uiText("gvim.plugin_manager.footer", "Enter: actions    Esc: close")
 	if mode == managerReload {
-		title, footer = "Reload plugin", "Enter: reload    Esc: close"
+		title = uiText("gvim.plugin_manager.reload_title", "Reload plugin")
+		footer = uiText("gvim.plugin_manager.reload_footer", "Enter: reload    Esc: close")
 	}
 	if off {
 		title += " (disabled by --no-plugins)"
 	}
 	p := picker.New(m.styles, picker.Options{
-		Title: title, Footer: footer, Placeholder: "Filter plugins",
+		Title: title, Footer: footer, Placeholder: uiText("gvim.plugin_manager.filter_placeholder", "Filter plugins"),
 		Items: managerItems(infos), Fuzzy: true,
 	})
 	ov := &managerOverlay{p: p, mode: mode, infos: infos}
@@ -260,25 +262,25 @@ func managerChoices(in pluginapi.PluginInfo) []popup.Item {
 		items = append(items, popup.Item{Label: label, Detail: cleanText(detail), Data: managerChoice{op: op, info: in}})
 	}
 	if in.Status == "legacy" {
-		add("source", "Open Source", "")
+		add("source", uiText("gvim.plugin_manager.action_open_source", "Open Source"), "")
 		return items
 	}
 	if reloadable(in) {
-		add("reload", "Reload", "")
+		add("reload", uiText("gvim.plugin_manager.action_reload", "Reload"), "")
 	}
 	if in.Source != "cli" && in.Source != "init" {
 		if in.Status == "disabled" {
-			add("enable", "Enable", in.Locked)
+			add("enable", uiText("gvim.plugin_manager.action_enable", "Enable"), in.Locked)
 		} else {
-			add("disable", "Disable", in.Locked)
+			add("disable", uiText("gvim.plugin_manager.action_disable", "Disable"), in.Locked)
 		}
 	}
-	add("log", "Show Log", "")
+	add("log", uiText("gvim.plugin_manager.action_show_log", "Show Log"), "")
 	if in.Source != "bundled" && in.Source != "buffer" {
-		add("source", "Open Source", "")
+		add("source", uiText("gvim.plugin_manager.action_open_source", "Open Source"), "")
 	}
 	if in.Err != "" {
-		add("copy", "Copy Error", "")
+		add("copy", uiText("gvim.plugin_manager.action_copy_error", "Copy Error"), "")
 	}
 	return items
 }
@@ -322,7 +324,7 @@ func (m *Model) pluginManagerMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.managerRun(c), true
 	case managerSourceMsg:
 		if msg.err != nil {
-			m.notice = "Plugin '" + msg.name + "': " + msg.err.Error()
+			m.notice = uiTextVars("gvim.plugin_manager.plugin_error", "Plugin '%{name}': %{error}", map[string]any{"name": msg.name, "error": msg.err.Error()})
 			return nil, true
 		}
 		m.openFile(msg.path, false)
@@ -343,7 +345,7 @@ func (m *Model) managerRun(c managerChoice) tea.Cmd {
 	case "source":
 		return pluginSourceCmd(in, m.initFilePath())
 	case "copy":
-		m.notice = "Copied the error of plugin '" + in.Name + "'"
+		m.notice = uiTextVars("gvim.plugin_manager.copied_error", "Copied the error of plugin '%{name}'", map[string]any{"name": in.Name})
 		return m.clipboardOut("copy", editor.Result{Text: in.Err})
 	}
 	return nil
@@ -361,9 +363,9 @@ func (m *Model) showPluginLog(plugin string) tea.Cmd {
 		return m.openScratch(text)
 	}
 	if _, err := m.plug.host.CreateBuffer(pluginapi.CreateBuffer{
-		Name: "Plugin Log", Text: text, ReadOnly: true, Focus: true,
+		Name: uiText("gvim.plugin_manager.log_buffer", "Plugin Log"), Text: text, ReadOnly: true, Focus: true,
 	}); err != nil {
-		m.notice = "Plugin log: " + err.Error()
+		m.notice = uiTextVars("gvim.plugin_manager.log_error", "Plugin log: %{error}", map[string]any{"error": err.Error()})
 	}
 	return nil
 }
@@ -391,9 +393,9 @@ func pluginLogText(entries []pluginapi.LogEntry, plugin string) string {
 	case b.Len() > 0:
 		return b.String()
 	case plugin != "":
-		return "No log entries for plugin '" + plugin + "'.\n"
+		return uiTextVars("gvim.plugin_manager.log_empty_plugin", "No log entries for plugin '%{name}'.\n", map[string]any{"name": plugin})
 	}
-	return "No plugin log entries yet.\n"
+	return uiText("gvim.plugin_manager.log_empty", "No plugin log entries yet.\n")
 }
 
 // ---- the source of a plugin
@@ -450,7 +452,7 @@ func (m *Model) loadPluginFromBuffer() tea.Cmd {
 		m.notice = noDocumentNotice
 		return nil
 	case isLargeDoc(doc):
-		m.notice = "Load Plugin from Buffer: a large file cannot be loaded as a plugin"
+		m.notice = uiText("gvim.plugin_manager.large_file", "Load Plugin from Buffer: a large file cannot be loaded as a plugin")
 		return nil
 	}
 	var b strings.Builder
@@ -460,7 +462,7 @@ func (m *Model) loadPluginFromBuffer() tea.Cmd {
 		}
 		b.WriteString(doc.Line(i))
 		if b.Len() > pluginSourceMax {
-			m.notice = fmt.Sprintf("Load Plugin from Buffer: the buffer is larger than %d KiB", pluginSourceMax>>10)
+			m.notice = uiTextVars("gvim.plugin_manager.file_too_large", "Load Plugin from Buffer: the buffer is larger than %{limit} KiB", map[string]any{"limit": pluginSourceMax >> 10})
 			return nil
 		}
 	}

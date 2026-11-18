@@ -71,7 +71,7 @@ func TestPluginVirtualBufferEndToEnd(t *testing.T) {
 
 	// the session leaves it out
 	sess := filepath.Join(t.TempDir(), "session")
-	must(t, restore.SaveSession(s.rt.ed, sess, s.m.ExplorerState()))
+	must(t, restore.WriteSession(s.rt.ed, sess, s.m.ExplorerState(), nil))
 	got, ok, err := session.Load(sess)
 	must(t, err)
 	if !ok || len(got.Files) != 1 || filepath.Base(got.Files[0].Path) != "a.txt" {

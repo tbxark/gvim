@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -208,12 +207,7 @@ func (r *remoteReplacer) ProjectReplaceRemote(parent context.Context, req search
 
 // inside reports whether p is the remote root or under it.
 func (r *remoteReplacer) inside(p string) bool {
-	if p == "" || r.root == "" {
-		return false
-	}
-	clean := path.Clean(p)
-	root := path.Clean(r.root)
-	return clean == root || strings.HasPrefix(clean, root+"/")
+	return remoteInside(r.root, p)
 }
 
 // selectedReplaceEdits keeps the plan entries whose start the panel checked. An empty
@@ -238,46 +232,73 @@ func selectedReplaceEdits(plan []search.Edit, selected []searchpanel.Position) [
 // remoteReplaceText applies the plan's edits to text. Positions are rune columns of the
 // remote file's text, the same as the local replacer's plan.
 func remoteReplaceText(text string, edits []search.Edit) (string, error) {
-	lines := strings.Split(text, "\n")
-	runes := []rune(text)
-	offset := func(p buffer.Pos) (int, error) {
-		if p.Line < 0 || p.Line >= len(lines) || p.Col < 0 {
-			return 0, fmt.Errorf("replacement position %+v is outside the file", p)
-		}
-		n := 0
-		for i := 0; i < p.Line; i++ {
-			n += len([]rune(lines[i])) + 1
-		}
-		n += p.Col
-		if p.Col > len([]rune(lines[p.Line])) || n > len(runes) {
-			return 0, fmt.Errorf("replacement position %+v is outside the file", p)
-		}
-		return n, nil
+	if len(edits) == 0 {
+		return text, nil
 	}
+	lineCount := 1 + strings.Count(text, "\n")
+	lineStarts := make([]int, lineCount)
+	lineEnds := make([]int, lineCount)
+	idx := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			lineEnds[idx] = i
+			idx++
+			lineStarts[idx] = i + 1
+		}
+	}
+	lineEnds[idx] = len(text)
+
+	// Lazily cache rune-to-byte offsets per touched line so repeated edits on the
+	// same line remain O(1) after the first access and the overall pass stays O(N+E).
+	lineOffsets := make(map[int][]int)
+	byteOffset := func(p buffer.Pos) (int, error) {
+		if p.Line < 0 || p.Line >= lineCount || p.Col < 0 {
+			return 0, fmt.Errorf("replacement position %+v is outside the file", p)
+		}
+		if p.Col == 0 {
+			return lineStarts[p.Line], nil
+		}
+		offs, cached := lineOffsets[p.Line]
+		if !cached {
+			line := text[lineStarts[p.Line]:lineEnds[p.Line]]
+			offs = make([]int, 0, len(line)+1)
+			for i := range line {
+				offs = append(offs, i)
+			}
+			offs = append(offs, len(line))
+			lineOffsets[p.Line] = offs
+		}
+		if p.Col >= len(offs) {
+			return 0, fmt.Errorf("replacement position %+v is outside the file", p)
+		}
+		return lineStarts[p.Line] + offs[p.Col], nil
+	}
+
 	from := make([]int, len(edits))
 	to := make([]int, len(edits))
 	for i, e := range edits {
 		var err error
-		if from[i], err = offset(e.From); err != nil {
+		if from[i], err = byteOffset(e.From); err != nil {
 			return "", err
 		}
-		if to[i], err = offset(e.To); err != nil {
+		if to[i], err = byteOffset(e.To); err != nil {
 			return "", err
 		}
 		if from[i] > to[i] {
 			return "", fmt.Errorf("replacement range %+v..%+v is inverted", e.From, e.To)
 		}
 	}
-	var out []rune
+	var out strings.Builder
+	out.Grow(len(text))
 	last := 0
 	for i, e := range edits {
 		if from[i] < last {
 			return "", fmt.Errorf("overlapping replacement at %+v", e.From)
 		}
-		out = append(out, runes[last:from[i]]...)
-		out = append(out, []rune(e.Text)...)
+		out.WriteString(text[last:from[i]])
+		out.WriteString(e.Text)
 		last = to[i]
 	}
-	out = append(out, runes[last:]...)
-	return string(out), nil
+	out.WriteString(text[last:])
+	return out.String(), nil
 }

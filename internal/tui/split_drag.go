@@ -2,15 +2,21 @@ package tui
 
 import "github.com/tbxark/gvim/internal/tui/split"
 
-// pressBorder starts a drag on the line at index i of the layout's lines. The drag keeps
-// the split that the line divides, so the motion changes that split's ratio. A press on
-// a line takes no focus.
-func (m *Model) pressBorder(i int) {
+// pressBorder starts a drag on the line at index i of the layout's lines, or
+// equalizes the split 50/50 on a double-click. A press on a line takes no focus.
+func (m *Model) pressBorder(i, count int) {
 	lines := m.layout().Borders
 	if i < 0 || i >= len(lines) {
 		return
 	}
 	line := lines[i]
+	if count == 2 && line.Node != nil {
+		line.Node.Ratio = split.Even
+		m.drag = drag{}
+		m.syncViewport()
+		m.revealCaretVisual(0)
+		return
+	}
 	m.drag = drag{active: true, border: &line}
 }
 

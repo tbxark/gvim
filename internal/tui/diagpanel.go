@@ -433,6 +433,7 @@ func (m *Model) takeDiagFocus() {
 		m.syncViewport()
 	}
 	m.blurPluginPanels()
+	m.menu = m.menu.Close()
 	m.tabFocus = false
 	m.dock.SetFocus(false)
 	m.explorerFocus = false
@@ -544,11 +545,31 @@ func (m *Model) pressDiagRow(row int) tea.Cmd {
 	return m.diagJump()
 }
 
+func (m *Model) closeDiagPanel() {
+	wasFocused := m.diag.focus
+	m.diag.open = false
+	m.diag.focus = false
+	if wasFocused {
+		m.focusEditor()
+	}
+}
+
+func (m *Model) wheelDiagPanel(up bool) {
+	rows := m.diagRows()
+	delta := m.wheelRows()
+	if up {
+		delta = -delta
+	}
+	maxScroll := max(len(rows)-m.diag.Rows(), 0)
+	m.diag.scroll = min(max(m.diag.scroll+delta, 0), maxScroll)
+}
+
 // toggleDiagnosticsPanel is the palette action: it shows the Diagnostics section
 // with the keyboard, or closes it and gives the keyboard back to the editor.
 func (m *Model) toggleDiagnosticsPanel() tea.Cmd {
 	if m.diag.open {
 		m.diag.open = false
+		m.diag.focus = false
 		m.focusEditor()
 		return nil
 	}

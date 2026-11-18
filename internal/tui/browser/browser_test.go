@@ -840,3 +840,51 @@ func TestCapitalizeKeepsMultibyteLetters(t *testing.T) {
 		}
 	}
 }
+
+func TestScrollToRowReachesTopWhenViewportHeightIsTwo(t *testing.T) {
+	t.Parallel()
+	dir, home := fixture(t)
+	b := New(Options{Dir: dir, Home: home})
+	// Height 8 yields a list viewport height bx.h == 2 (6 chrome/border rows).
+	b.Draw(grid.New(40, 8))
+	if b.box.h != 2 {
+		t.Fatalf("setup: box.h = %d, want 2", b.box.h)
+	}
+	b.top = 2
+	b.scrollToRow(b.box.y + 3)
+	if b.top != 0 {
+		t.Fatalf("b.top after clicking top scrollbar cell with h==2 = %d, want 0", b.top)
+	}
+}
+
+func TestThumbOfZeroAndLargeLines(t *testing.T) {
+	t.Parallel()
+	if s, l := thumbOf(0, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("thumbOf(0,6,0) = %d,%d, want 0,0", s, l)
+	}
+	if s, l := thumbOf(-5, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("thumbOf(-5,6,0) = %d,%d, want 0,0", s, l)
+	}
+	if s, l := thumbOf(10_000_000, 1_000_000, 5_000_000); s < 400_000 || s > 600_000 || l < 1 {
+		t.Fatalf("thumbOf large = %d,%d, unexpected overflow or clamp", s, l)
+	}
+}
+
+func TestBrowserLongInputUsesSpaceWindow(t *testing.T) {
+	t.Parallel()
+	dir, home := fixture(t)
+	b := New(Options{Dir: dir, Home: home})
+	long := strings.Repeat("a", 80) + "TAIL"
+	for _, r := range long {
+		send(t, b, typed(string(r)))
+	}
+	g := grid.New(36, 12)
+	b.Draw(g)
+	row := g.Plain()[b.box.y+1]
+	if !strings.Contains(row, "TAIL") {
+		t.Fatalf("input row = %q, want scrolled window showing TAIL", row)
+	}
+	if strings.Contains(row, "…") {
+		t.Fatalf("input row = %q, expected space.Window without trailing ellipsis", row)
+	}
+}

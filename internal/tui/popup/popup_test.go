@@ -287,3 +287,28 @@ func TestShowDropsTheNoteOfAnEarlierShowNote(t *testing.T) {
 		t.Fatalf("Show kept the note of the earlier ShowNote: note=%q lines=%v", p.note, p.noteLines)
 	}
 }
+
+func TestWrapNoteWideCJKAtWidthOne(t *testing.T) {
+	t.Parallel()
+	got := wrapNote("中文", 1)
+	if len(got) != 2 || got[0] != "中" || got[1] != "文" {
+		t.Fatalf("wrapNote(\"中文\", 1) = %q, want [\"中\" \"文\"]", got)
+	}
+}
+
+func TestDrawClampsLongNoteInsideBottomBorder(t *testing.T) {
+	t.Parallel()
+	p := New(style.Overlay{})
+	p.ShowNote(Point{1, 0}, "T", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", items(2))
+	g := grid.New(30, 6)
+	p.Draw(g)
+	bottomY := p.box.Y + p.box.H - 1
+	if bottomY < len(g.Plain()) {
+		if row := g.Plain()[bottomY]; !strings.Contains(row, "╰") {
+			t.Fatalf("bottom border row %d = %q, expected box border not overwritten by note/items", bottomY, row)
+		}
+	}
+	if p.box.Y+len(p.noteLines)+p.rows >= bottomY {
+		t.Fatalf("noteLines(%d)+rows(%d) exceeded bottom border row %d (box=%+v)", len(p.noteLines), p.rows, bottomY, p.box)
+	}
+}

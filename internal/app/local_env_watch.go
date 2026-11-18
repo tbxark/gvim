@@ -182,6 +182,7 @@ func (lw *localEnvWatch) Dead() bool { return lw == nil || lw.dead.Load() }
 type localEnvWatchRetry struct {
 	mu      sync.Mutex
 	ctx     context.Context
+	closed  bool
 	current *localEnvWatch
 	start   func() *localEnvWatch
 	install func(*localEnvWatch)
@@ -192,6 +193,21 @@ func (r *localEnvWatchRetry) Current() *localEnvWatch {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.current
+}
+
+// Close stops any installed local environment watcher.
+func (r *localEnvWatchRetry) Close() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.closed = true
+	cur := r.current
+	r.current = nil
+	r.mu.Unlock()
+	if cur != nil {
+		cur.Close()
+	}
 }
 
 // SetInstall sets the callback that records the recovered watcher (settings service). It
@@ -217,6 +233,9 @@ func (r *localEnvWatchRetry) Retry() {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
 	if r.ctx != nil && r.ctx.Err() != nil {
 		return
 	}
@@ -350,6 +369,7 @@ func (lw *localEnvWatch) armDirs() bool {
 		lw.provider.SetWatchRetryNeeded(false)
 	case plan.omitted > 0 || plan.omittedDirs > 0:
 		lw.provider.SetWatchNotice(localEnvWatchLimitNotice(plan))
+		lw.provider.SetWatchRetryNeeded(false)
 	default:
 		lw.provider.SetWatchNotice("")
 		lw.provider.SetWatchRetryNeeded(false)

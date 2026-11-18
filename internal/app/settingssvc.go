@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,6 +64,10 @@ type settingsService struct {
 	// back when it does not).
 	lastDiags []config.Diagnostic
 
+	// formatters is the resolved formatter command table computed off the UI
+	// goroutine at construction and reload, so Apply pushes it with no LookPath.
+	formatters map[string]string
+
 	// ioMu serializes the file writes and reloads. The state mutex is not held
 	// while a file is written or loaded, so a Snapshot can run during a Save.
 	ioMu sync.Mutex
@@ -112,9 +117,21 @@ func newSettingsService(root string, opts Options, ed *editor.Editor, trusted fu
 	if trusted == nil {
 		trusted = func() bool { return true }
 	}
-	s := &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat, rt: rt}
+	fmts := rt.initialFormatters
+	if fmts == nil {
+		fmts = formattersFor(cfg, lookPath)
+	}
+	s := &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat, rt: rt, formatters: fmts}
 	s.themePreviews = s.buildThemePreviews()
 	return s
+}
+
+// effectiveKeybindingsConfig overlays any live in-session keybindings from the keybinding store.
+func (s *settingsService) effectiveKeybindingsConfig(cfg config.Config) config.Config {
+	if s.rt.withKeybindings != nil {
+		return s.rt.withKeybindings(cfg)
+	}
+	return cfg
 }
 
 // Snapshot returns the settings the page lists.
@@ -126,7 +143,7 @@ func (s *settingsService) Snapshot() tui.SettingsSnapshot {
 
 // snapshotFor builds the page content for a loaded config. It reads no files.
 func (s *settingsService) snapshotFor(cfg config.Config, themePreviews map[string][]tui.SettingsSwatch) tui.SettingsSnapshot {
-	projectWritable := s.trusted()
+	projectWritable := s.trusted() && s.opts.Remote == nil
 	snap := tui.SettingsSnapshot{
 		UserFile:        s.userFile,
 		ProjectFile:     s.projectFile(),
@@ -206,10 +223,17 @@ func (s *settingsService) choicesOf(setting config.Setting) []string {
 // loadTheme resolves a config theme value through the catalog (bundled themes
 // when the service has none).
 func (s *settingsService) loadTheme(ref string) (theme.Theme, error) {
+	var th theme.Theme
+	var err error
 	if s.theme != nil {
-		return s.theme.Load(ref)
+		th, err = s.theme.Load(ref)
+	} else {
+		th, err = theme.Load(ref)
 	}
-	return theme.Load(ref)
+	if err == nil && s.opts.Theme == "" && os.Getenv("NO_COLOR") != "" {
+		th = th.WithoutColor()
+	}
+	return th, err
 }
 
 // Validate reports why value cannot be used for key. It checks the schema's
@@ -253,6 +277,9 @@ func (s *settingsService) prepareSave(edits []tui.SettingEdit, layer string) (pa
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	project := layer == tui.SettingsLayerProject
+	if project && s.opts.Remote != nil {
+		return nil, nil, "", errors.New("the project config cannot be edited on a remote workspace")
+	}
 	if project && !s.trusted() {
 		return nil, nil, "", errors.New("the project config can be written only in a trusted workspace")
 	}
@@ -388,6 +415,7 @@ func (s *settingsService) Reload() (tui.SettingsChange, error) {
 func (s *settingsService) Apply(tui.SettingsChange) {
 	s.mu.Lock()
 	cfg := s.cfg
+	fmts := maps.Clone(s.formatters)
 	s.mu.Unlock()
 	// The UI language applies live: T() lookups and the plugin runtime read the new
 	// locale at their next call. Generated command/palette/menu titles stay English.
@@ -397,7 +425,7 @@ func (s *settingsService) Apply(tui.SettingsChange) {
 		s.rt.localeApply(locale)
 	}
 	s.ed.SetLanguageSettings(languageSettings(cfg))
-	s.ed.SetFormatters(formattersFor(cfg, lookPath))
+	s.ed.SetFormatters(fmts)
 	s.ed.SetEphemeralFilePatterns(cfg.EphemeralFilePatterns)
 	s.ed.SetRulers(cfg.Rulers)
 }
@@ -427,11 +455,15 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	cfg, diags, err := config.Load(config.Options{
 		Root:      root,
 		UserFile:  opts.Config,
-		Untrusted: !s.trusted(),
+		Untrusted: !s.trusted() || opts.Remote != nil,
 	})
 	if err != nil {
 		return tui.SettingsChange{}, err
 	}
+	if s.rt.keysReload != nil {
+		s.rt.keysReload(cfg)
+	}
+	keybindingsChanged := !bytes.Equal(bytes.TrimSpace(previous.Keybindings), bytes.TrimSpace(cfg.Keybindings))
 	reloaded := changed == nil
 	var keys []string
 	if reloaded {
@@ -446,7 +478,7 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	} else {
 		keys = s.changedKeys(changed)
 	}
-	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
+	icon := icons.Resolve(effectiveUIIcons(cfg), cfg.UIIconsFont, os.Getenv)
 	settings := settingsFor(opts, cfg)
 	settings.IconsMode, settings.IconsWhy = icon.Mode.String(), icon.Why
 	settings.Keymap = effectiveKeymap(opts, cfg)
@@ -455,6 +487,7 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 		settings.Theme = th.Name
 	}
 	previews := s.buildThemePreviews()
+	fmts := formattersFor(cfg, lookPath)
 	change := tui.SettingsChange{
 		Snapshot:    s.snapshotFor(cfg, previews),
 		Settings:    settings,
@@ -487,10 +520,16 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 			change.Live = append(change.Live, key)
 		}
 	}
+	if keybindingsChanged && change.Keymap != "" && !slices.Contains(change.Live, "keymap") {
+		change.Live = append(change.Live, "keymap")
+	}
 	s.mu.Lock()
 	s.cfg = cfg
 	s.lastDiags = diags
 	s.themePreviews = previews
+	s.rt.iconsMode = icon.Mode.String()
+	s.rt.iconsWhy = icon.Why
+	s.formatters = fmts
 	reloadFn := s.configReload
 	s.mu.Unlock()
 	if s.rt.lspReload != nil {
@@ -628,14 +667,18 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 	cfg := s.cfg
 	userFile := s.userFile
 	root := s.root
+	remote := s.opts.Remote != nil
 	s.mu.Unlock()
 	project := layer == tui.SettingsLayerProject
 	path := userFile
 	if project {
+		if remote {
+			return tui.SettingsStructure{}, errors.New("the project config cannot be edited on a remote workspace")
+		}
 		if !s.trusted() {
 			return tui.SettingsStructure{}, errors.New("the project config can be written only in a trusted workspace")
 		}
-		path = projectFileFor(root)
+		path = projectFileFor(root, false)
 	}
 	// The Plugins page's project view is the same inventory shown locked: it needs
 	// no project file to exist (the user layer owns plugin enablement).
@@ -643,7 +686,7 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 		return s.structurePlugins(cfg, project), nil
 	}
 	if structureKey == "keybindings" {
-		return s.structureKeybindings(cfg), nil
+		return s.structureKeybindings(s.effectiveKeybindingsConfig(cfg)), nil
 	}
 	if structureKey == "env.detectors" {
 		return s.structureEnvDetectors(cfg), nil
@@ -917,6 +960,9 @@ func changedSettings(old, next config.Config) []string {
 			keys = append(keys, setting.Key())
 		}
 	}
+	if effectiveUIIcons(old) != effectiveUIIcons(next) && !slices.Contains(keys, "ui_icons") {
+		keys = append(keys, "ui_icons")
+	}
 	return keys
 }
 
@@ -941,11 +987,11 @@ func structuredSettingChanged(key string, old, next config.Config) bool {
 
 // projectFile returns the project config file the page writes: the nearest
 // existing one at or above the root, or root/.gvim/config.json to create.
-func (s *settingsService) projectFile() string { return projectFileFor(s.root) }
+func (s *settingsService) projectFile() string { return projectFileFor(s.root, s.opts.Remote != nil) }
 
 // projectFileFor is projectFile for a root captured outside the state lock.
-func projectFileFor(root string) string {
-	if root == "" {
+func projectFileFor(root string, remote bool) string {
+	if root == "" || remote {
 		return ""
 	}
 	if path, ok, err := config.ProjectFile(root); err == nil && ok {

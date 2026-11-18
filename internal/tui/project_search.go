@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -77,8 +78,9 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		m.proj.replaceCancel = nil
 	}
 	if m.proj.panel != nil && m.proj.panel.Active() {
-		m.proj.panel.Dismiss()
-		m.popOverlay()
+		old := m.proj.panel
+		old.Dismiss()
+		m.overlays = slices.DeleteFunc(m.overlays, func(o Overlay) bool { return o == Overlay(old) })
 	}
 	modes, scope := m.projectSearchSettings()
 	openFiles := m.projectOpenFiles()
@@ -345,11 +347,19 @@ func (m *Model) askProjectReplace(req searchpanel.ReplaceRequest) tea.Cmd {
 // question, so a remote replacement is never mistaken for a local one.
 func projectReplaceQuestion(req searchpanel.ReplaceRequest, remoteTarget string) string {
 	files := len(req.Files)
-	q := fmt.Sprintf("Replace %d %s in %d %s?", req.Matches, pluralWord(req.Matches, "match"), files, pluralWord(files, "file"))
-	if remoteTarget != "" {
-		q = fmt.Sprintf("Replace %d %s in %d %s on %s?", req.Matches, pluralWord(req.Matches, "match"), files, pluralWord(files, "file"), remoteTarget)
+	vars := map[string]any{
+		"matches":    req.Matches,
+		"match_word": pluralWord(req.Matches, "match"),
+		"files":      files,
+		"file_word":  pluralWord(files, "file"),
 	}
-	return q
+	if remoteTarget != "" {
+		vars["target"] = remoteTarget
+		return uiTextVars("gvim.project_search.confirm_remote",
+			"Replace %{matches} %{match_word} in %{files} %{file_word} on %{target}?", vars)
+	}
+	return uiTextVars("gvim.project_search.confirm",
+		"Replace %{matches} %{match_word} in %{files} %{file_word}?", vars)
 }
 
 // projectReplaceAnswer runs the confirmed replacement, or reports that it was
@@ -439,7 +449,14 @@ func (m *Model) remoteProjectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
 	switch {
 	case msg.err != nil:
 		if msg.remoteResult.Files > 0 {
-			m.notice = fmt.Sprintf("Replace on %s: %v; %d %s already written", msg.remoteTarget, msg.err, msg.remoteResult.Files, pluralWord(msg.remoteResult.Files, "file"))
+			m.notice = uiTextVars("gvim.project_search.partial_remote",
+				"Replace on %{target}: %{error}; %{files} %{file_word} already written",
+				map[string]any{
+					"target":    msg.remoteTarget,
+					"error":     msg.err.Error(),
+					"files":     msg.remoteResult.Files,
+					"file_word": pluralWord(msg.remoteResult.Files, "file"),
+				})
 		} else {
 			m.notice = uiTextVars("gvim.project_search.remote_error", "Replace on %{target}: %{error}", map[string]any{"target": msg.remoteTarget, "error": msg.err.Error()})
 		}

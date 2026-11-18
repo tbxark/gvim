@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"runtime"
 	"slices"
 
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/updatecheck"
 )
 
 // noBindingsText is the text the keymap lists show when the keymap cannot list its
@@ -118,9 +120,55 @@ func contextsInOrder(groups map[string][]list.Row) []string {
 // the rows.
 func (m *Model) openHelp(title string) {
 	l, _ := m.keys.(BindingLister)
-	v := list.New(title, helpRows(l, m.actionDescriber()), m.listChrome(), nil)
+	rows := helpRows(l, m.actionDescriber())
+	if title == "Help" && l != nil {
+		rows = append(rows,
+			list.Row{Header: true, Left: "Mouse Shortcuts"},
+			list.Row{Left: "Add/remove multiple cursors", Right: "Alt+Click"},
+			list.Row{Left: "Go to definition or open URL", Right: "Cmd+Click"},
+			list.Row{Left: "Extend selection from caret (or open URL with Ctrl)", Right: "Shift/Ctrl+Click"},
+			list.Row{Left: "Select line(s) or toggle code fold", Right: "Click / Drag Gutter"},
+			list.Row{Left: "Paste clipboard in editor or close tab", Right: "Middle-click"},
+			list.Row{Left: "Inspect theme color at cursor", Right: "Ctrl+Right-click"},
+			list.Row{Left: "Equalize split panes to 50/50", Right: "Double-click Split Border"},
+			list.Row{Header: true, Left: "Quick Open Modes (Ctrl+P)"},
+			list.Row{Left: "Fuzzy file finder (supports file:line[:col])", Right: "(no prefix)"},
+			list.Row{Left: "Command palette", Right: ">"},
+			list.Row{Left: "Go to line", Right: ":"},
+			list.Row{Left: "Switch open buffer", Right: "#"},
+			list.Row{Header: true, Left: "Pager Mode Keys (-R / piped stdin)"},
+			list.Row{Left: "Page down / Page up", Right: "Space / b"},
+			list.Row{Left: "Scroll down / up", Right: "j / k / d / u"},
+			list.Row{Left: "Top / Bottom / Search / Next / Prev / Quit", Right: "g / G / / / n / N / q"},
+		)
+	}
+	v := list.New(title, rows, m.listChrome(), nil)
 	if l == nil {
 		v.Empty = noBindingsText
 	}
+	m.pushOverlay(v)
+}
+
+// openAbout shows a read-only overlay with build, runtime, and session metadata.
+func (m *Model) openAbout() {
+	themeName := m.theme.Name
+	if themeName == "" {
+		themeName = "default"
+	}
+	keymapName := m.util.settings.Keymap
+	if keymapName == "" {
+		keymapName = "default"
+	}
+	rows := []list.Row{
+		{Header: true, Left: "gvim — Pure-Go Terminal Text Editor"},
+		{Left: "Version", Right: updatecheck.DisplayVersion()},
+		{Left: "Go Runtime", Right: runtime.Version()},
+		{Left: "OS / Arch", Right: runtime.GOOS + "/" + runtime.GOARCH},
+		{Left: "Rendering Engine", Right: "Pure Go · Native Terminal Grid"},
+		{Header: true, Left: "Session"},
+		{Left: "Active Theme", Right: themeName},
+		{Left: "Active Keymap", Right: keymapName},
+	}
+	v := list.New("About gvim", rows, m.listChrome(), nil)
 	m.pushOverlay(v)
 }

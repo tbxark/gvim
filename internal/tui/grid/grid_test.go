@@ -225,3 +225,35 @@ func TestRestylingWideGraphemeKeepsItsContinuation(t *testing.T) {
 		t.Errorf("row width = %d, want 6", got)
 	}
 }
+
+func TestSubGridWideCharBoundaryAndResetKeys(t *testing.T) {
+	g := New(6, 1)
+	g.CaptureKeys()
+	g.Put(1, 0, 5, "日本", Style{FGKey: 7})
+	sub, ok := g.Sub(2, 0, 2, 1)
+	if !ok {
+		t.Fatal("Sub failed")
+	}
+	sub.Clear(Style{})
+	if g.At(1, 0).Text != " " {
+		t.Fatalf("left lead cell after sub.Clear = %q, want blank", g.At(1, 0).Text)
+	}
+	if g.At(4, 0).Text != " " {
+		t.Fatalf("right continuation cell after sub.Clear = %q, want blank", g.At(4, 0).Text)
+	}
+	if got := ansi.StringWidth(g.Lines()[0]); got != 6 {
+		t.Fatalf("row width after sub.Clear = %d, want 6", got)
+	}
+
+	g.Put(1, 0, 5, "日本", Style{})
+	sub.Set(0, 0, "a", Style{})
+	if g.At(1, 0).Text != " " {
+		t.Fatalf("left lead cell after sub.Set = %q, want blank", g.At(1, 0).Text)
+	}
+
+	g.Set(0, 0, "x", Style{FGKey: 42})
+	sub.Reset()
+	if fg, _ := g.KeysAt(0, 0); fg != 42 {
+		t.Fatalf("parent keys at (0,0) cleared by sub.Reset: got %d, want 42", fg)
+	}
+}

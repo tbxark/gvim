@@ -108,7 +108,7 @@ func (p *Panel) Covers(x, y, w, h int) bool {
 	if geo.top < 0 {
 		return false
 	}
-	return x > geo.left && x < geo.right && y >= geo.top && y <= geo.bottom
+	return x >= geo.left && x <= geo.right && y >= geo.top && y <= geo.bottom
 }
 
 // Draw paints the panel over the last rows of g. The card is the title border, the

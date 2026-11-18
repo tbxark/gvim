@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/tbxark/gvim/internal/tui/frame"
+import (
+	"fmt"
+
+	"github.com/tbxark/gvim/internal/tui/frame"
+)
 
 // statusExtraSource is the structural identity of one status-row Extra item. Plugin status
 // items and the native appended segments share the Extra slice, so routing must not depend
@@ -14,6 +18,8 @@ const (
 	statusExtraAuthority
 	statusExtraWorkspace
 	statusExtraEnv
+	statusExtraMacro
+	statusExtraSelection
 )
 
 type statusExtraEntry struct {
@@ -47,6 +53,28 @@ func (m *Model) statusExtraEntries() []statusExtraEntry {
 	if !officialEnvPill {
 		if item, ok := m.envStatusSegment(); ok {
 			out = append(out, statusExtraEntry{item: item, source: statusExtraEnv})
+		}
+	}
+	if m.root.macro.recording {
+		out = append(out, statusExtraEntry{
+			item:   frame.StatusItem{ID: "macro_rec", Text: "● REC"},
+			source: statusExtraMacro,
+		})
+	}
+	if doc := m.ed.Active(); doc != nil && m.ed.Status() == "" && m.notice == "" {
+		if a, h, ok := doc.Selection(); ok && a != h {
+			var label string
+			if a.Line == h.Line {
+				n := max(a.Col-h.Col, h.Col-a.Col)
+				label = fmt.Sprintf("Sel: %d chars", n)
+			} else {
+				n := max(a.Line-h.Line, h.Line-a.Line) + 1
+				label = fmt.Sprintf("Sel: %d lines", n)
+			}
+			out = append(out, statusExtraEntry{
+				item:   frame.StatusItem{ID: "selection", Text: label},
+				source: statusExtraSelection,
+			})
 		}
 	}
 	return out

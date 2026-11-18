@@ -9,7 +9,9 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	"github.com/tbxark/gvim/internal/tui/list"
+	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -879,6 +881,42 @@ func TestPromptClipboardStaleAndSupersededResults(t *testing.T) {
 		}
 		if m.notice != "marker" {
 			t.Fatalf("stale-generation notice = %q, want the untouched marker", m.notice)
+		}
+	})
+}
+
+func TestOverlayContextOfCoversChoiceAndPopups(t *testing.T) {
+	t.Parallel()
+	m := overlayModel(t, fakeKeymap{})
+	ch := prompt.NewChoice(m.styles, "Save?", "tag", []prompt.ChoiceOption{{Key: "y", Label: "Yes"}})
+	if ctx, ok := overlayContextOf(ch); !ok || ctx != KeyContextPrompt {
+		t.Fatalf("overlayContextOf(*prompt.Choice) = %q,%v, want %q,true", ctx, ok, KeyContextPrompt)
+	}
+	var _ prompt.RowOwner = ch
+	pop := &popup.Popup{}
+	if ctx, ok := overlayContextOf(pop); !ok || ctx != KeyContextPopup {
+		t.Fatalf("overlayContextOf(*popup.Popup) = %q,%v, want %q,true", ctx, ok, KeyContextPopup)
+	}
+	if ctx, ok := overlayContextOf(&pluginPopupOverlay{}); !ok || ctx != KeyContextPopup {
+		t.Fatalf("overlayContextOf(*pluginPopupOverlay) = %q,%v, want %q,true", ctx, ok, KeyContextPopup)
+	}
+	if ctx, ok := overlayContextOf(&pluginActionPopupOverlay{}); !ok || ctx != KeyContextPopup {
+		t.Fatalf("overlayContextOf(*pluginActionPopupOverlay) = %q,%v, want %q,true", ctx, ok, KeyContextPopup)
+	}
+	if ctx, ok := overlayContextOf(&pluginLineOverlay{}); !ok || ctx != KeyContextPrompt {
+		t.Fatalf("overlayContextOf(*pluginLineOverlay) = %q,%v, want %q,true", ctx, ok, KeyContextPrompt)
+	}
+	t.Run("ctrl+c cancels pluginLineOverlay despite prompt_copy", func(t *testing.T) {
+		pm, rt := newPromptModel(t)
+		pm.keys = fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}}
+		openVia(t, pm, rt, func(h pluginapi.Host) { _ = h.Input(9, pluginapi.InputSpec{Prompt: ":"}) })
+		feed(pm, runKey(pm, ctrl('c')))
+		got := lastResolved(t, rt)
+		if got.Token != 9 || got.Err != "" || len(got.Values) != 1 || got.Values[0] != nil {
+			t.Fatalf("resolved = %+v, want nil cancel answer", got)
+		}
+		if len(pm.overlays) != 0 {
+			t.Fatalf("overlays after ctrl+c = %d, want 0", len(pm.overlays))
 		}
 	})
 }

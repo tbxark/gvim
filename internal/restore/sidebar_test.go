@@ -74,7 +74,7 @@ func TestWriteSessionKeepsSidebarState(t *testing.T) {
 		PluginCollapsed:   map[string]bool{"7": true},
 	}
 	ed := apptest.NewSessionEditor()
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{Open: true, Root: dir, Sidebar: ui}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{Open: true, Root: dir, Sidebar: ui}, nil))
 	got, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)
 	if !ok {

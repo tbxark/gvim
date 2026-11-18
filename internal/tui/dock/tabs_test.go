@@ -826,9 +826,10 @@ func TestRestoreDropsAnInFlightDrag(t *testing.T) {
 	tabs, _ := newTestTabs(t, &notices)
 	startTab(t, tabs)
 	tabs.drag = tabDrag{from: 0, startX: 3, x: 9, on: true, active: true}
+	tabs.resize = dockResize{on: true, active: true, startY: 10, startH: 8}
 	tabs.Restore(terminal.SavedState{})
-	if tabs.drag != (tabDrag{}) {
-		t.Fatalf("drag = %+v after Restore, want none", tabs.drag)
+	if tabs.drag != (tabDrag{}) || tabs.resize != (dockResize{}) {
+		t.Fatalf("drag/resize = %+v / %+v after Restore, want zero", tabs.drag, tabs.resize)
 	}
 }
 
@@ -843,5 +844,54 @@ func TestLaunchShellClearsExited(t *testing.T) {
 	}
 	if p.Exited() {
 		t.Fatal("the panel still reports exited while its new shell starts")
+	}
+}
+
+func TestDockWideContinuationStylesSearchBarHideShowAndCopyScreen(t *testing.T) {
+	t.Parallel()
+	// 1. lineFromText emits continuation cells and render/shellStyle preserves Italic/Faint/Strikethrough.
+	line := lineFromText("中文a")
+	if len(line.Cells) != 5 || line.Cells[0].Rune != '中' || line.Cells[1].Rune != 0 || line.Cells[4].Rune != 'a' {
+		t.Fatalf("lineFromText wide cells = %+v", line.Cells)
+	}
+	st := shellStyle(terminal.Style{Italic: true, Faint: true, Strikethrough: true}, grid.Style{})
+	if !st.Italic || !st.Faint || !st.Strike {
+		t.Fatalf("shellStyle dropped attrs: %+v", st)
+	}
+
+	// 2. Tabs.Hide() + Show() keeps tab.open synced across tab switches.
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	_ = tabs.NewTab()
+	tabs.Hide()
+	tabs.SetActive(0)
+	tabs.Show()
+	if !tabs.Open() {
+		t.Fatal("tabs did not reopen after switching tabs and calling Show")
+	}
+
+	// 3. Tabs.Draw does not overwrite scrollback '/' search prompt on l.DockY.
+	p := tabs.Active()
+	p.scroll.on = true
+	p.scroll.typing = true
+	p.scroll.searchInput = "abc"
+	g := grid.New(80, 6)
+	tabs.Draw(g, frame.Layout{DockOn: true, W: 80, H: 6, DockX: 0, DockY: 0, DockH: 6, EditorW: 80}, style.Styles{})
+	if row := g.Plain()[0]; !strings.Contains(row, "/abc") {
+		t.Fatalf("Tabs.Draw overwrote scrollback search bar: row=%q", row)
+	}
+
+	// 4. copyScreen works on restored transcripts with no live term.
+	var rp Panel
+	var copied string
+	rp.SetHost(Host{
+		Copy: func(s string) tea.Cmd { copied = s; return nil },
+		Notice: func(string) {},
+	})
+	rp.Restore(terminal.SavedTab{Open: true, Rows: []string{"restored-line"}})
+	rp.copyScreen()
+	if !strings.Contains(copied, "restored-line") {
+		t.Fatalf("copyScreen on restored transcript copied %q", copied)
 	}
 }

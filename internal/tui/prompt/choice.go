@@ -46,6 +46,9 @@ func (c *Choice) Active() bool { return !c.closed }
 // user answers it. See overlay.Alert.
 func (*Choice) AlertOverlay() {}
 
+// UsesPromptRow marks Choice as a bottom-row prompt.
+func (*Choice) UsesPromptRow() {}
+
 // Update handles one key: Esc closes without an answer; Enter answers the focused option;
 // left/right/tab move the focus; an option's exact mnemonic key answers it. Anything else
 // leaves the prompt open (a typo must not drop a paste queue).
@@ -123,4 +126,7 @@ func (c *Choice) Cursor(w, h int) (x, y int, ok bool) {
 	return 0, 0, false
 }
 
-var _ overlay.Overlay = (*Choice)(nil)
+var (
+	_ overlay.Overlay = (*Choice)(nil)
+	_ RowOwner        = (*Choice)(nil)
+)

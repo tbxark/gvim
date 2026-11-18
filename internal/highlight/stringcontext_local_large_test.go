@@ -181,8 +181,9 @@ func TestStringContextLocalLargeEditing(t *testing.T) {
 	const lines, target = 20000, 10000
 	ed := openLocalLargeDoc(t, localLargeQuoteContent(lines))
 	doc := ed.Active()
-	ed.SetStringContext(NewStringContext())
-	ed.SetNonCodeContext(NewNonCodeContext())
+	strCtx, nonCodeCtx := NewContextPair()
+	ed.SetStringContext(strCtx)
+	ed.SetNonCodeContext(nonCodeCtx)
 	if doc.ReadOnly() {
 		t.Fatal("the local large document is read-only")
 	}

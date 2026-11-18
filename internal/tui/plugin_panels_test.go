@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/space"
@@ -247,5 +248,71 @@ func TestRemountPanelChecksOwnerAndAppliesChrome(t *testing.T) {
 	}
 	if mp.panel.Title() != "Renamed" || mp.panel.Closable() {
 		t.Fatalf("title %q closable %v after the replace, want Renamed and false", mp.panel.Title(), mp.panel.Closable())
+	}
+}
+
+func TestFocusClearingPasteRoutingAndBufferCloseLifecycle(t *testing.T) {
+	t.Parallel()
+	m, rt := widgetPanelModel(t)
+	h := m.plug.host
+	mount := pluginapi.WidgetMount{
+		Title: "Input", Focus: true, Closable: true, Placement: pluginapi.PlacementFloat,
+		Panel: pluginapi.WidgetPanel{
+			Root: pluginapi.Widget{Kind: pluginapi.WidgetCol, Children: []pluginapi.Widget{
+				{Kind: pluginapi.WidgetText, Key: "q", Text: "ab"},
+			}},
+			FocusKey: "q",
+		},
+	}
+	if err := h.MountWidgetPanel("p", 9, mount); err != nil {
+		t.Fatal(err)
+	}
+	beforeEd := m.ed.Active().Line(0)
+
+	// Pasting while the widget panel holds focus must route to WidgetText, never the editor.
+	m.Update(tea.PasteMsg{Content: "XY"})
+	m.Update(editorPasteMsg{text: "Z"})
+	if got := m.ed.Active().Line(0); got != beforeEd {
+		t.Fatalf("editor line changed during panel paste: got %q, want %q", got, beforeEd)
+	}
+	if got := lastWidgetEvent(rt, "change"); got == nil || got["value"] != "abXYZ" {
+		t.Fatalf("widget text change event = %+v, want value abXYZ", got)
+	}
+
+	// Cross-chrome focus hand-offs clear diag, contents, menu, and plugin panel focus.
+	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"ok"}}}})
+	m.diag.focus = true
+	m.contentsFocus = true
+	m.menu = m.menu.Open(0)
+	m.focusDock()
+	if m.diag.focus || m.contentsFocus || m.menu.IsOpen() || m.plug.panels.focus != 0 {
+		t.Fatalf("focusDock left focus flags set: diag=%v contents=%v menu=%v panel=%d",
+			m.diag.focus, m.contentsFocus, m.menu.IsOpen(), m.plug.panels.focus)
+	}
+
+	// Closing a buffer drops its scoped/placed panel and emits cancel.
+	rt.emitted = nil
+	bufMount := widgetMountFixture()
+	bufMount.Scope = pluginapi.ScopeBuffer
+	bufMount.Buffer = 1
+	bufMount.Focus = true
+	if err := h.MountWidgetPanel("p", 10, bufMount); err != nil {
+		t.Fatal(err)
+	}
+	m.plugPanelsBufferClosed(1)
+	// Drain queued plugin events via Update loop (same path as normal tab-close updates).
+	m.Update(nil)
+	if m.plug.panels.get(10) != nil {
+		t.Fatal("buffer close left ScopeBuffer panel mounted")
+	}
+	if lastWidgetEvent(rt, "cancel") == nil {
+		t.Fatalf("buffer close did not emit cancel event: %+v", rt.emitted)
+	}
+
+	// Tiny-terminal float bounds never go negative.
+	m.width, m.height = 2, 1
+	r := m.floatPanelRect(pluginapi.WidgetMount{WidthPct: 60, HeightPct: 70})
+	if r.W < 0 || r.H < 0 || r.X < 0 || r.Y < 0 {
+		t.Fatalf("floatPanelRect on tiny terminal produced negative dims: %+v", r)
 	}
 }

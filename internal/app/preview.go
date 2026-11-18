@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 
 	"github.com/tbxark/gvim/internal/tui/palette"
 )
@@ -22,7 +21,7 @@ func (previewReader) ReadHead(path string, maxBytes int) ([]byte, bool, error) {
 	if maxBytes <= 0 {
 		maxBytes = 1 << 10
 	}
-	f, err := os.Open(path)
+	f, _, err := openRegularFile(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -51,7 +50,7 @@ func (previewReader) ReadWindow(ctx context.Context, path string, line, maxBytes
 	if line < 1 {
 		line = 1
 	}
-	f, err := os.Open(path)
+	f, _, err := openRegularFile(path)
 	if err != nil {
 		return nil, 0, false, err
 	}

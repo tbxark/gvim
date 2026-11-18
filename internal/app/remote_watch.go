@@ -67,6 +67,7 @@ type remoteWatch struct {
 	wg        sync.WaitGroup
 	reconnect chan struct{}
 	closeOnce sync.Once
+	onTake    func(remoteWatchUpdate)
 }
 
 // newRemoteWatch starts the bridge for slot under parent. Nothing is watched until a
@@ -337,6 +338,9 @@ func (w *remoteWatch) collect() {
 				timer.Reset(remoteWatchDebounce)
 			}
 			timerC = timer.C
+			if w.onTake != nil {
+				w.onTake(update)
+			}
 		case <-timerC:
 			timer, timerC = nil, nil
 			if len(dirs) == 0 {

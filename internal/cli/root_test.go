@@ -272,8 +272,8 @@ func TestExecuteVersion(t *testing.T) {
 func TestExecuteVersionShowsBuildInfo(t *testing.T) {
 	rec := &recorder{}
 	_, stdout, _ := execute(t, []string{"version"}, rec)
-	if !strings.Contains(stdout, "go go") || !strings.Contains(stdout, "platform ") {
-		t.Fatalf("stdout = %q, want Go and platform lines", stdout)
+	if !strings.Contains(stdout, "v") || !strings.Contains(stdout, "go1.") || !strings.Contains(stdout, "platform ") {
+		t.Fatalf("stdout = %q, want version, Go toolchain, and platform lines", stdout)
 	}
 }
 
@@ -327,5 +327,43 @@ func TestExecuteWithNilRunnerFails(t *testing.T) {
 	code := Execute(context.Background(), []string{}, &stdout, &stderr, nil)
 	if code != 1 || !strings.Contains(stderr.String(), "no runner configured") {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+}
+
+func TestExecuteSilencesUsageOnEarlyRunEError(t *testing.T) {
+	isolateHome(t)
+	for _, args := range [][]string{
+		{"--stdin", "-"},
+		{"-", "-"},
+		{"--daemon", "-a"},
+		{"ssh://"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			rec := &recorder{}
+			code, stdout, stderr := execute(t, args, rec)
+			if code != 1 {
+				t.Fatalf("exit = %d, want 1 (stderr %q)", code, stderr)
+			}
+			if strings.Contains(stdout, "Usage:") || strings.Contains(stderr, "Usage:") {
+				t.Fatalf("early RunE error dumped usage: stdout=%q stderr=%q", stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestRootLocalFlagsNotInheritedBySubcommands(t *testing.T) {
+	isolateHome(t)
+	for _, args := range [][]string{
+		{"config", "paths", "--daemon"},
+		{"config", "paths", "--attach"},
+		{"config", "paths", "--log-file", "/tmp/x.log"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			rec := &recorder{}
+			code, _, stderr := execute(t, args, rec)
+			if code != 1 || !strings.Contains(stderr, "unknown flag") {
+				t.Fatalf("execute(%v) = %d %q, want unknown flag", args, code, stderr)
+			}
+		})
 	}
 }

@@ -515,3 +515,34 @@ func TestServerClosesConnectionWithoutHello(t *testing.T) {
 		t.Fatalf("read on a silent connection = %v, want the server to close it (EOF)", err)
 	}
 }
+
+func TestServerWriteChunksLargePayloads(t *testing.T) {
+	srv, _ := startTestServer(t)
+	c := dialTestDaemon(t, srv, 100, 30)
+	payload := bytes.Repeat([]byte("Z"), MaxPayload+12345)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := srv.Write(payload)
+		errCh <- err
+	}()
+	var got []byte
+	for len(got) < len(payload) {
+		f, err := ReadFrame(c.conn)
+		if err != nil {
+			t.Fatalf("ReadFrame after %d bytes: %v", len(got), err)
+		}
+		if f.Type != TypeOutput {
+			t.Fatalf("frame type = %d, want TypeOutput", f.Type)
+		}
+		if len(f.Payload) > MaxPayload {
+			t.Fatalf("chunk size = %d > MaxPayload", len(f.Payload))
+		}
+		got = append(got, f.Payload...)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Server.Write: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("reassembled len = %d, want %d", len(got), len(payload))
+	}
+}

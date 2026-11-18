@@ -92,7 +92,7 @@ func (p *themeInfoPage) Draw(g *grid.Grid) {
 		if line.swatch != nil {
 			sw := ov.Box
 			sw.FG = style.RenderedColor(*line.swatch)
-			g.Put(x+2, row, x+3, "██", sw)
+			g.Put(x+2, row, x+4, "██", sw)
 			textX := x + 4
 			st := ov.Box
 			if line.bold {

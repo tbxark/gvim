@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 )
 
@@ -20,6 +21,9 @@ type mouseExtra struct {
 	// extend is set while a Shift or Ctrl press is handled. The press grows the
 	// selection from its anchor instead of placing the caret.
 	extend bool
+	alt    bool
+	ctrl   bool
+	super  bool
 	pan    panView
 	// dragSeq numbers the autoscroll ticks of text drags.
 	dragSeq int
@@ -39,6 +43,16 @@ type panView struct {
 // without moving the caret. The app adapter implements it.
 type foldToggler interface {
 	ToggleFoldAt(line int) bool
+}
+
+// multiCursorEditor is the optional editor port that adds/removes a caret on Alt+Click.
+type multiCursorEditor interface {
+	ToggleCursorAt(p buffer.Pos) bool
+}
+
+// rangeReplacer is the optional editor port that replaces a small buffer range as one undo step.
+type rangeReplacer interface {
+	ReplaceActiveRange(from, to buffer.Pos, text string) bool
 }
 
 // scrollMargined is the optional editor port that reports the scroll-off margin in
@@ -64,7 +78,11 @@ func (m *Model) scrollMarginFor(msg tea.Msg) int {
 // noteMods records the modifiers of a left press. Shift and Ctrl both extend the
 // selection, since some terminals swallow Shift+click.
 func (m *Model) noteMods(mo tea.Mouse) {
-	m.mx.extend = mo.Mod&(tea.ModShift|tea.ModCtrl) != 0
+	altGr := isAltGr(tea.KeyMod(mo.Mod))
+	m.mx.alt = mo.Mod&tea.ModAlt != 0 && !altGr
+	m.mx.ctrl = mo.Mod&tea.ModCtrl != 0 && !altGr
+	m.mx.super = mo.Mod&(tea.ModSuper|tea.ModMeta) != 0
+	m.mx.extend = mo.Mod&(tea.ModShift|tea.ModCtrl) != 0 && !altGr
 }
 
 // collapseCarets ends multi-caret editing before a plain click places the caret,
@@ -118,6 +136,14 @@ func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	py := m.drag.last.Y - fp.Y
 	before := doc.Cursor()
 	pos := m.dragPos(p, doc, w, h, x, py)
+	if m.drag.gutterLine && pos.Line != m.drag.gutterStartLine {
+		if m.drag.unit != editor.UnitLine {
+			anchor := buffer.Pos{Line: m.drag.gutterStartLine, Col: 0}
+			m.ed.SetCursor(anchor, false)
+			m.ed.ExtendSelection(anchor, editor.UnitLine)
+			m.drag.unit = editor.UnitLine
+		}
+	}
 	last := max(p.BodyRows(w, h), 1) - 1
 	vs, vd := pastEdge(py, 0, last)
 	var hs, hd int

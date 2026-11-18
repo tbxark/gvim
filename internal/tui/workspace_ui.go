@@ -151,7 +151,7 @@ func (m *Model) CloseTabForWorkspaceExtract(path string) bool {
 	if i < 0 || i >= len(tabs) || tabs[i].Path != path {
 		return false
 	}
-	if err := t.CloseTab(i, true); err != nil {
+	if err := m.closeTab(t, i, true); err != nil {
 		m.quietNotice(err.Error())
 		return false
 	}
@@ -173,7 +173,7 @@ func (m *Model) CloseTabForWorkspaceExtractAt(path string) bool {
 		if tab.Path != path {
 			continue
 		}
-		if err := t.CloseTab(i, true); err != nil {
+		if err := m.closeTab(t, i, true); err != nil {
 			m.quietNotice(err.Error())
 			return false
 		}

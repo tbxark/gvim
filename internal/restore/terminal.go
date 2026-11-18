@@ -87,7 +87,11 @@ func SaveTerminal(dir string, st terminal.SavedState) error {
 	}
 	// The generic entry point bounds the whole state, not only the dock's own
 	// callers: a direct SaveTerminal cannot write a record larger than LoadTerminal
-	// (or the documented bounds) would accept.
+	// (or the documented bounds) would accept. Default Version when unset so
+	// callers building a fresh SavedState always emit a loadable record.
+	if st.Version == 0 {
+		st.Version = terminal.SavedStateVersion
+	}
 	st = boundTerminalState(st)
 	if len(st.Tabs) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -429,17 +433,24 @@ func boundSavedLaunch(name, agent, source, launchDir, title string, launchArgv, 
 // clamped. It is pure value processing: no IO and no process.
 func boundTerminalState(st terminal.SavedState) terminal.SavedState {
 	st.SearchHistory = boundSearchHistory(st.SearchHistory)
+	active := st.ActiveTab
 	if len(st.Tabs) > maxSavedTerminalTabs {
-		st.Tabs = st.Tabs[len(st.Tabs)-maxSavedTerminalTabs:]
+		trimmed := len(st.Tabs) - maxSavedTerminalTabs
+		st.Tabs = st.Tabs[trimmed:]
+		active -= trimmed
 	}
 	kept := make([]terminal.SavedTab, 0, len(st.Tabs))
-	for _, tab := range st.Tabs {
+	nextActive := active
+	for i, tab := range st.Tabs {
 		tab.Name, tab.Agent, tab.Source, tab.LaunchDir, tab.Title, tab.LaunchArgv, tab.ResumeArgv =
 			boundSavedLaunch(tab.Name, tab.Agent, tab.Source, tab.LaunchDir, tab.Title, tab.LaunchArgv, tab.ResumeArgv)
 		tab.Cwd = boundTerminalDir(tab.Cwd)
 		tab.Rows = boundTerminalRows(tab.Rows)
 		tab.Screen = tab.Screen.Bounded()
 		if len(tab.Rows) == 0 && !tab.Open {
+			if i < active {
+				nextActive--
+			}
 			continue
 		}
 		kept = append(kept, tab)
@@ -448,7 +459,7 @@ func boundTerminalState(st terminal.SavedState) terminal.SavedState {
 	if len(st.Tabs) == 0 {
 		st.ActiveTab = 0
 	} else {
-		st.ActiveTab = min(max(st.ActiveTab, 0), len(st.Tabs)-1)
+		st.ActiveTab = min(max(nextActive, 0), len(st.Tabs)-1)
 	}
 	return st
 }
@@ -501,14 +512,13 @@ func boundTerminalRows(rows []string) []string {
 	return rows
 }
 
-// cleanTerminalText strips control characters from a saved transcript row.
+// cleanTerminalText replaces invalid UTF-8 and control characters (including C1
+// 0x80..0x9f) with spaces, matching SavedScreen's cleanSavedRune sanitization.
 func cleanTerminalText(text string) string {
-	out := make([]rune, 0, len(text))
-	for _, r := range text {
-		if r < 0x20 || r == 0x7f {
-			continue
+	return strings.Map(func(r rune) rune {
+		if !utf8.ValidRune(r) || unicode.IsControl(r) {
+			return ' '
 		}
-		out = append(out, r)
-	}
-	return string(out)
+		return r
+	}, strings.ToValidUTF8(text, " "))
 }

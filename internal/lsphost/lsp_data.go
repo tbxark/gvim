@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -60,9 +61,10 @@ func (p *lspPort) InlayHints(path string) ([]tui.InlayHint, error) {
 	if last < 0 {
 		last = 0
 	}
+	lastLine := rec.lines.line(last)
 	hints, err := hs[0].Client().InlayHints(ctx, lsp.PathURI(path), protocol.Range{
 		Start: protocol.Position{Line: 0, Character: 0},
-		End:   protocol.Position{Line: uint32(last), Character: uint32(len(rec.lines.line(last)))},
+		End:   protocol.Position{Line: uint32(last), Character: lsp.RuneColToUTF16(lastLine, utf8.RuneCountInString(lastLine))},
 	})
 	if err != nil {
 		return nil, err

@@ -22,7 +22,7 @@ func (m *Model) openCompare(left, right int) bool {
 		return false
 	}
 	if name := m.largeTabIn(left, right); name != "" {
-		m.notice = name + " is too large to compare"
+		m.notice = uiTextVars("gvim.notice.compare.too_large", "%{name} is too large to compare", map[string]any{"name": name})
 		return false
 	}
 	a, b := &split.Node{Tab: left}, &split.Node{Tab: right}
@@ -46,7 +46,7 @@ func (m *Model) compareStep(forward bool) {
 		return
 	}
 	if name := m.largeCompared(); name != "" {
-		m.notice = name + " is too large to compare"
+		m.notice = uiTextVars("gvim.notice.compare.too_large", "%{name} is too large to compare", map[string]any{"name": name})
 		return
 	}
 	hunks, ok := m.compareHunks()

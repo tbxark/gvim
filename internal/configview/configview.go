@@ -174,9 +174,9 @@ func Load(root string, opts Options) (ConfigView, error) {
 	return view, nil
 }
 
-// projectConfigFile returns the project config file the nearest-project search finds
-// for root. The trust decision itself is the caller's (Options.Trusted): this package is
-// a config/keybindings leaf and does not read the trust store.
+// projectConfigFile returns the project config file in root. The trust decision
+// itself is the caller's (Options.Trusted): this package is a config/keybindings
+// leaf and does not read the trust store.
 func projectConfigFile(root string) (path string, found bool) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
@@ -191,10 +191,9 @@ func projectConfigFile(root string) (path string, found bool) {
 
 // Paths returns the user config file and the project config file for root. A
 // non-empty configPath stands in for the user file, as it does in Load. The
-// project entry is the nearest .gvim/config.json at or above root. When none
-// exists, its path is the one under root, and Exists is false. The error is
-// non-nil only when configPath is empty and the user config directory is
-// unknown.
+// project entry is .gvim/config.json under root (even when absent, with Exists
+// false). The error is non-nil only when configPath is empty and the user config
+// directory is unknown.
 func Paths(root, configPath string) ([]ConfigFile, error) {
 	user := configPath
 	if user == "" {

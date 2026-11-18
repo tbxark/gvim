@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -373,8 +374,12 @@ func TestExactUnbindOnlyConsumesTheRemoteFallback(t *testing.T) {
 	d.keys = typedKeys(map[string]bool{"terminal|x|": true})
 	dockSettle(t, d, d.runCommand("open_terminal_in_dock"))
 	dockSettle(t, d, press(d, typed("x")))
-	if !strings.Contains(strings.Join(starter.term.writes, ""), "x") {
-		t.Fatalf("a terminal printable unbind did not reach the shell: writes %q", starter.term.writes)
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for !strings.Contains(strings.Join(starter.term.WritesSnapshot(), ""), "x") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(strings.Join(starter.term.WritesSnapshot(), ""), "x") {
+		t.Fatalf("a terminal printable unbind did not reach the shell: writes %q", starter.term.WritesSnapshot())
 	}
 
 	// F6 unbind still consumes the chord when Global F6 would run the remote action.

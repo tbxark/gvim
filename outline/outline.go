@@ -96,7 +96,8 @@ func Scan(lines []string) []Heading {
 
 	inFence, fenceChar, fenceLen := false, byte(0), 0
 	body := frontMatterEnd(lines) + 1
-	for i, line := range lines {
+	for i, raw := range lines {
+		line := strings.TrimSuffix(raw, "\r")
 		if i < body {
 			continue // YAML front matter: its "---" fences are not setext underlines
 		}
@@ -117,11 +118,14 @@ func Scan(lines []string) []Heading {
 		// A setext heading is written as its text line followed by an
 		// underline, so it is found at the underline, one line after its text.
 		// The text line must be in the body too: the line closing front matter is not one.
-		if level, ok := setextUnderline(line); ok && i > body && setextText(lines[i-1]) {
-			if n := len(heads); n > 0 && heads[n-1].Line == i-1 {
-				continue // the line above is an ATX heading, not a paragraph
+		if i > body {
+			prev := strings.TrimSuffix(lines[i-1], "\r")
+			if level, ok := setextUnderline(line); ok && setextText(prev) {
+				if n := len(heads); n > 0 && heads[n-1].Line == i-1 {
+					continue // the line above is an ATX heading, not a paragraph
+				}
+				heads = append(heads, Heading{Byte: starts[i-1], Line: i - 1, Level: level, Title: clipTitle(strings.TrimSpace(prev))})
 			}
-			heads = append(heads, Heading{Byte: starts[i-1], Line: i - 1, Level: level, Title: clipTitle(strings.TrimSpace(lines[i-1]))})
 		}
 	}
 
@@ -134,8 +138,8 @@ func Scan(lines []string) []Heading {
 				break
 			}
 		}
-		h.BodyStart = ends[h.Line] + 1
 		h.EndByte = ends[h.EndLine]
+		h.BodyStart = min(ends[h.Line]+1, h.EndByte)
 		h.HasChildren = i+1 < len(heads) && heads[i+1].Level > h.Level
 	}
 	return heads
@@ -152,7 +156,10 @@ func ScanDoc(doc Lines, maxBytes int) (headings []Heading, complete bool) {
 	if n < 0 {
 		n = 0
 	}
-	lines := make([]string, 0, n)
+	if n > maxBytes {
+		return nil, false
+	}
+	lines := make([]string, 0, min(n, 256))
 	total := 0
 	for i := 0; i < n; i++ {
 		line := doc.Line(i)
@@ -170,8 +177,9 @@ func ScanDoc(doc Lines, maxBytes int) (headings []Heading, complete bool) {
 // whitespace, and a non-empty text; an optional closing run of "#" is stripped
 // when a space precedes it ("## Title ##" is "Title", "## C#" is "C#").
 func atxHeading(line string) (level int, title string, ok bool) {
+	line = strings.TrimSuffix(line, "\r")
 	i := 0
-	for i < len(line) && i < 3 && (line[i] == ' ' || line[i] == '	') {
+	for i < len(line) && i < 3 && line[i] == ' ' {
 		i++
 	}
 	start := i
@@ -208,8 +216,9 @@ func atxHeading(line string) (level int, title string, ok bool) {
 // run of "=", 2 for a run of "-". Up to three spaces may precede it and
 // trailing white space is allowed.
 func setextUnderline(line string) (level int, ok bool) {
+	line = strings.TrimSuffix(line, "\r")
 	i := 0
-	for i < len(line) && i < 3 && (line[i] == ' ' || line[i] == '	') {
+	for i < len(line) && i < 3 && line[i] == ' ' {
 		i++
 	}
 	if i >= len(line) {

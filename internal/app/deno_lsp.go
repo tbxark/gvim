@@ -104,6 +104,22 @@ func (s *denoAutoSelector) Start(ctx context.Context) {
 	}()
 }
 
+// Clear cancels any in-flight probe and clears the current root's provider.
+func (s *denoAutoSelector) Clear() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
+	}
+	root := s.root
+	s.mu.Unlock()
+	s.gen.Add(1)
+	s.lsp.ClearRootServerProvider(root)
+}
+
 // Rebind moves auto-selection to a new project root: it cancels the old probe, clears the
 // old root's provider (so future managers there restore the baseline) and probes the new
 // root. Existing managers keep whatever they were created with.

@@ -32,15 +32,16 @@ type composedLine struct {
 // until its text changes.
 func (f frame) composedLine(i int) composedLine {
 	if lm, ok := f.doc.(LayoutMemo); ok && !isLarge(f.doc) {
-		key := composeKey{line: i, measure: f.pageMeasure}
+		key := composeKey{line: i, measure: f.pageMeasure, revealed: !f.noPageReveal && f.caret.Line == i}
 		return lm.MemoValue(key, func() any { return f.composeLine(i) }).(composedLine)
 	}
 	return f.composeLine(i)
 }
 
 type composeKey struct {
-	line    int
-	measure int
+	line     int
+	measure  int
+	revealed bool
 }
 
 // rawComposed returns line i without any composing: the visible reveal variant.

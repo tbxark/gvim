@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/trust"
 )
 
@@ -623,4 +628,97 @@ func TestSaveDoesNotHoldTheStateLockAcrossFileIO(t *testing.T) {
 	if err := <-saveErr; err != nil {
 		t.Fatalf("Save error = %v", err)
 	}
+}
+
+// TestSettingsReloadSyncsKeybindingsSwitchKeymapPluginKeysAndSummary checks that Reload
+// synchronizes the keybinding store, SwitchKeymap, PluginKeys, keybindings summary (even
+// with nil user overrides), and iconsMode/iconsWhy on subsequent snapshots.
+func TestSettingsReloadSyncsKeybindingsSwitchKeymapPluginKeysAndSummary(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "config.json")
+	writeTestFile(t, userFile, `{"keymap": "default"}`)
+	got, err := buildCaptured(t, Options{Root: dir, Config: userFile})
+	apptest.Must(t, err)
+	port := settingsPort(t, got)
+
+	initial := findItem(t, port.Snapshot(), "keybindings").Value
+	if strings.HasPrefix(initial, "0 bindings") || !strings.HasSuffix(initial, " · default") {
+		t.Fatalf("initial keybindings summary = %q, want preset binding count and · default", initial)
+	}
+
+	writeTestFile(t, userFile, `{
+		"keymap": "emacs",
+		"ui_icons": "nerd",
+		"keybindings": [{"key": "j", "modifiers": ["alt"], "action": "save", "when": "normal"}]
+	}`)
+	change, err := port.Reload()
+	apptest.Must(t, err)
+	if !slices.Contains(change.Live, "keymap") {
+		t.Fatalf("Reload change.Live = %v, want keymap included", change.Live)
+	}
+	if gotCustom := got.deps.Root.Keybindings.Custom(); len(gotCustom) != 1 || gotCustom[0].Chord != "alt+j" {
+		t.Fatalf("Keybindings.Custom() = %+v, want alt+j after Reload", gotCustom)
+	}
+	sw, err := got.deps.SwitchKeymap("default")
+	apptest.Must(t, err)
+	if cmd, ok := sw.Resolve(tui.KeyPress{Name: "j", Mods: []string{"alt"}}, tui.KeyContextNormal); !ok || cmd.Action != "save" {
+		t.Fatalf("SwitchKeymap alt+j = %+v/%v, want save", cmd, ok)
+	}
+	pk, err := got.deps.Root.PluginKeys("default", []pluginapi.Binding{{Plugin: "p", Chord: "alt+p", Action: "p.run"}})
+	apptest.Must(t, err)
+	if cmd, ok := pk.Resolve(tui.KeyPress{Name: "j", Mods: []string{"alt"}}, tui.KeyContextNormal); !ok || cmd.Action != "save" {
+		t.Fatalf("PluginKeys alt+j = %+v/%v, want save", cmd, ok)
+	}
+
+	after := port.Snapshot()
+	if summary := findItem(t, after, "keybindings").Value; !strings.HasSuffix(summary, " · emacs") {
+		t.Fatalf("reloaded keybindings summary = %q, want · emacs", summary)
+	}
+	if iconVal := findItem(t, after, "env.icons").Value; iconVal != "nerd" {
+		t.Fatalf("reloaded env.icons = %q, want nerd", iconVal)
+	}
+}
+
+// TestSettingsRemoteDisablesProjectLayer checks that remote sessions report ProjectWritable=false
+// and refuse project-layer Structure and Save calls even when trust is Granted.
+func TestSettingsRemoteDisablesProjectLayer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "user.json")
+	svc := newSettingsService(dir, Options{
+		Config: userFile,
+		Remote: &authority.RemoteSpec{Host: "example", Path: "/srv/app"},
+	}, editor.New(editor.Options{}), func() bool { return true }, config.Defaults(), nil, settingsRuntime{})
+
+	snap := svc.Snapshot()
+	if snap.ProjectWritable || snap.ProjectFile != "" {
+		t.Fatalf("remote snapshot = writable:%v file:%q, want false and empty", snap.ProjectWritable, snap.ProjectFile)
+	}
+	if _, err := svc.Save([]tui.SettingEdit{{Key: "editor.tab_size", Value: "2"}}, tui.SettingsLayerProject); err == nil || !strings.Contains(err.Error(), "remote") {
+		t.Fatalf("remote project Save = %v, want remote refusal", err)
+	}
+	if _, err := svc.Structure("formatters", tui.SettingsLayerProject); err == nil || !strings.Contains(err.Error(), "remote") {
+		t.Fatalf("remote project Structure = %v, want remote refusal", err)
+	}
+}
+
+// TestSettingsApplyDoesNotInvokeLookPath verifies Apply uses cached formatter resolution from
+// build/reload and never probes PATH on the UI update goroutine.
+func TestSettingsApplyDoesNotInvokeLookPath(t *testing.T) {
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "user.json")
+	writeTestFile(t, userFile, `{}`)
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+
+	lookPath = func(string) (string, error) { return "", errors.New("missing") }
+	svc := newSettingsService(dir, Options{Config: userFile}, editor.New(editor.Options{}), func() bool { return true }, config.Defaults(), nil, settingsRuntime{})
+
+	lookPath = func(name string) (string, error) {
+		t.Fatalf("Apply called lookPath(%q) on UI thread", name)
+		return "", nil
+	}
+	svc.Apply(tui.SettingsChange{})
+	_ = json.Valid([]byte("{}"))
 }

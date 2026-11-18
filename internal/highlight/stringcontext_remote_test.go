@@ -147,8 +147,9 @@ func TestStringContextRemoteLargeEditing(t *testing.T) {
 	if !doc.LineLoaded(0) {
 		t.Fatal("line 0 did not load")
 	}
-	ed.SetStringContext(NewStringContext())
-	ed.SetNonCodeContext(NewNonCodeContext())
+	strCtx, nonCodeCtx := NewContextPair()
+	ed.SetStringContext(strCtx)
+	ed.SetNonCodeContext(nonCodeCtx)
 	reads, bytes := access.counts()
 
 	// Inside "hello": the quote is inserted as text, not paired.

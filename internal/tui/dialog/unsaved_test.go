@@ -144,80 +144,14 @@ func TestUnsavedChangesDrawsBodyAndButtons(t *testing.T) {
 	}
 }
 
-func TestConfirmTrashKeysAndFocus(t *testing.T) {
+func TestConfirmQuitWideButtonClick(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		keys []string
-		want Choice
-	}{
-		{"enter starts on Cancel", []string{"enter"}, ChoiceCancel},
-		{"t moves to trash", []string{"t"}, ChoiceMoveToTrash},
-		{"upper T moves to trash", []string{"T"}, ChoiceMoveToTrash},
-		{"c cancels", []string{"c"}, ChoiceCancel},
-		{"esc cancels", []string{"esc"}, ChoiceCancel},
-		{"left then enter moves to trash", []string{"left", "enter"}, ChoiceMoveToTrash},
-		{"tab then enter moves to trash", []string{"tab", "enter"}, ChoiceMoveToTrash},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			c := newFakeClock()
-			d := NewConfirmTrash(c.Now, "old.txt", "tag", testOv)
-			c.afterGrace()
-			var o Overlay = d
-			var last Result
-			var answered bool
-			for _, k := range tt.keys {
-				var cmd tea.Cmd
-				o, cmd = o.Update(key(k))
-				if r, ok := answer(cmd); ok {
-					last, answered = r, true
-					break
-				}
-			}
-			if !answered {
-				t.Fatalf("keys %v did not answer", tt.keys)
-			}
-			if last.Choice != tt.want || last.Tag != "tag" {
-				t.Fatalf("answered %+v, want %v with the tag", last, tt.want)
-			}
-		})
-	}
-}
-
-func TestConfirmTrashDrawsQuestionAndUnderlinesT(t *testing.T) {
-	t.Parallel()
-	c := newFakeClock()
-	d := NewConfirmTrash(c.Now, "old.txt", nil, testOv)
+	d := NewConfirmQuit(newFakeClock().Now, nil, testOv)
+	d.buttons[0] = newButton("退出编辑", 0, ChoiceQuit)
 	g := draw(d, 80, 24)
-	mustFind(t, g, `Move "old.txt" to Trash?`)
-	x, y := mustFind(t, g, "Move to Trash")
-	if !g.At(x+8, y).Style.Underline {
-		t.Fatalf("the T of Trash is not underlined")
-	}
-	if g.At(x, y).Style.Underline {
-		t.Fatalf("the M of Move is underlined, only the hotkey letter should be")
-	}
-}
-
-func TestConfirmTrashWideButtonClick(t *testing.T) {
-	d := NewConfirmTrash(newFakeClock().Now, "old.txt", nil, testOv)
-	d.buttons[0] = newButton("删除文件", 0, ChoiceMoveToTrash)
-	g := draw(d, 80, 24)
-	x, y := mustFind(t, g, "删除文件")
+	x, y := mustFind(t, g, "退出编辑")
 	_, cmd := d.Update(click(x+7, y))
-	mustClose(t, d, cmd, ChoiceMoveToTrash, "")
-}
-
-func TestConfirmTrashClickMovesToTrash(t *testing.T) {
-	t.Parallel()
-	c := newFakeClock()
-	d := NewConfirmTrash(c.Now, "old.txt", nil, testOv)
-	g := draw(d, 80, 24)
-	x, y := mustFind(t, g, "Move to Trash")
-	_, cmd := d.Update(click(x+2, y))
-	mustClose(t, d, cmd, ChoiceMoveToTrash, "")
+	mustClose(t, d, cmd, ChoiceQuit, "")
 }
 
 func TestConfirmQuitKeysAndFocus(t *testing.T) {

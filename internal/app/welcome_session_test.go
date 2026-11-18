@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/internal/uitest"
 	"github.com/tbxark/gvim/keymap"
@@ -57,7 +58,7 @@ func startFilesApp(t *testing.T, w, h int, names ...string) *uitest.Session {
 func TestWelcomeShowsAtStartupWithoutFiles(t *testing.T) {
 	s := startEmptyApp(t, 80, 24)
 	sc := s.Screen()
-	for _, want := range []string{"a terminal editor", "New File", "Open File", "Command Palette"} {
+	for _, want := range []string{frame.WelcomeSubtitleText, "New File", "Open File", "Command Palette"} {
 		if !sc.Contains(want) {
 			t.Fatalf("welcome lacks %q:\n%s", want, sc)
 		}
@@ -72,7 +73,7 @@ func TestCtrlNHidesWelcomeAndOpensUntitledTab(t *testing.T) {
 	s := startEmptyApp(t, 80, 24)
 	s.Key("ctrl+n")
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Untitled-1") })
-	if sc.Contains("a terminal editor") {
+	if sc.Contains(frame.WelcomeSubtitleText) {
 		t.Fatalf("the welcome screen is still shown after Ctrl+N:\n%s", sc)
 	}
 }
@@ -81,7 +82,7 @@ func TestCtrlNHidesWelcomeAndOpensUntitledTab(t *testing.T) {
 func TestCloseTabKeyOnLastTabShowsWelcomeAgain(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
 	s.Key(closeTabChord(t))
-	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("a terminal editor") })
+	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains(frame.WelcomeSubtitleText) })
 	if sc.Contains("a.txt") {
 		t.Fatalf("the tab is still shown after closing it:\n%s", sc)
 	}
@@ -96,7 +97,7 @@ func TestClickingNewFileRowOpensUntitledTab(t *testing.T) {
 	}
 	s.Click(x+1, y)
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Untitled-1") })
-	if sc.Contains("a terminal editor") {
+	if sc.Contains(frame.WelcomeSubtitleText) {
 		t.Fatalf("the welcome screen is still shown after New File:\n%s", sc)
 	}
 }

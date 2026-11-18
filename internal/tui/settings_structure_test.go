@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/theme"
@@ -495,4 +496,59 @@ func TestStructurePageDualOpensRightSide(t *testing.T) {
 		t.Errorf("side = %q, want right for the right row", sub.side)
 	}
 	_ = palette.RunCommandMsg{}
+}
+
+func TestStructureMapDynamicPathDuplicateListOpsNoDoubleJumpAndTinyClamp(t *testing.T) {
+	t.Parallel()
+	m, p, _ := openStructuredPage(t)
+
+	// 1. Dynamic p.st.Path on a custom map key ("custom.map").
+	customMap := newSettingsStructurePage(p, SettingsStructure{
+		Key: "custom.map", Path: []string{"custom", "map"}, Title: "Custom", Kind: "map",
+	})
+	m.pushOverlay(customMap)
+	customMap.promptDone(prompt.Done{
+		Outcome: prompt.Submitted, Text: "val",
+		Tag: structurePromptTag{page: customMap, action: "add-value", path: []string{"k"}},
+	})
+	if pe, ok := p.pending[pathID([]string{"custom", "map", "k"})]; !ok || !slices.Equal(pe.path, []string{"custom", "map", "k"}) {
+		t.Fatalf("pending keys = %+v, want dynamic path [custom map k]", p.pending)
+	}
+	m.popOverlay()
+
+	// 2. Duplicate list entries edit/reorder/remove by index.
+	dupList := newSettingsStructurePage(p, SettingsStructure{
+		Key: "terminal.shell.args", Path: []string{"terminal", "shell", "args"}, Kind: "list",
+		Rows: []SettingsStructureRow{{Value: "-x", Name: "-x"}, {Value: "-x", Name: "-x"}},
+	})
+	m.pushOverlay(dupList)
+	dupList.sel = 1
+	cmd := dupList.edit()
+	ovMsg := firstOf[structureOverlayMsg](t, collect(cmd))
+	ln := ovMsg.overlay.(*prompt.Line)
+	// Simulate submit for index 1.
+	dupList.promptDone(prompt.Done{
+		Outcome: prompt.Submitted, Text: "-y",
+		Tag: structurePromptTag{page: dupList, action: "edit-item", index: 1, kind: "string"},
+	})
+	if !slices.Equal(dupList.items, []string{"-x", "-y"}) {
+		t.Fatalf("duplicate edit-item mutated wrong index: %v", dupList.items)
+	}
+	_ = ln
+	m.popOverlay()
+
+	// 3. Dual reorder moves selection by 1 row (no double +d jump) and tiny terminal clamps startRow.
+	sub := requestStructurePage(t, m, p, "editor.status_bar.left")
+	sub.sel = 1 // first entry under Left header
+	press(m, tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
+	if sub.sel != 2 {
+		t.Fatalf("dual reorder down moved sel to %d, want 2 (single step, no double jump)", sub.sel)
+	}
+	sub.st.Note = "note"
+	sub.st.Filter = true
+	sub.filter = []rune("x")
+	sub.Draw(grid.New(40, 6))
+	if sub.box.H < 3 || sub.page < 0 || sub.startRow > sub.box.H-1 {
+		t.Fatalf("tiny Draw failed to clamp startRow/page: startRow=%d page=%d box=%+v", sub.startRow, sub.page, sub.box)
+	}
 }

@@ -287,6 +287,10 @@ func (p *Panel) nextAutoScroll() tea.Cmd {
 // past the dock's edges (see the auto-scroll in input.go).
 func (p *Panel) SelectionDragging() bool { return p.sel.pending || p.sel.dragging }
 
+// MouseDragging reports whether the dock holds a selection drag or a forwarded
+// mouse button press that must still receive motion/release outside the dock.
+func (p *Panel) MouseDragging() bool { return p.SelectionDragging() || p.pressed != 0 }
+
 // canDragSelect reports whether a drag on the live grid starts a selection.
 func (p *Panel) canDragSelect() bool {
 	return !p.effects.NoMouseDragSelects || p.sel.pressShift
@@ -516,6 +520,9 @@ func (p *Panel) paintSelection(g *grid.Grid, x0, y, w int, abs int, bg color.Col
 func tintRange(g *grid.Grid, x0, y, start, end int, bg color.Color) {
 	for c := start; c < end; c++ {
 		cell := g.At(x0+c, y)
+		if cell.Text == "" {
+			continue
+		}
 		st := cell.Style
 		if bg != nil {
 			st.BG = bg

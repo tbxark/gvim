@@ -63,7 +63,7 @@ func seedSession(t *testing.T, root string) (string, string) {
 	if res := seed.Do("insert_char", map[string]any{"text": "Z"}); res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	apptest.Must(t, restore.SaveSession(seed, dir, tui.ExplorerState{Open: true, ShowHidden: true}))
+	apptest.Must(t, restore.WriteSession(seed, dir, tui.ExplorerState{Open: true, ShowHidden: true}, nil))
 	seed.Close()
 	return dir, edited
 }
@@ -138,7 +138,7 @@ func TestBuildRuntimeWithFilesRestoresWhenTheSkipKeyIsOff(t *testing.T) {
 	writeTestFile(t, given, "given\n")
 	seed := apptest.NewSessionEditor()
 	apptest.Must(t, seed.OpenFile(saved))
-	apptest.Must(t, restore.SaveSession(seed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, restore.WriteSession(seed, sessDir, tui.ExplorerState{}, nil))
 	seed.Close()
 
 	opts := Options{
@@ -192,7 +192,7 @@ func TestBuildRuntimeRestoreFlagForcesTheSession(t *testing.T) {
 	writeTestFile(t, saved, "one\ntwo\nthree\n")
 	seed := apptest.NewSessionEditor()
 	apptest.Must(t, seed.OpenFile(saved))
-	apptest.Must(t, restore.SaveSession(seed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, restore.WriteSession(seed, sessDir, tui.ExplorerState{}, nil))
 	seed.Close()
 
 	opts := Options{

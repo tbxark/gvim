@@ -35,6 +35,10 @@ type PluginShared struct {
 	idMu       sync.Mutex
 	workspaces map[*Model]uint64
 	nextWS     uint64
+
+	// waitMu guards the cross-workspace wait ownership map of this shared host.
+	waitMu sync.Mutex
+	waits  map[pluginapi.Token]*Model
 }
 
 // workspaceSeq returns m's sequence in the shared plugin id namespace, assigning the next

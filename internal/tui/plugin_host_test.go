@@ -714,3 +714,62 @@ func TestHostRefusalsDoNotDependOnTheNotice(t *testing.T) {
 		}
 	})
 }
+
+func TestPluginHostLiveConfigAndSaveGateGlobalBufferIDs(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime(t)
+	shared := NewPluginShared()
+	m1, _ := newSharedPluginModel(t, shared, rt)
+	m2, pe2 := newSharedPluginModel(t, shared, rt)
+	shared.Bind(m2)
+	defer shared.Bind(m1)
+
+	// Live theme and active document/deps tab size must reflect current Model state,
+	// not just static initial settings.
+	m2.util.settings.Theme = "stale"
+	m2.theme.Name = "live-custom"
+	m2.tabSize = 6
+	if got, ok := shared.host.Config("theme"); !ok || got != "live-custom" {
+		t.Fatalf("Config(theme) = %v, %v, want live-custom", got, ok)
+	}
+	if got, ok := shared.host.Config("tab_size"); !ok || got != 6 {
+		t.Fatalf("Config(tab_size) = %v, %v, want 6", got, ok)
+	}
+
+	// All 4 before_file_save gates must encode local IDs with m2.gb(...).
+	rt.wants["before_file_save"] = true
+	var gotBufIDs []pluginapi.BufferID
+	rt.veto = func(e pluginapi.Event) (bool, string) {
+		if e.Name == "before_file_save" {
+			if id, ok := e.Data["buf"].(pluginapi.BufferID); ok {
+				gotBufIDs = append(gotBufIDs, id)
+			}
+		}
+		return false, ""
+	}
+	localID := pe2.ActiveBuffer()
+	wantGlobal := m2.gb(localID)
+	if wantGlobal == localID {
+		t.Fatalf("expected distinct global buffer ID for second workspace (local=%d, global=%d)", localID, wantGlobal)
+	}
+	for i := range pe2.bufs {
+		if pe2.bufs[i].ID == localID {
+			if pe2.bufs[i].Path == "" {
+				pe2.bufs[i].Path = "/w/a.txt"
+			}
+			pe2.bufs[i].Modified = true
+		}
+	}
+	m2.pluginSaveGate("manual")
+	m2.pluginSaveAllGate("manual")
+	m2.pluginAutoSaveGate()
+	m2.pluginSaveAsGate("/w/new.txt")
+	if len(gotBufIDs) != 4 {
+		t.Fatalf("got %d before_file_save events, want 4", len(gotBufIDs))
+	}
+	for i, id := range gotBufIDs {
+		if id != wantGlobal {
+			t.Errorf("gate %d encoded buf=%d, want global %d", i, id, wantGlobal)
+		}
+	}
+}

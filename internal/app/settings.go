@@ -73,6 +73,15 @@ func autoSaveInterval(flagged time.Duration, cfg config.Config) time.Duration {
 	return 0
 }
 
+// effectiveUIIcons returns the ui_icons input to icons.Resolve, honoring
+// nerd_font_icons when ui_icons is empty or "auto".
+func effectiveUIIcons(cfg config.Config) string {
+	if (cfg.UIIcons == "" || cfg.UIIcons == "auto") && cfg.NerdFontIcons {
+		return "nerd"
+	}
+	return cfg.UIIcons
+}
+
 // viewOptions returns the starting display options that cfg gives. icons is the
 // resolved icon set, "plain" or "nerd".
 func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {

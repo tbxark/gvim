@@ -39,9 +39,9 @@ func newRexInstallCommand(installer rexplugin.Installer) *cobra.Command {
 		Short: "Install the Rex integration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			rep, err := installer.Install()
 			if err != nil {
-				cmd.SilenceUsage = true
 				return err
 			}
 			w := cmd.OutOrStdout()
@@ -69,9 +69,9 @@ func newRexUninstallCommand(installer rexplugin.Installer) *cobra.Command {
 		Short: "Remove the Rex integration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			rep, err := installer.Uninstall()
 			if err != nil {
-				cmd.SilenceUsage = true
 				return err
 			}
 			w := cmd.OutOrStdout()

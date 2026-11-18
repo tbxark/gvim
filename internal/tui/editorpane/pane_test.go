@@ -625,3 +625,31 @@ func (p Pane) Thumb(h int) (start, length int) {
 	}
 	return thumbOf(display, h, top)
 }
+
+func TestThumbOfMaxZeroAndLargeLines(t *testing.T) {
+	t.Parallel()
+	if s, l := thumbOfMax(0, 6, 0, 0); s != 0 || l != 0 {
+		t.Fatalf("thumbOfMax(0,6,0,0) = %d,%d, want 0,0", s, l)
+	}
+	if s, l := thumbOfMax(10_000_000, 1_000_000, 5_000_000, 9_000_000); s < 400_000 || s > 600_000 || l < 1 {
+		t.Fatalf("thumbOfMax large = %d,%d, unexpected overflow or clamp", s, l)
+	}
+}
+
+func TestBlitSkipsContinuationAndClipsWideEdgeRune(t *testing.T) {
+	t.Parallel()
+	src := grid.New(4, 1)
+	src.Put(0, 0, 4, "中文", grid.Style{})
+	dst := grid.New(3, 1)
+	dst.Set(1, 0, "Q", grid.Style{})
+	Blit(dst, 0, 0, src)
+	if got := dst.At(0, 0).Text; got != "中" {
+		t.Fatalf("dst(0,0) = %q, want 中", got)
+	}
+	if got := dst.At(1, 0).Text; got != "" {
+		t.Fatalf("dst(1,0) continuation = %q, want empty", got)
+	}
+	if got := dst.At(2, 0).Text; got != " " {
+		t.Fatalf("clipped edge wide rune at dst(2,0) = %q, want space", got)
+	}
+}

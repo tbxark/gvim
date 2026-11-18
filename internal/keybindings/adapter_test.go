@@ -406,21 +406,26 @@ func TestAdapterExactContextPrecedence(t *testing.T) {
 		t.Fatalf("ResolveExact(Terminal) after unbind = %+v, want none", cmd)
 	}
 
-	// Unbinding Global F6 removes the fallback everywhere; it does not erase an explicit
-	// Terminal binding in the exact context.
-	globalOff, _ := rebound.WithUserBindings([]byte(`[{"key":"F6","modifiers":[],"action":"unbind","when":"global"}]`), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Unbinding Global F6 in the same layer removes the fallback everywhere while keeping
+	// an explicit Terminal binding in that layer; a later Global unbind layer removes prior
+	// context bindings too.
+	globalOff, _ := base.WithUserBindings([]byte(`[{"key":"F6","modifiers":[],"action":"unbind","when":"global"},{"key":"F6","modifiers":[],"action":"toggle_keyboard_capture","when":"terminal"}]`), nil)
 	ad = NewKeymap(globalOff)
 	exact = ad.(interface {
 		ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
 	})
 	if cmd, ok := exact.ResolveExact(f6, tui.KeyContextTerminal); !ok || cmd.Action != "toggle_keyboard_capture" {
-		t.Fatalf("global unbind erased the terminal rebind: %+v/%v", cmd, ok)
+		t.Fatalf("same-layer global unbind erased the terminal rebind: %+v/%v", cmd, ok)
 	}
 	if cmd, ok := ad.Resolve(f6, tui.KeyContextNormal); ok {
 		t.Fatalf("global unbind left a normal/global binding: %+v", cmd)
+	}
+	layeredGlobalOff, _ := rebound.WithUserBindings([]byte(`[{"key":"F6","modifiers":[],"action":"unbind","when":"global"}]`), nil)
+	adLayered := NewKeymap(layeredGlobalOff)
+	if cmd, ok := adLayered.(interface {
+		ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+	}).ResolveExact(f6, tui.KeyContextTerminal); ok {
+		t.Fatalf("later-layer global unbind left prior terminal rebind: %+v", cmd)
 	}
 }
 

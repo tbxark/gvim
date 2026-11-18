@@ -331,10 +331,20 @@ var _ authority.FileSystem = (*fakeWatchFS)(nil)
 // carrier while a batch of the old carrier is still waiting for its quiet window is
 // delivered: the old batch is dropped, the new change is not dropped with it.
 func TestRemoteWatchKeepsTheFirstEventAfterAReconnect(t *testing.T) {
+	tookOld := make(chan struct{})
 	w := newRemoteWatch(t.Context(), nil)
+	w.onTake = func(u remoteWatchUpdate) {
+		if u.file == "/old/a" {
+			close(tookOld)
+		}
+	}
 	t.Cleanup(func() { _ = w.Close() })
 	w.updates <- remoteWatchUpdate{gen: w.currentGen(), dir: "/old", file: "/old/a"}
-	time.Sleep(remoteWatchDebounce / 3) // let the collector take it into its pending batch
+	select {
+	case <-tookOld:
+	case <-time.After(3 * time.Second):
+		t.Fatal("collector did not take the old batch update")
+	}
 	w.Reconnected()
 	w.updates <- remoteWatchUpdate{gen: w.currentGen(), dir: "/new", file: "/new/b"}
 	select {

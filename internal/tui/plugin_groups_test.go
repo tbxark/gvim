@@ -138,3 +138,31 @@ func TestScrollFollowMapping(t *testing.T) {
 		t.Errorf("identity = %d", got)
 	}
 }
+
+func TestBufferGroupBufferClosedRemovesGroupAndClosesPanels(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime(t)
+	m, _, pe := newPluginEditorModel(t, rt)
+	h := m.plug.host
+	layout := pluginapi.BufferGroupLayout{Dir: "h", Ratio: 0.5,
+		First:  &pluginapi.BufferGroupLayout{Leaf: &pluginapi.BufferGroupLeaf{Name: "files"}},
+		Second: &pluginapi.BufferGroupLayout{Leaf: &pluginapi.BufferGroupLeaf{Name: "preview"}},
+	}
+	if err := h.CreateBufferGroup("p", 8, pluginapi.BufferGroupSpec{Name: "Diff", Layout: layout}); err != nil {
+		t.Fatal(err)
+	}
+	g := m.plug.groups.byID[8]
+	if g == nil || len(g.panels) == 0 {
+		t.Fatalf("group panels not created: %+v", g)
+	}
+	panelBuf := g.panels[0].buffer
+	m.plugGroupsBufferClosed(panelBuf)
+	if m.plug.groups.byID[8] != nil {
+		t.Fatal("closing a group panel buffer left the buffer group mounted")
+	}
+	for _, panel := range g.panels {
+		if _, ok := pe.Buffer(panel.buffer); ok {
+			t.Fatalf("panel buffer %d survived group teardown", panel.buffer)
+		}
+	}
+}

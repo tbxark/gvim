@@ -85,10 +85,7 @@ func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.Buffe
 		if end <= start {
 			continue // a one-line range folds nothing
 		}
-		placeholder := r.Placeholder
-		if len(placeholder) > decorMaxText {
-			placeholder = placeholder[:decorMaxText]
-		}
+		placeholder := truncateUTF8Bytes(r.Placeholder, decorMaxText)
 		r.Range.From.Line, r.Range.To.Line = start, end
 		r.Placeholder = placeholder
 		clean = append(clean, r)

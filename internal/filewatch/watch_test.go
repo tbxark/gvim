@@ -318,3 +318,34 @@ func TestRemoveStopsReportingDir(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 }
+
+func TestAddAfterCloseFailsWithoutRecording(t *testing.T) {
+	w, _ := newFake(t)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	dir := t.TempDir()
+	if err := w.Add(dir); err == nil {
+		t.Fatal("Add after Close succeeded, want error")
+	}
+	w.mu.Lock()
+	_, recorded := w.watched[dir]
+	w.mu.Unlock()
+	if recorded {
+		t.Fatalf("closed watcher recorded %q in watched", dir)
+	}
+}
+
+func TestAddFailedDoesNotRecordWatched(t *testing.T) {
+	w, _ := newFake(t)
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := w.Add(missing); err == nil {
+		t.Fatal("Add(missing) succeeded, want error")
+	}
+	w.mu.Lock()
+	_, recorded := w.watched[missing]
+	w.mu.Unlock()
+	if recorded {
+		t.Fatalf("failed Add recorded %q in watched", missing)
+	}
+}

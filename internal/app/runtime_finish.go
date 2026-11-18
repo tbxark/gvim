@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/config"
@@ -21,18 +23,21 @@ import (
 // for its Plugins page. They are built after the page's config snapshot and before the
 // model.
 func (b *runtimeBuild) wireSettingsService() {
-	ctx, opts, cfg, deps, pw := b.ctx, &b.opts, b.cfg, &b.deps, b.pw
+	ctx, opts, cfg, deps, pw, keys := b.ctx, b.opts, b.cfg, &b.deps, b.pw, b.keys
+	levelOf := makeLevelOf(b.trustCtl, b.trustState.Level)
+	trustedForSettings := makeTrustedForSettings(b.trustCtl)
+	var lspBase *lspBaselineUpdater
 	// The Settings page writes the config files and reapplies the live values. The
 	// project layer is offered only while the workspace is trusted, so the check
 	// reads the trust controller every time.
-	b.settingsSvc = newSettingsService(b.root, *opts, b.ed, b.trustedForSettings, cfg, b.themeCat, settingsRuntime{
+	b.settingsSvc = newSettingsService(b.root, opts, b.ed, trustedForSettings, cfg, b.themeCat, settingsRuntime{
 		lsp:         deps.LSP,
 		localeApply: func(locale string) { pw.Runtime.SetLocale(locale) },
 		lspReload: func(next config.Config) {
 			// The worker serializes this with live trust changes and always applies the
 			// newest config+trust snapshot under the live gate; it never blocks the caller.
-			if b.lspBase != nil {
-				b.lspBase.UpdateConfig(next, trust.State{Level: b.levelOf()})
+			if lspBase != nil {
+				lspBase.UpdateConfig(next, trust.State{Level: levelOf()})
 			}
 		},
 		plugins:    pw.Runtime,
@@ -40,26 +45,45 @@ func (b *runtimeBuild) wireSettingsService() {
 		keymapOf: func(cfg config.Config) tui.Keymap {
 			return keybindings.NewKeymap(keybindings.ApplyOverrides(presetKeymap(opts.Keymap, cfg), cfg))
 		},
-		presetName: b.choice.name,
-		iconsMode:  b.icon.Mode.String(),
-		iconsWhy:   b.icon.Why,
-		version:    gvimVersion(),
+		presetName:        b.choice.name,
+		iconsMode:         b.icon.Mode.String(),
+		iconsWhy:          b.icon.Why,
+		version:           gvimVersion(),
+		initialFormatters: b.initFormatters,
+		keysReload: func(next config.Config) {
+			if keys != nil {
+				keys.Reload(next)
+			}
+		},
+		withKeybindings: func(cur config.Config) config.Config {
+			if keys != nil {
+				return keys.Current(cur)
+			}
+			return cur
+		},
 	})
 	svc := b.settingsSvc
+	if b.liveCfg != nil {
+		b.liveCfg.set(svc.currentConfig)
+	}
 	svc.env = b.envProvider
 	svc.setEnvWatch(b.envWatch)
+	projSearch, grep, files, root, isRemote, remoteLoader := b.projSearch, b.grep, b.files, b.root, opts.Remote != nil, b.remoteExplorerLoader
 	svc.setConfigReload(func(next config.Config) {
-		if b.projSearch != nil {
-			b.projSearch.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
+		if projSearch != nil {
+			projSearch.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
 		}
-		if b.grep != nil {
-			b.grep.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
+		if grep != nil {
+			grep.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
 		}
-		if b.files != nil {
-			b.files.SetOptions(b.root, finder.Options{
+		if !isRemote && files != nil {
+			files.SetOptions(root, finder.Options{
 				RespectGitignore:     next.FileExplorer.RespectGitignore,
 				CustomIgnorePatterns: next.FileExplorer.CustomIgnorePatterns,
 			})
+		}
+		if isRemote && remoteLoader != nil {
+			remoteLoader.SetIgnoreOptions(next.FileExplorer.RespectGitignore, next.FileExplorer.CustomIgnorePatterns)
 		}
 	})
 	if b.localWatchRetryObj != nil {
@@ -70,10 +94,11 @@ func (b *runtimeBuild) wireSettingsService() {
 		})
 	}
 	deps.SettingsPort = svc
-	b.lspBase = newLSPBaselineUpdater(ctx, deps.LSP, svc.currentConfig(), trust.State{Level: b.levelOf()})
-	svc.lspBase = b.lspBase
-	if setter, ok := deps.LSP.(interface{ SetBaselineWait(func()) }); ok && b.lspBase != nil {
-		setter.SetBaselineWait(b.lspBase.Wait)
+	lspBase = newLSPBaselineUpdater(ctx, deps.LSP, svc.currentConfig(), trust.State{Level: levelOf()})
+	b.lspBase = lspBase
+	svc.lspBase = lspBase
+	if setter, ok := deps.LSP.(interface{ SetBaselineWait(func()) }); ok && lspBase != nil {
+		setter.SetBaselineWait(lspBase.Wait)
 	}
 }
 
@@ -83,19 +108,21 @@ func (b *runtimeBuild) wireSettingsService() {
 // reload snapshot cannot overwrite a newer baseline. Manual Start/Restart remains
 // available.
 func (b *runtimeBuild) wireTrustLSP() {
-	trustCtl, lspBase, deps := b.trustCtl, b.lspBase, &b.deps
+	ctx, trustCtl, lspBase, lsp, svc, isRemote := b.ctx, b.trustCtl, b.lspBase, b.deps.LSP, b.settingsSvc, b.opts.Remote != nil
 	if trustCtl == nil {
 		return
 	}
-	if b.opts.Remote == nil && lspBase != nil {
+	denoSlot := &atomic.Pointer[denoAutoSelector]{}
+	b.denoSlot = denoSlot
+	if !isRemote && lspBase != nil {
 		trustCtl.prepareTrust = func(state trust.State) error {
-			cfg, err := b.settingsSvc.loadTrustedLSP(state.Root)
+			cfg, err := svc.loadTrustedLSP(state.Root)
 			if err != nil {
 				return err
 			}
 			lspBase.UpdateConfig(cfg, state)
 			lspBase.Wait()
-			if refresher, ok := deps.LSP.(interface{ RefreshServerPlans() }); ok {
+			if refresher, ok := lsp.(interface{ RefreshServerPlans() }); ok {
 				refresher.RefreshServerPlans()
 			}
 			return nil
@@ -105,11 +132,18 @@ func (b *runtimeBuild) wireTrustLSP() {
 		// A manual start performed while Trusted must not survive as a forced
 		// automatic=false bypass after a revoke. Clear it before any new manager or
 		// Open can consult it; running servers are not stopped.
-		if setter, ok := deps.LSP.(interface{ ClearForced() }); ok {
+		if setter, ok := lsp.(interface{ ClearForced() }); ok {
 			setter.ClearForced()
 		}
 		if lspBase != nil {
 			lspBase.UpdateTrust(trust.State{Level: state.Level})
+		}
+		if d := denoSlot.Load(); d != nil {
+			if state.AllowsProjectConfig() {
+				d.Start(ctx)
+			} else {
+				d.Clear()
+			}
 		}
 	})
 }
@@ -117,23 +151,33 @@ func (b *runtimeBuild) wireTrustLSP() {
 // wireLSPExtras starts the Deno auto-selection and installs the external-location
 // opener on the LSP manager.
 func (b *runtimeBuild) wireLSPExtras() {
-	ctx, opts, deps, authSlot := b.ctx, &b.opts, &b.deps, b.authSlot
+	ctx, opts, deps, authSlot, root, overlay := b.ctx, b.opts, &b.deps, b.authSlot, b.root, b.envProvider.Overlay
+	levelOf := makeLevelOf(b.trustCtl, b.trustState.Level)
+	spawnGate := makeSpawnGate(opts.Remote != nil, root, levelOf)
+	authGate := func(ctx context.Context, argv []string, cwd string) error {
+		return spawnGate(ctx, argv, cwd, nil)
+	}
 	// Project-root Deno auto-selection (Fresh deno_lsp parity with authority-only checks):
 	// one bounded background probe against the workspace root; it never overrides an explicit
 	// or disabled user LSP config and is re-run after a reconnect or project-root switch. The
 	// provider is evaluated when a manager for exactly this root is created, re-reading the
 	// settings service's live config (a settings reload thus invalidates a stale decision).
 	if deps.LSP != nil && authSlot != nil && b.denoRoot != "" {
+		svc := b.settingsSvc
 		denoCfg := func() config.Config {
 			// The Deno selection is an auto-start choice, so evaluate it against the same
 			// live-trust-gated config the port uses, never the raw reloaded settings.
-			return lspConfig(b.settingsSvc.currentConfig(), trust.State{Level: b.levelOf()})
+			return lspConfig(svc.currentConfig(), trust.State{Level: levelOf()})
 		}
-		b.denoAuto = newDenoAutoSelector(deps.LSP, authSlot, b.denoRoot, opts.Remote != nil, b.authGate, b.envProvider.Overlay, denoCfg)
+		b.denoAuto = newDenoAutoSelector(deps.LSP, authSlot, b.denoRoot, opts.Remote != nil, authGate, overlay, denoCfg)
+		if b.denoSlot != nil {
+			b.denoSlot.Store(b.denoAuto)
+		}
 		if b.denoAuto != nil {
+			denoAuto := b.denoAuto
 			if setter, ok := deps.LSP.(interface{ SetRootChangeListener(func(string)) }); ok {
 				setter.SetRootChangeListener(func(root string) {
-					b.denoAuto.Rebind(ctx, root)
+					denoAuto.Rebind(ctx, root)
 				})
 			}
 			b.denoAuto.Start(ctx)
@@ -147,7 +191,7 @@ func (b *runtimeBuild) wireLSPExtras() {
 		if setter, ok := deps.LSP.(interface {
 			SetExternalLocationOpener(lsphost.ExternalLocationOpener)
 		}); ok {
-			setter.SetExternalLocationOpener(newSlangSynthOpener(opts.Remote != nil, authSlot, b.authGate, b.envProvider.Overlay, b.root))
+			setter.SetExternalLocationOpener(newSlangSynthOpener(opts.Remote != nil, authSlot, authGate, overlay, root))
 		}
 	}
 }
@@ -220,6 +264,7 @@ func (b *runtimeBuild) newModel() {
 func (b *runtimeBuild) wireDock() {
 	cfg, model := b.cfg, b.model
 	shellCommand, shellArgs := cfg.Terminal.TerminalShellOptions()
+	trustedLive := makeTrustedLive(makeLevelOf(b.trustCtl, b.trustState.Level))
 	model.SetDock(tui.DockPorts{
 		Starter: uiadapter.NewTermStarter(b.ctx, uiadapter.TermStarterOptions{
 			Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines,
@@ -232,7 +277,7 @@ func (b *runtimeBuild) wireDock() {
 			// for it and the workspace is trusted (output is untrusted data, and
 			// the default is off); the session parser is inert otherwise.
 			OSC52: func(selection, text string) bool {
-				if !cfg.Clipboard.UseOSC52 || !b.trustedLive() {
+				if !cfg.Clipboard.UseOSC52 || !trustedLive() {
 					return false
 				}
 				return uiadapter.SystemClipboard{}.Write(text) == nil
@@ -241,7 +286,7 @@ func (b *runtimeBuild) wireDock() {
 			// when the gvim extension is on and the workspace is trusted. The answer
 			// is bounded and queued as terminal input; no reply on failure/empty/too
 			// large, so an unavailable clipboard never blocks the child's paste.
-			OSC52Query: dockOSC52Query(cfg, b.trustedLive, systemClipboardRead),
+			OSC52Query: dockOSC52Query(cfg, trustedLive, systemClipboardRead),
 		}),
 		Clipboard: uiadapter.SystemClipboard{},
 		Effects: tui.DockEffects{
@@ -265,7 +310,9 @@ func (b *runtimeBuild) wireDock() {
 func (b *runtimeBuild) wireAuthorityUI() {
 	// Agent discovery scans the local machine through the same spawn gate as the
 	// terminal and plugins; the picker runs the scan off the update loop.
-	b.model.SetAgentDiscoverer(newAgentDiscoverer(func() string { return b.proj.RootDir() }, b.spawnGate, b.cfg.Terminal.Agents))
+	proj := b.proj
+	spawnGate := makeSpawnGate(b.opts.Remote != nil, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))
+	b.model.SetAgentDiscoverer(newAgentDiscoverer(func() string { return proj.RootDir() }, spawnGate, b.cfg.Terminal.Agents))
 	// The workspace authority of the session: the shell and formatter runner go
 	// through the slot, and a remote launch shows its segment and opens the SSH
 	// terminal at the remote workspace.
@@ -326,6 +373,9 @@ func (b *runtimeBuild) newRuntime() *runtime {
 
 		recoveryWriter:   b.deps.Root.Recovery,
 		log:              b.logFile,
+		cancel:           b.cancel,
+		localWatchRetry:  b.localWatchRetryObj,
+		remoteEnv:        b.remoteEnv,
 		auth:             b.authSlot,
 		remoteWatch:      b.remoteFileWatch,
 		remoteFiles:      b.remoteFiles,

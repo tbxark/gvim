@@ -112,13 +112,32 @@ type Store struct {
 // holds. path is the user config file, or empty when there is none to write. An entry that
 // cannot apply is left out of the editor's list and kept in the file (see skipped).
 func NewStore(path string, cfg config.Config) *Store {
-	s := &Store{path: path, raw: cfg.Keybindings}
-	list, skipped, _ := keymap.ParseUserBindingsRaw(cfg.Keybindings, knownAction)
-	s.skipped = skipped
-	for _, b := range list {
-		s.custom = append(s.custom, tui.CustomBinding{Chord: b.Chord, Action: b.Action, Context: string(b.When), Args: b.Args})
+	custom, skipped := parseCustomBindings(cfg.Keybindings)
+	return &Store{
+		path:    path,
+		custom:  custom,
+		skipped: skipped,
+		raw:     bytes.Clone(cfg.Keybindings),
 	}
-	return s
+}
+
+func parseCustomBindings(raw json.RawMessage) ([]tui.CustomBinding, []json.RawMessage) {
+	list, skipped, _ := keymap.ParseUserBindingsRaw(raw, knownAction)
+	custom := make([]tui.CustomBinding, 0, len(list))
+	for _, b := range list {
+		custom = append(custom, tui.CustomBinding{Chord: b.Chord, Action: b.Action, Context: string(b.When), Args: b.Args})
+	}
+	return custom, skipped
+}
+
+// Reload replaces the store's keybindings from cfg after a config reload.
+func (s *Store) Reload(cfg config.Config) {
+	custom, skipped := parseCustomBindings(cfg.Keybindings)
+	s.mu.Lock()
+	s.custom = custom
+	s.skipped = skipped
+	s.raw = bytes.Clone(cfg.Keybindings)
+	s.mu.Unlock()
 }
 
 // Custom lists the user's bindings.
@@ -132,7 +151,7 @@ func (s *Store) Custom() []tui.CustomBinding {
 func (s *Store) Current(cfg config.Config) config.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg.Keybindings = s.raw
+	cfg.Keybindings = bytes.Clone(s.raw)
 	return cfg
 }
 

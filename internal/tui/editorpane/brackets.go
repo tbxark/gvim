@@ -37,10 +37,11 @@ func skipKind(k syntax.Kind) bool { return k == syntax.KindComment || k == synta
 
 // bracketsOf marks the brackets of buffer line i: the depth color of each one, and
 // the pair at the caret. kinds are the syntax kinds of the runes of raw.
-func (f frame) bracketsOf(i int, raw []rune, kinds []syntax.Kind, cells []cell) {
+func (f frame) bracketsOf(i int, raw []rune, kinds []syntax.Kind, ln *line) {
 	if !f.opts.HighlightBrackets {
 		return
 	}
+	cells := ln.cells
 	bs := &f.fx.brackets
 	rainbow := f.opts.RainbowBrackets
 	if !bs.ready {
@@ -75,7 +76,11 @@ func (f frame) bracketsOf(i int, raw []rune, kinds []syntax.Kind, cells []cell) 
 	if bs.hasPair {
 		for _, p := range bs.pair {
 			if p.Line == i {
-				if x := expandedIndex(raw, p.Col-f.off, f.tab); x < len(cells) {
+				col := p.Col
+				if ln.srcToDisp != nil {
+					col = mapSrcColumn(*ln, col)
+				}
+				if x := expandedIndex(raw, col-f.off, f.tab); x < len(cells) {
 					cells[x].pair = true
 				}
 			}

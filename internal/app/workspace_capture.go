@@ -9,6 +9,7 @@ package app
 // last capture (documented limitation; the previous session file is intact).
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ type captureOverlay struct {
 type saveJob struct {
 	done chan struct{}
 	err  error
+	seq  uint64
 }
 
 // snapshotCapture takes the consistent in-memory snapshot of a workspace on the UI
@@ -75,8 +77,6 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 	}
 	ed := s.rt.ed
 	tabs := ed.Tabs()
-	// Read the MRU before the capture loop activates every tab (that changes the
-	// history); it is stored as saved paths/labels just like restore.WriteSession.
 	mruTabs := ed.RecentTabIndices()
 	orig := -1
 	for i, t := range tabs {
@@ -84,17 +84,11 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 			orig = i
 		}
 	}
-	defer func() {
-		if orig >= 0 {
-			ed.ActivateTab(orig)
-		}
-	}()
 	var files []session.FileState
 	savedByTab := make(map[int]int, len(tabs))
 	active := 0
 	for i := range tabs {
-		ed.ActivateTab(i)
-		doc := ed.Active()
+		doc := ed.DocAt(i)
 		if doc == nil || doc.Virtual() || (doc.Path == "" && !doc.Modified()) {
 			continue
 		}
@@ -167,11 +161,60 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 // The UI goroutine never takes mu (enqueue only bumps the atomic seq), so a slow disk
 // cannot freeze Update.
 type captureWriter struct {
-	q         chan *captureWrite
-	mu        sync.Mutex
-	seq       atomic.Uint64
-	committed uint64
-	stopped   bool
+	qmu        sync.Mutex
+	queue      []*captureWrite
+	retired    bool
+	sig        chan struct{}
+	mu         sync.Mutex
+	seq        atomic.Uint64
+	writingSeq atomic.Uint64
+	committed  uint64
+	stopped    bool
+}
+
+func (w *captureWriter) retire() {
+	if w == nil {
+		return
+	}
+	w.qmu.Lock()
+	w.retired = true
+	w.qmu.Unlock()
+	select {
+	case w.sig <- struct{}{}:
+	default:
+	}
+}
+
+// retireWriter detaches and signals a workspace's capture writer to drain and exit.
+func (m *workspaceManager) retireWriter(id string) {
+	if id == "" {
+		return
+	}
+	m.mu.Lock()
+	w := m.writers[id]
+	delete(m.writers, id)
+	m.mu.Unlock()
+	w.retire()
+}
+
+// fallbackSave supersedes any queued snapshots on s's writer and runs a synchronous
+// session save under the per-workspace writer lock so an older queued write cannot
+// overwrite it.
+func (m *workspaceManager) fallbackSave(s *workspaceSession) error {
+	if s == nil || s.rt == nil {
+		return nil
+	}
+	m.mu.Lock()
+	w := m.writers[s.ws.File.StableID]
+	m.mu.Unlock()
+	if w == nil {
+		return s.rt.save()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.stopped = true
+	w.committed = w.seq.Load()
+	return s.rt.save()
 }
 
 // captureWrite is one queued snapshot write.
@@ -222,14 +265,30 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 	m.mu.Lock()
 	w := m.writers[s.ws.File.StableID]
 	if w == nil {
-		w = &captureWriter{q: make(chan *captureWrite, 16)}
+		w = &captureWriter{
+			sig: make(chan struct{}, 1),
+		}
 		m.writers[s.ws.File.StableID] = w
 		go m.runWriter(w)
 	}
 	m.mu.Unlock()
-	// The UI goroutine must not wait on the writer's lock; the sequence is atomic.
+	// The UI goroutine must not wait on the writer's I/O lock; qmu only guards
+	// in-memory queue operations.
+	w.qmu.Lock()
+	if w.retired {
+		w.qmu.Unlock()
+		job.err = errors.New("workspace: capture writer is retired")
+		close(job.done)
+		return job
+	}
 	seq := w.seq.Add(1)
-	w.q <- &captureWrite{sess: s, snap: snap, job: job, seq: seq}
+	job.seq = seq
+	w.queue = append(w.queue, &captureWrite{sess: s, snap: snap, job: job, seq: seq})
+	w.qmu.Unlock()
+	select {
+	case w.sig <- struct{}{}:
+	default:
+	}
 	return job
 }
 
@@ -238,39 +297,60 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 // state or is skipped as superseded; the delayed-writer regression covers the case the
 // exit path raced a queued older snapshot.
 func (m *workspaceManager) runWriter(w *captureWriter) {
-	for c := range w.q {
-		if m.captureWriterGate != nil {
-			m.captureWriterGate()
-		}
-		write := m.writeSnapshot
-		if m.writeSnapshotFn != nil {
-			write = m.writeSnapshotFn
-		}
-		w.mu.Lock()
-		if w.stopped || c.seq <= w.committed {
-			// A newer path (the exit fallback, or a later snapshot) already committed:
-			// this snapshot must not overwrite it, not even atomically with older data.
-			w.mu.Unlock()
-			c.job.err = nil
-			close(c.job.done)
+	for {
+		w.qmu.Lock()
+		if len(w.queue) > 0 {
+			c := w.queue[0]
+			w.queue[0] = nil
+			w.queue = w.queue[1:]
+			w.qmu.Unlock()
+			m.processCaptureWrite(w, c)
 			continue
 		}
-		err := write(c.sess, c.snap)
-		if err == nil && c.sess.rt.sessionDir != "" {
-			// Registry disk work stays off the UI goroutine; the registry is
-			// concurrency-safe and this is the newest written layout of the workspace.
-			layout := c.snap.layout
-			_, _ = m.reg.UpdateLayout(c.sess.ws.File.StableID, &layout)
-			_, _ = m.reg.Touch(c.sess.ws.File.StableID, m.now())
-			w.committed = c.seq
+		if w.retired {
+			w.qmu.Unlock()
+			return
 		}
-		w.mu.Unlock()
-		if err != nil {
-			m.notify(fmt.Errorf("save workspace %q: %w", c.sess.ws.File.Label, err))
-		}
-		c.job.err = err
-		close(c.job.done)
+		w.qmu.Unlock()
+		<-w.sig
 	}
+}
+
+func (m *workspaceManager) processCaptureWrite(w *captureWriter, c *captureWrite) {
+	if m.captureWriterGate != nil {
+		m.captureWriterGate()
+	}
+	write := m.writeSnapshot
+	if m.writeSnapshotFn != nil {
+		write = m.writeSnapshotFn
+	}
+	w.mu.Lock()
+	if w.stopped || c.seq <= w.committed {
+		// A newer path (the exit fallback, or a later snapshot) already committed:
+		// this snapshot must not overwrite it, not even atomically with older data.
+		w.mu.Unlock()
+		c.job.err = nil
+		close(c.job.done)
+		return
+	}
+	w.writingSeq.Store(c.seq)
+	err := write(c.sess, c.snap)
+	w.writingSeq.Store(0)
+	if err == nil && c.sess.rt.sessionDir != "" {
+		// Registry disk work stays off the UI goroutine; the registry is
+		// concurrency-safe and this is the newest written layout of the workspace.
+		// Do not bump LastFocusedAt here: async snapshot flushes must not steal
+		// focus ordering from foreground workspace switches.
+		layout := c.snap.layout
+		_, _ = m.reg.UpdateLayout(c.sess.ws.File.StableID, &layout)
+		w.committed = c.seq
+	}
+	w.mu.Unlock()
+	if err != nil {
+		m.notify(fmt.Errorf("save workspace %q: %w", c.sess.ws.File.Label, err))
+	}
+	c.job.err = err
+	close(c.job.done)
 }
 
 // writeSnapshot writes the stash files, the session JSON, the terminal record and the

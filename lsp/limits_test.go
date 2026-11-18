@@ -75,7 +75,7 @@ func TestPlanLimitsRecordsAnUnsupportedPlatform(t *testing.T) {
 	if plan.Applied || plan.WrapMemoryKB != 0 || plan.AfterStart != nil {
 		t.Fatalf("plan = %+v, want nothing applicable", plan)
 	}
-	for _, want := range []string{"process_limits", "memory 50%", "cpu 90%", "not applied on " + runtime.GOOS, "Fresh also applies them on Linux only"} {
+	for _, want := range []string{"process_limits", "memory 50%", "cpu 90%", "not applied on " + runtime.GOOS, "Linux cgroup v2"} {
 		if !strings.Contains(plan.Note, want) {
 			t.Errorf("note = %q, want %q", plan.Note, want)
 		}

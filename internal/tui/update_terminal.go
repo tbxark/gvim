@@ -52,7 +52,7 @@ func (m *Model) runUpdateCommand() tea.Cmd {
 func (m *Model) focusUpdateOutput() tea.Cmd {
 	index, ok := m.dock.FindSource(updateTabSource)
 	if !ok {
-		m.notice = uiText("gvim.notice.update_no_output", "No update output yet: run Update fresh first")
+		m.notice = uiText("gvim.notice.update_no_output", "No update output yet: run Update gvim first")
 		return nil
 	}
 	m.dock.SetActive(index)

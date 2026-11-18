@@ -101,12 +101,22 @@ func (w *Watcher) Add(dir string) error {
 	if err != nil {
 		return fmt.Errorf("watch: add %q: %w", dir, err)
 	}
-	if err := w.fsw.Add(abs); err != nil {
-		return fmt.Errorf("watch: add %q: %w", dir, err)
-	}
 	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return fmt.Errorf("watch: add %q: closed", dir)
+	}
+	wasWatched := w.watched[abs]
 	w.watched[abs] = true
 	w.mu.Unlock()
+	if err := w.fsw.Add(abs); err != nil {
+		if !wasWatched {
+			w.mu.Lock()
+			delete(w.watched, abs)
+			w.mu.Unlock()
+		}
+		return fmt.Errorf("watch: add %q: %w", dir, err)
+	}
 	return nil
 }
 

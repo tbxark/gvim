@@ -103,3 +103,61 @@ func resetSaveProtectionForTest(dir string) {
 	defer saveDisabledMu.Unlock()
 	delete(saveDisabledDirs, dir)
 }
+
+func TestSaveTerminalDefaultsZeroVersion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	err := SaveTerminal(dir, terminal.SavedState{
+		Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"hello"}}},
+	})
+	if err != nil {
+		t.Fatalf("SaveTerminal: %v", err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok || got.Version != terminal.SavedStateVersion {
+		t.Fatalf("LoadTerminal = %+v, %v, %v; want version %d", got, ok, err, terminal.SavedStateVersion)
+	}
+}
+
+func TestBoundTerminalStateAdjustsActiveTabWhenTabsDropped(t *testing.T) {
+	t.Parallel()
+	t.Run("trims leading tabs past maxSavedTerminalTabs", func(t *testing.T) {
+		var tabs []terminal.SavedTab
+		for i := range maxSavedTerminalTabs + 3 {
+			tabs = append(tabs, terminal.SavedTab{Name: string(rune('a' + i)), Open: true})
+		}
+		st := boundTerminalState(terminal.SavedState{
+			Version:   terminal.SavedStateVersion,
+			Tabs:      tabs,
+			ActiveTab: 5, // name 'f', shifts from 5 to 5-3 = 2
+		})
+		if st.ActiveTab != 2 || st.Tabs[st.ActiveTab].Name != "f" {
+			t.Fatalf("ActiveTab = %d (%q), want 2 (\"f\")", st.ActiveTab, st.Tabs[st.ActiveTab].Name)
+		}
+	})
+
+	t.Run("skips closed empty tabs before active", func(t *testing.T) {
+		st := boundTerminalState(terminal.SavedState{
+			Version: terminal.SavedStateVersion,
+			Tabs: []terminal.SavedTab{
+				{Name: "empty-closed-0", Open: false},
+				{Name: "open-1", Open: true},
+				{Name: "empty-closed-2", Open: false},
+				{Name: "target-3", Open: true},
+			},
+			ActiveTab: 3,
+		})
+		if st.ActiveTab != 1 || st.Tabs[st.ActiveTab].Name != "target-3" {
+			t.Fatalf("ActiveTab = %d (%q), want 1 (\"target-3\")", st.ActiveTab, st.Tabs[st.ActiveTab].Name)
+		}
+	})
+}
+
+func TestCleanTerminalTextMapsControlsAndC1ToSpace(t *testing.T) {
+	t.Parallel()
+	got := cleanTerminalText("a\x1bb\x7fc\u0085d\u009be")
+	want := "a b c d e"
+	if got != want {
+		t.Fatalf("cleanTerminalText = %q, want %q", got, want)
+	}
+}

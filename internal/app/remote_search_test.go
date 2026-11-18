@@ -2810,3 +2810,56 @@ func TestRemoteSearchNonReadyIndexWithCandidateListUsesNeutralFallbackNotice(t *
 		t.Fatalf("zero-match Done = %+v, want the neutral fallback notice", done)
 	}
 }
+
+func TestRemoteSearchAndGitGrepCacheProbesPerConnectionGen(t *testing.T) {
+	var gen uint64 = 1
+	var shCalls, gitInsideCalls, topLevelCalls int
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		joined := strings.Join(argv, " ")
+		switch {
+		case len(argv) > 0 && argv[0] == "sh":
+			shCalls++
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		case strings.Contains(joined, "rev-parse --is-inside-work-tree"):
+			gitInsideCalls++
+			return hostos.ProcResult{Stdout: []byte("true")}, nil
+		case strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: []byte("100644 deadbeef 0\tsrc/a.go\x00")}, nil
+		case len(argv) > 0 && argv[0] == "rg":
+			return hostos.ProcResult{Stdout: []byte("src/a.go:1:1:todo\n")}, nil
+		case strings.Contains(joined, "rev-parse --show-toplevel"):
+			topLevelCalls++
+			return hostos.ProcResult{Stdout: []byte("/remote/w\n")}, nil
+		case strings.Contains(joined, "grep"):
+			return hostos.ProcResult{Stdout: []byte("src/a.go\x001\x001\x00todo\n")}, nil
+		default:
+			return hostos.ProcResult{}, errors.New("unexpected: " + joined)
+		}
+	}}
+	rs := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS()).withConnGen(func() uint64 { return gen })
+	gg := newRemoteGitGrep(one, "/remote/w", nil).withConnGen(func() uint64 { return gen })
+
+	for range 3 {
+		if _, err := rs.ProjectSearch(searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := gg.GitGrep(searchpanel.GitRequest{Root: "/remote/w", Query: "todo"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if shCalls != 1 || gitInsideCalls != 1 || topLevelCalls != 1 {
+		t.Fatalf("same gen probes: sh=%d gitInside=%d topLevel=%d, want 1/1/1", shCalls, gitInsideCalls, topLevelCalls)
+	}
+
+	// Advancing the connection generation (simulating reconnect) invalidates all probes.
+	gen = 2
+	if _, err := rs.ProjectSearch(searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gg.GitGrep(searchpanel.GitRequest{Root: "/remote/w", Query: "todo"}); err != nil {
+		t.Fatal(err)
+	}
+	if shCalls != 2 || gitInsideCalls != 2 || topLevelCalls != 2 {
+		t.Fatalf("after reconnect gen probes: sh=%d gitInside=%d topLevel=%d, want 2/2/2", shCalls, gitInsideCalls, topLevelCalls)
+	}
+}

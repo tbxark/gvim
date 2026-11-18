@@ -3,16 +3,22 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // The glyphs of the lines between panes. The lines take the split colour (splitCell).
@@ -225,14 +231,14 @@ func (m *Model) splitInput() (*split.Node, []split.LeafInfo) {
 		if n != m.splits.Focus {
 			infos[i] = split.LeafInfo{Tab: n.Tab, Top: n.Top}
 			if doc := m.docAt(n.Tab); doc != nil {
-				infos[i].Lines = displayLines(doc)
+				infos[i].Lines = m.paneDisplayLines(doc)
 			}
 			continue
 		}
 		infos[i] = split.LeafInfo{Tab: m.activeTab(), Focused: true}
 		if doc := m.ed.Active(); doc != nil {
 			infos[i].Top = doc.Top()
-			infos[i].Lines = displayLines(doc)
+			infos[i].Lines = m.paneDisplayLines(doc)
 		}
 	}
 	return m.splits.Root, infos
@@ -358,7 +364,30 @@ func (m *Model) scrollPane(i, delta int) {
 	if doc == nil {
 		return
 	}
+	oldTop := n.Top
 	n.Top = min(max(n.Top+delta, 0), max(doc.LineCount()-1, 0))
+	m.syncOtherPanesScroll(n, n.Top-oldTop)
+}
+
+// syncOtherPanesScroll propagates delta line scrolling across split panes when scroll_sync is active.
+func (m *Model) syncOtherPanesScroll(skip *split.Node, delta int) {
+	if !m.view.scrollSync || m.splits.comparing || delta == 0 || m.splits.Root == nil {
+		return
+	}
+	for _, leaf := range m.splits.Root.Leaves() {
+		if leaf == skip {
+			continue
+		}
+		doc := m.docAt(leaf.Tab)
+		if doc == nil {
+			continue
+		}
+		if leaf == m.splits.Focus {
+			m.ed.ScrollBy(delta)
+			continue
+		}
+		leaf.Top = min(max(leaf.Top+delta, 0), max(doc.LineCount()-1, 0))
+	}
 }
 
 // paneDoc returns the document that pane p shows.
@@ -519,6 +548,22 @@ func (m *Model) caretNow() caretAt {
 // was pressed in, so the caret lands on the line under the pointer.
 func (m *Model) pressPane(i, x, y, count int) tea.Cmd {
 	p, hit, top, ok := m.paneHitIn(i, x, y)
+	if ok && m.stickyScroll && !p.PageView.On && (hit.Kind == editorpane.HitText || hit.Kind == editorpane.HitGutter) && !m.mx.extend && !m.mx.alt && !m.mx.super {
+		l := m.layout()
+		if i >= 0 && i < len(l.Panes) && y == l.Panes[i].Y {
+			if doc := m.paneDoc(l.Panes[i]); doc != nil {
+				if stickyLine, hasSticky := m.stickyScrollLine(l.Panes[i], doc); hasSticky {
+					m.focusPane(i)
+					m.focusEditor()
+					m.collapseCarets()
+					m.ed.SetCursor(buffer.Pos{Line: stickyLine, Col: 0}, false)
+					m.ed.ScrollTo(stickyLine)
+					m.drag = drag{}
+					return nil
+				}
+			}
+		}
+	}
 	m.focusPane(i)
 	if ok {
 		m.ed.ScrollTo(top)
@@ -563,10 +608,13 @@ func (m *Model) paintPanes(g *grid.Grid, l frame.Layout) {
 		if m.hexPane(g, p, doc) {
 			continue
 		}
-		editorpane.Blit(g, p.X, p.Y, m.paneFor(p, doc).Render(p.W, p.H))
+		m.paneFor(p, doc).RenderInto(g, p.X, p.Y, p.W, p.H)
 		m.paintStickyScroll(g, p, doc)
 	}
 	drawBorders(g, l.Borders, m.splitCell())
+	if m.borderHover >= 0 && m.borderHover < len(l.Borders) {
+		drawBorderHover(g, l.Borders[m.borderHover], m.splitHoverCell())
+	}
 }
 
 // imagePane returns the grid that draws doc's picture in pane p, and whether the
@@ -594,24 +642,48 @@ func (m *Model) imagePane(p split.Pane, doc Document, placement int) (*grid.Grid
 	return pg, true
 }
 
-// paintStickyScroll displays a sticky header on the top row of the pane showing
-// the enclosing function or scope declaration when scrolled down into a body.
-func (m *Model) paintStickyScroll(g *grid.Grid, p split.Pane, doc Document) {
-	if !m.stickyScroll || p.Top <= 0 || p.W <= 10 || p.H <= 2 {
-		return
+// stickyScrollLine returns the enclosing scope's start line when pane p shows
+// a sticky header at row p.Y.
+func (m *Model) stickyScrollLine(p split.Pane, doc Document) (int, bool) {
+	if !m.stickyScroll || m.splits.comparing || doc == nil || p.Top <= 0 || p.W <= 10 || p.H <= 2 {
+		return 0, false
 	}
-	fl, ok := doc.(editorpane.Folder)
-	if !ok {
-		return
+	if doc.Cursor().Line == p.Top || m.panePageView(p, doc).On {
+		return 0, false
 	}
-	ranges := fl.Folds(m.tabSize)
+	pane := m.paneGeometry(p, doc)
+	tabW := pane.TabSize
+	if tabW <= 0 {
+		tabW = 4
+	}
+	var ranges []fold.Range
+	collapsed := map[int]bool{}
+	if fl, ok := doc.(editorpane.Folder); ok {
+		ranges = fl.Folds(tabW)
+		for _, r := range ranges {
+			if fl.Folded(r.Start) {
+				collapsed[r.Start] = true
+			}
+		}
+	}
+	if extra, extraCollapsed, _ := m.plugFolds(doc); len(extra) > 0 {
+		ranges = append(slices.Clip(ranges), extra...)
+		for start, c := range extraCollapsed {
+			if _, ok := collapsed[start]; !ok {
+				collapsed[start] = c
+			}
+		}
+	}
 	if len(ranges) == 0 {
-		return
+		return 0, false
 	}
 	bestSpan := 1 << 30
 	stickyLine := -1
 	for _, r := range ranges {
-		if r.Start < p.Top && r.End >= p.Top {
+		if r.Start >= p.Top || collapsed[r.Start] {
+			continue
+		}
+		if r.End >= p.Top {
 			span := r.End - r.Start
 			if span < bestSpan {
 				bestSpan = span
@@ -620,14 +692,97 @@ func (m *Model) paintStickyScroll(g *grid.Grid, p split.Pane, doc Document) {
 		}
 	}
 	if stickyLine < 0 || stickyLine >= doc.LineCount() {
+		return 0, false
+	}
+	return stickyLine, true
+}
+
+// paintStickyScroll displays a sticky header on the top row of the pane showing
+// the enclosing function or scope declaration when scrolled down into a body.
+func (m *Model) paintStickyScroll(g *grid.Grid, p split.Pane, doc Document) {
+	stickyLine, ok := m.stickyScrollLine(p, doc)
+	if !ok {
 		return
 	}
-	text := doc.Line(stickyLine)
-	lineNum := fmt.Sprintf("%4d │ ", stickyLine+1)
-	cell := style.Cell(m.styles.Sticky)
-	cell.Italic = true
-	g.Fill(p.X, p.X+p.W, p.Y, cell)
-	g.Put(p.X, p.Y, p.W, lineNum+text, cell)
+	pane := m.paneGeometry(p, doc)
+	if pane.PageView.On {
+		return
+	}
+	base := style.Cell(m.styles.Sticky)
+	base.Italic = true
+	end := p.X + p.W
+	if p.Scrollbar {
+		end--
+	}
+	if end <= p.X {
+		return
+	}
+	g.Fill(p.X, end, p.Y, base)
+
+	x := p.X
+	if !pane.HideGutter {
+		gw := editorpane.GutterWidth(displayLines(doc))
+		gut := base
+		if gfg := style.Cell(m.styles.Gutter).FG; gfg != nil {
+			gut.FG = gfg
+		}
+		digitsW := max(gw-3, 1)
+		label := fmt.Sprintf("%*d │ ", digitsW, stickyLine+1)
+		x += g.Put(x, p.Y, end, label, gut)
+	}
+	raw := doc.Line(stickyLine)
+	tabW := pane.TabSize
+	if tabW <= 0 {
+		tabW = 4
+	}
+	var spans []syntax.Span
+	if m.view.opts.SyntaxHighlighting {
+		spans = doc.LineSpans(stickyLine)
+	}
+	si := 0
+	col := 0
+	var chunk strings.Builder
+	chunkSt := base
+	flush := func() {
+		if chunk.Len() == 0 || x >= end {
+			chunk.Reset()
+			return
+		}
+		x += g.Put(x, p.Y, end, textsafe.Clean(chunk.String()), chunkSt)
+		chunk.Reset()
+	}
+	for byteOff, r := range raw {
+		if x >= end {
+			break
+		}
+		if r == '\t' {
+			flush()
+			n := tabW - col%tabW
+			adv := min(n, end-x)
+			x += g.Put(x, p.Y, end, strings.Repeat(" ", adv), base)
+			col += n
+			continue
+		}
+		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		st := base
+		for si < len(spans) && spans[si].End <= byteOff {
+			si++
+		}
+		if si < len(spans) && byteOff >= spans[si].Start && spans[si].Kind != syntax.KindPlain {
+			if sfg := m.panes.Syntax[spans[si].Kind].FG; sfg != nil {
+				st.FG = sfg
+			}
+		}
+		if chunk.Len() > 0 && st.FG != chunkSt.FG {
+			flush()
+		}
+		chunkSt = st
+		chunk.WriteRune(r)
+		col += ansi.StringWidth(string(r))
+	}
+	flush()
 }
 
 // splitCell is the style of the lines between panes: the split colour of the theme, on
@@ -639,6 +794,37 @@ func (m *Model) splitCell() grid.Style {
 		cell.FG = c
 	}
 	return cell
+}
+
+// splitHoverCell is the style of a hovered split border.
+func (m *Model) splitHoverCell() grid.Style {
+	cell := m.splitCell()
+	if accent := style.Cell(m.styles.Accent).BG; accent != nil {
+		cell.FG = accent
+		cell.FGKey = style.KeyIDFor("ui", "accent_bg")
+	}
+	return cell
+}
+
+// drawBorderHover highlights a hovered split divider line without overwriting junctions.
+func drawBorderHover(g *grid.Grid, b split.Border, cell grid.Style) {
+	if b.Vertical {
+		for y := b.Y; y < b.Y+b.H; y++ {
+			cur := g.At(b.X, y).Text
+			if cur == "" {
+				cur = splitVLine
+			}
+			g.Set(b.X, y, cur, cell)
+		}
+		return
+	}
+	for x := b.X; x < b.X+b.W; x++ {
+		cur := g.At(x, b.Y).Text
+		if cur == "" {
+			cur = splitHLine
+		}
+		g.Set(x, b.Y, cur, cell)
+	}
 }
 
 // drawBorders paints the lines between panes in cell.

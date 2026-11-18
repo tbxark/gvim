@@ -521,9 +521,14 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 		if lineIdx >= len(s.data.Spans) || len(s.data.Spans[lineIdx]) == 0 {
 			g.Put(x, y, geo.prevEnd, space.End(line, codeWidth), st)
 		} else {
+			over := ansi.StringWidth(line) > codeWidth
+			limit := geo.prevEnd
+			if over && codeWidth > 1 {
+				limit = geo.prevEnd - 1
+			}
 			trimmedLen := len(line)
 			for _, span := range s.data.Spans[lineIdx] {
-				if span.Start >= trimmedLen {
+				if span.Start >= trimmedLen || x >= limit {
 					break
 				}
 				start := span.Start
@@ -534,16 +539,28 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 				chunk := line[start:end]
 				spanSt := st
 				if span.Kind != syntax.KindPlain {
-					spanSt = p.chrome.syntax[span.Kind]
-					spanSt.BG = st.BG
+					syn := p.chrome.syntax[span.Kind]
+					if target == lineNo {
+						// Keep selected foreground contrast while retaining emphasis attributes.
+						spanSt.Bold = spanSt.Bold || syn.Bold
+						spanSt.Italic = spanSt.Italic || syn.Italic
+					} else {
+						spanSt = syn
+						spanSt.BG = st.BG
+					}
 				}
-				adv := g.Put(x, y, geo.prevEnd, chunk, spanSt)
+				adv := g.Put(x, y, limit, chunk, spanSt)
 				x += adv
-				if x >= geo.prevEnd {
+				if adv < ansi.StringWidth(chunk) {
+					x = limit
 					break
 				}
 			}
-			if ansi.StringWidth(line) > codeWidth {
+			if over && codeWidth > 0 {
+				for x < limit {
+					g.Set(x, y, " ", st)
+					x++
+				}
 				g.Set(geo.prevEnd-1, y, "…", st)
 			}
 		}

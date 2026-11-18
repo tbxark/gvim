@@ -97,6 +97,9 @@ func (m *workspaceManager) ExtractTab() (tui.WorkspaceCmd, error) {
 	if sess == nil {
 		return nil, errors.New("cannot extract: the daemon is not ready")
 	}
+	if sess.ws.File.AuthoritySpec != "" {
+		return nil, errors.New("cannot extract: extracting tabs from a remote workspace is not supported")
+	}
 	doc := sess.rt.ed.Active()
 	if doc == nil || doc.Virtual() || doc.Path == "" {
 		return nil, errors.New("cannot extract: buffer has no file path")

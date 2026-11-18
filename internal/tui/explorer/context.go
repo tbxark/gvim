@@ -9,6 +9,8 @@ type ContextTarget struct {
 	// Root is set when the only target is the tree root, or the press was on the blank
 	// area. Fresh gives these the narrow menu of creation and paste.
 	Root bool
+	// IsDir reports whether a single target path is a directory.
+	IsDir bool
 }
 
 // SelectAt prepares the panel for a context menu opened by a right press at (x, y)
@@ -41,5 +43,5 @@ func (p Panel) SelectAt(g Geometry, x, y int) (ContextTarget, bool) {
 	}
 	s.picked, s.anchor = nil, ""
 	p.selectIndex(rows, idx)
-	return ContextTarget{Paths: []string{path}, Root: path == p.tree.Root()}, true
+	return ContextTarget{Paths: []string{path}, Root: path == p.tree.Root(), IsDir: rows[idx].IsDir}, true
 }

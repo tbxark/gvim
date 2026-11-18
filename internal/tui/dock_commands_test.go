@@ -196,45 +196,35 @@ func TestTerminalCommandsLayOutTheDockInTheEditorColumn(t *testing.T) {
 }
 
 func TestFocusTerminalWithNoRunningShellNotifies(t *testing.T) {
-	tests := []struct {
-		name  string
-		fail  bool // the shell cannot start
-		setup func(t *testing.T, m *Model, s *shellsStarter)
-	}{
-		{
-			name:  "a start that failed",
-			fail:  true,
-			setup: func(t *testing.T, m *Model, s *shellsStarter) { openDock(t, m) },
-		},
-		{
-			name: "a shell that exited",
-			setup: func(t *testing.T, m *Model, s *shellsStarter) {
-				openDock(t, m)
-				close(s.terms[0].done)
-				dockSettle(t, m, nil)
-			},
-		},
+	starter := &shellsStarter{err: errors.New("no shell")}
+	m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
+	openDock(t, m)
+	starts := len(starter.dirs)
+	dockRun(t, m, "focus_terminal")
+	if m.dock.Focus() {
+		t.Fatal("the dock took the focus with no shell running")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			starter := &shellsStarter{}
-			if tt.fail {
-				starter.err = errors.New("no shell")
-			}
-			m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
-			tt.setup(t, m, starter)
-			starts := len(starter.dirs)
-			dockRun(t, m, "focus_terminal")
-			if m.dock.Focus() {
-				t.Fatal("the dock took the focus with no shell running")
-			}
-			if len(starter.dirs) != starts {
-				t.Fatalf("shell starts = %d, want %d: focus_terminal must not start a shell", len(starter.dirs), starts)
-			}
-			if m.notice != noTerminalNotice() {
-				t.Fatalf("notice = %q, want %q", m.notice, noTerminalNotice())
-			}
-		})
+	if len(starter.dirs) != starts {
+		t.Fatalf("shell starts = %d, want %d: focus_terminal must not start a shell", len(starter.dirs), starts)
+	}
+	if m.notice != noTerminalNotice() {
+		t.Fatalf("notice = %q, want %q", m.notice, noTerminalNotice())
+	}
+}
+
+func TestFocusTerminalOnExitedShellFocusesDockWithoutStarting(t *testing.T) {
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
+	openDock(t, m)
+	close(starter.terms[0].done)
+	dockSettle(t, m, nil)
+	starts := len(starter.dirs)
+	dockRun(t, m, "focus_terminal")
+	if !m.dock.Focus() {
+		t.Fatal("the exited dock did not take focus for its transcript/scrollback")
+	}
+	if len(starter.dirs) != starts {
+		t.Fatalf("shell starts = %d, want %d: focus_terminal must not start a shell", len(starter.dirs), starts)
 	}
 }
 

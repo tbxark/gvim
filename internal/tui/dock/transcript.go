@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/terminal"
 )
@@ -176,12 +177,15 @@ func captureTranscript(t Terminal) ([]terminal.Line, int) {
 	return out, sc.Cols
 }
 
-// lineFromText turns a saved transcript line into cells, one rune per cell.
+// lineFromText turns a saved transcript line into cells, inserting continuation cells
+// after width-2 runes so display columns align with terminal screens.
 func lineFromText(text string) terminal.Line {
-	runes := []rune(text)
-	cells := make([]terminal.Cell, len(runes))
-	for i, r := range runes {
-		cells[i] = terminal.Cell{Rune: r}
+	cells := make([]terminal.Cell, 0, len(text))
+	for _, r := range text {
+		cells = append(cells, terminal.Cell{Rune: r})
+		if r >= utf8.RuneSelf && ansi.StringWidth(string(r)) == 2 {
+			cells = append(cells, terminal.Cell{})
+		}
 	}
 	return terminal.Line{Cells: cells}
 }

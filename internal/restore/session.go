@@ -24,19 +24,12 @@ type Unrestored struct {
 	Stash string
 }
 
-// SaveSession writes the open tabs of ed to dir. Each file keeps its cursor and its
-// first visible line. A modified tab keeps its text in a stash file, so the unsaved
-// edits come back with the session. An untitled tab with no text is not kept, and neither
-// is a virtual one, which belongs to a plugin and is not a file. The
-// explorer state goes in as it is. The active tab is kept as the index among the
-// saved tabs, and the editor's own active tab is put back.
-func SaveSession(ed *editor.Editor, dir string, st tui.ExplorerState) error {
-	return WriteSession(ed, dir, st, nil)
-}
-
-// WriteSession writes the session as SaveSession does, and lists the kept files after
-// the open tabs. A kept file is one whose unsaved text restoreSession could not put
-// back. Its stash file is named in the new session, so the save does not remove it,
+// WriteSession writes the open tabs of ed to dir, and lists the kept files after
+// the open tabs. Each open file keeps its cursor and first visible line; a modified tab
+// keeps its text in a stash file, so the unsaved edits come back with the session. An
+// untitled tab with no text is not kept, and neither is a virtual one, which belongs to a
+// plugin and is not a file. A kept file is one whose unsaved text restoreSession could not
+// put back. Its stash file is named in the new session, so the save does not remove it,
 // and the next start tries to restore it again. The optional layout is the pane layout
 // of the workspace: it is saved only when every pane still names a file of the session
 // with the same path, so a stale or hand-edited layout never attaches a pane to the
@@ -187,7 +180,7 @@ func RestoreHotExitAccess(ed *editor.Editor, dir string, s session.Session, exis
 
 // restoreHotExitFiles opens only the tabs that carry unsaved text.
 func restoreHotExitFiles(ed *editor.Editor, dir string, s session.Session, exists func(path string) bool) []Unrestored {
-	var hot session.Session
+	hot := session.Session{MRU: s.MRU}
 	for i, f := range s.Files {
 		if f.StashFile != "" || f.OverlayFile != "" {
 			if i == s.Active {
@@ -263,6 +256,8 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 		}
 		overlay = &st
 	}
+	prevActive := activeIndex(ed)
+	alreadyOpen := false
 	if f.Path == "" {
 		ed.Do("new", nil)
 	} else {
@@ -280,6 +275,7 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 		if statErr != nil && f.StashFile == "" {
 			return false, nil
 		}
+		_, alreadyOpen = ed.DocumentIndexByPath(f.Path)
 		if err := openFile(ed, f.Path); err != nil {
 			return false, err
 		}
@@ -301,6 +297,15 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 			restore = ed.ReplaceOverlay
 		}
 		if err := restore(doc, *overlay); err != nil {
+			if !alreadyOpen {
+				if idx := activeIndex(ed); idx >= 0 {
+					_ = ed.CloseTab(idx, true)
+				}
+				if prevActive >= 0 && prevActive < len(ed.Tabs()) {
+					ed.ActivateTab(prevActive)
+				}
+				return false, fmt.Errorf("%s: %w; its stashed changes were kept", filepath.Base(f.Path), err)
+			}
 			return true, fmt.Errorf("%s: %w; its stashed changes were kept", filepath.Base(f.Path), err)
 		}
 	}

@@ -61,7 +61,7 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 		inner := width - 4
 		start := base + indent
 		var show []fenceBodyRune
-		if f.caret.Line == i {
+		if f.caret.Line == i && !f.noPageReveal {
 			// The caret line keeps the whole body text (the wrapped rows without
 			// rails are the editing view); the continuation rows stand down.
 			show = fenceContent(raw, start)

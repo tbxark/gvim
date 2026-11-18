@@ -281,6 +281,7 @@ type Manager struct {
 	servers       map[string][]ServerConfig // by language ID
 	universal     []ServerConfig
 	start         func(context.Context, lsp.Config) (*lsp.Client, error)
+	customSpawner bool
 	// applyEdit answers a server's workspace/applyEdit request. It gets the
 	// language of the requesting server ("" for a universal one). It is read and
 	// set under mu.
@@ -369,6 +370,7 @@ func (m *Manager) SetSpawnEnv(overlay func() []string) {
 func (m *Manager) SetSpawner(start func(context.Context, lsp.Config) (*lsp.Client, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.customSpawner = start != nil
 	if start == nil {
 		start = lsp.Start
 	}
@@ -443,9 +445,10 @@ func (m *Manager) preflightServer(language string, cfg ServerConfig) error {
 	pathValue := effectivePath(append(os.Environ(), serverEnv...))
 	m.mu.Lock()
 	rootDir := m.rootDir
+	customSpawner := m.customSpawner
 	m.mu.Unlock()
 	program := ""
-	if len(command) > 0 && !strings.ContainsAny(command[0], "/\\") {
+	if !customSpawner && len(command) > 0 && !strings.ContainsAny(command[0], "/\\") {
 		if resolved, ok := trust.ResolveSpawnPath(rootDir, command[0], pathValue); ok {
 			program = resolved
 		}
@@ -1120,9 +1123,10 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool,
 	m.mu.Lock()
 	rootDir := m.rootDir
 	start := m.start
+	customSpawner := m.customSpawner
 	m.mu.Unlock()
 	program := ""
-	if len(command) > 0 && !strings.ContainsAny(command[0], "/\\") {
+	if !customSpawner && len(command) > 0 && !strings.ContainsAny(command[0], "/\\") {
 		if resolved, ok := trust.ResolveSpawnPath(rootDir, command[0], pathValue); ok {
 			program = resolved
 		}
@@ -1154,6 +1158,7 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool,
 		Command:               command,
 		Program:               program,
 		RootURI:               m.rootURI,
+		Dir:                   rootDir,
 		Env:                   serverEnv,
 		InitializationOptions: cfg.InitializationOptions,
 		ApplyEdit:             m.applyEditHandler(language),

@@ -87,7 +87,31 @@ func menuBarLabel(title string) string {
 func dropdownRows(title string, holds func(string) bool, keyOf func(string) (string, bool), themeChoices []ThemeChoice) []Row {
 	for _, lm := range legacyMenus {
 		if lm.label == title {
-			return menuRows(lm.items, holds, keyOf, themeChoices)
+			rows := menuRows(lm.items, holds, keyOf, themeChoices)
+			switch title {
+			case "View":
+				var keys string
+				if keyOf != nil {
+					keys, _ = keyOf("toggle_sticky_scroll")
+				}
+				checked := holds != nil && holds("sticky_scroll")
+				rows = append(rows, Row{
+					Label:    i18n.TOr("", "gvim.menu.sticky_scroll", "Sticky Scroll", nil),
+					Keys:     keys,
+					Action:   "toggle_sticky_scroll",
+					Checkbox: true,
+					Checked:  checked,
+				})
+			case "Help":
+				rows = append(rows,
+					Row{Separator: true},
+					Row{
+						Label:  i18n.TOr("", "gvim.menu.about_gvim", "About gvim", nil),
+						Action: "about_gvim",
+					},
+				)
+			}
+			return rows
 		}
 	}
 	return nil

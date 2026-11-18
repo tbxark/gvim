@@ -23,11 +23,13 @@ package editorpane
 
 import (
 	"fmt"
-	"github.com/tbxark/gvim/fold"
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/syntax"
@@ -446,6 +448,7 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		soft:        p.SoftBreaks,
 		inline:      p.InlineHints,
 		pluginFolds: p.PluginFolds,
+		opts:        p.Opts,
 	}
 	if f.extras != nil || f.pageExtras != nil {
 		f.extraCache = make(map[int]ExtraRows)
@@ -487,6 +490,9 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		f.setVirtualLines(p.Doc)
 	}
 	f.initFX(p)
+	if f.opts.HideCurrentLineOnSelection && len(f.sels) > 0 {
+		f.curLine = false
+	}
 	switch {
 	case f.fill != nil && p.TopRow > 0 && f.top == p.Top:
 		f.topRow = min(p.TopRow, f.rowsIn(f.top, f.layoutLine(f.top, false))-1)
@@ -706,21 +712,35 @@ func shifted(m map[int]bool, n int) map[int]bool {
 // position for the terminal cursor.
 func (p Pane) Render(w, h int) *grid.Grid {
 	g := grid.New(w, h)
-	for y := range g.Height() {
-		g.Fill(0, g.Width(), y, p.Styles.Text)
+	p.paintTo(g, w, h)
+	return g
+}
+
+// RenderInto paints the pane directly into dst at top-left (x0, y0) with size
+// w by h, avoiding an intermediate grid allocation and Blit when the rectangle
+// lies inside dst.
+func (p Pane) RenderInto(dst *grid.Grid, x0, y0, w, h int) {
+	if sub, ok := dst.Sub(x0, y0, w, h); ok {
+		p.paintTo(&sub, w, h)
+		return
 	}
+	Blit(dst, x0, y0, p.Render(w, h))
+}
+
+func (p Pane) paintTo(g *grid.Grid, w, h int) {
+	g.Clear(p.Styles.Text)
 	f, ok := p.newFrame(w, h)
 	if !ok {
-		return g
+		return
 	}
 	rows := f.paintText(g)
+	f.paintCurrentColumn(g)
 	f.paintRulers(g)
 	f.paintMarks(g, rows)
 	f.paintHorizontalBar(g)
 	f.paintCursorLineOverlay(g)
 	f.paintSecondaryCarets(g)
 	f.paintCaret(g)
-	return g
 }
 
 // paintCaret draws the caret cell in the frame's caret shape, so the caret shows even
@@ -804,10 +824,36 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 		rows, y = f.paintFillers(g, rows, i, above+1, f.fillAfter(i), y)
 	}
 	for ; y < f.h; y, i = y+1, i+1 {
-		g.Put(0, y, f.w-1, tildeText, f.styles.Gutter)
+		if !f.opts.HideTilde {
+			g.Put(0, y, f.w-1, tildeText, f.styles.Gutter)
+		}
 		rows = append(rows, rowInfo{y: y, line: i})
 	}
 	return rows
+}
+
+// paintCurrentColumn tints the caret's display column vertically across body rows when enabled.
+func (f frame) paintCurrentColumn(g *grid.Grid) {
+	if !f.opts.HighlightCurrentColumn || f.pageOn || f.styles.CurrentLine.BG == nil {
+		return
+	}
+	cx, _, ok := f.caretCell()
+	if !ok || cx < f.gutter || cx >= f.w-1 {
+		return
+	}
+	colBG := f.styles.CurrentLine.BG
+	colBGKey := f.styles.CurrentLine.BGKey
+	textBG := f.styles.Text.BG
+	for y := 0; y < f.h; y++ {
+		c := g.At(cx, y)
+		if c.Text == "" || c.Style.BG != textBG {
+			continue
+		}
+		st := c.Style
+		st.BG = colBG
+		st.BGKey = colBGKey
+		g.Set(cx, y, c.Text, st)
+	}
 }
 
 // paintLineRow paints one text row of line i at body row y.
@@ -916,6 +962,9 @@ func (f frame) style(c cell, cur bool) grid.Style {
 		st = f.styles.CurrentMatch
 	case c.match == matchOther:
 		st = withBackground(st, f.styles.Match)
+		if f.styles.Match.FG != nil {
+			st.FG, st.FGKey = f.styles.Match.FG, f.styles.Match.FGKey
+		}
 	case c.match == matchOccurrence && f.styles.Occurrence.BG != nil:
 		st = withBackground(st, f.styles.Occurrence)
 		// The band lands where syntax colors live, so text that would vanish on it
@@ -975,7 +1024,10 @@ func (f frame) paintMarks(g *grid.Grid, rows []rowInfo) {
 			g.Set(0, r.y, changeBar, f.styles.Gutter)
 		}
 		st, marked := f.scrollMark(r.line)
+		onThumb := f.overflow && !f.noVBar && r.y >= thumbStart && r.y < thumbStart+thumbLen
 		switch {
+		case onThumb:
+			f.paintBar(g, r.y, thumbStart, thumbLen)
 		case marked:
 			g.Set(last, r.y, changeScroll, st)
 		case f.scroll[r.line]:
@@ -1129,7 +1181,11 @@ func (f frame) caretRowIn() int {
 		k, _ = f.tallRowsBetween(f.caret.Line, 0, f.caret.Col, 4*f.h+16)
 	} else {
 		ln := f.layoutLine(f.caret.Line, false)
-		k, _ = caretInSpans(ln.geom, ln.spans, expandedIndex(ln.raw, f.caret.Col-ln.off, f.tab))
+		rel := f.caret.Col - ln.off
+		if ln.srcToDisp != nil {
+			rel = mapSrcColumn(ln, rel)
+		}
+		k, _ = caretInSpans(ln.geom, ln.spans, expandedIndex(ln.raw, rel, f.tab))
 		k += f.fillAbove(f.caret.Line) + f.aboveCount(f.caret.Line)
 	}
 	f.fx.caretRow, f.fx.caretRowOK = k, true
@@ -1352,6 +1408,47 @@ func (f frame) virtualAt(x, y int) int {
 	return max(cells-r.endCells(), 0)
 }
 
+// HasTextAt reports whether the pane-local coordinates (x, y) land on an
+// actual buffer text cell (excluding gutter, virtual/filler/extra rows, ~ rows
+// below the buffer, and empty cells past the end of the line even when
+// soft-wrap is enabled).
+func (p Pane) HasTextAt(w, h, x, y int) bool {
+	f, ok := p.newFrame(w, h)
+	if !ok {
+		return false
+	}
+	if y < 0 || y >= f.h || x < f.gutter || x >= f.w {
+		return false
+	}
+	if f.hbar && y == f.barY {
+		return false
+	}
+	if f.overflow && !f.noVBar && x == w-1 {
+		return false
+	}
+	r := f.rowAt(y)
+	if !r.valid || r.filler != notFiller || r.extra != 0 {
+		return false
+	}
+	cells := r.startCells() + x - f.gutter + f.dropFor(r.ln)
+	if lead := f.rowLead(r.ln, r.k); lead > 0 {
+		cells -= lead
+	} else if !r.first {
+		cells -= r.ln.indent
+	}
+	if cells < r.startCells() {
+		return false
+	}
+	if f.dropFor(r.ln) == 0 && f.inlineAvailable(r.line, r.ln) {
+		adjusted, _, onHint := f.inlineUnshift(r.line, r.ln, r.k, cells)
+		if onHint {
+			return false
+		}
+		cells = adjusted
+	}
+	return cells >= r.startCells() && cells < r.endCells()
+}
+
 // PosAt maps a pane-local cell to a document position. The row and the column
 // are clamped into the document, so a drag past the edge gives the nearest
 // position. A column left of the text maps to the start of the row, and a
@@ -1505,9 +1602,12 @@ func thumbOf(lines, h, top int) (start, length int) {
 
 // thumbOfMax is thumbOf for a view whose last page starts at line maxTop.
 func thumbOfMax(lines, h, top, maxTop int) (start, length int) {
-	length = min(h, max(1, (h*h+lines/2)/lines))
+	if lines <= 0 || h <= 0 {
+		return 0, 0
+	}
+	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
 	if maxTop > 0 {
-		start = min(max(top, 0), maxTop) * (h - length) / maxTop
+		start = int(int64(min(max(top, 0), maxTop)) * int64(h-length) / int64(maxTop))
 	}
 	return start, length
 }
@@ -1554,11 +1654,23 @@ func (f frame) posAt(x, row int) buffer.Pos {
 }
 
 // Blit copies src into dst with its top-left cell at (x0, y0). Cells outside dst
-// are dropped. The root uses it to place the pane in the frame.
+// are dropped. Wide-char continuation cells are skipped so pairs are preserved, and a
+// width-2 glyph landing on the last column of dst is replaced with a space rather than split.
 func Blit(dst *grid.Grid, x0, y0 int, src *grid.Grid) {
 	for y := range src.Height() {
 		for x := range src.Width() {
 			c := src.At(x, y)
+			if c.Text == "" {
+				continue
+			}
+			if ansi.StringWidth(c.Text) == 2 {
+				if x0+x >= dst.Width()-1 {
+					dst.Set(x0+x, y0+y, " ", c.Style)
+				} else {
+					dst.Put(x0+x, y0+y, min(x0+x+2, dst.Width()), c.Text, c.Style)
+				}
+				continue
+			}
 			dst.Set(x0+x, y0+y, c.Text, c.Style)
 		}
 	}

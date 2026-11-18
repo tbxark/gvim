@@ -118,4 +118,18 @@ func TestDefaultNameIsPerRoot(t *testing.T) {
 	if !strings.HasPrefix(a, "proj-") {
 		t.Fatalf("name = %q, want a proj- prefix", a)
 	}
+
+	// A symlink pointing at realDir resolves to the same DefaultName via EvalSymlinks.
+	base := t.TempDir()
+	realDir := filepath.Join(base, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(base, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if DefaultName(realDir) != DefaultName(linkDir) {
+		t.Fatalf("symlink DefaultName(%q) = %q, want %q", linkDir, DefaultName(linkDir), DefaultName(realDir))
+	}
 }

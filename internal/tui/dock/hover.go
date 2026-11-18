@@ -64,6 +64,9 @@ func (p *Panel) paintHoverRow(g *grid.Grid, x0, y, row, w int, scroll bool) {
 	}
 	for c := max(p.hover.start, 0); c < min(p.hover.end, w); c++ {
 		cell := g.At(x0+c, y)
+		if cell.Text == "" {
+			continue
+		}
 		st := cell.Style
 		st.Underline = true
 		g.Set(x0+c, y, cell.Text, st)

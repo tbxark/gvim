@@ -794,7 +794,7 @@ func (p *Panel) copySelected() tea.Cmd {
 
 // copyScreen copies the visible rows of the scrollback view.
 func (p *Panel) copyScreen() tea.Cmd {
-	if p.term == nil {
+	if p.term == nil && !p.restored {
 		p.noticeOf(NoTerminalNotice())
 		return nil
 	}

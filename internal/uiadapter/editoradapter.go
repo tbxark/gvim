@@ -25,6 +25,16 @@ type Editor struct {
 	// hotExit makes a plain Quit grant the quit while tabs are modified: with
 	// editor.hot_exit on, the session save at exit stashes their text.
 	hotExit bool
+	// remote disables local-disk LSP workspace file operations when the editor is
+	// bound to a remote authority workspace.
+	remote bool
+}
+
+// SetRemote marks whether the editor is backed by a remote workspace.
+func (a *Editor) SetRemote(remote bool) {
+	if a != nil {
+		a.remote = remote
+	}
 }
 
 // SetViewport sizes the editor pane.
@@ -355,6 +365,16 @@ func (a *Editor) ExtendSelection(p buffer.Pos, u editor.Unit) {
 	a.ed.ExtendSelection(p, u)
 }
 
+// ToggleCursorAt toggles a caret at p for Alt+Click multi-cursor editing.
+func (a *Editor) ToggleCursorAt(p buffer.Pos) bool {
+	return a.ed.ToggleCursorAt(p)
+}
+
+// ReplaceActiveRange replaces a single range in the active buffer while keeping the caret.
+func (a *Editor) ReplaceActiveRange(from, to buffer.Pos, text string) bool {
+	return a.ed.ReplaceActiveRange(from, to, text)
+}
+
 // ScrollBy moves the viewport by rows lines. The caret stays where it is.
 func (a *Editor) ScrollBy(rows int) {
 	a.ed.ScrollBy(rows)
@@ -455,5 +475,11 @@ func (a *Editor) Quit(force bool) []editor.Dirty {
 // SetContext sets how many bytes of lines above the lines shown the lexer is given
 // (highlight_context_bytes).
 func (a *Editor) SetContext(n int) {
+	if a == nil {
+		return
+	}
 	a.spans.SetContext(n)
+	for _, c := range a.others {
+		c.SetContext(n)
+	}
 }

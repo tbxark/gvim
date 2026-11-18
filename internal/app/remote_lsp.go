@@ -157,6 +157,44 @@ func remoteLSMarkerChecker(slot authority.Slot) func(ctx context.Context, dir st
 	}
 }
 
+const remoteLSPMaxReadBytes = 16 << 20
+
+func remoteLSReadFile(slot authority.Slot) func(ctx context.Context, filePath string) ([]byte, error) {
+	return func(ctx context.Context, filePath string) ([]byte, error) {
+		if slot == nil || !slot.Connected() {
+			return nil, errors.New("remote workspace is disconnected")
+		}
+		files := slot.Files()
+		if files == nil {
+			return nil, errors.New("remote workspace has no file system")
+		}
+		return files.ReadFile(ctx, filePath, remoteLSPMaxReadBytes)
+	}
+}
+
+func remoteLSReadDir(slot authority.Slot) func(ctx context.Context, dir string) ([]string, error) {
+	return func(ctx context.Context, dir string) ([]string, error) {
+		if slot == nil || !slot.Connected() {
+			return nil, errors.New("remote workspace is disconnected")
+		}
+		files := slot.Files()
+		if files == nil {
+			return nil, errors.New("remote workspace has no file system")
+		}
+		entries, err := files.ReadDir(ctx, dir, false)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.Kind != "dir" {
+				names = append(names, entry.Name)
+			}
+		}
+		return names, nil
+	}
+}
+
 // procConn adapts the authority's chunk-based long-running process to the io.ReadWriteCloser
 // lsp.NewClient wants: stdout chunks become the client's reader, stdin writes are fed to
 // the process through a pipe (blocking the writer until the authority accepts the bytes,
@@ -164,6 +202,8 @@ func remoteLSMarkerChecker(slot authority.Slot) func(ctx context.Context, dir st
 // the client's error tail. Close terminates the remote child.
 type procConn struct {
 	proc hostos.Proc
+	ctx  context.Context
+	stop context.CancelFunc
 	in   *io.PipeWriter
 	inR  *io.PipeReader
 	out  *io.PipeReader
@@ -178,7 +218,8 @@ func newProcConn(proc hostos.Proc) *procConn {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
-	c := &procConn{proc: proc, in: inW, inR: inR, out: outR, outW: outW, errR: errR, errW: errW}
+	ctx, stop := context.WithCancel(context.Background())
+	c := &procConn{proc: proc, ctx: ctx, stop: stop, in: inW, inR: inR, out: outR, outW: outW, errR: errR, errW: errW}
 	go c.pump()
 	go c.feed()
 	return c
@@ -192,7 +233,7 @@ func (c *procConn) pump() {
 		_ = c.errW.Close()
 	}()
 	for {
-		chunk, ok := c.proc.Output(context.Background())
+		chunk, ok := c.proc.Output(c.ctx)
 		if !ok {
 			return
 		}
@@ -208,7 +249,7 @@ func (c *procConn) pump() {
 
 // feed forwards stdin to the process. A full stdin buffer (a busy error) is retried (the
 // LSP pipe gives backpressure); any other write error means the process or its stdin is
-// gone and ends the loop.
+// gone and ends the loop, closing the pipe with the failure cause.
 func (c *procConn) feed() {
 	defer c.proc.CloseStdin()
 	buf := make([]byte, 32<<10)
@@ -221,9 +262,17 @@ func (c *procConn) feed() {
 					break
 				}
 				if pluginapi.CodeOf(werr) != pluginapi.CodeBusy {
+					_ = c.inR.CloseWithError(werr)
 					return
 				}
-				time.Sleep(2 * time.Millisecond)
+				timer := time.NewTimer(2 * time.Millisecond)
+				select {
+				case <-c.ctx.Done():
+					timer.Stop()
+					_ = c.inR.CloseWithError(c.ctx.Err())
+					return
+				case <-timer.C:
+				}
 			}
 		}
 		if err != nil {
@@ -242,6 +291,7 @@ func (c *procConn) Stderr() io.Reader { return c.errR }
 // Close ends the client's connection and terminates the remote child. It is idempotent.
 func (c *procConn) Close() error {
 	c.closeOnce.Do(func() {
+		c.stop()
 		_ = c.in.Close()
 		_ = c.out.Close()
 		_ = c.errR.Close()

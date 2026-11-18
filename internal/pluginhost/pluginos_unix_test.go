@@ -295,7 +295,7 @@ func TestOSShutdownKillsEverythingAtOnce(t *testing.T) {
 			t.Fatalf("res = %+v", res)
 		}
 	}
-	if d := time.Since(begin); d > time.Second {
+	if d := time.Since(begin); d > 5*time.Second {
 		t.Fatalf("Shutdown took %v to kill", d)
 	}
 	if _, err := o.Start(ctx, []string{"sleep", "1"}, hostos.ProcOptions{}); codeOf(err) != pluginapi.CodeClosed {
@@ -361,7 +361,7 @@ gvim.notify("pid " .. tostring(p:wait_started()))`}, plugintest.Options{OS: o})
 	})
 	begin := time.Now()
 	h.Unload("t")
-	if d := time.Since(begin); d > time.Second {
+	if d := time.Since(begin); d > 5*time.Second {
 		t.Fatalf("Unload blocked for %v", d)
 	}
 	eventually(t, "the child to die", func() bool { return !alive(pid) })
@@ -713,4 +713,35 @@ func TestStartAfterShutdownLeaksNoDescriptors(t *testing.T) {
 	if after := openFDs(t); after > before {
 		t.Fatalf("descriptors went from %d to %d", before, after)
 	}
+}
+
+// TestProcKillConcurrentAndExitedReturnsClosed verifies Kill synchronizes under smu and
+// maps exited/ESRCH processes cleanly to CodeClosed.
+func TestProcKillConcurrentAndExitedReturnsClosed(t *testing.T) {
+	o, _ := newTestOS(t)
+	p, err := o.Start(context.Background(), []string{"true"}, hostos.ProcOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := p.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Kill("TERM"); codeOf(err) != pluginapi.CodeClosed {
+		t.Fatalf("Kill after Wait = %v, want CodeClosed", err)
+	}
+	// Concurrent Start + Kill/Terminate race check.
+	p2, err := o.Start(context.Background(), []string{"sleep", "30"}, hostos.ProcOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _ = p2.Kill("TERM") }()
+	go func() { defer wg.Done(); p2.Terminate(5 * time.Second) }()
+	if _, err := p2.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
 }

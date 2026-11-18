@@ -750,6 +750,7 @@ func (p *Palette) liveCompletenessHint() string {
 // toolbarSeg is one segment of the Live Grep toolbar: the key, the label, the state, and
 // whether the state is on.
 type toolbarSeg struct {
+	key  string
 	text string
 	on   bool
 }
@@ -765,22 +766,22 @@ func (p *Palette) toolbarSegments() []toolbarSeg {
 		return "off"
 	}
 	segs := []toolbarSeg{
-		{text: "Alt+C Case:" + onOff(p.grep.opts.CaseSensitive) + "  ", on: p.grep.opts.CaseSensitive},
-		{text: "Alt+G Regex:" + onOff(p.grep.opts.Regex) + "  ", on: p.grep.opts.Regex},
-		{text: "Alt+O Word:" + onOff(p.grep.opts.WholeWord) + "  ", on: p.grep.opts.WholeWord},
+		{key: "alt+c", text: "Alt+C Case:" + onOff(p.grep.opts.CaseSensitive) + "  ", on: p.grep.opts.CaseSensitive},
+		{key: "alt+g", text: "Alt+G Regex:" + onOff(p.grep.opts.Regex) + "  ", on: p.grep.opts.Regex},
+		{key: "alt+o", text: "Alt+O Word:" + onOff(p.grep.opts.WholeWord) + "  ", on: p.grep.opts.WholeWord},
 		{text: toolbarSep, on: true},
-		{text: "Alt+L Files:" + onOff(p.grep.sources.Files) + "  ", on: p.grep.sources.Files},
+		{key: "alt+l", text: "Alt+L Files:" + onOff(p.grep.sources.Files) + "  ", on: p.grep.sources.Files},
 	}
 	if p.grep.buffers {
-		segs = append(segs, toolbarSeg{text: "Alt+U Buffers:" + onOff(p.grep.sources.Buffers) + "  ", on: p.grep.sources.Buffers})
+		segs = append(segs, toolbarSeg{key: "alt+u", text: "Alt+U Buffers:" + onOff(p.grep.sources.Buffers) + "  ", on: p.grep.sources.Buffers})
 	}
 	if p.grep.terminals {
-		segs = append(segs, toolbarSeg{text: "Alt+T Terminals:" + onOff(p.grep.sources.Terminals) + "  ", on: p.grep.sources.Terminals})
+		segs = append(segs, toolbarSeg{key: "alt+t", text: "Alt+T Terminals:" + onOff(p.grep.sources.Terminals) + "  ", on: p.grep.sources.Terminals})
 	}
 	if p.grep.diagnostics {
-		segs = append(segs, toolbarSeg{text: "Alt+D Diagnostics:" + onOff(p.grep.sources.Diagnostics) + "  ", on: p.grep.sources.Diagnostics})
+		segs = append(segs, toolbarSeg{key: "alt+d", text: "Alt+D Diagnostics:" + onOff(p.grep.sources.Diagnostics) + "  ", on: p.grep.sources.Diagnostics})
 	}
-	return append(segs, toolbarSeg{text: "Alt+I Ignored:" + onOff(p.grep.sources.Ignored), on: p.grep.sources.Ignored})
+	return append(segs, toolbarSeg{key: "alt+i", text: "Alt+I Ignored:" + onOff(p.grep.sources.Ignored), on: p.grep.sources.Ignored})
 }
 
 // grepRowDisplay turns one hit's line into the sanitized row text plus the match's

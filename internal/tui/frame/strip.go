@@ -17,6 +17,7 @@ type TabInfo struct {
 	Path     string
 	Modified bool
 	Preview  bool
+	ReadOnly bool
 	Active   bool
 	// Icon is the file type icon the strip draws before the name. The root fills it
 	// when the icon set has file icons; an editor leaves it empty.
@@ -50,6 +51,9 @@ func StripLabel(t TabInfo) string {
 	}
 	if t.Modified {
 		base = ModifiedMark + " " + base
+	}
+	if t.ReadOnly {
+		base += " [RO]"
 	}
 	if t.Preview || strings.HasSuffix(t.Name, PreviewSuffix) {
 		base += PreviewSuffix
@@ -165,10 +169,11 @@ func tabRuns(tabs []TabInfo, x0 int, ic icons.Mode) []Run {
 	for i, t := range tabs {
 		name := " " + space.Pad(StripLabel(t))
 		nw := ansi.StringWidth(name)
+		preview := t.Preview || strings.HasSuffix(t.Name, PreviewSuffix)
 		runs = append(runs,
-			Run{X: p, W: nw, Text: name, Kind: HitTab, Index: i},
-			Run{X: p + nw, W: 1, Text: ic.Glyph(icons.Close), Kind: HitTabClose, Index: i},
-			Run{X: p + nw + 1, W: 1, Text: " ", Kind: HitTab, Index: i},
+			Run{X: p, W: nw, Text: name, Kind: HitTab, Index: i, Preview: preview},
+			Run{X: p + nw, W: 1, Text: ic.Glyph(icons.Close), Kind: HitTabClose, Index: i, Preview: preview},
+			Run{X: p + nw + 1, W: 1, Text: " ", Kind: HitTab, Index: i, Preview: preview},
 		)
 		p += nw + 2
 	}
@@ -234,10 +239,11 @@ func clipRunTo(r Run, lo, hi int) (Run, bool) {
 		return Run{}, false
 	}
 	return Run{
-		X:     r.X + from,
-		W:     to - from,
-		Text:  ansi.Cut(r.Text, from, to),
-		Kind:  r.Kind,
-		Index: r.Index,
+		X:       r.X + from,
+		W:       to - from,
+		Text:    ansi.Cut(r.Text, from, to),
+		Kind:    r.Kind,
+		Index:   r.Index,
+		Preview: r.Preview,
 	}, true
 }

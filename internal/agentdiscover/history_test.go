@@ -296,3 +296,28 @@ func TestSafeSessionID(t *testing.T) {
 		}
 	}
 }
+
+func TestScanExternalRejectsUnsafeCodexStemFallbackAndTrimsCaseExt(t *testing.T) {
+	t.Parallel()
+	h := newHistoryHome(t)
+	codexDir := filepath.Join(h.home, ".codex", "sessions", "2026", "02", "03")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Unsafe json id + unsafe filename stem -> skipped instead of slipping past safeSessionID.
+	h.writeFile(t, filepath.Join(codexDir, "rollout-bad;id.JSONL"),
+		`{"type":"session_meta","payload":{"id":"bad/id","cwd":"/w","originator":"codex_cli_rs"}}`)
+
+	// Safe uppercase .JSONL Claude transcript -> extension trimmed case-insensitively.
+	claudeDir := filepath.Join(h.home, ".claude", "projects", "bucket")
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h.writeFile(t, filepath.Join(claudeDir, "safe-upper-0001.JSONL"),
+		`{"type":"user","cwd":"/w"}`)
+
+	report := scanFixture(t, h, nil)
+	if len(report.Sessions) != 1 || report.Sessions[0].Tool != ExternalClaude || report.Sessions[0].ID != "safe-upper-0001" {
+		t.Fatalf("sessions = %+v, want only safe-upper-0001 without .JSONL", report.Sessions)
+	}
+}

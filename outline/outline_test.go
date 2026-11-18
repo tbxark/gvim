@@ -219,3 +219,30 @@ func TestScanFrontMatterClosingLineIsNoSetextText(t *testing.T) {
 		t.Errorf("headings = %+v, want the setext Title", heads)
 	}
 }
+
+func TestScanEmptySectionsTabsAndCRLF(t *testing.T) {
+	t.Parallel()
+	// Empty section clamps BodyStart <= EndByte.
+	empty := Scan([]string{"# A", "# B"})
+	if len(empty) != 2 || empty[0].BodyStart != empty[0].EndByte || empty[1].BodyStart != empty[1].EndByte {
+		t.Fatalf("empty sections = %+v, want BodyStart == EndByte", empty)
+	}
+	// Leading tabs are code blocks, not ATX or setext headings; CRLF works cleanly.
+	got := Scan([]string{"\t# indented by tab\r", "Not Setext\r", "\t===\r", "# Real\r", "Title\r", "---\r"})
+	if len(got) != 2 || got[0].Title != "Real" || got[1].Title != "Title" || got[1].Level != 2 {
+		t.Fatalf("tabs/CRLF headings = %+v", got)
+	}
+}
+
+type panicOnLineDoc struct{ n int }
+
+func (d panicOnLineDoc) LineCount() int { return d.n }
+func (panicOnLineDoc) Line(int) string  { panic("Line should not be called when LineCount > maxBytes") }
+
+func TestScanDocFastFailsWhenLineCountExceedsMaxBytes(t *testing.T) {
+	t.Parallel()
+	got, ok := ScanDoc(panicOnLineDoc{n: 1_000_000}, 100)
+	if ok || got != nil {
+		t.Fatalf("ScanDoc = %+v, %v; want nil, false", got, ok)
+	}
+}

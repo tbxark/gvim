@@ -279,6 +279,7 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	for _, b := range before.bufs {
 		if !has(cur.bufs, b.ID) {
 			m.plugEmit("buffer_closed", map[string]any{"id": m.gb(b.ID), "path": b.Path})
+			m.plugGroupsBufferClosed(pluginapi.BufferID(b.ID))
 			m.plugPanelsBufferClosed(pluginapi.BufferID(b.ID))
 			m.plugViewStateDrop(b.ID)
 			m.plugLineTargetsDrop(pluginapi.BufferID(b.ID))
@@ -496,7 +497,7 @@ func (m *Model) pluginSaveAllGate(source string) (cancel bool, cmd tea.Cmd) {
 	var cmds []tea.Cmd
 	for _, b := range m.saveGateBuffers(false) {
 		c, reason, gate := m.pluginVeto(pluginapi.Event{Name: "before_file_save", Data: map[string]any{
-			"buf": b.ID, "path": b.Path, "source": source,
+			"buf": m.gb(b.ID), "path": b.Path, "source": source,
 		}})
 		cmds = append(cmds, gate)
 		if c {
@@ -517,7 +518,7 @@ func (m *Model) pluginAutoSaveGate() (cancel bool, cmd tea.Cmd) {
 	var cmds []tea.Cmd
 	for _, b := range m.saveGateBuffers(true) {
 		c, _, gate := m.pluginVeto(pluginapi.Event{Name: "before_file_save", Data: map[string]any{
-			"buf": b.ID, "path": b.Path, "source": "autosave",
+			"buf": m.gb(b.ID), "path": b.Path, "source": "autosave",
 		}})
 		cmds = append(cmds, gate)
 		if c {
@@ -535,7 +536,7 @@ func (m *Model) pluginSaveAsGate(path string) (cancel bool, cmd tea.Cmd) {
 		return false, nil
 	}
 	c, reason, gate := m.pluginVeto(pluginapi.Event{Name: "before_file_save", Data: map[string]any{
-		"buf": pe.ActiveBuffer(), "path": path, "source": "manual",
+		"buf": m.gb(pe.ActiveBuffer()), "path": path, "source": "manual",
 	}})
 	if c {
 		if reason == "" {

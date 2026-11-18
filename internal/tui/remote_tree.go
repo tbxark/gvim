@@ -290,7 +290,7 @@ func (t *RemoteExplorerTree) Move(delta int) {
 // ScrollBy scrolls the rows by n.
 func (t *RemoteExplorerTree) ScrollBy(n int) {
 	t.mu.Lock()
-	t.scroll += n
+	t.scroll = max(t.scroll+n, 0)
 	t.mu.Unlock()
 }
 
@@ -298,7 +298,7 @@ func (t *RemoteExplorerTree) ScrollBy(n int) {
 func (t *RemoteExplorerTree) ScrollOffset() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return min(t.scroll, max(len(t.rowsLocked())-1, 0))
+	return max(min(t.scroll, max(len(t.rowsLocked())-1, 0)), 0)
 }
 
 // Expand marks a directory expanded. The root calls it for the tree root at

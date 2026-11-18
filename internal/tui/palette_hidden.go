@@ -9,7 +9,13 @@ import (
 // hiddenCommands are the builtin palette rows that can only answer "Not available in gvim":
 // Fresh's updater. The palette does not list them, so it offers no command that does nothing.
 // The actions still answer when something runs them (see notApplicable).
-var hiddenCommands = map[string]bool{"update_fresh": true, "open_update_log": true}
+// hiddenCommands lists actions hidden from the Command Palette: unsupported
+// upstream updater rows and easter-egg animation stubs.
+var hiddenCommands = map[string]bool{
+	"update_fresh":           true,
+	"open_update_log":        true,
+	"trigger_wave_animation": true,
+}
 
 // hiddenCommandRows returns the hidden updater rows, so the model can offer them when
 // an update command is configured. The other hidden rows have no substitute.

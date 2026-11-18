@@ -258,7 +258,7 @@ func readClaudeTranscript(file transcriptFile, headerBytes int) (*ExternalSessio
 	records := jsonRecords(text)
 	parts := strings.Split(file.rel, "/")
 	bucket := parts[0]
-	stem := strings.TrimSuffix(filepath.Base(file.rel), ".jsonl")
+	stem := trimJSONLExt(filepath.Base(file.rel))
 	cwd := firstStringField(records, "cwd")
 	id := firstStringField(records, "sessionId")
 	if !safeSessionID(id) {
@@ -384,7 +384,7 @@ func readCodexTranscript(file transcriptFile, headerBytes int) (*ExternalSession
 	if !safeSessionID(id) {
 		id = ""
 	}
-	stem := strings.TrimSuffix(filepath.Base(file.rel), ".jsonl")
+	stem := trimJSONLExt(filepath.Base(file.rel))
 	if id == "" {
 		// The uuid is the last five dash-separated groups; the timestamp's dashes
 		// come first.
@@ -398,7 +398,7 @@ func readCodexTranscript(file transcriptFile, headerBytes int) (*ExternalSession
 	if !safeSessionID(id) {
 		id = clipText(stem, maxExternalIDBytes)
 	}
-	if id == "" {
+	if !safeSessionID(id) {
 		return nil, ""
 	}
 	return &ExternalSession{
@@ -406,6 +406,15 @@ func readCodexTranscript(file transcriptFile, headerBytes int) (*ExternalSession
 		CWD: clipText(cwd, maxExternalTitleBytes), Path: file.path, ModTime: file.modTime,
 		Agent: "codex", ResumeArgv: []string{codexResumeCommand, "resume", "--last"}, Exact: false,
 	}, ""
+}
+
+// trimJSONLExt strips a trailing .jsonl suffix case-insensitively.
+func trimJSONLExt(name string) string {
+	const ext = ".jsonl"
+	if len(name) >= len(ext) && strings.EqualFold(name[len(name)-len(ext):], ext) {
+		return name[:len(name)-len(ext)]
+	}
+	return name
 }
 
 // sortNewest orders transcripts newest first.

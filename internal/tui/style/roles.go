@@ -15,6 +15,7 @@ import (
 // theme.KeyByName, so "ui.popup_fg" is the same id as "ui.popup_text_fg".
 var (
 	themeKeyIDs   map[string]uint16
+	themeKeyPairs map[[2]string]uint16
 	themeKeyTable []theme.Key
 )
 
@@ -22,8 +23,11 @@ func init() {
 	keys := theme.Keys()
 	themeKeyTable = keys
 	themeKeyIDs = make(map[string]uint16, len(keys))
+	themeKeyPairs = make(map[[2]string]uint16, len(keys)+2)
 	for i, key := range keys {
-		themeKeyIDs[key.Name()] = uint16(i + 1)
+		id := uint16(i + 1)
+		themeKeyIDs[key.Name()] = id
+		themeKeyPairs[[2]string{key.Section, key.Key}] = id
 	}
 }
 
@@ -33,6 +37,9 @@ func init() {
 func KeyIDFor(section, key string) uint16 {
 	if section == "" || key == "" {
 		return 0
+	}
+	if id, ok := themeKeyPairs[[2]string{section, key}]; ok {
+		return id
 	}
 	return KeyID(section + "." + key)
 }

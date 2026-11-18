@@ -43,7 +43,7 @@ func recoverAbandoned(ed *editor.Editor, root string, alive func(pid int) bool, 
 	}
 	var pids []int
 	for _, e := range entries {
-		if pid, err := strconv.Atoi(e.Name()); err == nil && e.IsDir() && strconv.Itoa(pid) == e.Name() {
+		if pid, err := strconv.Atoi(e.Name()); err == nil && pid > 0 && e.IsDir() && strconv.Itoa(pid) == e.Name() {
 			pids = append(pids, pid)
 		}
 	}

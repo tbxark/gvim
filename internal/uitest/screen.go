@@ -53,8 +53,8 @@ func (sc Screen) Cell(x, y int) Cell {
 	return sc.cells[y][x]
 }
 
-// Row returns the text of row y. Wide characters occupy one entry here, so a
-// column index from Find can differ from a display column after one.
+// Row returns the text of row y. Wide-character continuation cells hold "" so text
+// across wide characters stays contiguous for Contains and Find.
 func (sc Screen) Row(y int) string {
 	if y < 0 || y >= len(sc.cells) {
 		return ""
@@ -72,8 +72,8 @@ func (sc Screen) Contains(text string) bool {
 	return ok
 }
 
-// Find returns the column and row of the first occurrence of text, scanning
-// rows top to bottom. The column is a cell index, not a display column.
+// Find returns the display column and row of the first occurrence of text, scanning
+// rows top to bottom.
 func (sc Screen) Find(text string) (x, y int, ok bool) {
 	for y := range sc.cells {
 		row := sc.Row(y)
@@ -81,9 +81,25 @@ func (sc Screen) Find(text string) (x, y int, ok bool) {
 		if !ok {
 			continue
 		}
-		return len([]rune(before)), y, true
+		if text == "" {
+			return 0, y, true
+		}
+		return cellColAtByte(sc.cells[y], len(before)), y, true
 	}
 	return 0, 0, false
+}
+
+// cellColAtByte maps a byte offset within Row(y) back to its starting cell column,
+// skipping zero-text wide-character continuation cells.
+func cellColAtByte(row []Cell, target int) int {
+	n := 0
+	for col, c := range row {
+		if n >= target && c.Char != "" {
+			return col
+		}
+		n += len(c.Char)
+	}
+	return len(row)
 }
 
 // Underlined reports the columns of row y that are drawn underlined, as the
@@ -91,7 +107,7 @@ func (sc Screen) Find(text string) (x, y int, ok bool) {
 func (sc Screen) Underlined(y int) []string {
 	var out []string
 	for x := range sc.Width() {
-		if c := sc.Cell(x, y); c.Underline {
+		if c := sc.Cell(x, y); c.Underline && c.Char != "" {
 			out = append(out, c.Char)
 		}
 	}
@@ -101,10 +117,19 @@ func (sc Screen) Underlined(y int) []string {
 // ParseKey converts a key spec into a key press message. The spec grammar is
 // described on Session.Key.
 func ParseKey(spec string) (tea.KeyPressMsg, error) {
-	parts := strings.Split(spec, "+")
-	name := parts[len(parts)-1]
+	var mods []string
+	name := spec
+	if spec != "+" {
+		if strings.HasSuffix(spec, "++") {
+			mods = strings.Split(strings.TrimSuffix(spec, "++"), "+")
+			name = "+"
+		} else if i := strings.LastIndexByte(spec, '+'); i >= 0 {
+			mods = strings.Split(spec[:i], "+")
+			name = spec[i+1:]
+		}
+	}
 	var mod tea.KeyMod
-	for _, m := range parts[:len(parts)-1] {
+	for _, m := range mods {
 		switch strings.ToLower(m) {
 		case "ctrl":
 			mod |= tea.ModCtrl

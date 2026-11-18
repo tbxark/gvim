@@ -272,12 +272,17 @@ func (s TermStarter) remoteDirFallback(dir, reason string) {
 type SystemClipboard struct{}
 
 // Read returns the text of the system clipboard. It fails when no tool is installed
-// for the platform.
+// for the platform or every installed tool fails, matching Write's fallback behavior.
 func (SystemClipboard) Read() (string, error) {
 	cmds := clipboardCommands(goruntime.GOOS)
 	if len(cmds) == 0 {
 		return "", fmt.Errorf("reading the clipboard is not supported on %s yet", goruntime.GOOS)
 	}
+	return readClipboard(cmds)
+}
+
+func readClipboard(cmds [][]string) (string, error) {
+	var last error
 	for _, argv := range cmds {
 		path, err := exec.LookPath(argv[0])
 		if err != nil {
@@ -286,10 +291,13 @@ func (SystemClipboard) Read() (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), clipboardTimeout)
 		out, err := exec.CommandContext(ctx, path, argv[1:]...).Output()
 		cancel()
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", argv[0], err)
+		if err == nil {
+			return string(out), nil
 		}
-		return string(out), nil
+		last = fmt.Errorf("%s: %w", argv[0], err)
+	}
+	if last != nil {
+		return "", last
 	}
 	return "", errors.New("no clipboard tool found; install pbpaste, wl-paste, xclip or xsel")
 }
@@ -306,6 +314,8 @@ func clipboardCommands(goos string) [][]string {
 			{"xclip", "-selection", "clipboard", "-out"},
 			{"xsel", "--clipboard", "--output"},
 		}
+	case "windows":
+		return [][]string{{"powershell", "-NoProfile", "-Command", "Get-Clipboard"}}
 	}
 	return nil
 }

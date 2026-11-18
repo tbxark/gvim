@@ -380,3 +380,59 @@ func TestTabMenuExtractRow(t *testing.T) {
 		}
 	}
 }
+
+type pathMultiFake struct {
+	*multiFake
+	paths []string
+}
+
+func (f *pathMultiFake) Tabs() []TabInfo {
+	tabs := f.multiFake.Tabs()
+	for i := range tabs {
+		if i < len(f.paths) {
+			tabs[i].Path = f.paths[i]
+		}
+	}
+	return tabs
+}
+
+func (f *pathMultiFake) CloseTab(i int, force bool) error {
+	if err := f.multiFake.CloseTab(i, force); err != nil {
+		return err
+	}
+	f.paths = append(f.paths[:i], f.paths[i+1:]...)
+	return nil
+}
+
+func TestCloseTabForWorkspaceExtractUpdatesSplitIndicesAndNilActiveSafe(t *testing.T) {
+	t.Parallel()
+	ed := &pathMultiFake{
+		multiFake: newMultiFake(3, 2),
+		paths:     []string{"/ws/0.txt", "/ws/1.txt", "/ws/2.txt"},
+	}
+	m := New(Deps{Editor: ed, Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	runAction(t, m, "split_vertical")
+	// Put tab 2 in the right leaf while focused left leaf A holds tab 0, then extract-close tab 0.
+	m.focusLeaf(m.splits.Root.A)
+	m.splits.Root.B.Tab = 2
+	if !m.CloseTabForWorkspaceExtract("/ws/0.txt") {
+		t.Fatal("CloseTabForWorkspaceExtract returned false")
+	}
+	if m.splits.Root.B.Tab != 1 {
+		t.Fatalf("right leaf Tab = %d after closing tab 0, want 1", m.splits.Root.B.Tab)
+	}
+	for i, leaf := range m.splits.Root.Leaves() {
+		if leaf.Tab < 0 || leaf.Tab >= len(ed.Tabs()) {
+			t.Fatalf("leaf %d has out-of-range Tab %d (len %d)", i, leaf.Tab, len(ed.Tabs()))
+		}
+	}
+	if !m.CloseTabForWorkspaceExtractAt("/ws/2.txt") {
+		t.Fatal("CloseTabForWorkspaceExtractAt returned false")
+	}
+	var empty WorkspaceHost
+	if next, cmd := empty.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); next != &empty || cmd != nil {
+		t.Fatalf("nil-active WorkspaceHost.Update = %v, %v", next, cmd)
+	}
+	_ = empty.View()
+}

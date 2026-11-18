@@ -57,8 +57,6 @@ var errRemoteExplorerNoExclusiveDirCreate = errors.New("this backend cannot crea
 // remoteExplorerOps implements the TUI's explorerOps over the remote authority.
 type remoteExplorerOps struct {
 	slot  authority.Slot
-	files authority.FileSystem
-	muts  authority.FileMutations
 	gate  func(ctx context.Context, argv []string, cwd string) error
 	root  string
 	label string
@@ -72,12 +70,14 @@ type remoteExplorerOps struct {
 
 // newRemoteExplorerOps returns the write adapter of the remote workspace root.
 func newRemoteExplorerOps(slot authority.Slot, root, label string, gate func(ctx context.Context, argv []string, cwd string) error, ed *editor.Editor) *remoteExplorerOps {
-	o := &remoteExplorerOps{slot: slot, root: root, label: label, gate: gate, ed: ed}
-	if slot != nil {
-		o.files = slot.Files()
-		o.muts = authority.Mutations(o.files)
+	return &remoteExplorerOps{slot: slot, root: root, label: label, gate: gate, ed: ed}
+}
+
+func (o *remoteExplorerOps) currentFiles() authority.FileSystem {
+	if o == nil || o.slot == nil {
+		return nil
 	}
-	return o
+	return o.slot.Files()
 }
 
 // setCopyWarning records one non-fatal copy warning (metadata could not be preserved).
@@ -109,8 +109,11 @@ func (o *remoteExplorerOps) RemoteTarget() string {
 }
 
 // opContext returns the bounded context of one mutation.
-func (o *remoteExplorerOps) opContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), remoteExplorerOpTimeout)
+func (o *remoteExplorerOps) opContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(ctx, remoteExplorerOpTimeout)
 }
 
 // check refuses the operation while the authority is down or the backend cannot mutate.
@@ -118,7 +121,7 @@ func (o *remoteExplorerOps) check() error {
 	if o == nil || o.slot == nil || !o.slot.Connected() {
 		return errRemoteExplorerDisconnected
 	}
-	if o.files == nil {
+	if o.currentFiles() == nil {
 		return errors.New("remote file operations: the workspace authority mounts no file system")
 	}
 	return nil
@@ -130,7 +133,7 @@ func (o *remoteExplorerOps) checkMutations() error {
 	if err := o.check(); err != nil {
 		return err
 	}
-	if o.muts == nil {
+	if authority.Mutations(o.currentFiles()) == nil {
 		return errors.New("remote file operations: the backend does not support changing the tree")
 	}
 	return nil
@@ -149,8 +152,7 @@ func (o *remoteExplorerOps) gateOp(ctx context.Context, op, p string) error {
 
 // inside reports whether p is the remote root or under it.
 func (o *remoteExplorerOps) inside(p string) bool {
-	clean, root := path.Clean(p), path.Clean(o.root)
-	return clean == root || len(clean) > len(root)+1 && clean[:len(root)+1] == root+"/"
+	return remoteInside(o.root, p)
 }
 
 // child builds and validates dir/name as one entry of the remote workspace.
@@ -170,7 +172,11 @@ func (o *remoteExplorerOps) child(dir, name string) (string, error) {
 
 // exists reports whether p exists remotely.
 func (o *remoteExplorerOps) exists(ctx context.Context, p string) (bool, hostos.FileStat, error) {
-	st, err := o.files.Stat(ctx, p)
+	files := o.currentFiles()
+	if files == nil {
+		return false, hostos.FileStat{}, errors.New("remote file operations: the workspace authority mounts no file system")
+	}
+	st, err := files.Stat(ctx, p)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, hostos.FileStat{}, nil
@@ -193,18 +199,18 @@ func (o *remoteExplorerOps) CreateFile(ctx context.Context, dir, name string) (s
 	if err != nil {
 		return "", err
 	}
-	opCtx, cancel := o.opContext()
+	opCtx, cancel := o.opContext(ctx)
 	defer cancel()
 	if err := o.gateOp(opCtx, "create", p); err != nil {
 		return "", err
 	}
-	creator := authority.Creators(o.files)
+	creator := authority.Creators(o.currentFiles())
 	if creator == nil {
 		return "", fmt.Errorf("remote file operation: %w: %s", errRemoteExplorerNoExclusiveCreate, p)
 	}
 	if err := creator.CreateNew(opCtx, p, hostos.WriteOptions{}); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return "", fmt.Errorf("remote file operation: %s: %w", p, fs.ErrExist)
+			return "", fmt.Errorf("remote file operation: %s: %w (%w)", p, expanel.ErrConflict, fs.ErrExist)
 		}
 		if errors.Is(err, authority.ErrUnsupportedFileIO) {
 			return "", fmt.Errorf("remote file operation: %w: %s", errRemoteExplorerNoExclusiveCreate, p)
@@ -227,19 +233,19 @@ func (o *remoteExplorerOps) Mkdir(ctx context.Context, dir, name string) (string
 	if err != nil {
 		return "", err
 	}
-	opCtx, cancel := o.opContext()
+	opCtx, cancel := o.opContext(ctx)
 	defer cancel()
 	if err := o.gateOp(opCtx, "mkdir", p); err != nil {
 		return "", err
 	}
-	creator := authority.DirectoryCreators(o.files)
+	creator := authority.DirectoryCreators(o.currentFiles())
 	if creator == nil {
 		return "", fmt.Errorf("remote file operation: %w: %s", errRemoteExplorerNoExclusiveDirCreate, p)
 	}
 	if err := creator.MkdirNew(opCtx, p); err != nil {
 		switch {
 		case errors.Is(err, fs.ErrExist):
-			return "", fmt.Errorf("remote file operation: %s: %w", p, fs.ErrExist)
+			return "", fmt.Errorf("remote file operation: %s: %w (%w)", p, expanel.ErrConflict, fs.ErrExist)
 		case errors.Is(err, fs.ErrNotExist):
 			return "", fmt.Errorf("remote file operation: mkdir %s: parent directory is missing: %w", p, fs.ErrNotExist)
 		default:
@@ -288,7 +294,7 @@ func (o *remoteExplorerOps) Trash(ctx context.Context, p string) error {
 	if !o.inside(p) {
 		return fmt.Errorf("remote file operation: %s is outside the remote workspace", p)
 	}
-	opCtx, cancel := o.opContext()
+	opCtx, cancel := o.opContext(ctx)
 	defer cancel()
 	if err := o.gateOp(opCtx, "delete", p); err != nil {
 		return err
@@ -300,7 +306,11 @@ func (o *remoteExplorerOps) Trash(ctx context.Context, p string) error {
 	if !ok {
 		return fmt.Errorf("remote file operation: %s does not exist", p)
 	}
-	if err := o.muts.Remove(opCtx, p, st.Kind == "dir"); err != nil {
+	muts := authority.Mutations(o.currentFiles())
+	if muts == nil {
+		return errors.New("remote file operations: the backend does not support changing the tree")
+	}
+	if err := muts.Remove(opCtx, p, st.Kind == "dir"); err != nil {
 		return fmt.Errorf("remote file operation: delete %s: %w", p, err)
 	}
 	return nil

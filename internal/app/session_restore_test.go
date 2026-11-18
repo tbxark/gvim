@@ -47,7 +47,7 @@ func TestBuildRuntimeRestoresTheSessionWhenNoFilesGiven(t *testing.T) {
 	sessDir := filepath.Join(dir, "session")
 	ed := apptest.NewSessionEditor()
 	must(t, ed.OpenFile(file))
-	must(t, restore.SaveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true, ShowIgnored: true}))
+	must(t, restore.WriteSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true, ShowIgnored: true}, nil))
 
 	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir}, false)
 	must(t, err)
@@ -99,7 +99,7 @@ func TestBuildRuntimeWithFilesDoesNotRestore(t *testing.T) {
 	sessDir := filepath.Join(dir, "session")
 	ed := apptest.NewSessionEditor()
 	must(t, ed.OpenFile(saved))
-	must(t, restore.SaveSession(ed, sessDir, tui.ExplorerState{}))
+	must(t, restore.WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir, Files: []FileTarget{{Path: given}}}, false)
 	must(t, err)

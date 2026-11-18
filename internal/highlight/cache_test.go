@@ -105,3 +105,19 @@ func TestCacheDoesNotLexVeryLongLines(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheLinesFastPathsPlaintext(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	apptest.Must(t, os.WriteFile(path, []byte("hello world\nsecond line\n"), 0o644))
+	ed := editor.New(editor.Options{})
+	apptest.Must(t, ed.OpenFile(path))
+	t.Cleanup(ed.Close)
+	c := New()
+	if spans := c.Lines(ed.Active()); spans != nil {
+		t.Fatalf("plaintext Cache.Lines = %v, want nil fast path", spans)
+	}
+	if c.valid {
+		t.Fatal("plaintext document unexpectedly ran full lex")
+	}
+}

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 )
 
@@ -191,6 +193,10 @@ func TestInstallRestoresTheConfigWhenRexRejectsIt(t *testing.T) {
 	if _, err := os.Stat(configPath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("init.lua still exists after a failed check (err = %v)", err)
 	}
+	pluginPath := filepath.Join(home, ".config", "rex", "plugins", "gvim", "init.lua")
+	if _, err := os.Stat(pluginPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("newly created rex plugin %s still exists after rollback (err = %v)", pluginPath, err)
+	}
 }
 
 func TestUninstallRemovesEverythingItWrote(t *testing.T) {
@@ -320,5 +326,85 @@ func TestInstallLeavesAnUnbalancedConfigUntouched(t *testing.T) {
 	}
 	if got := readText(t, configPath); got != broken {
 		t.Errorf("init.lua after Uninstall = %q, want it untouched", got)
+	}
+}
+
+func TestLuaStringEscapesControlChars(t *testing.T) {
+	raw := "a\nb\rc\td\x00e\\f\"g\x1bh"
+	lit := luaString(raw)
+	if strings.ContainsAny(lit, "\n\r\x00\x1b") {
+		t.Fatalf("luaString left unescaped control bytes: %q", lit)
+	}
+	chunk, err := parse.Parse(strings.NewReader("return "+lit), "test.lua")
+	if err != nil || len(chunk) != 1 {
+		t.Fatalf("luaString output did not parse as Lua: %v", err)
+	}
+	l := lua.NewState()
+	defer l.Close()
+	if err := l.DoString("return " + lit); err != nil {
+		t.Fatalf("DoString: %v", err)
+	}
+	if got := l.Get(-1).String(); got != raw {
+		t.Fatalf("round-trip = %q, want %q", got, raw)
+	}
+}
+
+func TestRexLuaPathAndDashDashTarget(t *testing.T) {
+	t.Setenv("PATH", "/custom/bin")
+	t.Setenv("HOME", "")
+
+	l := lua.NewState()
+	defer l.Close()
+	if err := l.DoString(`
+		local actions = {}
+		local spawned = {}
+		rex = {
+			block = { call = function() return nil end },
+			layout = { block = function(o) return o end },
+			session = { new_layer = function(o)
+				spawned[#spawned + 1] = o.layout.options.command
+				return true, nil
+			end },
+			action = function(a) actions[a.name] = a end,
+			bind = function() end,
+		}
+		_TEST_ACTIONS = actions
+		_TEST_SPAWNED = spawned
+	`); err != nil {
+		t.Fatal(err)
+	}
+	// Load rexSource as a chunk and call setup + gvim_open.
+	fn, err := l.Load(bytes.NewReader(rexSource), "rex.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Push(fn)
+	l.Call(0, 1)
+	mod := l.Get(-1)
+	l.SetGlobal("gvim_mod", mod)
+	if err := l.DoString(`
+		gvim_mod.setup({ bin = { "/opt/bin/gvim" } })
+		_TEST_ACTIONS.gvim_open.run({}, { target = "-dash.txt" })
+		_TEST_ACTIONS.gvim_diff.run({}, { left = "-a.txt", right = "-b.txt" })
+	`); err != nil {
+		t.Fatal(err)
+	}
+	spawned := l.GetGlobal("_TEST_SPAWNED").(*lua.LTable)
+	readCmd := func(idx int) []string {
+		tbl := spawned.RawGetInt(idx).(*lua.LTable)
+		var out []string
+		for i := 1; i <= tbl.Len(); i++ {
+			out = append(out, tbl.RawGetInt(i).String())
+		}
+		return out
+	}
+	wantPath := "PATH=/custom/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin"
+	wantOpen := []string{"/usr/bin/env", wantPath, "/opt/bin/gvim", "--", "-dash.txt"}
+	if got := readCmd(1); !slices.Equal(got, wantOpen) {
+		t.Fatalf("gvim_open cmd = %v, want %v", got, wantOpen)
+	}
+	wantDiff := []string{"/usr/bin/env", wantPath, "/opt/bin/gvim", "--diff", "--", "-a.txt", "-b.txt"}
+	if got := readCmd(2); !slices.Equal(got, wantDiff) {
+		t.Fatalf("gvim_diff cmd = %v, want %v", got, wantDiff)
 	}
 }

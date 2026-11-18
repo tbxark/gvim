@@ -47,6 +47,10 @@ func TestOSC52Parser(t *testing.T) {
 		{"other OSC ignored", []string{esc + "]0;title\x07" + esc + "]52;c;aGVsbG8=\x07"}, []string{"c=hello"}},
 		{"empty payload", []string{esc + "]52;c;\x07"}, []string{"c="}},
 		{"bare ESC then text", []string{esc + "[31m" + esc + "]52;c;aGVsbG8=\x07"}, []string{"c=hello"}},
+		{"combined selection pc", []string{esc + "]52;pc;aGVsbG8=\x07"}, []string{"pc=hello"}},
+		{"combined selection cp", []string{esc + "]52;cp;aGVsbG8=\x07"}, []string{"cp=hello"}},
+		{"split ST across reads", []string{esc + "]52;c;aGVsbG8=" + esc, "\\"}, []string{"c=hello"}},
+		{"truncated body aborted by CSI", []string{esc + "]52;c;aGVsbG8=" + esc + "[31m" + esc + "]52;c;d29ybGQ=\x07"}, []string{"c=world"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,6 +93,7 @@ func TestOSC52QueryParser(t *testing.T) {
 		{"split query", []string{esc + "]52;c", ";?\x07"}, []string{"QUERY:c"}},
 		{"ST query", []string{esc + "]52;c;?" + esc + "\\"}, []string{"QUERY:c"}},
 		{"primary query ignored", []string{esc + "]52;p;?\x07"}, nil},
+		{"combined selection query", []string{esc + "]52;pc;?\x07"}, []string{"QUERY:pc"}},
 		{"query then write", []string{esc + "]52;c;?\x07" + esc + "]52;c;aGVsbG8=\x07"}, []string{"QUERY:c", "WRITE:c=hello"}},
 	}
 	for _, tt := range tests {
@@ -99,6 +104,16 @@ func TestOSC52QueryParser(t *testing.T) {
 			}
 		})
 	}
+	t.Run("query works when emit is nil", func(t *testing.T) {
+		var queries []string
+		var p osc52Parser
+		p.scan([]byte(esc+"]52;c;?\x07"), nil, func(sel string) {
+			queries = append(queries, sel)
+		})
+		if len(queries) != 1 || queries[0] != "c" {
+			t.Fatalf("queries = %q, want [c]", queries)
+		}
+	})
 }
 
 func TestOSC52ResponseFormat(t *testing.T) {

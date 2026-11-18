@@ -115,14 +115,19 @@ func (p *Panel) paintSavedCursor(g *grid.Grid, x0, top, rows, w int) {
 	if x < 0 || x >= w {
 		return
 	}
-	cell := g.At(x0+x, top+abs-p.scroll.top)
+	y := top + abs - p.scroll.top
+	cell := g.At(x0+x, y)
+	if cell.Text == "" && x > 0 {
+		x--
+		cell = g.At(x0+x, y)
+	}
 	st := cell.Style
 	st.Reverse = !st.Reverse
 	text := cell.Text
 	if text == "" {
 		text = " "
 	}
-	g.Set(x0+x, top+abs-p.scroll.top, text, st)
+	g.Set(x0+x, y, text, st)
 }
 
 // tintRow sets the background of the w cells of row y at column x0 when they have
@@ -133,6 +138,9 @@ func tintRow(g *grid.Grid, x0, y, w int, bg color.Color) {
 	}
 	for c := range w {
 		cell := g.At(x0+c, y)
+		if cell.Text == "" {
+			continue
+		}
 		style := cell.Style
 		if style.BG == nil {
 			style.BG = bg
@@ -290,7 +298,16 @@ func cellText(r rune) string {
 // shellStyle is the grid style of a shell cell. A colour the shell did not set takes
 // the base colour.
 func shellStyle(st terminal.Style, base grid.Style) grid.Style {
-	out := grid.Style{FG: st.Fg, BG: st.Bg, Bold: st.Bold, Underline: st.Underline, Reverse: st.Reverse}
+	out := grid.Style{
+		FG:        st.Fg,
+		BG:        st.Bg,
+		Bold:      st.Bold,
+		Italic:    st.Italic,
+		Faint:     st.Faint,
+		Underline: st.Underline,
+		Strike:    st.Strikethrough,
+		Reverse:   st.Reverse,
+	}
 	if out.FG == nil {
 		out.FG = base.FG
 	}

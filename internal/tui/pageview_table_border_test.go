@@ -36,3 +36,19 @@ func TestPageViewTableBordersInTheFrame(t *testing.T) {
 		t.Fatalf("wrong order: top %d header %d sep %d bottom %d", top, header, sep, bottom)
 	}
 }
+
+func TestPageViewTableBordersRespectsNoCaretReveal(t *testing.T) {
+	t.Parallel()
+	m, ed := viewModelWith(t, editor.New(editor.Options{}), DefaultViewOptions(),
+		"| Name | Qty |\n| --- | --- |\n| a | 1 |\n", 60, 14)
+	ed.Active().SetLanguage("markdown")
+	ed.SetCursor(buffer.Pos{Line: 0, Col: 2}, false) // caret inside table header
+	runAction(t, m, "markdown_mode_dual")
+	rows := frameText(m)
+	joined := strings.Join(rows, "\n")
+	// Focused left side shows raw markdown source; right composed side has NoCaretReveal=true
+	// so it must keep composed table borders even while the caret is on row 0.
+	if !strings.Contains(joined, "┌──────┬─────┐") || !strings.Contains(joined, "| --- | --- |") {
+		t.Fatalf("dual view missing source or composed table borders:\n%s", joined)
+	}
+}

@@ -147,7 +147,7 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, limit int) (ke
 	if captureErr != nil {
 		// Never evict unsaved work without a durable session: confirm with the synchronous
 		// fallback save first. If that cannot be confirmed either, keep the workspace.
-		if ferr := sess.rt.save(); ferr != nil {
+		if ferr := m.fallbackSave(sess); ferr != nil {
 			return true, fmt.Errorf("cannot evict workspace %q: the capture write failed (%v) and the fallback save failed: %w; the workspace stays materialized", label, captureErr, ferr)
 		}
 	}
@@ -172,6 +172,7 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, limit int) (ke
 	delete(m.sessions, sess.ws.File.StableID)
 	h := m.host
 	m.mu.Unlock()
+	m.retireWriter(sess.ws.File.StableID)
 
 	msg := appTextVars("gvim.workspace.report_evicted", "Evicted workspace %{label} from memory (limit %{limit} materialized workspaces)", map[string]any{"label": fmt.Sprintf("%q", label), "limit": limit})
 	if captureErr != nil {
@@ -187,12 +188,19 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, limit int) (ke
 }
 
 // releasePluginWorkspace drops a torn-down workspace model from the daemon-wide plugin
-// host's id registry (task-149): an evicted or closed model's window/buffer ids must stop
-// resolving, and a rematerialized workspace is a new model with its own sequence. Cheap,
-// goroutine-safe and safe after model.Close.
+// host's id registry and shuts down/unregisters its workspace OS from the daemon mux so
+// closed or evicted workspaces release processes, watchers, and references.
 func (m *workspaceManager) releasePluginWorkspace(sess *workspaceSession) {
-	if sess == nil || sess.rt == nil || sess.rt.model == nil || m.opts.PluginShared == nil {
+	if sess == nil || sess.rt == nil {
 		return
 	}
-	m.opts.PluginShared.ReleaseWorkspace(sess.rt.model)
+	if sess.rt.model != nil && m.opts.PluginShared != nil {
+		m.opts.PluginShared.ReleaseWorkspace(sess.rt.model)
+	}
+	if sess.rt.pluginWS != nil && sess.rt.pluginWS.OS != nil {
+		sess.rt.pluginWS.OS.Shutdown()
+		if m.opts.PluginDaemon != nil {
+			m.opts.PluginDaemon.Mux().Unregister(sess.rt.pluginWS.OS)
+		}
+	}
 }

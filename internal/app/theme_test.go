@@ -157,6 +157,39 @@ func TestReloadRereadsAUserThemeFile(t *testing.T) {
 	}
 }
 
+func TestRunThemeHonorsNoColorUnlessOverridden(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv("NO_COLOR", "1")
+	reg := theme.NewRegistry(userThemeDir())
+
+	// Automatic theme resolution (empty CLI flag) strips RGB/ANSI colors.
+	th, _, _, err := runTheme(t.Context(), "", config.Config{Theme: "dark"}, reg)
+	apptest.Must(t, err)
+	if bg, ok := th.Value("editor", "bg"); !ok || bg.IsRGB || !bg.IsTerminalDefault() {
+		t.Fatalf("NO_COLOR editor.bg = %+v, want terminal Default", bg)
+	}
+
+	// Explicit --theme overrides NO_COLOR.
+	explicit, _, _, err := runTheme(t.Context(), "dark", config.Config{Theme: "dark"}, reg)
+	apptest.Must(t, err)
+	if bg, ok := explicit.Value("editor", "bg"); !ok || !bg.IsRGB {
+		t.Fatalf("explicit --theme editor.bg = %+v, want RGB color", bg)
+	}
+
+	// Reload keeps NO_COLOR active on ThemeCatalog.
+	userFile := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, userFile, `{"theme": "dark"}`)
+	got, err := buildRecorded(t, Options{Root: t.TempDir(), Config: userFile})
+	apptest.Must(t, err)
+	change, err := got.deps.SettingsPort.Reload()
+	apptest.Must(t, err)
+	reloaded, err := got.deps.ThemeCatalog.Load(change.Theme)
+	apptest.Must(t, err)
+	if bg, ok := reloaded.Value("editor", "bg"); !ok || bg.IsRGB || !bg.IsTerminalDefault() {
+		t.Fatalf("Reload() under NO_COLOR editor.bg = %+v, want terminal Default", bg)
+	}
+}
+
 // sliceContains reports whether s contains value.
 func sliceContains(s []string, value string) bool {
 	for _, item := range s {

@@ -66,9 +66,15 @@ func (f frame) inlineData(i int, ln line) inlineLineData {
 			// end-of-line form for every hint.
 			data.unplaced = f.inline(i)
 		}
+		if f.inlineCache != nil {
+			f.inlineCache[i] = data
+		}
 		return data
 	}
 	if f.inline == nil {
+		if f.inlineCache != nil {
+			f.inlineCache[i] = data
+		}
 		return data
 	}
 	// Hint cells cost this much of the pane's text width on their row. Placed widths
@@ -118,6 +124,9 @@ func (f frame) inlineData(i int, ln line) inlineLineData {
 			style:  h.Style,
 			anchor: col,
 		})
+	}
+	if f.inlineCache != nil {
+		f.inlineCache[i] = data
 	}
 	return data
 }
@@ -196,6 +205,9 @@ func (f frame) spliceInlineHints(i int, ln line, k int, cells []cell) (out []cel
 		dec := f.dx.intern(p.style)
 		for _, r := range p.text {
 			out = append(out, cell{r: r, dec: dec})
+			if cellAdvance(0, r, f.tab) == 2 {
+				out = append(out, cell{rep: repHidden, dec: dec})
+			}
 		}
 	}
 	out = append(out, cells[cursor:]...)

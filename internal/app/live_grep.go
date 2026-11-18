@@ -3,13 +3,13 @@ package app
 import (
 	"context"
 	"path/filepath"
-	"regexp"
+	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
-	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/pluginhost"
@@ -27,8 +27,8 @@ type liveGrep struct {
 	// searched, and a miss in the rest would look like no match. Zero skips none.
 	skipFrom int64
 
-	customPatterns []string
-	customMatcher  gitignore.Matcher
+	customMu      sync.Mutex
+	customMatcher gitignore.Matcher
 
 	// mu guards the listing of the hidden and ignored files. That listing walks the
 	// tree, which is expensive, so it is cached for the root last searched, for
@@ -58,9 +58,6 @@ func grepFor(o editor.Options, customPatterns ...[]string) *liveGrep {
 
 // SetCustomIgnorePatterns configures custom ignore rules (e.g. *.log, build/).
 func (g *liveGrep) SetCustomIgnorePatterns(pats []string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.customPatterns = pats
 	var rules []gitignore.Pattern
 	for _, p := range pats {
 		p = strings.TrimSpace(p)
@@ -69,25 +66,27 @@ func (g *liveGrep) SetCustomIgnorePatterns(pats []string) {
 		}
 		rules = append(rules, gitignore.ParsePattern(p, nil))
 	}
+	var matcher gitignore.Matcher
 	if len(rules) > 0 {
-		g.customMatcher = gitignore.NewMatcher(rules)
-	} else {
-		g.customMatcher = nil
+		matcher = gitignore.NewMatcher(rules)
 	}
+	g.customMu.Lock()
+	g.customMatcher = matcher
+	g.customMu.Unlock()
+
+	g.mu.Lock()
 	g.walkList = nil
+	g.mu.Unlock()
+}
+
+func (g *liveGrep) customIgnoreMatcher() gitignore.Matcher {
+	g.customMu.Lock()
+	defer g.customMu.Unlock()
+	return g.customMatcher
 }
 
 func (g *liveGrep) matchesCustom(rel string) bool {
-	if g.customMatcher == nil {
-		return false
-	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	for i := 1; i <= len(parts); i++ {
-		if g.customMatcher.Match(parts[:i], i < len(parts)) {
-			return true
-		}
-	}
-	return false
+	return matchIgnoreMatcher(g.customIgnoreMatcher(), rel)
 }
 
 // Search returns at most req.Limit hits of req.Text, one per matching line: the file
@@ -110,10 +109,9 @@ func (g *liveGrep) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
 	}
 	// Compile up front, so an invalid regex is reported even when no file is searched
 	// and the palette shows the error instead of no matches.
-	if q.Regex {
-		if _, err := regexp.Compile(q.Text); err != nil {
-			return nil, err
-		}
+	cq, err := search.CompileQuery(q)
+	if err != nil {
+		return nil, err
 	}
 	var hits []palette.GrepHit
 	if req.Sources.Files || req.Sources.Ignored {
@@ -124,66 +122,151 @@ func (g *liveGrep) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
 			// cached for the root.
 			files = g.ignoredFiles(req.Root)
 		}
-		if g.customMatcher != nil {
+		if matcher := g.customIgnoreMatcher(); matcher != nil {
 			filtered := make([]string, 0, len(files))
 			for _, f := range files {
-				if !g.matchesCustom(f) {
+				if !matchIgnoreMatcher(matcher, f) {
 					filtered = append(filtered, f)
 				}
 			}
 			files = filtered
 		}
-		var err error
-		if hits, err = searchFiles(req.Root, files, q, req.Limit, hits, g.skipFrom); err != nil {
-			return nil, err
-		}
+		hits = searchFiles(req.Root, files, cq, req.Limit, hits, g.skipFrom)
 	}
 	if len(hits) < req.Limit && req.Sources.Buffers {
-		var err error
-		if hits, err = searchBuffers(req.Buffers, q, req.Limit, hits); err != nil {
-			return nil, err
-		}
+		hits = searchBuffers(req.Buffers, cq, req.Limit, hits)
 	}
 	if len(hits) < req.Limit && req.Sources.Terminals {
-		var err error
-		if hits, err = searchTerminals(req.Terminals, q, req.Limit, hits); err != nil {
-			return nil, err
-		}
+		hits = searchTerminals(req.Terminals, cq, req.Limit, hits)
 	}
 	return hits, nil
 }
 
-// searchFiles appends the hits of q in the files of root to hits, in file order and one
+// searchFiles appends the hits of cq in the files of root to hits, in file order and one
 // per matching line, up to limit hits.
-func searchFiles(root string, files []string, q search.Query, limit int, hits []palette.GrepHit, skipFrom int64) ([]palette.GrepHit, error) {
-	for i, rel := range files {
-		if i >= pluginhost.GrepMaxFiles || len(hits) >= limit {
+func searchFiles(root string, files []string, cq *search.CompiledQuery, limit int, hits []palette.GrepHit, skipFrom int64) []palette.GrepHit {
+	n := min(len(files), pluginhost.GrepMaxFiles)
+	if n <= 0 || len(hits) >= limit {
+		return hits
+	}
+	workers := min(max(goruntime.NumCPU(), 1), 8)
+	if n <= 4 || limit-len(hits) <= 4 || workers <= 1 {
+		for i := range n {
+			if len(hits) >= limit {
+				break
+			}
+			rel := files[i]
+			text, ok := pluginhost.ReadSearchable(filepath.Join(root, filepath.FromSlash(rel)), skipFrom)
+			if !ok {
+				continue
+			}
+			hits = appendLineHitsText(text, cq, limit, hits, func(h palette.GrepHit) palette.GrepHit {
+				h.Rel, h.Source = rel, palette.GrepFiles
+				return h
+			})
+		}
+		return hits
+	}
+	window := min(workers*4, n)
+	for base := 0; base < n && len(hits) < limit; base += window {
+		end := min(base+window, n)
+		count := end - base
+		perFile := make([][]palette.GrepHit, count)
+		var next atomic.Int64
+		var wg sync.WaitGroup
+		need := limit - len(hits)
+		wCount := min(workers, count)
+		wg.Add(wCount)
+		for range wCount {
+			go func() {
+				defer wg.Done()
+				for {
+					idx := int(next.Add(1) - 1)
+					if idx >= count {
+						return
+					}
+					rel := files[base+idx]
+					text, ok := pluginhost.ReadSearchable(filepath.Join(root, filepath.FromSlash(rel)), skipFrom)
+					if !ok {
+						continue
+					}
+					perFile[idx] = appendLineHitsText(text, cq, need, nil, func(h palette.GrepHit) palette.GrepHit {
+						h.Rel, h.Source = rel, palette.GrepFiles
+						return h
+					})
+				}
+			}()
+		}
+		wg.Wait()
+		for _, fh := range perFile {
+			for _, h := range fh {
+				if len(hits) >= limit {
+					return hits
+				}
+				hits = append(hits, h)
+			}
+		}
+	}
+	return hits
+}
+
+// lineCursor walks text forward line-by-line without allocating a buffer.Buffer.
+type lineCursor struct {
+	text    string
+	curLine int
+	curOff  int
+	cachedL int
+	cachedS string
+}
+
+func newLineCursor(text string) lineCursor {
+	return lineCursor{text: text, cachedL: -1}
+}
+
+func (c *lineCursor) lineAtRaw(target int) string {
+	if target < 0 {
+		return ""
+	}
+	if target == c.cachedL {
+		return c.cachedS
+	}
+	if target < c.curLine {
+		c.curLine, c.curOff = 0, 0
+	}
+	for c.curLine < target && c.curOff < len(c.text) {
+		idx := strings.IndexByte(c.text[c.curOff:], '\n')
+		if idx < 0 {
+			c.curOff = len(c.text)
+			c.curLine++
 			break
 		}
-		text, ok := pluginhost.ReadSearchable(filepath.Join(root, filepath.FromSlash(rel)), skipFrom)
-		if !ok {
-			continue
-		}
-		var err error
-		hits, err = appendLineHits(buffer.New(text), q, limit, hits, func(h palette.GrepHit) palette.GrepHit {
-			h.Rel, h.Source = rel, palette.GrepFiles
-			return h
-		})
-		if err != nil {
-			return nil, err
-		}
+		c.curOff += idx + 1
+		c.curLine++
 	}
-	return hits, nil
+	if c.curLine != target || c.curOff > len(c.text) {
+		return ""
+	}
+	end := len(c.text)
+	if idx := strings.IndexByte(c.text[c.curOff:], '\n'); idx >= 0 {
+		end = c.curOff + idx
+	}
+	s := c.text[c.curOff:end]
+	c.cachedL, c.cachedS = target, s
+	return s
 }
 
-// appendLineHits appends the hits of q in b to hits, one per matching line, up to limit
-// hits. Each hit comes with its line, column and text; fill sets the source-specific
-// fields.
-func appendLineHits(b *buffer.Buffer, q search.Query, limit int, hits []palette.GrepHit, fill func(palette.GrepHit) palette.GrepHit) ([]palette.GrepHit, error) {
-	matches, err := search.Find(b, q)
-	if err != nil {
-		return nil, err
+func (c *lineCursor) lineAt(target int) string {
+	return strings.TrimRight(c.lineAtRaw(target), "\r")
+}
+
+// appendLineHitsText appends the hits of cq in text to hits, one per matching line, up to limit
+// hits. Each hit comes with its line, column and text; fill sets the source-specific fields.
+func appendLineHitsText(text string, cq *search.CompiledQuery, limit int, hits []palette.GrepHit, fill func(palette.GrepHit) palette.GrepHit) []palette.GrepHit {
+	matches := cq.FindString(text)
+	if len(matches) == 0 {
+		return hits
 	}
+	cur := newLineCursor(text)
 	last := -1
 	for _, m := range matches {
 		if len(hits) >= limit {
@@ -196,15 +279,15 @@ func appendLineHits(b *buffer.Buffer, q search.Query, limit int, hits []palette.
 		hits = append(hits, fill(palette.GrepHit{
 			Line: m.Start.Line + 1,
 			Col:  m.Start.Col + 1,
-			Text: strings.TrimRight(b.Line(m.Start.Line), "\r"),
+			Text: cur.lineAt(m.Start.Line),
 		}))
 	}
-	return hits, nil
+	return hits
 }
 
-// searchBuffers appends the hits of q in the open buffers' snapshot to hits, in buffer
+// searchBuffers appends the hits of cq in the open buffers' snapshot to hits, in buffer
 // order and one per matching line, up to limit hits. A buffer with no text is skipped.
-func searchBuffers(buffers []palette.BufferSource, q search.Query, limit int, hits []palette.GrepHit) ([]palette.GrepHit, error) {
+func searchBuffers(buffers []palette.BufferSource, cq *search.CompiledQuery, limit int, hits []palette.GrepHit) []palette.GrepHit {
 	for _, src := range buffers {
 		if len(hits) >= limit {
 			break
@@ -219,23 +302,19 @@ func searchBuffers(buffers []palette.BufferSource, q search.Query, limit int, hi
 		if label == "" {
 			label = "[No Name]"
 		}
-		var err error
-		hits, err = appendLineHits(buffer.New(src.Text), q, limit, hits, func(h palette.GrepHit) palette.GrepHit {
+		hits = appendLineHitsText(src.Text, cq, limit, hits, func(h palette.GrepHit) palette.GrepHit {
 			h.Rel, h.Source, h.Index = label, palette.GrepBuffers, src.Index
 			return h
 		})
-		if err != nil {
-			return nil, err
-		}
 	}
-	return hits, nil
+	return hits
 }
 
-// searchTerminals appends the hits of q in the bounded dock terminal snapshots to
+// searchTerminals appends the hits of cq in the bounded dock terminal snapshots to
 // hits, in dock-tab order and one per matching line, up to limit hits. The snapshot is
 // already bounded by the palette/root caps (≤500 rows/1 MiB per tab, ≤16 tabs/4 MiB
 // total), so this is a bounded in-memory search: no PTY read, no process, no IO.
-func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, hits []palette.GrepHit) ([]palette.GrepHit, error) {
+func searchTerminals(terms []palette.TerminalSource, cq *search.CompiledQuery, limit int, hits []palette.GrepHit) []palette.GrepHit {
 	for _, src := range terms {
 		if len(hits) >= limit {
 			break
@@ -247,8 +326,7 @@ func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, 
 		if label == "" {
 			label = "terminal"
 		}
-		var err error
-		hits, err = appendLineHits(buffer.New(strings.Join(src.Lines, "\n")), q, limit, hits, func(h palette.GrepHit) palette.GrepHit {
+		hits = appendLineHitsText(strings.Join(src.Lines, "\n"), cq, limit, hits, func(h palette.GrepHit) palette.GrepHit {
 			line := h.Line - 1
 			h.Rel, h.Source, h.Index = label, palette.GrepTerminals, src.Index
 			h.TerminalID, h.TranscriptFirst, h.TerminalTotal = src.ID, src.First, src.Total
@@ -257,11 +335,8 @@ func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, 
 			h.TerminalBeforeKnown, h.TerminalAfterKnown = line > 0, line+1 < len(src.Lines)
 			return h
 		})
-		if err != nil {
-			return nil, err
-		}
 	}
-	return hits, nil
+	return hits
 }
 
 // terminalContextBefore/After return the snapshot neighbours of the terminal hit at

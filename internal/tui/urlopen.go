@@ -134,5 +134,3 @@ func (m *Model) openURLDone(msg urlOpenedMsg) {
 	}
 	m.quietNotice(uiText("gvim.url.opened", "Opened URL"))
 }
-
-var _ pluginapi.URLOpenHost = (*pluginHost)(nil)

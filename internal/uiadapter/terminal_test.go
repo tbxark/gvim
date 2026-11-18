@@ -3,6 +3,8 @@ package uiadapter
 import (
 	"context"
 	"os"
+	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -30,7 +32,7 @@ func TestClipboardCommands(t *testing.T) {
 			{"xclip", "-selection", "clipboard", "-out"},
 			{"xsel", "--clipboard", "--output"},
 		}},
-		{goos: "windows", want: nil},
+		{goos: "windows", want: [][]string{{"powershell", "-NoProfile", "-Command", "Get-Clipboard"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
@@ -139,4 +141,45 @@ func TestDockRunsAShellAndShowsItsOutput(t *testing.T) {
 	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	p.start(cmd)
 	p.until(t, m, func(frame string) bool { return strings.Contains(frame, "gotok") })
+}
+
+func TestSystemClipboardReadTriesTheNextToolAfterAFailure(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("the stand-in tools are shell scripts")
+	}
+	dir := t.TempDir()
+	tools := map[string]string{
+		"wl-paste": "#!/bin/sh\nexit 1\n",
+		"xclip":    "#!/bin/sh\nprintf 'from-xclip'\n",
+	}
+	for name, script := range tools {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	got, err := readClipboard([][]string{{"wl-paste"}, {"xclip"}})
+	if err != nil {
+		t.Fatalf("readClipboard = %v, want xclip fallback", err)
+	}
+	if got != "from-xclip" {
+		t.Fatalf("readClipboard = %q, want %q", got, "from-xclip")
+	}
+}
+
+func TestSystemClipboardReadReturnsTheLastErrorWhenEveryToolFails(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("the stand-in tools are shell scripts")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"wl-paste", "xclip"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	_, err := readClipboard([][]string{{"wl-paste"}, {"xclip"}})
+	if err == nil || !strings.HasPrefix(err.Error(), "xclip:") {
+		t.Fatalf("err = %v, want error from last failed tool xclip", err)
+	}
 }

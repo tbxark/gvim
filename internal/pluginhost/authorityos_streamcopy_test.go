@@ -89,18 +89,19 @@ func (s *fakeAuthorityWriteStream) Commit(_ context.Context) error {
 	}
 	s.parent.mu.Lock()
 	defer s.parent.mu.Unlock()
+	remote := s.parent.fakeRemoteFiles
+	remote.mu.Lock()
 	if s.newTarget {
-		remote := s.parent.fakeRemoteFiles
-		remote.mu.Lock()
 		_, file := remote.files[s.path]
 		_, dir := remote.dirs[s.path]
 		_, link := remote.links[s.path]
-		remote.mu.Unlock()
 		if file || dir || link {
+			remote.mu.Unlock()
 			return &fs.PathError{Op: "copy", Path: s.path, Err: fs.ErrExist}
 		}
 	}
-	s.parent.mutableFiles().files[s.path] = s.buf.String()
+	remote.files[s.path] = s.buf.String()
+	remote.mu.Unlock()
 	s.parent.commits++
 	s.done = true
 	return nil
@@ -115,8 +116,6 @@ func (s *fakeAuthorityWriteStream) Abort(context.Context) {
 	s.parent.aborts++
 	s.parent.mu.Unlock()
 }
-
-func (f *fakeStreamFiles) mutableFiles() *fakeMutableFiles { return f.fakeMutableFiles }
 
 func newStreamFiles() *fakeStreamFiles {
 	remote := &fakeMutableFiles{fakeRemoteFiles: newFakeRemoteFiles()}

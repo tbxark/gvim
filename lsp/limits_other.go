@@ -17,6 +17,6 @@ func PlanLimits(l ProcessLimits) LimitPlan {
 		return LimitPlan{}
 	}
 	return LimitPlan{Note: fmt.Sprintf(
-		"process_limits (%s): not applied on %s: the limits need Linux cgroup v2 (Go's os/exec has no pre-exec rlimit hook); Fresh also applies them on Linux only",
+		"process_limits (%s): not applied on %s: the limits need Linux cgroup v2 (Go's os/exec has no pre-exec rlimit hook)",
 		limitsSummary(l), runtime.GOOS)}
 }

@@ -25,9 +25,11 @@ type trustController struct {
 	writeMu      sync.Mutex
 	transition   uint64
 	prepareTrust func(trust.State) error
-	mu           sync.Mutex
-	store        *trust.Store
-	state        trust.State
+	// writeStore, when non-nil (tests), overrides store.Set/SetRecord inside writeMu.
+	writeStore func(recordKey, root string, level trust.Level) error
+	mu         sync.Mutex
+	store      *trust.Store
+	state      trust.State
 	// recordKey, when set, is the explicit store key of a non-filesystem workspace (a
 	// remote target). Decide writes the record key instead of canonicalizing a root.
 	recordKey string
@@ -129,18 +131,37 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 			return state, err
 		}
 	}
-	recordKey, root := c.recordKey, c.state.Root
 	c.mu.Unlock()
 	// The store write is file IO: it runs outside c.mu, which State takes on the
-	// update goroutine. writeMu keeps concurrent decisions in call order.
+	// update goroutine. writeMu keeps concurrent decisions in call order, and re-checking
+	// c.transition inside writeMu guarantees a superseded decision never overwrites
+	// a newer decision's store entry or live state.
 	c.writeMu.Lock()
+	c.mu.Lock()
+	if c.transition != seq {
+		state := c.state
+		c.mu.Unlock()
+		c.writeMu.Unlock()
+		return state, fmt.Errorf("trust decision superseded")
+	}
+	recordKey, root, writeHook := c.recordKey, c.state.Root, c.writeStore
+	c.mu.Unlock()
 	var err error
-	if recordKey != "" {
+	switch {
+	case writeHook != nil:
+		err = writeHook(recordKey, root, level)
+	case recordKey != "":
 		err = c.store.SetRecord(recordKey, level)
-	} else {
+	default:
 		err = c.store.Set(root, level)
 	}
 	c.mu.Lock()
+	if c.transition != seq {
+		state := c.state
+		c.mu.Unlock()
+		c.writeMu.Unlock()
+		return state, fmt.Errorf("trust decision superseded")
+	}
 	c.state.Level = level
 	c.state.Decided = true
 	state := c.state
@@ -156,12 +177,34 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 func (c *trustController) Load(root string) (trust.State, error) {
 	c.mu.Lock()
 	c.transition++
+	seq := c.transition
+	c.mu.Unlock()
+
+	c.writeMu.Lock()
+	c.mu.Lock()
+	if c.transition != seq {
+		current := c.state
+		c.mu.Unlock()
+		c.writeMu.Unlock()
+		return current, fmt.Errorf("trust load superseded")
+	}
+	c.mu.Unlock()
+
 	state, err := c.store.Open(root)
+
+	c.mu.Lock()
+	if c.transition != seq {
+		current := c.state
+		c.mu.Unlock()
+		c.writeMu.Unlock()
+		return current, fmt.Errorf("trust load superseded")
+	}
 	if state.Root != "" {
 		c.state = state
 	}
 	current := c.state
 	c.mu.Unlock()
+	c.writeMu.Unlock()
 	c.notify(current)
 	return current, err
 }

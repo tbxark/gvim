@@ -117,3 +117,37 @@ func TestRestoreHotExitAppliesTheSavedActiveTab(t *testing.T) {
 		})
 	}
 }
+
+func TestRestoreHotExitPreservesMRU(t *testing.T) {
+	apptest.IsolateConfig(t)
+	dir := t.TempDir()
+	sessDir := filepath.Join(dir, "session")
+	clean := filepath.Join(dir, "clean.txt")
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+	for _, path := range []string{clean, first, second} {
+		apptest.Must(t, os.WriteFile(path, []byte("on disk\n"), 0o644))
+	}
+	stash1, err := session.StashContent(sessDir, "first unsaved\n")
+	apptest.Must(t, err)
+	stash2, err := session.StashContent(sessDir, "second unsaved\n")
+	apptest.Must(t, err)
+
+	ed := apptest.NewSessionEditor()
+	s := session.Session{
+		Active: 1,
+		Files: []session.FileState{
+			{Path: clean},
+			{Path: first, StashFile: stash1},
+			{Path: second, StashFile: stash2},
+		},
+		MRU: []session.MruFile{{Path: first}, {Path: clean}, {Path: second}},
+	}
+	if failed := RestoreHotExit(ed, sessDir, s); len(failed) != 0 {
+		t.Fatalf("RestoreHotExit failed = %v", failed)
+	}
+	got := ed.RecentTabIndices()
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("hot-exit MRU = %v, want [0 1] (first before second)", got)
+	}
+}

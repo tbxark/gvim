@@ -121,13 +121,16 @@ func (m *Model) imageIDFor(doc Document) (id int, uploaded bool) {
 	return m.img.imageUploaded(path, size, mtime)
 }
 
-// imageSendMsg carries the picture bytes a tab needs transmitted. The root reads
-// the file in a command, so a big picture does not block the update loop.
+// imageSendMsg carries the picture bytes and prebuilt upload sequence a tab needs
+// transmitted. The root reads and encodes in a command, so a big picture does not block
+// the update loop.
 type imageSendMsg struct {
-	path string
-	id   int
-	data []byte
-	err  error
+	path     string
+	id       int
+	data     []byte
+	seq      string
+	seqReady bool
+	err      error
 }
 
 // imageUploadedMsg means the Raw message of an upload has reached the program.
@@ -137,10 +140,10 @@ type imageUploadedMsg struct {
 	id   int
 }
 
-// imageSendCmd reads the picture of path and returns the bytes to upload under id.
-// The read is a command, so opening a large image does not stall the frame. A read
-// failure is reported to imageMessage, which records the failure so the pane keeps
-// the summary and the same file is not read again every frame.
+// imageSendCmd reads the picture of path, encodes its upload sequence, and returns the
+// result under id. The work runs in a command, so opening or decoding a large image does
+// not stall the frame. A read failure is reported to imageMessage, which records the
+// failure so the pane keeps the summary and the same file is not read again every frame.
 func imageSendCmd(path string, id int) tea.Cmd {
 	return func() tea.Msg {
 		st, err := os.Stat(path)
@@ -160,7 +163,13 @@ func imageSendCmd(path string, id int) tea.Cmd {
 		if len(data) > imageMaxBytes {
 			return imageSendMsg{path: path, id: id, err: errImageTooLarge}
 		}
-		return imageSendMsg{path: path, id: id, data: data}
+		return imageSendMsg{
+			path:     path,
+			id:       id,
+			data:     data,
+			seq:      imageUploadSequence(data, id),
+			seqReady: true,
+		}
 	}
 }
 

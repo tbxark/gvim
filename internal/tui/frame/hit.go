@@ -174,8 +174,12 @@ func (l Layout) hitSectionBody(sec sidebar.Section, x, y int) HitTarget {
 	if x == grip {
 		return HitTarget{Kind: HitExplorerGrip}
 	}
+	outer := l.ExX
+	if l.ExRight {
+		outer = l.ExX + l.Ex - 1
+	}
 	if sec.Index == 0 {
-		if x == l.ExX {
+		if x == outer {
 			return HitTarget{Kind: HitExplorerBody}
 		}
 		if row := y - sec.BodyTop; row >= 0 && row < l.ExRows {
@@ -183,7 +187,7 @@ func (l Layout) hitSectionBody(sec sidebar.Section, x, y int) HitTarget {
 		}
 		return HitTarget{Kind: HitExplorerBody}
 	}
-	if x == l.ExX {
+	if x == outer {
 		return HitTarget{Kind: HitSidebarBody, Section: sec.Index}
 	}
 	if row := y - sec.BodyTop; row >= 0 && row < sec.Rows() {

@@ -1,13 +1,21 @@
 package lsphost
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/protocol"
 
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/lsp"
 )
 
 // TestDecodeSemanticTokens checks the protocol quintuples decode to rune-column
@@ -284,5 +292,86 @@ func TestPullSetCancelsSupersededAndAllPulls(t *testing.T) {
 	s.end(third)
 	if len(calls) != 2 {
 		t.Fatalf("a pull after cancelAll cancelled %v", calls)
+	}
+}
+
+type biPipe struct {
+	r *io.PipeReader
+	w *io.PipeWriter
+}
+
+func (b biPipe) Read(p []byte) (int, error)  { return b.r.Read(p) }
+func (b biPipe) Write(p []byte) (int, error) { return b.w.Write(p) }
+func (b biPipe) Close() error                { _ = b.r.Close(); return b.w.Close() }
+
+func TestInlayHintsSendsUTF16EndCharacter(t *testing.T) {
+	t.Parallel()
+	c2sR, c2sW := io.Pipe()
+	s2cR, s2cW := io.Pipe()
+	clientEnd := biPipe{r: s2cR, w: c2sW}
+	serverEnd := biPipe{r: c2sR, w: s2cW}
+	defer func() { _ = serverEnd.Close() }()
+
+	gotEndCh := make(chan uint32, 1)
+	go func() {
+		in := bufio.NewReader(serverEnd)
+		for {
+			n := -1
+			for {
+				line, err := in.ReadString('\n')
+				if err != nil {
+					return
+				}
+				line = strings.TrimSpace(line)
+				if line == "" {
+					break
+				}
+				if v, ok := strings.CutPrefix(line, "Content-Length: "); ok {
+					n, _ = strconv.Atoi(v)
+				}
+			}
+			body := make([]byte, n)
+			if _, err := io.ReadFull(in, body); err != nil {
+				return
+			}
+			var msg struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+				Params struct {
+					Range protocol.Range `json:"range"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(body, &msg) != nil || len(msg.ID) == 0 {
+				continue
+			}
+			result := "null"
+			switch msg.Method {
+			case "initialize":
+				result = `{"capabilities":{"inlayHintProvider":true}}`
+			case "textDocument/inlayHint":
+				gotEndCh <- msg.Params.Range.End.Character
+				result = `[]`
+			}
+			reply := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":%s}`, msg.ID, result)
+			_, _ = fmt.Fprintf(serverEnd, "Content-Length: %d\r\n\r\n%s", len(reply), reply)
+		}
+	}()
+
+	port := New(map[string]config.LSPServer{"go": {Command: "fake"}}).(*lspPort)
+	port.SetSpawner(func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
+		return lsp.NewClient(clientEnd, cfg), nil
+	})
+	port.SetRoot("/w")
+	defer func() { _ = port.Stop() }()
+
+	// "a\U0001F600b" is 6 UTF-8 bytes, 3 runes, and 4 UTF-16 code units (1 + 2 + 1).
+	if _, err := port.Open("/w/a.go", "go", "a\U0001F600b"); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := port.InlayHints("/w/a.go"); err != nil {
+		t.Fatalf("InlayHints: %v", err)
+	}
+	if got := <-gotEndCh; got != 4 {
+		t.Fatalf("InlayHints Range.End.Character = %d, want 4 UTF-16 code units", got)
 	}
 }

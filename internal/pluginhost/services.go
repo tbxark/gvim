@@ -31,6 +31,7 @@ type pluginServices struct {
 	// agentDiscover is nil when the session has no agent-discovery capability (for
 	// example a shared daemon runtime, whose scanner is per workspace).
 	agentDiscover func(context.Context) (pluginapi.AgentReport, error)
+	remote        bool
 }
 
 var _ pluginapi.Services = pluginServices{}
@@ -136,7 +137,10 @@ func hitWindow(line string, col int) (string, int) {
 // (live grep itself reports a 1-based line and rune column), or a window of about
 // grepHitTextMax bytes of it when the line is longer. That bounds the result to
 // Max * (grepHitTextMax + path length) bytes.
-func (pluginServices) Grep(ctx context.Context, r pluginapi.GrepRequest) ([]pluginapi.GrepHit, error) {
+func (s pluginServices) Grep(ctx context.Context, r pluginapi.GrepRequest) ([]pluginapi.GrepHit, error) {
+	if s.remote {
+		return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "grep is not available on a remote workspace")
+	}
 	if r.Query == "" {
 		return nil, nil
 	}
@@ -214,7 +218,12 @@ func (pluginServices) Decode(name string, data []byte) (string, error) {
 }
 
 // GitRoot returns the work tree root that holds dir.
-func (pluginServices) GitRoot(dir string) (string, bool) { return gitstate.FindRoot(dir) }
+func (s pluginServices) GitRoot(dir string) (string, bool) {
+	if s.remote {
+		return "", false
+	}
+	return gitstate.FindRoot(dir)
+}
 
 // DiscoverAgents reports the app's bounded, trust-gated local agent session scan. A
 // pluginServices without a callback has no discovery capability rather than a fake empty
@@ -227,7 +236,10 @@ func (s pluginServices) DiscoverAgents(ctx context.Context) (pluginapi.AgentRepo
 }
 
 // GitBranch returns the checked-out branch of the work tree root.
-func (pluginServices) GitBranch(root string) (string, error) {
+func (s pluginServices) GitBranch(root string) (string, error) {
+	if s.remote {
+		return "", pluginapi.Errf(pluginapi.CodeUnsupported, "git branch is not available on a remote workspace")
+	}
 	b, err := gitstate.Branch(root)
 	if err != nil {
 		return "", pluginapi.Errf(pluginapi.CodeNotFound, "%v", err)
@@ -251,10 +263,10 @@ const (
 	grepBinaryProbe  = 8000
 )
 
-// ReadSearchable returns the first GrepMaxFileBytes of the file at path. It reports
-// false when the file cannot be read, is not a regular file (a FIFO behind a symbolic link
-// must not block the search), is skipFrom bytes or more (when skipFrom is not zero), or
-// looks binary: a NUL byte in its first grepBinaryProbe bytes.
+// ReadSearchable returns the text of the file at path when it is a valid UTF-8 regular
+// file of at most GrepMaxFileBytes (and smaller than skipFrom when skipFrom is not zero),
+// non-binary (no NUL byte in its first grepBinaryProbe bytes). Files larger than
+// GrepMaxFileBytes are skipped as a whole instead of being silently truncated.
 func ReadSearchable(path string, skipFrom int64) (string, bool) {
 	// O_NONBLOCK: opening a FIFO must not wait for a writer.
 	f, err := os.OpenFile(path, os.O_RDONLY|openNoBlock, 0)
@@ -263,14 +275,14 @@ func ReadSearchable(path string, skipFrom int64) (string, bool) {
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || (skipFrom > 0 && info.Size() >= skipFrom) {
+	if err != nil || !info.Mode().IsRegular() || info.Size() > GrepMaxFileBytes || (skipFrom > 0 && info.Size() >= skipFrom) {
 		return "", false
 	}
-	data, err := io.ReadAll(io.LimitReader(f, GrepMaxFileBytes))
-	if err != nil {
+	data, err := io.ReadAll(io.LimitReader(f, GrepMaxFileBytes+1))
+	if err != nil || len(data) > GrepMaxFileBytes {
 		return "", false
 	}
-	if bytes.IndexByte(data[:min(len(data), grepBinaryProbe)], 0) >= 0 {
+	if bytes.IndexByte(data[:min(len(data), grepBinaryProbe)], 0) >= 0 || !utf8.Valid(data) {
 		return "", false
 	}
 	return string(data), true

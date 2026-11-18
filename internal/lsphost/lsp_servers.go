@@ -1,8 +1,10 @@
 package lsphost
 
 import (
+	"context"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -241,13 +243,30 @@ func serverConfig(entry config.LSPServer, spec manager.Spec) manager.ServerConfi
 // .tsx file the name of TypeScript, but the server must be told "typescriptreact", or it
 // reads the JSX as a syntax error. A .h file in a directory with a C++ source or header is
 // opened as C++, as Fresh does, so that clangd reads it as C++.
-func openLanguage(path, lang string) string {
-	if lang == "typescript" && strings.EqualFold(filepath.Ext(path), ".tsx") {
+func openLanguage(filePath, lang string) string {
+	return openLanguageWith(filePath, lang, false, cppSibling)
+}
+
+func (p *lspPort) openLanguage(filePath, lang string) string {
+	p.mu.Lock()
+	isRemote := p.remoteMarkers != nil || p.remoteReadDir != nil || p.remoteReadFile != nil
+	p.mu.Unlock()
+	return openLanguageWith(filePath, lang, isRemote, p.cppSibling)
+}
+
+func openLanguageWith(filePath, lang string, isRemote bool, hasCPPSibling func(string) bool) string {
+	extFn := filepath.Ext
+	dirFn := filepath.Dir
+	if isRemote {
+		extFn = path.Ext
+		dirFn = path.Dir
+	}
+	if lang == "typescript" && strings.EqualFold(extFn(filePath), ".tsx") {
 		if _, ok := manager.DefaultFor("tsx"); ok {
 			return "tsx"
 		}
 	}
-	if lang == "c" && filepath.Ext(path) == ".h" && cppSibling(filepath.Dir(path)) {
+	if lang == "c" && extFn(filePath) == ".h" && hasCPPSibling(dirFn(filePath)) {
 		if _, ok := manager.DefaultFor("cpp"); ok {
 			return "cpp"
 		}
@@ -274,6 +293,31 @@ func cppSibling(dir string) bool {
 		}
 	}
 	return false
+}
+
+func (p *lspPort) cppSibling(dir string) bool {
+	p.mu.Lock()
+	remoteDir := p.remoteReadDir
+	isRemote := p.remoteMarkers != nil || remoteDir != nil || p.remoteReadFile != nil
+	p.mu.Unlock()
+	if remoteDir != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+		names, err := remoteDir(ctx, dir)
+		cancel()
+		if err != nil {
+			return false
+		}
+		for _, name := range names {
+			if slices.Contains(cppSiblingExts, path.Ext(name)) {
+				return true
+			}
+		}
+		return false
+	}
+	if isRemote {
+		return false
+	}
+	return cppSibling(dir)
 }
 
 // Server describes the server of a language from the configuration. It does no

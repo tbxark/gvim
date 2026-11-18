@@ -41,7 +41,7 @@ func TestSessionPersistsMRUOrder(t *testing.T) {
 	if got, want := ed.RecentTabIndices(), []int{1, 0, 2}; !slices.Equal(got, want) {
 		t.Fatalf("source MRU = %v, want %v", got, want)
 	}
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	s, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)
@@ -78,7 +78,7 @@ func TestSessionMRUSkipsMissingAndStaleReferences(t *testing.T) {
 	apptest.Must(t, ed.OpenFile(a))
 	apptest.Must(t, ed.OpenFile(b))
 	apptest.Must(t, ed.OpenFile(c))
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 	s, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)
 	if !ok {
@@ -147,7 +147,7 @@ func TestSessionMRURestoresUntitledBuffer(t *testing.T) {
 	// A (tab 0) was activated, then the untitled tab (tab 1): MRU is untitled, A.
 	ed.ActivateTab(0)
 	ed.ActivateTab(1)
-	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+	apptest.Must(t, WriteSession(ed, sessDir, tui.ExplorerState{}, nil))
 
 	s, ok, err := session.Load(sessDir)
 	apptest.Must(t, err)

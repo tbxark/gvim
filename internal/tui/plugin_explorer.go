@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -162,10 +163,7 @@ func (h *pluginHost) SetExplorerDecorations(plugin, ns string, list []pluginapi.
 		if !ok {
 			continue
 		}
-		symbol := cleanText(d.Symbol)
-		if len(symbol) > pluginapi.MaxExplorerSymbol {
-			symbol = symbol[:pluginapi.MaxExplorerSymbol]
-		}
+		symbol := truncateUTF8Bytes(cleanText(d.Symbol), pluginapi.MaxExplorerSymbol)
 		if symbol == "" {
 			continue
 		}
@@ -242,12 +240,28 @@ func (h *pluginHost) ClearExplorerSlots(plugin, ns string) {
 // cleanSlotText sanitizes a slot text and reserves its caps.
 func cleanSlotText(t *pluginapi.FileExplorerSlotText) *pluginapi.FileExplorerSlotText {
 	out := *t
-	out.Text = cleanText(out.Text)
-	if len(out.Text) > pluginapi.MaxExplorerSlotText {
-		out.Text = out.Text[:pluginapi.MaxExplorerSlotText]
-	}
+	out.Text = truncateUTF8Bytes(cleanText(out.Text), pluginapi.MaxExplorerSlotText)
 	out.MinWidth = min(max(out.MinWidth, 0), pluginapi.MaxExplorerMinWidth)
 	return &out
+}
+
+// truncateUTF8Bytes returns the longest prefix of s that fits in limit bytes without
+// splitting a UTF-8 rune.
+func truncateUTF8Bytes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(s) <= limit {
+		return s
+	}
+	for i := 0; i < len(s); {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		if i+size > limit {
+			return s[:i]
+		}
+		i += size
+	}
+	return s
 }
 
 // betterDeco reports whether a wins over b: higher priority, then the alphabetically

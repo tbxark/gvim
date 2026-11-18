@@ -127,9 +127,7 @@ func TestGraceAppliesToEveryDialog(t *testing.T) {
 	t.Parallel()
 	makers := map[string]func(Clock) Overlay{
 		"unsaved": func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil, testOv) },
-		"trash":   func(clk Clock) Overlay { return NewConfirmTrash(clk, "a", nil, testOv) },
 		"saveas":  func(clk Clock) Overlay { return NewSaveAs(clk, "a.txt", nil, PathChecks{}, testOv) },
-		"open":    func(clk Clock) Overlay { return NewOpenFolder(clk, []string{"/x"}, "/x", nil, nil, testOv) },
 		"error":   func(clk Clock) Overlay { return NewErrorDialog(clk, "boom", nil, testOv) },
 	}
 	for name, mk := range makers {

@@ -14,7 +14,13 @@ import (
 // dialogPort is the root's Dialogs port. It builds the dialogs of
 // internal/tui/dialog and answers the Save As prompt's path questions from the
 // disk, so the root does no file IO itself.
-type dialogPort struct{}
+type dialogPort struct {
+	remote bool
+}
+
+// RemoteDialogs returns the Dialogs port for a remote workspace, omitting local disk
+// existence/parent-dir checks from the Save As prompt.
+func RemoteDialogs() tui.Dialogs { return dialogPort{remote: true} }
 
 // Unsaved opens the unsaved-changes dialog for the tab called name.
 func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) tui.Overlay {
@@ -33,22 +39,25 @@ func (dialogPort) Error(message string, tag any, ov style.Overlay) tui.Overlay {
 
 // SaveAs opens the Save As prompt prefilled with path. A path whose parent
 // folder is missing is refused inline, and an existing file needs a confirm.
-func (dialogPort) SaveAs(path string, tag any, ov style.Overlay) tui.Overlay {
-	checks := dialog.PathChecks{
-		Exists: func(p string) bool {
-			_, err := os.Stat(p)
-			return err == nil
-		},
-		Validate: func(p string) error {
-			dir, err := os.Stat(filepath.Dir(p))
-			if err != nil {
-				return errors.New("folder does not exist")
-			}
-			if !dir.IsDir() {
-				return errors.New("parent is not a folder")
-			}
-			return nil
-		},
+func (d dialogPort) SaveAs(path string, tag any, ov style.Overlay) tui.Overlay {
+	var checks dialog.PathChecks
+	if !d.remote {
+		checks = dialog.PathChecks{
+			Exists: func(p string) bool {
+				_, err := os.Stat(p)
+				return err == nil
+			},
+			Validate: func(p string) error {
+				dir, err := os.Stat(filepath.Dir(p))
+				if err != nil {
+					return errors.New("folder does not exist")
+				}
+				if !dir.IsDir() {
+					return errors.New("parent is not a folder")
+				}
+				return nil
+			},
+		}
 	}
 	return dialog.NewSaveAs(time.Now, path, tag, checks, ov)
 }

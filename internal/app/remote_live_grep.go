@@ -70,6 +70,10 @@ func (g *remoteLiveGrep) SearchContext(ctx context.Context, req palette.GrepRequ
 	if err := validateQuery(q); err != nil {
 		return out, err
 	}
+	cq, err := search.CompileQuery(q)
+	if err != nil {
+		return out, err
+	}
 	if req.Sources.Files || req.Sources.Ignored {
 		if g.gate != nil {
 			if err := g.gate(ctx, []string{"gvim-remote-live-grep", g.search.root}, g.search.root); err != nil {
@@ -89,16 +93,10 @@ func (g *remoteLiveGrep) SearchContext(ctx context.Context, req palette.GrepRequ
 		}
 	}
 	if len(out.Hits) < req.Limit && req.Sources.Buffers {
-		var err error
-		if out.Hits, err = searchBuffers(req.Buffers, q, req.Limit, out.Hits); err != nil {
-			return out, err
-		}
+		out.Hits = searchBuffers(req.Buffers, cq, req.Limit, out.Hits)
 	}
 	if len(out.Hits) < req.Limit && req.Sources.Terminals {
-		var err error
-		if out.Hits, err = searchTerminals(req.Terminals, q, req.Limit, out.Hits); err != nil {
-			return out, err
-		}
+		out.Hits = searchTerminals(req.Terminals, cq, req.Limit, out.Hits)
 	}
 	return out, nil
 }

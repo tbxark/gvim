@@ -52,3 +52,21 @@ func TestNewScreenHoldsCellsRowByRow(t *testing.T) {
 		})
 	}
 }
+
+func TestSavedScreenRoundTripsExtendedStyles(t *testing.T) {
+	sc := NewScreen(1, 3, []Cell{
+		{Rune: 'i', Style: Style{Italic: true}},
+		{Rune: 'f', Style: Style{Faint: true}},
+		{Rune: 's', Style: Style{Strikethrough: true}},
+	})
+	saved := SnapshotScreen(sc)
+	if saved == nil || len(saved.Rows) != 1 || len(saved.Rows[0].Cells) != 3 {
+		t.Fatalf("SnapshotScreen = %+v, want 1x3 cells", saved)
+	}
+	lines := saved.Lines()
+	for idx, want := range []Style{{Italic: true}, {Faint: true}, {Strikethrough: true}} {
+		if got := lines[0].Cells[idx].Style; got != want {
+			t.Fatalf("cell %d restored style = %+v, want %+v", idx, got, want)
+		}
+	}
+}

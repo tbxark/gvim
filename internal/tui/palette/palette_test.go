@@ -1433,3 +1433,20 @@ func TestFileTickCarriesTheTokenOfTheRanking(t *testing.T) {
 		t.Fatalf("tick = %+v, want token %d seq %d", tick, token, seq)
 	}
 }
+
+func TestClickInputWideRunePositionsCaretOnGrapheme(t *testing.T) {
+	t.Parallel()
+	p := New(Options{Query: "日本x"})
+	geo := layoutFor(60, 20)
+	p.width = 60
+	// Clicking the second cell of '日' (geo.nameX + 1) stays before '日' (pos 0), not '本'.
+	p.clickInput(geo, geo.nameX+1)
+	if got := p.input.Position(); got != 0 {
+		t.Fatalf("Position after clicking second cell of wide rune = %d, want 0", got)
+	}
+	// Clicking at geo.nameX + 2 lands on '本' (pos 1).
+	p.clickInput(geo, geo.nameX+2)
+	if got := p.input.Position(); got != 1 {
+		t.Fatalf("Position after wide rune = %d, want 1", got)
+	}
+}

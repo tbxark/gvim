@@ -323,13 +323,63 @@ func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
 	if g == nil {
 		return
 	}
-	m.plugEmit("buffer_group_closed", map[string]any{"group": uint64(id), "name": g.name})
-	h.closeGroupPanels(g)
 	delete(ps.byID, id)
 	for i, got := range ps.order {
 		if got == id {
 			ps.order = append(ps.order[:i:i], ps.order[i+1:]...)
 			break
+		}
+	}
+	m.plugEmit("buffer_group_closed", map[string]any{"group": uint64(id), "name": g.name})
+	h.closeGroupPanels(g)
+}
+
+// plugGroupsBufferClosed closes any buffer group that held id as a panel buffer so its
+// sibling splits/panel buffers are cleaned up and plugins receive buffer_group_closed.
+func (m *Model) plugGroupsBufferClosed(id pluginapi.BufferID) {
+	h := m.plug.host
+	ps := &m.plug.groups
+	for _, gid := range append([]pluginapi.BufferGroupID(nil), ps.order...) {
+		g := ps.group(gid)
+		if g == nil {
+			continue
+		}
+		for _, p := range g.panels {
+			if p.buffer == id {
+				if h != nil {
+					h.CloseBufferGroup(gid)
+				}
+				break
+			}
+		}
+	}
+}
+
+// plugGroupsReconcile closes any group whose visible panel window was closed directly by
+// the user (leaving p.visible set with no live split leaf), keeping sibling panels clean.
+func (m *Model) plugGroupsReconcile() {
+	h := m.plug.host
+	ps := &m.plug.groups
+	if h == nil || len(ps.order) == 0 {
+		return
+	}
+	for _, gid := range append([]pluginapi.BufferGroupID(nil), ps.order...) {
+		g := ps.group(gid)
+		if g == nil {
+			continue
+		}
+		broken := false
+		for _, p := range g.panels {
+			if p.visible && p.window != 0 {
+				local, err := m.pluginResolveWindow(p.window)
+				if err != nil || m.splitByID(local) == nil {
+					broken = true
+					break
+				}
+			}
+		}
+		if broken {
+			h.CloseBufferGroup(gid)
 		}
 	}
 }

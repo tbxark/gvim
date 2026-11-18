@@ -159,6 +159,9 @@ func TestSettingsPluginToggleRollback(t *testing.T) {
 		{"failed reload", func(path string, _ []config.Edit) error {
 			return os.WriteFile(path, []byte("{not json"), 0o600)
 		}},
+		{"diagnostic after reload", func(path string, _ []config.Edit) error {
+			return os.WriteFile(path, []byte(`{"editor": {"tab_size": 0}, "plugins": {"git": {"enabled": true}}}`), 0o600)
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			user := `{"editor": {"tab_size": 3}}`
@@ -177,8 +180,28 @@ func TestSettingsPluginToggleRollback(t *testing.T) {
 			if string(body) != user {
 				t.Errorf("config after a failed toggle = %q, want the previous bytes", body)
 			}
+			if s.currentConfig().TabSize != 3 {
+				t.Errorf("in-memory TabSize = %d after rollback, want 3", s.currentConfig().TabSize)
+			}
+			if pc, ok := s.currentConfig().Plugins["git"]; ok && pc.Enabled != nil {
+				t.Errorf("in-memory git.Enabled = %+v after rollback, want cleared", pc)
+			}
 		})
 	}
+	t.Run("non-not-exist read error keeps target untouched", func(t *testing.T) {
+		cfg, _ := loadLayerConfig(t, `{}`)
+		s, path := pluginSettingsService(t, "", cfg, &fakeSettingsPlugins{})
+		_ = os.Remove(path)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Act("plugin-enable", "git"); err == nil {
+			t.Fatal("Act succeeded when userFile is a directory")
+		}
+		if st, err := os.Stat(path); err != nil || !st.IsDir() {
+			t.Fatalf("directory userFile was removed/altered on error: %v, %v", st, err)
+		}
+	})
 }
 
 // TestSettingsPluginReloadAction checks the reload row: it writes no config, it just

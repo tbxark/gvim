@@ -216,3 +216,47 @@ func TestPaletteTabAcceptsSuggestionWithoutRunningTheCommand(t *testing.T) {
 		t.Fatalf("Enter ran %#v, want RunCommandMsg{Action: save}", cmd())
 	}
 }
+
+type capFakeDoc struct {
+	*fakeDoc
+	ro, bin, img bool
+}
+
+func (d capFakeDoc) ReadOnly() bool { return d.ro }
+func (d capFakeDoc) Binary() bool   { return d.bin }
+func (d capFakeDoc) IsImage() bool  { return d.img }
+
+func TestCapabilitiesFalseOnWelcomeReadOnlyBinaryAndImage(t *testing.T) {
+	t.Parallel()
+	welcome := newFakeEditor("")
+	welcome.doc = nil
+	welcome.tabs = nil
+	cases := []struct {
+		name           string
+		ed             EditorState
+		wantTextBuffer bool
+	}{
+		{"welcome", welcome, false},
+		{"read_only", holdsDocEditor{newFakeEditor("a"), capFakeDoc{fakeDoc: &fakeDoc{lines: []string{"a"}}, ro: true}}, true},
+		{"binary", holdsDocEditor{newFakeEditor("a"), capFakeDoc{fakeDoc: &fakeDoc{lines: []string{"a"}}, bin: true}}, false},
+		{"image", holdsDocEditor{newFakeEditor("a"), capFakeDoc{fakeDoc: &fakeDoc{lines: []string{"a"}}, img: true}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := New(Deps{Editor: tc.ed, Keys: testKeys(), Clock: testClock})
+			for _, capName := range []string{"can_edit", "can_paste"} {
+				if m.Holds(capName) {
+					t.Errorf("%s: Holds(%q) = true, want false", tc.name, capName)
+				}
+			}
+			if got := m.Holds("has_text_buffer"); got != tc.wantTextBuffer {
+				t.Errorf("%s: Holds(has_text_buffer) = %v, want %v", tc.name, got, tc.wantTextBuffer)
+			}
+			st := m.paletteState()
+			if st.Editable || st.TextBuffer != tc.wantTextBuffer {
+				t.Errorf("%s: paletteState = %+v, want Editable=false TextBuffer=%v", tc.name, st, tc.wantTextBuffer)
+			}
+		})
+	}
+}

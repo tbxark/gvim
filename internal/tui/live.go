@@ -79,6 +79,7 @@ func (m *Model) openLiveGrepResume(query string, resume *palette.LiveResume) tea
 		SourceBuffers:     m.bufferSources(),
 		SourceTerminals:   m.terminalSources(),
 		SourceDiagnostics: m.diagnosticSources(),
+		Icons:             m.view.icons,
 		Theme:             m.theme,
 	})
 	m.pushOverlay(p)

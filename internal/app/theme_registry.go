@@ -27,7 +27,8 @@ func userThemeDir() string {
 // fallbacks; the app owns the atomic file write, because the theme package is a
 // leaf and may not import atomicfile.
 type themeCatalog struct {
-	reg *theme.Registry
+	reg     *theme.Registry
+	noColor bool
 }
 
 var _ tui.ThemeCatalog = (*themeCatalog)(nil)
@@ -50,7 +51,13 @@ func (c *themeCatalog) Infos() []tui.ThemeInfo {
 	return out
 }
 
-func (c *themeCatalog) Load(ref string) (theme.Theme, error) { return c.reg.Load(ref) }
+func (c *themeCatalog) Load(ref string) (theme.Theme, error) {
+	th, err := c.reg.Load(ref)
+	if err == nil && c.noColor && os.Getenv("NO_COLOR") != "" {
+		return th.WithoutColor(), nil
+	}
+	return th, err
+}
 
 func (c *themeCatalog) Canonical(ref string) (string, error) { return c.reg.Canonical(ref) }
 

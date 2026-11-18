@@ -2,6 +2,7 @@ package tui
 
 import (
 	"image/color"
+	"strconv"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -136,21 +137,37 @@ func (m *Model) plugPanelsScopeSync() {
 	}
 }
 
-// plugPanelsBufferClosed drops the buffer-scoped panels of a buffer that closed: their
-// owner buffer is gone, so they cannot belong to anything on screen any more.
+// plugPanelsBufferClosed drops the buffer-scoped and buffer-placed panels of a buffer
+// that closed: their owner buffer is gone, so they cannot belong to anything on screen.
 func (m *Model) plugPanelsBufferClosed(id pluginapi.BufferID) {
 	ps := &m.plug.panels
 	removed := false
+	scopeEditor := false
 	for _, pid := range append([]pluginapi.PanelID(nil), ps.order...) {
 		mp := ps.get(pid)
-		if mp != nil && mp.mount.Scope == pluginapi.ScopeBuffer && mp.scopeBuffer == id {
+		if mp == nil {
+			continue
+		}
+		matchesScope := mp.mount.Scope == pluginapi.ScopeBuffer && mp.scopeBuffer == id
+		matchesBuf := mp.mount.Placement == pluginapi.PlacementBuffer && mp.mount.Buffer == id
+		if matchesScope || matchesBuf {
+			if mp.mount.Scope == pluginapi.ScopeEditor {
+				scopeEditor = true
+			}
 			if ps.focus == pid {
 				ps.focus = 0
+				mp.panel.SetFocused(false)
+				m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(pid), Event: "focus_lost", Index: -1})
+				m.plugEmit("focus_gained", map[string]any{})
 			}
+			m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(pid), Event: "cancel", Index: -1})
 			m.forgetDividerPanel(pid)
 			ps.remove(pid)
 			removed = true
 		}
+	}
+	if scopeEditor {
+		m.noteEditorChromeChanged()
 	}
 	if removed {
 		m.syncViewport()
@@ -216,7 +233,9 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 			return pluginapi.Errf(pluginapi.CodeInvalid, "a section asks for 0 to %d rows, not %d", sidebarMaxPluginRows, o.Rows)
 		}
 	default:
-		return pluginapi.Errf(pluginapi.CodeInvalid, "placement must be \"float\", \"buffer\" or \"sidebar\", not %q", string(o.Placement))
+		return pluginapi.Errf(pluginapi.CodeInvalid, "%s", uiTextVars("gvim.plugin.placement_invalid",
+			`placement must be "float", "buffer" or "sidebar", not %{placement}`,
+			map[string]any{"placement": strconv.Quote(string(o.Placement))}))
 	}
 	if len(o.Title) > pluginpanel.MaxTitle {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a panel title is at most %d bytes", pluginpanel.MaxTitle)
@@ -237,7 +256,7 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 			scopeBuffer = m.pluginActiveBuffer()
 		}
 		if scopeBuffer == 0 {
-			return pluginapi.Errf(pluginapi.CodeInvalid, "a buffer-scoped panel needs the buffer it belongs to")
+			return pluginapi.Errf(pluginapi.CodeInvalid, "%s", uiText("gvim.plugin.scope_buffer_needs_buffer", "a buffer-scoped panel needs the buffer it belongs to"))
 		}
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "scope must be \"window\", \"editor\" or \"buffer\", not %q", string(o.Scope))
@@ -310,7 +329,9 @@ func (h *pluginHost) UnmountWidgetPanel(id pluginapi.PanelID) {
 	}
 	if m.plug.panels.focus == id {
 		m.plug.panels.focus = 0
+		mp.panel.SetFocused(false)
 		m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(id), Event: "focus_lost", Index: -1})
+		m.plugEmit("focus_gained", map[string]any{})
 	}
 	scopeEditor := mp.mount.Scope == pluginapi.ScopeEditor
 	m.forgetDividerPanel(id)
@@ -398,11 +419,8 @@ func (m *Model) focusPluginPanel(id pluginapi.PanelID) {
 	}
 	ps.focus = id
 	mp.panel.SetFocused(true)
+	m.menu = m.menu.Close()
 	m.focusEditorChrome()
-	m.explorerFocus = false
-	m.contentsFocus = false
-	m.tabFocus = false
-	m.dock.SetFocus(false)
 	m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(id), Event: "focus_gained", Index: -1})
 	if ev := mp.panel.FocusEvent(); ev.Event == "focus" {
 		m.emitWidgetResult(id, pluginpanel.Result{Handled: true, Events: []pluginapi.WidgetEvent{ev}})
@@ -558,9 +576,14 @@ func (m *Model) floatPanelRect(o pluginapi.WidgetMount) pluginpanel.Rect {
 	margin := space.Margin(m.width)
 	w := m.width * wp / 100
 	h := m.height * hp / 100
-	w = min(max(w, 20), max(m.width-2*margin, 20))
-	h = min(max(h, 5), max(m.height-2, 5))
-	return pluginpanel.Rect{X: max((m.width-w)/2, 0), Y: max((m.height-h)/2, 1), W: w, H: h}
+	w = min(max(w, 20), max(m.width-2*margin, 20), m.width)
+	h = min(max(h, 5), max(m.height-2, 5), m.height)
+	return pluginpanel.Rect{
+		X: max((m.width-w)/2, 0),
+		Y: min(max((m.height-h)/2, 1), max(m.height-h, 0)),
+		W: w,
+		H: h,
+	}
 }
 
 // windowOfBuffer returns the index of the window (in reading order) that shows buffer id,
@@ -715,6 +738,50 @@ func (m *Model) pluginPanelKey(msg tea.Msg) (tea.Cmd, bool) {
 	res := mp.panel.HandleKey(pk)
 	m.emitWidgetResult(mp.id, res)
 	return nil, true
+}
+
+// pastePluginPanel routes a bracketed or clipboard paste to the focused widget panel so a
+// paste into a plugin text field never mutates the background editor.
+func (m *Model) pastePluginPanel(s string) bool {
+	ps := &m.plug.panels
+	if ps.focus == 0 {
+		return false
+	}
+	mp := ps.get(ps.focus)
+	if mp == nil || !mp.panel.Focused() || !m.panelVisible(mp) {
+		ps.focus = 0
+		return false
+	}
+	res := mp.panel.HandlePaste(s)
+	m.emitWidgetResult(mp.id, res)
+	return true
+}
+
+func (m *Model) closePluginSection(section int) bool {
+	mp := m.pluginSectionAt(section)
+	if mp == nil {
+		return false
+	}
+	m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(mp.id), Event: "cancel", Index: -1})
+	m.unmountPanel(mp.id)
+	return true
+}
+
+func (m *Model) pressPluginSection(section int, mo tea.Mouse) tea.Cmd {
+	mp := m.pluginSectionAt(section)
+	if mp == nil {
+		return nil
+	}
+	m.focusPluginSection(mp)
+	return m.panelMouseInput(mp, mo, true, false)
+}
+
+func (m *Model) wheelPluginSection(section int, mo tea.Mouse) tea.Cmd {
+	mp := m.pluginSectionAt(section)
+	if mp == nil {
+		return nil
+	}
+	return m.panelMouseInput(mp, mo, true, false)
 }
 
 // panelKeyOf converts a key press to the panel key vocabulary, using the plugin key names.

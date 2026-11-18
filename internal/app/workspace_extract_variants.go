@@ -46,7 +46,7 @@ func (m *workspaceManager) ExtractTargets() []tui.WorkspaceEntry {
 	m.mu.Lock()
 	sess := m.sessions[m.active]
 	m.mu.Unlock()
-	if sess == nil {
+	if sess == nil || sess.ws.File.AuthoritySpec != "" {
 		return nil
 	}
 	sourceRoot, err := daemon.CanonicalRoot(sess.ws.File.Root)
@@ -56,7 +56,7 @@ func (m *workspaceManager) ExtractTargets() []tui.WorkspaceEntry {
 	entries, _ := m.reg.List()
 	out := make([]tui.WorkspaceEntry, 0, len(entries))
 	for _, ws := range entries {
-		if ws.File.StableID == sess.ws.File.StableID {
+		if ws.File.StableID == sess.ws.File.StableID || ws.File.AuthoritySpec != "" {
 			continue
 		}
 		root, err := daemon.CanonicalRoot(ws.File.Root)
@@ -126,6 +126,9 @@ func (m *workspaceManager) ExtractTabTo(id string) (tui.WorkspaceCmd, error) {
 	if sess == nil {
 		return nil, errors.New("cannot extract: the daemon is not ready")
 	}
+	if sess.ws.File.AuthoritySpec != "" {
+		return nil, errors.New("cannot extract: extracting tabs from a remote workspace is not supported")
+	}
 	doc := sess.rt.ed.Active()
 	if doc == nil || doc.Virtual() || doc.Path == "" {
 		return nil, errors.New("cannot extract: buffer has no file path")
@@ -158,6 +161,10 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 	target, ok, err := m.reg.Get(extTo.destID)
 	if err != nil || !ok {
 		m.notify(errors.New("cannot extract: the target workspace is gone; the tab stays open"))
+		return
+	}
+	if target.File.AuthoritySpec != "" {
+		m.notify(errors.New("cannot extract: the target workspace is remote; the tab stays open"))
 		return
 	}
 	sourceRoot, err := daemon.CanonicalRoot(sess.ws.File.Root)
@@ -341,6 +348,9 @@ func (m *workspaceManager) ExtractTerminalTabTo(id string) (tui.WorkspaceCmd, er
 	if sess == nil {
 		return nil, errors.New("cannot extract: the daemon is not ready")
 	}
+	if sess.ws.File.AuthoritySpec != "" {
+		return nil, errors.New("cannot extract: extracting terminal tabs from a remote workspace is not supported")
+	}
 	tab, ok := sess.rt.model.ActiveTerminalTab()
 	if !ok {
 		return nil, errors.New("cannot extract: there is no terminal tab")
@@ -363,6 +373,10 @@ func (m *workspaceManager) runExtractTerminalTab(ext *extractTerminalTab) {
 	target, ok, err := m.reg.Get(ext.destID)
 	if err != nil || !ok {
 		m.notify(errors.New("cannot extract: the target workspace is gone; the terminal tab stays open"))
+		return
+	}
+	if target.File.AuthoritySpec != "" {
+		m.notify(errors.New("cannot extract: the target workspace is remote; the terminal tab stays open"))
 		return
 	}
 	sourceRoot, err := daemon.CanonicalRoot(sess.ws.File.Root)
@@ -504,6 +518,9 @@ func (m *workspaceManager) ExtractTabs(paths []string) (tui.WorkspaceCmd, error)
 	m.mu.Unlock()
 	if sess == nil {
 		return nil, errors.New("cannot extract: the daemon is not ready")
+	}
+	if sess.ws.File.AuthoritySpec != "" {
+		return nil, errors.New("cannot extract: extracting tabs from a remote workspace is not supported")
 	}
 	seen := make(map[string]bool, len(paths))
 	exts := make([]*extractTab, 0, len(paths))

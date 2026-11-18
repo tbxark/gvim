@@ -37,6 +37,9 @@ func DefaultName(root string) string {
 	if err != nil {
 		abs = root
 	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
 	base := strings.ToLower(filepath.Base(abs))
 	var slug strings.Builder
 	for _, r := range base {

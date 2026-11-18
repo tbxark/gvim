@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
@@ -250,6 +251,10 @@ func (p *Popup) Draw(g *grid.Grid) {
 	w, h := g.Width(), g.Height()
 	boxW := boxWidthNote(p.title, p.note, p.items, w)
 	p.noteLines = wrapNote(p.note, max(boxW-2*(1+space.PadX), 1))
+	maxNote := max(h-borderRows-1, 0)
+	if len(p.noteLines) > maxNote {
+		p.noteLines = p.noteLines[:maxNote]
+	}
 	p.rows = visibleRows(len(p.items), h-len(p.noteLines))
 	p.keepVisible()
 	p.box = placeBox(p.anchor, boxW, p.rows+borderRows+len(p.noteLines), w, h)
@@ -258,12 +263,19 @@ func (p *Popup) Draw(g *grid.Grid) {
 	b := p.box
 	chrome.PaintBox(g, b.X, b.Y, b.W, b.H, p.title)
 	inner, end := b.X+1+space.PadX, b.X+b.W-1-space.PadX
+	maxRow := b.Y + b.H - 1
 	for i, line := range p.noteLines {
-		g.Put(inner, b.Y+1+i, end, line, chrome.Box)
+		y := b.Y + 1 + i
+		if y >= maxRow {
+			break
+		}
+		g.Put(inner, y, end, line, chrome.Box)
 	}
 	itemTop := b.Y + 1 + len(p.noteLines)
 	if len(p.items) == 0 {
-		g.Put(inner, itemTop, end, "No items", chrome.Muted)
+		if itemTop < maxRow {
+			g.Put(inner, itemTop, end, "No items", chrome.Muted)
+		}
 		return
 	}
 	for k := range p.rows {
@@ -272,6 +284,9 @@ func (p *Popup) Draw(g *grid.Grid) {
 			break
 		}
 		y := itemTop + k
+		if y >= maxRow {
+			break
+		}
 		st := chrome.Box
 		if i == p.sel {
 			st = chrome.Selected
@@ -342,8 +357,17 @@ func wrapNote(note string, width int) []string {
 					line = ""
 				}
 				head := ansi.Truncate(word, width, "")
+				if head == "" {
+					head, word, _, _ = uniseg.FirstGraphemeClusterInString(word, -1)
+					lines = append(lines, head)
+					continue
+				}
 				lines = append(lines, head)
-				word = word[len(head):]
+				if strings.HasPrefix(word, head) {
+					word = word[len(head):]
+				} else {
+					word = ansi.TruncateLeft(word, ansi.StringWidth(head), "")
+				}
 			}
 			switch {
 			case line == "":

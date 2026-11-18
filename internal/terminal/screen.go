@@ -40,8 +40,8 @@ type Cell struct {
 // Style is the basic character style of a cell. A nil colour means the terminal
 // default.
 type Style struct {
-	Fg, Bg                   color.Color
-	Bold, Underline, Reverse bool
+	Fg, Bg                                                 color.Color
+	Bold, Italic, Faint, Underline, Strikethrough, Reverse bool
 }
 
 // NewScreen returns a screen of rows by cols cells, filled row by row from cells.
@@ -74,11 +74,14 @@ func cellOf(c *uv.Cell) Cell {
 	return Cell{
 		Rune: r,
 		Style: Style{
-			Fg:        c.Style.Fg,
-			Bg:        c.Style.Bg,
-			Bold:      c.Style.Attrs&uv.AttrBold != 0,
-			Underline: c.Style.Underline != uv.UnderlineNone,
-			Reverse:   c.Style.Attrs&uv.AttrReverse != 0,
+			Fg:            c.Style.Fg,
+			Bg:            c.Style.Bg,
+			Bold:          c.Style.Attrs&uv.AttrBold != 0,
+			Italic:        c.Style.Attrs&uv.AttrItalic != 0,
+			Faint:         c.Style.Attrs&uv.AttrFaint != 0,
+			Underline:     c.Style.Underline != uv.UnderlineNone,
+			Strikethrough: c.Style.Attrs&uv.AttrStrikethrough != 0,
+			Reverse:       c.Style.Attrs&uv.AttrReverse != 0,
 		},
 	}
 }

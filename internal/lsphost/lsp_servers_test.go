@@ -1,6 +1,7 @@
 package lsphost
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -501,5 +502,32 @@ func TestServerConfigCarriesProcessLimits(t *testing.T) {
 	cfg = serverConfig(entry, manager.Spec{})
 	if cfg.Limits != (lsp.ProcessLimits{}) {
 		t.Fatalf("limits = %+v, want the zero value without process_limits", cfg.Limits)
+	}
+}
+
+func TestOpenLanguageUsesRemoteReadDirWithoutLocalDisk(t *testing.T) {
+	t.Parallel()
+	localDir := t.TempDir()
+	// Create a C++ sibling on local disk so any accidental os.ReadDir would falsely detect cpp.
+	if err := os.WriteFile(filepath.Join(localDir, "sibling.cpp"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	port := newPort(lspPlan{}, true, nil)
+	var readDirs []string
+	port.SetRemoteReadDir(func(_ context.Context, d string) ([]string, error) {
+		readDirs = append(readDirs, d)
+		if d == "/remote/cpp" {
+			return []string{"impl.cpp"}, nil
+		}
+		return []string{"main.c"}, nil
+	})
+	if got := port.openLanguage(filepath.Join(localDir, "foo.h"), "c"); got != "c" {
+		t.Fatalf("remote openLanguage on local path = %q, want c (must not touch local disk)", got)
+	}
+	if got := port.openLanguage("/remote/cpp/hdr.h", "c"); got != "cpp" {
+		t.Fatalf("remote openLanguage with .cpp sibling = %q, want cpp", got)
+	}
+	if len(readDirs) != 2 || readDirs[1] != "/remote/cpp" {
+		t.Fatalf("remoteReadDir calls = %v", readDirs)
 	}
 }

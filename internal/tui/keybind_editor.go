@@ -302,7 +302,11 @@ func (e *keybindEditor) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case tea.MouseClickMsg:
 		if e.mode == kbList && tea.Mouse(msg).Button == tea.MouseLeft {
 			if k, ok := e.rowAt(tea.Mouse(msg).X, tea.Mouse(msg).Y); ok {
-				e.sel = k
+				if e.sel == k {
+					e.startEdit()
+				} else {
+					e.sel = k
+				}
 			}
 		}
 	case tea.MouseWheelMsg:

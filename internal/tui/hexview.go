@@ -69,11 +69,24 @@ func isBinaryDoc(doc Document) bool {
 	if doc == nil {
 		return false
 	}
-	b, ok := doc.(interface{ Binary() bool })
+	b, ok := doc.(BinaryDoc)
 	if !ok || !b.Binary() {
 		return false
 	}
 	return !isImageDoc(doc)
+}
+
+// paneDisplayLines returns the display row count used by split layout (scrollbar and
+// gutter sizing) for doc, substituting the hex row count while hex mode is active.
+func (m *Model) paneDisplayLines(doc Document) int {
+	lines := displayLines(doc)
+	if isBinaryDoc(doc) {
+		if h := m.hexStateFor(docPath(doc)); h != nil && h.on {
+			size, _ := binaryStatOf(doc)
+			lines = max(lines, hexRows(size))
+		}
+	}
+	return lines
 }
 
 // hexForKey returns the per-path state, creating it on first use.
@@ -182,7 +195,7 @@ func (m *Model) toggleHexView() tea.Cmd {
 
 // binaryStatOf returns the binary file's size and modification time, or zeros.
 func binaryStatOf(doc Document) (size, mtime int64) {
-	if b, ok := doc.(interface{ BinaryStat() (int64, int64) }); ok {
+	if b, ok := doc.(BinaryRangeDoc); ok {
 		return b.BinaryStat()
 	}
 	return 0, 0
@@ -317,18 +330,19 @@ func (m *Model) hexAction(action string) (tea.Cmd, bool) {
 }
 
 // hexPaneWheel scrolls the hex view of pane i by delta rows. It reports whether
-// that pane is showing a hex dump. Only the focused pane is scrolled; the other
-// panes keep their own dump position.
+// that pane is showing a hex dump.
 func (m *Model) hexPaneWheel(i, delta int) bool {
+	h, ok := m.hexAtPane(i)
+	if !ok {
+		return false
+	}
 	l := m.layout()
-	if i < 0 || i >= len(l.Panes) {
-		return false
-	}
 	p := l.Panes[i]
-	if !p.Focused {
-		return false
-	}
-	return m.hexMove(delta)
+	doc := m.paneDoc(p)
+	size, _ := binaryStatOf(doc)
+	h.top += delta
+	m.hexClampTop(h, size, hexPaneVisibleRows(p))
+	return true
 }
 
 // hexFallbackKey maps an unbound key in hex mode to its pager action. It is a fallback
@@ -359,22 +373,19 @@ func (m *Model) hexFallbackKey(kp KeyPress, text string) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// hexScrollTo moves the hex view to the row clicked on the scrollbar track.
+// hexScrollTo moves the hex view of pane i to the row clicked on the scrollbar track.
 func (m *Model) hexScrollTo(i, y int) {
-	h, ok := m.activeHex()
+	h, ok := m.hexAtPane(i)
 	if !ok {
 		return
 	}
 	l := m.layout()
-	if i < 0 || i >= len(l.Panes) {
-		return
-	}
 	p := l.Panes[i]
-	rows := m.hexVisibleRows()
-	if p.H <= 0 || rows <= 1 {
+	rows := hexPaneVisibleRows(p)
+	if p.H <= 0 || rows <= 0 {
 		return
 	}
-	size, _ := binaryStatOf(m.ed.Active())
+	size, _ := binaryStatOf(m.paneDoc(p))
 	total := hexRows(size)
 	maxTop := max(total-rows, 0)
 	if maxTop == 0 {
@@ -424,9 +435,7 @@ func (m *Model) hexQueue() tea.Cmd {
 		if size <= 0 || h.atEOF && int64(h.top)*hexBytesPerRow >= size {
 			continue
 		}
-		if _, ok := doc.(interface {
-			ReadBinaryRange(context.Context, int64, int64) ([]byte, error)
-		}); !ok {
+		if _, ok := doc.(BinaryRangeDoc); !ok {
 			h.err = errors.New("hex view is not supported by this document")
 			continue
 		}
@@ -448,9 +457,7 @@ func (m *Model) hexQueue() tea.Cmd {
 // hexReadCmd reads a bounded window in a command, so the update loop never
 // waits on a disk or an authority.
 func (m *Model) hexReadCmd(doc Document, path string, off, n int64, gen uint64) tea.Cmd {
-	reader, ok := doc.(interface {
-		ReadBinaryRange(context.Context, int64, int64) ([]byte, error)
-	})
+	reader, ok := doc.(BinaryRangeDoc)
 	if !ok {
 		return nil
 	}
@@ -566,6 +573,13 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 	if p.H > 2 {
 		helpRow = p.Y + visible
 	}
+	size, _ := binaryStatOf(doc)
+	total := hexRows(size)
+	drawScrollbar := m.view.vScroll && p.W > 1 && p.H > 0 && total > visible
+	textEnd := p.X + p.W
+	if drawScrollbar {
+		textEnd--
+	}
 	start := int64(h.top) * hexBytesPerRow
 	for row := 0; row < visible; row++ {
 		off := start + int64(row)*hexBytesPerRow
@@ -576,7 +590,7 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 			bytes = h.data[from:to]
 		}
 		text := hexLine(off, bytes)
-		g.Put(p.X, p.Y+row, p.X+p.W, text, cell)
+		g.Put(p.X, p.Y+row, textEnd, text, cell)
 	}
 	if helpRow >= 0 {
 		help := "Toggle Hex View: summary"
@@ -585,9 +599,32 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 		} else if h.err != nil {
 			help = hexNoticeError + h.err.Error()
 		}
-		g.Put(p.X, helpRow, p.X+p.W, help, dim)
+		g.Put(p.X, helpRow, textEnd, help, dim)
+	}
+	if drawScrollbar {
+		maxTop := max(total-visible, 0)
+		thumbStart, thumbLen := hexThumbOf(maxTop+p.H, p.H, h.top)
+		trackCell := style.Cell(m.styles.Scrollbar)
+		thumbCell := style.Cell(m.styles.ScrollbarThumb)
+		sbX := p.X + p.W - 1
+		for y := 0; y < p.H; y++ {
+			if y >= thumbStart && y < thumbStart+thumbLen {
+				g.Set(sbX, p.Y+y, "┃", thumbCell)
+			} else {
+				g.Set(sbX, p.Y+y, "│", trackCell)
+			}
+		}
 	}
 	return true
+}
+
+func hexThumbOf(lines, h, top int) (start, length int) {
+	if lines <= 0 || h <= 0 {
+		return 0, 0
+	}
+	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
+	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
+	return min(start, max(h-length, 0)), length
 }
 
 // hexNotice is the status-row hint while the active tab is in hex mode.

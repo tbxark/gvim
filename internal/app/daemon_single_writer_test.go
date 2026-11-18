@@ -56,10 +56,11 @@ func quitDaemonTest(t *testing.T, name string, done chan error) {
 		return
 	}
 	// A raw client must announce itself with the hello frame before the server reads its
-	// input frames.
+	// input frames. Keep conn open until the daemon finishes quitting to avoid closing
+	// before Ctrl+Q is processed under heavy CPU load.
+	defer func() { _ = conn.Close() }()
 	_ = daemon.WriteJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30})
 	_ = daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11})
-	_ = conn.Close()
 	select {
 	case err := <-done:
 		_ = err

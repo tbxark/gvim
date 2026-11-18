@@ -36,6 +36,11 @@ func (m *Model) viewRender(p editorpane.Pane, doc Document, s editor.ViewSetting
 	p.Opts.WrapColumn = ls.WrapColumn
 	p.Opts.HighlightBrackets = o.HighlightMatchingBrackets
 	p.Opts.RainbowBrackets = o.HighlightMatchingBrackets && o.RainbowBrackets
+	p.Opts.FoldLineCount = true
+	p.Opts.HideTilde = !o.ShowTilde
+	p.Opts.HideSyntax = !o.SyntaxHighlighting
+	p.Opts.HideCurrentLineOnSelection = o.HideCurrentLineOnSelection
+	p.Opts.HighlightCurrentColumn = o.HighlightCurrentColumn
 
 	mode := editor.ResolveIndentGuide(o.IndentationGuideMode, s.IndentGuides, ls.IndentationGuide)
 	p.IndentGuides = mode != editor.GuidesNone

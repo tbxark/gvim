@@ -43,28 +43,6 @@ func TestFieldKeysEditValue(t *testing.T) {
 	}
 }
 
-func TestRecentListSelectionAndWindow(t *testing.T) {
-	t.Parallel()
-	empty := newRecentList(nil)
-	empty.move(1)
-	if empty.selected() != "" {
-		t.Fatal("empty list has a selection")
-	}
-	l := newRecentList([]string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"})
-	for range 20 {
-		l.move(1)
-	}
-	if l.sel != 9 || l.top != 4 {
-		t.Fatalf("sel=%d top=%d, want sel=9 top=4", l.sel, l.top)
-	}
-	for range 20 {
-		l.move(-1)
-	}
-	if l.sel != 0 || l.top != 0 {
-		t.Fatalf("sel=%d top=%d, want 0 and 0", l.sel, l.top)
-	}
-}
-
 func TestFieldFirstTypedKeyReplacesUntouchedPrefill(t *testing.T) {
 	t.Parallel()
 	f := newField("/a/Untitled-1.txt")

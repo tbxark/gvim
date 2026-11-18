@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/theme"
 )
@@ -182,5 +183,64 @@ func TestThemeEditorPickerPreviewRaisesNoThemeChanged(t *testing.T) {
 	page.setColor("editor.bg", theme.Color{IsRGB: true, RGB: theme.RGB{R: 9, G: 9, B: 9}})
 	if got := evRowsOf(h); len(got) != 1 || !strings.HasPrefix(got[0], "theme_changed") {
 		t.Fatalf("events after applying = %v, want one theme_changed", got)
+	}
+}
+
+func TestThemeEditorOpenDoneUpdatesRefAndSwatchClickBounds(t *testing.T) {
+	t.Parallel()
+	oldTh, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldTh.Name = "old"
+	newTh, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newTh.Name = "new"
+	cat := &fakeThemeCatalog{
+		themes: map[string]theme.Theme{
+			"old.json": oldTh,
+			"new.json": newTh,
+		},
+		refs: map[string]string{
+			"old.json": "old",
+			"new.json": "new",
+		},
+	}
+	m := newThemeTestModel(t, cat)
+	m.applyTheme("old.json")
+	m.openThemeEditor()
+	page := m.overlays[len(m.overlays)-1].(*themeEditorPage)
+
+	cmd := page.openRef("new.json")
+	msg := firstOf[themeEditorOpenDoneMsg](t, collect(cmd))
+	m.Update(msg)
+	if page.ref != "new.json" || m.themeRef != "new.json" {
+		t.Fatalf("after openDone: page.ref=%q model.themeRef=%q, want new.json", page.ref, m.themeRef)
+	}
+
+	// Swatch is 2 cells ("██" at box.X+2..box.X+3); border at box.X+1 must not open picker.
+	page.sel = editorRowIndex(t, page, "editor.bg")
+	page.keepVisible()
+	page.Draw(grid.New(100, 30))
+	rowY := page.box.Y + 1 + (page.sel - page.top)
+	if _, borderCmd := page.Update(tea.MouseClickMsg(tea.Mouse{X: page.box.X + 1, Y: rowY, Button: tea.MouseLeft})); borderCmd != nil {
+		t.Fatal("clicking left padding/border opened color picker")
+	}
+	if _, swatchCmd := page.Update(tea.MouseClickMsg(tea.Mouse{X: page.box.X + 3, Y: rowY, Button: tea.MouseLeft})); swatchCmd == nil {
+		t.Fatal("clicking second cell of 2-cell swatch did not open color picker")
+	}
+
+	// Ctrl+D must delete the opened theme, never the previously active "old.json".
+	acceptEditorOverlay(t, m, press(m, ctrl('d')))
+	delCmd := press(m, typed("y"))
+	_, doneCmd := m.Update(firstOf[prompt.Done](t, collect(delCmd)))
+	m.Update(firstOf[themeEditorDeleteDoneMsg](t, collect(doneCmd)))
+	if _, ok := cat.refs["old.json"]; !ok {
+		t.Fatal("deleting after open deleted the previously active old.json theme")
+	}
+	if _, ok := cat.refs["new.json"]; ok {
+		t.Fatal("deleting after open did not delete the opened new.json theme")
 	}
 }

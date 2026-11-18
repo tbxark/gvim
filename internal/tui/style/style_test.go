@@ -39,8 +39,8 @@ func TestNewReadsTheSearchMatchColors(t *testing.T) {
 	if want := (color.RGBA{R: 82, G: 65, B: 27, A: 255}); match.BG != want {
 		t.Errorf("match bg = %v, want %v", match.BG, want)
 	}
-	if match.FG != nil || match.Bold {
-		t.Errorf("match sets a foreground or bold: %+v", match)
+	if want := (color.RGBA{R: 230, G: 237, B: 243, A: 255}); match.FG != want || match.Bold {
+		t.Errorf("match = %+v, want fg %v and not bold", match, want)
 	}
 	cur := Cell(s.CurrentMatch)
 	if want := (color.RGBA{R: 227, G: 179, B: 65, A: 255}); cur.BG != want {

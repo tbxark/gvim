@@ -166,3 +166,61 @@ func TestKittyKeyboardPushDefaultsAndEviction(t *testing.T) {
 		t.Fatalf("over-popping left flags %d, want 0", got)
 	}
 }
+
+// TestKittyKeyboardInlineAltScreenOrder verifies that DECSET/DECRST alt-screen
+// switches interleaved in the same read as Kitty push/pop/query apply in exact
+// byte-stream order.
+func TestKittyKeyboardInlineAltScreenOrder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enter alt then push targets alt stack", func(t *testing.T) {
+		var k kittyKeyboard
+		k.scan([]byte("\x1b[?1049h\x1b[>1u"))
+		if k.screen != 1 || k.flags() != kittyDisambiguate {
+			t.Fatalf("alt screen=%d flags=%d, want screen=1 flags=1", k.screen, k.flags())
+		}
+		k.scan([]byte("\x1b[?1049l"))
+		if k.screen != 0 || k.flags() != 0 {
+			t.Fatalf("main screen=%d flags=%d, want screen=0 flags=0", k.screen, k.flags())
+		}
+	})
+
+	t.Run("pop then leave alt pops alt stack without clobbering main", func(t *testing.T) {
+		var k kittyKeyboard
+		k.scan([]byte("\x1b[>2u"))
+		k.scan([]byte("\x1b[?1049h\x1b[>5u"))
+		replies := k.scan([]byte("\x1b[<u\x1b[?1049l\x1b[?u"))
+		if k.screen != 0 || k.flags() != kittyReportEventTypes {
+			t.Fatalf("after pop+leave screen=%d flags=%d, want screen=0 flags=2", k.screen, k.flags())
+		}
+		if len(replies) != 1 || string(replies[0]) != "\x1b[?2u" {
+			t.Fatalf("replies = %q, want [\x1b[?2u]", replies)
+		}
+		k.scan([]byte("\x1b[?1049h"))
+		if k.flags() != 0 {
+			t.Fatalf("alt stack after returning = %d, want 0 (was popped)", k.flags())
+		}
+	})
+
+	t.Run("multi-param private mode and modes 47/1047", func(t *testing.T) {
+		var k kittyKeyboard
+		k.scan([]byte("\x1b[?1;1049h\x1b[>1u"))
+		if k.screen != 1 || k.flags() != 1 {
+			t.Fatalf("multi-param enter: screen=%d flags=%d", k.screen, k.flags())
+		}
+		k.scan([]byte("\x1b[?47l\x1b[>4u\x1b[?1047h\x1b[?u"))
+		replies := k.scan([]byte("\x1b[?1047l\x1b[?u"))
+		if len(replies) != 1 || string(replies[0]) != "\x1b[?4u" {
+			t.Fatalf("main replies after 1047l = %q, want [\x1b[?4u]", replies)
+		}
+	})
+
+	t.Run("split alt-screen and push across chunks", func(t *testing.T) {
+		var k kittyKeyboard
+		k.scan([]byte("\x1b[?104"))
+		k.scan([]byte("9h\x1b[>1u"))
+		if k.screen != 1 || k.flags() != 1 {
+			t.Fatalf("split enter+push: screen=%d flags=%d", k.screen, k.flags())
+		}
+	})
+}

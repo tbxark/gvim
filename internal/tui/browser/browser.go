@@ -165,6 +165,7 @@ type Browser struct {
 	top    int // index into rows of the first row in the window
 	vis    int // rows in the window, as last drawn
 	box    box // the box as last drawn; zero before the first Draw
+	thumb  bool
 	notice string
 	closed bool
 }
@@ -250,6 +251,15 @@ func (b *Browser) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		b.paste(msg.Content)
 	case tea.MouseClickMsg:
 		cmd = b.click(tea.Mouse(msg))
+	case tea.MouseMotionMsg:
+		if b.thumb {
+			mo := tea.Mouse(msg)
+			if mo.Button == tea.MouseLeft {
+				b.scrollToRow(mo.Y)
+			}
+		}
+	case tea.MouseReleaseMsg:
+		b.thumb = false
 	case tea.MouseWheelMsg:
 		b.wheel(tea.Mouse(msg))
 	}
@@ -313,6 +323,13 @@ func (b *Browser) click(m tea.Mouse) tea.Cmd {
 	if m.Button != tea.MouseLeft {
 		return nil
 	}
+	b.thumb = false
+	bx := b.box
+	if bx.ok && len(b.rows) > b.vis && m.X == bx.x+bx.w-2 && m.Y >= bx.y+3 && m.Y < bx.y+3+bx.h {
+		b.thumb = true
+		b.scrollToRow(m.Y)
+		return nil
+	}
 	n := b.clicks.press(b.now(), m.X, m.Y)
 	i, ok := b.rowAt(m.X, m.Y)
 	if !ok {
@@ -336,6 +353,21 @@ func (b *Browser) click(m tea.Mouse) tea.Cmd {
 
 // wheel scrolls the window by wheelRows per notch. The selection moves with the
 // window so that it stays visible.
+func (b *Browser) scrollToRow(y int) {
+	bx := b.box
+	if !bx.ok || len(b.rows) <= b.vis || bx.h <= 0 {
+		return
+	}
+	k := space.Clamp(y-(bx.y+3), 0, bx.h-1)
+	maxTop := max(len(b.rows)-b.vis, 0)
+	if bx.h == 1 {
+		b.top = 0
+	} else {
+		b.top = space.Clamp((k*maxTop+(bx.h-1)/2)/(bx.h-1), 0, maxTop)
+	}
+	b.sel = space.Clamp(b.sel, b.top, min(b.top+b.vis, len(b.rows))-1)
+}
+
 func (b *Browser) wheel(m tea.Mouse) {
 	delta := 0
 	switch m.Button {
@@ -675,7 +707,9 @@ func (b *Browser) Draw(g *grid.Grid) {
 		title = b.title
 	}
 	ov.PaintBox(g, x0, top, bw, vis+4, title)
-	boxLine(g, x0, top+1, bw, "> "+b.input, ov.Idle, 0)
+	inputRoom := max(bw-2-2*space.PadX-2, 0)
+	shownInput, _ := space.Window(b.input, utf8.RuneCountInString(b.input), inputRoom)
+	boxLine(g, x0, top+1, bw, "> "+shownInput, ov.Idle, 0)
 	boxLine(g, x0, top+2, bw, truncateLeft(b.dir, bw-4), ov.Muted, 0)
 
 	over := len(b.rows) > vis
@@ -734,7 +768,10 @@ func boxLine(g *grid.Grid, x0, y, bw int, text string, inner grid.Style, reserve
 // thumbOf sizes the scrollbar thumb for lines rows in a window of h rows, with
 // the first window row top. The thumb is at least one row long.
 func thumbOf(lines, h, top int) (start, length int) {
-	length = min(h, max(1, (h*h+lines/2)/lines))
-	start = min(top, lines-1) * h / lines
+	if lines <= 0 || h <= 0 {
+		return 0, 0
+	}
+	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
+	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
 	return min(start, max(h-length, 0)), length
 }

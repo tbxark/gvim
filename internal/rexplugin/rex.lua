@@ -19,15 +19,28 @@ local M = {}
 local SHELL = "com.superlogical.terminal.shell"
 local TERMINAL = "com.superlogical.terminal"
 
-local DEFAULT_PATH = table.concat({
-  (os.getenv("HOME") or "") .. "/go/bin",
-  (os.getenv("HOME") or "") .. "/.local/bin",
-  "/opt/homebrew/bin",
-  "/opt/homebrew/sbin",
-  "/usr/local/bin",
-  "/usr/bin",
-  "/bin",
-}, ":")
+local function default_path()
+  local parts = {}
+  local env_path = os.getenv("PATH")
+  if type(env_path) == "string" and env_path ~= "" then
+    parts[#parts + 1] = env_path
+  end
+  local home = os.getenv("HOME")
+  if type(home) == "string" and home ~= "" then
+    parts[#parts + 1] = home .. "/go/bin"
+    parts[#parts + 1] = home .. "/.local/bin"
+  end
+  for _, dir in ipairs({
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+  }) do
+    parts[#parts + 1] = dir
+  end
+  return table.concat(parts, ":")
+end
 
 -- decode_file_url turns an OSC 7 style file:// URL into a path.
 local function decode_file_url(url)
@@ -43,7 +56,7 @@ function M.setup(opts)
   opts = opts or {}
   local bin = opts.bin or { "gvim" }
   if type(bin) == "string" then bin = { bin } end
-  local path = opts.path or DEFAULT_PATH
+  local path = opts.path or default_path()
 
   -- The argv of gvim with ARGS appended.
   local function argv(args)
@@ -109,7 +122,7 @@ function M.setup(opts)
         open(ctx, "gvim", { "." })
         return
       end
-      open(ctx, target:match("([^/\\]+)$") or "gvim", { target })
+      open(ctx, target:match("([^/\\]+)$") or "gvim", { "--", target })
     end,
   }
 
@@ -121,7 +134,7 @@ function M.setup(opts)
     keywords = "gvim diff compare review",
     args = { left = "string", right = "string" },
     run = function(ctx, args)
-      open(ctx, "diff", { "--diff", args.left, args.right })
+      open(ctx, "diff", { "--diff", "--", args.left, args.right })
     end,
   }
 

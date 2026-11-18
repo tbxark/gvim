@@ -371,3 +371,33 @@ func TestPluginServicesDiscoverAgents(t *testing.T) {
 		t.Fatalf("configured services = %+v, %v", got, err)
 	}
 }
+
+func TestPluginServicesRemoteUnsupportedAndReadSearchableBounds(t *testing.T) {
+	root := t.TempDir()
+	apptest.Must(t, os.WriteFile(filepath.Join(root, "ok.txt"), []byte("needle\n"), 0o644))
+	svc := pluginServices{remote: true}
+	if _, err := svc.Grep(t.Context(), pluginapi.GrepRequest{Root: root, Query: "needle"}); pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("remote Grep = %v, want CodeUnsupported", err)
+	}
+	if r, ok := svc.GitRoot(root); ok || r != "" {
+		t.Fatalf("remote GitRoot = %q, %v, want false", r, ok)
+	}
+	if _, err := svc.GitBranch(root); pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("remote GitBranch = %v, want CodeUnsupported", err)
+	}
+
+	// Files larger than GrepMaxFileBytes must be skipped even when skipFrom is 0, not
+	// silently truncated at 1 MiB.
+	over := filepath.Join(root, "over.txt")
+	apptest.Must(t, os.WriteFile(over, []byte("needle\n"+strings.Repeat("a", GrepMaxFileBytes)), 0o644))
+	if _, ok := ReadSearchable(over, 0); ok {
+		t.Fatal("ReadSearchable accepted file > GrepMaxFileBytes with skipFrom=0")
+	}
+
+	// Non-UTF-8 files without NUL bytes must be skipped.
+	badUTF8 := filepath.Join(root, "bad.txt")
+	apptest.Must(t, os.WriteFile(badUTF8, []byte{'a', 'b', 0xff, 0xfe, '\n'}, 0o644))
+	if _, ok := ReadSearchable(badUTF8, 0); ok {
+		t.Fatal("ReadSearchable accepted invalid UTF-8 bytes")
+	}
+}

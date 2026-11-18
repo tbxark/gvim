@@ -1,5 +1,5 @@
 // Package dialog holds the modal dialogs of gvim: Unsaved Changes, Save As with
-// its overwrite check, Confirm Delete (move to Trash), Open Folder, and the
+// its overwrite check, Confirm Quit, and the
 // error message. Each dialog is an overlay that the root stacks above the frame.
 //
 // A dialog never acts on the editor or the file system. When it ends, it
@@ -51,14 +51,12 @@ type Choice int
 
 // The answers. ChoiceCancel is the zero value, so an unset Choice is a cancel.
 const (
-	ChoiceCancel      Choice = iota // Cancel, Esc, or a dismissed Save As overwrite
-	ChoiceSave                      // Unsaved Changes: save the buffer; Save As: save to Result.Text
-	ChoiceDiscard                   // Unsaved Changes: drop the changes
-	ChoiceReplace                   // Save As: replace the existing file at Result.Text
-	ChoiceMoveToTrash               // Confirm Delete: move the item to the Trash
-	ChoiceOpen                      // Open Folder: open the folder at Result.Text
-	ChoiceOK                        // Error: acknowledged
-	ChoiceQuit                      // Confirm Quit: quit the editor
+	ChoiceCancel  Choice = iota // Cancel, Esc, or a dismissed Save As overwrite
+	ChoiceSave                  // Unsaved Changes: save the buffer; Save As: save to Result.Text
+	ChoiceDiscard               // Unsaved Changes: drop the changes
+	ChoiceReplace               // Save As: replace the existing file at Result.Text
+	ChoiceOK                    // Error: acknowledged
+	ChoiceQuit                  // Confirm Quit: quit the editor
 )
 
 // String names the choice, for logs and tests.
@@ -72,10 +70,6 @@ func (c Choice) String() string {
 		return "discard"
 	case ChoiceReplace:
 		return "replace"
-	case ChoiceMoveToTrash:
-		return "move-to-trash"
-	case ChoiceOpen:
-		return "open"
 	case ChoiceOK:
 		return "ok"
 	case ChoiceQuit:
@@ -86,8 +80,7 @@ func (c Choice) String() string {
 
 // Result is the message a dialog emits as a command when it answers. Tag is
 // the value the opener passed in. Text is the path of Save As (the name to save
-// to, or to replace) and of Open Folder (the folder to open). It is empty for
-// the other dialogs.
+// to, or to replace). It is empty for the other dialogs.
 type Result struct {
 	Tag    any
 	Choice Choice

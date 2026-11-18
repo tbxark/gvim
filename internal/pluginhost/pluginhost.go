@@ -68,6 +68,12 @@ type Options struct {
 	// remote workspace's gvim.fs/gvim.proc through the workspace authority
 	// (NewAuthorityOS); a local session leaves it nil and keeps the plain plugin OS.
 	WrapOS func(hostos.OS) hostos.OS
+	// Remote reports whether this session is bound to a remote authority workspace, so
+	// local-only plugin services (Grep, GitRoot, GitBranch) refuse local disk reads.
+	Remote bool
+	// Config optionally supplies the current effective config on demand so reloaded
+	// keybindings apply to rebuilt plugin keymaps.
+	Config func() config.Config
 }
 
 // SpawnGate is the trust check a plugin process launch goes through. It is a
@@ -96,7 +102,7 @@ func New(cfg config.Config, ed *editor.Editor, o Options) *Wiring {
 		Runtime: plugin.New(plugin.Options{
 			Timeout:                cfg.PluginTimeout,
 			OS:                     osys,
-			Services:               pluginServices{agentDiscover: o.AgentDiscover},
+			Services:               pluginServices{agentDiscover: o.AgentDiscover, remote: o.Remote},
 			Version:                o.Version,
 			LogSink:                o.LogSink,
 			Loader:                 ld,
@@ -170,7 +176,11 @@ func pluginKeysFor(cfg config.Config, o Options) func(name string, bs []pluginap
 			}
 			base = b
 		}
-		return keybindings.PluginKeymap(base, cfg, bs)
+		cur := cfg
+		if o.Config != nil {
+			cur = o.Config()
+		}
+		return keybindings.PluginKeymap(base, cur, bs)
 	}
 }
 
@@ -180,6 +190,10 @@ func pluginDirs(cfgDir string, root func() string) func() hostos.Dirs {
 	home, _ := os.UserHomeDir()
 	return func() hostos.Dirs {
 		cwd, _ := os.Getwd()
-		return hostos.Dirs{Config: cfgDir, Home: home, Temp: os.TempDir(), Cwd: cwd, Root: root()}
+		var r string
+		if root != nil {
+			r = root()
+		}
+		return hostos.Dirs{Config: cfgDir, Home: home, Temp: os.TempDir(), Cwd: cwd, Root: r}
 	}
 }

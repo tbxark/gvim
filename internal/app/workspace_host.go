@@ -193,6 +193,9 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 		m.materializedCap = config.DefaultMaterializedWorkspaces
 	}
 	m.lastFocus[m.active] = m.now()
+	if m.active != "" {
+		_, _ = m.reg.Touch(m.active, m.now())
+	}
 	// Bind the daemon's shared plugin runtime/host to the eagerly materialized foreground
 	// workspace before anything can start it (runDaemonHost's explicit call is idempotent).
 	m.activateForegroundPlugins()
@@ -388,10 +391,23 @@ func (m *workspaceManager) workspaceSessionDir(id string) (string, error) {
 	if !ok {
 		return "", errors.New("workspace session storage is unavailable")
 	}
-	_, state, _ := openTrust(ws.File.Root)
-	cfg, _, err := config.Load(config.Options{Root: ws.File.Root, UserFile: m.opts.Config, Untrusted: !state.AllowsProjectConfig()})
-	if err != nil {
-		return "", err
+	var cfg config.Config
+	if ws.File.AuthoritySpec != "" {
+		spec, err := parseAuthoritySpec(ws.File.AuthoritySpec)
+		if err != nil {
+			return "", err
+		}
+		_, state, _ := openRemoteTrust(spec)
+		cfg, _, err = config.Load(config.Options{Root: remoteLocalRoot(), UserFile: m.opts.Config, Untrusted: !state.AllowsProjectConfig()})
+		if err != nil {
+			return "", err
+		}
+	} else {
+		_, state, _ := openTrust(ws.File.Root)
+		cfg, _, err = config.Load(config.Options{Root: ws.File.Root, UserFile: m.opts.Config, Untrusted: !state.AllowsProjectConfig()})
+		if err != nil {
+			return "", err
+		}
 	}
 	if !cfg.SaveSession {
 		return "", errors.New("workspace session saving is disabled")
@@ -611,6 +627,7 @@ func (m *workspaceManager) beginSelect(id string) (func() error, error) {
 				delete(m.sessions, id)
 				m.mu.Unlock()
 				sess.rt.shutdown()
+				m.retireWriter(id)
 				err = errors.New("workspace: the daemon is not ready")
 			}
 		}
@@ -856,7 +873,7 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 			// confirmed, keep the workspace, the runtime and the registry file so no
 			// unsaved state is silently lost, and return the failure.
 			if sess != nil {
-				if ferr := sess.rt.save(); ferr != nil {
+				if ferr := m.fallbackSave(sess); ferr != nil {
 					cerr := fmt.Errorf("close workspace %q: the capture write failed (%v) and the fallback save failed: %w", label, job.err, ferr)
 					m.notify(cerr)
 					return cerr
@@ -879,6 +896,7 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 	m.mu.Lock()
 	delete(m.sessions, id)
 	m.mu.Unlock()
+	m.retireWriter(id)
 	if err := m.reg.Remove(id); err != nil {
 		return err
 	}
@@ -1083,17 +1101,23 @@ func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 	canonical := canonicalWorkspaceFile(target.path)
 	// The tabs of a runtime are editor state: read them on the UI goroutine, not on the
 	// socket goroutine this runs on.
-	ownerID, active := "", ""
+	ownerID, active, activeRemote := "", "", false
 	if !m.runOnUI(func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		for id, s := range m.sessions {
+			if s.ws.File.AuthoritySpec != "" {
+				continue
+			}
 			if sessionHasPath(s.rt, canonical) {
 				ownerID = id
 				break
 			}
 		}
 		active = m.active
+		if s := m.sessions[active]; s != nil && s.ws.File.AuthoritySpec != "" {
+			activeRemote = true
+		}
 	}) {
 		m.notify(fmt.Errorf("open %s: the workspace UI is busy; the file was not opened", canonical))
 		return
@@ -1103,6 +1127,10 @@ func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 		if id, pos, ok := m.dormantOwner(canonical); ok {
 			ownerID, saved = id, pos
 		}
+	}
+	if ownerID == "" && activeRemote {
+		m.notify(fmt.Errorf("open %s: cannot open a local path in the active remote workspace", canonical))
+		return
 	}
 	if ownerID != "" && ownerID != active {
 		// A daemon open-file request always switches to the workspace that already owns
@@ -1147,6 +1175,9 @@ func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 func (m *workspaceManager) dormantOwner(canonical string) (string, workspacePosition, bool) {
 	entries, _ := m.reg.List()
 	for _, e := range entries {
+		if e.File.AuthoritySpec != "" {
+			continue
+		}
 		m.mu.Lock()
 		_, materialized := m.sessions[e.File.StableID]
 		m.mu.Unlock()

@@ -1,10 +1,14 @@
 package editorpane
 
 import (
+	"image/color"
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/syntax"
 )
 
 func TestHideTabArrowsLeavesTabsAsBlanks(t *testing.T) {
@@ -144,4 +148,106 @@ func TestHiddenVerticalScrollbarIsNotAHitTarget(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDisplayOptionsV010(t *testing.T) {
+	colBG := color.RGBA{R: 30, G: 35, B: 45, A: 255}
+	kwFG := color.RGBA{R: 255, G: 100, B: 100, A: 255}
+	txtFG := color.RGBA{R: 220, G: 220, B: 220, A: 255}
+
+	t.Run("FoldLineCount", func(t *testing.T) {
+		g := Pane{
+			Doc:  foldFixture(map[int]bool{0: true}),
+			Opts: Options{FoldLineCount: true},
+		}.Render(32, 4)
+		row := g.Plain()[0]
+		if !strings.Contains(row, "⋯ 2 lines") {
+			t.Fatalf("folded row = %q, want '⋯ 2 lines'", row)
+		}
+		nested := foldDoc{
+			fakeDoc: newDoc("0", "1", "2", "3", "4", "5"),
+			ranges:  []fold.Range{{Start: 0, End: 2}, {Start: 0, End: 5}},
+			folded:  map[int]bool{0: true},
+		}
+		g2 := Pane{
+			Doc:  nested,
+			Opts: Options{FoldLineCount: true},
+		}.Render(32, 4)
+		if row2 := g2.Plain()[0]; !strings.Contains(row2, "⋯ 5 lines") {
+			t.Fatalf("folded row with overlapping start = %q, want '⋯ 5 lines'", row2)
+		}
+	})
+
+	t.Run("HideTilde", func(t *testing.T) {
+		g := Pane{
+			Doc:  newDoc("only one line"),
+			Opts: Options{HideTilde: true},
+		}.Render(20, 4)
+		if c := cellAt(t, g, 0, 2).Text; c == tildeText {
+			t.Fatalf("row 2 still drew %q with HideTilde=true", c)
+		}
+	})
+
+	t.Run("HideSyntax", func(t *testing.T) {
+		d := newDoc("func a() {}")
+		d.spans = map[int][]syntax.Span{0: {{Start: 0, End: 4, Kind: syntax.KindKeyword}}}
+		var sy [syntax.KindCount]grid.Style
+		for i := range sy {
+			sy[i] = grid.Style{FG: txtFG}
+		}
+		sy[syntax.KindKeyword] = grid.Style{FG: kwFG}
+		g := Pane{
+			Doc:    d,
+			Styles: Styles{Text: grid.Style{FG: txtFG}, Syntax: sy},
+			Opts:   Options{HideSyntax: true},
+		}.Render(25, 2)
+		if got := cellAt(t, g, oneLineGutter, 0).Style.FG; got != txtFG {
+			t.Fatalf("keyword FG with HideSyntax = %v, want %v", got, txtFG)
+		}
+	})
+
+	t.Run("HideCurrentLineOnSelection", func(t *testing.T) {
+		d := newDoc("hello", "world")
+		d.anchor = buffer.Pos{Line: 0, Col: 0}
+		d.head = buffer.Pos{Line: 0, Col: 3}
+		d.selected = true
+		g := Pane{
+			Doc:         d,
+			CurrentLine: true,
+			Styles:      Styles{CurrentLine: grid.Style{BG: colBG}, Selection: grid.Style{BG: kwFG}},
+			Opts:        Options{HideCurrentLineOnSelection: true},
+		}.Render(20, 2)
+		if got := cellAt(t, g, oneLineGutter+4, 0).Style.BG; got == colBG {
+			t.Fatalf("current line BG painted while selection is active: %v", got)
+		}
+	})
+
+	t.Run("HighlightCurrentColumn", func(t *testing.T) {
+		d := newDoc("alpha", "beta")
+		d.cursor = buffer.Pos{Line: 0, Col: 2}
+		g := Pane{
+			Doc:    d,
+			Styles: Styles{CurrentLine: grid.Style{BG: colBG}},
+			Opts:   Options{HighlightCurrentColumn: true},
+		}.Render(20, 2)
+		if got := cellAt(t, g, oneLineGutter+2, 1).Style.BG; got != colBG {
+			t.Fatalf("column cell on row 1 BG = %v, want %v", got, colBG)
+		}
+	})
+
+	t.Run("ScrollbarThumbWinsOverChangeMarks", func(t *testing.T) {
+		lines := make([]string, 30)
+		saved := make([]string, 30)
+		for i := range lines {
+			lines[i] = "modified"
+			saved[i] = "saved"
+		}
+		d := newDoc(lines...)
+		d.saved = saved
+		d.modified = true
+		g := Pane{Doc: d}.Render(16, 6)
+		if got := cellAt(t, g, 15, 0).Text; got != thumbGlyph {
+			t.Fatalf("scrollbar thumb cell = %q, want %q", got, thumbGlyph)
+		}
+	})
 }

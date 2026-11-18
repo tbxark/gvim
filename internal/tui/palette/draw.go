@@ -7,6 +7,7 @@ import (
 
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
@@ -326,12 +327,19 @@ func (p *Palette) drawName(g *grid.Grid, geo geometry, y int, r row, st grid.Sty
 	if width <= 0 {
 		return
 	}
+	x0 := geo.nameX
+	if r.kind == rowFile && p.opts.Icons == icons.Nerd && width > 3 {
+		if icon := p.opts.Icons.FileIcon(r.name, false, false); icon != "" {
+			x0 += g.Put(x0, y, end, icon+" ", st)
+			width = end - x0
+		}
+	}
 	shown, hl := fitName(r, width)
 	if len(hl) == 0 {
-		g.Put(geo.nameX, y, end, shown, st)
+		g.Put(x0, y, end, shown, st)
 		return
 	}
-	x := geo.nameX
+	x := x0
 	for i, c := range []rune(shown) {
 		s := st
 		if slices.Contains(hl, i) {

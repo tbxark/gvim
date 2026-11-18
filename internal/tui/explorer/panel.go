@@ -328,6 +328,23 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 		bold.Bold = true
 		dst.Put(g.X+h.TitleX, g.Top, g.X+h.TitleX+h.TitleW, ansi.Cut(h.Text, h.TitleX, h.TitleX+h.TitleW), bold)
 	}
+	if q := p.state().query; q != "" && h.TitleW > 0 {
+		fx := g.X + h.TitleX + h.TitleW + 1
+		btnStart := right - 1
+		if h.Reload >= 0 {
+			btnStart = min(btnStart, g.X+h.Reload-1)
+		}
+		if h.Close >= 0 {
+			btnStart = min(btnStart, g.X+h.Close-1)
+		}
+		if btnStart-fx >= 3 {
+			filterSt := head
+			if fg := style.Cell(p.styles.Accent).BG; fg != nil {
+				filterSt.FG = fg
+			}
+			dst.Put(fx, g.Top, btnStart, "/"+space.End(q, btnStart-fx-2)+" ", filterSt)
+		}
+	}
 	p.drawBody(dst, g)
 	if g.Bottom > g.Top {
 		dst.Set(g.X, g.Bottom, "└", body)
@@ -433,7 +450,7 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 				// asked about, so the highlight is the panel's only preview.
 				st.Underline = true
 			}
-			drawRow(dst, r, y, g.X, g.Width, over, marker, g.Marks[r.Path], g.Icons, st, sep, accent, decor)
+			p.drawRow(dst, r, y, g.X, g.Width, over, marker, g.Marks[r.Path], g.Icons, st, sep, accent, decor)
 		}
 		if over {
 			st := track
@@ -454,7 +471,7 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 // name that does not fit ends with "…". A non-zero mark is the git status
 // letter, drawn in the last column before that padding, and the name stops one
 // cell before it.
-func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, mark rune, ic icons.Mode, st, sep grid.Style, accent color.Color, decor RowDecor) {
+func (p Panel) drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, mark rune, ic icons.Mode, st, sep grid.Style, accent color.Color, decor RowDecor) {
 	end := left + width - 1 - space.PadX
 	if over {
 		end--
@@ -490,6 +507,9 @@ func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, 
 		trailing, trailingStyle = decor.Trailing, decor.TrailingStyle
 	case mark != 0:
 		trailing = ic.GitMark(mark)
+		if fg := p.gitMarkFG(mark); fg != nil {
+			trailingStyle.FG = fg
+		}
 	}
 	if trailing != "" {
 		tw := ansi.StringWidth(trailing)
@@ -538,6 +558,19 @@ func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, 
 	if x < end {
 		dst.Put(x, y, end, space.Name(space.StripBidi(r.Name), end-x), nameStyle)
 	}
+}
+
+// gitMarkFG returns the semantic foreground color for a native git status letter.
+func (p Panel) gitMarkFG(mark rune) color.Color {
+	switch mark {
+	case 'M':
+		return style.Cell(p.styles.DiagWarning).FG
+	case 'D':
+		return style.Cell(p.styles.DiagError).FG
+	case 'A', 'U', '?':
+		return style.Cell(p.styles.DiagInfo).FG
+	}
+	return nil
 }
 
 // bodyRows is the number of tree rows the body shows.
@@ -640,13 +673,119 @@ func (p Panel) press(m tea.Mouse, g Geometry) (Panel, tea.Cmd) {
 		p.thumb = true
 		p.scrollTo(t.row, g)
 	case zoneRow:
-		next, cmd := p.rowPress(t.row, n)
+		next, cmd := p.rowClick(m, g, t.row, n)
 		next.startDragMove(t.row, m.X, m.Y)
 		return next, cmd
 	case zoneBody:
 		return p, emit(FocusMsg{})
 	}
 	return p, nil
+}
+
+// rowClick dispatches a left press on a tree row with modifier and compact-chain support.
+func (p Panel) rowClick(m tea.Mouse, g Geometry, row, n int) (Panel, tea.Cmd) {
+	rows := p.tree.Rows()
+	if row < 0 || row >= len(rows) {
+		return p, nil
+	}
+	if m.Mod&tea.ModShift != 0 {
+		p.selectRangeTo(rows, row)
+		return p, emit(FocusMsg{})
+	}
+	if m.Mod&tea.ModCtrl != 0 {
+		p.selectIndex(rows, row)
+		p.togglePick()
+		return p, emit(FocusMsg{})
+	}
+	if len(rows[row].Chain) > 0 && n == 1 {
+		if segPath, ok := p.chainSegmentAt(g, rows[row], m.X); ok {
+			p.selectIndex(rows, row)
+			cmd := p.toggleCmd(segPath)
+			p.selectIndex(p.tree.Rows(), row)
+			return p, tea.Batch(cmd, emit(FocusMsg{}))
+		}
+	}
+	return p.rowPress(row, n)
+}
+
+// Dragging reports whether the explorer panel currently holds a resize, scrollbar, or move drag.
+func (p Panel) Dragging() bool {
+	return p.grip || p.thumb || len(p.dragRows) > 0
+}
+
+// chainSegmentAt returns the path of the compact chain segment under column x, if any.
+func (p Panel) chainSegmentAt(g Geometry, r tree.Row, clickX int) (string, bool) {
+	end := g.X + g.Width - 1 - space.PadX
+	if overflows(g, p.tree.Rows()) {
+		end--
+	}
+	iconX := g.X + 1 + space.PadX + 2*r.Depth
+	nameX := iconX + 2
+	fileIcon := g.Icons.FileIcon(r.Name, r.IsDir, r.Expanded)
+	var decor RowDecor
+	if g.Decor != nil {
+		decor = g.Decor(r.Path)
+	}
+	switch {
+	case decor.SuppressLeading:
+		// Leading icon slot is suppressed; nameX stays at iconX + 2.
+	case decor.Leading != "":
+		lw := max(decor.LeadingMinWidth, 2, ansi.StringWidth(decor.Leading))
+		nameX = iconX + 2 + lw
+	case fileIcon != "":
+		nameX += 2
+	}
+	trailing := ""
+	switch {
+	case decor.SuppressTrailing:
+	case decor.Trailing != "":
+		trailing = decor.Trailing
+	case g.Marks != nil && g.Marks[r.Path] != 0:
+		trailing = g.Icons.GitMark(g.Marks[r.Path])
+	}
+	if trailing != "" {
+		tw := ansi.StringWidth(trailing)
+		if x := end - tw; x > nameX {
+			end = x
+		} else {
+			end = max(nameX, end-tw)
+		}
+	}
+	x := nameX
+	for _, part := range r.Chain {
+		if x >= end {
+			break
+		}
+		name := space.Name(space.StripBidi(part.Name), end-x)
+		w := ansi.StringWidth(name)
+		if clickX >= x && clickX < x+w {
+			return part.Path, true
+		}
+		x += w + 1
+	}
+	return "", false
+}
+
+// selectRangeTo picks every visible row from the existing range anchor (or current
+// cursor) to row, keeping anchor intact for subsequent Shift+Clicks.
+func (p Panel) selectRangeTo(rows []tree.Row, row int) {
+	s := p.state()
+	if s.anchor == "" {
+		if cur, ok := p.tree.Selected(); ok {
+			s.anchor = cur.Path
+		}
+	}
+	p.selectIndex(rows, row)
+	ai := slices.IndexFunc(rows, func(r tree.Row) bool { return r.Path == s.anchor })
+	if ai < 0 {
+		ai = row
+		s.anchor = rows[row].Path
+	}
+	lo, hi := min(ai, row), max(ai, row)
+	s.picked = make(map[string]bool, hi-lo+1)
+	for _, r := range rows[lo : hi+1] {
+		s.picked[r.Path] = true
+	}
 }
 
 // rowPress selects the row under a press. A directory toggles on a single
@@ -887,7 +1026,10 @@ func emit(msg tea.Msg) tea.Cmd {
 // thumbOf sizes the scrollbar thumb for lines rows in a body of h rows, with the
 // first visible row top. The thumb is at least one row and at most the body.
 func thumbOf(lines, h, top int) (start, length int) {
-	length = min(h, max(1, (h*h+lines/2)/lines))
-	start = min(top, lines-1) * h / lines
+	if lines <= 0 || h <= 0 {
+		return 0, 0
+	}
+	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
+	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
 	return min(start, max(h-length, 0)), length
 }

@@ -13,6 +13,7 @@ import (
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/split"
 )
 
 // noContextMenuNotice is the status text of a right press on a part of the frame that
@@ -233,9 +234,14 @@ func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 			row(uiText("gvim.context.copy_full_path", "Copy Full Path"), "copy_full_path"), row(uiText("gvim.context.copy_relative_path", "Copy Relative Path"), "copy_relative_path"),
 		}
 	}
-	return append(create,
+	out := append(create,
 		row(uiText("gvim.context.rename", "Rename"), "file_explorer_rename"), row(uiText("gvim.context.cut", "Cut"), "cut"), row(uiText("gvim.context.copy", "Copy"), "copy"), paste,
-		row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), row(uiText("gvim.context.duplicate", "Duplicate"), "duplicate"), rule,
+		row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), row(uiText("gvim.context.duplicate", "Duplicate"), "duplicate"),
+	)
+	if !target.IsDir {
+		out = append(out, rule, row(uiText("gvim.context.open_in_split", "Open in Split"), "open_in_split"))
+	}
+	return append(out, rule,
 		row(uiText("gvim.context.copy_full_path", "Copy Full Path"), "copy_full_path"), row(uiText("gvim.context.copy_relative_path", "Copy Relative Path"), "copy_relative_path"),
 	)
 }
@@ -248,6 +254,18 @@ const explorerMenuPrefix = "explorer:"
 // panel, which acts on the entries the right press selected.
 func (m *Model) explorerMenuAction(action string, paths []string) tea.Cmd {
 	switch action {
+	case "open_in_split":
+		if len(paths) > 0 {
+			m.focusEditor()
+			if m.hasDocument() {
+				if msg := m.trySplit(split.SideBySide); msg != "" {
+					m.notice = msg
+					return nil
+				}
+			}
+			return m.openFileCmd(paths[0], false, 0, 0)
+		}
+		return nil
 	case "duplicate":
 		if target := m.remoteExplorerTarget(); target != "" {
 			q := remoteClipboardQuestion(remoteClipboardDuplicate, paths, "", target)
@@ -277,6 +295,7 @@ func (m *Model) explorerMenuAction(action string, paths []string) tea.Cmd {
 // several carets, which Paste then fills in at each caret. Cut and Copy still need a
 // selection, as they do in Fresh. On a read-only document Cut and Paste are disabled.
 func (m *Model) editorContextMenu(mo tea.Mouse, t frame.HitTarget) {
+	m.focusPane(t.Pane)
 	doc := m.ed.Active()
 	if doc == nil {
 		return
@@ -285,16 +304,41 @@ func (m *Model) editorContextMenu(mo tea.Mouse, t frame.HitTarget) {
 	cl, _ := doc.(editorpane.CaretLister)
 	multi := cl != nil && len(cl.Cursors()) > 0
 	if !selected && !multi {
-		_ = m.pressPane(t.Pane, mo.X, mo.Y, 1)
+		if p, hit, top, ok := m.paneHitIn(t.Pane, mo.X, mo.Y); ok {
+			m.ed.ScrollTo(top)
+			if m.splits.comparing {
+				m.setTopRow(p.TopRow)
+			}
+			if hit.Kind == editorpane.HitText || hit.Kind == editorpane.HitGutter {
+				m.collapseCarets()
+				m.ed.SetCursor(hit.Pos, false)
+			}
+		}
 		m.drag = drag{}
 	}
 	readOnly := m.Holds("read_only")
 	m.focusEditor()
-	m.showContextMenu(mo, []ctxmenu.Item{
+	items := []ctxmenu.Item{
 		{Label: uiText("gvim.context.cut", "Cut"), Action: "cut", Disabled: !selected || readOnly},
 		{Label: uiText("gvim.context.copy", "Copy"), Action: "copy", Disabled: !selected},
 		{Label: uiText("gvim.context.paste", "Paste"), Action: "paste", Disabled: readOnly},
 		{Separator: true},
 		{Label: uiText("gvim.context.select_all", "Select All"), Action: "select_all"},
-	})
+	}
+	hasLSP := m.Holds("lsp_available")
+	hasFmt := m.Holds("formatter_available")
+	if hasLSP || hasFmt {
+		items = append(items, ctxmenu.Item{Separator: true})
+		if hasLSP {
+			items = append(items,
+				ctxmenu.Item{Label: uiText("menu.lsp.goto_definition", "Go to Definition"), Action: "lsp_goto_definition"},
+				ctxmenu.Item{Label: uiText("menu.lsp.find_references", "Find References"), Action: "lsp_references"},
+				ctxmenu.Item{Label: uiText("menu.lsp.rename_symbol", "Rename Symbol"), Action: "lsp_rename", Disabled: readOnly},
+			)
+		}
+		if hasFmt {
+			items = append(items, ctxmenu.Item{Label: uiText("menu.edit.format_buffer", "Format Buffer"), Action: "format_buffer", Disabled: readOnly})
+		}
+	}
+	m.showContextMenu(mo, items)
 }

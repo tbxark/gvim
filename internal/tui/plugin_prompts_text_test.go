@@ -16,6 +16,7 @@ func TestCleanText(t *testing.T) {
 		{"newline and tab", "a\nb\tc", "a b c"},
 		{"carriage return and bell", "a\rb\ac", "a b c"},
 		{"delete and C1", "a\x7fb\u009bc", "a b c"},
+		{"bidi Cf and invalid UTF-8 stripped", "a\u202Eb\u2066c\xffd", "abcd"},
 		{"wide text is kept", "日本語", "日本語"},
 	}
 	for _, tt := range tests {

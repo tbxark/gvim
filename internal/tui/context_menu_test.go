@@ -2,11 +2,15 @@ package tui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
@@ -308,7 +312,7 @@ func TestExplorerMenuForAFileFolderAndTheBlankArea(t *testing.T) {
 		row  int // body row of the press
 		want []string
 	}{
-		{"an entry", 1, []string{"New File", "New Directory", "Rename", "Cut", "Copy", "Paste", "Delete", "Duplicate", "Copy Full Path", "Copy Relative Path"}},
+		{"an entry", 1, []string{"New File", "New Directory", "Rename", "Cut", "Copy", "Paste", "Delete", "Duplicate", "Open in Split", "Copy Full Path", "Copy Relative Path"}},
 		{"the blank area", 12, []string{"New File", "New Directory", "Paste"}},
 	}
 	for _, tt := range tests {
@@ -460,5 +464,65 @@ func TestRelativePathKeepsDotDotNamesInsideTheRoot(t *testing.T) {
 		if got := m.relativePath(c.path); got != c.want {
 			t.Errorf("relativePath(%q) = %q, want %q", c.path, got, c.want)
 		}
+	}
+}
+
+func TestRightClickDoesNotToggleMarkdownCheckboxOrLeakAltModifier(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "todo.md")
+	if err := os.WriteFile(path, []byte("- [ ] task\nsecond line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ed := editor.New(editor.Options{})
+	if err := ed.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := DefaultViewOptions()
+	m := New(Deps{Editor: realEditor{ed}, Keys: testKeys(), Theme: th, Clock: testClock, View: &o})
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 12})
+	l := m.layout()
+
+	// Alt+Click adds a second cursor, then remove it via keyboard so m.mx.alt was previously true.
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: l.TextX + 1, Y: l.BodyTop + 1, Button: tea.MouseLeft, Mod: tea.ModAlt}))
+	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: l.TextX + 1, Y: l.BodyTop + 1, Button: tea.MouseLeft}))
+	ed.Do("remove_secondary_cursors", nil)
+
+	// Right-click directly on "[ ]" must open the context menu without toggling "[ ]".
+	rightClickAt(m, l.TextX+3, l.BodyTop)
+	if ctxTop(m) == nil {
+		t.Fatal("right-click on markdown checkbox did not open context menu")
+	}
+	if got := ed.Active().Buffer.Line(0); got != "- [ ] task" {
+		t.Fatalf("right-click toggled checkbox: got %q, want %q", got, "- [ ] task")
+	}
+	if cs := ed.Active().Cursors(); len(cs) != 0 {
+		t.Fatalf("right-click leaked Alt+Click and added cursor: %v", cs)
+	}
+	if got := ed.Active().Cursor; got != (buffer.Pos{Line: 0, Col: 3}) {
+		t.Fatalf("caret after right-click = %v, want 0:3", got)
+	}
+}
+
+func TestExplorerContextMenuOpenInSplitGuardsNoDocAndNarrowPane(t *testing.T) {
+	// 1. With no open document, open_in_split opens the file directly with no bogus split notice.
+	noDoc := New(Deps{Editor: noDocFake{newFakeEditor()}, Explorer: newFakeTree(1), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+	noDoc.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	_ = noDoc.explorerMenuAction("open_in_split", []string{"/ws/a.go"})
+	if strings.Contains(noDoc.notice, "No open document") {
+		t.Fatalf("open_in_split with no doc left bogus split guard notice %q", noDoc.notice)
+	}
+
+	// 2. With a narrow frame where splitting fails, open_in_split keeps the active tab intact.
+	narrow, ed := newCtxModel(t, "a.txt")
+	narrow.Update(tea.WindowSizeMsg{Width: 2, Height: 12})
+	_ = narrow.explorerMenuAction("open_in_split", []string{"/ws/other.go"})
+	if !strings.Contains(narrow.notice, "Not enough room") {
+		t.Fatalf("narrow open_in_split notice = %q, want split failure notice", narrow.notice)
+	}
+	if got := tabNames(ed); !slices.Equal(got, []string{"a.txt"}) {
+		t.Fatalf("narrow open_in_split replaced active tab: %v", got)
 	}
 }
