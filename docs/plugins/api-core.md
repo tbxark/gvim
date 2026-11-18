@@ -92,7 +92,7 @@ does not iterate with `pairs`; use `gvim.settings.get()` for a plain copy. At mo
 > `project = true` only for harmless presentation keys (labels, depth, a delay). See
 > [limits.md](limits.md#settings-are-untrusted-input).
 
-gvim reads the config when it starts, so a changed setting needs a restart.
+Plugin settings are read when a plugin loads, so editing `plugins.<name>.settings` in `config.json` needs a restart.
 
 ## gvim.config
 

@@ -2,8 +2,7 @@
 
 Status: design record of the theme model and the theme UI (round 5).
 
-gvim paints from a color theme. The bundled themes are Fresh's (copied under
-`theme/data`); user themes live in `config.Dir()/themes` and may extend a built-in theme. The model lives in `theme/`: the key table, parsing, inheritance, fallbacks, the registry that finds themes, and the in-memory layer the plugin API and the theme editor use. `internal/tui/style` is the one place colors become styles, so every consumer goes through the same resolution.
+gvim paints from a color theme. There are 11 bundled themes under `theme/data` (Fresh's 10 themes plus gvim's flagship `gopher` theme), and automatic theme resolution also honors `NO_COLOR` via `Theme.WithoutColor()`; user themes live in `config.Dir()/themes` and may extend a built-in theme. The model lives in `theme/`: the key table, parsing, inheritance, fallbacks, the registry that finds themes, and the in-memory layer the plugin API and the theme editor use. `internal/tui/style` is the one place colors become styles, so every consumer goes through the same resolution.
 
 ## 1. Theme files and config forms
 
@@ -12,7 +11,7 @@ A theme file is Fresh's JSON format: a `name`, an optional `extends`, and the se
 Config forms (seen in `config/config.go` and validated in `theme/form.go`):
 
 ```jsonc
-{ "theme": "dark" }                              // a bundled theme
+{ "theme": "gopher" }                            // the default bundled theme
 { "theme": "builtin://light" }                   // the explicit builtin form
 { "theme": "my-theme.json" }                     // relative to config.Dir()/themes
 { "theme": "subdir/dark.json" }                  // nested user theme
@@ -35,7 +34,7 @@ body is cached atomically under `<user cache dir>/gvim/theme-cache/<sha256(url)>
 a cache younger than 24 hours is used without a request, and when a fetch or its
 validation fails the cached copy is the last-known-good fallback ("using the
 cached copy" warning). A URL theme that cannot be fetched and has no cache falls
-back to the default `dark` theme with a clear stderr/status-row notice instead of
+back to the default `gopher` theme with a clear stderr/status-row notice instead of
 failing the start. A `https://...` builtin is never fetched (only URL forms are).
 The fetch happens during start-up, before the program: the Update loop never
 waits on the network, and the runtime Settings theme path only reads the cache, so
@@ -56,10 +55,10 @@ rather than fetched in the Update loop.
 
 The model is a port of Fresh's `theme/types.rs` (source revision `2338640274915a37786810bd8b59439c6633ba64`, recorded in `theme/keys_table.go`):
 
-- `theme/keys_table.go` is the `theme_color_keys!` table: 143 color keys (49 required, 91 fallback, 3 optional) plus gvim's two `ui.accent_*` extension keys, the three attribute-only keys, and the `ui.popup_fg` alias. The checked-table test (`theme/keys_table_test.go`) asserts the counts, the exact required list, that every fallback chain terminates at a required or optional key without cycles, and that every bundled theme resolves all required keys.
+- `theme/keys_table.go` is the `theme_color_keys!` table: 82 color keys (with 63 unused Fresh keys removed), including gvim's two `ui.accent_*` keys, plus the attribute-only keys and aliases. The checked-table test (`theme/keys_table_test.go`) asserts the key set, that every fallback chain terminates at a required or optional key without cycles, and that every bundled theme resolves all required keys.
 - `Resolve` chooses the base: an explicit `extends` must name a built-in theme (chaining user themes is not supported, as in Fresh); a complete standalone theme (all required keys named) has no base; otherwise the implicit base is `builtin://light` when `editor.bg`'s relative luminance is above 0.5 and `builtin://dark` otherwise (the terminal default and an unreadable background count as dark).
 - With a base, a key the theme does not name is the base's resolved value - the fallback chain is not re-derived (Fresh's rule: `extends` wins over fallbacks). A standalone theme fills each omitted fallback key from the first key its chain names, taking that key's color and attributes.
-- The two gvim extension keys `ui.accent_bg`/`ui.accent_fg` fall back to `ui.popup_selection_bg`/`ui.popup_selection_fg` (they are `FallbackKey`s in the table). Every gvim accent surface reads them: the `style.Accent` role (status highlights, the palette and menu selections), the `style.Overlay` highlight/border/focus, and the explorer/diagnostics marker bars. The bundled themes either leave the extension keys to the fallback or set them to exactly their popup selection colours, so every bundled theme's accent follows its popup selection (`theme/accent_audit_test.go` and `internal/tui/style/accent_audit_test.go` pin the equality and the painted roles); a user theme may set `accent_bg`/`accent_fg` explicitly to choose a different accent (a theme with a base inherits the base's accent unless it names them, and a standalone theme fills them through the chain — the same tests pin those cases).
+- The two gvim keys `ui.accent_bg`/`ui.accent_fg` fall back to `ui.popup_selection_bg`/`ui.popup_selection_fg` when omitted by a user theme. Every gvim accent surface reads them: the `style.Accent` role (status highlights, the palette and menu selections), the `style.Overlay` highlight/border/focus, and the explorer/diagnostics marker bars. All 11 built-in themes explicitly define `ui.accent_bg` and `ui.accent_fg` (matching their popup selection colours; `theme/accent_audit_test.go` and `internal/tui/style/accent_audit_test.go` pin the equality and the painted roles); a user theme may set `accent_bg`/`accent_fg` explicitly to choose a different accent (a theme with a base inherits the base's accent unless it names them, and a standalone theme fills them through the chain — the same tests pin those cases).
 - **Chrome text contrast.** The bundled themes tune their chrome text so it stays readable: `ui.popup_selection_*` (and therefore the accent, which follows it) keeps selected-row text at WCAG AA 4.5:1. A mid-tone selection chip is lightened and takes the theme's canvas ink, so the chip keeps its hue while the ink may flip from light to dark (the `dark` theme's selection is dark ink on the blue chip). The active and inactive tab inks are tuned to 4.5:1, and the muted line-number gray to 3:1. The `terminal` theme's named ANSI values are terminal-defined and excluded from the floors; the editor body/syntax palette is unchanged, and the Solarized editor selection keeps its deliberately low-contrast content palette. `theme/contrast_test.go` pins the floors.
 - Attributes apply to the foreground AND the background of a value: an attribute on `editor.selection_bg`, for example, reaches the selected text, and the legacy `editor.selection_modifier` / `ui.semantic_highlight_modifier` keys overwrite the attributes of their color key when a theme gives both. `editor.bracket_rainbow_match_modifier` defaults to bold+underlined.
 
@@ -114,7 +113,7 @@ The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by th
   bolted onto the Settings theme row (the picker edits theme values and belongs to the theme
   editor, while the Settings row's Enter/click opens Select Theme);
 - untagged painters remain a fallback: compose/page-view/plugin/custom-overlay cells report `matched by colour` instead of provenance (the first-surface subset — editor text/syntax, gutter, selection/current line, status bar, popup/palette/Settings rows, menu — is attributed);
-- accent keys beyond gvim's own `ui.accent_*` extension; a Fresh theme and every bundled theme get the popup selection colors as their accent (§2).
+- accent keys beyond gvim's own `ui.accent_*` extension; all 11 built-in themes explicitly define `ui.accent_bg`/`ui.accent_fg` to match their popup selection colors, and imported Fresh themes fall back to popup selection colors (§2).
 
 The Settings page's theme preview landed (four colour chips on the theme row; mechanics and keys in `docs/settings.md` §4), so it is no longer deferred.
 
@@ -145,7 +144,7 @@ The Settings page's theme preview landed (four colour chips on the theme row; me
 - `theme/keys_table_test.go`: counts, required list, chain invariants, bundled themes; the accent extension keys.
 - `theme/theme_test.go` / `theme/model_test.go`: parsing warnings and errors, base-by-luminance, extends, standalone fallbacks, attribute bundles and the legacy modifier keys, named/Reset colors, overrides (incl. dark flag), save round-trip, registry forms `file://`/env/user dir/reload/delete, save.
 - `theme/url_test.go`: URL form validation (https, loopback http, fragment and unknown-scheme refusal), cache path hash stability, cached URL loading, fetched-body validation, URL themes not deletable/listable as user files.
-- `internal/app/theme_url_test.go`: httptest round-trip under the loopback policy, fresh cache avoids a second request, offline last-known-good fallback, invalid/oversized body rejection (nothing cached), transport-policy refusal before any request, and start-up fallback to dark when a configured URL theme cannot be fetched.
+- `internal/app/theme_url_test.go`: httptest round-trip under the loopback policy, fresh cache avoids a second request, offline last-known-good fallback, invalid/oversized body rejection (nothing cached), transport-policy refusal before any request, and start-up fallback to `gopher` when a configured URL theme cannot be fetched.
 - `internal/tui/style/decor_test.go` / `editorpane/styles_test.go`: partial themes use the base's values (Fresh's rule), attributes reach cells.
 - `internal/tui/theme_tui_test.go`: inspect command and Ctrl+Right-Click, the catalog picker, apply through the catalog, overrides layering and clearing.
 - `internal/tui/theme_inspect_provenance_test.go`: exact `Painted by` output for editor text, syntax, gutter, status bar, menu bar and a palette/Settings selection; the colour+context fallback for an unattributed theme-editor swatch; a normal paint with no capture and an identical captured repaint.

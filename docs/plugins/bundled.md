@@ -333,8 +333,8 @@ server not found — click the LSP status for install help*) and remembers the f
 the next LSP-status click opens an action popup with the entry's explanation, copyable install
 commands and gvim-native quick actions (Start/Restart LSP Server, Stop LSP Server, Toggle LSP for
 This Buffer, Disable <Language> LSP, Go to Definition, Find References, Dismiss). Install hints are
-carried for the languages a gvim user is likely to configure (Go, Rust, Python, TypeScript/
-JavaScript, C/C++, Java, JSON, YAML, TOML, Markdown, Ruby, Bash, Lua, HTML, CSS, SQL). Reductions:
+carried for the languages a gvim user is likely to configure (Go, Rust, Python, TypeScript/TSX/
+JavaScript/JSX/React, C/C++, Java, JSON, YAML, TOML, Markdown, Ruby, Bash, Lua, HTML, CSS, SQL). Reductions:
 gvim's `lsp_server_error` payload carries only the error text (no language, error type or server
 command), so the language is the active buffer's, the server command in the message is the entry's
 documented default and *not found* is inferred from the error text; gvim's LSP status click also
@@ -701,12 +701,14 @@ library. **Go to LSP Symbol** asks the server for `textDocument/documentSymbol`,
 (re-sorted by source line) and previews the selection in the buffer: moving the highlight moves the
 cursor onto the symbol and paints it in the search-match style, Enter commits the jump, Esc restores
 the cursor and clears the highlight. Symbol names are refined against their line (servers report the
-declaration start), and the kinds and both response shapes (DocumentSymbol/SymbolInformation) follow
-Fresh. The three **LSP: Show Definitions / Show Implementations / Show Type Definitions** list
-commands are gvim additions (in Fresh those are core actions that jump directly; gvim keeps its
-native Go to Definition rows) and share the references location list: one result jumps, several open
-the filterable list with preview tabs. **LSP: Workspace Symbols** (`workspace/symbol` with an empty
-query), **LSP: Incoming Calls** / **Outgoing Calls** (call hierarchy; one row per call site) and
+declaration start), `DocumentSymbol.children` are flattened recursively, UTF-16 columns are
+converted via `finder.utf16_to_byte`, and the kinds and both response shapes
+(DocumentSymbol/SymbolInformation) follow Fresh. The three **LSP: Show Definitions / Show
+Implementations / Show Type Definitions** list commands are gvim additions (in Fresh those are core
+actions that jump directly; gvim keeps its native Go to Definition rows) and share the references
+location list: one result jumps, several open the filterable list with preview tabs. **LSP:
+Workspace Symbols** (live `workspace/symbol` search as you type via `finder.new { search = ... }`),
+**LSP: Incoming Calls** / **Outgoing Calls** (call hierarchy; one row per call site) and
 **LSP: Breadcrumbs Outline** (the symbols enclosing the caret, outermost first) use the same list;
 **LSP: Show Breadcrumbs** prints the enclosing symbols as `A > B > C` in the status message and **LSP:
 Document Outline** is **Go to LSP Symbol** under another name. Fresh's enclosing-symbol preselection is ported as a
@@ -881,10 +883,11 @@ shell commands inherit it. Detection and the activation trust gate are host feat
 `.venv` without an interpreter does not count, and nothing is executed until activation in a trusted
 workspace. The plugin auto-activates path-only environments silently once the workspace is trusted,
 asks the core trust dialog for others and re-runs activation on `trust_changed`; it shows an `env`
-status-bar pill (`system` / `<name>` / `<name> ✓` / `<name> (locked)`) and offers**Env: Activate
+status-bar pill (`system` / `<name>` / `<name> ✓` / `<name> (locked)`) and offers **Env: Activate
 Detected Environment**, **Env: Reload Environment**, **Env: Use System** and **Env: Show Environment
 Status**. It is opt-in (memory, and activating a repository's shell snippet is a trust decision).
-Reductions: no widget-panel UI yet, no file watcher (use Env: Reload), no devcontainer deferral or
+Reductions: no widget-panel UI yet, no plugin-side file watcher (use Env: Reload; passive detector
+marker watching lives in the host `env` layer), no devcontainer deferral,
 authority handling, no automatic shell-environment activation (explicit command), one local
 environment, and no persisted recipe. It declares no plugin settings; detection is configured
 through the user config `env.detectors`.

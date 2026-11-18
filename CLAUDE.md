@@ -2,10 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Default agent guidelines for a go-sphere project. Copy this file to the project root as
-`CLAUDE.md` (or `AGENTS.md` for Codex and OpenCode), then fill in the project-specific
-section at the bottom.
-
 The behavioral rules are adapted from
 [andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills).
 
@@ -67,22 +63,11 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## 5. go-sphere Conventions
-
-- Never edit generated code by hand (`*.pb.go`, ent output, swagger, generated TypeScript
-  clients). Change the `.proto` or ent schema and re-run the project's generate target.
-- Respect `.sphere/layout.json` ownership rules: files the layout owns are changed through
-  the layout sync flow, not ad hoc.
-- Run the project's own gates (`make test`, `make lint`, `make check`) before calling work
-  done. Read the `Makefile` for fixture and generation targets.
-- Do not run commands with outside side effects (publishing, tagging, pushing, deploying)
-  without explicit approval.
-
-## 6. Project-Specific Instructions
+## 5. Project-Specific Instructions
 
 gvim is a terminal editor in Go: a port of the Fresh TUI (Rust, checked out under `refs/fresh`)
-on Bubble Tea v2. It is **not** a proto/ent project, so section 5 applies only where it fits:
-there is no `Makefile`, no `.sphere/layout.json`, and no generate target.
+on Bubble Tea v2. Do not run commands with outside side effects (publishing, tagging, pushing,
+deploying) without explicit approval.
 
 ### Commands
 

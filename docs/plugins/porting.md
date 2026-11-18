@@ -24,7 +24,7 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 |---|---|
 | `getActiveBufferId`, `getBufferInfo`, `listBuffers`, `findBufferByPath` | `gvim.buf.current()`, `b:info()`, `gvim.buf.list()`, `gvim.buf.find(path)` |
 | `getBufferText(id, start, end)`, `getBufferLength`, `getLineStartPosition(n)` | `b:text(range)`, `b:byte_length()`, `b:offset_of({line = n, col = 0})` |
-| `compareBuffers(left, right)` | `gvim.diff.compare_buffers(left, right)`: same CompareResult fields in snake_case (`left_lines`, `left_len`, `left_version` = version token, `eol_only` always false) |
+| `compareBuffers(left, right)` | `gvim.diff.compare_buffers(left, right)`: same CompareResult fields in snake_case (`left_lines`, `left_len`, `left_version` = version token; no `eol_only` field) |
 | `replaceRange(buf, start, end, text, expectedVersion)` | `gvim.diff.replace_range(buf, start, end, text, expected_version?)`: one edit and one undo step; `false` for the read-only/binary/out-of-range/stale refusals, exactly as Fresh |
 | `getCursorPosition`, `getPrimaryCursor`, `getAllCursors`, `setBufferCursor` | `b:offset_of(b:cursor())`, `b:cursors()`, `b:set_cursor(pos)` |
 | `insertText`, `deleteRange`, `replaceRange`, `insertAtCursor` | `b:insert`, `b:delete`, `b:replace`; typing semantics: `gvim.command.run("insert_char", {text = ...})` |
@@ -34,7 +34,7 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 | `setStatus`, `info`, `warn`, `error`, `debug` | `gvim.notify`, `gvim.log.*` |
 | `prompt`, `startPrompt` with `setPromptSuggestions` | `gvim.ui.input` and `gvim.ui.set_prompt_suggestions` in its `on_change`, or `gvim.ui.picker` |
 | `import { Finder, defaultFuzzyFilter, getRelativePath } from "./lib/finder.ts"` | `require "gvim.finder"`: `Finder.new`/`open`/`close`, `filter`/`score`, `tree`, `open_locations`, `read_snippets`, `relative_path` (see [The shared Finder](#the-shared-finder-port-residual)) |
-| `showActionPopup` | `gvim.ui.action_popup` (`action_popup_result` event) |
+| `showActionPopup` | `gvim.ui.action_popup` (returns chosen action id; also raises `action_popup_result`) |
 | `addMenuItem` | `gvim.menu.add_item` / `remove_item` / `clear` |
 | `t(...)`, plugin i18n files | `gvim.i18n.t` (`t` alias) + `<name>.i18n.json`; %-prefixed command titles are translated |
 | `overrideThemeColors` | `gvim.theme.override` / `clear` / `overrides` |
@@ -65,7 +65,8 @@ Not provided at all (and not stubbed): Fresh's other editor catalogues (gvim shi
 Simplified Chinese, with the `locale` setting and resolution; plugin texts are translated; see
 [api-core.md](api-core.md#gvimi18n) and [i18n.md](../i18n.md)), project-local plugins, a trust store,
 synthetic buffer-group tabs and per-panel views of one buffer, a terminal API, Fresh's window and
-authority runtimes, the package manager, the HTTP client API and `render_line`. The tier-1c
+authority runtimes, the package manager, a full HTTP client API (only bounded HTTPS GET is
+provided via `gvim.http.get`) and `render_line`. The tier-1c
 decoration surface is provided and painted (virtual lines, conceal, soft breaks, cursor-line
 overlay, ranged scrollbar marks and plugin folds), gated by `gvim.has("decor_virtual_paint")`;
 the 1c-C seams are provided too (split labels, per-plugin window state, open/focus/close split
@@ -114,7 +115,7 @@ API and this port does not ask for one. Recorded differences:
 * Rendering caps are Fresh's, made host-aware: full → no-vlines (more than
   `max_virtual_lines` deleted lines) → outline (more than `max_overlay_lines` changed lines), and
   a deletion block longer than the host's 64-virtual-rows-per-anchor cap is summarised by an
-  "`… N more deleted lines`“ row.
+  "`… N more deleted lines`" row.
 
 ### Code tour: recorded-ref drift
 
@@ -196,7 +197,7 @@ current tab showing the two existing file buffers — there is no synthetic grou
 segments are stored but not painted. The two files are opened as ordinary tabs when they were not
 open (gvim has no tabless view of a real file buffer); **Compare: Close** closes the ones it opened
 when they are unmodified, while a file that was already open keeps its tab. Line-ending-only hunks
-do not exist because gvim normalises a buffer's line endings (`eol_only` is always false, so there
+do not exist because gvim normalises a buffer's line endings (so `CompareHunk` omits `eol_only`, and there
 are no CRLF/missing-newline notes). Filler rows need the host's virtual-line painting
 (`gvim.has("decor_virtual_paint")`); without it the panes are level only where both sides have lines.
 Lines are paired positionally inside a hunk (Fresh's documented fallback), the command bodies ask
@@ -451,9 +452,10 @@ Fresh's `env_manager` plugin owns detection and activation. In gvim both are hos
 (`env.detectors` in the user config, the `gvim.env` runtime API, the trust gate in the core trust
 dialog), and the bundled plugin is the thin command/status layer: Activate a detected environment,
 Reload after a `.envrc`/`mise.toml` change, Use System, and Status (the `env` status-bar pill shows
-`system` / `<name>` / `<name> ✓` / `<name> (locked)`). Reductions: no widget-panel UI yet, no file
-watcher (Reload is explicit), no devcontainer deferral/authority handling, no automatic
-shell-environment activation (the command is explicit), one local environment, and no persisted
+`system` / `<name>` / `<name> ✓` / `<name> (locked)`). Reductions: no widget-panel UI yet, no
+plugin-side file watcher (Reload is explicit; passive marker watching lives in the host), no
+devcontainer deferral, no automatic shell-environment activation (the command is explicit), one
+local environment, and no persisted
 recipe; a bare `.venv` without an interpreter does not count and first match wins, as in Fresh.
 
 ### Line targets: what they can and cannot express

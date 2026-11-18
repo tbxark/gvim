@@ -51,15 +51,15 @@ A status is backed by a package or file read, a test, or a doc that states the b
 
 | Measure | Fresh | gvim | Where to re-measure |
 |---|---|---|---|
-| Palette commands | 206 `CommandDef` rows | 243: the 206 generated rows plus 37 gvim rows (menu bar, live grep, project search, theme editor, compare, Contents, diagnostics, plugin management, agents, terminal tabs, hex view, update) | `commands/palette_test.go` (`TestCommandsFromBuiltinTable`) |
-| Menus | 8 menus, 103 static actions, 31 separators, 2 static submenus + 1 dynamic | identical static table; the dynamic "Copy with Formatting" submenu lists the built-in themes; plugins add up to 32 rows | `internal/tui/menubar/menu_table_gen.go`, `python3 tools/gen_menus.py --check` |
+| Palette commands | 206 `CommandDef` rows | 245: the 206 generated rows plus 39 gvim rows (menu bar, live grep, project search, theme editor, compare, Contents, diagnostics, sticky scroll, about gvim, plugin management, agents, terminal tabs, hex view, update) | `commands/palette_test.go` (`TestCommandsFromBuiltinTable`) |
+| Menus | 8 menus, 103 static actions, 31 separators, 2 static submenus + 1 dynamic | identical static table + View `Sticky Scroll` & Help `About gvim`; the dynamic "Copy with Formatting" submenu lists the built-in themes; plugins add up to 32 rows | `internal/tui/menubar/menu_table_gen.go`, `python3 tools/gen_menus.py --check` |
 | Keymap presets | 5 | 5 (default, macos, macos-gui, emacs, vscode) with Fresh's inheritance graph; own/in-effect bindings default 269/266, macos 61/289, macos-gui 52/340, emacs 98/331, vscode 11/273 | `keymap/common_set_test.go` |
-| Themes | 10 built-in, files by name/path/URL | 10 built-in plus user themes, plugin theme files, URL themes (cached, validated); no packaged repository | `theme/data/*.json`, `docs/themes.md` |
+| Themes | 10 built-in, files by name/path/URL | 11 built-in (Fresh's 10 plus `gopher`) + user themes, plugin theme files, URL themes, and `NO_COLOR`; no packaged repository | `theme/data/*.json`, `docs/themes.md` |
 | LSP server entries | built-in list plus universal servers | 62 built-in entries; `universal_lsp` is config only | `lsp/manager/defaults.go` |
 | Bundled plugins | 50 | 37, of which 9 are on by default (`git_blame`, `diagnostics_panel`, `git_gutter`, `git_find_file`, `goto_with_selection`, `git_statusbar`, `lsp_help`, `path_complete`, `tab_actions`) | `plugin/bundled/plugins/*/plugin.json` (`default_enabled`), `docs/plugins/bundled.md` |
 | Plugin API | about 372 methods (TypeScript) | about 250 Lua functions, API level 2 | `docs/plugins/gvim.d.lua` (checked against the runtime by `plugin/docs_test.go`) |
-| Settings page | schema-driven page over every setting | 79 rows in 14 sections plus injected Languages, Language Servers, Plugins, Keybindings, Environment and Detectors pages | `config/settings_schema.go`, `docs/settings.md` |
-| i18n catalogues | 15 locales | en (1203 keys) and zh-CN (581 keys); other locales are out of scope | `i18n/locales/*.json`, `docs/i18n.md` |
+| Settings page | schema-driven page over every setting | 82 rows in 15 sections plus injected Languages, Language Servers, Plugins, Keybindings, Environment and Detectors pages | `config/settings_schema.go`, `docs/settings.md` |
+| i18n catalogues | 15 locales | en (1214 keys) and zh-CN (581 keys); other locales are out of scope | `i18n/locales/*.json`, `docs/i18n.md` |
 | Idle plugin heap | n/a | the 9 default-enabled plugins cost about 3.0 MiB against an 8 MiB test gate | `TestBundledPluginsIdleHeap`, `docs/plugins/bundled.md` |
 | e2e feature index | 413 test files | not comparable; gvim uses Go unit tests | `refs/fresh/crates/fresh-editor/tests/e2e/` |
 
@@ -248,8 +248,8 @@ was built. Where a reference doc has the detail it is named.
     opt-in and bounded.
   - `code_tour`: no dock placement, no per-step buffer modes, one tour at a time.
   - `lsp_navigation`: no initial selected index; `find_references` is command-driven (gvim has no
-    reference events); the Finder library has no async search sources, embedded preview or
-    utility-dock routing.
+    reference events); the Finder library's search sources have no process-cancellation handle,
+    embedded preview or utility-dock routing.
   - `diff_nav` (standalone, opt-in) and `git_gutter`'s merged navigation: targets are line-based
     (Fresh sorts by byte position); no real-terminal verification of the Compare Files source.
   - Language helpers `asm_lsp`, `csharp_support`, `clangd_support`, `rust_lsp`, `deno_lsp`,

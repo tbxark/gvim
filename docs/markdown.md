@@ -63,7 +63,7 @@ reader's delimiters rather than moving the parser:
   (☐ / ☑) with one blank after it, so the item's text keeps its place; the raw box
   shows under the caret like the other conceals;
 - **images**: an image's leading "!" is part of its opening marker, so
-  "![alt](url)" composes to its alt text (the page view has no image renderer);
+  `![alt](url)` composes to its alt text (the page view has no image renderer);
   the raw syntax shows under the caret;
 - **inline HTML** is left literal: the page view has no cell renderer for it, and
   hiding it would lose visible text.
@@ -214,8 +214,8 @@ can independently toggle or cycle its view mode (`markdown_mode_rendered`,
 `markdown_mode_source`, `markdown_cycle_mode`) without altering the view modes of other
 split panes (landed round 92).
 
-[^cmd]: The palette rows are the same five actions in `commands/markdown_commands.go`;
-the native palette therefore lists 229 commands.
+[^cmd]: The palette rows are the five view-mode actions in `commands/markdown_commands.go`
+(alongside its five Markdown Contents actions); the native palette therefore lists 245 built-in commands.
 
 ## Headings
 

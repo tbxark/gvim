@@ -125,18 +125,19 @@ gvim adds no key either. There is nothing to set: open the dialog and decide. (F
 
 | Fresh gate | gvim | Status |
 |---|---|---|
-| Project config layer | Skipped entirely (`config.Options.Untrusted`) unless the workspace is Trusted. Covers `formatters`, `lsp` entries, `languages`, display settings, plugin enablement/settings. | **Enforced**, and **stricter than Fresh**, which merges the project config at any level. |
+| Project config layer | Skipped entirely (`config.Options.Untrusted`) unless the workspace is Trusted. When Trusted, `.gvim/config.json` permits `formatters` and `languages.*.on_save` alongside `lsp` entries, `languages`, display settings, and plugin enablement/settings (while C11 still blocks `keymap`, `keybindings`, LSP `command`, `theme` URLs, `terminal.shell`, etc.). | **Enforced**, and **stricter than Fresh**, which merges the project config at any level. |
 | Project plugins, plugin settings | Via the project layer skip: a project cannot turn a plugin off or set a project setting. gvim discovers no plugins from the workspace itself (plugins come from the binary, the user config dir and `--plugin`), so there is nothing else to gate. | **Enforced** via the config layer. |
 | Explicit executables inside the workspace | Enforced by the spawn gate (`trust.DecideSpawn`, wired through the workspace authority's one-shots/long-running children/terminal, the plugin OS and the LSP manager): an executable that resolves inside the root is refused, lexically and through symlinks, and a bare name is resolved against the child's effective PATH first. See §3.1. | **Enforced.** |
 | LSP auto-start | `lsp_enabled` is forced off for the session when the workspace is not Trusted, so no server starts on its own (the LSP pill shows `LSP (off)`); Start/Restart LSP Server still starts one, as Fresh's manual start does in a restricted workspace. The user's config file is not changed. | **Enforced.** |
 | Environment activation | Host-gated on Trusted (`gvim.env.set` refuses otherwise); see "Environments". | **Enforced.** |
-| Devcontainer and task running | gvim has no task runner and no container authority (the `devcontainer` plugin only reads the config). | Not applicable. |
+| Devcontainer and task running | gvim has no task runner and no container authority. | Not applicable. |
 | Blocked | Blocked now denies every spawn (terminals, shell/formatter jobs, LSP starts, git/find spawns, plugin processes) in addition to the Restricted restrictions. | **Enforced** by the spawn gate. |
 
 Why the project layer is gated: it is the one place in gvim where a repository's file can
-name a program to run. The project `.gvim/config.json` can set `formatters`, whose command
-the editor runs on Format Buffer, and it can disable plugins and set project plugin
-settings. gvim already refuses the most dangerous project keys unconditionally
+name a program to run. Once a workspace is **Trusted**, its `.gvim/config.json` permits
+`formatters` and `languages.*.on_save` (whose commands/actions the editor runs on Format
+Buffer or Save), as well as disabling plugins and setting project plugin settings.
+gvim still refuses the most dangerous project keys unconditionally
 (AMENDMENTS C11: project files cannot set keybindings/keymap, cannot name an LSP command,
 can only *disable* a plugin and only *lower* `plugin_timeout_ms`; a project `theme` that is a
 URL is refused too, because a repository must not choose a host gvim fetches from). The project
@@ -336,5 +337,5 @@ servers, terminal shells, plugin processes and app git-grep runs.
 
 Reductions from Fresh: one local environment (no SSH/container authority), the
 overlay is set-only (activation unsets are not applied to spawns), no persisted
-recipe across sessions, no devcontainer deferral, and detectors are read-only in the
+recipe across sessions, and detectors are read-only in the
 Settings UI (edit `env.detectors` in the user config JSON).

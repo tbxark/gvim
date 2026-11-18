@@ -533,7 +533,7 @@ CompareResult = {
   left_len, right_len,               -- each buffer's length in bytes
   left_version, right_version,       -- content version tokens, for expected_version
 }
-CompareHunk = { left = CompareSide, right = CompareSide, eol_only = false }
+CompareHunk = { left = CompareSide, right = CompareSide }
 CompareSide = { start, count,       -- 0-based first line and line count (0 on an empty side)
                 from, to,           -- byte range the hunk replaces, terminator included
                 jump,               -- cursor byte for a jump: from, or the line before a gap
@@ -545,8 +545,7 @@ Offsets are absolute bytes of the corresponding buffer in the editor's model: th
 LF-normalised, so a line break counts one byte (the same model as `b:offset_of` and
 `b:byte_length`), and every offset can be handed straight to `replace_range`. A paired line with no
 differing text has `false` in `spans` (not `nil`: a nil hole would leave the array without a length
-for `#`); a painted span never cuts a UTF-8 character. `eol_only` is always `false` here: gvim
-normalises a buffer's line endings when it reads the file, so a pair that differs only by its
+for `#`); a painted span never cuts a UTF-8 character. `gvim` normalises a buffer's line endings when it reads the file, so a pair that differs only by its
 terminator is equal lines and produces no hunk (Fresh reports it as an eol-only hunk). The lines
 are paired positionally within a hunk, which is the fallback pairing Fresh documents when it has no
 per-line ops.
@@ -559,3 +558,55 @@ or binary, when the range is outside the buffer, or when `expected_version` is s
 buffer or another real failure is an error (`nil, err`). The text's line endings are normalised to
 the document's before insertion. Deleting and then inserting is two edits (two undo steps), so
 prefer this one call.
+
+## gvim.finder
+
+A Lua library module (`require "gvim.finder"` or `gvim.finder`) for fuzzy ranking, live pickers,
+grouped widget-panel trees, UTF-16/byte column conversion and LSP location lists:
+
+```text
+gvim.finder.MAX_ITEMS            -- 2000
+gvim.finder.MAX_RESULTS          -- 100
+gvim.finder.MAX_QUERY            -- 64
+gvim.finder.MAX_LABEL            -- 256
+gvim.finder.MAX_DETAIL           -- 256
+gvim.finder.MAX_SCORE_LEN        -- 512
+gvim.finder.MAX_LOCATION_FILES   -- 100
+gvim.finder.MAX_LOCATION_BYTES   -- 1048576
+
+gvim.finder.clip(s, limit) -> string
+gvim.finder.cells(s, limit) -> string
+gvim.finder.relative_path(path) -> string
+gvim.finder.score(text, pattern) -> number | nil
+gvim.finder.filter(items, query, get_text?, max_results?) -> items
+gvim.finder.new(opts) -> Finder
+gvim.finder.tree(items, opts) -> { nodes, node_map, count }
+gvim.finder.first_leaf(tree) -> integer
+gvim.finder.utf16_to_byte(line, units) -> integer
+gvim.finder.byte_to_utf16(line, byte_col) -> integer
+gvim.finder.open_locations(opts) -> Finder | nil, err
+gvim.finder.read_snippets(items) -> items
+gvim.finder.lsp_locations(result) -> locations
+```
+
+* `new(opts)` requires `format` and either `load` (lazy source, ranked by `filter` or `score`) or
+  `search` (live query callback `⏳`, gated by `min_query`, default `1`). The returned `Finder`
+  supports `:open(opts?)`, `:close()`, `:refresh()`, `:set_footer(text)`, `:set_status(text)`,
+  `:query_text()` and `:is_open()`.
+* `open_locations(opts)` presents `{ path, line, col, text }` items with preview tabs on move,
+  commit on Enter and preview cleanup on cancel. `read_snippets(items)` populates missing `.text`
+  snippets from open buffers or one bounded disk read per file.
+* `tree(items, opts)` builds deduped, optionally grouped nodes for a widget panel `tree`; `first_leaf`
+  returns the 1-based index of the first non-header row.
+
+## gvim.textsafe
+
+A Lua library module (`require "gvim.textsafe"` or `gvim.textsafe`) for sanitising untrusted
+display strings (PR titles, remote diagnostics, filenames):
+
+```text
+gvim.textsafe.strip(text) -> string
+```
+
+Replaces `Cc` control characters and invalid UTF-8 sequences with spaces and strips invisible `Cf`
+formatting/bidi characters so untrusted text cannot reorder, hide or split UI rows.

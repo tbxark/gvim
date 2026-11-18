@@ -347,8 +347,7 @@ Next (tracked as follow-up work; each keeps build + tests green):
 2. Finish the editor split tail: move the `editor` model tests into `document`, then delete
    the alias bridge (`editor/bridge.go` + `document/export.go`, ~385 lines) by retargeting
    the ~165 consumer references; tighten `document`'s exported surface to accessors.
-3. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction; optional keybinding
-   editor extraction (`tui/keybindeditor`, needs its test harness rewritten).
+3. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction.
 
 The analysis these steps build on (file clusters, symbol-level boundaries, risk
 ordering) is in the session's analysis notes; the durable conclusions are kept in this
@@ -1130,8 +1129,8 @@ of any other version is skipped with a diagnostic and never modified.
   previous session file stays intact — this is the documented limitation of the slice, and
   a failed write is reported (tested with a read-only session directory and an injected
   failing writer). The capture is field-for-field compared against `restore.WriteSession` in a
-  regression test (layout, explorer/sidebar, cursor/top, active tab, unsaved stash; the
-  session format has no split record, so no split state exists to capture yet).
+  regression test (layout, explorer/sidebar, cursor/top, active tab, unsaved stash; split
+  state is also persisted via `session.Session.Layout`).
   Per-workspace plugin runtimes are kept materialized per workspace (memory for
   isolation): only materialized workspaces cost a runtime; the registry keeps the rest as
   descriptors.

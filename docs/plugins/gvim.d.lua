@@ -1245,7 +1245,6 @@ function gvim.diff.prev_hunk(hunks, line) end
 ---@class CompareHunk
 ---@field left CompareSide
 ---@field right CompareSide
----@field eol_only boolean
 ---@class CompareResult
 ---@field hunks CompareHunk[]
 ---@field left_lines integer
@@ -1531,6 +1530,91 @@ function gvim.theme.override(colors) end
 function gvim.theme.clear() end
 ---@return table<string, string> the session overrides in force
 function gvim.theme.overrides() end
+
+---@class FinderItem
+---@field label? string
+---@field text? string
+---@field description? string
+---@field detail? string
+---@field id? string
+
+---@class FinderLocation
+---@field path string
+---@field line integer 0-based line
+---@field col integer 0-based byte column
+---@field text? string
+
+---@class Finder
+---@field open fun(self: Finder, opts?: {title?: string, placeholder?: string, footer?: string, initial_query?: string}): Picker|nil, string?
+---@field close fun(self: Finder): boolean
+---@field refresh fun(self: Finder): boolean|nil, string?
+---@field set_footer fun(self: Finder, text: string)
+---@field set_status fun(self: Finder, text: string)
+---@field query_text fun(self: Finder): string
+---@field is_open fun(self: Finder): boolean
+
+gvim.finder = {}
+gvim.finder.MAX_ITEMS = 2000
+gvim.finder.MAX_RESULTS = 100
+gvim.finder.MAX_QUERY = 64
+gvim.finder.MAX_LABEL = 256
+gvim.finder.MAX_DETAIL = 256
+gvim.finder.MAX_SCORE_LEN = 512
+gvim.finder.MAX_LOCATION_FILES = 100
+gvim.finder.MAX_LOCATION_BYTES = 1048576
+---@param s string
+---@param limit integer byte budget
+---@return string
+function gvim.finder.clip(s, limit) end
+---@param s string
+---@param limit integer display cell budget
+---@return string
+function gvim.finder.cells(s, limit) end
+---@param path string
+---@return string
+function gvim.finder.relative_path(path) end
+---@param text string
+---@param pattern string
+---@return number|nil
+function gvim.finder.score(text, pattern) end
+---@param items any[]
+---@param query string
+---@param get_text? string|(fun(item: any): string)
+---@param max_results? integer
+---@return any[]
+function gvim.finder.filter(items, query, get_text, max_results) end
+---@param opts {load?: (fun(): any[]), search?: (fun(query: string): any[]), min_query?: integer, format: (fun(item: any, index?: integer): FinderItem), rank_text?: (fun(item: any): string), filter?: (fun(items: any[], query: string): any[]), title?: string, placeholder?: string, footer?: string, initial_query?: string, max_results?: integer, on_select?: (fun(item: any, index?: integer)), on_move?: (fun(item: any)), on_close?: (fun(reason: string)), on_rows?: (fun(shown: integer, total: integer))}
+---@return Finder
+function gvim.finder.new(opts) end
+---@param items any[]
+---@param opts {key?: (fun(item: any): string|nil), dedupe?: boolean, group?: (fun(item: any): {key: string, text?: string, detail?: string}|nil), row: (fun(item: any): {text: string, detail?: string, key?: string}), max_rows?: integer}
+---@return {nodes: WidgetNode[], node_map: table<integer, any>, count: integer}
+function gvim.finder.tree(items, opts) end
+---@param tree {nodes: WidgetNode[], node_map: table<integer, any>, count: integer}
+---@return integer 1-based index of the first non-header leaf node
+function gvim.finder.first_leaf(tree) end
+---@param line string
+---@param units integer UTF-16 code units
+---@return integer 0-based byte column
+function gvim.finder.utf16_to_byte(line, units) end
+---@param line string
+---@param byte_col integer 0-based byte column
+---@return integer UTF-16 code units
+function gvim.finder.byte_to_utf16(line, byte_col) end
+---@param opts {items: FinderLocation[], title?: string, placeholder?: string, footer?: string, max_results?: integer, on_move?: (fun(item: FinderLocation)), on_jump?: (fun(item: FinderLocation)), on_close?: (fun(reason: string))}
+---@return Finder|nil, string?
+function gvim.finder.open_locations(opts) end
+---@param items FinderLocation[]
+---@return FinderLocation[]
+function gvim.finder.read_snippets(items) end
+---@param result any LSP Location, Location[], LocationLink[] or nil
+---@return FinderLocation[]
+function gvim.finder.lsp_locations(result) end
+
+gvim.textsafe = {}
+---@param text string
+---@return string
+function gvim.textsafe.strip(text) end
 
 json = gvim.json
 re = gvim.re

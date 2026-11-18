@@ -153,7 +153,7 @@ Rules (all covered by table tests):
   helper commands over the same exec channel (a read cap, stat with GNU and BSD/macOS
   `stat`, a sorted directory listing with an entry cap, atomic temp-file+rename writes
   that preserve the target mode and write through a symlink, and a polling watch). The
-  decision, assumptions and limits are in `6.
+  decision, assumptions and limits are in §6.
 - Reconnect: `Reconnect(ctx)` closes the carrier and redials the stored target; a session
   that observes the death marks `Connected=false` with a reason for the indicator. Existing
   remote terminals are not resurrected automatically: the transcript is kept read-only and

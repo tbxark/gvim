@@ -22,7 +22,7 @@ log (**Plugin: Show Log**) has the full text.
 | [api-commands.md](api-commands.md) | `gvim.command`, `keymap`, `mode`, `context`, `input` |
 | [events.md](events.md) | `gvim.on` and every event with its payload |
 | [api-ui.md](api-ui.md) | prompts, pickers, popups, the status bar, the clipboard, decorations |
-| [api-system.md](api-system.md) | `path`, `fs`, `proc`, `timer`, `async`, `workspace`, `git`, `lsp`, `diff` |
+| [api-system.md](api-system.md) | `path`, `fs`, `proc`, `timer`, `async`, `workspace`, `git`, `lsp`, `diff`, `finder`, `textsafe` |
 | [api-data.md](api-data.md) | the standard library as gvim leaves it, `json`, `re`, `text`, `utf8`, `bit`, `time`, `theme` |
 | [limits.md](limits.md) | sandbox, time budgets, quotas, the cap table, `re` work cap, untrusted settings, risks, known limitations |
 | [bundled.md](bundled.md) | the plugins that ship with gvim, their commands, settings and memory cost |
@@ -124,7 +124,7 @@ All fields are optional; unknown fields are ignored.
   "name": "git_gutter",            // default: the directory or file name
   "version": "1.0.0",              // shown by the manager, and gvim.plugin.version
   "description": "Git change markers in the gutter",
-  "api": 1,                        // the lowest plugin API level it needs; a newer one fails with a notice
+  "api": 2,                        // the minimum plugin API level it needs (1 or 2); a newer one fails with a notice
   "main": "init.lua",              // the entry file; it must stay inside the plugin directory
   "default_enabled": true,         // bundled plugins only: false means "off until the user turns it on"
   "requires": ["lib_x"],           // hard dependency: missing, disabled or failed means this one does not load
@@ -133,7 +133,7 @@ All fields are optional; unknown fields are ignored.
 ```
 
 A plugin that `requires` another starts after the other's main chunk has *finished*. `require`
-inside a plugin loads, in this order, host modules (`gvim`, `gvim.<area>`, `gvim.git`; they
+inside a plugin loads, in this order, host modules (`gvim`, `gvim.<area>`, `gvim.git`, `gvim.finder`, `gvim.textsafe`; they
 cannot be replaced), then the plugin's own files (`lua/a/b.lua`, `lua/a/b/init.lua`, `a/b.lua`,
 `a/b/init.lua`). There is no `package.path` and no `require` of another plugin: use
 [`gvim.plugins`](api-core.md#gvimplugins).
@@ -165,8 +165,10 @@ Plugins are configured in `config.json` (the same file as every other gvim setti
   repository never runs code from it. Project plugin folders do not exist.
 * `plugin_timeout_ms` (default 500, 1 to 60000) is the time a command may run (see
   [limits.md](limits.md#time-budgets)). A project config can only lower it.
-* Settings are read when gvim starts. gvim has no config reload yet, so editing the config needs
-  a restart; **Plugin: Reload** re-reads a plugin's source, not the config.
+* Plugin settings (`plugins.<name>.settings`) are read when a plugin loads, so editing them in
+  `config.json` needs a restart (**Reload Configuration** reloads editor settings/themes, while
+  **Settings → Plugins** writes `enabled` live; **Plugin: Reload** re-reads source, not
+  `config.json`).
 
 ## The plugin manager and commands
 

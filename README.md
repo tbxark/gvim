@@ -9,7 +9,7 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
 ## Highlights
 
 - **Fast Code Viewer & Read-Only Protection**
-  - Launch with `gvim -R` / `gvim --view` to lock all buffers in read-only mode, protecting your codebase against accidental keystrokes, pastes, or saves.
+  - Launch with `gvim -R` / `gvim --read-only` to lock all buffers in read-only mode, protecting your codebase against accidental keystrokes, pastes, or saves.
   - Syntax highlighting for 30+ programming languages, powered by Chroma lexers.
   - Code folding based on indentation and syntax (`▼` / `▶`), supporting keyboard and mouse toggles.
   - Windowed streaming for large files (100+ MiB) without allocating the whole file into memory.
@@ -27,7 +27,7 @@ Built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) with a cust
   - **Git Blame**: inline commit author, age, and summary on the cursor line, commit details popup, and parent revision blame.
   - **Git Log**: commit history browser with commit diff previews.
   - **Review Diff (Audit Mode)**: list staged, unstaged, and untracked changes, view unified diffs, and navigate hunks across files.
-  - Git Log, Review Diff, Merge conflict resolution, Compare Files and Flash Jump are bundled plugins that are **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in `config.json` (see `docs/plugins/bundled.md`). Its keys (`Alt+J` for Flash, which then replaces the built-in `Alt+J` Utility Dock toggle; `Alt+M` / `Ctrl+Alt+C` for Merge) apply once it is on. Git Gutter and Git Blame are on.
+  - Git Log, Review Diff, Merge conflict resolution, and Flash Jump are bundled plugins that are **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in `config.json` (see `docs/plugins/bundled.md`). Its keys (`Alt+J` for Flash, which then replaces the built-in `Alt+J` Utility Dock toggle; `Alt+M` / `Ctrl+Alt+C` for Merge) apply once it is on. Git Gutter and Git Blame are on.
 
 - **Multi-Modal Fast Search**
   - **Quick Open (`Ctrl+P`)**: fuzzy file search, line jump (`:line`), relative line jump (`:+N` / `:-N`), buffer list (`#`), and command palette (`>`).
@@ -89,10 +89,10 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 
 | Flag | Description |
 |---|---|
-| `-R`, `--read-only`, `--view` | Open in read-only / code-viewer mode (edits and writes disabled) |
+| `-R`, `--read-only` | Open in read-only / code-viewer mode (edits and writes disabled) |
 | `--diff` | Compare two files side by side |
 | `--keymap NAME` | Keymap profile: `default`, `vscode`, `emacs`, `macos`, `macos-gui` |
-| `--theme NAME` | Theme name (e.g. `dark`, `light`) |
+| `--theme NAME` | Theme name (default `gopher`; also `dark`, `light`, `terminal`, etc.; `NO_COLOR=1` strips colors when `--theme` is unset) |
 | `--config PATH` | Path to custom config file (default: `config.json` in the platform config directory, `~/.config/gvim/` on Linux) |
 | `--log-file PATH` | Append status notices and plugin log to file |
 | `--simple` | Open without restoring or saving session, and without file explorer |
@@ -100,7 +100,6 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `--no-restore` | Skip restoring previous tabs |
 | `--stdin` (or `-`) | Read standard input into a scratch buffer |
 | `--stdin-name NAME` | Name the stdin buffer, for its language and the Save-As suggestion |
-| `--no-session` | Alias for `--no-restore` |
 | `--no-plugins` | Skip discovering or loading plugins (`--plugin` still loads) |
 | `--plugin PATH` | Load the plugin at PATH (a `.lua` file or a plugin directory); repeatable |
 | `--daemon[=NAME]` | Run the editor as a daemon on a Unix socket (foreground) |
@@ -183,7 +182,19 @@ The right vertical scrollbar track acts as a real-time overview ruler:
 Allows scanning long files and spotting issues at a glance without having to scroll through thousands of lines.
 
 ### Sticky Scroll
-When scrolling down into long functions, classes, or code blocks, the top row of the editor pane automatically pins the enclosing declaration header (e.g. `func (m *Model) paintPanes(...) {`), ensuring you never lose your place while reading code. Toggled by the `toggle_sticky_scroll` action, which has no default key and no palette row: bind a key to it in your keybindings.
+When scrolling down into long functions, classes, or code blocks, the top row of the editor pane automatically pins the enclosing syntax-highlighted declaration header (e.g. `func (m *Model) paintPanes(...) {`). Clicking the sticky header jumps to that scope; toggled via **View → Sticky Scroll** or `View: Toggle Sticky Scroll` (`toggle_sticky_scroll`) in the Command Palette.
+
+### Mouse Interactions
+| Action | Effect |
+|---|---|
+| `Alt+Click` | Add or remove a cursor (multi-cursor editing) |
+| `Cmd+Click` / `Ctrl+Click` | Go to LSP definition (`Cmd+Click`); open URL (`Cmd/Ctrl+Click`); extend selection (`Ctrl+Click` on text) |
+| `Shift+Click` | Extend selection from cursor |
+| `Click / Double-click Gutter` | Select lines / toggle code fold (`⋯ N lines`) |
+| `Click Markdown Checkbox` | Toggle `- [ ]` / `- [x]` directly |
+| `Middle-click` | Paste clipboard in editor or terminal dock |
+| `Double-click Split Border` | Equalize split panes to 50/50 |
+| `Drag Dock Title / Tab "+"` | Resize terminal dock / open new terminal tab menu |
 
 ### Pager Mode (`gvim -R` / `git diff | gvim`)
 When viewing read-only buffers or piped input, single-key pager shortcuts activate:
@@ -217,3 +228,9 @@ For architecture records, design documentation, and internal specifications, see
 - [`docs/themes.md`](docs/themes.md) — Theme specification, color roles, and customization
 - [`docs/terminal.md`](docs/terminal.md) — Pseudo-terminal dock and scrollback model
 - [`docs/parity.md`](docs/parity.md) — Fresh parity matrix, deliberate differences and open gaps
+
+---
+
+## Thanks
+
+- [Fresh](https://github.com/sinelaw/fresh) — the terminal editor whose feature set and design `gvim` measures itself against.

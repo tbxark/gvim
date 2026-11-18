@@ -24,7 +24,7 @@ written.
 ## 1. The schema
 
 `config/settings_schema.go` holds the descriptor table the page is built from:
-79 settings rows, each a `config.Setting` with
+82 settings rows, each a `config.Setting` with
 
 - `Path`: where the value lives in the file, such as `{"editor", "tab_size"}`;
 - `Kind`: `bool`, `int`, `enum`, `string`, or `page` (a row that opens
@@ -44,7 +44,7 @@ written.
   it, and the JSON to write for a value the page produced. A page row's
   `Value` is its summary ("2 commands"), and `Encode` refuses.
 
-The sections are Interface, Display, Whitespace, Editing, Search, Explorer,
+The sections are Interface, Display, Whitespace, Editing, Completion, Search, Explorer,
 Contents, Session, Mouse, Languages, Formatters, Status Bar, File Explorer and
 Terminal.
 The scalar rows cover the settings gvim reads today; the structured rows open
