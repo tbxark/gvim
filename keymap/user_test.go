@@ -30,10 +30,9 @@ func TestWithUserBindings(t *testing.T) {
 			chord: "alt+u", ctx: keymap.ContextNormal, want: "to_upper_case",
 		},
 		{
-			name: "the legacy object form is rejected", preset: "default",
-			data:     `{"bindings":[{"key":"u","modifiers":["alt"],"action":"to_upper_case","when":"normal"}]}`,
-			chord:    "ctrl+s", ctx: keymap.ContextNormal, want: "save",
-			warnings: []string{`keybindings: must be a list of bindings`},
+			name: "the object form still loads", preset: "default",
+			data:  `{"bindings":[{"key":"u","modifiers":["alt"],"action":"to_upper_case","when":"normal"}]}`,
+			chord: "alt+u", ctx: keymap.ContextNormal, want: "to_upper_case",
 		},
 		{
 			name: "when defaults to normal", preset: "default",

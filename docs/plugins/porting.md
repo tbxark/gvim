@@ -2,9 +2,9 @@
 
 ## From gvim's old JavaScript plugins
 
-The goja/esbuild system is removed. A `.js` or `.ts` file in the plugin folder is **never run**: gvim
-shows one notice (`N JavaScript plugin(s) ignored (gvim plugins are Lua now): a.js, b.ts`) and a
-`legacy` row per file in **Plugin: Manager**. The old API was five functions:
+The goja/esbuild system is removed. A `.js` or `.ts` file in the plugin folder is **never run**:
+gvim's discovery reads only `.lua` files and plugin directories, so a leftover JavaScript file is
+simply ignored. The old API was five functions:
 
 | Old (JavaScript) | New (Lua) |
 |---|---|
@@ -190,43 +190,6 @@ plus a Path Completion prompt command that exercises it) and documents the gap; 
 would emit a prompt-changed event for the browser/dialog inputs, and route the plugin's suggestion
 list into those overlays, after which the port can drop its command and match Fresh exactly.
 
-### Compare files: group-lite splits (port residual)
-
-`compare_files` (port of Fresh's `compare_files.ts`) compares through group-lite splits of the
-current tab showing the two existing file buffers — there is no synthetic group tab, so the title
-segments are stored but not painted. The two files are opened as ordinary tabs when they were not
-open (gvim has no tabless view of a real file buffer); **Compare: Close** closes the ones it opened
-when they are unmodified, while a file that was already open keeps its tab. Line-ending-only hunks
-do not exist because gvim normalises a buffer's line endings (so `CompareHunk` omits `eol_only`, and there
-are no CRLF/missing-newline notes). Filler rows need the host's virtual-line painting
-(`gvim.has("decor_virtual_paint")`); without it the panes are level only where both sides have lines.
-Lines are paired positionally inside a hunk (Fresh's documented fallback), the command bodies ask
-for paths with `gvim.ui.input` instead of Fresh's file picker, and there is no `fresh --diff` launch
-hook or script-facing export (the native Compare view handles `--diff`). Enabling the plugin adds
-palette rows that duplicate the native Compare commands, which is why it is off by default.
-
-### Live agent sessions: native discovery, no orchestrator (port residual)
-
-Fresh's `live_sessions.ts` is an orchestrator-dock feeder: it polls Claude/Codex local and cloud
-listings, merges the answers, and calls the orchestrator's `setExternalSessions`; the orchestrator
-draws the rows and owns opening/attaching. gvim has no orchestrator, cloud sign-in reader, or
-process attach/resume, so the port is a picker over the native agent discovery that already exists
-(`internal/agentdiscover`): tmux sessions and local Claude Code/Codex transcript history. The app
-exposes one bounded, read-only service to plugins (`gvim.agent_sessions.discover`, through
-`pluginapi.Services.DiscoverAgents`); it applies the same spawn trust gate and runs in a Work, never
-on the update loop, and carries no process handle or attach/resume argv. The plugin polls every 60
-seconds while the picker is open, coalesces refreshes, cancels the timer and discards stale answers
-after close, and caps rows at 200 (the native scan's own caps apply). A close/reopen during an
-in-flight scan leaves the old single-flight scan running; the reopened picker marks a refresh
-pending, and the stale completion consumes it and starts the new scan immediately rather than
-leaving the new picker in Scanning until the poll tick. Enter opens a transcript file;
-tmux rows are informational (no attach). Shared daemon runtimes intentionally leave the service nil
-because their scanner/trust root is per workspace, and remote launches are unsupported; the plugin
-shows a real unsupported state instead of an empty scan. Not ported: cloud sessions, orchestrator
-groups, attach/resume/orchestration, vendor CLI polling, and the Settings/Menu toggles. Tests:
-`live_sessions_test.go` covers listing, transcript open, unsupported/empty states and polling;
-`agent_sessions_api_test.go` covers the report shape and unsupported service.
-
 ### Audit mode: read-only review (port residual)
 
 Fresh's `audit_mode.ts` is a magit-style review session: a buffer-group split with a file
@@ -283,61 +246,6 @@ reload with cursor/line-target preservation and no focus steal, picker+diff save
 unrelated-refresh and picker-close interleavings, visible set_content failure, overlapping/stale
 reload discard,
 the untracked synthetic diff, the clean and not-a-repository states, and the read-only command list.
-
-### Dev containers: read-only config inspection (port residual)
-
-Fresh's `devcontainer.ts` is a full devcontainer integration: it detects and parses the config,
-shows a status-bar summary and info panel, runs lifecycle commands, drives the `devcontainer` CLI
-for attach/rebuild/detach, streams container/build logs, forwards ports, reacts to failed attaches
-and offers attach prompts/scaffolding. gvim has no container runtime or attach surface, so the port
-keeps only the real read-only part: discovery in Fresh's three-location priority order, JSONC
-parsing with the bounded host parser, a read-only virtual info panel (image/build/compose, features,
-ports/attributes, container+remote env, lifecycle commands, users, mounts, host requirements), an
-Open Config command and a Refresh that re-detects and refreshes an open panel. Config reads go
-through `gvim.fs` (workspace authority on remote workspaces), are capped (1 MiB config; bounded
-features/ports/env/lifecycle/line counts) and run as plugin-task awaits, never Update. Invalid JSON,
-unreadable/oversized files and missing configs are reported as notices; the port never runs docker
-or the devcontainer CLI, never attaches/builds/runs lifecycle commands, forwards ports, streams
-logs, shows a status-bar summary, or claims the editor is in a container. OPEN: all execution and
-container state, status bar, attach/rebuild/logs/ports, prompts/scaffold, and Fresh's other modes.
-Tests: `devcontainer_test.go` covers JSONC + info sections, priority order, Open Config (with no
-process spawned), missing/invalid config, and the read-only command set.
-
-### Kubernetes workspace: config inspection only (port residual)
-
-Fresh's `k8s-workspace.ts` loads `.fresh/k8s.json`, resolves a target through one of four providers
-(`attach-existing`, `manifest`, `run`, `command`) by spawning kubectl or the user's command, checks
-`create pods/exec` RBAC, probes the in-pod environment and calls `attachRemoteAgent`; Disconnect
-runs the provider teardown. gvim has no kubectl/attachRemoteAgent/orchestrator integration, so the
-port is read-only configuration inspection only: JSONC parsing through the host parser, validation
-of `targets`/`defaultTarget`/provider shapes, and a virtual panel showing cluster context,
-namespace, manifest/run/command settings, workspace, vars and `confirmCreate`, plus an Open Config
-command and Refresh. It never executes kubectl or a provider command, creates pods, probes RBAC, or
-claims a connection. Reads use `gvim.fs` (workspace authority on remote workspaces), cap the config
-at 1 MiB and target/vars/error counts, and run in plugin-task awaits, never Update. Invalid JSON,
-read failures and shape errors are surfaced in notices and the panel. OPEN: connect/disconnect,
-all four provider resolutions, RBAC/env probes, pod/container selection, attachRemoteAgent and
-teardown. Tests: `k8s_workspace_test.go` covers valid JSONC targets/providers, validation errors and
-invalid JSON, Open Config with zero process runs, missing config, the read-only command set, and
-the inclusive 100/101 vars and 100/101 targets boundaries (the 101st entry is the error; exactly
-100 is accepted).
-
-### Package browser: metadata only (port residual)
-
-Fresh's `pkg.ts` is a git-based plugin/theme package manager: install from URLs or a curated
-registry, update/remove, version pinning, registry sync, lockfile generation and install, and
-package actions. gvim has no such package store or git/network surface, so the port is a read-only
-browser: `Package: Packages` reads `gvim.plugins.list()` (extended with manifest description,
-requires, file/dir and enabled metadata) and `gvim.theme.all()`, groups INSTALLED/BUNDLED plugins and
-THEMES, and Enter opens a virtual detail panel with name/type/version/status/source/path/description/
-dependencies. Themes are native gvim themes, not package-manager theme packages, and are labelled
-that way. The two metadata APIs are synchronous and cheap; the command schedules the list build as a
-plugin async task so Update never blocks, the list is bounded to 1000 rows and clipped strings, and
-no filesystem or process I/O is involved. OPEN: install/install-from-URL/update/remove,
-registry sync, lockfile, outdated/available registry rows, git clone/pull, and packaged
-theme/language/bundle management. Tests: `pkg_test.go` covers installed/bundled rows and alpha's
-manifest detail (description/requires/path/status), native theme rows/details, the read-only command
-list and zero process runs; `api_plugins_test.go` covers the extended list metadata.
 
 ### The shared Finder (port residual)
 
@@ -513,7 +421,7 @@ pre-existing defaults stay unchanged, and git_gutter's own merged navigation rem
 
 `git_gutter` keeps its own merged Next/Previous Change commands and `hunks` export: they predate this
 plugin, remain the default navigation while diff_nav is opt-in, and when both are enabled cause two
-palette command sets over the same targets (documented residual). Remaining gaps: the side-by-side Compare view (compare_files/--diff)
+palette command sets over the same targets (documented residual). Remaining gaps: the side-by-side Compare view (`--diff`)
 keeps its own Next/Previous Difference rather than feeding the cross-context navigation; large-file
 buffers can still only navigate sources that export something (a host that cannot answer offset_of
 falls back to line ordering; git_gutter keeps its own large-file notice); live_diff must be loaded to
@@ -639,196 +547,31 @@ header→source switches (single match, picker choice), no-match/unsupported/no-
 the project-setup buffer with a ready project and with missing compile/.clangd pieces (including buffer
 reuse and build-system hints), and open-config found/missing. The tests register openable targets on
 both the fake host and the fake OS.
-### Welcome screen: bounded reduced port with OPEN gaps (port residual)
 
-Fresh's `welcome_screen.ts` is a large startup surface, not a single command: a virtual buffer
-plus a page `WidgetPanel` (wordmark, doors, verbs, onboarding levels), a sidebar `Contents`
-outline, focus-follows-cursor and scroll-to-widget composition, and cards backed by the
-orchestrator and the dashboard. **Capability audit:** gvim's plugin API can create a read-only
-virtual buffer, set styled content and line targets, define a buffer mode/keymap, expose a palette
-command and read dashboard section metadata (`gvim.dashboard.sections()`). It cannot mount Fresh's
-page widget panel with `page`/`focusFollowsCursor`/`scrollToWidget` composition, render the
-onboarding document, contribute a live sidebar `Contents` outline for this page, or consume the
-dashboard's rendered built-ins/orchestrator exports. The gvim port (`plugin/bundled/plugins/welcome_screen/`,
-opt-in) therefore implements one bounded real core rather than claiming the full page:
+### Welcome screen: built into the TUI (native port)
 
-* wordmark, tagline, three doors (**Open a file**, **New buffer**, **Recent files**) that
-  dispatch the real native actions `open`, `new` and `quick_open_buffers`;
-* verbs (**Find file**, **Command palette**, **Settings**, **File explorer**, **Help**) that
-  dispatch real editor actions, not help text or stubs;
-* recent-file rows from this session's `after_file_open` events, deduplicated and capped at 8
-  (seeded from at most 64 open buffers) with path line targets; activation opens the path. Recent
-  basenames/details and dashboard titles use the dashboard's Cc/Cf/newline/invalid-UTF-8 display
-  sanitizer, and the target line is computed from the cleaned one-line row, so a hostile path
-  cannot inject a line or shift its click target;
-* dashboard rows from the registered external-section metadata only, capped at 8, with
-  `No dashboard sections registered.` when none; selecting a row opens the dashboard through its
-  public command. No dashboard built-in content, provider callback, git/disk/weather copy or
-  orchestrator data is read;
-* j/k or arrows move, Enter activates, q/Esc closes, r refreshes; action rows are line targets
-  registered by this plugin (the API rejects another plugin's action target). When the page is the
-  current buffer the selected row's caret is moved with reveal=true so j/k cannot activate an
-  off-screen row in a small viewport; a background page does not move the caret or steal focus.
-  This is caret-based row visibility, not Fresh's page focus-follows-cursor/scroll-to-widget
-  composition;
-* Fresh's startup toggle is represented by a footer action row and the **Welcome Screen: Toggle
-  Show on Startup** command. It writes the persistent plugin-state key `show_on_startup` through
-  `gvim.state`; `show_on_startup()` prefers that boolean over the `auto_open` setting, and
-  `auto_open()` reads it for future launches. The current page is not closed by the toggle and the
-  explicit Show command still forces it. The precedence matches Fresh's
-  `getGlobalState("showOnStartup")` over plugin config, and the rendering is a text row rather than
-  Fresh's checkbox/button widget (no footer copy/styling), but the **scope/durability is reduced**:
-  a direct launch uses the editor-wide per-plugin state file and the test covers Stop→new runtime;
-  a daemon workspace scopes state to that workspace (Fresh's is global across workspaces), and the
-  toggle cannot detect asynchronous write failures. `gvim.state.set` returns after the in-memory
-  update; disk errors are runtime warnings only, not a return value or status row. State writes are
-  debounced and flushed on Stop for the current namespace; a workspace switch queues the old
-  namespace's write, and a fast switch followed by exit may lose that queued write. The toggle is
-  therefore best-effort, not equivalent to Fresh's global/durable toggle.
+Fresh's `welcome_screen.ts` is a startup surface in a virtual buffer plus a page widget panel.
+gvim builds the page into the TUI frame instead (`internal/tui/frame/welcome.go`, painted by the
+model when a tab would otherwise be empty): the three-line wordmark, the `v0.1.0 · Go editor`
+subtitle, the doors **New File**, **Open File**, **Open Folder**, **Command Palette** and
+**Explorer** with the shortcuts of the active keymap, and up to five recent folders. Doors run the
+native actions; rows are mouse targets. The page shows when the editor has no tab open; with
+`editor.auto_create_empty_buffer_on_last_buffer_close` off it also stays after the last tab closes
+(the default leaves one untitled tab instead, see `docs/settings.md`). There is no plugin, no
+`auto_open`/`show_on_startup` toggle and no dashboard-section rows: the dashboard plugin is the
+start-screen surface for that. Not ported from Fresh's page: onboarding levels, chips/hover styling,
+page focus-follows-cursor/scroll-to-widget composition, the Contents sidebar and
+orchestrator/agent cards. Tests: `internal/tui/welcome_test.go` and
+`internal/app/welcome_session_test.go` cover placement, the doors/keys, recents, and the
+show-on-empty/close-last-tab rules.
 
-The page is opened automatically as a **background** tab once at startup when `auto_open` is true
-and never steals the foreground; it is not closed when files open and it does not reopen after the
-reader closes it. The plugin stays opt-in (`default_enabled: false`) while Fresh's page is
-enabled by default, so it adds no idle page or default palette row; `auto_open` only matters after
-the plugin is enabled. It starts no process, performs no network access or file writes, does no
-foreground IO and relies only on existing plugin APIs (no new trust path).
-
-**File-launch guard (landed).** Fresh's guard is
-`if (!force && editor.fileLaunch()) return` before creating the page: `fileLaunch()` is true for
-`fresh FILE…` (including `$EDITOR`/git editor) and `fresh --simple`, false for bare `fresh`,
-`fresh DIR`, a daemon and a session restore. gvim now keeps the `sessionPlan.fileLaunch` decision
-(files/`--simple`/`--diff`, with `--restore` and the skip-session config taken into account;
-stdin is not part of Fresh's `is_file_launch`, and gvim's stdin-still-sessionless rule stays
-separate). It passes it through `tui.Deps` to the model and exposes it read-only as
-`gvim.workspace.file_launch()`; `auto_open()` skips when it is true and the explicit
-**Welcome Screen: Show** command keeps `force`. The value is immutable and is never inferred from
-`gvim.buf.list()`: CLI files and restored-session tabs both exist before plugins load. A
-daemon-hosted/shared runtime routes the host call to the active workspace's model, so the flag is
-that workspace build's invocation property; `workspaceOptions` builds daemon workspaces without
-launch files (they restore their session), so they report false.
-
-**OPEN gaps (not implemented, not claimed):** Fresh's full onboarding ladder and section banners;
-page `WidgetPanel`, widgets/buttons/chips, hover styling and composed page width; sidebar
-`Contents` and focus/scroll interaction; recent-file persistence beyond the current session;
-workspace/agent/orchestrator cards and auto-attach; audit-mode content; dashboard built-in
-snapshots (only provider metadata is available to another plugin); and Fresh's localized long form.
-The docs/bundled table entry and the plugin header carry the same reduced-scope note.
-
-Tests: `plugin/bundled/welcome_screen_test.go` covers manifest/opt-in, page content and real door
-dispatch, action/path line targets, recent-row activation, close stickiness, background
-auto-open/no-focus-steal, `auto_open: false`, the persistent startup toggle (page row/command,
-next-startup suppression/re-enable, its precedence over `auto_open`, and cross-Stop/new-runtime
-state persistence for a direct launch), and dashboard metadata rows plus the empty fallback.
-It loads the plugin through the real loader; no plugin→host end-to-end UI composition test is
-claimed for the unavailable page widget panel.
-
-### Welcome: a demo plugin, with localized status only in English (port residual)
-
-Fresh's `welcome.ts` is a plugin-API demo, not a feature: five palette commands, two of which
-dispatch built-in actions (`show_help`, `save`) and three of which insert text at the cursor. The
-gvim port (`plugin/bundled/plugins/welcome/`, opt-in) keeps the same five commands and calls the
-same gvim actions/buffer APIs; the differences are:
-
-* `insertAtCursor` maps to `b:insert(b:cursor(), text)`, so it is a plain edit with one undo step
-  and no auto-indent/auto-close; a read-only buffer reports the API's insert error on the status
-  row;
-* the example comment is language-aware (`--`, `#`, or `//`) instead of Fresh's hard-coded `//`, so
-  it is valid in more than C-like files;
-* the clock is `os.date("%H:%M:%S")` (local 24-hour time) rather than the runtime's locale
-  `toLocaleTimeString`; Fresh's command and status catalogue was imported into welcome.i18n.json
-  across Fresh's locale set (round 85);
-* Fresh's only load-time feedback is `debug` output; gvim's port logs the same debug line and
-  deliberately sets no status row.
-
-Tests: `plugin/bundled/welcome_test.go` covers the five command titles/no bindings, the two
-built-in action dispatches, greeting and time insertion into an edited buffer with their status
-lines, the language-aware comment prefix, and the read-only insert failure. The plugin is
-`default_enabled: false` so the default palette and idle heap do not grow with demo rows.
-### Markdown source: a native rule set, ported as an opt-in plugin (port residual)
-
-Fresh's `markdown_source.ts` defines a `markdown-source` input mode, activates it when a Markdown
-buffer is shown in source view, and intercepts Enter/Tab/Shift+Tab. gvim implemented those rules
-directly in `editor/markdown.go` before any plugin existed (the built-in `insert_newline`,
-`insert_tab` and `dedent_selection` actions call them for `.md`/`.markdown`/`.mdx` files and the
-markdown/multimarkdown languages). The bundled plugin (`plugin/bundled/plugins/markdown_source/`,
-opt-in) is therefore the explicit Lua port, with these differences:
-
-* it does not define or auto-activate a `markdown-source` input mode. gvim's plugin API has no
-  source/compose view query (the native rule set notes gvim has no other view), and a buffer-local
-  mode would add a status label plus the `(Esc x3 leaves)` hint to every Markdown tab. Instead the
-  plugin registers three hidden normal-context commands with `enter`/`tab`/`shift+tab` bindings;
-  they check the active buffer and fall back to the built-in actions outside Markdown, with a
-  selection, with extra carets or while a plugin input mode is active (Fresh steps aside for its
-  input mode too);
-* the checks are content-based, so `.mdx` (which gvim has no language entry for) works by suffix,
-  matching the native rule set;
-* every successful rule is a direct plugin-buffer edit (`b:delete`/`b:replace`/`b:insert` plus a
-  cursor placement), one undo step per key, rather than a mode handler; failures (read-only buffer,
-  stale state) are status rows;
-* the four-space unit is hardcoded exactly like Fresh's `TAB_SIZE`; `tab_size`/`use_tabs` are not
-  consulted, tabs already in the indent are preserved and Shift+Tab removes four bytes;
-* the plugin is off by default because the native editor already provides the behaviour; enabling it
-  adds the key bindings and keeps the default palette/idle set unchanged.
-
-Tests: `plugin/bundled/markdown_source_test.go` covers the hidden key commands and bindings, the
-Enter table (bullets, ordered increment, checkbox, empty-item marker removal, indented items,
-non-list indent copy, cursor), the Tab table (bullet cycles, checkbox state, ordered/content
-fallback, cursor), Shift+Tab (reverse cycle, indent threshold, `dedent_selection` fallback),
-non-Markdown and selection fallbacks, and the read-only failure status.
-### Rust LSP: no LSP-menu, disable or register seam (port residual)
-
-Fresh's `rust-lsp.ts` is mainly an LSP error flow: it detects rust-analyzer failures, contributes
-copy-install/disable rows to the native LSP-Servers popup, clears them when the server recovers, and
-offers a Configure Mode command that registers a full or reduced-memory rust-analyzer and restarts
-the language. gvim's plugin API has no LSP-menu contribution, no language-disable call and no
-register/restart-for-language call, so the bundled port
-(`plugin/bundled/plugins/rust_lsp/`, opt-in) keeps only the install/help surface as explicit
-commands:
-
-* `Rust: Copy rustup Install Command` / `Rust: Copy brew Install Command` use `gvim.clipboard.set`
-  and report on the status row (`rustup component add rust-analyzer` and
-  `brew install rust-analyzer`, the commands Fresh's popup offers);
-* `Rust: Check rust-analyzer` runs `gvim.proc.run {"rust-analyzer", "--version"}` (5 s / 64 KiB
-  bounds) through the workspace authority and its trust gate; the plugin's `LookPath` is a documented
-  local-machine API and is not used for the presence decision. The check succeeds only when
-  `result.ok` is true (exit 0, no timeout/signal). A failed probe (including exec failure or
-  trust-gate refusal), a non-zero exit (first stderr line), a timeout and a signal each have their
-  own status; a failed probe says it could not run on the workspace, names the local-only LookPath
-  limitation, and never reports a remote workspace's binary as missing;
-* `Rust: Language Server Help` is a `gvim.ui.action_popup` with Fresh's install commands, the
-  native Rust LSP-selection rules (built-in Rust entry under the normal `lsp_enabled`/root-marker/
-  `auto_start` rules; an explicit `lsp.rust` entry or a disabled Rust language replaces/skips it;
-  the plugin toggle only controls the helper commands and never changes the native selection),
-  PATH/restart/toolchain troubleshooting notes and the upstream installation link, plus copy/check
-  rows and the native Start/Restart LSP Server and Show LSP Status actions.
-
-**Disable Rust LSP** is available as a help-popup action, not an LSP-menu contribution: it
-re-checks the active `.rs` buffer and `gvim.has("lsp")`, captures that buffer's path/language and
-dispatches the controlled native `lsp_disable_language_target` action. The TUI validates the same
-path/language before the root-level LSP-port mute; a popup/tab switch or missing LSP refuses without
-dispatch, and the plugin never claims the asynchronous result. This is Fresh's disable behavior
-without its contributed LSP-menu row/recovery flow.
-
-Not ported: automatic status on `lsp_server_error`, contributed "Plugin actions" rows in the
-native LSP-Servers popup, recovery detection via `lsp_status_clicked`, and Configure Mode
-(registering full/reduced-memory rust-analyzer, process limits, restart). gvim's
-`lsp_help` already puts a Rust install hint on the status row and opens its own help popup on an LSP
-status click, so this plugin deliberately does not add a second `lsp_server_error` handler. The plugin
-is `default_enabled: false`, registers no keys and no settings.
-
-Tests: `plugin/bundled/rust_lsp_test.go` covers the visible command table/no bindings, both copy
-commands (clipboard/status), the authority probe finding rust-analyzer despite a local LookPath
-miss, the non-authoritative probe-failure/trust-gate-refusal status (no missing claim), found+version,
-non-zero version exit, timeout/signal failures, exec failure, and the help popup's message/actions
-plus copy/check/native-restart dispatch, and the controlled Disable Rust LSP target/no-LSP/tab-switch
-refusals.
-### Deno LSP: native auto-selection plus a reduced helper plugin (port updated)
+### Deno LSP: native auto-selection (port landed)
 
 Fresh's `deno_lsp.ts` selects `deno lsp` for TypeScript and JavaScript when the active window's
 root holds `deno.json` or `deno.jsonc` and the Deno runtime is available; it remembers the
 configured entries as a baseline and restores them when the active window is not a Deno project,
 leaving a disabled language alone. That selection is now ported in **gvim's native core**
-(`internal/app/deno_lsp.go`, documented in `docs/lsp.md`), not in the bundled plugin. The core
+(`internal/app/deno_lsp.go`, documented in `docs/lsp.md`), not in a plugin. The core
 rules: it probes the workspace root gvim opened/switched to (not every nested per-file root); when
 that root has `deno.json`/`deno.jsonc`, one bounded authority check confirms the runtime
 (`sh -c 'command -v deno'` through `authority.OneShot()` under the workspace trust gate; remote
@@ -869,62 +612,7 @@ initialize failure) are still not transactional. The authority probe returns fal
 re-probes), requires a strictly clean exit 0 (timeout/signal/start-error/cancel results are
 rejected), and provider updates are serialized with explicit Start/Restart (in-flight old-language
 starts are waited out before replacement). Probe failures/timeouts/disconnects/trust denials select
-nothing. The bundled plugin's `default_enabled: false` toggle only controls its
-helper commands and does not control the native auto-selection.
-
-The bundled port (`plugin/bundled/plugins/deno_lsp/`, opt-in) keeps the user-visible helper
-surface instead:
-
-* `Deno: Check Project` reads the workspace root (`gvim.dirs.cwd()` when there is none), checks
-  `deno.json` and `deno.jsonc` through `gvim.fs.exists`/`gvim.path.join` and runs
-  `deno --version` through `gvim.proc` (5 s / 64 KiB bounds, workspace authority and trust gate).
-  It reports ready only for config plus `result.ok` (exit 0, no timeout/signal); config with a
-  non-zero exit, timeout or signal is a failed check and is never reported ready. It also reports
-  config with a probe start/trust-gate failure, runtime without a Deno project config, or neither.
-  The plugin's `LookPath` is local-only and is not used for the presence decision; a failed probe
-  says it could not run on the workspace, names that limitation and never claims the remote host
-  lacks deno, and points at the install command/help popup.
-* `Deno: Copy Install Command` always copies the official
-  `curl -fsSL https://deno.land/install.sh | sh`, because a local `brew` lookup says nothing about
-  a remote host; the help popup still offers explicit copy-brew for users who prefer it, and the
-  status row reports the copied value.
-* `Deno: Language Server Help` is a `gvim.ui.action_popup` with the install commands, the native
-  auto-selection rules and explicit-config opt-out, the `typescript`/`javascript` `"lsp"`
-  entries (`command: "deno"`, `args: ["lsp"]`, `auto_start: false`,
-  `root_markers: ["deno.json", "deno.jsonc"]`, `initialization_options: {"enable": true}`),
-  the workspace-authority probe note and local-only LookPath caveat, the native Start/Restart LSP
-  Server and Show LSP Status actions, and the upstream installation link. When the active buffer is
-  TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`) and `gvim.has("lsp")`, it also
-  offers `Disable Deno LSP for this language`: the action re-checks the active buffer/LSP feature
-  after the popup, captures that buffer's path/language and dispatches the controlled native
-  `lsp_disable_language_target` command; a tab switch to a non-target file or a missing LSP is a
-  notice with no dispatch, and the plugin never claims the async mute succeeded. The language gate
-  is strict: only `buf:language()` `typescript`/`javascript` is a Deno buffer (plus `.tsx` language
-  `tsx`); `.tsx` detected as `typescript` targets `tsx` per native `openLanguage`, and the
-  controlled target action accepts that post-open `tsx` language for a TypeScript-detected .tsx
-  buffer (TUI integration test), so the mute reaches the same server LSP opened. The extension set
-  is supported only when already recognized as `typescript`/`javascript`: `.ts`, `.tsx`, `.js`,
-  `.jsx`, `.mjs`, `.cjs`. Fresh's default languages map javascript only js/jsx/mjs and has no cjs
-  (gvim matches this); `.cjs` and any unmapped extension require a user `languages` entry before
-  the action appears. `.jsx` detected as react is not a JS language. Text/unrecognized languages
-  show `status.not_deno`, offer no action, and never pass `text` to the native mute. No LSP-menu row or native-selection configuration is added by this
-  helper.
-
-Not ported in the plugin: server selection/baseline restore (native core owns it now), the
-active-window root decision, and the Fresh debug log. The presence check is the authority-following
-`deno --version` probe (not the local-machine LookPath); the project-file existence checks and the
-configuration itself are workspace-facing. The plugin is `default_enabled: false`, registers no
-keys and no settings.
-
-Tests: `plugin/bundled/deno_lsp_test.go` covers the manifest/command table/no bindings, the
-always-curl installer and clipboard/status, an authority probe succeeding despite a local LookPath
-miss, ready only for a successful version check, non-zero exit/timeout/signal never ready, probe
-start/workspace-trust-gate failures (not a missing-binary claim), the probe-failure/ready/no-config
-states plus `deno.jsonc` and a custom workspace root, the help popup's native
-auto-selection/explicit-config/plugin-toggle text and actions plus copy/check/native-restart dispatch,
-and the controlled Disable action (recognized TS/JS extensions, target args,
-strict-language/tsx mapping, real default-config detection of unmapped `.cjs`,
-unrecognized-language/no-LSP refusals, no false success).
+nothing.
 
 ### Slang: native slang-synth external locations + helper plugin (native flow landed)
 

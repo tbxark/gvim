@@ -317,7 +317,11 @@ func TestViBigBuffer(t *testing.T) {
 		t.Fatalf("line 1 after :%%s = %q (log %v, notices %q)", got, v.h.LogText(viPlugin), v.notices())
 	}
 	v.keys("}")
-	if time.Since(start) > 5*time.Second {
+	limit := 5 * time.Second
+	if raceDetector {
+		limit *= 4
+	}
+	if time.Since(start) > limit {
 		t.Errorf("took %v", time.Since(start))
 	}
 }

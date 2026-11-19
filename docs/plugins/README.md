@@ -7,8 +7,8 @@ servers. gvim ships a few plugins of its own (see [bundled.md](bundled.md)), and
 rest in `~/.config/gvim/plugins/` or in a single `init.lua`.
 
 The earlier JavaScript plugin system is gone. `.js` and `.ts` files in the plugin folder are
-never run: gvim shows one notice that lists them and a `legacy` row in the plugin manager.
-The status row holds one line: when plugins also fail to load at startup, the notices are joined
+never run: discovery reads only `.lua` files and plugin directories, so a leftover file is ignored.
+When plugins fail to load at startup, the status row holds one line: the notices are joined
 (errors first) and cut at the width of the row. Each one is in **Show Warnings**, and the plugin
 log (**Plugin: Show Log**) has the full text.
 [porting.md](porting.md) maps the old API and Fresh's TypeScript API to the new one.
@@ -174,7 +174,7 @@ Plugins are configured in `config.json` (the same file as every other gvim setti
 
 | Palette command | What it does |
 |---|---|
-| **Plugin: Manager** | lists every plugin with its status (`loaded`, `disabled`, `failed`, `suspended`, `legacy`); Enter opens the actions of a row: enable, disable, reload, open source |
+| **Plugin: Manager** | lists every plugin with its status (`loaded`, `disabled`, `failed`, `suspended`); Enter opens the actions of a row: enable, disable, reload, open source |
 | **Plugin: Reload...** / **Plugin: Reload All** | read the source again and reload; a syntax error keeps the old version running |
 | **Plugin: Show Log** | the plugin log (2000 entries) in a read-only buffer, newest last |
 | **Load Plugin from Buffer** | loads the current buffer as a plugin named after the file (default `buffer`) |

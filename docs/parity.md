@@ -79,7 +79,7 @@ A status is backed by a package or file read, a test, or a doc that states the b
 | Display and view options | line numbers, wrap and wrap column, page view, virtual space, rulers, indent guides, whitespace marks, current line/column, occurrence highlight, scrollbars with markers, inline diagnostics, inlay hints, semantic tokens, animations, screensaver | **partial** | `document/virtualspace.go`, `document/block.go`, `internal/tui/editorpane/`, `internal/tui/virtual_space.go`, `docs/markdown.md` | animations, edge fade and screensaver are parsed but never drawn (section 4); virtual space is off under wrap, multi-caret and large-file mode, and the per-buffer toggle is bool-only |
 | Folding | indent folds, LSP `foldingRange`, outline/Contents folds, plugin namespace folds, fold-first toggle | **implemented** | `editor/fold.go`, `document/fold.go`, `editor/lsp_folds.go`, `editor/outline_folds.go`, `internal/tui/plugin_folds.go` | a source that changes ranges without an edit refreshes on the next edit or open; no fold command (as in Fresh) |
 | Splits, tabs, panes | vertical/horizontal splits, tab strip and drag, preview tabs, buffer groups, split labels, per-buffer window state, line targets, multiple windows | **partial** | `internal/tui/split.go`, `internal/tui/tabs.go`, `internal/tui/tab_drag.go`, `internal/tui/plugin_groups.go`, `internal/tui/plugin_seams.go`, `internal/tui/plugin_linetargets.go` | no synthetic group tab or per-panel views; "Move tab to other split" is a notice |
-| Compare files | `--diff A B`, editable side by side, copy/take change, next/prev difference, plugin compare API and the `compare_files` plugin | **implemented** (native view, plugin API, opt-in plugin port) | `internal/tui/compare.go`, `docs/compare.md`, `pluginapi/compare.go`, `internal/pluginhost/compare.go`, `plugin/bundled/plugins/compare_files/` | see "Plugin ports" in section 5 for the `compare_files` reductions |
+| Compare files | `--diff A B`, editable side by side, copy/take change, next/prev difference, plugin compare API | **implemented** (native view and plugin API) | `internal/tui/compare.go`, `docs/compare.md`, `pluginapi/compare.go`, `internal/pluginhost/compare.go` | none found |
 | Markdown | highlighting, source smart editing, page view (compose), tables, code-fence frames, dual view, heading conceal and scrollbar marks, page-view persistence, Contents section | **partial** | `syntax/markdown*.go`, `editor/markdown.go`, `internal/tui/editorpane/compose*.go`, `internal/tui/dual.go`, `internal/tui/sidebar/contents.go`, `session/session.go`, `docs/markdown.md` | exact byte anchors for the dual view (a line anchor is used), a native Markdown menu row, wrapped-cell selection paints only the primary row |
 
 ### 3.2 Project, chrome and settings
@@ -102,7 +102,7 @@ A status is backed by a package or file read, a test, or a doc that states the b
 |---|---|---|---|---|
 | LSP | diagnostics, hover, definition/references, completion (server and buffer words, snippets, auto-import, resolve, auto-popup, trigger characters), rename, code actions and file ops, signature help, format, folds, inlay hints, semantic tokens, diagnostics panel, multi-server routing, universal servers, status and mute, pull and workspace diagnostics, progress, process limits, remote LSP over SSH | **partial** | `lsp/`, `lsp/manager/`, `internal/lsphost/`, `internal/tui/lsp.go`, `internal/tui/diagpanel.go`, `internal/app/remote_lsp.go`, `docs/lsp.md` | no built-in universal server; `process_limits` is enforced on Linux only (cgroup v2, `ulimit -v` fallback), as in Fresh; workspace-edit application stops at the first refused file operation where Fresh continues (section 4); a remote server gets one restart attempt per reconnect |
 | Plugins runtime and host API | TypeScript on QuickJS, about 372 methods, overlays, virtual text, folds, line targets, explorer decorations, project environment, prompts, windows, composite buffers, buffer groups, terminals, authority, HTTP, widgets and dock panels, i18n, package manager | **partial**, runtime **different** | `plugin/`, `pluginapi/`, `internal/pluginhost/`, `internal/tui/plugin_*.go`, `internal/tui/pluginpanel/`, `docs/plugins/` | composite buffers (native substitution only), dock and fullscreen placement, independent per-panel views, `windowEmbed` live panes, markdown-in-text, package manager, generic HTTP (`gvim.http.get` is a bounded HTTPS GET), project-local plugins, `render_line`; plugin `fs.remove` is unsupported on remote workspaces |
-| Bundled plugins | 50 | **partial**: 37 ported or reduced, plus native equivalents where they genuinely replace one | `plugin/bundled/plugins/`, `plugin/bundled/lib/`, `docs/plugins/bundled.md`, `docs/plugins/porting.md` | see "Plugin ports" in section 5 |
+| Bundled plugins | 50 | **partial**: 27 ported or reduced, plus native equivalents where they genuinely replace one | `plugin/bundled/plugins/`, `plugin/bundled/lib/`, `docs/plugins/bundled.md`, `docs/plugins/porting.md` | see "Plugin ports" in section 5 |
 | Terminal | PTY panes and dock, tabs, live and scrollback modes, OSC 7 paths, launch and agent records, restart, selection and copy, mouse forwarding, drag-select, link hover, ConPTY, SSH terminal, OSC 52, live restore | **partial** | `internal/terminal/`, `internal/tui/dock/`, `internal/restore/terminal.go`, `config/terminal.go`, `docs/terminal.md` | see "Terminal" in section 5 |
 | Git surfaces | review diff, git log with live diff, blame, live diff baselines, diff chunk navigation, git grep, git explorer, git find file, statusbar branch, gutter marks | **partial** | `gitstate/`, `plugin/bundled/plugins/git_*`, `plugin/bundled/plugins/live_diff/`, `plugin/bundled/plugins/audit_mode/`, `plugin/bundled/plugins/merge_conflict/`, `internal/tui/git.go` | the review diff is read-only (no stage, discard, comments or export); no range or stash reviews; merge view is reduced to in-buffer resolution; blame has no history stepping beyond "previous revision" |
 | Session, restore, daemon | session restore/save, hot exit, crash recovery, split-layout persistence, `--restore`/`--no-restore`/`--simple`, daemon with attach/detach and open-file forwarding, workspace registry, multi-client attach, auto-attach | **partial** | `internal/app/session_plan.go`, `internal/app/session_open.go`, `internal/app/daemon_runtime.go`, `internal/app/workspace_host.go`, `internal/daemon/`, `internal/cli/`, `session/`, `internal/restore/`, `docs/architecture.md` | see "Daemon and workspaces" in section 5 |
@@ -118,7 +118,7 @@ A status is backed by a package or file read, a test, or a doc that states the b
 ## 4. Deliberately different (allowed)
 
 1. **Plugin runtime.** Lua 5.1 on gopher-lua, not TypeScript on QuickJS. `.js`/`.ts` plugins are
-   never run and are reported once (`docs/plugins/porting.md`). The language difference is
+   never run (discovery reads only `.lua` files; `docs/plugins/porting.md`). The language difference is
    allowed; missing capabilities are gaps.
 2. **TUI component style.** A custom cell grid on Bubble Tea v2 with the chrome described in
    `docs/ui.md`, not Fresh's retained-mode tree. Layout and paint differences are allowed;
@@ -163,12 +163,12 @@ A status is backed by a package or file read, a test, or a doc that states the b
     (`docs/internal/virtual-space-scoping.md`).
 15. **Markdown page view is a native inline transform**, not Fresh's plugin; the dual view is a
     derived per-pane view of one document, not a buffer group; Contents is a native sidebar
-    section with `contents.*` settings in the user layer. The `markdown_source` plugin pins a
+    section with `contents.*` settings in the user layer. The native Markdown list rules pin a
     four-space list indent.
-16. **Native equivalents of plugins**: the diagnostics sidebar panel, the theme editor and the
-    project-search panel are native. The plugin buffer groups are "group-lite": a layout of
-    real splits of the current tab. `compare_files` is a second, opt-in Compare surface and
-    duplicates the native palette rows when enabled.
+16. **Native equivalents of plugins**: the diagnostics sidebar panel, the theme editor,
+    the project-search panel, the welcome page and the compare view are native. The plugin buffer
+    groups are "group-lite": a layout of
+    real splits of the current tab.
 17. **Plugin action popups block the caller** until a choice is made; the plugin API level is 2.
 18. **Bundled-plugin defaults are memory-bound.** Nine plugins are on by default; the rest are
     opt-in so the default set stays inside the 8 MiB idle-heap gate.
@@ -232,9 +232,6 @@ was built. Where a reference doc has the detail it is named.
   cap; editor-scoped overlays are model-local; editor-scoped widget state is rebuilt, not cloned;
   a buffer-bearing mount cannot be editor-scoped; remote workspaces own their runtime.
 - Plugin ports (`docs/plugins/porting.md`, `docs/plugins/bundled.md`):
-  - `compare_files`: no synthetic group tab, no EOL-only hunks, fillers need the virtual-line
-    paint capability, positional pairing fallback, `ui.input` instead of Fresh's picker, no
-    `--diff` launch hook or script-facing export.
   - `path_complete`: no `prompt_changed` seam (exported engine plus one command).
   - `lsp_help`: payload carries no language, type or command; 16 install hints.
   - `live_diff`: plugin-side baselines, Myers diff with caps, large files refused.
@@ -251,13 +248,11 @@ was built. Where a reference doc has the detail it is named.
     reference events); the Finder library's search sources have no process-cancellation handle,
     embedded preview or utility-dock routing.
   - `diff_nav` (standalone, opt-in) and `git_gutter`'s merged navigation: targets are line-based
-    (Fresh sorts by byte position); no real-terminal verification of the Compare Files source.
-  - Language helpers `asm_lsp`, `csharp_support`, `clangd_support`, `rust_lsp`, `deno_lsp`,
-    `slang_lsp` are reduced opt-in ports (no server-specific notifications, floating panels, or
-    `--version` prechecks where Fresh has them); `live_sessions`, `audit_mode`, `devcontainer`,
-    `k8s_workspace`, `pkg` are read-only (no attach, stage/discard, lifecycle, install).
-  - Not ported: `orchestrator`, the `agent_*` family, the full `welcome_screen` page, and Fresh's
-    remaining language helpers.
+    (Fresh sorts by byte position); no real-terminal verification.
+  - Language helpers `asm_lsp`, `csharp_support`, `clangd_support`, `slang_lsp` are reduced
+    opt-in ports (no server-specific notifications, floating panels, or `--version` prechecks
+    where Fresh has them); `audit_mode` is read-only (no stage/discard).
+  - Not ported: `orchestrator`, the `agent_*` family, and Fresh's remaining language helpers.
 
 ### Terminal
 - Kitty keyboard: the child-side protocol answers presses only (no releases or event types;
@@ -335,10 +330,10 @@ Daemon mode itself is in scope.
 
 **Genuine native equivalences.** A native gvim feature stands in for a Fresh plugin only when it
 delivers the user-facing behaviour; its residual gaps stay in section 5. Accepted today: native
-Compare for `compare_files`, the native theme editor, the native project-search panel, and the
-native Markdown page view and dual view. `dashboard`, `live_grep` and `welcome_screen` are
-partial equivalents at best, and `git_gutter`'s merged navigation is not the standalone
-`diff_nav` plugin.
+Compare (in place of Fresh's `compare_files` plugin), the native theme editor, the native
+project-search panel, the native welcome page, and the native Markdown page view and dual view.
+`dashboard` and `live_grep` are partial equivalents at best, and `git_gutter`'s merged navigation
+is not the standalone `diff_nav` plugin.
 
 **gvim-only additions** (not parity requirements, but the fastest way to verify new work; keep
 them working): `gvim config show` and `config paths` (show is trust-gated), `gvim grammar`,

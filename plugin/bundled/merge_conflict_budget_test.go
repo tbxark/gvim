@@ -13,7 +13,9 @@ import (
 )
 
 // newMCRealClock is merge_conflict with the real clock and a plugin timeout, so an event
-// slice gets the 50 ms budget it has in the editor (min(50 ms, timeout)).
+// slice gets the budget it has in the editor (min(EventBudget, timeout), 50 ms by default).
+// The race detector makes the interpreter an order of magnitude slower, so the slice budget
+// is raised then; the tests that rely on a slice being killed scale their delay with it.
 func newMCRealClock(t *testing.T, text string, timeout time.Duration) *mcEnv {
 	t.Helper()
 	src, err := fs.ReadFile(bundled.FS, "plugins/merge_conflict/init.lua")
@@ -22,8 +24,12 @@ func newMCRealClock(t *testing.T, text string, timeout time.Duration) *mcEnv {
 	}
 	host := plugintest.NewFakeHost()
 	id := host.AddBuffer("/w/a.txt", text)
+	var eventBudget time.Duration
+	if raceDetector {
+		eventBudget = 500 * time.Millisecond
+	}
 	h := plugintest.New(t, plugintest.Files{"merge_conflict/init.lua": string(src)},
-		plugintest.Options{Host: host, Timeout: timeout, Now: time.Now})
+		plugintest.Options{Host: host, Timeout: timeout, EventBudget: eventBudget, Now: time.Now})
 	h.Start()
 	return &mcEnv{h: h, buf: id, b: host.Buffers[0]}
 }
@@ -42,8 +48,12 @@ func timedOut(e *mcEnv) []string {
 // killed in the middle of its scan, then makes the editor fast again.
 func killedScan(t *testing.T) *mcEnv {
 	t.Helper()
-	e := newMCRealClock(t, mcTwo, 100*time.Millisecond)
-	e.h.Host.LinesDelay = 150 * time.Millisecond
+	timeout, delay := 100*time.Millisecond, 150*time.Millisecond
+	if raceDetector {
+		timeout, delay = timeout*10, delay*10
+	}
+	e := newMCRealClock(t, mcTwo, timeout)
+	e.h.Host.LinesDelay = delay
 	e.open()
 	e.h.Host.LinesDelay = 0
 	if len(timedOut(e)) == 0 {

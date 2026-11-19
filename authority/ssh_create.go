@@ -103,20 +103,29 @@ if [ -n "$mode" ]; then chmod "$mode" "$p" || exit 2; fi
 `
 
 // sshCreateNewContentScript creates $1 exclusively and writes stdin through the same
-// noclobber descriptor: set -C makes exec 3> open O_EXCL-like, then cat >&3 uses fd 3, so
-// the path is never reopened after the claim. $2 is an optional octal mode (empty leaves
-// it to the remote umask). Exit 3 means something already exists at the path (the caller
-// maps it to fs.ErrExist); a write or chmod failure exits 2 and leaves this caller's
-// claimed file rather than deleting a path another process may have replaced.
+// noclobber descriptor: set -C makes the open O_EXCL-like, then cat uses fd 3, so the path
+// is never reopened after the claim. The claim runs in a subshell because a failed `exec`
+// is a POSIX special-builtin failure: bash continues after it, but dash (Ubuntu's /bin/sh)
+// exits the shell at once, before the script can report which case it was. In the subshell
+// a claim failure is the shell's own exit status, while a failed write (7) or chmod (8) is
+// ours, so the parent can tell them apart. $2 is an optional octal mode (empty leaves it to
+// the remote umask). Exit 3 means something already exists at the path (the caller maps it
+// to fs.ErrExist); a write or chmod failure exits 2 and leaves this caller's claimed file
+// rather than deleting a path another process may have replaced.
 const sshCreateNewContentScript = `p=$1
 mode=$2
-set -C
-if { exec 3>"$p"; } 2>/dev/null; then
-  if ! cat >&3; then exec 3>&-; echo "create $p: write failed" >&2; exit 2; fi
+(
+  set -C
+  exec 3>"$p" || exit 6
+  if ! cat >&3; then exec 3>&-; exit 7; fi
   exec 3>&-
-else
-  if [ -e "$p" ] || [ -L "$p" ]; then echo "create $p: already exists" >&2; exit 3; fi
-  echo "create $p: cannot create" >&2; exit 2
-fi
-if [ -n "$mode" ]; then chmod "$mode" "$p" || exit 2; fi
+  if [ -n "$mode" ]; then chmod "$mode" "$p" || exit 8; fi
+  exit 0
+) 2>/dev/null
+case $? in
+  0) exit 0;;
+  7|8) echo "create $p: write failed" >&2; exit 2;;
+esac
+if [ -e "$p" ] || [ -L "$p" ]; then echo "create $p: already exists" >&2; exit 3; fi
+echo "create $p: cannot create" >&2; exit 2
 `

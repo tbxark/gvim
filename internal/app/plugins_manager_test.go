@@ -19,14 +19,13 @@ const (
 )
 
 // newManagerSession starts a session whose user folder holds a working plugin, a broken
-// one, a plugin the configuration switches off, and a JavaScript file of the old host.
+// one and a plugin the configuration switches off.
 func newManagerSession(t *testing.T) *pluginSession {
 	t.Helper()
 	isolateConfig(t)
 	writeUserFile(t, "plugins/hello.lua", mgrHello)
 	writeUserFile(t, "plugins/broken.lua", mgrBroken)
 	writeUserFile(t, "plugins/locked_one.lua", mgrHello)
-	writeUserFile(t, "plugins/old.js", "gvim.registerCommand('x', 'X', function() {})\n")
 	writeUserFile(t, "config.json", `{"plugins": {"locked_one": {"enabled": false}}}`)
 	s := newSession(t, Options{})
 	s.openFile("a.txt", "world\n")
@@ -44,8 +43,8 @@ func (s *pluginSession) openManager() {
 }
 
 // TestPluginManagerShowsEveryKindOfRow checks the real runtime's rows as the manager draws
-// them: a loaded plugin with its counts, a failed one with its error, a plugin the
-// configuration locks off, and the ignored JavaScript file as a legacy row.
+// them: a loaded plugin with its counts, a failed one with its error, and a plugin the
+// configuration locks off.
 func TestPluginManagerShowsEveryKindOfRow(t *testing.T) {
 	s := newManagerSession(t)
 	s.openManager()
@@ -57,7 +56,6 @@ func TestPluginManagerShowsEveryKindOfRow(t *testing.T) {
 	}
 	rows := strings.Join(seen, "\n")
 	for _, want := range []string{
-		"legacy", "JavaScript plugins are not supported",
 		"locked: set in config", "kaboom", "(1 cmds, ",
 		"goto_with_selection", "bundled",
 	} {

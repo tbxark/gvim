@@ -18,11 +18,20 @@
     "ruler_bg": [60, 56, 54],
     "indentation_guide_fg": [80, 73, 69],
     "indent_rainbow_1": [131, 165, 152],
+    "indent_rainbow_2": [184, 187, 38],
+    "indent_rainbow_3": [250, 189, 47],
+    "indent_rainbow_4": [211, 134, 155],
+    "indent_rainbow_5": [142, 192, 124],
     "indent_rainbow_6": [254, 128, 25],
     "whitespace_indicator_fg": [102, 92, 84],
     "whitespace_indicator_selected_fg": [168, 153, 132],
     "bracket_match_fg": [254, 128, 25],
-    "bracket_rainbow_2": [184, 187, 38]
+    "bracket_rainbow_1": [131, 165, 152],
+    "bracket_rainbow_2": [184, 187, 38],
+    "bracket_rainbow_3": [250, 189, 47],
+    "bracket_rainbow_4": [211, 134, 155],
+    "bracket_rainbow_5": [142, 192, 124],
+    "bracket_rainbow_6": [254, 128, 25]
   },
   "ui": {
     "tab_active_fg": [40, 40, 40],

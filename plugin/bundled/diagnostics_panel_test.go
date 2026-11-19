@@ -43,8 +43,14 @@ func startDiagPanel(t *testing.T, host *plugintest.FakeHost) *plugintest.Harness
 	if host.Workspace().RootDir == "" {
 		host.Workspace().RootDir = "/w"
 	}
+	timeout := 500 * time.Millisecond
+	if raceDetector {
+		// The race detector makes the Lua interpreter an order of magnitude slower: the
+		// 1200-diagnostic tree of the cap test would time out while it is still building.
+		timeout *= 10
+	}
 	h := plugintest.New(t, diagPanelFiles(t), plugintest.Options{
-		Host: host, Timeout: 500 * time.Millisecond, EventBudget: 5 * time.Second,
+		Host: host, Timeout: timeout, EventBudget: 5 * time.Second,
 	})
 	h.Start()
 	return h

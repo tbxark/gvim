@@ -28,9 +28,9 @@ var requiredKeys = []string{
 
 func TestThemeKeyTableIsComplete(t *testing.T) {
 	keys := theme.Keys()
-	// 80 kept Fresh keys plus gvim's two accent extension keys.
-	if len(keys) != 82 {
-		t.Fatalf("Keys() has %d keys, want 80 kept Fresh keys plus the 2 gvim accent keys", len(keys))
+	// 89 kept Fresh keys plus gvim's two accent extension keys.
+	if len(keys) != 91 {
+		t.Fatalf("Keys() has %d keys, want 89 kept Fresh keys plus the 2 gvim accent keys", len(keys))
 	}
 	var required, fallback, optional int
 	for _, key := range keys {
@@ -46,8 +46,8 @@ func TestThemeKeyTableIsComplete(t *testing.T) {
 			t.Errorf("key %q has a bad name", key.Name())
 		}
 	}
-	if required != 38 || fallback != 43 || optional != 1 {
-		t.Errorf("kinds = %d required, %d fallback, %d optional; want 38/43/1", required, fallback, optional)
+	if required != 38 || fallback != 52 || optional != 1 {
+		t.Errorf("kinds = %d required, %d fallback, %d optional; want 38/52/1", required, fallback, optional)
 	}
 	if got := theme.RequiredKeys(); !slices.Equal(got, requiredKeys) {
 		t.Fatalf("RequiredKeys drifted from the ported list: got %v, want %v", got, requiredKeys)

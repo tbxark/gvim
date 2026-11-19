@@ -17,8 +17,17 @@
     "whitespace_indicator_fg": [68, 71, 90],
     "bracket_match_fg": [255, 121, 198],
     "indent_rainbow_1": [255, 121, 198],
+    "indent_rainbow_2": [241, 250, 140],
+    "indent_rainbow_3": [80, 250, 123],
+    "indent_rainbow_4": [139, 233, 253],
+    "indent_rainbow_5": [248, 248, 242],
     "indent_rainbow_6": [189, 147, 249],
+    "bracket_rainbow_1": [255, 121, 198],
     "bracket_rainbow_2": [241, 250, 140],
+    "bracket_rainbow_3": [80, 250, 123],
+    "bracket_rainbow_4": [139, 233, 253],
+    "bracket_rainbow_5": [248, 248, 242],
+    "bracket_rainbow_6": [189, 147, 249],
     "whitespace_indicator_selected_fg": [123, 126, 145]
   },
   "ui": {

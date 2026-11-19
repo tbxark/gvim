@@ -228,7 +228,6 @@ func TestBrokenPluginDoesNotBreakTheOthers(t *testing.T) {
 	writeUserFile(t, "plugins/hello.lua", helloPlugin)
 	writeUserFile(t, "plugins/broken_syntax.lua", "local x = = 1\n")
 	writeUserFile(t, "plugins/broken_run.lua", `error("boom at load")`)
-	writeUserFile(t, "plugins/old.js", "// a JavaScript plugin")
 	s := newSession(t, Options{})
 	s.waitStatus("hello", "loaded")
 	s.waitStatus("broken_syntax", "failed")
@@ -236,23 +235,21 @@ func TestBrokenPluginDoesNotBreakTheOthers(t *testing.T) {
 	s.waitStatus("tab_actions", "loaded")
 	s.settle(30 * time.Millisecond)
 
-	var broken, run, old bool
+	var broken, run bool
 	for _, e := range s.plug.Log() {
 		switch {
 		case strings.Contains(e.Msg, "broken_syntax"):
 			broken = true
 		case strings.Contains(e.Msg, "boom at load"):
 			run = true
-		case strings.Contains(e.Msg, "JavaScript plugin"):
-			old = true
 		}
 	}
-	if !broken || !run || !old {
-		t.Errorf("log lacks the problems (syntax %v, runtime %v, legacy js %v): %v", broken, run, old, s.plug.Log())
+	if !broken || !run {
+		t.Errorf("log lacks the problems (syntax %v, runtime %v): %v", broken, run, s.plug.Log())
 	}
 	// Every problem reached the warnings log of the ui, not only the last one.
 	s.runCommand("Show Warnings")
-	for _, want := range []string{"broken_syntax", "boom at load", "JavaScript plugin"} {
+	for _, want := range []string{"broken_syntax", "boom at load"} {
 		if !s.screenHas(want) {
 			t.Errorf("Show Warnings does not list %q", want)
 		}
@@ -418,11 +415,10 @@ end)
 }
 
 // TestStartupProblemsAreNotHiddenByEachOther: the first load error is on the status row
-// (the status row is cut, so it is the one that matters), and every problem, the note
-// about ignored JavaScript files too, is in the warnings log.
+// (the status row is cut, so it is the one that matters), and every problem is in the
+// warnings log.
 func TestStartupProblemsAreNotHiddenByEachOther(t *testing.T) {
 	isolateConfig(t)
-	writeUserFile(t, "plugins/old.js", "// a JavaScript plugin")
 	writeUserFile(t, "plugins/p1.lua", `error("e1")`)
 	writeUserFile(t, "plugins/p2.lua", `error("e2")`)
 	s := newSession(t, Options{})
@@ -433,7 +429,7 @@ func TestStartupProblemsAreNotHiddenByEachOther(t *testing.T) {
 		t.Errorf("status row and notice band %q lack the first error", row)
 	}
 	s.runCommand("Show Warnings")
-	for _, want := range []string{"plugin 'p1'", "plugin 'p2'", "JavaScript plugin(s) ignored"} {
+	for _, want := range []string{"plugin 'p1'", "plugin 'p2'"} {
 		if !s.screenHas(want) {
 			t.Errorf("Show Warnings does not list %q", want)
 		}

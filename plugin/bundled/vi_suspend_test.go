@@ -10,7 +10,13 @@ import (
 // "-- NORMAL --" would say that a mode is on that no longer takes keys.
 func TestViSuspendedDropsItsStatusAndMode(t *testing.T) {
 	t.Parallel()
-	v := newViTimeout(t, strings.Repeat("alpha beta gamma delta\n", 120000), 15*time.Millisecond)
+	budget := 15 * time.Millisecond
+	if raceDetector {
+		// The race detector makes the interpreter an order of magnitude slower: a shorter
+		// budget would time out the event that opens the prompt instead of the command.
+		budget *= 10
+	}
+	v := newViTimeout(t, strings.Repeat("alpha beta gamma delta\n", 120000), budget)
 	v.lenient = true // the command that runs out of time is an error of the plugin
 	if v.label() != "-- NORMAL --" {
 		t.Fatalf("label = %q before", v.label())

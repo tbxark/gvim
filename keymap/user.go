@@ -20,10 +20,10 @@ const (
 const UserContext = ContextNormal
 
 // WithUserBindings applies the keybindings of a config file to m and reports what it
-// could not apply. data is the "keybindings" array that Fresh documents:
-// [{"key": "s", "modifiers": ["ctrl"], "action": "save", "when": "normal"}].
-// An entry needs "action" and either "key" or "keys"; its when-clause defaults to
-// "normal".
+// could not apply. data is the "keybindings" value in either form: the array that
+// Fresh documents, [{"key": "s", "modifiers": ["ctrl"], "action": "save", "when": "normal"}],
+// or an object {"bindings": [...]}. An entry needs "action" and either "key" or "keys"; its
+// when-clause defaults to "normal".
 //
 // Nothing here stops startup. An entry with an unreadable key or modifier, an unknown
 // when-clause or an unknown field is skipped with a warning, as is one whose action
@@ -161,7 +161,7 @@ func knownUserAction(action string, known func(string) bool) bool {
 	return action == ActionNoop || action == ActionUnbind || strings.Contains(action, ".") || known(action)
 }
 
-// splitUserBindings reads the keybindings array into its entries.
+// splitUserBindings reads the two forms of the keybindings value into its entries.
 func splitUserBindings(data []byte) ([]json.RawMessage, error) {
 	data = bytes.TrimSpace(data)
 	var list []json.RawMessage
@@ -172,6 +172,16 @@ func splitUserBindings(data []byte) ([]json.RawMessage, error) {
 		if err := json.Unmarshal(data, &list); err != nil {
 			return nil, err
 		}
+	case data[0] == '{':
+		var obj struct {
+			Bindings []json.RawMessage `json:"bindings"`
+		}
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&obj); err != nil {
+			return nil, err
+		}
+		list = obj.Bindings
 	default:
 		return nil, fmt.Errorf("must be a list of bindings")
 	}

@@ -2,9 +2,9 @@ package theme
 
 // Ported from refs/fresh crates/fresh-editor-core/src/theme/types.rs, the
 // theme_color_keys! table, at Fresh commit 2338640274915a37786810bd8b59439c6633ba64,
-// trimmed to the 80 Fresh keys gvim references plus gvim's two ui.accent_* keys.
+// trimmed to the 89 Fresh keys gvim references plus gvim's two ui.accent_* keys.
 // keys_table_test.go checks the required set, the fallback chains and the
-// count (82); update both together.
+// count (91); update both together.
 
 // KeyKind is what a theme key names.
 type KeyKind int
@@ -45,6 +45,10 @@ var themeKeys = []Key{
 	{Section: "editor", Key: "inactive_cursor", Kind: FallbackKey, Fallback: "editor.line_number_fg"},
 	{Section: "editor", Key: "indentation_guide_fg", Kind: FallbackKey, Fallback: "editor.whitespace_indicator_fg"},
 	{Section: "editor", Key: "indent_rainbow_1", Kind: FallbackKey, Fallback: "editor.indentation_guide_fg"},
+	{Section: "editor", Key: "indent_rainbow_2", Kind: FallbackKey, Fallback: "editor.indentation_guide_fg"},
+	{Section: "editor", Key: "indent_rainbow_3", Kind: FallbackKey, Fallback: "editor.indentation_guide_fg"},
+	{Section: "editor", Key: "indent_rainbow_4", Kind: FallbackKey, Fallback: "editor.indentation_guide_fg"},
+	{Section: "editor", Key: "indent_rainbow_5", Kind: FallbackKey, Fallback: "editor.indentation_guide_fg"},
 	{Section: "editor", Key: "indent_rainbow_6", Kind: FallbackKey, Fallback: "editor.indentation_guide_fg"},
 	{Section: "editor", Key: "line_number_bg", Kind: RequiredKey, Fallback: ""},
 	{Section: "editor", Key: "line_number_fg", Kind: RequiredKey, Fallback: ""},
@@ -53,7 +57,12 @@ var themeKeys = []Key{
 	{Section: "editor", Key: "whitespace_indicator_fg", Kind: FallbackKey, Fallback: "editor.line_number_fg"},
 	{Section: "editor", Key: "whitespace_indicator_selected_fg", Kind: FallbackKey, Fallback: "editor.whitespace_indicator_fg"},
 	{Section: "editor", Key: "bracket_match_fg", Kind: FallbackKey, Fallback: "editor.cursor"},
+	{Section: "editor", Key: "bracket_rainbow_1", Kind: FallbackKey, Fallback: "syntax.keyword"},
 	{Section: "editor", Key: "bracket_rainbow_2", Kind: FallbackKey, Fallback: "syntax.function"},
+	{Section: "editor", Key: "bracket_rainbow_3", Kind: FallbackKey, Fallback: "syntax.type"},
+	{Section: "editor", Key: "bracket_rainbow_4", Kind: FallbackKey, Fallback: "syntax.string"},
+	{Section: "editor", Key: "bracket_rainbow_5", Kind: FallbackKey, Fallback: "syntax.constant"},
+	{Section: "editor", Key: "bracket_rainbow_6", Kind: FallbackKey, Fallback: "syntax.variable"},
 	// ui
 	{Section: "ui", Key: "file_status_added_fg", Kind: FallbackKey, Fallback: "diagnostic.info_fg"},
 	{Section: "ui", Key: "file_status_conflicted_fg", Kind: FallbackKey, Fallback: "diagnostic.error_fg"},
