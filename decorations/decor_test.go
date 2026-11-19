@@ -389,6 +389,9 @@ func TestRemoveInterleaved(t *testing.T) {
 // must not be quadratic (the removal loop of 20000 items took 0.58 s with a shifting
 // delete, which is past the command time budget).
 func TestRemoveManyIsFast(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	s := New()
 	ids := make([]int, MaxPerNamespace)
 	for i := range ids {

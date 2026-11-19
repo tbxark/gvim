@@ -138,6 +138,9 @@ func TestViHalfPageScroll(t *testing.T) {
 // seconds for 50 000 lines; the budget here is looser than the slice of the editor (500 ms)
 // so that a busy machine does not fail the test.
 func TestViBigRangesFitTheBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Parallel()
 	const n = 50000
 	text := numberedLines(n) + "\n"

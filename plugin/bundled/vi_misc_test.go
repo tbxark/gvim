@@ -301,6 +301,9 @@ func TestViCountsAreBounded(t *testing.T) {
 
 // TestViBigBuffer: commands on a big buffer stay inside the time budget.
 func TestViBigBuffer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Parallel()
 	v := newViTimeout(t, numberedLines(20000), 20*time.Second)
 	start := time.Now()

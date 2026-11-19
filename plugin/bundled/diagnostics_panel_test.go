@@ -583,6 +583,9 @@ func TestDiagnosticsPanelCollapsesDuplicates(t *testing.T) {
 // exactly MAX_ROWS rows, and a huge or multi-line message and a long source are cut (one
 // line, display-cell budgets), so no unbounded string reaches the panel.
 func TestDiagnosticsPanelRowsAreBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Parallel()
 	const total = 1200 // more than the plugin's 500-row cap
 	host, a, b := diagHost(t)

@@ -144,6 +144,9 @@ func TestRainbowDepthCountsBracketsAboveTheWindow(t *testing.T) {
 // The brackets of one very long line are marked in time that grows with the line, not
 // with its square: a minified file is one line of 200 KB.
 func TestRainbowBracketsOnOneHugeLineAreLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	d := newDoc(strings.Repeat("[1,2],", 40000))
 	d.cursor = buffer.Pos{Col: 3}
 	p := Pane{Doc: d, Styles: bracketStyles(), Opts: Options{HighlightBrackets: true, RainbowBrackets: true}}

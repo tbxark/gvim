@@ -234,6 +234,9 @@ func TestCompileErrorOfALongQueryIsShort(t *testing.T) {
 // of the line once, not once per match: counting from the line's start for every
 // match takes minutes on a minified file.
 func TestFindManyMatchesOnOneLine(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Parallel()
 	const pairs = 250_000
 	b := buffer.New(strings.Repeat("aé", pairs))

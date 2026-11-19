@@ -184,6 +184,9 @@ func TestStdlibPatterns(t *testing.T) {
 }
 
 func TestPatternCancelledByDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	// A pattern that fails slowly over a 16 MiB subject is cut by the slice deadline, long
 	// before its step budget, and the state stays usable. The subject is built while the
 	// plugin loads (the load budget is several times the command budget): building it inside
@@ -337,6 +340,9 @@ func TestStdlibCaps(t *testing.T) {
 }
 
 func TestStdlibSortCancel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	// sort_cancel: a 500k-element sort (the largest allowed) is cut by the deadline, and the
 	// state stays usable. The table is built with table.move doublings, in the main chunk,
 	// whose load budget is four times the command's: on a loaded machine the building must not

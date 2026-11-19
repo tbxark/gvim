@@ -218,6 +218,9 @@ func noBudgetProblems(t reporter, r *rig, plugin string) {
 // reads the buffer by lines, and every handler finishes inside the 50 ms event budget (the
 // runtime would otherwise log a timeout and count a strike).
 func TestGitGutterBigBufferStaysWithinBudgets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	attempts(t, 3, func(p *attempt) {
 		r, text := bigRig(t, rigOpts{plugins: []string{"git_gutter"}})
 		for _, name := range []string{"after_file_open", "buffer_activated", "after_file_save"} {
@@ -241,6 +244,9 @@ func TestGitGutterBigBufferStaysWithinBudgets(t *testing.T) {
 // A long run of changed lines is built over several turns of the scheduler, within the
 // time budget of a handler, and capped at 10 000 bars.
 func TestGitGutterLongRunOfChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	tests := []struct {
 		name     string
 		changed  int
@@ -285,6 +291,9 @@ func TestGitGutterLongRunOfChanges(t *testing.T) {
 // The inline blame of an edited 150 000-line buffer hands git the text of the buffer in one
 // piece and reads no lines but the last, within the budget of a handler.
 func TestGitBlameBigBufferStaysWithinBudgets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	attempts(t, 3, func(p *attempt) {
 		var sb strings.Builder
 		for i := 0; i < 150_000; i++ {

@@ -700,6 +700,9 @@ func TestEditorErrMapping(t *testing.T) {
 // costs about 0.4 ms per byte; a plugin may pass a name of megabytes. A name longer than any
 // lexer name is refused before the lookup, and the error does not echo it.
 func TestPluginLanguageNameIsBoundedBeforeLookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	pe, _, ids := pluginEditorOver(t, "x")
 	long := strings.Repeat("x", 200_000)
 	start := time.Now()
@@ -720,6 +723,9 @@ func TestPluginLanguageNameIsBoundedBeforeLookup(t *testing.T) {
 // 100 000 matches of one long line (a minified file) from the line start took seconds on the
 // UI goroutine, so the conversion walks the line once.
 func TestPluginEditorSearchOnOneLongLineIsLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	const n = 100_000
 	for _, unit := range []string{"a", "é"} {
 		pe, _, ids := pluginEditorOver(t, strings.Repeat(unit, n))

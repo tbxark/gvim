@@ -66,6 +66,9 @@ func TestConvertLuaToHost(t *testing.T) {
 }
 
 func TestConvertSizeLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	timeout := 5 * time.Second
 	if stdlibRace {
 		// Building the million-entry table takes the interpreter many times longer under

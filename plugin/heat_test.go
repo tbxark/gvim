@@ -64,6 +64,9 @@ end)`)
 
 // A timer that runs a lot of Lua each time (12 ms of every 10 ms wake-up in the manual clock) is found by the time it uses.
 func TestHeatBusyTimerIsThrottled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	h := start(t, `
 local gvim = require "gvim"
 T.command("burn", function()

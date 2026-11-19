@@ -34,6 +34,9 @@ func bigProject() []string {
 // the cap-sized list. The budget is generous, because the race detector slows
 // the scorer; the measured times are logged.
 func TestFileRankerFiltersFiftyThousandPaths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	const budget = 5 * time.Second
 	files := bigProject()
 	idx := fakeIndex{files: files}

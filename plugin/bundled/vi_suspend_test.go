@@ -9,6 +9,9 @@ import (
 // When vi is suspended after three strikes, its status item and its input mode go: a stale
 // "-- NORMAL --" would say that a mode is on that no longer takes keys.
 func TestViSuspendedDropsItsStatusAndMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Parallel()
 	budget := 15 * time.Millisecond
 	if raceDetector {

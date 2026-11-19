@@ -113,6 +113,9 @@ func TestMergeConflictRecoversFromAKilledScan(t *testing.T) {
 // slice that is fine: the test fails only when ten runs in a row time out, which a slice
 // that really costs more than the budget does every time.
 func TestMergeConflictScanFitsTheEventBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Parallel()
 	const conflicts = 2000 // 6000 markers in 10 000 lines
 	var sb strings.Builder

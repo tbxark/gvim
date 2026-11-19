@@ -110,6 +110,9 @@ end)`)
 
 // A repeating timer that keeps its callback busy is throttled the same way.
 func TestBusyTimerIsThrottled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	h := start(t, `
 local gvim = require "gvim"
 T.command("go", function()
@@ -150,6 +153,9 @@ T.command("go", function() gvim.timer.every(10, function() T.spy("tick") end) en
 // A timer whose callback keeps the core busy through the throttle is struck: the floor leaves
 // it 60 ms of work in every 240 ms, a quarter of a core, which is still hot.
 func TestBusyLoopIsStruck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	h := start(t, `
 local gvim = require "gvim"
 T.command("burn", function()

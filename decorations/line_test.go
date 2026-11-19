@@ -283,6 +283,9 @@ func cpuUnit() time.Duration {
 // is in units of cpuUnit (the window costs about 26 of them, a full sort about 280), so it
 // does not depend on how fast or how busy the machine is.
 func TestLineWindowCostIsBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	const limitUnits = 120
 	unit := cpuUnit()
 	s := New()

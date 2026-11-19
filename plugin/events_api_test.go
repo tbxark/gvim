@@ -772,6 +772,9 @@ gvim.on("post_command", function(e) T.spy("post", e.action) end)`)
 // shutdown handlers run in Stop, 200 ms for all plugins, min(50 ms,
 // remaining) each, without yielding.
 func TestShutdownHandlersRunInStopWithin200msTotal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	t.Run("a hanging handler does not stop the others", func(t *testing.T) {
 		h := startFiles(t, plugintest.Files{
 			"a.lua": gv + `gvim.on("shutdown", function() while true do end end)`,

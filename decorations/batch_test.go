@@ -204,6 +204,9 @@ func TestQueueFlushesAtTheCap(t *testing.T) {
 // time that is the edits times the items (1.3 s for 5000 and 48 000); in one pass it is a few
 // milliseconds. The bound is generous so a slow machine or the race detector passes.
 func TestBulkEditsCostOnePass(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock budget: the non-race budget job runs it")
+	}
 	s := New()
 	const perNS, edits = 16_000, 5000
 	for _, ns := range []string{"a", "b", "c"} {
