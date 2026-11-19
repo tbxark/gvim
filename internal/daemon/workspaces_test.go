@@ -307,10 +307,16 @@ func TestDiscoverReturnsCoTenants(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := newRegistry(t)
+	// LastFocusedAt has millisecond resolution: two creates on a fast or loaded machine can
+	// share one stamp, and discovery then breaks the tie by path instead of freshness. Pin the
+	// clock so the co-tenant is unambiguously the fresher one.
+	now := time.Unix(1_700_000_000, 0)
+	reg.now = func() time.Time { return now }
 	first, _, err := reg.Create(canonical, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	now = now.Add(time.Second)
 	second, _, err := reg.CreateCoTenant(canonical, "")
 	if err != nil {
 		t.Fatal(err)
