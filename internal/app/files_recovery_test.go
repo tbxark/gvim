@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/apptest"
@@ -95,13 +96,18 @@ func TestInterruptedExitKeepsTheRecoveryCopyWhenNoSessionIsSaved(t *testing.T) {
 	}
 }
 
+// crashedRunPID names the recovery directory of the run that crashed. It is above Linux's
+// highest pid_max (4194304), so no process can own it and recovery never mistakes it for a
+// run that is still editing; a small pid like 222 can be alive on a CI runner.
+const crashedRunPID = 1 << 30
+
 func TestRecoveredTextIsCopiedBeforeTheOldCopyGoes(t *testing.T) {
 	isolateConfig(t)
 	dir := t.TempDir()
 	b := filepath.Join(dir, "b.txt")
 	must(t, os.WriteFile(b, []byte("two\n"), 0o644))
 	sessDir := filepath.Join(dir, "session")
-	writeCrashCopy(t, b, "Z", filepath.Join(restore.RecoveryPath(sessDir), "222"))
+	writeCrashCopy(t, b, "Z", filepath.Join(restore.RecoveryPath(sessDir), strconv.Itoa(crashedRunPID)))
 
 	opts := projectRoot(t, "")
 	opts.SessionDir = sessDir

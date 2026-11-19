@@ -314,6 +314,10 @@ func TestGitBlameBigBufferStaysWithinBudgets(t *testing.T) {
 			p.Errorf("blame text = %q (log %v)", got, r.h.LogText(""))
 		}
 		runs := r.os.Runs()
+		if len(runs) == 0 {
+			p.Errorf("git was never run (log %v)", r.h.LogText(""))
+			return
+		}
 		if last := runs[len(runs)-1]; len(last.Opts.Stdin) != len(text)+1 || !slices.Contains(last.Argv, "--contents") {
 			p.Errorf("git was given %d bytes on stdin, argv %v", len(last.Opts.Stdin), last.Argv)
 		}

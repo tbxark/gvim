@@ -111,6 +111,11 @@ func startRig(t *testing.T, o rigOpts) *rig {
 	if timeout == 0 {
 		timeout = 200 * time.Millisecond
 	}
+	if raceDetector {
+		// The race detector makes the Lua interpreter an order of magnitude slower: the
+		// 50 ms budgets some scenarios set would kill a handler that is fine.
+		timeout *= 10
+	}
 	osImpl := hostos.OS(r.os)
 	if o.osWrap != nil {
 		osImpl = o.osWrap(r.os)

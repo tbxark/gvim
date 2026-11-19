@@ -66,10 +66,16 @@ func TestConvertLuaToHost(t *testing.T) {
 }
 
 func TestConvertSizeLimit(t *testing.T) {
+	timeout := 5 * time.Second
+	if stdlibRace {
+		// Building the million-entry table takes the interpreter many times longer under
+		// the race detector, so the load would time out before the limit is reached.
+		timeout = 60 * time.Second
+	}
 	h := start(t, `
 local t = {}
 for i = 1, 1000001 do t[i] = true end
-T.spy(T.to_host(t))`, plugintest.Options{Timeout: 5 * time.Second})
+T.spy(T.to_host(t))`, plugintest.Options{Timeout: timeout})
 	if got := spyText(h); !strings.Contains(got, "limit: table has more than 1000000 nodes") {
 		t.Fatalf("spy = %q log=%v", got, h.LogText(""))
 	}

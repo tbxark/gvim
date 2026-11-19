@@ -185,15 +185,22 @@ func TestStdlibPatterns(t *testing.T) {
 
 func TestPatternCancelledByDeadline(t *testing.T) {
 	// A pattern that fails slowly over a 16 MiB subject is cut by the slice deadline, long
-	// before its step budget, and the state stays usable.
+	// before its step budget, and the state stays usable. The subject is built while the
+	// plugin loads (the load budget is several times the command budget): building it inside
+	// the command would charge that setup to the deadline, which the race detector makes
+	// many times slower.
+	timeout := 60 * time.Millisecond
+	if stdlibRace {
+		timeout *= 10
+	}
 	h := start(t, `
+local s = ("x"):rep(16 * 1024 * 1024)
 T.command("go", function()
-  local s = ("x"):rep(16 * 1024 * 1024)
   T.spy("built")
   s:find("[%a_][%w_]*%(")
   T.spy("not reached")
 end)
-T.command("ok", function() T.spy("alive", ("abc"):find("b")) end)`, plugintest.Options{Timeout: 60 * time.Millisecond})
+T.command("ok", function() T.spy("alive", ("abc"):find("b")) end)`, plugintest.Options{Timeout: timeout})
 	d := timed(t, h)
 	if !noticeHas(h, "timed out") {
 		t.Fatalf("notices = %v log = %v", h.NoticeTexts(), h.LogText(""))
@@ -203,7 +210,7 @@ T.command("ok", function() T.spy("alive", ("abc"):find("b")) end)`, plugintest.O
 		limit = 5 * time.Second
 	}
 	if d > limit {
-		t.Fatalf("the find ran %v past a 60 ms budget", d)
+		t.Fatalf("the find ran %v past a %v budget", d, timeout)
 	}
 	if got := spyText(h); got != "built" {
 		t.Fatalf("spy = %q", got)
