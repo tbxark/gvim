@@ -280,7 +280,11 @@ func TestViSettings(t *testing.T) {
 // TestViCountsAreBounded: a huge count does not hang the editor or blow the budget.
 func TestViCountsAreBounded(t *testing.T) {
 	t.Parallel()
-	v := newVi(t, numberedLines(200))
+	budget := 2 * time.Second
+	if raceDetector {
+		budget *= 10
+	}
+	v := newViTimeout(t, numberedLines(200), budget)
 	start := time.Now()
 	v.keys("99999999j")
 	if got := v.cursor().Line; got != 199 {
