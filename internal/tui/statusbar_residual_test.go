@@ -68,9 +68,12 @@ func TestStatusFilename(t *testing.T) {
 		{"outside the root stays absolute", statusPathDoc{base, "/elsewhere/notes.txt", false, false}, "/elsewhere/notes.txt"},
 		{"no path keeps the document name", statusPathDoc{base, "", false, false}, "a.txt"},
 	}
+	// The subtests share one model and statusFilename memoizes its answer in
+	// m.statusName, so running them in parallel is a write/write race on that cache
+	// (the real per-frame caller is single-goroutine, so the cache is fine; the
+	// parallelism here is what isn't). Each case is one map lookup — keep them serial.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			if got := m.statusFilename(tt.doc); got != tt.want {
 				t.Errorf("statusFilename = %q, want %q", got, tt.want)
 			}
