@@ -58,7 +58,31 @@ func TestMemBombChild(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		peak <<= 10 // kilobytes elsewhere
 	}
+	// On Linux ru_maxrss of an exec'd child carries the parent's resident size at fork time
+	// (Go starts children with a vfork-style clone), so it reports the parent's peak, not the
+	// child's. VmHWM belongs to the mm that exec built and is the child's own.
+	if hwm, ok := vmHWM(); ok {
+		peak = hwm
+	}
 	fmt.Printf("PEAK_RSS=%d\n", peak)
+}
+
+func vmHWM() (int64, bool) {
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(line, "VmHWM:"); ok {
+			fields := strings.Fields(rest)
+			if len(fields) == 0 {
+				return 0, false
+			}
+			kb, err := strconv.ParseInt(fields[0], 10, 64)
+			return kb << 10, err == nil
+		}
+	}
+	return 0, false
 }
 
 func TestPeakMemoryUnderTheHeapGuard(t *testing.T) {

@@ -19,6 +19,14 @@ func newRegistry(t *testing.T) *Registry {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// LastFocusedAt has millisecond resolution and discovery breaks ties by path, so two
+	// registry writes in one millisecond would make "freshest" ambiguous. Every reading of the
+	// clock is a millisecond later than the last.
+	now := time.Unix(1_700_000_000, 0)
+	reg.now = func() time.Time {
+		now = now.Add(time.Millisecond)
+		return now
+	}
 	return reg
 }
 

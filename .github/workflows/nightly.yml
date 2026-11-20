@@ -1,0 +1,43 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    name: Race (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The race detector slows the Lua interpreter and the Go paths an order of magnitude,
+      # so wall-clock budgets are meaningless here; those tests skip under -short.
+      - name: Run the suite with the race detector
+        run: go test -race -short -p 2 ./...
+
+  budgets:
+    name: Budgets (ubuntu-latest, no race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The wall-clock budget tests (git_gutter/git_blame on big buffers, the vi slices,
+      # the plugin timeouts, the editor cost bounds) and the peak-memory test skip under
+      # -short; run the whole suite here without the race detector.
+      - name: Run the suite without the race detector
+        run: go test -p 2 ./...

@@ -47,34 +47,21 @@ jobs:
             exit 1
           fi
 
-      # The race detector slows the Lua interpreter and the Go paths an order of magnitude,
-      # so wall-clock budgets are meaningless here; those tests skip under -short and run in
-      # the budgets job below without the race detector. -p 2 matches the runner's cores.
-      - name: Run tests with race detector
-        run: go test -race -short -p 2 ./...
+      # -short skips the wall-clock budget and memory tests, which are not reliable on a shared
+      # runner; nightly.yml runs them. -p 2 matches the runner's cores.
+      - name: Run tests
+        run: go test -short -p 2 ./...
+
+      # Only the packages that run goroutines gate a pull request under the race detector; the
+      # pure-logic packages are covered by the nightly full race run.
+      - name: Run concurrent packages with race detector
+        run: |
+          go test -race -short -p 2 \
+            ./internal/app/... ./internal/daemon/... ./internal/tui/... \
+            ./internal/lsphost/... ./internal/filewatch/... ./internal/pluginhost/... \
+            ./internal/terminal/... ./lsp/... ./plugin/...
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
           version: latest
-
-  budgets:
-    name: Budgets (${{ matrix.os }}, no race)
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The wall-clock budget tests (git_gutter/git_blame on big buffers, the vi slices,
-      # the plugin timeouts, the editor cost bounds) skip under -short; run the whole suite
-      # here without the race detector, where the timings mean what the tests assert.
-      - name: Run the suite without the race detector
-        run: go test -p 2 ./...
