@@ -1277,8 +1277,7 @@ func runDaemonHost(ctx context.Context, srv *daemon.Server, opts Options) (err e
 	ws.activateForegroundPlugins()
 	host := tui.NewWorkspaceHost(ws.ForegroundModel())
 	ws.setHost(host)
-	go srv.Serve(ctx)
-	runErr := tui.RunWorkspaceHost(ctx, host, srv, srv, srv.OnProgram)
+	runErr := tui.RunWorkspaceHost(ctx, host, srv, srv, srv.ServeOnProgram(ctx))
 	if runErr != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim:", runErr)
 	}

@@ -1,9 +1,14 @@
 package tui
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -435,4 +440,128 @@ func TestCloseTabForWorkspaceExtractUpdatesSplitIndicesAndNilActiveSafe(t *testi
 		t.Fatalf("nil-active WorkspaceHost.Update = %v, %v", next, cmd)
 	}
 	_ = empty.View()
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestWorkspaceHostIgnoresZeroWindowSize(t *testing.T) {
+	t.Parallel()
+	m := statusViewModel(t, nil)
+	h := NewWorkspaceHost(m)
+	h.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if h.width != 100 || h.height != 30 || m.width != 100 || m.height != 30 {
+		t.Fatalf("initial size = host %dx%d model %dx%d, want 100x30", h.width, h.height, m.width, m.height)
+	}
+
+	cases := []struct {
+		name   string
+		msg    tea.Msg
+		keep   bool
+		wantW  int
+		wantH  int
+	}{
+		{name: "zero both", msg: tea.WindowSizeMsg{Width: 0, Height: 0}, keep: false, wantW: 100, wantH: 30},
+		{name: "zero width", msg: tea.WindowSizeMsg{Width: 0, Height: 30}, keep: false, wantW: 100, wantH: 30},
+		{name: "zero height", msg: tea.WindowSizeMsg{Width: 100, Height: 0}, keep: false, wantW: 100, wantH: 30},
+		{name: "negative width", msg: tea.WindowSizeMsg{Width: -1, Height: 30}, keep: false, wantW: 100, wantH: 30},
+		{name: "positive size", msg: tea.WindowSizeMsg{Width: 120, Height: 40}, keep: true, wantW: 120, wantH: 40},
+	}
+
+	if got := ignoreZeroWindowSize(h, struct{}{}); got == nil {
+		t.Fatal("ignoreZeroWindowSize dropped a non-size message")
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filtered := ignoreZeroWindowSize(h, tc.msg)
+			if tc.keep && filtered != tc.msg {
+				t.Fatalf("ignoreZeroWindowSize(%#v) = %#v, want passthrough", tc.msg, filtered)
+			}
+			if !tc.keep && filtered != nil {
+				t.Fatalf("ignoreZeroWindowSize(%#v) = %#v, want nil", tc.msg, filtered)
+			}
+			h.Update(tc.msg)
+			if h.width != tc.wantW || h.height != tc.wantH || m.width != tc.wantW || m.height != tc.wantH {
+				t.Fatalf("after %#v: host=%dx%d model=%dx%d, want %dx%d",
+					tc.msg, h.width, h.height, m.width, m.height, tc.wantW, tc.wantH)
+			}
+		})
+	}
+}
+
+func TestRunWorkspaceHostDropsZeroWindowSize(t *testing.T) {
+	t.Parallel()
+	m := New(Deps{Editor: newFakeEditor("ZERO-SIZE-GUARD"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+	h := NewWorkspaceHost(m)
+	inR, inW := io.Pipe()
+	out := &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	progCh := make(chan *tea.Program, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWorkspaceHost(ctx, h, inR, out, func(p *tea.Program) { progCh <- p })
+	}()
+
+	var p *tea.Program
+	select {
+	case p = <-progCh:
+	case <-time.After(5 * time.Second):
+		cancel()
+		_ = inW.Close()
+		_ = inR.Close()
+		t.Fatal("RunWorkspaceHost did not emit program")
+	}
+
+	t.Cleanup(func() {
+		cancel()
+		_ = inW.Close()
+		_ = inR.Close()
+		select {
+		case err := <-done:
+			_ = err
+		case <-time.After(5 * time.Second):
+		}
+	})
+
+	p.Send(tea.WindowSizeMsg{Width: 80, Height: 24})
+	p.Send(tea.WindowSizeMsg{Width: 0, Height: 0})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(out.String(), "ZERO-SIZE-GUARD") {
+		if time.Now().After(deadline) {
+			t.Fatalf("rendered output did not contain ZERO-SIZE-GUARD after 0x0 size message: %q", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	p.Quit()
+	cancel()
+	_ = inW.Close()
+	_ = inR.Close()
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunWorkspaceHost: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunWorkspaceHost did not exit after Quit")
+	}
+	if m.width != 80 || m.height != 24 {
+		t.Fatalf("model size = %dx%d, want 80x24", m.width, m.height)
+	}
 }

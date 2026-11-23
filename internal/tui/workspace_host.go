@@ -547,14 +547,26 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return h.deliverModelCmd(owned)
 	}
 	var cmd tea.Cmd
-	if size, ok := msg.(tea.WindowSizeMsg); ok && size.Width > 0 && size.Height > 0 {
-		// Ignore a 0x0 size: a daemon's program output is not a terminal, so a window
-		// size request can come back as 0x0 and must not erase the client's size.
-		h.mu.Lock()
-		h.width, h.height = size.Width, size.Height
-		h.mu.Unlock()
-	}
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		if msg.Width <= 0 || msg.Height <= 0 {
+			// Ignore a non-positive size: a daemon's program output is not a terminal,
+			// so a window size probe can arrive as 0x0 and must not erase the client's
+			// size in either the host or the active model.
+			break
+		}
+		h.mu.Lock()
+		h.width, h.height = msg.Width, msg.Height
+		h.mu.Unlock()
+		if active := h.Active(); active != nil {
+			next, c := active.Update(msg)
+			if m, ok := next.(*Model); ok {
+				h.mu.Lock()
+				h.active = m
+				h.mu.Unlock()
+			}
+			cmd = wrapModelCmd(active.WorkspaceOwner(), active, c)
+		}
 	case notifyMsg:
 		if active := h.Active(); active != nil {
 			active.Notify(msg.text)

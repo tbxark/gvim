@@ -186,6 +186,16 @@ func (s *Server) OnProgram(p *tea.Program) {
 	}
 }
 
+// ServeOnProgram returns an OnProgram callback that binds the hosted program and then
+// starts accepting clients in the background. Passing it to tui.RunWorkspaceHost
+// ensures both the host program and Server.prog are set before any client frame runs.
+func (s *Server) ServeOnProgram(ctx context.Context) func(*tea.Program) {
+	return func(p *tea.Program) {
+		s.OnProgram(p)
+		go s.Serve(ctx)
+	}
+}
+
 // Detach sends the detached frame to every attached client and drops them. The hosted
 // program is untouched; with no clients it keeps running and discards output.
 func (s *Server) Detach() {

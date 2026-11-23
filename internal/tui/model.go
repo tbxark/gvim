@@ -451,6 +451,17 @@ func RunWithInput(ctx context.Context, m *Model, in io.Reader) error {
 	return runProgram(ctx, m, os.Stdout, tea.WithInput(in))
 }
 
+// ignoreZeroWindowSize drops non-positive WindowSizeMsg before Bubble Tea's renderer
+// or WorkspaceHost sees it. A daemon's output is not a TTY, so Bubble Tea's startup
+// goroutine sends an initial WindowSizeMsg{0, 0} that can arrive after an attached
+// client's size and wipe both the renderer and the active model back to 0x0.
+func ignoreZeroWindowSize(_ tea.Model, msg tea.Msg) tea.Msg {
+	if size, ok := msg.(tea.WindowSizeMsg); ok && (size.Width <= 0 || size.Height <= 0) {
+		return nil
+	}
+	return msg
+}
+
 // RunWorkspaceHost runs a WorkspaceHost as the daemon's one program: the host swaps the
 // active workspace model on switch without restarting the program, and onProgram receives
 // the program (the daemon uses it for attach resizes and repaints).
@@ -460,7 +471,7 @@ func RunWorkspaceHost(ctx context.Context, h *WorkspaceHost, in io.Reader, out i
 		if onProgram != nil {
 			onProgram(p)
 		}
-	}, tea.WithInput(in), tea.WithOutput(out))
+	}, tea.WithInput(in), tea.WithOutput(out), tea.WithFilter(ignoreZeroWindowSize))
 	// The program is over: Do would block on a dead message queue.
 	h.stop()
 	return err
