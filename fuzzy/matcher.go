@@ -1,6 +1,9 @@
 package fuzzy
 
-import "unicode"
+import (
+	"slices"
+	"unicode"
+)
 
 // Matcher is a prepared query with reusable target scratch buffers, Fresh's
 // FuzzyMatcher. It gives the same result as Pattern for the same query and target,
@@ -24,33 +27,65 @@ func NewMatcher(query string) *Matcher {
 // any whitespace-separated term is not a subsequence of target. An ASCII target
 // that cannot contain an ASCII term is rejected without allocating or converting it.
 func (m *Matcher) Match(target string) (score int, indexes []int, ok bool) {
+	return m.match(target, true)
+}
+
+// MatchScore scores target against the prepared query identically to Match, but
+// skips allocating and copying the matched rune positions slice.
+func (m *Matcher) MatchScore(target string) (score int, ok bool) {
+	score, _, ok = m.match(target, false)
+	return score, ok
+}
+
+func (m *Matcher) match(target string, needPositions bool) (score int, indexes []int, ok bool) {
 	if m == nil {
 		return 0, nil, false
 	}
 	if len(m.terms) == 0 {
 		return 0, nil, true
 	}
-	if isASCIIString(target) {
+	ascii := isASCIIString(target)
+	if ascii {
 		for _, t := range m.terms {
 			if t.ascii == nil || !isSubsequenceASCIIString(t.ascii, target) {
 				return 0, nil, false
 			}
 		}
+		m.tc, m.tl = prepareTargetASCII(m.tc, m.tl, target)
+	} else {
+		// matchPreparedScratchOpts starts with the subsequence check for non-ASCII targets.
+		m.tc = appendRunes(m.tc[:0], target)
+		m.tl = appendLowerRunes(m.tl[:0], target)
 	}
-	// matchPrepared starts with the subsequence check, so a non-ASCII target is
-	// rejected there, after one conversion.
-	m.tc = appendRunes(m.tc[:0], target)
-	m.tl = appendLowerRunes(m.tl[:0], target)
-	r := matchPreparedScratch(m.terms, m.tc, m.tl, &m.dp)
+	r := matchPreparedScratchOpts(m.terms, m.tc, m.tl, &m.dp, ascii, needPositions)
 	if !r.matched {
 		return 0, nil, false
 	}
-	var out []int
-	if len(r.positions) > 0 {
-		out = make([]int, len(r.positions))
-		copy(out, r.positions)
+	if needPositions && len(r.positions) > 0 {
+		indexes = make([]int, len(r.positions))
+		copy(indexes, r.positions)
 	}
-	return r.score, out, true
+	return r.score, indexes, true
+}
+
+func prepareTargetASCII(tc, tl []rune, s string) ([]rune, []rune) {
+	n := len(s)
+	tc = slices.Grow(tc[:0], n)[:n]
+	tl = slices.Grow(tl[:0], n)[:n]
+	if n == 0 {
+		return tc, tl
+	}
+	_ = tc[n-1]
+	_ = tl[n-1]
+	for i := 0; i < n; i++ {
+		b := s[i]
+		tc[i] = rune(b)
+		if b >= 'A' && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		tl[i] = rune(b)
+	}
+	return tc, tl
 }
 
 // isSubsequenceASCIIString is isSubsequenceBytes over a string, without building a

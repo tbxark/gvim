@@ -156,7 +156,7 @@ func rank(files []string, query string, usage Usage, now time.Time, limit int) [
 	matcher := fuzzy.NewMatcher(query)
 	h := make(matchMinHeap, 0, min(limit, len(files)))
 	for idx, f := range files {
-		score, pos, ok := matcher.Match(f)
+		score, ok := matcher.MatchScore(f)
 		if !ok {
 			continue
 		}
@@ -164,9 +164,12 @@ func rank(files []string, query string, usage Usage, now time.Time, limit int) [
 		if strings.HasPrefix(f, query) {
 			score += prefixBoost
 		}
-		cand := rankedMatch{m: Match{Path: f, Score: score, Positions: pos}, idx: idx}
+		cand := rankedMatch{m: Match{Path: f, Score: score}, idx: idx}
 		if len(h) < limit {
-			heap.Push(&h, cand)
+			h = append(h, cand)
+			if len(h) == limit {
+				heap.Init(&h)
+			}
 		} else if betterMatch(cand, h[0]) {
 			h[0] = cand
 			heap.Fix(&h, 0)
@@ -186,7 +189,9 @@ func rank(files []string, query string, usage Usage, now time.Time, limit int) [
 	})
 	out := make([]Match, len(h))
 	for i := range h {
-		out[i] = h[i].m
+		m := h[i].m
+		_, m.Positions, _ = matcher.Match(m.Path)
+		out[i] = m
 	}
 	return out
 }

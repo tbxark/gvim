@@ -602,3 +602,70 @@ func TestDiscoverForegroundAndDormant(t *testing.T) {
 		t.Fatal("discovery did not register the foreground workspace")
 	}
 }
+
+func TestDiscoverPreservesProblemsAndNewForeground(t *testing.T) {
+	a, err := CanonicalRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := CanonicalRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newRegistry(t)
+	if _, _, err := reg.Create(b, "dormant"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a corrupt registry file to check Problems propagation from the single scan.
+	if err := os.WriteFile(filepath.Join(reg.Dir(), "corrupt.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := reg.Discover(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Problems) != 1 {
+		t.Fatalf("Problems = %v, want 1", d.Problems)
+	}
+	if d.Foreground.File.Root != a || d.Foreground.Path == "" {
+		t.Fatalf("Foreground = %+v, want root %q with Path", d.Foreground, a)
+	}
+	if _, err := os.Stat(d.Foreground.Path); err != nil {
+		t.Fatalf("foreground file missing: %v", err)
+	}
+	if len(d.Dormant) != 1 || d.Dormant[0].File.Root != b {
+		t.Fatalf("Dormant = %+v, want [%q]", d.Dormant, b)
+	}
+}
+
+func BenchmarkRegistryDiscover(b *testing.B) {
+	reg, err := OpenRegistry(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	fgRoot, err := CanonicalRoot(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, _, err := reg.Create(fgRoot, "fg"); err != nil {
+		b.Fatal(err)
+	}
+	for range 40 {
+		r, err := CanonicalRoot(b.TempDir())
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, _, err := reg.Create(r, ""); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		d, err := reg.Discover(fgRoot)
+		if err != nil || len(d.Dormant) != 40 {
+			b.Fatalf("Discover = %d dormant, err=%v", len(d.Dormant), err)
+		}
+	}
+}

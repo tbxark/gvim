@@ -49,6 +49,31 @@ func TestDecodeSemanticTokens(t *testing.T) {
 	if got := decodeSemanticTokens(data, legend, lines, 1, 1); len(got) != 2 || got[0].Line != 1 {
 		t.Fatalf("visible lines = %+v, want line 1 only", got)
 	}
+
+	// Multiple tokens on the same non-ASCII line reuse cached line text, and tokens
+	// past lastLine stop decoding early.
+	multiLines := newTextLines("a\né🙂x y\nend\ntail")
+	multiData := []uint32{
+		0, 0, 1, 0, 0, // line 0
+		1, 0, 1, 0, 0, // line 1: "é" (UTF-16 0..1)
+		0, 1, 2, 1, 0, // line 1: "🙂" (UTF-16 1..3)
+		0, 2, 1, 2, 0, // line 1: "x" (UTF-16 3..4)
+		1, 0, 3, 0, 0, // line 2
+		1, 0, 4, 99, 0, // line 3: invalid token type past lastLine
+	}
+	gotMulti := decodeSemanticTokens(multiData, legend, multiLines, 1, 2)
+	wantMulti := []tui.SemanticToken{
+		{Line: 1, Start: 0, End: 1, Type: "keyword"},
+		{Line: 1, Start: 1, End: 2, Type: "function"},
+		{Line: 1, Start: 2, End: 3, Type: "variable"},
+		{Line: 2, Start: 0, End: 3, Type: "keyword"},
+	}
+	if !slices.EqualFunc(gotMulti, wantMulti, semanticTokenEqual) {
+		t.Fatalf("multi-line tokens = %+v, want %+v", gotMulti, wantMulti)
+	}
+	if empty := decodeSemanticTokens(multiData, legend, multiLines, 0, -1); len(empty) != 0 {
+		t.Fatalf("negative lastLine tokens = %+v, want empty", empty)
+	}
 }
 
 // semanticTokenEqual compares two tokens, modifiers included.
@@ -184,6 +209,21 @@ func TestCapWorkspaceDiagnostics(t *testing.T) {
 	}
 	if capped[0].Severity != protocol.DiagnosticSeverityError {
 		t.Fatal("the cap dropped the most severe diagnostic")
+	}
+
+	// Distinct messages at the same position and severity preserve first-seen order.
+	tied := []protocol.Diagnostic{
+		{Range: rng(1), Severity: protocol.DiagnosticSeverityWarning, Message: protocol.String("first")},
+		{Range: rng(1), Severity: protocol.DiagnosticSeverityWarning, Message: protocol.String("second")},
+		{Range: rng(1), Severity: protocol.DiagnosticSeverityWarning, Message: protocol.String("first")},
+		{Range: rng(1), Severity: protocol.DiagnosticSeverityWarning, Message: protocol.String("third")},
+	}
+	gotTied := capWorkspaceDiagnostics(tied)
+	if len(gotTied) != 3 ||
+		diagnosticText(gotTied[0].Message) != "first" ||
+		diagnosticText(gotTied[1].Message) != "second" ||
+		diagnosticText(gotTied[2].Message) != "third" {
+		t.Fatalf("tied order = %+v, want first, second, third", gotTied)
 	}
 }
 

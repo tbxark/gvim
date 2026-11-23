@@ -1,6 +1,7 @@
 package editorpane
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -31,24 +32,34 @@ func (f *frame) setFolds(doc Document) {
 		return
 	}
 	var ranges []fold.Range
-	collapsed := map[int]bool{}
+	var collapsed map[int]bool
 	if fl, ok := doc.(Folder); ok {
 		ranges = fl.Folds(f.tab)
 		for _, r := range ranges {
 			if fl.Folded(r.Start) {
+				if collapsed == nil {
+					collapsed = make(map[int]bool)
+				}
 				collapsed[r.Start] = true
 			}
 		}
 	}
 	// Plugin folding ranges merge with the document's (ids tie: the document's win).
 	var pluginPlaceholders map[int]string
+	hasExtra := false
 	if f.pluginFolds != nil {
 		extra, extraCollapsed, placeholder := f.pluginFolds()
-		// Clip: the document's slice is shared, and the sort below must not reorder it.
-		ranges = append(slices.Clip(ranges), extra...)
+		if len(extra) > 0 {
+			// Clip: the document's slice is shared, and the sort below must not reorder it.
+			ranges = append(slices.Clip(ranges), extra...)
+			hasExtra = true
+		}
 		for start, c := range extraCollapsed {
-			if _, ok := collapsed[start]; !ok {
-				collapsed[start] = c
+			if c {
+				if collapsed == nil {
+					collapsed = make(map[int]bool)
+				}
+				collapsed[start] = true
 			}
 		}
 		f.foldPlaceholder = placeholder
@@ -57,17 +68,29 @@ func (f *frame) setFolds(doc Document) {
 	if len(ranges) == 0 {
 		return
 	}
-	slices.SortStableFunc(ranges, func(a, b fold.Range) int {
-		if a.Start != b.Start {
-			return a.Start - b.Start
-		}
-		return a.End - b.End
-	})
-	f.folds = make(map[int]bool, len(ranges))
+	if hasExtra {
+		slices.SortStableFunc(ranges, func(a, b fold.Range) int {
+			if a.Start != b.Start {
+				return a.Start - b.Start
+			}
+			return a.End - b.End
+		})
+	}
+	f.foldRanges = ranges
+	if len(collapsed) == 0 {
+		return
+	}
+	var activeCollapsed map[int]bool
 	copiedPlaceholder := false
 	for _, r := range ranges {
-		f.folds[r.Start] = collapsed[r.Start]
-		if collapsed[r.Start] && f.opts.FoldLineCount && pluginPlaceholders[r.Start] == "" {
+		if !collapsed[r.Start] {
+			continue
+		}
+		if activeCollapsed == nil {
+			activeCollapsed = make(map[int]bool)
+		}
+		activeCollapsed[r.Start] = true
+		if f.opts.FoldLineCount && pluginPlaceholders[r.Start] == "" {
 			if !copiedPlaceholder {
 				f.foldPlaceholder = maps.Clone(f.foldPlaceholder)
 				if f.foldPlaceholder == nil {
@@ -78,16 +101,29 @@ func (f *frame) setFolds(doc Document) {
 			f.foldPlaceholder[r.Start] = fmt.Sprintf(" ⋯ %d lines", max(r.End-r.Start, 1))
 		}
 	}
-	if len(collapsed) > 0 {
-		f.hidden = fold.Hidden(f.lines, ranges, collapsed)
+	if len(activeCollapsed) > 0 {
+		f.folds = activeCollapsed
+		f.hidden = fold.Hidden(f.lines, ranges, activeCollapsed)
 	}
+}
+
+func (f frame) hasFold(i int) bool {
+	if len(f.foldRanges) == 0 {
+		return false
+	}
+	_, ok := slices.BinarySearchFunc(f.foldRanges, i, func(r fold.Range, line int) int {
+		return cmp.Compare(r.Start, line)
+	})
+	return ok
 }
 
 // foldable reports whether a click may toggle the fold that starts at line i: it is
 // collapsed, which stays possible with the markers hidden, or its marker shows.
 func (f frame) foldable(i int) bool {
-	collapsed, ok := f.folds[i]
-	return ok && (collapsed || !f.noFolds)
+	if !f.hasFold(i) {
+		return false
+	}
+	return f.folds[i] || !f.noFolds
 }
 
 // visibleCount is the number of lines that are not hidden by a fold.
@@ -137,15 +173,12 @@ func (f frame) prevLine(i int) int {
 // after the row's text, so no text cell is overwritten. When the text fills the row
 // there is no such cell before the scrollbar column, and no marker is drawn.
 func (f frame) paintFoldMarker(g *grid.Grid, i, y, end int) {
-	if f.pageOn {
+	if f.pageOn || f.noFolds || !f.hasFold(i) {
 		// The page view hides the gutter and the fold markers; the collapsed fold
 		// placeholder still shows in the text.
 		return
 	}
-	collapsed, ok := f.folds[i]
-	if !ok || f.noFolds {
-		return
-	}
+	collapsed := f.folds[i]
 	mark := f.icons.Glyph(icons.FoldOpen)
 	if collapsed {
 		mark = f.icons.Glyph(icons.FoldClosed)

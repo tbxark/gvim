@@ -3,6 +3,7 @@ package syntax
 import (
 	"cmp"
 	"slices"
+	"unicode/utf8"
 )
 
 // InlineMarkerKind is the kind of delimiter an InlineMarker describes.
@@ -49,22 +50,31 @@ func MarkdownInlineMarkers(line string) []InlineMarker {
 		return cmp.Compare(a.end, b.end)
 	})
 	out := make([]InlineMarker, len(p.marks))
+	prevByte, prevRune := 0, 0
 	for i, m := range p.marks {
+		startByte := min(max(m.start, 0), len(line))
+		endByte := min(max(m.end, 0), len(line))
+		if startByte < prevByte {
+			prevByte, prevRune = 0, 0
+		}
+		prevRune += utf8.RuneCountInString(line[prevByte:startByte])
+		prevByte = startByte
+		startCol := prevRune
+		endCol := startCol
+		if endByte > startByte {
+			endCol = startCol + utf8.RuneCountInString(line[startByte:endByte])
+			if i+1 == len(p.marks) || endByte <= min(max(p.marks[i+1].start, 0), len(line)) {
+				prevByte = endByte
+				prevRune = endCol
+			}
+		}
 		out[i] = InlineMarker{
-			Start: runeColumn(line, m.start),
-			End:   runeColumn(line, m.end),
-			Kind:  InlineMarkerKind(m.kind),
+			Start: startCol,
+			End:   endCol,
+			Kind:  m.kind,
 		}
 	}
 	return out
-}
-
-// runeColumn converts a byte offset of s to a rune column.
-func runeColumn(s string, byteOffset int) int {
-	if byteOffset <= 0 {
-		return 0
-	}
-	return len([]rune(s[:min(byteOffset, len(s))]))
 }
 
 // mark is a recorded delimiter run, in bytes of the line.

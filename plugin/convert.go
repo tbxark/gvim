@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	lua "github.com/yuin/gopher-lua"
@@ -91,12 +92,141 @@ func (p *plugin) toLua(v any) lua.LValue {
 		t.RawSetString("super", lua.LBool(x.Super))
 		return t
 	case pluginapi.Hunk:
+		return p.hunkTable(x)
+	case []pluginapi.Hunk:
+		t := p.L.CreateTable(len(x), 0)
+		for _, h := range x {
+			t.Append(p.hunkTable(h))
+		}
+		return t
+	case pluginapi.ChangeRec:
+		return p.changeRecTable(x)
+	case []pluginapi.ChangeRec:
+		return p.changeRecsTable(x)
+	case pluginapi.Changes:
+		t := p.L.CreateTable(0, 4)
+		t.RawSetString("version", lua.LString(x.Version.String()))
+		t.RawSetString("edits", p.changeRecsTable(x.Edits))
+		t.RawSetString("undo", lua.LBool(x.Undo))
+		t.RawSetString("overflow", lua.LBool(x.Overflow))
+		return t
+	case pluginapi.Edit:
+		return p.editTable(x)
+	case []pluginapi.Edit:
+		t := p.L.CreateTable(len(x), 0)
+		for _, e := range x {
+			t.Append(p.editTable(e))
+		}
+		return t
+	case pluginapi.Caret:
+		return p.caretTable(x)
+	case []pluginapi.Caret:
+		t := p.L.CreateTable(len(x), 0)
+		for _, c := range x {
+			t.Append(p.caretTable(c))
+		}
+		return t
+	case pluginapi.GrepHit:
+		return p.grepHitTable(x)
+	case []pluginapi.GrepHit:
+		t := p.L.CreateTable(len(x), 0)
+		for _, h := range x {
+			t.Append(p.grepHitTable(h))
+		}
+		return t
+	case pluginapi.BufferInfo:
+		return p.bufferInfoTable(x)
+	case []pluginapi.BufferInfo:
+		t := p.L.CreateTable(len(x), 0)
+		for _, b := range x {
+			t.Append(p.bufferInfoTable(b))
+		}
+		return t
+	case pluginapi.WindowInfo:
+		return p.windowInfoTable(x)
+	case []pluginapi.WindowInfo:
+		t := p.L.CreateTable(len(x), 0)
+		for _, w := range x {
+			t.Append(p.windowInfoTable(w))
+		}
+		return t
+	case pluginapi.VisibleRow:
+		return p.visibleRowTable(x)
+	case []pluginapi.VisibleRow:
+		t := p.L.CreateTable(len(x), 0)
+		for _, r := range x {
+			t.Append(p.visibleRowTable(r))
+		}
+		return t
+	case pluginapi.DiagnosticInfo:
+		return p.diagnosticInfoTable(x)
+	case []pluginapi.DiagnosticInfo:
+		return p.diagnosticInfosTable(x)
+	case pluginapi.FileDiagnostics:
+		return p.fileDiagnosticsTable(x)
+	case []pluginapi.FileDiagnostics:
+		t := p.L.CreateTable(len(x), 0)
+		for _, fd := range x {
+			t.Append(p.fileDiagnosticsTable(fd))
+		}
+		return t
+	case pluginapi.AgentSession:
+		return p.agentSessionTable(x)
+	case []pluginapi.AgentSession:
+		return p.agentSessionsTable(x)
+	case pluginapi.AgentReport:
 		t := p.L.CreateTable(0, 5)
+		t.RawSetString("supported", lua.LBool(x.Supported))
+		t.RawSetString("installed", lua.LBool(x.Installed))
+		t.RawSetString("truncated", lua.LBool(x.Truncated))
+		t.RawSetString("sessions", p.agentSessionsTable(x.Sessions))
+		t.RawSetString("problems", p.stringsTable(x.Problems))
+		return t
+	case pluginapi.WidgetEvent:
+		t := p.L.CreateTable(0, 15)
+		t.RawSetString("panel", lua.LNumber(x.Panel))
+		t.RawSetString("event", lua.LString(x.Event))
+		t.RawSetString("widget", lua.LString(x.Widget))
+		t.RawSetString("index", lua.LNumber(x.Index))
+		t.RawSetString("checked", lua.LBool(x.Checked))
+		t.RawSetString("value", lua.LString(x.Value))
+		t.RawSetString("cursor_byte", lua.LNumber(x.CursorByte))
+		t.RawSetString("included", p.stringsTable(x.Included))
+		t.RawSetString("focus_key", lua.LString(x.FocusKey))
+		t.RawSetString("target_key", lua.LString(x.TargetKey))
+		t.RawSetString("target_index", lua.LNumber(x.TargetIndex))
+		t.RawSetString("x", lua.LNumber(x.X))
+		t.RawSetString("y", lua.LNumber(x.Y))
+		t.RawSetString("button", lua.LString(x.Button))
+		t.RawSetString("wheel", lua.LNumber(x.Wheel))
+		return t
+	case pluginapi.EnvInfo:
+		t := p.L.CreateTable(0, 3)
+		t.RawSetString("name", lua.LString(x.Name))
 		t.RawSetString("kind", lua.LString(x.Kind))
-		t.RawSetString("old_start", lua.LNumber(x.OldStart))
-		t.RawSetString("old_count", lua.LNumber(x.OldCount))
-		t.RawSetString("new_start", lua.LNumber(x.NewStart))
-		t.RawSetString("new_count", lua.LNumber(x.NewCount))
+		t.RawSetString("snippet", lua.LString(x.Snippet))
+		return t
+	case pluginapi.FuzzyMatch:
+		return p.fuzzyMatchTable(x)
+	case []pluginapi.FuzzyMatch:
+		t := p.L.CreateTable(len(x), 0)
+		for _, m := range x {
+			t.Append(p.fuzzyMatchTable(m))
+		}
+		return t
+	case []int:
+		return p.intsTable(x)
+	case []pluginapi.Pos:
+		t := p.L.CreateTable(len(x), 0)
+		for _, pos := range x {
+			t.Append(p.posTable(pos))
+		}
+		return t
+	case []pluginapi.Range:
+		t := p.L.CreateTable(len(x), 0)
+		for _, r := range x {
+			t.Append(p.rangeTable(r))
+		}
 		return t
 	case []any:
 		t := p.L.CreateTable(len(x), 0)
@@ -105,11 +235,7 @@ func (p *plugin) toLua(v any) lua.LValue {
 		}
 		return t
 	case []string:
-		t := p.L.CreateTable(len(x), 0)
-		for _, e := range x {
-			t.Append(lua.LString(e))
-		}
-		return t
+		return p.stringsTable(x)
 	case map[string]any:
 		t := p.L.CreateTable(0, len(x))
 		for k, e := range x {
@@ -159,8 +285,13 @@ func (p *plugin) toLua(v any) lua.LValue {
 	return lua.LString(fmt.Sprint(v))
 }
 
+var snakeCaseCache sync.Map
+
 // snakeCase turns a Go field name into the key Lua sees: OldStart -> old_start, ID -> id.
 func snakeCase(name string) string {
+	if cached, ok := snakeCaseCache.Load(name); ok {
+		return cached.(string)
+	}
 	var sb strings.Builder
 	rs := []rune(name)
 	for i, r := range rs {
@@ -174,7 +305,182 @@ func snakeCase(name string) string {
 		}
 		sb.WriteRune(r)
 	}
-	return sb.String()
+	out := sb.String()
+	snakeCaseCache.Store(name, out)
+	return out
+}
+
+func (p *plugin) stringsTable(xs []string) *lua.LTable {
+	t := p.L.CreateTable(len(xs), 0)
+	for _, s := range xs {
+		t.Append(lua.LString(s))
+	}
+	return t
+}
+
+func (p *plugin) intsTable(xs []int) *lua.LTable {
+	t := p.L.CreateTable(len(xs), 0)
+	for _, n := range xs {
+		t.Append(lua.LNumber(n))
+	}
+	return t
+}
+
+func (p *plugin) hunkTable(x pluginapi.Hunk) *lua.LTable {
+	t := p.L.CreateTable(0, 5)
+	t.RawSetString("kind", lua.LString(x.Kind))
+	t.RawSetString("old_start", lua.LNumber(x.OldStart))
+	t.RawSetString("old_count", lua.LNumber(x.OldCount))
+	t.RawSetString("new_start", lua.LNumber(x.NewStart))
+	t.RawSetString("new_count", lua.LNumber(x.NewCount))
+	return t
+}
+
+func (p *plugin) changeRecTable(x pluginapi.ChangeRec) *lua.LTable {
+	t := p.L.CreateTable(0, 3)
+	t.RawSetString("range", p.rangeTable(x.Range))
+	t.RawSetString("text", lua.LString(x.Text))
+	t.RawSetString("removed", lua.LString(x.Removed))
+	return t
+}
+
+func (p *plugin) changeRecsTable(xs []pluginapi.ChangeRec) *lua.LTable {
+	t := p.L.CreateTable(len(xs), 0)
+	for _, rec := range xs {
+		t.Append(p.changeRecTable(rec))
+	}
+	return t
+}
+
+func (p *plugin) editTable(x pluginapi.Edit) *lua.LTable {
+	t := p.L.CreateTable(0, 2)
+	t.RawSetString("range", p.rangeTable(x.Range))
+	t.RawSetString("text", lua.LString(x.Text))
+	return t
+}
+
+func (p *plugin) caretTable(x pluginapi.Caret) *lua.LTable {
+	t := p.L.CreateTable(0, 2)
+	t.RawSetString("pos", p.posTable(x.Pos))
+	if x.Anchor != nil {
+		t.RawSetString("anchor", p.posTable(*x.Anchor))
+	}
+	return t
+}
+
+func (p *plugin) grepHitTable(x pluginapi.GrepHit) *lua.LTable {
+	t := p.L.CreateTable(0, 4)
+	t.RawSetString("path", lua.LString(x.Path))
+	t.RawSetString("line", lua.LNumber(x.Line))
+	t.RawSetString("col", lua.LNumber(x.Col))
+	t.RawSetString("text", lua.LString(x.Text))
+	return t
+}
+
+func (p *plugin) bufferInfoTable(x pluginapi.BufferInfo) *lua.LTable {
+	t := p.L.CreateTable(0, 15)
+	if x.ID != 0 {
+		t.RawSetString("id", p.idHandle(kindBuffer, uint64(x.ID)))
+	}
+	t.RawSetString("path", lua.LString(x.Path))
+	t.RawSetString("name", lua.LString(x.Name))
+	t.RawSetString("language", lua.LString(x.Language))
+	t.RawSetString("encoding", lua.LString(x.Encoding))
+	t.RawSetString("line_ending", lua.LString(x.LineEnding))
+	t.RawSetString("mode", lua.LString(x.Mode))
+	t.RawSetString("modified", lua.LBool(x.Modified))
+	t.RawSetString("read_only", lua.LBool(x.ReadOnly))
+	t.RawSetString("virtual", lua.LBool(x.Virtual))
+	t.RawSetString("large", lua.LBool(x.Large))
+	t.RawSetString("preview", lua.LBool(x.Preview))
+	t.RawSetString("active", lua.LBool(x.Active))
+	t.RawSetString("line_count", lua.LNumber(x.LineCount))
+	t.RawSetString("version", lua.LString(x.Version.String()))
+	return t
+}
+
+func (p *plugin) windowInfoTable(x pluginapi.WindowInfo) *lua.LTable {
+	t := p.L.CreateTable(0, 9)
+	if x.ID != 0 {
+		t.RawSetString("id", p.idHandle(kindWindow, uint64(x.ID)))
+	}
+	if x.Buffer != 0 {
+		t.RawSetString("buffer", p.idHandle(kindBuffer, uint64(x.Buffer)))
+	}
+	t.RawSetString("x", lua.LNumber(x.X))
+	t.RawSetString("y", lua.LNumber(x.Y))
+	t.RawSetString("width", lua.LNumber(x.Width))
+	t.RawSetString("height", lua.LNumber(x.Height))
+	t.RawSetString("top_line", lua.LNumber(x.TopLine))
+	t.RawSetString("left_col", lua.LNumber(x.LeftCol))
+	t.RawSetString("active", lua.LBool(x.Active))
+	return t
+}
+
+func (p *plugin) visibleRowTable(x pluginapi.VisibleRow) *lua.LTable {
+	t := p.L.CreateTable(0, 4)
+	t.RawSetString("line", lua.LNumber(x.Line))
+	t.RawSetString("col_from", lua.LNumber(x.ColFrom))
+	t.RawSetString("col_to", lua.LNumber(x.ColTo))
+	t.RawSetString("wrapped", lua.LBool(x.Wrapped))
+	return t
+}
+
+func (p *plugin) diagnosticInfoTable(x pluginapi.DiagnosticInfo) *lua.LTable {
+	t := p.L.CreateTable(0, 4)
+	t.RawSetString("range", p.rangeTable(x.Range))
+	t.RawSetString("severity", lua.LString(x.Severity))
+	t.RawSetString("message", lua.LString(x.Message))
+	t.RawSetString("source", lua.LString(x.Source))
+	return t
+}
+
+func (p *plugin) diagnosticInfosTable(xs []pluginapi.DiagnosticInfo) *lua.LTable {
+	t := p.L.CreateTable(len(xs), 0)
+	for _, d := range xs {
+		t.Append(p.diagnosticInfoTable(d))
+	}
+	return t
+}
+
+func (p *plugin) fileDiagnosticsTable(x pluginapi.FileDiagnostics) *lua.LTable {
+	t := p.L.CreateTable(0, 2)
+	t.RawSetString("path", lua.LString(x.Path))
+	t.RawSetString("diagnostics", p.diagnosticInfosTable(x.Diagnostics))
+	return t
+}
+
+func (p *plugin) agentSessionTable(x pluginapi.AgentSession) *lua.LTable {
+	t := p.L.CreateTable(0, 12)
+	t.RawSetString("kind", lua.LString(x.Kind))
+	t.RawSetString("tool", lua.LString(x.Tool))
+	t.RawSetString("id", lua.LString(x.ID))
+	t.RawSetString("title", lua.LString(x.Title))
+	t.RawSetString("path", lua.LString(x.Path))
+	t.RawSetString("dir", lua.LString(x.Dir))
+	t.RawSetString("agent", lua.LString(x.Agent))
+	t.RawSetString("agents", p.stringsTable(x.Agents))
+	t.RawSetString("attached", lua.LBool(x.Attached))
+	t.RawSetString("socket_only", lua.LBool(x.SocketOnly))
+	t.RawSetString("exact", lua.LBool(x.Exact))
+	t.RawSetString("mod_time", lua.LNumber(x.ModTime))
+	return t
+}
+
+func (p *plugin) agentSessionsTable(xs []pluginapi.AgentSession) *lua.LTable {
+	t := p.L.CreateTable(len(xs), 0)
+	for _, s := range xs {
+		t.Append(p.agentSessionTable(s))
+	}
+	return t
+}
+
+func (p *plugin) fuzzyMatchTable(x pluginapi.FuzzyMatch) *lua.LTable {
+	t := p.L.CreateTable(0, 3)
+	t.RawSetString("index", lua.LNumber(x.Index))
+	t.RawSetString("score", lua.LNumber(x.Score))
+	t.RawSetString("indexes", p.intsTable(x.Indexes))
+	return t
 }
 
 func (p *plugin) posTable(x pluginapi.Pos) *lua.LTable {

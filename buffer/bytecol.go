@@ -15,6 +15,10 @@ var ErrLargeBuffer = errors.New("buffer: byte offsets are not available on large
 // it, so in a large buffer a byte of the source that is not valid UTF-8 counts
 // as U+FFFD, three bytes, and a line cut at the line cap is the cut line.
 func (b *Buffer) ByteCol(p Pos) int {
+	if b.big == nil && !b.NonASCII() {
+		line := b.lines[b.clampLine(p.Line)]
+		return min(max(p.Col, 0), len(line))
+	}
 	line := b.lineRunes(p.Line)
 	return runesLen(line[:min(max(p.Col, 0), len(line))])
 }
@@ -24,11 +28,18 @@ func (b *Buffer) ByteCol(p Pos) int {
 // both arguments are clamped. The line is the text Line returns (see ByteCol).
 func (b *Buffer) PosAtByteCol(line, byteCol int) Pos {
 	line = b.clampLine(line)
+	if b.big == nil && !b.NonASCII() {
+		return Pos{line, min(max(byteCol, 0), len(b.lines[line]))}
+	}
 	rs := b.lineRunes(line)
 	var tmp [utf8.UTFMax]byte
 	n := 0
 	for i, r := range rs {
-		n += utf8.EncodeRune(tmp[:], r)
+		if uint32(r) < utf8.RuneSelf {
+			n++
+		} else {
+			n += utf8.EncodeRune(tmp[:], r)
+		}
 		if n > byteCol {
 			return Pos{line, i}
 		}
@@ -46,6 +57,9 @@ func (b *Buffer) ByteOffset(p Pos) (int, error) {
 		return 0, ErrLargeBuffer
 	}
 	p = b.Clamp(p)
+	if !b.NonASCII() {
+		return b.lineStart(p.Line) + p.Col, nil
+	}
 	return b.lineStart(p.Line) + runesLen(b.lines[p.Line][:p.Col]), nil
 }
 
@@ -81,8 +95,14 @@ func (b *Buffer) lineStart(l int) int {
 	}
 	if l >= b.startsValid {
 		b.starts = b.starts[:b.startsValid]
-		for i := b.startsValid; i <= l; i++ {
-			b.starts = append(b.starts, b.starts[i-1]+runesLen(b.lines[i-1])+1)
+		if !b.NonASCII() {
+			for i := b.startsValid; i <= l; i++ {
+				b.starts = append(b.starts, b.starts[i-1]+len(b.lines[i-1])+1)
+			}
+		} else {
+			for i := b.startsValid; i <= l; i++ {
+				b.starts = append(b.starts, b.starts[i-1]+runesLen(b.lines[i-1])+1)
+			}
 		}
 		b.startsValid = l + 1
 	}
@@ -120,6 +140,10 @@ func (w *ByteColWalker) ByteCol(p Pos) int {
 		w.line, w.runes, w.col, w.bytes = l, w.b.lineRunes(l), 0, 0
 	}
 	col := min(max(p.Col, 0), len(w.runes))
+	if w.b.big == nil && !w.b.NonASCII() {
+		w.col, w.bytes = col, col
+		return col
+	}
 	if col < w.col {
 		w.col, w.bytes = 0, 0
 	}

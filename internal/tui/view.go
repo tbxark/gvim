@@ -722,7 +722,8 @@ func (m *Model) promptOpen() bool {
 // of its own (panePageView).
 func (m *Model) viewPane(sp split.Pane, p editorpane.Pane, doc Document) editorpane.Pane {
 	s := docViewOf(doc)
-	p.PageView = m.panePageView(sp, doc)
+	ls := m.docLanguageSettings(doc)
+	p.PageView = m.panePageViewWith(sp, doc, s, ls)
 	if !sp.Focused && m.validDual() != nil {
 		// The unfocused side of a dual view does not own the document caret, so
 		// its composed rows stay concealed.
@@ -754,13 +755,13 @@ func (m *Model) viewPane(sp split.Pane, p editorpane.Pane, doc Document) editorp
 	p.Rulers = slices.Clone(s.Rulers)
 	// The tab width is the language's (which holds the global tab_size where the
 	// language sets none), unless the buffer set its own.
-	if n := m.docLanguageSettings(doc).TabSize; n > 0 {
+	if n := ls.TabSize; n > 0 {
 		p.TabSize = n
 	}
 	if s.TabSize > 0 {
 		p.TabSize = s.TabSize
 	}
-	return m.viewRender(p, doc, s)
+	return m.viewRender(p, s, ls)
 }
 
 // pageViewFor returns the page view of doc. It is on when the buffer's override
@@ -773,10 +774,17 @@ func (m *Model) pageViewFor(doc Document) editorpane.PageView {
 	if doc == nil {
 		return editorpane.PageView{}
 	}
-	s := docViewOf(doc)
+	return m.pageViewForWith(doc, docViewOf(doc), m.docLanguageSettings(doc))
+}
+
+// pageViewForWith computes doc's page view using already-resolved view and language settings.
+func (m *Model) pageViewForWith(doc Document, s editor.ViewSettings, ls editor.LanguageSettings) editorpane.PageView {
+	if doc == nil {
+		return editorpane.PageView{}
+	}
 	on, ok := s.PageViewOverride()
 	if !ok {
-		on = m.docLanguageSettings(doc).PageView
+		on = ls.PageView
 	}
 	if !on {
 		return editorpane.PageView{}
@@ -786,9 +794,33 @@ func (m *Model) pageViewFor(doc Document) editorpane.PageView {
 	}
 	measure := s.PageWidth
 	if measure <= 0 {
-		measure = m.docLanguageSettings(doc).PageWidth
+		measure = ls.PageWidth
 	}
 	return editorpane.PageView{On: true, Measure: measure, Markdown: m.markdownDoc(doc)}
+}
+
+// panePageViewWith computes pane p's page view using already-resolved view and language settings.
+func (m *Model) panePageViewWith(p split.Pane, doc Document, s editor.ViewSettings, ls editor.LanguageSettings) editorpane.PageView {
+	pv := m.pageViewForWith(doc, s, ls)
+	switch m.dualRoleOf(p) {
+	case dualPreview:
+		pv.On = true
+		pv.Markdown = m.markdownDoc(doc)
+		return pv
+	case dualSource:
+		return editorpane.PageView{}
+	}
+	if m.markdownDoc(doc) {
+		switch m.paneViewMode(p) {
+		case "rendered":
+			pv.On = true
+			pv.Markdown = true
+			return pv
+		case "source":
+			return editorpane.PageView{}
+		}
+	}
+	return pv
 }
 
 // pageViewActive reports whether the focused pane is showing the page view. The

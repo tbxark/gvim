@@ -45,6 +45,7 @@ type stringCache struct {
 	lang  string
 	path  string
 	lexer chroma.Lexer
+	hl    *syntax.Highlighter
 	plain bool
 
 	valid      bool
@@ -100,6 +101,10 @@ func (c *stringCache) refresh(doc *editor.Document, line int) bool {
 		c.doc, c.lang, c.path = doc, doc.Language(), doc.Path
 		c.lexer, _ = documentLexer(doc)
 		c.plain = c.lexer == nil || c.lexer == lexers.Fallback || c.lexer.Config().Name == "" || syntax.IsPlain(c.lexer.Config().Name)
+		c.hl = nil
+		if !c.plain {
+			c.hl = syntax.NewHighlighter(c.lexer)
+		}
 		c.valid = false
 	}
 	if c.plain {
@@ -108,30 +113,82 @@ func (c *stringCache) refresh(doc *editor.Document, line int) bool {
 	if c.valid && c.version == b.Version() && c.gen == gen && line >= c.start && line < c.end {
 		return true
 	}
-	var start int
-	var lines []string
+	var (
+		start int
+		lines []string
+		ok    bool
+	)
 	if doc.Large() {
-		var ok bool
 		start, lines, ok = c.largeStringWindow(doc, b, line)
-		if !ok {
-			c.valid = false
-			return false
-		}
 	} else {
-		end := 0
-		start, end = stringWindow(b.Lines(), line, func(i int) bool {
-			return strings.TrimSpace(b.Line(i)) == ""
-		})
-		lines = make([]string, end-start)
-		for i := range lines {
-			lines[i] = b.Line(start + i)
-		}
+		start, lines, ok = c.localStringWindow(b, line)
+	}
+	if !ok {
+		c.valid = false
+		return false
 	}
 	c.lines = lines
-	c.spans = syntax.NewHighlighter(c.lexer).Lines(0, c.lines)
-	c.start, c.end, c.version, c.gen, c.valid = start, start+len(lines), b.Version(), gen, true
 	c.lexed++
+	c.spans = c.hl.Lines(c.lexed, c.lines)
+	c.start, c.end, c.version, c.gen, c.valid = start, start+len(lines), b.Version(), gen, true
 	return true
+}
+
+// localStringWindow returns the bounded, contiguous lines around line of a non-large
+// document, using zero-alloc blank detection and enforcing maxLexedLineBytes and
+// stringMaxBytes.
+func (c *stringCache) localStringWindow(b *buffer.Buffer, line int) (start int, lines []string, ok bool) {
+	if line < 0 || line >= b.Lines() || lineSize(b, line) > maxLexedLineBytes {
+		return 0, nil, false
+	}
+	text := b.Line(line)
+	if len(text) > maxLexedLineBytes {
+		return 0, nil, false
+	}
+	winStart, winEnd := stringWindow(b.Lines(), line, func(i int) bool {
+		_, blank := b.LineIndent(i, 1)
+		return blank
+	})
+	used := len(text)
+	back := make([]string, 0, line-winStart)
+	start = line
+	for i := line - 1; i >= winStart; i-- {
+		s := ""
+		if lineSize(b, i) <= maxLexedLineBytes {
+			s = b.Line(i)
+			if len(s) > maxLexedLineBytes {
+				s = ""
+			}
+		}
+		if used+len(s) > stringMaxBytes {
+			break
+		}
+		back = append(back, s)
+		used += len(s)
+		start = i
+	}
+	forward := make([]string, 0, max(winEnd-line-1, 0))
+	for i := line + 1; i < winEnd; i++ {
+		s := ""
+		if lineSize(b, i) <= maxLexedLineBytes {
+			s = b.Line(i)
+			if len(s) > maxLexedLineBytes {
+				s = ""
+			}
+		}
+		if used+len(s) > stringMaxBytes {
+			break
+		}
+		forward = append(forward, s)
+		used += len(s)
+	}
+	lines = make([]string, 0, len(back)+1+len(forward))
+	for i := len(back) - 1; i >= 0; i-- {
+		lines = append(lines, back[i])
+	}
+	lines = append(lines, text)
+	lines = append(lines, forward...)
+	return start, lines, true
 }
 
 // largeStringWindow returns the bounded, contiguous lines around line of a large
@@ -209,7 +266,7 @@ func (c *stringCache) inString(doc *editor.Document, p buffer.Pos) bool {
 	// A large document is read only from lines that are available and lexable;
 	// for a windowed remote document LineLoaded is the loaded-window check, and a
 	// missing window answers false without reading.
-	if doc.Large() && (!doc.LineLoaded(p.Line) || lineTooBig(doc.Buffer, p.Line)) {
+	if (doc.Large() && !doc.LineLoaded(p.Line)) || lineSize(doc.Buffer, p.Line) > maxLexedLineBytes {
 		return false
 	}
 	if !c.refresh(doc, p.Line) {
@@ -251,7 +308,7 @@ func (c *stringCache) nonCode(doc *editor.Document, line int) []bool {
 	if line < 0 || line >= doc.Buffer.Lines() {
 		return nil
 	}
-	if doc.Large() && (!doc.LineLoaded(line) || lineTooBig(doc.Buffer, line)) {
+	if (doc.Large() && !doc.LineLoaded(line)) || lineSize(doc.Buffer, line) > maxLexedLineBytes {
 		return nil
 	}
 	if !c.refresh(doc, line) {

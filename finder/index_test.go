@@ -52,6 +52,33 @@ func TestStartWithAtTheCapIsNotTruncated(t *testing.T) {
 	}
 }
 
+func TestStartWithAtCapPlusOneIsTruncated(t *testing.T) {
+	x := startWith(context.Background(), fakeEnum(MaxFiles+1))
+	defer x.Close()
+	<-x.Done()
+	if files, _ := x.Snapshot(); len(files) != MaxFiles || !x.Truncated() {
+		t.Fatalf("len = %d, Truncated = %v; cap+1 must truncate at %d", len(files), x.Truncated(), MaxFiles)
+	}
+}
+
+func TestIndexBatchStopsWhenEmitReturnsFalse(t *testing.T) {
+	x := &Index{}
+	var batch []string
+	for i := range 10 {
+		batch = append(batch, fmt.Sprintf("f%02d", i))
+	}
+	if !x.addBatchFor(0, batch) {
+		t.Fatal("addBatchFor failed below cap")
+	}
+	if x.addBatchFor(1, batch) {
+		t.Fatal("addBatchFor accepted stale generation")
+	}
+	files, _ := x.Snapshot()
+	if len(files) != 10 {
+		t.Fatalf("len = %d, want 10", len(files))
+	}
+}
+
 func TestCloseCancelsAPendingEnumeration(t *testing.T) {
 	started := make(chan struct{})
 	x := startWith(context.Background(), func(ctx context.Context, emit func(string) bool) error {

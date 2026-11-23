@@ -221,7 +221,7 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 		return true
 	}
 	matchText := func(path, name string, dirty bool, text string) (searchpanel.FileMatches, bool) {
-		matches := cq.FindString(text)
+		matches := cq.FindStringLimit(text, limit)
 		if len(matches) == 0 {
 			return searchpanel.FileMatches{}, false
 		}
@@ -335,70 +335,167 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 			reason  string
 			fm      searchpanel.FileMatches
 		}
-		window := min(workers*4, len(files))
-		for base := 0; base < len(files); base += window {
+		aborted := false
+		runOrderedPool(len(files), workers, func() bool { return !next() }, func(idx int, stop func() bool) searchSlot {
+			rel := files[idx]
+			if matchIgnoreMatcher(matcher, rel) {
+				return searchSlot{}
+			}
+			abs := filepath.Join(req.Root, filepath.FromSlash(rel))
+			if src, ok := open[abs]; ok {
+				if stop() {
+					return searchSlot{}
+				}
+				fm, _ := matchText(abs, rel, src.Dirty, src.Text)
+				return searchSlot{scanned: true, fm: fm}
+			}
+			text, reason := readSearchableFile(abs, s.skipFrom)
+			if reason != "" {
+				return searchSlot{scanned: true, reason: reason}
+			}
+			if stop() {
+				return searchSlot{}
+			}
+			fm, _ := matchText(abs, rel, false, text)
+			return searchSlot{scanned: true, fm: fm}
+		}, func(_ int, sl searchSlot) bool {
 			if !next() {
-				return
+				aborted = true
+				return false
 			}
-			end := min(base+window, len(files))
-			count := end - base
-			slots := make([]searchSlot, count)
-			var nextIdx atomic.Int64
-			var wg sync.WaitGroup
-			wCount := min(workers, count)
-			wg.Add(wCount)
-			for range wCount {
-				go func() {
-					defer wg.Done()
-					for {
-						idx := int(nextIdx.Add(1) - 1)
-						if idx >= count || !next() {
-							return
-						}
-						rel := files[base+idx]
-						if matchIgnoreMatcher(matcher, rel) {
-							continue
-						}
-						abs := filepath.Join(req.Root, filepath.FromSlash(rel))
-						if src, ok := open[abs]; ok {
-							fm, _ := matchText(abs, rel, src.Dirty, src.Text)
-							slots[idx] = searchSlot{scanned: true, fm: fm}
-							continue
-						}
-						text, reason := readSearchableFile(abs, s.skipFrom)
-						if reason != "" {
-							slots[idx] = searchSlot{scanned: true, reason: reason}
-							continue
-						}
-						fm, _ := matchText(abs, rel, false, text)
-						slots[idx] = searchSlot{scanned: true, fm: fm}
-					}
-				}()
+			if sl.scanned {
+				scanned++
 			}
-			wg.Wait()
-			stopped := false
-			for _, sl := range slots {
-				if !next() {
-					return
-				}
-				if sl.scanned {
-					scanned++
-				}
-				if sl.reason != "" {
-					skips.add(sl.reason)
-					continue
-				}
-				if appendFileMatches(sl.fm) || !flushAfter() {
-					stopped = true
-					break
-				}
+			if sl.reason != "" {
+				skips.add(sl.reason)
+				return true
 			}
-			if stopped {
-				break
+			if appendFileMatches(sl.fm) {
+				return false
 			}
+			if !flushAfter() {
+				aborted = true
+				return false
+			}
+			return true
+		})
+		if aborted || !next() {
+			return
 		}
 	}
 	flush(true, "")
+}
+
+// runOrderedPool processes n items across a persistent pool of at most workers
+// goroutines while delivering results to consume in strict index order 0..n-1.
+// In-flight lookahead is bounded to avoid scanning far ahead of an early stop.
+func runOrderedPool[T any](
+	n, workers int,
+	cancelled func() bool,
+	process func(idx int, stop func() bool) T,
+	consume func(idx int, item T) bool,
+) {
+	if n <= 0 {
+		return
+	}
+	window := min(n, max(workers*4, 1))
+	type poolSlot struct {
+		readyIdx int
+		val      T
+	}
+	ring := make([]poolSlot, window)
+	for i := range ring {
+		ring[i].readyIdx = -1
+	}
+
+	var mu sync.Mutex
+	workCond := sync.NewCond(&mu)
+	slotCond := sync.NewCond(&mu)
+	var stopFlag atomic.Bool
+	nextJob := 0
+	head := 0
+	stop := false
+
+	shouldStop := func() bool {
+		return stopFlag.Load() || (cancelled != nil && cancelled())
+	}
+
+	var wg sync.WaitGroup
+	wCount := min(workers, n)
+	wg.Add(wCount)
+	for range wCount {
+		go func() {
+			defer wg.Done()
+			for {
+				mu.Lock()
+				for !stop && nextJob < n && nextJob-head >= window {
+					workCond.Wait()
+				}
+				if stop || nextJob >= n {
+					mu.Unlock()
+					return
+				}
+				idx := nextJob
+				nextJob++
+				mu.Unlock()
+
+				if shouldStop() {
+					stopFlag.Store(true)
+					mu.Lock()
+					stop = true
+					slotCond.Signal()
+					workCond.Broadcast()
+					mu.Unlock()
+					return
+				}
+
+				val := process(idx, shouldStop)
+
+				mu.Lock()
+				ring[idx%window] = poolSlot{readyIdx: idx, val: val}
+				if idx == head {
+					slotCond.Signal()
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+	defer func() {
+		stopFlag.Store(true)
+		mu.Lock()
+		stop = true
+		workCond.Broadcast()
+		mu.Unlock()
+		wg.Wait()
+	}()
+
+	for head < n {
+		if cancelled != nil && cancelled() {
+			return
+		}
+		mu.Lock()
+		for !stop && ring[head%window].readyIdx != head {
+			slotCond.Wait()
+		}
+		if stop {
+			mu.Unlock()
+			return
+		}
+		slot := ring[head%window]
+		var zero T
+		ring[head%window] = poolSlot{readyIdx: -1, val: zero}
+		oldHead := head
+		head++
+		if nextJob-oldHead >= window {
+			workCond.Signal()
+		}
+		mu.Unlock()
+
+		if !consume(oldHead, slot.val) {
+			return
+		}
+	}
 }
 
 // dedupeSources returns the open buffers in tab order, one per tab. An unnamed buffer is
@@ -582,10 +679,29 @@ func readSearchableFile(path string, skipFrom int64) (string, string) {
 	case skipFrom > 0 && info.Size() >= skipFrom:
 		return "", "large file"
 	}
-	data, err := io.ReadAll(io.LimitReader(f, pluginhost.GrepMaxFileBytes+1))
-	if err != nil {
-		return "", "unreadable file"
+	size := max(info.Size(), 0)
+	buf := make([]byte, min(size, int64(pluginhost.GrepMaxFileBytes))+1)
+	n := 0
+	for {
+		if n == len(buf) {
+			if len(buf) >= pluginhost.GrepMaxFileBytes {
+				return "", "large file"
+			}
+			nextCap := min(len(buf)*2, pluginhost.GrepMaxFileBytes)
+			grown := make([]byte, nextCap)
+			copy(grown, buf[:n])
+			buf = grown
+		}
+		nr, err := f.Read(buf[n:])
+		n += nr
+		if err == io.EOF {
+			break
+		}
+		if err != nil || nr == 0 {
+			return "", "unreadable file"
+		}
 	}
+	data := buf[:n]
 	if len(data) >= pluginhost.GrepMaxFileBytes {
 		return "", "large file"
 	}
@@ -616,7 +732,7 @@ func selectedSet(positions []searchpanel.Position) map[[2]int]struct{} {
 // hash of the exact text searched.
 func hashText(text string) uint64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(text))
+	_, _ = io.WriteString(h, text)
 	return h.Sum64()
 }
 

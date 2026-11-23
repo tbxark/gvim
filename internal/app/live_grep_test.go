@@ -76,6 +76,28 @@ func TestLiveGrepOneHitPerLineAndLimit(t *testing.T) {
 	if len(hits) != 2 || hits[0].Line != 1 || hits[1].Line != 2 {
 		t.Fatalf("hits = %v, want the first match of lines 1 and 2 (limit 2)", hits)
 	}
+	// Multiple matches on line 1 must collapse to 1 hit so line 2 is still reached when Limit=2.
+	dir2 := t.TempDir()
+	tree := map[string]string{}
+	files := make([]string, 10)
+	for i := range files {
+		files[i] = fmt.Sprintf("f%02d.txt", i)
+		if i == 0 {
+			tree[files[i]] = "todo todo todo todo\ntodo\n"
+		} else {
+			tree[files[i]] = "nothing\n"
+		}
+	}
+	writeTree(t, dir2, tree)
+	req2 := fileReq(dir2, files, "todo")
+	req2.Limit = 2
+	hits, err = (&liveGrep{}).Search(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[0].Line != 1 || hits[1].Line != 2 {
+		t.Fatalf("collapsed line hits = %v, want lines 1 and 2", hits)
+	}
 }
 
 func TestLiveGrepSkipsBinaryFiles(t *testing.T) {

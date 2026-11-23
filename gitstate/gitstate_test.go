@@ -407,3 +407,51 @@ func TestLinkedWorktreeCommonDir(t *testing.T) {
 		t.Fatalf("Status = %+v, want untracked.txt Untracked", st)
 	}
 }
+
+func TestBranchGitFileRelativeAndFallback(t *testing.T) {
+	// Relative gitdir in a .git file resolves relative to root.
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "mainrepo")
+	wtDir := filepath.Join(base, "wt")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := git.PlainInitWithOptions(repoDir, &git.PlainInitOptions{
+		DefaultBranch: plumbing.NewBranchReferenceName("main"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtGitDir := filepath.Join(repoDir, ".git", "worktrees", "wt1")
+	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtGitDir, "HEAD"), []byte("ref: refs/heads/feat/fast\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte("gitdir: ../mainrepo/.git/worktrees/wt1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := gitstate.Branch(wtDir)
+	if err != nil || got != "feat/fast" {
+		t.Fatalf("Branch(relative gitdir) = %q, %v; want feat/fast", got, err)
+	}
+
+	// Non-refs symbolic indirection falls back to go-git without breaking.
+	_ = repo
+	dir, _, _ := newRepo(t, map[string]string{"a.txt": "a\n"})
+	headPath := filepath.Join(dir, ".git", "HEAD")
+	if err := os.WriteFile(headPath, []byte("ref: OTHER\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gotFallback, err := gitstate.Branch(dir)
+	if err != nil || gotFallback != "OTHER" {
+		t.Fatalf("Branch(non-refs symref fallback) = %q, %v; want OTHER", gotFallback, err)
+	}
+}

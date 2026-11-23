@@ -595,26 +595,33 @@ func (m *Model) paneHitIn(i, x, y int) (p editorpane.Pane, hit editorpane.Hit, t
 // document is left blank. A pane that shows an image file draws the picture over
 // the placeholder cells when the terminal supports it; otherwise the text summary
 // of the document is painted the usual way.
-func (m *Model) paintPanes(g *grid.Grid, l frame.Layout) {
+func (m *Model) paintPanes(g *grid.Grid, l frame.Layout) (cx, cy int, ok, paintedFocus bool) {
 	for i, p := range l.Panes {
 		doc := m.paneDoc(p)
 		if doc == nil || p.W <= 0 || p.H <= 0 {
 			continue
 		}
-		if pg, ok := m.imagePane(p, doc, i+1); ok {
+		if pg, imgOK := m.imagePane(p, doc, i+1); imgOK {
 			editorpane.Blit(g, p.X, p.Y, pg)
 			continue
 		}
 		if m.hexPane(g, p, doc) {
 			continue
 		}
-		m.paneFor(p, doc).RenderInto(g, p.X, p.Y, p.W, p.H)
+		pcx, pcy, pok := m.paneFor(p, doc).RenderIntoWithCaret(g, p.X, p.Y, p.W, p.H)
+		if i == l.Focus && p.Focused {
+			paintedFocus = true
+			if pok {
+				cx, cy, ok = p.X+pcx, p.Y+pcy, true
+			}
+		}
 		m.paintStickyScroll(g, p, doc)
 	}
 	drawBorders(g, l.Borders, m.splitCell())
 	if m.borderHover >= 0 && m.borderHover < len(l.Borders) {
 		drawBorderHover(g, l.Borders[m.borderHover], m.splitHoverCell())
 	}
+	return cx, cy, ok, paintedFocus
 }
 
 // imagePane returns the grid that draws doc's picture in pane p, and whether the

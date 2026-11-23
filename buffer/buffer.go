@@ -129,17 +129,52 @@ func (b *Buffer) now() time.Time {
 func (b *Buffer) setText(text string) {
 	n := strings.Count(text, "\n") + 1
 	b.lines = make([][]rune, n)
-	lineIdx := 0
-	start := 0
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' {
-			b.lines[lineIdx] = []rune(text[start:i])
-			lineIdx++
-			start = i + 1
-		}
-	}
-	b.lines[lineIdx] = []rune(text[start:])
 	b.nonASCII = countNonASCII(text)
+	if b.nonASCII == 0 {
+		total := len(text) - (n - 1)
+		if total == 0 {
+			return
+		}
+		slab := make([]rune, total)
+		lineIdx, lineStart, off := 0, 0, 0
+		for i := 0; i < len(text); i++ {
+			if text[i] == '\n' {
+				if off > lineStart {
+					b.lines[lineIdx] = slab[lineStart:off:off]
+				}
+				lineIdx++
+				lineStart = off
+				continue
+			}
+			slab[off] = rune(text[i])
+			off++
+		}
+		if off > lineStart {
+			b.lines[lineIdx] = slab[lineStart:off:off]
+		}
+		return
+	}
+	totalRunes := utf8.RuneCountInString(text) - (n - 1)
+	if totalRunes == 0 {
+		return
+	}
+	slab := make([]rune, totalRunes)
+	lineIdx, lineStart, off := 0, 0, 0
+	for _, r := range text {
+		if r == '\n' {
+			if off > lineStart {
+				b.lines[lineIdx] = slab[lineStart:off:off]
+			}
+			lineIdx++
+			lineStart = off
+			continue
+		}
+		slab[off] = r
+		off++
+	}
+	if off > lineStart {
+		b.lines[lineIdx] = slab[lineStart:off:off]
+	}
 }
 
 // NonASCII reports whether the text has a rune above 0x7f, which is any character that
@@ -149,13 +184,22 @@ func (b *Buffer) NonASCII() bool { return b.nonASCII > 0 }
 
 // countNonASCII is the number of runes above 0x7f in s.
 func countNonASCII(s string) int {
-	n := 0
-	for _, r := range s {
-		if r >= utf8.RuneSelf {
-			n++
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			n := 0
+			for j := i; j < len(s); {
+				if s[j] < utf8.RuneSelf {
+					j++
+					continue
+				}
+				_, size := utf8.DecodeRuneInString(s[j:])
+				n++
+				j += size
+			}
+			return n
 		}
 	}
-	return n
+	return 0
 }
 
 // countNonASCIIIn is the number of runes above 0x7f between from and to, which are
@@ -273,12 +317,23 @@ func (b *Buffer) Text() string {
 	if b.big != nil {
 		return b.bigText(b.big.text())
 	}
+	total := max(len(b.lines)-1, 0)
+	if !b.NonASCII() {
+		for _, l := range b.lines {
+			total += len(l)
+		}
+	} else {
+		for _, l := range b.lines {
+			total += runesLen(l)
+		}
+	}
 	var sb strings.Builder
+	sb.Grow(total)
 	for i, l := range b.lines {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
-		sb.WriteString(string(l))
+		writeRunes(&sb, l)
 	}
 	return sb.String()
 }
@@ -297,16 +352,39 @@ func (b *Buffer) Range(from, to Pos) string {
 		return ""
 	}
 	if from.Line == to.Line {
-		return string(b.lines[from.Line][from.Col:to.Col])
+		rs := b.lines[from.Line][from.Col:to.Col]
+		var sb strings.Builder
+		if !b.NonASCII() {
+			sb.Grow(len(rs))
+		} else {
+			sb.Grow(runesLen(rs))
+		}
+		writeRunes(&sb, rs)
+		return sb.String()
+	}
+	total := to.Line - from.Line
+	if !b.NonASCII() {
+		total += len(b.lines[from.Line][from.Col:])
+		for i := from.Line + 1; i < to.Line; i++ {
+			total += len(b.lines[i])
+		}
+		total += to.Col
+	} else {
+		total += runesLen(b.lines[from.Line][from.Col:])
+		for i := from.Line + 1; i < to.Line; i++ {
+			total += runesLen(b.lines[i])
+		}
+		total += runesLen(b.lines[to.Line][:to.Col])
 	}
 	var sb strings.Builder
-	sb.WriteString(string(b.lines[from.Line][from.Col:]))
+	sb.Grow(total)
+	writeRunes(&sb, b.lines[from.Line][from.Col:])
 	for i := from.Line + 1; i < to.Line; i++ {
 		sb.WriteByte('\n')
-		sb.WriteString(string(b.lines[i]))
+		writeRunes(&sb, b.lines[i])
 	}
 	sb.WriteByte('\n')
-	sb.WriteString(string(b.lines[to.Line][:to.Col]))
+	writeRunes(&sb, b.lines[to.Line][:to.Col])
 	return sb.String()
 }
 

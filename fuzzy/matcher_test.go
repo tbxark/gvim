@@ -30,6 +30,11 @@ func TestMatcherMatchesPattern(t *testing.T) {
 				t.Errorf("Matcher(%q).Match(%q) = %d, %v, %v; Pattern gives %d, %v, %v",
 					q, target, gotScore, gotIdx, gotOK, wantScore, wantIdx, wantOK)
 			}
+			scoreOnly, okOnly := m.MatchScore(target)
+			if okOnly != wantOK || scoreOnly != wantScore {
+				t.Errorf("Matcher(%q).MatchScore(%q) = %d, %v; want %d, %v",
+					q, target, scoreOnly, okOnly, wantScore, wantOK)
+			}
 			// The same matcher is reused across targets and calls.
 			againScore, againIdx, againOK := m.Match(target)
 			if againOK != wantOK || againScore != wantScore || !slices.Equal(againIdx, wantIdx) {
@@ -37,6 +42,10 @@ func TestMatcherMatchesPattern(t *testing.T) {
 					q, target, againScore, againIdx, againOK, wantScore, wantIdx, wantOK)
 			}
 		}
+	}
+	var nilM *Matcher
+	if s, ok := nilM.MatchScore("abc"); s != 0 || ok {
+		t.Fatalf("nil Matcher.MatchScore = %d, %v; want 0, false", s, ok)
 	}
 }
 
@@ -51,5 +60,24 @@ func TestMatcherASCIIRejectDoesNotAllocate(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("ASCII rejection allocated %.1f objects per call, want 0", allocs)
+	}
+}
+
+func TestMatcherMatchScoreZeroAllocAfterWarmup(t *testing.T) {
+	for _, q := range []string{"edhan", "pane handler"} {
+		m := NewMatcher(q)
+		target := "internal/tui/editorpane/component_0001/handler.go"
+		// Warm up scratch buffers to target size.
+		if _, ok := m.MatchScore(target); !ok {
+			t.Fatalf("expected %q to match %q", q, target)
+		}
+		allocs := testing.AllocsPerRun(100, func() {
+			if _, ok := m.MatchScore(target); !ok {
+				t.Fatalf("expected %q to match %q", q, target)
+			}
+		})
+		if allocs != 0 {
+			t.Fatalf("MatchScore(%q) allocated %.1f objects per hit after warmup, want 0", q, allocs)
+		}
 	}
 }

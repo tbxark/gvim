@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -74,6 +75,8 @@ const maxNumberRun = 64
 // A number token that is already as long as the match is left alone.
 func numbers(re *regexp.Regexp) fixup {
 	return func(toks []chroma.Token) []chroma.Token {
+		var buf [maxNumberRun]byte
+		var endsBuf [8]int
 		out := make([]chroma.Token, 0, len(toks))
 		for i := 0; i < len(toks); {
 			t := toks[i]
@@ -82,8 +85,18 @@ func numbers(re *regexp.Regexp) fixup {
 				i++
 				continue
 			}
-			run, ends := numberRun(toks[i:])
-			m := re.FindString(run)
+			if isNumberToken(t.Type) && !canExtendNumber(toks, i) {
+				out = append(out, t)
+				i++
+				continue
+			}
+			n, ends := numberRun(toks[i:], &buf, endsBuf[:0])
+			var m string
+			if n == ends[0] {
+				m = re.FindString(t.Value[:n])
+			} else if mb := re.Find(buf[:n]); len(mb) > 0 {
+				m = string(mb)
+			}
 			if m == "" || (isNumberToken(t.Type) && len(m) <= len(t.Value)) {
 				out = append(out, t)
 				i++
@@ -110,6 +123,23 @@ func numbers(re *regexp.Regexp) fixup {
 	}
 }
 
+// canExtendNumber reports whether a token after toks[i] starts with a byte that could
+// extend a number literal. Whitespace and punctuation such as ";", ",", ")", "}" cannot.
+func canExtendNumber(toks []chroma.Token, i int) bool {
+	for j := i + 1; j < len(toks); j++ {
+		v := toks[j].Value
+		if v == "" {
+			continue
+		}
+		c := v[0]
+		return (c >= '0' && c <= '9') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			c == '_' || c == '.' || c == '\'' || c == '+' || c == '-'
+	}
+	return false
+}
+
 // startsNumber reports whether t may be the first token of a number literal.
 func startsNumber(t chroma.Token) bool {
 	if t.Value == "" {
@@ -131,41 +161,45 @@ func startsNumber(t chroma.Token) bool {
 func isNumberToken(t chroma.TokenType) bool { return t.InSubCategory(chroma.LiteralNumber) }
 
 // numberRun joins the leading tokens of toks that hold no blank, up to maxNumberRun
-// bytes, and returns the text with the offset at which each token of it ends. A token
-// with a blank in it ends the run before the blank.
-func numberRun(toks []chroma.Token) (run string, ends []int) {
-	var b strings.Builder
+// bytes into buf, and returns the byte length with the offset at which each token of it ends.
+// A token with a blank in it ends the run before the blank.
+func numberRun(toks []chroma.Token, buf *[maxNumberRun]byte, ends []int) (int, []int) {
+	n := 0
 	for _, t := range toks {
 		v := t.Value
 		cut := strings.IndexAny(v, " \t\r\n")
 		if cut >= 0 {
 			v = v[:cut]
 		}
-		if b.Len()+len(v) > maxNumberRun {
-			v = v[:maxNumberRun-b.Len()]
+		if n+len(v) > maxNumberRun {
+			v = v[:maxNumberRun-n]
 			cut = 0
 		}
-		b.WriteString(v)
-		ends = append(ends, b.Len())
-		if cut >= 0 || b.Len() >= maxNumberRun {
+		n += copy(buf[n:], v)
+		ends = append(ends, n)
+		if cut >= 0 || n >= maxNumberRun {
 			break
 		}
 	}
-	return b.String(), ends
+	return n, ends
 }
 
 // numberType is the chroma type that says what kind of number m is.
 func numberType(m string) chroma.TokenType {
-	lower := strings.ToLower(m)
-	switch {
-	case strings.HasPrefix(lower, "0x"):
-		return chroma.LiteralNumberHex
-	case strings.HasPrefix(lower, "0o"):
-		return chroma.LiteralNumberOct
-	case strings.HasPrefix(lower, "0b"):
-		return chroma.LiteralNumberBin
-	case strings.ContainsAny(lower, ".e"):
-		return chroma.LiteralNumberFloat
+	if len(m) >= 2 && m[0] == '0' {
+		switch m[1] {
+		case 'x', 'X':
+			return chroma.LiteralNumberHex
+		case 'o', 'O':
+			return chroma.LiteralNumberOct
+		case 'b', 'B':
+			return chroma.LiteralNumberBin
+		}
+	}
+	for i := 0; i < len(m); i++ {
+		if m[i] == '.' || m[i] == 'e' || m[i] == 'E' {
+			return chroma.LiteralNumberFloat
+		}
 	}
 	return chroma.LiteralNumberInteger
 }
@@ -431,9 +465,13 @@ func cDirectives(toks []chroma.Token) []chroma.Token {
 	return out
 }
 
+var cLexer = sync.OnceValue(func() chroma.Lexer {
+	return lexers.Get("c")
+})
+
 // relexC reads the rest of a preprocessor line as C. A failure leaves it plain.
 func relexC(text string) []chroma.Token {
-	lexer := lexers.Get("c")
+	lexer := cLexer()
 	if lexer == nil {
 		return []chroma.Token{{Type: chroma.Text, Value: text}}
 	}

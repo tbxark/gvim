@@ -98,32 +98,67 @@ func CompileQuery(q Query) (*CompiledQuery, error) {
 // fast literal-prefix precheck before running the matcher. It is safe for
 // concurrent use across worker goroutines.
 func (cq *CompiledQuery) FindString(text string) []Match {
-	if cq == nil || cq.q.Text == "" || (!cq.q.Regex && text == "") {
+	return cq.FindStringLimit(text, math.MaxInt)
+}
+
+// FindStringLimit searches text for at most limit matches without allocating a
+// buffer.Buffer, applying a fast literal-prefix precheck before running the matcher.
+// It is safe for concurrent use across worker goroutines.
+func (cq *CompiledQuery) FindStringLimit(text string, limit int) []Match {
+	if cq == nil || cq.q.Text == "" || limit <= 0 || (!cq.q.Regex && text == "") {
 		return nil
 	}
 	if cq.litPrefix != "" && !strings.Contains(text, cq.litPrefix) {
 		return nil
 	}
-	var locs [][]int
 	if !cq.q.Regex {
 		var sc *foldScan
 		if cq.needle != nil {
 			sc = cq.needle.scan("", 0)
 		}
-		offs := (&literalSearch{q: cq.q, sc: sc}).offsets(text, math.MaxInt)
+		offs := (&literalSearch{q: cq.q, sc: sc}).offsets(text, limit)
 		if len(offs) == 0 {
 			return nil
 		}
-		locs = make([][]int, len(offs))
+		cur := newOffsetPos(text, buffer.Pos{})
+		out := make([]Match, len(offs))
 		for i, o := range offs {
-			locs[i] = []int{o[0], o[1]}
+			out[i] = Match{Start: cur.pos(o[0]), End: cur.pos(o[1])}
 		}
-	} else {
-		d := document{text: text}
-		locs = d.locate(cq.re, cq.q)
-		if len(locs) == 0 {
-			return nil
+		return out
+	}
+	ask := limit
+	if ask == math.MaxInt {
+		ask = -1
+	}
+	var locs [][]int
+	for {
+		all := cq.re.FindAllStringIndex(text, ask)
+		if !cq.q.WholeWord {
+			locs = all
+			break
 		}
+		kept := all[:0]
+		for _, loc := range all {
+			if isWholeWord(text, loc[0], loc[1]) {
+				kept = append(kept, loc)
+				if len(kept) == limit {
+					break
+				}
+			}
+		}
+		if len(kept) == limit || ask < 0 || len(all) < ask {
+			locs = kept
+			break
+		}
+		if ask > math.MaxInt/4 {
+			ask = -1
+		} else {
+			ask = max(ask*4, 16)
+		}
+	}
+	if len(locs) == 0 {
+		return nil
 	}
 	cur := newOffsetPos(text, buffer.Pos{})
 	out := make([]Match, len(locs))
@@ -270,8 +305,20 @@ type document struct {
 }
 
 func newDocument(b *buffer.Buffer) document {
+	lines := b.Lines()
+	size := max(lines-1, 0)
+	if b.NonASCII() {
+		for i := range lines {
+			size += b.LineBytes(i)
+		}
+	} else {
+		for i := range lines {
+			size += b.LineLen(i)
+		}
+	}
 	var sb strings.Builder
-	for i := range b.Lines() {
+	sb.Grow(size)
+	for i := range lines {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}

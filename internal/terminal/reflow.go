@@ -45,14 +45,18 @@ func ReflowLines(lines []Line, fromWidth, toWidth int) []Line {
 				i++
 				continue
 			}
-			w := ansi.StringWidth(string(c.Rune))
-			if w < 1 {
+			var w int
+			if c.Rune < 0x80 {
 				w = 1
+			} else {
+				w = ansi.StringWidth(string(c.Rune))
+				if w < 1 {
+					w = 1
+				}
 			}
-			unit := []Cell{c}
+			hasCont := w > 1 && i+1 < end && cells[i+1].Rune == 0
 			advance := 1
-			if w > 1 && i+1 < end && cells[i+1].Rune == 0 {
-				unit = append(unit, cells[i+1])
+			if hasCont {
 				advance = 2
 			}
 			if width > 0 && width+w > toWidth {
@@ -60,7 +64,13 @@ func ReflowLines(lines []Line, fromWidth, toWidth int) []Line {
 				cur = nil
 				width = 0
 			}
-			cur = append(cur, unit...)
+			if cur == nil {
+				cur = make([]Cell, 0, min(end-i, max(toWidth, advance)))
+			}
+			cur = append(cur, c)
+			if hasCont {
+				cur = append(cur, cells[i+1])
+			}
 			width += w
 			i += advance
 		}

@@ -227,14 +227,50 @@ func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, 
 	return ln
 }
 
+const hexDigits = "0123456789ABCDEF"
+
 // expandedGeom is the runes of raw as they are laid out, tabs as blanks and control
 // characters as escapes, and glue[i], which joins rune i to the next one.
 func expandedGeom(raw []rune, tab int) (geom []rune, glue []bool) {
-	plain := expandCells(raw, nil, nil, tab)
-	geom = make([]rune, len(plain))
-	glue = make([]bool, len(plain))
-	for j, c := range plain {
-		geom[j], glue[j] = c.r, c.glue
+	hasSpecial := false
+	for _, r := range raw {
+		if r == '\t' || controlRune(r) {
+			hasSpecial = true
+			break
+		}
+	}
+	if !hasSpecial {
+		return raw, nil
+	}
+	geom = make([]rune, 0, len(raw))
+	col := 0
+	for _, r := range raw {
+		switch {
+		case r == '\t':
+			n := tab - col%tab
+			for range n {
+				geom = append(geom, ' ')
+			}
+			if glue != nil {
+				for range n {
+					glue = append(glue, false)
+				}
+			}
+			col += n
+		case controlRune(r):
+			if glue == nil {
+				glue = make([]bool, len(geom), max(len(geom), len(raw))+controlWidth)
+			}
+			geom = append(geom, '<', rune(hexDigits[r>>4]), rune(hexDigits[r&0xF]), '>')
+			glue = append(glue, true, true, true, false)
+			col += controlWidth
+		default:
+			geom = append(geom, r)
+			if glue != nil {
+				glue = append(glue, false)
+			}
+			col += cellAdvance(col, r, tab)
+		}
 	}
 	return geom, glue
 }

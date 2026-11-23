@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -272,4 +273,142 @@ func TestModifiedWhenMergedAfterSave(t *testing.T) {
 	if !b.Modified() {
 		t.Fatal("merged edit after save must be modified")
 	}
+}
+
+func TestSlabIsolationOnInsertDeleteAndSnapshot(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		text string
+		ins  string
+	}{
+		{"ascii", "alpha\n\nbeta\ngamma", "XYZ123"},
+		{"non-ascii", "héllo\n\n日本\nwörld", "中😀"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := New(tc.text)
+			// Verify every non-empty line has cap == len so in-place insert cannot bleed into next line.
+			for i, l := range b.lines {
+				if cap(l) != len(l) {
+					t.Fatalf("line %d cap=%d != len=%d", i, cap(l), len(l))
+				}
+			}
+
+			snap := b.Snapshot()
+			defer snap.Release()
+
+			// Insert on line 0 and on empty line 1 must not affect line 2 or the snapshot.
+			b.Insert(Pos{0, 5}, tc.ins)
+			b.Insert(Pos{1, 0}, tc.ins)
+			if got := b.Line(2); got != strings.Split(tc.text, "\n")[2] {
+				t.Fatalf("line 2 corrupted after inserts: %q", got)
+			}
+			if _, _, got := snap.Chunk(0, 1<<20); got != tc.text {
+				t.Fatalf("snapshot changed after insert: %q, want %q", got, tc.text)
+			}
+
+			// Delete part of line 2 then insert past its original length, with and without snapshot.
+			snap.Release()
+			b.Delete(Pos{2, 0}, Pos{2, 1})
+			b.Insert(Pos{2, 1}, tc.ins+tc.ins)
+			if got := b.Line(3); got != strings.Split(tc.text, "\n")[3] {
+				t.Fatalf("line 3 corrupted after delete+insert on line 2: %q", got)
+			}
+		})
+	}
+}
+
+func TestCountNonASCIIAndASCIIByteColFastPaths(t *testing.T) {
+	t.Parallel()
+	if got := countNonASCII("plain ascii 123\nxyz"); got != 0 {
+		t.Fatalf("countNonASCII(ascii) = %d, want 0", got)
+	}
+	if got := countNonASCII("a\xffb\xfe"); got != 2 {
+		t.Fatalf("countNonASCII(invalid utf8) = %d, want 2", got)
+	}
+	b := New("alpha\nbeta\ngamma")
+	if b.NonASCII() {
+		t.Fatal("pure ASCII buffer reported NonASCII")
+	}
+	for l := -1; l <= b.Lines(); l++ {
+		for c := -2; c <= 8; c++ {
+			got := b.ByteCol(Pos{l, c})
+			clamped := b.Clamp(Pos{l, c})
+			if got != clamped.Col {
+				t.Fatalf("ASCII ByteCol(%d,%d) = %d, want %d", l, c, got, clamped.Col)
+			}
+			pos := b.PosAtByteCol(l, c)
+			if pos != clamped {
+				t.Fatalf("ASCII PosAtByteCol(%d,%d) = %+v, want %+v", l, c, pos, clamped)
+			}
+			off, err := b.ByteOffset(Pos{l, c})
+			if err != nil {
+				t.Fatal(err)
+			}
+			back, err := b.PosAtByteOffset(off)
+			if err != nil || back != clamped {
+				t.Fatalf("PosAtByteOffset(ByteOffset(%d,%d)) = %+v, %v; want %+v", l, c, back, err, clamped)
+			}
+		}
+	}
+}
+
+func BenchmarkBufferSetText(b *testing.B) {
+	ascii := strings.Repeat("func add(x int, y int) int { return x + y*42 }\n", 4000)
+	utf8Text := strings.Repeat("func 計算(x int) string { return \"héllo 日本\" }\n", 4000)
+	b.Run("ASCII", func(b *testing.B) {
+		b.SetBytes(int64(len(ascii)))
+		var buf Buffer
+		for b.Loop() {
+			buf.setText(ascii)
+		}
+	})
+	b.Run("UTF8", func(b *testing.B) {
+		b.SetBytes(int64(len(utf8Text)))
+		var buf Buffer
+		for b.Loop() {
+			buf.setText(utf8Text)
+		}
+	})
+}
+
+func BenchmarkBufferText(b *testing.B) {
+	asciiBuf := New(strings.Repeat("func add(x int, y int) int { return x + y*42 }\n", 4000))
+	utf8Buf := New(strings.Repeat("func 計算(x int) string { return \"héllo 日本\" }\n", 4000))
+	b.Run("ASCII", func(b *testing.B) {
+		b.SetBytes(int64(len(asciiBuf.Text())))
+		b.ResetTimer()
+		for b.Loop() {
+			_ = asciiBuf.Text()
+		}
+	})
+	b.Run("UTF8", func(b *testing.B) {
+		b.SetBytes(int64(len(utf8Buf.Text())))
+		b.ResetTimer()
+		for b.Loop() {
+			_ = utf8Buf.Text()
+		}
+	})
+}
+
+func BenchmarkBufferByteCol(b *testing.B) {
+	asciiBuf := New(strings.Repeat("func add(x int, y int) int { return x + y*42 }\n", 200))
+	utf8Buf := New(strings.Repeat("func 計算(x int) string { return \"héllo 日本\" }\n", 200))
+	b.Run("ASCII", func(b *testing.B) {
+		p := Pos{Line: 100, Col: 30}
+		for b.Loop() {
+			_ = asciiBuf.ByteCol(p)
+			_ = asciiBuf.PosAtByteCol(100, 30)
+			_, _ = asciiBuf.ByteOffset(p)
+		}
+	})
+	b.Run("UTF8", func(b *testing.B) {
+		p := Pos{Line: 100, Col: 30}
+		for b.Loop() {
+			_ = utf8Buf.ByteCol(p)
+			_ = utf8Buf.PosAtByteCol(100, 35)
+			_, _ = utf8Buf.ByteOffset(p)
+		}
+	})
 }

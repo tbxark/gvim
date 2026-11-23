@@ -261,11 +261,10 @@ func tokenize(lexer chroma.Lexer, text []string, inside bool) ([][]Span, error) 
 		}
 	}
 
-	out := make([][]Span, len(text))
 	for i, ln := range text {
-		out[i] = fillGaps(raw[i], len(ln))
+		raw[i] = fillGaps(raw[i], len(ln))
 	}
-	return out, nil
+	return raw, nil
 }
 
 // plainSpans returns one KindPlain span per non-empty line. It is the
@@ -320,6 +319,22 @@ func appendSpan(spans []Span, s Span) []Span {
 func fillGaps(spans []Span, length int) []Span {
 	if length == 0 {
 		return nil
+	}
+	if len(spans) > 0 && spans[0].Start == 0 && spans[len(spans)-1].End == length {
+		ok := true
+		pos := 0
+		var prevKind Kind
+		for i, s := range spans {
+			if s.Start != pos || s.End <= s.Start || (i > 0 && s.Kind == prevKind) {
+				ok = false
+				break
+			}
+			pos = s.End
+			prevKind = s.Kind
+		}
+		if ok && pos == length {
+			return spans
+		}
 	}
 	out := make([]Span, 0, len(spans)+1)
 	pos := 0

@@ -93,3 +93,31 @@ func TestDiagnosticsForReturnsCopy(t *testing.T) {
 		t.Fatalf("snapshot changed through a returned value: %+v", again.Diagnostics)
 	}
 }
+
+func TestDiagnosticsRevIncrementsOnPublish(t *testing.T) {
+	const docURI = "file:///work/proj/rev.go"
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+
+	if rev := f.client.DiagnosticsRev(); rev != 0 {
+		t.Fatalf("initial DiagnosticsRev = %d, want 0", rev)
+	}
+
+	if err := f.client.DidOpen(ctx, docURI, "go", 1, "ERR\n"); err != nil {
+		t.Fatalf("DidOpen: %v", err)
+	}
+	lsptest.Recv(t, f.client.Diagnostics(), "open event")
+	rev1 := f.client.DiagnosticsRev()
+	if rev1 != 1 {
+		t.Fatalf("DiagnosticsRev after DidOpen = %d, want 1", rev1)
+	}
+
+	if err := f.client.DidChange(ctx, docURI, 2, "ok\n"); err != nil {
+		t.Fatalf("DidChange: %v", err)
+	}
+	lsptest.Recv(t, f.client.Diagnostics(), "change event")
+	rev2 := f.client.DiagnosticsRev()
+	if rev2 != 2 {
+		t.Fatalf("DiagnosticsRev after DidChange = %d, want 2", rev2)
+	}
+}

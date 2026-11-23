@@ -3766,9 +3766,11 @@ func (m *Model) View() tea.View {
 	m.frameLayout = &l
 	defer func() { m.frameLayout = nil }()
 	content := ""
+	var cx, cy int
+	var cok, paintedFocus bool
 	if m.width > 0 && m.height > 0 {
 		m.paintGrid.Resize(m.width, m.height)
-		m.paintInto(&m.paintGrid)
+		cx, cy, cok, paintedFocus = m.paintIntoWithCaret(&m.paintGrid)
 		content = m.paintGrid.String()
 	}
 	v := tea.NewView(content)
@@ -3779,7 +3781,9 @@ func (m *Model) View() tea.View {
 	// when the window is activated.
 	v.ReportFocus = true
 	v.MouseMode = tea.MouseModeAllMotion
-	cx, cy, cok := m.caret()
+	if !paintedFocus || !m.editorOwnsCaret(l) {
+		cx, cy, cok = m.caret()
+	}
 	if cok {
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -3886,14 +3890,18 @@ func (m *Model) paint() *grid.Grid {
 // capture enabled on a fresh grid, so the paint path itself is the same in both
 // cases; normal frames capture nothing.
 func (m *Model) paintInto(g *grid.Grid) {
+	m.paintIntoWithCaret(g)
+}
+
+func (m *Model) paintIntoWithCaret(g *grid.Grid) (cx, cy int, ok, paintedFocus bool) {
 	l := m.layout()
 	if l.Gated {
 		g.Put(0, 0, g.Width(), frame.GateText, grid.Style{})
-		return
+		return 0, 0, false, false
 	}
 	body := style.TaggedCell(m.styles.Editor, "editor", "fg", "editor", "bg")
 	g.Clear(body)
-	m.paintEditor(g, l)
+	cx, cy, ok, paintedFocus = m.paintEditor(g, l)
 	m.paintDropZone(g)
 	m.dock.Draw(g, l, m.styles)
 	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip, m.stripHover)
@@ -3924,6 +3932,7 @@ func (m *Model) paintInto(g *grid.Grid) {
 	for _, o := range m.overlays {
 		o.Draw(g)
 	}
+	return cx, cy, ok, paintedFocus
 }
 
 // paintFrameChrome draws the Style's border outside the workspace cells: the glyphs
@@ -3975,12 +3984,33 @@ func (m *Model) paintFrameChrome(g *grid.Grid, l frame.Layout) {
 // Each pane draws its visible lines, the gutter, the text, the selection, the change
 // marks and the scrollbar, and the lines between the panes are drawn in their gaps.
 // With no tab open, the welcome screen is painted instead.
-func (m *Model) paintEditor(g *grid.Grid, l frame.Layout) {
+func (m *Model) paintEditor(g *grid.Grid, l frame.Layout) (cx, cy int, ok, paintedFocus bool) {
 	if m.ed.Active() == nil {
 		paintWelcome(g, m.styles, l, m.welcomeSel)
-		return
+		return 0, 0, false, false
 	}
-	m.paintPanes(g, l)
+	return m.paintPanes(g, l)
+}
+
+// editorOwnsCaret reports whether the focused editor pane owns the terminal caret.
+func (m *Model) editorOwnsCaret(l frame.Layout) bool {
+	if l.Gated || len(m.overlays) > 0 {
+		return false
+	}
+	if m.explorerFocus || m.contentsFocus || m.diag.focus || m.menu.IsOpen() {
+		return false
+	}
+	if m.plug.panels.focus != 0 || m.dockKeyboard() {
+		return false
+	}
+	doc := m.ed.Active()
+	if doc == nil || m.tabFocus {
+		return false
+	}
+	if _, ok := m.activeHex(); ok {
+		return false
+	}
+	return true
 }
 
 // caret is the terminal cursor position in frame cells. ok is false when the

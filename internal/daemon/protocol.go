@@ -90,15 +90,24 @@ type OpenFileTarget struct {
 	Col  int    `json:"col,omitempty"`
 }
 
+const maxSmallFramePayload = 4096
+
 // WriteFrame writes one frame to w.
 func WriteFrame(w io.Writer, typ byte, payload []byte) error {
 	if len(payload) > MaxPayload {
 		return ErrFrameTooLarge
 	}
-	header := make([]byte, 5)
-	binary.BigEndian.PutUint32(header[:4], uint32(len(payload)))
-	header[4] = typ
-	if err := writeAll(w, header); err != nil {
+	if len(payload) > 0 && len(payload) <= maxSmallFramePayload {
+		var buf [5 + maxSmallFramePayload]byte
+		binary.BigEndian.PutUint32(buf[:4], uint32(len(payload)))
+		buf[4] = typ
+		copy(buf[5:], payload)
+		return writeAll(w, buf[:5+len(payload)])
+	}
+	var hdr [5]byte
+	binary.BigEndian.PutUint32(hdr[:4], uint32(len(payload)))
+	hdr[4] = typ
+	if err := writeAll(w, hdr[:]); err != nil {
 		return err
 	}
 	if len(payload) == 0 {
@@ -110,15 +119,15 @@ func WriteFrame(w io.Writer, typ byte, payload []byte) error {
 // ReadFrame reads one frame from r. A clean EOF before any byte is io.EOF; a
 // truncated frame is io.ErrUnexpectedEOF.
 func ReadFrame(r io.Reader) (Frame, error) {
-	header := make([]byte, 5)
-	if _, err := io.ReadFull(r, header); err != nil {
+	var hdr [5]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return Frame{}, err
 	}
-	n := binary.BigEndian.Uint32(header[:4])
+	n := binary.BigEndian.Uint32(hdr[:4])
 	if n > MaxPayload {
 		return Frame{}, fmt.Errorf("%w (%d bytes)", ErrFrameTooLarge, n)
 	}
-	f := Frame{Type: header[4]}
+	f := Frame{Type: hdr[4]}
 	if n > 0 {
 		f.Payload = make([]byte, n)
 		if _, err := io.ReadFull(r, f.Payload); err != nil {

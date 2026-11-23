@@ -6,7 +6,6 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
@@ -167,46 +166,26 @@ func searchFiles(root string, files []string, cq *search.CompiledQuery, limit in
 		}
 		return hits
 	}
-	window := min(workers*4, n)
-	for base := 0; base < n && len(hits) < limit; base += window {
-		end := min(base+window, n)
-		count := end - base
-		perFile := make([][]palette.GrepHit, count)
-		var next atomic.Int64
-		var wg sync.WaitGroup
-		need := limit - len(hits)
-		wCount := min(workers, count)
-		wg.Add(wCount)
-		for range wCount {
-			go func() {
-				defer wg.Done()
-				for {
-					idx := int(next.Add(1) - 1)
-					if idx >= count {
-						return
-					}
-					rel := files[base+idx]
-					text, ok := pluginhost.ReadSearchable(filepath.Join(root, filepath.FromSlash(rel)), skipFrom)
-					if !ok {
-						continue
-					}
-					perFile[idx] = appendLineHitsText(text, cq, need, nil, func(h palette.GrepHit) palette.GrepHit {
-						h.Rel, h.Source = rel, palette.GrepFiles
-						return h
-					})
-				}
-			}()
+	need := limit - len(hits)
+	runOrderedPool(n, workers, nil, func(idx int, stop func() bool) []palette.GrepHit {
+		rel := files[idx]
+		text, ok := pluginhost.ReadSearchable(filepath.Join(root, filepath.FromSlash(rel)), skipFrom)
+		if !ok || stop() {
+			return nil
 		}
-		wg.Wait()
-		for _, fh := range perFile {
-			for _, h := range fh {
-				if len(hits) >= limit {
-					return hits
-				}
-				hits = append(hits, h)
+		return appendLineHitsText(text, cq, need, nil, func(h palette.GrepHit) palette.GrepHit {
+			h.Rel, h.Source = rel, palette.GrepFiles
+			return h
+		})
+	}, func(_ int, fh []palette.GrepHit) bool {
+		for _, h := range fh {
+			if len(hits) >= limit {
+				return false
 			}
+			hits = append(hits, h)
 		}
-	}
+		return len(hits) < limit
+	})
 	return hits
 }
 

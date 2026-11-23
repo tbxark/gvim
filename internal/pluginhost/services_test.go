@@ -10,8 +10,10 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/search"
 )
 
 // TestPluginServicesGrepConvertsColumns checks the conversion of a hit
@@ -399,5 +401,149 @@ func TestPluginServicesRemoteUnsupportedAndReadSearchableBounds(t *testing.T) {
 	apptest.Must(t, os.WriteFile(badUTF8, []byte{'a', 'b', 0xff, 0xfe, '\n'}, 0o644))
 	if _, ok := ReadSearchable(badUTF8, 0); ok {
 		t.Fatal("ReadSearchable accepted invalid UTF-8 bytes")
+	}
+
+	// Empty and exact-size files are accepted.
+	empty := filepath.Join(root, "empty.txt")
+	apptest.Must(t, os.WriteFile(empty, nil, 0o644))
+	if txt, ok := ReadSearchable(empty, 0); !ok || txt != "" {
+		t.Fatalf("ReadSearchable(empty) = %q, %v; want empty, true", txt, ok)
+	}
+	exact := filepath.Join(root, "exact.txt")
+	apptest.Must(t, os.WriteFile(exact, []byte(strings.Repeat("x", GrepMaxFileBytes)), 0o644))
+	if txt, ok := ReadSearchable(exact, 0); !ok || len(txt) != GrepMaxFileBytes {
+		t.Fatalf("ReadSearchable(exact) = len %d, %v", len(txt), ok)
+	}
+}
+
+func TestGrepMatchesBufferReferenceEdgeCases(t *testing.T) {
+	refGrep := func(rel, text string, q search.Query) []pluginapi.GrepHit {
+		b := buffer.New(text)
+		matches, err := search.Find(b, q)
+		apptest.Must(t, err)
+		var out []pluginapi.GrepHit
+		last := -1
+		for _, m := range matches {
+			if m.Start.Line == last {
+				continue
+			}
+			last = m.Start.Line
+			line := strings.TrimRight(b.Line(m.Start.Line), "\r")
+			winText, col := hitWindow(line, b.ByteCol(m.Start))
+			out = append(out, pluginapi.GrepHit{Path: rel, Line: m.Start.Line, Col: col, Text: winText})
+		}
+		return out
+	}
+
+	longUTF8CRLF := strings.Repeat("é", 400) + "needle" + strings.Repeat("z", 400) + "\r\n"
+	cases := []struct {
+		name string
+		body string
+		req  pluginapi.GrepRequest
+	}{
+		{
+			name: "empty lines and trailing newline",
+			body: "\n\nneedle\n\nneedle\n",
+			req:  pluginapi.GrepRequest{Query: "needle", CaseSensitive: true},
+		},
+		{
+			name: "crlf lines with empty crlf and double cr",
+			body: "alpha\r\n\r\n  needle crlf\r\r\nend\r\n",
+			req:  pluginapi.GrepRequest{Query: "needle", CaseSensitive: true},
+		},
+		{
+			name: "multiline regex across crlf and lf",
+			body: "header\nfoo\nbar middle\nfoo\nbar\r\ntail",
+			req:  pluginapi.GrepRequest{Query: `foo\nbar`, Regex: true},
+		},
+		{
+			name: "utf8 multibyte before match and single line no newline",
+			body: "日本語 café 🚀 needle tail",
+			req:  pluginapi.GrepRequest{Query: "needle", CaseSensitive: true},
+		},
+		{
+			name: "long utf8 crlf hit window",
+			body: "\r\n" + longUTF8CRLF + "second needle",
+			req:  pluginapi.GrepRequest{Query: "needle"},
+		},
+		{
+			name: "case insensitive unicode fold",
+			body: "alpha\nCAFÉ\nNEEDLE\n",
+			req:  pluginapi.GrepRequest{Query: "café"},
+		},
+		{
+			name: "empty line regex match",
+			body: "a\n\nb\n",
+			req:  pluginapi.GrepRequest{Query: `^$`, Regex: true},
+		},
+	}
+
+	svc := pluginServices{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			apptest.Must(t, os.WriteFile(filepath.Join(root, "case.txt"), []byte(tc.body), 0o644))
+			req := tc.req
+			req.Root = root
+			got, err := svc.Grep(t.Context(), req)
+			apptest.Must(t, err)
+			want := refGrep("case.txt", tc.body, search.Query{
+				Text:          req.Query,
+				Regex:         req.Regex,
+				CaseSensitive: req.CaseSensitive,
+			})
+			if !slices.Equal(got, want) {
+				t.Fatalf("got = %+v\nwant  %+v", got, want)
+			}
+		})
+	}
+}
+
+func BenchmarkPluginServicesFuzzy(b *testing.B) {
+	svc := pluginServices{}
+	ctx := context.Background()
+	items := make([]string, 2000)
+	for i := range items {
+		items[i] = "internal/pluginhost/services_" + strings.Repeat("x", i%17) + ".go"
+	}
+	items[1234] = "internal/pluginhost/main_target.go"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = svc.Fuzzy(ctx, "main target", items, 50)
+	}
+}
+
+func BenchmarkPluginServicesGrep(b *testing.B) {
+	root := b.TempDir()
+	body := strings.Repeat("ordinary line without target text in this repository file\n", 100) +
+		"hit line with needle_token here\n" +
+		strings.Repeat("another ordinary line\n", 100)
+	for i := range 20 {
+		name := filepath.Join(root, "f"+string(rune('a'+i))+".txt")
+		apptest.Must(b, os.WriteFile(name, []byte(body), 0o644))
+	}
+	svc := pluginServices{}
+	ctx := context.Background()
+	req := pluginapi.GrepRequest{Root: root, Query: "needle_token", CaseSensitive: true}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		hits, err := svc.Grep(ctx, req)
+		if err != nil || len(hits) != 20 {
+			b.Fatalf("hits=%d err=%v", len(hits), err)
+		}
+	}
+}
+
+func BenchmarkReadSearchable(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "sample.txt")
+	apptest.Must(b, os.WriteFile(path, []byte(strings.Repeat("hello world\n", 4096)), 0o644))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, ok := ReadSearchable(path, GrepMaxFileBytes+1); !ok {
+			b.Fatal("ReadSearchable failed")
+		}
 	}
 }

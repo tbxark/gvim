@@ -22,7 +22,6 @@
 package editorpane
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -344,10 +343,12 @@ type frame struct {
 	scroll     map[int]bool       // lines that get the last-column change mark
 	// highlights gives the search highlights of a line. Nil paints none.
 	highlights func(line int) []Highlight
-	// folds maps each fold start line to whether it is collapsed. hidden marks
-	// the lines inside a collapsed fold. Both are nil without folds.
-	folds  map[int]bool
-	hidden []bool
+	// folds holds collapsed fold start lines (nil when none are collapsed). foldRanges
+	// holds all fold ranges sorted by start line, and hidden marks lines inside a
+	// collapsed fold.
+	folds      map[int]bool
+	foldRanges []fold.Range
+	hidden     []bool
 	// occWord is the word whose occurrences are painted, or "".
 	occWord string
 	curLine bool
@@ -720,18 +721,30 @@ func (p Pane) Render(w, h int) *grid.Grid {
 // w by h, avoiding an intermediate grid allocation and Blit when the rectangle
 // lies inside dst.
 func (p Pane) RenderInto(dst *grid.Grid, x0, y0, w, h int) {
-	if sub, ok := dst.Sub(x0, y0, w, h); ok {
-		p.paintTo(&sub, w, h)
-		return
-	}
-	Blit(dst, x0, y0, p.Render(w, h))
+	p.RenderIntoWithCaret(dst, x0, y0, w, h)
 }
 
-func (p Pane) paintTo(g *grid.Grid, w, h int) {
+// RenderIntoWithCaret paints the pane directly into dst at top-left (x0, y0) with
+// size w by h and returns the pane-local caret coordinates from the painted frame,
+// matching Caret(w, h).
+func (p Pane) RenderIntoWithCaret(dst *grid.Grid, x0, y0, w, h int) (cx, cy int, ok bool) {
+	if w <= 0 || h <= 0 {
+		return 0, 0, false
+	}
+	if sub, subOK := dst.Sub(x0, y0, w, h); subOK {
+		return p.paintTo(&sub, w, h)
+	}
+	g := grid.New(w, h)
+	cx, cy, ok = p.paintTo(g, w, h)
+	Blit(dst, x0, y0, g)
+	return cx, cy, ok
+}
+
+func (p Pane) paintTo(g *grid.Grid, w, h int) (cx, cy int, ok bool) {
 	g.Clear(p.Styles.Text)
 	f, ok := p.newFrame(w, h)
 	if !ok {
-		return
+		return 0, 0, false
 	}
 	rows := f.paintText(g)
 	f.paintCurrentColumn(g)
@@ -740,15 +753,15 @@ func (p Pane) paintTo(g *grid.Grid, w, h int) {
 	f.paintHorizontalBar(g)
 	f.paintCursorLineOverlay(g)
 	f.paintSecondaryCarets(g)
-	f.paintCaret(g)
+	return f.paintCaret(g)
 }
 
 // paintCaret draws the caret cell in the frame's caret shape, so the caret shows even
 // when the terminal cursor is hidden. The caret never takes the scrollbar column.
-func (f frame) paintCaret(g *grid.Grid) {
+func (f frame) paintCaret(g *grid.Grid) (int, int, bool) {
 	x, y, ok := f.caretCell()
 	if !ok || x < f.gutter || x >= f.w-1 {
-		return
+		return x, y, ok
 	}
 	c := g.At(x, y)
 	st := c.Style
@@ -765,6 +778,7 @@ func (f frame) paintCaret(g *grid.Grid) {
 		st.Reverse = true
 	}
 	g.Set(x, y, text, st)
+	return x, y, true
 }
 
 // rowInfo ties a painted body row to the buffer line it shows. The marks are
@@ -860,11 +874,26 @@ func (f frame) paintCurrentColumn(g *grid.Grid) {
 func (f frame) paintLineRow(g *grid.Grid, rows []rowInfo, i int, rd rowDesc, y int, cur bool) []rowInfo {
 	ln := rd.ln
 	if f.gutter > 0 && !f.pageOn {
-		label := fmt.Sprintf("%*s │ ", f.gutter-gutterSeparator, "")
+		var buf [32]byte
+		var numBuf [24]byte
+		var num []byte
 		if rd.first {
-			label = fmt.Sprintf("%*d │ ", f.gutter-gutterSeparator, f.lineNumber(i))
+			num = strconv.AppendInt(numBuf[:0], int64(f.lineNumber(i)), 10)
 		}
-		g.Put(0, y, f.w-1, label, f.numberStyle(i))
+		const sep = " │ "
+		width := max(f.gutter-gutterSeparator, 0)
+		pad := max(width-len(num), 0)
+		need := pad + len(num) + len(sep)
+		out := buf[:0]
+		if need > cap(out) {
+			out = make([]byte, 0, need)
+		}
+		for range pad {
+			out = append(out, ' ')
+		}
+		out = append(out, num...)
+		out = append(out, sep...)
+		g.Put(0, y, f.w-1, string(out), f.numberStyle(i))
 	}
 	cells := f.rowCells(rd)
 	// widthAll is the width of the whole row before horizontal scrolling
@@ -916,12 +945,13 @@ func (f frame) paintLineRow(g *grid.Grid, rows []rowInfo, i int, rd rowDesc, y i
 func (f frame) paintCells(g *grid.Grid, y int, cells []cell, cur bool) int {
 	x := f.gutter
 	maxX := f.w - 1
+	var b strings.Builder
 	for start := 0; start < len(cells); {
 		end := start + 1
 		for end < len(cells) && (cells[end].sameAttr(cells[start]) || isZeroWidth(cells[end].r)) {
 			end++
 		}
-		var b strings.Builder
+		b.Reset()
 		for _, c := range cells[start:end] {
 			switch {
 			case c.rep == 0:

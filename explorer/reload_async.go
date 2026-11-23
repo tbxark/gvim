@@ -64,12 +64,14 @@ type Listing struct {
 // Apply. Read touches no tree, so it may run on any goroutine.
 func (s Snapshot) Read() Listing {
 	l := Listing{entries: make(map[string][]Entry, len(s.dirs))}
+	ignoreCache := make(map[string]ignoreCacheEntry)
 	for _, dir := range s.dirs {
 		entries, err := listDir(dir, ListOptions{
 			ShowHidden:           true,
 			ShowIgnored:          true,
 			IgnoreRoot:           s.root,
 			Fast:                 true,
+			IgnoreCache:          ignoreCache,
 			RespectGitignore:     s.respectGitignore,
 			CustomIgnorePatterns: s.customIgnorePatterns,
 		})

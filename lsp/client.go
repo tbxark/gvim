@@ -85,10 +85,12 @@ type Client struct {
 	// diags is closed after the read loop exits, so no send can follow the close.
 	diags chan DiagnosticsEvent
 
-	// diagMu guards diagByURI, the latest publishDiagnostics event per document.
-	// Unlike diags, it is never trimmed by the drop-oldest policy.
+	// diagMu guards diagByURI, the latest publishDiagnostics event per document,
+	// and diagRev, which increments on each publish. Unlike diags, diagByURI is
+	// never trimmed by the drop-oldest policy.
 	diagMu    sync.Mutex
 	diagByURI map[string]DiagnosticsEvent
+	diagRev   uint64
 
 	// progMu guards the $/progress entries the server reported and progOrder,
 	// their begin order. They are the editor's bounded progress list.
@@ -497,12 +499,22 @@ func (c *Client) DiagnosticsAll() map[string]DiagnosticsEvent {
 	return out
 }
 
+// DiagnosticsRev returns a counter that increments whenever the server
+// publishes diagnostics. Callers that cache derived workspace diagnostics compare
+// it to detect new publishDiagnostics events.
+func (c *Client) DiagnosticsRev() uint64 {
+	c.diagMu.Lock()
+	defer c.diagMu.Unlock()
+	return c.diagRev
+}
+
 // publish records ev as the latest event for its document and queues it without
 // blocking. Only the read loop calls it, so a single-producer drop-oldest loop
 // always finishes after at most one drop.
 func (c *Client) publish(ev DiagnosticsEvent) {
 	c.diagMu.Lock()
 	c.diagByURI[ev.URI] = ev
+	c.diagRev++
 	c.diagMu.Unlock()
 
 	for {

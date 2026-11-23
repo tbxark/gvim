@@ -147,3 +147,32 @@ func TestPluginFoldsDoNotReorderTheDocumentsRanges(t *testing.T) {
 		t.Errorf("the document's first range = %+v after the pane merged plugin folds, want {2 3}", got)
 	}
 }
+
+func TestDuplicateStartFoldUsesLongestMergedPlaceholder(t *testing.T) {
+	t.Parallel()
+	d := foldDoc{
+		fakeDoc: newDoc("a", "\tb", "\tc", "\td", "\te", "f"),
+		ranges:  []fold.Range{{Start: 0, End: 2}},
+		folded:  map[int]bool{0: true},
+	}
+	var opts Options
+	opts.FoldLineCount = true
+	p := Pane{
+		Doc:  d,
+		Opts: opts,
+		PluginFolds: func() ([]fold.Range, map[int]bool, map[int]string) {
+			return []fold.Range{{Start: 0, End: 4}}, nil, nil
+		},
+	}
+	g := p.Render(30, 5)
+	row := rowsOf(g)[0]
+	if row != "  1 │▸a ⋯ 4 lines" {
+		t.Fatalf("row 0 = %q, want longest placeholder ⋯ 4 lines", row)
+	}
+	if h := p.Hit(30, 5, 2, 0); !h.Fold {
+		t.Errorf("gutter hit Fold = false, want true")
+	}
+	if h := p.Hit(30, 5, 2, 1); h.Pos.Line != 5 {
+		t.Errorf("row 1 line = %d, want 5", h.Pos.Line)
+	}
+}

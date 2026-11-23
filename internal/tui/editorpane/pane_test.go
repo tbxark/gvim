@@ -3,6 +3,7 @@ package editorpane
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 	"testing"
 
@@ -651,5 +652,104 @@ func TestBlitSkipsContinuationAndClipsWideEdgeRune(t *testing.T) {
 	}
 	if got := dst.At(2, 0).Text; got != " " {
 		t.Fatalf("clipped edge wide rune at dst(2,0) = %q, want space", got)
+	}
+}
+
+func TestRenderIntoWithCaretMatchesCaret(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		pane Pane
+		x0   int
+		y0   int
+		w, h int
+		dstW int
+		dstH int
+	}{
+		{
+			name: "plain in bounds",
+			pane: Pane{Doc: &fakeDoc{lines: []string{"alpha", "beta"}, cursor: buffer.Pos{Line: 1, Col: 2}}},
+			x0:   2, y0: 1, w: 20, h: 4, dstW: 30, dstH: 8,
+		},
+		{
+			name: "wrapped continuation",
+			pane: Pane{Doc: &fakeDoc{lines: []string{"aaaa bbbb cccc"}, cursor: buffer.Pos{Line: 0, Col: 11}}, Wrap: true},
+			x0:   0, y0: 0, w: 14, h: 4, dstW: 14, dstH: 4,
+		},
+		{
+			name: "offscreen caret",
+			pane: Pane{Doc: &fakeDoc{lines: []string{"a", "b", "c"}, cursor: buffer.Pos{Line: 0, Col: 0}}, Top: 1},
+			x0:   0, y0: 0, w: 20, h: 2, dstW: 20, dstH: 2,
+		},
+		{
+			name: "caret on scrollbar col",
+			pane: Pane{Doc: &fakeDoc{lines: []string{"1234567890123"}, cursor: buffer.Pos{Line: 0, Col: 13}}, Wrap: true},
+			x0:   0, y0: 0, w: 20, h: 2, dstW: 20, dstH: 2,
+		},
+		{
+			name: "clipped blit fallback",
+			pane: Pane{Doc: &fakeDoc{lines: []string{"hello"}, cursor: buffer.Pos{Line: 0, Col: 3}}},
+			x0:   5, y0: 2, w: 20, h: 4, dstW: 15, dstH: 4,
+		},
+		{
+			name: "no doc",
+			pane: Pane{},
+			x0:   0, y0: 0, w: 10, h: 2, dstW: 10, dstH: 2,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := grid.New(tc.dstW, tc.dstH)
+			gotX, gotY, gotOK := tc.pane.RenderIntoWithCaret(dst, tc.x0, tc.y0, tc.w, tc.h)
+			wantX, wantY, wantOK := tc.pane.Caret(tc.w, tc.h)
+			if gotX != wantX || gotY != wantY || gotOK != wantOK {
+				t.Errorf("RenderIntoWithCaret = (%d,%d,%v), Caret = (%d,%d,%v)", gotX, gotY, gotOK, wantX, wantY, wantOK)
+			}
+		})
+	}
+}
+
+func TestExpandedGeomMatchesExpandCells(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		tab  int
+	}{
+		{"plain ascii", "hello world", 4},
+		{"utf8 no special", "héllo 中文", 4},
+		{"tabs only", "\ta\tbc\t", 4},
+		{"wide before tab", "中\tx", 4},
+		{"controls only", "\x00a\x07\x7f", 4},
+		{"tab then control", "a\t\x1bb", 4},
+		{"control then tab", "\x07\tb", 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []rune(tc.raw)
+			cells := expandCells(raw, nil, nil, tc.tab)
+			wantGeom := make([]rune, len(cells))
+			var wantGlue []bool
+			hasCtrl := false
+			for i, c := range cells {
+				wantGeom[i] = c.r
+				if c.glue {
+					hasCtrl = true
+				}
+			}
+			if hasCtrl {
+				wantGlue = make([]bool, len(cells))
+				for i, c := range cells {
+					wantGlue[i] = c.glue
+				}
+			}
+			gotGeom, gotGlue := expandedGeom(raw, tc.tab)
+			if !slices.Equal(gotGeom, wantGeom) {
+				t.Errorf("geom = %q, want %q", string(gotGeom), string(wantGeom))
+			}
+			if !slices.Equal(gotGlue, wantGlue) {
+				t.Errorf("glue = %v, want %v", gotGlue, wantGlue)
+			}
+		})
 	}
 }

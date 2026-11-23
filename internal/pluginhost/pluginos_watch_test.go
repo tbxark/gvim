@@ -190,3 +190,80 @@ func TestMergeKind(t *testing.T) {
 		}
 	}
 }
+
+func TestOSWatchQueueReusesBackingAndClearsSlots(t *testing.T) {
+	w := &osWatch{
+		path: "/tmp/ws",
+		wake: make(chan struct{}, 1),
+	}
+	// Warm up a batch of 4 events so queue grows a backing array.
+	for i := range 4 {
+		w.push(hostos.WatchEvent{Path: "/tmp/ws/a", Kind: "write", Err: string(rune('a' + i))})
+	}
+	initialCap := cap(w.queue)
+	for range 4 {
+		ev, ok := w.Next(context.Background())
+		if !ok || ev.Kind != "write" {
+			t.Fatalf("Next = %+v, %v", ev, ok)
+		}
+	}
+	if len(w.queue) != 0 || w.qHead != 0 {
+		t.Fatalf("after drain: len=%d qHead=%d, want 0, 0", len(w.queue), w.qHead)
+	}
+	backing := w.queue[:cap(w.queue)]
+	for i, slot := range backing {
+		if slot != (hostos.WatchEvent{}) {
+			t.Fatalf("slot %d not cleared: %+v", i, slot)
+		}
+	}
+
+	// Repeat single- and multi-event push/drain cycles: backing capacity must stay reused.
+	for cycle := range 100 {
+		n := 1 + (cycle % 3)
+		for range n {
+			w.push(hostos.WatchEvent{Path: "/tmp/ws/b", Kind: "create"})
+		}
+		for range n {
+			ev, ok := w.Next(context.Background())
+			if !ok || ev.Path != "/tmp/ws/b" {
+				t.Fatalf("cycle %d Next = %+v, %v", cycle, ev, ok)
+			}
+		}
+		if cap(w.queue) != initialCap {
+			t.Fatalf("cycle %d cap(queue) = %d, want %d (backing array not reused)", cycle, cap(w.queue), initialCap)
+		}
+	}
+
+	// Verify overflow threshold honours qHead offset.
+	w.push(hostos.WatchEvent{Path: "/tmp/ws/0", Kind: "write"})
+	w.push(hostos.WatchEvent{Path: "/tmp/ws/1", Kind: "write"})
+	_, _ = w.Next(context.Background()) // qHead is now 1, 1 item queued
+	for range watchQueueMax - 1 {
+		w.push(hostos.WatchEvent{Path: "/tmp/ws/x", Kind: "write"})
+	}
+	if w.overflow {
+		t.Fatal("overflowed before watchQueueMax queued items")
+	}
+	w.push(hostos.WatchEvent{Path: "/tmp/ws/over", Kind: "write"})
+	if !w.overflow {
+		t.Fatal("expected overflow at watchQueueMax queued items")
+	}
+}
+
+func BenchmarkOSWatchPushNext(b *testing.B) {
+	w := &osWatch{
+		path: "/tmp/ws",
+		wake: make(chan struct{}, 1),
+	}
+	ev := hostos.WatchEvent{Path: "/tmp/ws/file.go", Kind: "write"}
+	ctx := context.Background()
+	// Warm up backing array.
+	w.push(ev)
+	_, _ = w.Next(ctx)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		w.push(ev)
+		_, _ = w.Next(ctx)
+	}
+}

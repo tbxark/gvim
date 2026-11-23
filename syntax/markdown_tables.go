@@ -58,16 +58,29 @@ func MarkdownTables(lines []string) ([]TableLine, []Table) {
 	var tables []Table
 	for i := 0; i+1 < len(lines); {
 		header := strings.TrimRight(lines[i], "\r")
+		if !strings.Contains(header, "|") || mdQuote.MatchString(header) || mdList.MatchString(header) {
+			i++
+			continue
+		}
 		sep := strings.TrimRight(lines[i+1], "\r")
-		if !isTableHeader(header) || !isTableSeparator(sep) || len(splitTableRow(header).cells) != len(splitTableRow(sep).cells) {
+		if !strings.Contains(sep, "|") || !strings.Contains(sep, "-") {
+			i++
+			continue
+		}
+		headerRow := splitTableRow(header)
+		if isTableSeparatorRow(header, headerRow) {
+			i++
+			continue
+		}
+		sepRow := splitTableRow(sep)
+		if !isTableSeparatorRow(sep, sepRow) || len(headerRow.cells) != len(sepRow.cells) {
 			i++
 			continue
 		}
 		id := len(tables)
-		row := splitTableRow(header)
-		align := tableAlignments(sep)
+		align := tableAlignmentsFromCells(sepRow.cells)
 		t := Table{Align: align}
-		out[i] = TableLine{Kind: TableHeader, Table: id, Cells: row.cells, Starts: row.starts, Ends: row.ends, Pipes: row.pipes}
+		out[i] = TableLine{Kind: TableHeader, Table: id, Cells: headerRow.cells, Starts: headerRow.starts, Ends: headerRow.ends, Pipes: headerRow.pipes}
 		t.Lines = append(t.Lines, i)
 		out[i+1] = TableLine{Kind: TableSeparator, Table: id}
 		t.Lines = append(t.Lines, i+1)
@@ -167,26 +180,21 @@ func splitTableRow(s string) tableRow {
 	return row
 }
 
-// isTableHeader reports whether s can hold the header cells of a table: it has
-// a pipe, is not itself a separator row, and is not a blockquote or a list item.
-// A table inside those containers is not classified: the page view leaves such a
-// line literal (docs/markdown.md).
-func isTableHeader(s string) bool {
-	if !strings.Contains(s, "|") || isTableSeparator(s) {
+// isTableSeparatorRow reports whether s (already split into row) is the separator row
+// under a table header: cells of dashes, optionally with a leading or trailing colon,
+// under at least one pipe.
+func isTableSeparatorRow(s string, row tableRow) bool {
+	if !strings.Contains(s, "-") || !strings.Contains(s, "|") {
 		return false
 	}
-	return !mdQuote.MatchString(s) && !mdList.MatchString(s)
-}
-
-// isTableSeparator reports whether s is the separator row under a table header:
-// cells of dashes, optionally with a leading or trailing colon, under at least
-// one pipe.
-func isTableSeparator(s string) bool {
-	t := strings.TrimSpace(s)
-	if !strings.Contains(t, "-") || !strings.Contains(t, "|") {
+	cells := row.cells
+	if t := strings.TrimSpace(s); len(t) != len(strings.Trim(s, " \t")) {
+		cells = splitTableRow(t).cells
+	}
+	if len(cells) == 0 {
 		return false
 	}
-	for _, c := range splitTableRow(t).cells {
+	for _, c := range cells {
 		c = strings.TrimSpace(c)
 		if c == "" {
 			return false
@@ -200,9 +208,8 @@ func isTableSeparator(s string) bool {
 	return true
 }
 
-// tableAlignments reads the alignments the separator row declares.
-func tableAlignments(sep string) []TableAlign {
-	cells := splitTableRow(sep).cells
+// tableAlignmentsFromCells reads the alignments the separator row cells declare.
+func tableAlignmentsFromCells(cells []string) []TableAlign {
 	out := make([]TableAlign, len(cells))
 	for i, c := range cells {
 		c = strings.TrimSpace(c)

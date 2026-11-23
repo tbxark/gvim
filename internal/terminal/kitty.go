@@ -117,14 +117,15 @@ func (k *kittyKeyboard) scan(p []byte) [][]byte {
 			k.keepPending(data[i:])
 			return replies
 		}
-		body := string(data[i+2 : j])
 		switch data[j] {
 		case 'u':
-			if reply := k.command(body); reply != nil {
+			if reply := k.command(string(data[i+2 : j])); reply != nil {
 				replies = append(replies, reply)
 			}
 		case 'h', 'l':
-			k.applyPrivateMode(body, data[j] == 'h')
+			if j > i+2 && data[i+2] == '?' {
+				k.applyPrivateMode(string(data[i+2:j]), data[j] == 'h')
+			}
 		}
 		i = j + 1
 	}

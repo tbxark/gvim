@@ -32,3 +32,17 @@ func BenchmarkCompileQueryFindStringHit(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkCompileQueryFindStringLimit(b *testing.B) {
+	text := strings.Repeat("func renderFrame(ctx Context, width int) error {\n\treturn nil\n}\n", 200)
+	cq, err := CompileQuery(Query{Text: "renderFrame", CaseSensitive: true})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if got := cq.FindStringLimit(text, 10); len(got) != 10 {
+			b.Fatalf("got %d matches, want 10", len(got))
+		}
+	}
+}

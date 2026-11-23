@@ -96,6 +96,7 @@ type dpScratch struct {
 	bestNode  []int
 	dpPos     []int
 	subPos    []int
+	multiPos  []int
 }
 
 func matchPrepared(terms []queryTerm, tc, tl []rune) fuzzyResult {
@@ -104,14 +105,20 @@ func matchPrepared(terms []queryTerm, tc, tl []rune) fuzzyResult {
 }
 
 func matchPreparedScratch(terms []queryTerm, tc, tl []rune, sc *dpScratch) fuzzyResult {
-	// Fast rejection: every term must be a subsequence of the target.
-	for _, t := range terms {
-		if !isSubsequence(t.lower, tl) {
-			return fuzzyResult{}
+	return matchPreparedScratchOpts(terms, tc, tl, sc, false, true)
+}
+
+func matchPreparedScratchOpts(terms []queryTerm, tc, tl []rune, sc *dpScratch, skipSubseq, needPositions bool) fuzzyResult {
+	if !skipSubseq {
+		// Fast rejection: every term must be a subsequence of the target.
+		for _, t := range terms {
+			if !isSubsequence(t.lower, tl) {
+				return fuzzyResult{}
+			}
 		}
 	}
 	if len(terms) > 1 {
-		return scoreMultiTermScratch(terms, tc, tl, sc)
+		return scoreMultiTermScratch(terms, tc, tl, sc, needPositions)
 	}
 	return scoreSingleTermScratch(terms[0].lower, tc, tl, sc)
 }
@@ -233,21 +240,28 @@ func scoreSingleTermScratch(q, tc, tl []rune, sc *dpScratch) fuzzyResult {
 	return fuzzyResult{matched: true, score: final, positions: positions}
 }
 
-// scoreMultiTerm scores each term independently, sums the scores, and adds a
+// scoreMultiTermScratch scores each term independently, sums the scores, and adds a
 // tight-span bonus when the terms appear in order and close together.
-func scoreMultiTermScratch(terms []queryTerm, tc, tl []rune, sc *dpScratch) fuzzyResult {
+func scoreMultiTermScratch(terms []queryTerm, tc, tl []rune, sc *dpScratch, needPositions bool) fuzzyResult {
 	total := 0
 	var all []int
+	if needPositions {
+		all = sc.multiPos[:0]
+	}
 	for _, t := range terms {
 		r := scoreSingleTermScratch(t.lower, tc, tl, sc)
 		if !r.matched {
 			return fuzzyResult{}
 		}
 		total += r.score
-		all = append(all, r.positions...)
+		if needPositions {
+			all = append(all, r.positions...)
+		}
 	}
-	slices.Sort(all)
-	all = slices.Compact(all)
+	if needPositions {
+		slices.Sort(all)
+		all = slices.Compact(all)
+	}
 
 	if start, end, ok := findSequentialTermSpan(tl, terms); ok {
 		termLenSum := 0
@@ -258,11 +272,16 @@ func scoreMultiTermScratch(terms []queryTerm, tc, tl []rune, sc *dpScratch) fuzz
 		maxGapExcess := max(len(terms)-1, 0) * 4
 		if gapExcess <= maxGapExcess {
 			total += scoreExactMatch
-			all = all[:0]
-			for i := start; i < end && i < len(tc); i++ {
-				all = append(all, i)
+			if needPositions {
+				all = all[:0]
+				for i := start; i < end && i < len(tc); i++ {
+					all = append(all, i)
+				}
 			}
 		}
+	}
+	if needPositions {
+		sc.multiPos = all
 	}
 	return fuzzyResult{matched: true, score: total, positions: all}
 }

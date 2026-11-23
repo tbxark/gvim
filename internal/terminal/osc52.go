@@ -102,7 +102,11 @@ func (p *osc52Parser) scan(data []byte, emit func(selection, text string), query
 // finish parses and emits the collected OSC body.
 func (p *osc52Parser) finish(emit func(selection, text string), query func(selection string)) {
 	body := p.body
-	p.body = nil
+	if cap(p.body) > 4096 {
+		p.body = nil
+	} else {
+		p.body = p.body[:0]
+	}
 	p.state = oscGround
 	if emit == nil && query == nil {
 		return

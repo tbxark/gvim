@@ -93,3 +93,33 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestSnapshotReadSharesIgnoreCache(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0o644))
+	must(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "sub", "a.txt"), nil, 0o644))
+
+	tree, err := Open(dir)
+	must(t, err)
+	must(t, tree.Expand(filepath.Join(dir, "sub")))
+
+	prev := listDir
+	var caches []map[string]ignoreCacheEntry
+	listDir = func(d string, opts ListOptions) ([]Entry, error) {
+		caches = append(caches, opts.IgnoreCache)
+		return prev(d, opts)
+	}
+	t.Cleanup(func() { listDir = prev })
+
+	_ = tree.Snapshot().Read()
+	if len(caches) != 2 {
+		t.Fatalf("listDir calls = %d, want 2", len(caches))
+	}
+	if caches[0] == nil || caches[1] == nil {
+		t.Fatalf("expected non-nil IgnoreCache in Snapshot.Read, got %v", caches)
+	}
+	if _, ok := caches[0][filepath.Join(dir, ".gitignore")]; !ok {
+		t.Fatalf("expected shared IgnoreCache to record root .gitignore")
+	}
+}

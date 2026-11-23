@@ -47,11 +47,18 @@ func formattersFor(cfg config.Config, lookPath func(string) (string, error)) map
 		out[k] = v
 		user[strings.ToLower(k)] = true
 	}
+	found := make(map[string]bool, 8)
 	for _, f := range defaultFormatters {
 		if slices.ContainsFunc(f.keys, func(k string) bool { return user[k] }) {
 			continue
 		}
-		if _, err := lookPath(f.program); err != nil {
+		ok, checked := found[f.program]
+		if !checked {
+			_, err := lookPath(f.program)
+			ok = err == nil
+			found[f.program] = ok
+		}
+		if !ok {
 			continue
 		}
 		for _, k := range f.keys {

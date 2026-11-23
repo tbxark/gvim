@@ -2,6 +2,7 @@ package app
 
 import (
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/tbxark/gvim/config"
@@ -13,8 +14,36 @@ import (
 // per-language settings of a document. It reads cfg once per call, so it keeps the
 // config alive but changes nothing in it.
 func languageSettings(cfg config.Config) editor.SettingsResolver {
+	type langKey struct {
+		lang, path string
+	}
+	const maxEntries = 512
+	var (
+		mu    sync.RWMutex
+		cache = make(map[langKey]editor.LanguageSettings)
+	)
 	return func(language, path string) editor.LanguageSettings {
-		return languageSettingsOf(cfg.EditorFor(language, path))
+		key := langKey{lang: language, path: path}
+		mu.RLock()
+		v, ok := cache[key]
+		mu.RUnlock()
+		if !ok {
+			v = languageSettingsOf(cfg.EditorFor(language, path))
+			mu.Lock()
+			if existing, dup := cache[key]; dup {
+				v = existing
+			} else {
+				if len(cache) >= maxEntries {
+					clear(cache)
+				}
+				cache[key] = v
+			}
+			mu.Unlock()
+		}
+		if len(v.OnSave) > 0 {
+			v.OnSave = slices.Clone(v.OnSave)
+		}
+		return v
 	}
 }
 

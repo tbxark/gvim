@@ -21,6 +21,9 @@ const (
 	previewHighlightBytes       = 256 << 10
 	previewHighlightLines       = 4000
 	previewHighlighterCacheSize = 8
+	previewDetectBytes          = 16 << 10
+	previewWindowContext        = 60
+	previewWindowThreshold      = 120
 )
 
 // previewHighlighter is one preview cache entry: a highlighter and the content hash it was
@@ -43,46 +46,80 @@ type previewHighlighterCache struct {
 // and returns nothing, plain text, for a file over the size or line caps or without a
 // grammar.
 func (c *previewHighlighterCache) spans(path, text string, lines []string, first, count int) []searchpanel.PreviewSpan {
-	if count <= 0 || len(text) > previewHighlightBytes || len(lines) > previewHighlightLines {
+	if count <= 0 || first < 0 || first >= len(lines) || len(text) > previewHighlightBytes || len(lines) > previewHighlightLines {
 		return nil
 	}
 	hash := hashText(text)
 	c.mu.Lock()
-	entry := c.entries[path]
-	if entry == nil || entry.hash != hash {
-		entry = &previewHighlighter{hash: hash, h: syntax.NewHighlighter(syntax.Detect(path, []byte(text)))}
-		if c.entries == nil {
-			c.entries = make(map[string]*previewHighlighter)
-		}
-		c.entries[path] = entry
-		for i, old := range c.order {
-			if old == path {
-				c.order = append(c.order[:i], c.order[i+1:]...)
-				break
-			}
-		}
-		c.order = append(c.order, path)
-		for len(c.order) > previewHighlighterCacheSize {
-			oldest := c.order[0]
-			c.order = c.order[1:]
-			if oldest != path {
-				delete(c.entries, oldest)
-			}
-		}
+	var h *syntax.Highlighter
+	if entry := c.entries[path]; entry != nil && entry.hash == hash {
+		h = entry.h
 	}
-	h := entry.h
 	c.mu.Unlock()
-	all := h.Lines(int(hash), lines)
+	if h == nil {
+		head := text[:min(len(text), previewDetectBytes)]
+		newH := syntax.NewHighlighter(syntax.Detect(path, []byte(head)))
+		c.mu.Lock()
+		if existing := c.entries[path]; existing != nil && existing.hash == hash {
+			h = existing.h
+		} else {
+			entry := &previewHighlighter{hash: hash, h: newH}
+			if c.entries == nil {
+				c.entries = make(map[string]*previewHighlighter)
+			}
+			c.entries[path] = entry
+			for i, old := range c.order {
+				if old == path {
+					c.order = append(c.order[:i], c.order[i+1:]...)
+					break
+				}
+			}
+			c.order = append(c.order, path)
+			for len(c.order) > previewHighlighterCacheSize {
+				oldest := c.order[0]
+				c.order = c.order[1:]
+				if oldest != path {
+					delete(c.entries, oldest)
+				}
+			}
+			h = newH
+		}
+		c.mu.Unlock()
+	}
+
+	var lineSpansFor func(int) []syntax.Span
+	limit := min(first+count, len(lines))
+	if len(lines) > count+previewWindowThreshold {
+		winFirst := max(first-previewWindowContext, 0)
+		win := h.LinesWindow(int(hash), winFirst, lines[winFirst:limit])
+		lineSpansFor = win.Line
+	} else {
+		all := h.Lines(int(hash), lines)
+		limit = min(limit, len(all))
+		lineSpansFor = func(abs int) []syntax.Span { return all[abs] }
+	}
+
 	var out []searchpanel.PreviewSpan
-	for i := 0; i < count && first+i < len(all); i++ {
-		abs := first + i
+	for abs := first; abs < limit; abs++ {
 		line := lines[abs]
-		for _, span := range all[abs] {
+		prevByte, prevRune := 0, 0
+		for _, span := range lineSpansFor(abs) {
 			if span.Kind == syntax.KindPlain {
 				continue
 			}
-			start := utf8.RuneCountInString(line[:min(span.Start, len(line))])
-			end := utf8.RuneCountInString(line[:min(span.End, len(line))])
+			s := min(max(span.Start, 0), len(line))
+			e := min(max(span.End, 0), len(line))
+			if s < prevByte {
+				prevByte, prevRune = 0, 0
+			}
+			prevRune += utf8.RuneCountInString(line[prevByte:s])
+			start := prevRune
+			prevByte = s
+			if e > s {
+				prevRune += utf8.RuneCountInString(line[s:e])
+				prevByte = e
+			}
+			end := prevRune
 			if end > start {
 				out = append(out, searchpanel.PreviewSpan{Line: abs, Start: start, End: end, Kind: span.Kind.String()})
 			}

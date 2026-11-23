@@ -27,10 +27,9 @@ func (m *Model) docLanguageSettings(doc Document) editor.LanguageSettings {
 // viewRender sets the editor.* display options on the pane of doc: relative numbers,
 // the hanging indent and wrap column, the indentation guides, the whitespace marks and
 // the bracket highlights. s are the document's own view settings, which win over the
-// config.
-func (m *Model) viewRender(p editorpane.Pane, doc Document, s editor.ViewSettings) editorpane.Pane {
+// config, and ls are its resolved language settings.
+func (m *Model) viewRender(p editorpane.Pane, s editor.ViewSettings, ls editor.LanguageSettings) editorpane.Pane {
 	o := m.view.opts
-	ls := m.docLanguageSettings(doc)
 	p.Opts.RelativeLineNumbers = o.RelativeLineNumbers
 	p.Opts.WrapIndent = o.WrapIndent
 	p.Opts.WrapColumn = ls.WrapColumn

@@ -244,20 +244,25 @@ func (r *Registry) createLocked(root, label string) (Workspace, bool, error) {
 // goes through CanonicalRoot; a remote one normalizes the root without local IO. Identity is
 // the stable id, so a remote workspace survives daemon restarts.
 func (r *Registry) createWithAuthorityLocked(root, label, authoritySpec string) (Workspace, bool, error) {
+	w, created, _, _, err := r.createWithAuthorityScanLocked(root, label, authoritySpec)
+	return w, created, err
+}
+
+func (r *Registry) createWithAuthorityScanLocked(root, label, authoritySpec string) (Workspace, bool, []Workspace, []error, error) {
 	spec := strings.TrimSpace(authoritySpec)
 	canonical, err := r.workspaceRoot(root, spec)
 	if err != nil {
-		return Workspace{}, false, err
+		return Workspace{}, false, nil, nil, err
 	}
-	entries, _ := r.scan()
+	entries, problems := r.scan()
 	for _, w := range entries {
 		if w.File.Root == canonical && w.File.AuthoritySpec == spec {
-			return w, false, nil
+			return w, false, entries, problems, nil
 		}
 	}
 	id, err := newStableID()
 	if err != nil {
-		return Workspace{}, false, err
+		return Workspace{}, false, nil, nil, err
 	}
 	if strings.TrimSpace(label) == "" {
 		if spec != "" {
@@ -276,9 +281,9 @@ func (r *Registry) createWithAuthorityLocked(root, label, authoritySpec string) 
 	}}
 	saved, err := r.saveLocked(w)
 	if err != nil {
-		return Workspace{}, false, err
+		return Workspace{}, false, nil, nil, err
 	}
-	return saved, true, nil
+	return saved, true, entries, problems, nil
 }
 
 // CreateCoTenant makes a NEW workspace over root: unlike Create it never reuses an
@@ -704,11 +709,11 @@ type Discovery struct {
 func (r *Registry) Discover(root string) (Discovery, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	foreground, _, err := r.createLocked(root, "")
+	foreground, _, list, problems, err := r.createWithAuthorityScanLocked(root, "", "")
 	if err != nil {
 		return Discovery{}, err
 	}
-	return r.discoveryLocked(foreground), nil
+	return discoveryLocked(foreground, list, problems), nil
 }
 
 // DiscoverWithAuthority is Discover for a daemon started with a remote target: it resolves
@@ -723,16 +728,15 @@ func (r *Registry) DiscoverWithAuthority(root, authoritySpec string) (Discovery,
 	if strings.TrimSpace(authoritySpec) == "" {
 		return Discovery{}, errors.New("workspace: empty authority spec")
 	}
-	foreground, _, err := r.createWithAuthorityLocked(root, "", authoritySpec)
+	foreground, _, list, problems, err := r.createWithAuthorityScanLocked(root, "", authoritySpec)
 	if err != nil {
 		return Discovery{}, err
 	}
-	return r.discoveryLocked(foreground), nil
+	return discoveryLocked(foreground, list, problems), nil
 }
 
-// discoveryLocked assembles the discover result around foreground. The caller holds mu.
-func (r *Registry) discoveryLocked(foreground Workspace) Discovery {
-	list, problems := r.scan()
+// discoveryLocked assembles the discover result around foreground from a single scan.
+func discoveryLocked(foreground Workspace, list []Workspace, problems []error) Discovery {
 	out := Discovery{Foreground: foreground, Problems: problems}
 	for _, w := range list {
 		if w.File.StableID == foreground.File.StableID {

@@ -91,3 +91,37 @@ func TestReflowLinesNeverSplitsAWideGlyph(t *testing.T) {
 		}
 	}
 }
+
+func TestReflowLinesHandlesLoneContinuationAndControlChars(t *testing.T) {
+	t.Parallel()
+	line := Line{Cells: []Cell{
+		{Rune: 0},    // lone continuation at start: dropped
+		{Rune: '\t'}, // ASCII control < 0x80: width 1
+		{Rune: 'a'},
+		{Rune: ' '}, // trailing space: trimmed
+	}}
+	got := ReflowLines([]Line{line}, 4, 2)
+	if len(got) != 1 || len(got[0].Cells) != 2 || got[0].Cells[0].Rune != '\t' || got[0].Cells[1].Rune != 'a' {
+		t.Fatalf("reflow = %+v, want [\\t, a]", got)
+	}
+}
+
+func BenchmarkReflowLines(b *testing.B) {
+	lines := make([]Line, 500)
+	row := make([]Cell, 120)
+	for c := range row {
+		row[c] = Cell{Rune: rune('a' + (c % 26))}
+	}
+	for i := range lines {
+		cells := make([]Cell, len(row))
+		copy(cells, row)
+		lines[i] = Line{Cells: cells}
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		out := ReflowLines(lines, 120, 80)
+		if len(out) != 1000 {
+			b.Fatalf("lines = %d, want 1000", len(out))
+		}
+	}
+}

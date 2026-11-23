@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +39,58 @@ type workspacePull struct {
 	capsRev  uint64
 	docCount int
 	ok       bool
+}
+
+// workspaceDiagCache holds the last computed WorkspaceDiagnostics slice and the
+// revision/stat signature under which it remains valid.
+type workspaceDiagCache struct {
+	valid       bool
+	handleRevs  []handleDiagRev
+	pulledRev   uint64
+	openDocsRev uint64
+	remoteRev   uint64
+	isRemote    bool
+	fileStats   []cachedFileStat
+	items       []tui.FileDiagnostics
+}
+
+type handleDiagRev struct {
+	handle  *manager.Handle
+	diagRev uint64
+}
+
+type cachedFileStat struct {
+	path    string
+	modTime time.Time
+	size    int64
+	exists  bool
+}
+
+func (c workspaceDiagCache) matches(handleRevs []handleDiagRev, pulledRev, openDocsRev, remoteRev uint64, isRemote bool) bool {
+	if !c.valid ||
+		c.pulledRev != pulledRev ||
+		c.openDocsRev != openDocsRev ||
+		c.remoteRev != remoteRev ||
+		c.isRemote != isRemote ||
+		!slices.Equal(c.handleRevs, handleRevs) {
+		return false
+	}
+	if !c.isRemote {
+		for _, fs := range c.fileStats {
+			if !fs.unchanged() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (fs cachedFileStat) unchanged() bool {
+	st, err := os.Stat(fs.path)
+	if err != nil {
+		return !fs.exists
+	}
+	return fs.exists && st.ModTime().Equal(fs.modTime) && st.Size() == fs.size
 }
 
 // pulledDiagnostics is the last server-pulled diagnostics of one document, kept so
@@ -213,6 +266,8 @@ func applySemanticTokenEdits(data []uint32, edits []protocol.SemanticTokensEdit)
 func decodeSemanticTokens(data []uint32, legend *protocol.SemanticTokensLegend, lines textLines, firstLine, lastLine int) []tui.SemanticToken {
 	var out []tui.SemanticToken
 	line, char := 0, 0
+	curLine := -1
+	var curLineText string
 	for i := 0; i+4 < len(data); i += 5 {
 		deltaLine, deltaChar := int(data[i]), int(data[i+1])
 		length, tokenType, mods := int(data[i+2]), int(data[i+3]), data[i+4]
@@ -222,14 +277,21 @@ func decodeSemanticTokens(data []uint32, legend *protocol.SemanticTokensLegend, 
 			line += deltaLine
 			char = deltaChar
 		}
+		if line > lastLine {
+			break
+		}
+		if line < firstLine {
+			continue
+		}
 		if tokenType < 0 || tokenType >= len(legend.TokenTypes) {
 			continue
 		}
-		if line < firstLine || line > lastLine {
-			continue
+		if line != curLine {
+			curLine = line
+			curLineText = lines.line(line)
 		}
-		start := lsp.UTF16ToRuneCol(lines.line(line), uint32(char))
-		end := lsp.UTF16ToRuneCol(lines.line(line), uint32(char+length))
+		start := lsp.UTF16ToRuneCol(curLineText, uint32(char))
+		end := lsp.UTF16ToRuneCol(curLineText, uint32(char+length))
 		if end <= start {
 			continue
 		}
@@ -375,16 +437,17 @@ func (s *pullSet) cancelAll() {
 	clear(s.cancels)
 }
 
-// workspacePulled returns the workspace/diagnostic answer, asking the capability
-// servers when the cached one is stale. The result is keyed by file path. A server
-// that does not advertise workspace diagnostics is not asked; a failed pull is
-// cached as empty until the next interval or capability change, so the poll does
-// not hammer it.
-func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
+// workspacePulled returns the workspace/diagnostic answer and its pulledRev, asking
+// the capability servers when the cached one is stale. The result is keyed by file
+// path. A server that does not advertise workspace diagnostics is not asked; a failed
+// pull is cached as empty until the next interval or capability change, so the poll
+// does not hammer it.
+func (p *lspPort) workspacePulled() (map[string][]protocol.Diagnostic, uint64) {
 	p.mu.Lock()
-	mgrs := slices.Collect(maps.Values(p.managers))
+	mgrs := p.sortedManagersLocked()
 	docCount := len(p.docs)
 	cache := p.wsPull
+	pulledRev := p.pulledRev
 	p.mu.Unlock()
 
 	rev := uint64(0)
@@ -396,7 +459,7 @@ func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
 		}
 	}
 	if cache.ok && time.Since(cache.at) < lspWorkspacePullEvery && cache.capsRev == rev && cache.docCount == docCount {
-		return cache.files
+		return cache.files, pulledRev
 	}
 
 	files := make(map[string][]protocol.Diagnostic)
@@ -437,17 +500,26 @@ func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
 		// or writes a stale set. The next poll asks again.
 		p.mu.Lock()
 		last := p.wsPull
+		pulledRev = p.pulledRev
 		p.mu.Unlock()
 		if last.ok {
-			return last.files
+			return last.files, pulledRev
 		}
-		return nil
+		return nil, pulledRev
 	}
 
 	p.mu.Lock()
 	p.wsPull = workspacePull{files: files, at: time.Now(), capsRev: rev, docCount: docCount, ok: true}
+	p.pulledRev++
+	pulledRev = p.pulledRev
 	p.mu.Unlock()
-	return files
+	return files, pulledRev
+}
+
+type wsDiagDedupKey struct {
+	Range    protocol.Range
+	Severity protocol.DiagnosticSeverity
+	Message  string
 }
 
 // capWorkspaceDiagnostics sorts the workspace-pulled diagnostics of one file most
@@ -457,19 +529,19 @@ func capWorkspaceDiagnostics(items []protocol.Diagnostic) []protocol.Diagnostic 
 	if len(items) == 0 {
 		return nil
 	}
+	seen := make(map[wsDiagDedupKey]struct{}, len(items))
 	out := make([]protocol.Diagnostic, 0, len(items))
 	for _, d := range items {
-		duplicate := false
-		for _, kept := range out {
-			if kept.Range == d.Range && kept.Severity == d.Severity &&
-				diagnosticText(kept.Message) == diagnosticText(d.Message) {
-				duplicate = true
-				break
-			}
+		key := wsDiagDedupKey{
+			Range:    d.Range,
+			Severity: d.Severity,
+			Message:  diagnosticText(d.Message),
 		}
-		if !duplicate {
-			out = append(out, d)
+		if _, exists := seen[key]; exists {
+			continue
 		}
+		seen[key] = struct{}{}
+		out = append(out, d)
 	}
 	slices.SortStableFunc(out, func(a, b protocol.Diagnostic) int {
 		if a.Severity != b.Severity {
@@ -507,40 +579,126 @@ func mergeWorkspaceDiagnostics(published, pulled map[string][]protocol.Diagnosti
 	return merged, source
 }
 
+func readLocalTextLines(file string) (textLines, cachedFileStat) {
+	fs := cachedFileStat{path: file}
+	st, err := os.Stat(file)
+	if err != nil {
+		return newTextLines(""), fs
+	}
+	fs.modTime = st.ModTime()
+	fs.size = st.Size()
+	fs.exists = true
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return newTextLines(""), fs
+	}
+	return newTextLines(strings.ReplaceAll(string(data), "\r\n", "\n")), fs
+}
+
+func readRemoteText(remoteRead func(context.Context, string) ([]byte, error), file string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+	data, err := remoteRead(ctx, file)
+	cancel()
+	if err != nil {
+		return ""
+	}
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
+}
+
 // WorkspaceDiagnostics returns the stored diagnostics of every file a server
 // reported on, open or not, sorted by path. It is the view the diagnostics panel
 // lists: the files the servers published for, plus the files a workspace/diagnostic
 // pull reported (the source says which). A file with both keeps its published set.
 func (p *lspPort) WorkspaceDiagnostics() []tui.FileDiagnostics {
+	pulled, pulledRev := p.workspacePulled()
+
 	p.mu.Lock()
-	mgrs := slices.Collect(maps.Values(p.managers))
+	mgrs := p.sortedManagersLocked()
+	openDocsRev := p.openDocsRev
+	curPulledRev := p.pulledRev
+	remoteRev := p.remoteRev
+	remoteRead := p.remoteReadFile
+	isRemote := p.remoteMarkers != nil || p.remoteReadDir != nil || remoteRead != nil
+	cache := p.wsDiagCache
 	p.mu.Unlock()
 
-	published := make(map[string][]protocol.Diagnostic)
+	var handles []*manager.Handle
 	for _, mgr := range mgrs {
-		for _, h := range mgr.AllHandles() {
-			for docURI, ev := range h.Client().DiagnosticsAll() {
-				file := uri.URI(docURI).FsPath()
-				published[file] = append(published[file], ev.Diagnostics...)
-			}
+		handles = append(handles, mgr.AllHandles()...)
+	}
+	handleRevs := make([]handleDiagRev, len(handles))
+	for i, h := range handles {
+		handleRevs[i] = handleDiagRev{
+			handle:  h,
+			diagRev: h.Client().DiagnosticsRev(),
 		}
 	}
-	byPath, source := mergeWorkspaceDiagnostics(published, p.workspacePulled())
+
+	if curPulledRev == pulledRev && cache.matches(handleRevs, pulledRev, openDocsRev, remoteRev, isRemote) {
+		return slices.Clone(cache.items)
+	}
+
+	published := make(map[string][]protocol.Diagnostic)
+	for _, hr := range handleRevs {
+		for docURI, ev := range hr.handle.Client().DiagnosticsAll() {
+			file := uri.URI(docURI).FsPath()
+			published[file] = append(published[file], ev.Diagnostics...)
+		}
+	}
+	byPath, source := mergeWorkspaceDiagnostics(published, pulled)
 	files := make([]string, 0, len(byPath))
 	for file := range byPath {
 		files = append(files, file)
 	}
 	slices.Sort(files)
 	out := make([]tui.FileDiagnostics, 0, len(files))
+	var fileStats []cachedFileStat
 	for _, file := range files {
-		lines := newTextLines(p.textOf(file))
+		var lines textLines
+		if rec, ok := p.doc(file); ok {
+			lines = rec.lines
+		} else if !isRemote {
+			var fs cachedFileStat
+			lines, fs = readLocalTextLines(file)
+			fileStats = append(fileStats, fs)
+		} else if remoteRead != nil {
+			lines = newTextLines(readRemoteText(remoteRead, file))
+		} else {
+			lines = newTextLines("")
+		}
 		out = append(out, tui.FileDiagnostics{
 			Path:   file,
 			Items:  uiDiagnostics(lines, byPath[file]),
 			Source: source[file],
 		})
 	}
-	return out
+
+	consistent := curPulledRev == pulledRev
+	if consistent {
+		for _, hr := range handleRevs {
+			if hr.handle.Client().DiagnosticsRev() != hr.diagRev {
+				consistent = false
+				break
+			}
+		}
+	}
+	if consistent {
+		p.mu.Lock()
+		if p.pulledRev == pulledRev && p.openDocsRev == openDocsRev && p.remoteRev == remoteRev {
+			p.wsDiagCache = workspaceDiagCache{
+				valid:       true,
+				handleRevs:  handleRevs,
+				pulledRev:   pulledRev,
+				openDocsRev: openDocsRev,
+				remoteRev:   remoteRev,
+				isRemote:    isRemote,
+				fileStats:   fileStats,
+				items:       out,
+			}
+		}
+		p.mu.Unlock()
+	}
+	return slices.Clone(out)
 }
 
 // pullDiagnostics asks the pull-capable servers for the document's diagnostics

@@ -116,3 +116,17 @@ func TestGofmtIsTheDefaultFormatBufferOfGo(t *testing.T) {
 		t.Fatalf("status = %q", rt.ed.Status())
 	}
 }
+
+func TestFormattersForMemoizesLookPathPerProgram(t *testing.T) {
+	calls := make(map[string]int)
+	counting := func(name string) (string, error) {
+		calls[name]++
+		return "/bin/" + name, nil
+	}
+	formattersFor(config.Defaults(), counting)
+	for prog, n := range calls {
+		if n != 1 {
+			t.Errorf("lookPath(%q) called %d times, want 1", prog, n)
+		}
+	}
+}

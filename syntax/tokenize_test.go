@@ -450,6 +450,20 @@ func TestNumbersFixupKeepsTheTextAfterABlank(t *testing.T) {
 		{"blank after the literal", []chroma.Token{{Type: chroma.Text, Value: "0x1F rest"}}},
 		{"token longer than a run", []chroma.Token{{Type: chroma.Text, Value: "0x1F" + strings.Repeat("_", maxNumberRun) + "tail"}}},
 		{"second token holds a blank", []chroma.Token{{Type: chroma.LiteralNumberInteger, Value: "0"}, {Type: chroma.Text, Value: "x1F rest"}}},
+		{"empty token between number parts", []chroma.Token{{Type: chroma.LiteralNumberInteger, Value: "0"}, {Type: chroma.Text, Value: ""}, {Type: chroma.Text, Value: "x1F;"}}},
+		{"more than eight tokens in one run", []chroma.Token{
+			{Type: chroma.LiteralNumberInteger, Value: "1"},
+			{Type: chroma.Text, Value: "_2"},
+			{Type: chroma.Text, Value: "_3"},
+			{Type: chroma.Text, Value: "_4"},
+			{Type: chroma.Text, Value: "_5"},
+			{Type: chroma.Text, Value: "_6"},
+			{Type: chroma.Text, Value: "_7"},
+			{Type: chroma.Text, Value: "_8"},
+			{Type: chroma.Text, Value: "_9"},
+			{Type: chroma.Text, Value: "_10"},
+			{Type: chroma.Punctuation, Value: ";"},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -464,5 +478,46 @@ func TestNumbersFixupKeepsTheTextAfterABlank(t *testing.T) {
 				t.Errorf("text = %q, want %q", got.String(), want.String())
 			}
 		})
+	}
+}
+
+func TestFillGapsPreservesAndNormalizes(t *testing.T) {
+	t.Parallel()
+	contiguous := []Span{{Start: 0, End: 3, Kind: KindKeyword}, {Start: 3, End: 6, Kind: KindPlain}}
+	got := fillGaps(contiguous, 6)
+	if len(got) != 2 || &got[0] != &contiguous[0] {
+		t.Fatalf("contiguous non-adjacent spans should be returned directly: %+v", got)
+	}
+	adjacent := []Span{{Start: 0, End: 3, Kind: KindKeyword}, {Start: 3, End: 6, Kind: KindKeyword}}
+	merged := fillGaps(adjacent, 6)
+	if len(merged) != 1 || merged[0] != (Span{Start: 0, End: 6, Kind: KindKeyword}) {
+		t.Fatalf("adjacent same-kind spans = %+v, want single merged span", merged)
+	}
+	gapped := []Span{{Start: 2, End: 4, Kind: KindString}}
+	filled := fillGaps(gapped, 6)
+	want := []Span{{0, 2, KindPlain}, {2, 4, KindString}, {4, 6, KindPlain}}
+	if !slices.Equal(filled, want) {
+		t.Fatalf("gapped fill = %+v, want %+v", filled, want)
+	}
+	if fillGaps(contiguous, 0) != nil {
+		t.Fatal("zero-length line must return nil")
+	}
+}
+
+func TestMarkdownInlineMarkersMultibyteColumns(t *testing.T) {
+	t.Parallel()
+	// "é" is 2 bytes, "日" is 3 bytes, "😀" is 4 bytes; markers must report rune columns.
+	line := "é **日😀** [a日](https://x/y) `b`"
+	got := MarkdownInlineMarkers(line)
+	want := []InlineMarker{
+		{Start: 2, End: 4, Kind: MarkerStrong},
+		{Start: 6, End: 8, Kind: MarkerStrong},
+		{Start: 9, End: 10, Kind: MarkerLink},
+		{Start: 12, End: 26, Kind: MarkerLink},
+		{Start: 27, End: 28, Kind: MarkerCode},
+		{Start: 29, End: 30, Kind: MarkerCode},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("MarkdownInlineMarkers = %+v, want %+v", got, want)
 	}
 }

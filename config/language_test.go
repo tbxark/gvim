@@ -457,3 +457,99 @@ func TestRemovablePathLanguageStructured(t *testing.T) {
 		}
 	}
 }
+
+func TestLangLookupTableParityAndPrecedence(t *testing.T) {
+	t.Parallel()
+	naiveFilename := func(src map[string]LanguageSettings, base string) string {
+		for _, id := range slices.Sorted(mapKeys(src)) {
+			if matchesName(src[id].Filenames, base) {
+				return id
+			}
+		}
+		return ""
+	}
+	naiveExt := func(src map[string]LanguageSettings, ext string) string {
+		for _, id := range slices.Sorted(mapKeys(src)) {
+			if matchesExt(src[id].Extensions, ext) {
+				return id
+			}
+		}
+		return ""
+	}
+	for _, tc := range []struct {
+		name string
+		src  map[string]LanguageSettings
+		got  langLookupTable
+	}{
+		{"builtin", builtinLanguages, builtinLookup},
+		{"file", fileLanguages, fileLookup},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, id := range slices.Sorted(mapKeys(tc.src)) {
+				for _, fn := range tc.src[id].Filenames {
+					sample := strings.ReplaceAll(fn, "*", "sample")
+					if got, want := tc.got.matchFilename(sample), naiveFilename(tc.src, sample); got != want {
+						t.Errorf("matchFilename(%q) = %q, want %q", sample, got, want)
+					}
+				}
+				for _, ext := range tc.src[id].Extensions {
+					key := strings.ToLower(strings.TrimPrefix(ext, "."))
+					if key == "" {
+						continue
+					}
+					if got, want := tc.got.matchExtension(key), naiveExt(tc.src, key); got != want {
+						t.Errorf("matchExtension(%q) = %q, want %q", key, got, want)
+					}
+				}
+			}
+		})
+	}
+
+	synthetic := map[string]LanguageSettings{
+		"alpha": {Filenames: []string{"*.cfg.in", "shared.txt"}, Extensions: []string{".TOML", "dup"}},
+		"beta":  {Filenames: []string{"foo.cfg.in", "shared.txt"}, Extensions: []string{"dup", "yaml"}},
+		"gamma": {Filenames: []string{"*.special", "bar.special"}},
+	}
+	tbl := buildLangLookup(synthetic)
+	synthTests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"earlier glob beats exact in same table", tbl.matchFilename("foo.cfg.in"), "alpha"},
+		{"exact beats later glob if exact id is smaller", tbl.matchFilename("bar.special"), "gamma"},
+		{"shared exact keeps smallest id", tbl.matchFilename("shared.txt"), "alpha"},
+		{"shared extension keeps smallest id", tbl.matchExtension("dup"), "alpha"},
+		{"dotted uppercase extension normalized", tbl.matchExtension("toml"), "alpha"},
+		{"miss returns empty", tbl.matchFilename("nope.txt"), ""},
+	}
+	for _, tc := range synthTests {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func BenchmarkEditorFor(b *testing.B) {
+	cfg := Defaults()
+	cases := []struct {
+		name     string
+		language string
+		path     string
+	}{
+		{"known-language-and-path", "Go", "/repo/pkg/main.go"},
+		{"unknown-language-with-ext", "Rust", "/repo/src/lib.rs"},
+		{"path-only-exact-filename", "", "/repo/Makefile"},
+		{"path-only-glob-filename", "", "/repo/app.pc.in"},
+		{"path-only-extension", "", "/repo/notes.MD"},
+		{"path-only-unknown", "", "/repo/plain.unknown"},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				_ = cfg.EditorFor(tc.language, tc.path)
+			}
+		})
+	}
+}

@@ -37,6 +37,7 @@ type osWatch struct {
 	mu       sync.Mutex
 	pending  map[string]*pendingEvent
 	queue    []hostos.WatchEvent
+	qHead    int
 	overflow bool
 	stopped  bool
 	wake     chan struct{} // 1-buffered: something is in the queue or the watcher stopped
@@ -216,7 +217,7 @@ func (w *osWatch) push(e hostos.WatchEvent) {
 	if w.stopped {
 		return
 	}
-	if len(w.queue) >= watchQueueMax {
+	if len(w.queue)-w.qHead >= watchQueueMax {
 		w.overflow = true
 		return
 	}
@@ -240,11 +241,15 @@ func (w *osWatch) Next(ctx context.Context) (hostos.WatchEvent, bool) {
 			w.overflow = false
 			w.mu.Unlock()
 			return hostos.WatchEvent{Path: w.path, Kind: "error", Err: "limit: file events were dropped"}, true
-		case len(w.queue) > 0:
-			e := w.queue[0]
-			w.queue = w.queue[1:]
-			if len(w.queue) > 0 {
+		case w.qHead < len(w.queue):
+			e := w.queue[w.qHead]
+			w.queue[w.qHead] = hostos.WatchEvent{}
+			w.qHead++
+			if w.qHead < len(w.queue) {
 				w.signal()
+			} else {
+				w.queue = w.queue[:0]
+				w.qHead = 0
 			}
 			w.mu.Unlock()
 			return e, true

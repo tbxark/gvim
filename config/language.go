@@ -611,11 +611,69 @@ func (c Config) resolveLanguage(language, path string) string {
 	return id
 }
 
-// pathTables are the places a path is matched against, in order: the user's entries,
-// the built-in entries, and Fresh's file tables. Within a table ids are tried in sorted
-// order.
-func (c Config) pathTables() [3]map[string]LanguageSettings {
-	return [3]map[string]LanguageSettings{c.Languages, builtinLanguages, fileLanguages}
+type globLangRule struct {
+	id      string
+	pattern string
+}
+
+type langLookupTable struct {
+	exactFiles map[string]string
+	globFiles  []globLangRule
+	exts       map[string]string
+}
+
+var (
+	builtinLookup langLookupTable
+	fileLookup    langLookupTable
+)
+
+func init() {
+	builtinLookup = buildLangLookup(builtinLanguages)
+	fileLookup = buildLangLookup(fileLanguages)
+}
+
+func buildLangLookup(src map[string]LanguageSettings) langLookupTable {
+	t := langLookupTable{
+		exactFiles: make(map[string]string),
+		exts:       make(map[string]string),
+	}
+	for _, id := range slices.Sorted(mapKeys(src)) {
+		entry := src[id]
+		for _, name := range entry.Filenames {
+			if strings.Contains(name, "*") {
+				t.globFiles = append(t.globFiles, globLangRule{id: id, pattern: name})
+			} else if _, exists := t.exactFiles[name]; !exists {
+				t.exactFiles[name] = id
+			}
+		}
+		for _, ext := range entry.Extensions {
+			key := strings.ToLower(strings.TrimPrefix(ext, "."))
+			if key == "" {
+				continue
+			}
+			if _, exists := t.exts[key]; !exists {
+				t.exts[key] = id
+			}
+		}
+	}
+	return t
+}
+
+func (t langLookupTable) matchFilename(base string) string {
+	best := t.exactFiles[base]
+	for _, rule := range t.globFiles {
+		if best != "" && rule.id >= best {
+			break
+		}
+		if ok, _ := filepath.Match(rule.pattern, base); ok {
+			return rule.id
+		}
+	}
+	return best
+}
+
+func (t langLookupTable) matchExtension(ext string) string {
+	return t.exts[ext]
 }
 
 // matchFilename returns the id of the entry whose file names match path, or "".
@@ -624,14 +682,17 @@ func (c Config) matchFilename(path string) string {
 		return ""
 	}
 	base := filepath.Base(path)
-	for _, g := range c.pathTables() {
-		for _, id := range slices.Sorted(mapKeys(g)) {
-			if matchesName(g[id].Filenames, base) {
+	if len(c.Languages) > 0 {
+		for _, id := range slices.Sorted(mapKeys(c.Languages)) {
+			if matchesName(c.Languages[id].Filenames, base) {
 				return id
 			}
 		}
 	}
-	return ""
+	if id := builtinLookup.matchFilename(base); id != "" {
+		return id
+	}
+	return fileLookup.matchFilename(base)
 }
 
 // matchExtension returns the id of the entry whose extensions match path, or "".
@@ -640,14 +701,17 @@ func (c Config) matchExtension(path string) string {
 	if ext == "" {
 		return ""
 	}
-	for _, g := range c.pathTables() {
-		for _, id := range slices.Sorted(mapKeys(g)) {
-			if matchesExt(g[id].Extensions, ext) {
+	if len(c.Languages) > 0 {
+		for _, id := range slices.Sorted(mapKeys(c.Languages)) {
+			if matchesExt(c.Languages[id].Extensions, ext) {
 				return id
 			}
 		}
 	}
-	return ""
+	if id := builtinLookup.matchExtension(ext); id != "" {
+		return id
+	}
+	return fileLookup.matchExtension(ext)
 }
 
 // matchesName reports whether base is one of names. A name with a "*" is a glob.

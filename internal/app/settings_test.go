@@ -1,10 +1,12 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,4 +175,41 @@ func TestChangedSettingsDetectsNerdFontIconsAlias(t *testing.T) {
 	if change.UIIconsMode != "nerd" {
 		t.Fatalf("UIIconsMode = %q, want nerd", change.UIIconsMode)
 	}
+}
+
+func TestLanguageSettingsMemoizationBoundedAndIsolated(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Languages = map[string]config.LanguageSettings{
+		"go": {
+			OnSave: []config.OnSaveAction{{Command: "gofmt", Enabled: true}},
+		},
+	}
+	resolve := languageSettings(cfg)
+
+	first := resolve("Go", "/repo/main.go")
+	if len(first.OnSave) != 1 || first.OnSave[0].Command != "gofmt" {
+		t.Fatalf("unexpected OnSave: %+v", first.OnSave)
+	}
+	first.OnSave[0].Command = "mutated"
+	second := resolve("Go", "/repo/main.go")
+	if len(second.OnSave) != 1 || second.OnSave[0].Command != "gofmt" {
+		t.Fatalf("OnSave mutation leaked through cache: %+v", second.OnSave)
+	}
+
+	var wg sync.WaitGroup
+	for g := range 4 {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := range 300 {
+				path := fmt.Sprintf("/repo/w%d/file%d.go", worker, i)
+				got := resolve("", path)
+				if got.Language != "go" || len(got.OnSave) != 1 || got.OnSave[0].Command != "gofmt" {
+					t.Errorf("resolve(%q) = %+v", path, got)
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
 }

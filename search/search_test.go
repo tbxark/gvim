@@ -307,3 +307,45 @@ func TestFindStringMatchesFind(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestCompiledQueryFindStringLimit(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		text  string
+		q     Query
+		limit int
+	}{
+		{"zero limit", "foo foo foo", Query{Text: "foo"}, 0},
+		{"negative limit", "foo foo foo", Query{Text: "foo"}, -1},
+		{"literal capped", "foo FOO foo foo", Query{Text: "foo"}, 2},
+		{"case sensitive capped", "foo FOO foo foo", Query{Text: "foo", CaseSensitive: true}, 2},
+		{"literal whole word capped", "food foo xfoo foo foo", Query{Text: "foo", WholeWord: true}, 2},
+		{"regex capped", "a1 a2 a3 a4", Query{Text: `a\d`, Regex: true}, 2},
+		{"regex whole word capped after rejected matches", "xa1 ya2 a3 za4 a5 a6 a7", Query{Text: `a\d`, Regex: true, WholeWord: true}, 2},
+		{"regex limit larger than matches", "a1 a2", Query{Text: `a\d`, Regex: true, WholeWord: true}, 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cq, err := CompileQuery(tc.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			all := cq.FindString(tc.text)
+			want := all
+			if tc.limit <= 0 {
+				want = nil
+			} else if len(want) > tc.limit {
+				want = want[:tc.limit]
+			}
+			got := cq.FindStringLimit(tc.text, tc.limit)
+			if !slices.Equal(got, want) {
+				t.Fatalf("FindStringLimit(%d) = %v, want %v", tc.limit, got, want)
+			}
+		})
+	}
+	var nilCQ *CompiledQuery
+	if got := nilCQ.FindStringLimit("foo", 1); got != nil {
+		t.Fatalf("nil CompiledQuery FindStringLimit = %v, want nil", got)
+	}
+}

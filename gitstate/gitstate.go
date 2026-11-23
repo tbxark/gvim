@@ -5,10 +5,12 @@ package gitstate
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -117,16 +119,40 @@ func Status(root string) (map[string]FileStatus, error) {
 			out[e.Name] = Conflicted
 		}
 	}
-	if err := pairRenames(repo, idx, st, out); err != nil {
-		return nil, err
+	if hasRenameCandidate(st, out) {
+		if err := pairRenames(repo, idx, st, out); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
+}
+
+func hasRenameCandidate(st git.Status, out map[string]FileStatus) bool {
+	hasStagedDelete := false
+	hasAdded := false
+	for p, status := range out {
+		switch status {
+		case Deleted:
+			if !hasStagedDelete && st[p].Staging == git.Deleted {
+				hasStagedDelete = true
+			}
+		case Added:
+			hasAdded = true
+		}
+		if hasStagedDelete && hasAdded {
+			return true
+		}
+	}
+	return false
 }
 
 // Branch returns the short name of the checked-out branch under root. An
 // unborn branch reports its name. A detached HEAD reports the first seven hex
 // digits of its commit. root must be the work tree root, as with Status.
 func Branch(root string) (string, error) {
+	if branch, ok := fastBranch(root); ok {
+		return branch, nil
+	}
 	repo, err := open(root)
 	if err != nil {
 		return "", err
@@ -139,6 +165,80 @@ func Branch(root string) (string, error) {
 		return head.Target().Short(), nil
 	}
 	return head.Hash().String()[:shortHashLen], nil
+}
+
+func fastBranch(root string) (string, bool) {
+	if branch, ok := readHeadBranch(filepath.Join(root, ".git", "HEAD")); ok {
+		return branch, true
+	}
+	dotGit := filepath.Join(root, ".git")
+	info, err := os.Stat(dotGit)
+	if err != nil || info.IsDir() || info.Size() > 4096 {
+		return "", false
+	}
+	raw, err := os.ReadFile(dotGit)
+	if err != nil {
+		return "", false
+	}
+	line := strings.TrimSpace(string(raw))
+	target, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return "", false
+	}
+	target = strings.TrimSpace(target)
+	if target == "" || strings.ContainsAny(target, "\r\n") {
+		return "", false
+	}
+	gitDir := filepath.Clean(target)
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Clean(filepath.Join(root, target))
+	}
+	return readHeadBranch(filepath.Join(gitDir, "HEAD"))
+}
+
+func readHeadBranch(headPath string) (string, bool) {
+	f, err := os.Open(headPath)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+	var buf [256]byte
+	n, err := io.ReadFull(f, buf[:])
+	if err == nil {
+		return "", false
+	}
+	if err != io.EOF && err != io.ErrUnexpectedEOF {
+		return "", false
+	}
+	s := strings.TrimSpace(string(buf[:n]))
+	if target, ok := strings.CutPrefix(s, "ref:"); ok {
+		target = strings.TrimSpace(target)
+		if !strings.HasPrefix(target, "refs/") || strings.ContainsAny(target, " \t\r\n") {
+			return "", false
+		}
+		short := plumbing.ReferenceName(target).Short()
+		if short == "" {
+			return "", false
+		}
+		return short, true
+	}
+	if isLowerHex40(s) {
+		return s[:shortHashLen], true
+	}
+	return "", false
+}
+
+func isLowerHex40(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for i := 0; i < 40; i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // open opens the repository whose work tree is root. It does not search

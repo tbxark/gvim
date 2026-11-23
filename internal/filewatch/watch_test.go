@@ -349,3 +349,161 @@ func TestAddFailedDoesNotRecordWatched(t *testing.T) {
 		t.Fatalf("failed Add recorded %q in watched", missing)
 	}
 }
+
+func TestChmodEventsIgnored(t *testing.T) {
+	w, clk := newFake(t)
+	w.event(fsnotify.Event{Name: "/ws/a/one.txt", Op: fsnotify.Chmod})
+	if clk.count() != 0 {
+		t.Fatalf("pure Chmod scheduled %d timers, want 0", clk.count())
+	}
+	noValue(t, w)
+
+	w.event(fsnotify.Event{Name: "/ws/a/one.txt", Op: fsnotify.Write | fsnotify.Chmod})
+	if clk.count() != 1 {
+		t.Fatalf("Write|Chmod scheduled %d timers, want 1", clk.count())
+	}
+	clk.fire(t, 0)
+	got := <-w.Events()
+	if !slices.Equal(got.Files, []string{"/ws/a/one.txt"}) {
+		t.Fatalf("Files = %v, want [/ws/a/one.txt]", got.Files)
+	}
+}
+
+func TestMaxWaitCeilingPreventsStarvationFakeClock(t *testing.T) {
+	w, clk := newFake(t)
+	now := time.Unix(1_700_000_000, 0)
+	w.now = func() time.Time { return now }
+
+	// Send events every 100ms (half of DefaultDelay=200ms).
+	// maxDelay = 5 * 200ms = 1000ms.
+	for step := range 12 {
+		w.event(fsnotify.Event{Name: "/ws/a/one.txt", Op: fsnotify.Write})
+		now = now.Add(100 * time.Millisecond)
+		if step == 9 && clk.count() == 0 {
+			t.Fatal("no timers scheduled")
+		}
+	}
+	// At t=800ms, now+200ms == deadline (1000ms), so timer is capped once and
+	// subsequent events at t=900ms, 1000ms, 1100ms must not postpone or schedule more.
+	lastIdx := clk.count() - 1
+	if clk.stopped(lastIdx) {
+		t.Fatal("the capped timer should still be active")
+	}
+	if got := clk.timers[lastIdx].d; got != 200*time.Millisecond {
+		t.Fatalf("capped timer delay = %v, want 200ms", got)
+	}
+	if clk.count() != 9 {
+		t.Fatalf("timers scheduled = %d, want 9 (capped at maxDelay)", clk.count())
+	}
+
+	clk.fire(t, lastIdx)
+	got := <-w.Events()
+	if !slices.Equal(got.Files, []string{"/ws/a/one.txt"}) {
+		t.Fatalf("Files = %v, want [/ws/a/one.txt]", got.Files)
+	}
+
+	// Next batch resets pendingStart and works normally.
+	w.event(fsnotify.Event{Name: "/ws/b/two.txt", Op: fsnotify.Create})
+	if clk.count() != 10 || clk.timers[9].d != DefaultDelay {
+		t.Fatalf("after flush: timers=%d delay=%v", clk.count(), clk.timers[9].d)
+	}
+	clk.fire(t, 9)
+	got = <-w.Events()
+	if !slices.Equal(got.Files, []string{"/ws/b/two.txt"}) {
+		t.Fatalf("second batch Files = %v, want [/ws/b/two.txt]", got.Files)
+	}
+}
+
+func TestMaxWaitCeilingRealTimerAndReuse(t *testing.T) {
+	w, err := New(Options{Delay: 20 * time.Millisecond})
+	if err != nil {
+		t.Skipf("fsnotify cannot start: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	// Continuous events every 5ms would starve a 20ms debounce without maxDelay=100ms.
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tick := time.NewTicker(5 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				w.event(fsnotify.Event{Name: "/ws/a/stream.txt", Op: fsnotify.Write})
+			}
+		}
+	}()
+
+	select {
+	case got := <-w.Events():
+		if !slices.Equal(got.Files, []string{"/ws/a/stream.txt"}) {
+			close(stop)
+			<-done
+			t.Fatalf("Files = %v", got.Files)
+		}
+	case <-time.After(2 * time.Second):
+		close(stop)
+		<-done
+		t.Fatal("continuous writes starved Changed past maxDelay ceiling")
+	}
+	close(stop)
+	<-done
+
+	// Drain any trailing event and verify the same prodTimer instance is reused across batches.
+	time.Sleep(40 * time.Millisecond)
+	select {
+	case <-w.Events():
+	default:
+	}
+
+	w.mu.Lock()
+	firstTimer := w.prodTimer
+	w.mu.Unlock()
+	if firstTimer == nil {
+		t.Fatal("prodTimer was nil after production burst")
+	}
+
+	w.event(fsnotify.Event{Name: "/ws/a/next.txt", Op: fsnotify.Create})
+	select {
+	case got := <-w.Events():
+		if !slices.Equal(got.Files, []string{"/ws/a/next.txt"}) {
+			t.Fatalf("next batch Files = %v", got.Files)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second batch did not fire")
+	}
+	w.mu.Lock()
+	secondTimer := w.prodTimer
+	w.mu.Unlock()
+	if secondTimer != firstTimer {
+		t.Fatal("prodTimer was reallocated instead of reused across batches")
+	}
+}
+
+func BenchmarkWatcherEvent(b *testing.B) {
+	w, err := New(Options{Delay: 50 * time.Millisecond})
+	if err != nil {
+		b.Skipf("fsnotify cannot start: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+	// Drain Events in background so channel never stalls.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range w.Events() {
+		}
+	}()
+	ev := fsnotify.Event{Name: "/ws/a/file.txt", Op: fsnotify.Write}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		w.event(ev)
+	}
+	b.StopTimer()
+	_ = w.Close()
+	<-done
+}

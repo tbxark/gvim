@@ -131,3 +131,22 @@ func TestOSC52ResponseFormat(t *testing.T) {
 		t.Fatalf("response %d bytes >= sequence bound %d", got, maxOSC52Sequence)
 	}
 }
+
+func TestOSC52ParserBodyCapacityReuseAndRelease(t *testing.T) {
+	t.Parallel()
+	var p osc52Parser
+	small := []byte("\x1b]52;c;aGVsbG8=\x07")
+	p.scan(small, func(_, _ string) {}, nil)
+	if p.body == nil || cap(p.body) == 0 || cap(p.body) > 4096 {
+		t.Fatalf("small sequence cap(body) = %d, want >0 and <=4096", cap(p.body))
+	}
+	if len(p.body) != 0 {
+		t.Fatalf("len(body) after finish = %d, want 0", len(p.body))
+	}
+	// Oversized sequence > 4096 bytes drops the backing buffer after finish.
+	bigPayload := strings.Repeat("QUFB", 1200) // 4800 bytes
+	p.scan([]byte("\x1b]52;c;"+bigPayload+"\x07"), func(_, _ string) {}, nil)
+	if p.body != nil || cap(p.body) != 0 {
+		t.Fatalf("oversized sequence left cap(body) = %d, want 0", cap(p.body))
+	}
+}

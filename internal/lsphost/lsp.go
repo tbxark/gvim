@@ -183,6 +183,14 @@ type lspPort struct {
 	// wsPull caches the workspace/diagnostic answer: the pull is throttled and
 	// re-asked when the capabilities change or the set of open documents does.
 	wsPull workspacePull
+	// pulledRev increments whenever wsPull changes; openDocsRev increments whenever
+	// docs changes; remoteRev increments whenever remote hooks change. wsDiagCache
+	// caches the rendered workspace diagnostics until one of them or a handle's
+	// published diagnostics or an unopened local file stat changes.
+	pulledRev   uint64
+	openDocsRev uint64
+	remoteRev   uint64
+	wsDiagCache workspaceDiagCache
 	// wsPulls tracks the workspace/diagnostic pulls in flight so a newer pull, or a
 	// stop/restart of the servers, cancels the old ones (their $/cancelRequest goes
 	// out through the client) instead of letting them answer into the cache.
@@ -301,6 +309,8 @@ func (p *lspPort) Supports(lang string) bool {
 func (p *lspPort) SetRemoteMarkerChecker(fn func(ctx context.Context, dir string, markers []string) (bool, error)) {
 	p.mu.Lock()
 	p.remoteMarkers = fn
+	p.remoteRev++
+	p.wsDiagCache = workspaceDiagCache{}
 	p.rootCache = make(map[string]remoteRootCacheEntry)
 	p.rootCacheOrder = nil
 	p.mu.Unlock()
@@ -311,6 +321,8 @@ func (p *lspPort) SetRemoteMarkerChecker(fn func(ctx context.Context, dir string
 func (p *lspPort) SetRemoteReadFile(fn func(ctx context.Context, path string) ([]byte, error)) {
 	p.mu.Lock()
 	p.remoteReadFile = fn
+	p.remoteRev++
+	p.wsDiagCache = workspaceDiagCache{}
 	p.mu.Unlock()
 }
 
@@ -319,6 +331,8 @@ func (p *lspPort) SetRemoteReadFile(fn func(ctx context.Context, path string) ([
 func (p *lspPort) SetRemoteReadDir(fn func(ctx context.Context, dir string) ([]string, error)) {
 	p.mu.Lock()
 	p.remoteReadDir = fn
+	p.remoteRev++
+	p.wsDiagCache = workspaceDiagCache{}
 	p.mu.Unlock()
 }
 
@@ -1167,6 +1181,8 @@ func (p *lspPort) Restart(language string) error {
 	p.sem = make(map[string]semanticCache)
 	p.pulled = make(map[string]pulledDiagnostics)
 	p.wsPull = workspacePull{}
+	p.pulledRev++
+	p.wsDiagCache = workspaceDiagCache{}
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
 	defer cancel()
@@ -1186,10 +1202,15 @@ func (p *lspPort) Stop() error {
 	p.mu.Lock()
 	mgrs := slices.Collect(maps.Values(p.managers))
 	p.managers = make(map[string]*manager.Manager)
+	if len(p.docs) > 0 {
+		p.openDocsRev++
+	}
 	p.docs = make(map[string]lspDocRec)
 	p.sem = make(map[string]semanticCache)
 	p.pulled = make(map[string]pulledDiagnostics)
 	p.wsPull = workspacePull{}
+	p.pulledRev++
+	p.wsDiagCache = workspaceDiagCache{}
 	p.pending = nil
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
@@ -1872,6 +1893,7 @@ func (p *lspPort) setDoc(path string, rec lspDocRec) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.docs[path] = rec
+	p.openDocsRev++
 }
 
 // updateDocVersion records the protocol version the document is open at.
@@ -1906,9 +1928,23 @@ func (p *lspPort) resetReopenedDoc(path string, mgr *manager.Manager) lspDocRec 
 func (p *lspPort) dropDoc(path string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.docs, path)
+	if _, ok := p.docs[path]; ok {
+		delete(p.docs, path)
+		p.openDocsRev++
+	}
 	delete(p.sem, path)
 	delete(p.pulled, path)
+}
+
+// sortedManagersLocked returns the root managers in sorted root order. p.mu must
+// be held.
+func (p *lspPort) sortedManagersLocked() []*manager.Manager {
+	roots := slices.Sorted(maps.Keys(p.managers))
+	mgrs := make([]*manager.Manager, 0, len(roots))
+	for _, root := range roots {
+		mgrs = append(mgrs, p.managers[root])
+	}
+	return mgrs
 }
 
 // textLines is the lines of a document, for the conversion between the rune columns

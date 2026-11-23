@@ -176,9 +176,31 @@ func (s *Snapshot) join(from, to, size int) string {
 		if i > from {
 			sb.WriteByte('\n')
 		}
-		sb.WriteString(string(s.lines[i]))
+		writeRunes(&sb, s.lines[i])
 	}
 	return sb.String()
+}
+
+// writeRunes appends rs encoded as UTF-8 to sb using a stack chunk buffer so
+// no per-line string([]rune) allocation is made.
+func writeRunes(sb *strings.Builder, rs []rune) {
+	var buf [256]byte
+	n := 0
+	for _, r := range rs {
+		if n+utf8.UTFMax > len(buf) {
+			sb.Write(buf[:n])
+			n = 0
+		}
+		if uint32(r) < utf8.RuneSelf {
+			buf[n] = byte(r)
+			n++
+		} else {
+			n += utf8.EncodeRune(buf[n:], r)
+		}
+	}
+	if n > 0 {
+		sb.Write(buf[:n])
+	}
 }
 
 // runesLen returns the UTF-8 length of rs as string(rs) encodes it.
@@ -186,7 +208,11 @@ func runesLen(rs []rune) int {
 	var tmp [utf8.UTFMax]byte
 	n := 0
 	for _, r := range rs {
-		n += utf8.EncodeRune(tmp[:], r)
+		if uint32(r) < utf8.RuneSelf {
+			n++
+		} else {
+			n += utf8.EncodeRune(tmp[:], r)
+		}
 	}
 	return n
 }

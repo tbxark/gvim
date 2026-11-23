@@ -380,3 +380,32 @@ func TestWalkFilesCustomIgnorePatternsAndRespectGitignore(t *testing.T) {
 		t.Fatalf("walkedNoGitignore = %v, want %v", walkedNoGitignore, wantNoGitignore)
 	}
 }
+
+func TestWalkFilesNestedAndSiblingGitignoreIsolation(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"a/.gitignore":    "*.local\n",
+		"a/drop.local":    "",
+		"a/keep.txt":      "",
+		"a/empty/.gitignore": "# comment only\n\n",
+		"a/empty/x.local": "",
+		"a/empty/ok.txt":  "",
+		"b/keep.local":    "",
+		"b/drop.log":      "",
+	})
+	var got []string
+	err := WalkFiles(context.Background(), root, WalkOptions{
+		CustomIgnorePatterns: []string{"*.log"},
+	}, func(rel string) bool {
+		got = append(got, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	want := []string{"a/empty/ok.txt", "a/keep.txt", "b/keep.local"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("WalkFiles = %v, want %v", got, want)
+	}
+}

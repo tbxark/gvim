@@ -334,11 +334,32 @@ func (x *Index) startLocked() {
 	go x.run(ctx, gen, done)
 }
 
+const indexBatchSize = 64
+
 // run enumerates once. Its result is stored only when it is still the current run, so a
 // run superseded by Restart cannot overwrite the fresh state; its own done channel is
 // always closed.
 func (x *Index) run(ctx context.Context, gen uint64, done chan struct{}) {
-	err := x.enum(ctx, func(rel string) bool { return x.addFor(gen, rel) }, func(text string) { x.notifyFor(gen, text) })
+	buf := make([]string, 0, indexBatchSize)
+	stopped := false
+	err := x.enum(ctx, func(rel string) bool {
+		if stopped {
+			return false
+		}
+		buf = append(buf, rel)
+		if len(buf) < indexBatchSize {
+			return true
+		}
+		ok := x.addBatchFor(gen, buf)
+		buf = buf[:0]
+		if !ok {
+			stopped = true
+		}
+		return ok
+	}, func(text string) { x.notifyFor(gen, text) })
+	if !stopped && len(buf) > 0 {
+		x.addBatchFor(gen, buf)
+	}
 	x.mu.Lock()
 	if x.gen == gen {
 		x.err = err
@@ -396,6 +417,31 @@ func (x *Index) addFor(gen uint64, rel string) bool {
 		return false
 	}
 	x.files = append(x.files, rel)
+	return true
+}
+
+// addBatchFor appends a batch of files of run gen. It returns false when the run was
+// superseded or MaxFiles files are already held.
+func (x *Index) addBatchFor(gen uint64, rels []string) bool {
+	if len(rels) == 0 {
+		return true
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.gen != gen {
+		return false
+	}
+	avail := MaxFiles - len(x.files)
+	if avail <= 0 {
+		x.truncated = true
+		return false
+	}
+	if len(rels) > avail {
+		x.files = append(x.files, rels[:avail]...)
+		x.truncated = true
+		return false
+	}
+	x.files = append(x.files, rels...)
 	return true
 }
 

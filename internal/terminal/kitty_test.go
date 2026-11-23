@@ -223,4 +223,27 @@ func TestKittyKeyboardInlineAltScreenOrder(t *testing.T) {
 			t.Fatalf("split enter+push: screen=%d flags=%d", k.screen, k.flags())
 		}
 	})
+
+	t.Run("non-private h/l and empty private h/l do not switch screen", func(t *testing.T) {
+		var k kittyKeyboard
+		k.scan([]byte("\x1b[4h\x1b[h\x1b[?h\x1b[?1049h\x1b[4l\x1b[l\x1b[?l"))
+		if k.screen != 1 {
+			t.Fatalf("screen=%d, want 1 (non-private modes ignored)", k.screen)
+		}
+	})
+}
+
+func BenchmarkKittyScanSGR(b *testing.B) {
+	chunk := make([]byte, 0, 8192)
+	sample := []byte("\x1b[38;5;196mhello \x1b[0m\x1b[1;32mworld\x1b[0m\x1b[12;34H\x1b[K")
+	for len(chunk) < 8192 {
+		chunk = append(chunk, sample...)
+	}
+	var k kittyKeyboard
+	b.ReportAllocs()
+	for b.Loop() {
+		if replies := k.scan(chunk); len(replies) != 0 {
+			b.Fatalf("unexpected replies: %v", replies)
+		}
+	}
 }

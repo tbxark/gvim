@@ -707,3 +707,44 @@ func TestProjectReplaceMultiLineRangeIsExact(t *testing.T) {
 		t.Fatalf("edit = %+v, want 1:0-2:5 replacing the exact range", e)
 	}
 }
+
+func TestReadSearchableFileSizeBoundaries(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"empty.txt": "",
+		"just.txt":  strings.Repeat("a", pluginhost.GrepMaxFileBytes-1),
+		"limit.txt": strings.Repeat("a", pluginhost.GrepMaxFileBytes),
+	})
+	if text, reason := readSearchableFile(filepath.Join(dir, "empty.txt"), 0); reason != "" || text != "" {
+		t.Fatalf("empty.txt = %q, %q; want empty text and empty reason", text, reason)
+	}
+	if text, reason := readSearchableFile(filepath.Join(dir, "just.txt"), 0); reason != "" || len(text) != pluginhost.GrepMaxFileBytes-1 {
+		t.Fatalf("just.txt len=%d reason=%q, want len %d", len(text), reason, pluginhost.GrepMaxFileBytes-1)
+	}
+	if _, reason := readSearchableFile(filepath.Join(dir, "limit.txt"), 0); reason != "large file" {
+		t.Fatalf("limit.txt reason = %q, want large file", reason)
+	}
+}
+
+func TestProjectSearchPoolOrderAndLimitAcrossManyFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files, content := batchFiles(80)
+	writeTree(t, dir, content)
+	s := newProjectSearch(editor.Options{})
+	req := projectSearchRequest(dir, files, "needle")
+	req.Limit = 25
+	res, err := s.ProjectSearch(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || len(res.Files) != 25 {
+		t.Fatalf("res = %d files truncated=%v, want 25 truncated", len(res.Files), res.Truncated)
+	}
+	for i, f := range res.Files {
+		if f.Name != files[i] {
+			t.Fatalf("file[%d] = %q, want %q", i, f.Name, files[i])
+		}
+	}
+}

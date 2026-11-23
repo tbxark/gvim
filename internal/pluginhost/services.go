@@ -12,7 +12,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/diff"
 	"github.com/tbxark/gvim/encoding"
 	"github.com/tbxark/gvim/finder"
@@ -83,13 +82,13 @@ func convertHunks(hs []diff.Hunk) []pluginapi.Hunk {
 // limit <= 0). Equal scores keep the order of items. A cancelled ctx stops the ranking and
 // returns nothing.
 func (pluginServices) Fuzzy(ctx context.Context, query string, items []string, limit int) []pluginapi.FuzzyMatch {
-	pat := fuzzy.NewPattern(query)
+	m := fuzzy.NewMatcher(query)
 	var out []pluginapi.FuzzyMatch
 	for i, it := range items {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if score, idx, ok := pat.Match(it); ok {
+		if score, idx, ok := m.Match(it); ok {
 			out = append(out, pluginapi.FuzzyMatch{Index: i, Score: score, Indexes: idx})
 		}
 	}
@@ -160,6 +159,10 @@ func (s pluginServices) Grep(ctx context.Context, r pluginapi.GrepRequest) ([]pl
 	if err != nil {
 		return nil, pluginapi.Errf(pluginapi.CodeIO, "grep: %v", err)
 	}
+	cq, err := search.CompileQuery(q)
+	if err != nil {
+		return nil, pluginapi.Errf(pluginapi.CodeInvalid, "grep: %v", err)
+	}
 	var hits []pluginapi.GrepHit
 	for _, rel := range files {
 		if err := ctx.Err(); err != nil {
@@ -169,26 +172,53 @@ func (s pluginServices) Grep(ctx context.Context, r pluginapi.GrepRequest) ([]pl
 		if !ok {
 			continue
 		}
-		b := buffer.New(text)
-		matches, err := search.Find(b, q)
-		if err != nil {
-			return hits, pluginapi.Errf(pluginapi.CodeInvalid, "grep: %v", err)
-		}
+		matches := cq.FindString(text)
 		last := -1
+		curLine, lineStart := 0, 0
 		for _, m := range matches {
 			if m.Start.Line == last {
 				continue
 			}
 			last = m.Start.Line
-			line := strings.TrimRight(b.Line(m.Start.Line), "\r")
-			text, col := hitWindow(line, b.ByteCol(m.Start))
-			hits = append(hits, pluginapi.GrepHit{Path: rel, Line: m.Start.Line, Col: col, Text: text})
+			for curLine < m.Start.Line {
+				nl := strings.IndexByte(text[lineStart:], '\n')
+				if nl < 0 {
+					lineStart = len(text)
+					break
+				}
+				lineStart += nl + 1
+				curLine++
+			}
+			lineEnd := len(text)
+			if nl := strings.IndexByte(text[lineStart:], '\n'); nl >= 0 {
+				lineEnd = lineStart + nl
+			}
+			rawLine := text[lineStart:lineEnd]
+			byteCol := runeColToByteCol(rawLine, m.Start.Col)
+			line := strings.TrimRight(rawLine, "\r")
+			hitText, col := hitWindow(line, byteCol)
+			hits = append(hits, pluginapi.GrepHit{Path: rel, Line: m.Start.Line, Col: col, Text: hitText})
 			if len(hits) >= limit {
 				return hits, nil
 			}
 		}
 	}
 	return hits, nil
+}
+
+// runeColToByteCol returns the byte offset of rune index runeCol inside line.
+func runeColToByteCol(line string, runeCol int) int {
+	if runeCol <= 0 {
+		return 0
+	}
+	count := 0
+	for i := range line {
+		if count == runeCol {
+			return i
+		}
+		count++
+	}
+	return len(line)
 }
 
 // encodingLabels are the labels the editor reports as the encoding of a buffer (which is
@@ -278,8 +308,28 @@ func ReadSearchable(path string, skipFrom int64) (string, bool) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > GrepMaxFileBytes || (skipFrom > 0 && info.Size() >= skipFrom) {
 		return "", false
 	}
-	data, err := io.ReadAll(io.LimitReader(f, GrepMaxFileBytes+1))
-	if err != nil || len(data) > GrepMaxFileBytes {
+	size := max(info.Size(), 0)
+	data := make([]byte, 0, min(int(size)+1, GrepMaxFileBytes+1))
+	for len(data) <= GrepMaxFileBytes {
+		if len(data) == cap(data) {
+			nextCap := min(max(cap(data)*2, 512), GrepMaxFileBytes+1)
+			grown := make([]byte, len(data), nextCap)
+			copy(grown, data)
+			data = grown
+		}
+		n, rerr := f.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return "", false
+		}
+		if n == 0 {
+			break
+		}
+	}
+	if len(data) > GrepMaxFileBytes || (skipFrom > 0 && int64(len(data)) >= skipFrom) {
 		return "", false
 	}
 	if bytes.IndexByte(data[:min(len(data), grepBinaryProbe)], 0) >= 0 || !utf8.Valid(data) {

@@ -197,3 +197,76 @@ func TestContextPairSharesWindowLex(t *testing.T) {
 		t.Fatalf("c.lexed = %d, want 1 shared lex across inString+nonCode", c.lexed)
 	}
 }
+
+func TestStringContextLocalGuardsLongLinesAndByteBudget(t *testing.T) {
+	t.Parallel()
+	// A non-large file with a line over maxLexedLineBytes skips that line and still
+	// answers accurately for neighboring lines; querying the long line itself returns false/nil.
+	huge := "var huge = \"" + strings.Repeat("x", maxLexedLineBytes+500) + "\""
+	src := "package main\n" + huge + "\nvar ok = \"hello\" // c\n"
+	ed := openText(t, "a.go", src)
+	doc := ed.Active()
+	if doc.Large() {
+		t.Fatal("expected non-large document")
+	}
+	c := &stringCache{}
+	if c.inString(doc, buffer.Pos{Line: 1, Col: 15}) {
+		t.Fatal("long line over maxLexedLineBytes must not report inString")
+	}
+	if c.nonCode(doc, 1) != nil {
+		t.Fatal("long line over maxLexedLineBytes must not return nonCode mask")
+	}
+	if c.lexed != 0 {
+		t.Fatalf("long line query triggered %d lexes, want 0", c.lexed)
+	}
+	if !c.inString(doc, buffer.Pos{Line: 2, Col: 11}) {
+		t.Fatal("normal line after long line lost string context")
+	}
+	if c.lines[1] != "" {
+		t.Fatalf("long neighbor line was materialized into window: len=%d", len(c.lines[1]))
+	}
+	if mask := c.nonCode(doc, 2); len(mask) == 0 || !mask[11] || !mask[19] {
+		t.Fatalf("normal line after long line nonCode mask = %v", mask)
+	}
+
+	// Many longish lines within maxLexedLineBytes still stay bounded by stringMaxBytes.
+	line := "var s = \"" + strings.Repeat("a", 1000) + "\"\n"
+	bigEd := openText(t, "big.go", strings.Repeat(line, 200))
+	bigDoc := bigEd.Active()
+	if bigDoc.Large() {
+		t.Fatal("expected non-large document")
+	}
+	c2 := &stringCache{}
+	if !c2.inString(bigDoc, buffer.Pos{Line: 100, Col: 15}) {
+		t.Fatal("line 100 inside string was not detected")
+	}
+	var totalBytes int
+	for _, l := range c2.lines {
+		totalBytes += len(l)
+	}
+	if totalBytes > stringMaxBytes {
+		t.Fatalf("collected window = %d bytes, want <= %d", totalBytes, stringMaxBytes)
+	}
+	if 100 < c2.start || 100 >= c2.end {
+		t.Fatalf("target line 100 outside window [%d, %d)", c2.start, c2.end)
+	}
+}
+
+func TestStringContextSameLineCountEditInvalidatesHighlighter(t *testing.T) {
+	t.Parallel()
+	ed := openText(t, "a.go", "x := \"hello\"\n")
+	doc := ed.Active()
+	c := &stringCache{}
+	if !c.inString(doc, buffer.Pos{Line: 0, Col: 7}) {
+		t.Fatal("expected inside string before edit")
+	}
+	hl := c.hl
+	doc.Buffer.Delete(buffer.Pos{Line: 0, Col: 5}, buffer.Pos{Line: 0, Col: 12})
+	doc.Buffer.Insert(buffer.Pos{Line: 0, Col: 5}, "abcdefg")
+	if c.inString(doc, buffer.Pos{Line: 0, Col: 7}) {
+		t.Fatal("stale highlighter spans served after same-line-count edit")
+	}
+	if c.hl != hl {
+		t.Fatal("expected c.hl to be reused across edits on the same document/lexer")
+	}
+}

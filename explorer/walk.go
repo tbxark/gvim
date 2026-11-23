@@ -47,27 +47,50 @@ func WalkFiles(ctx context.Context, root string, opts WalkOptions, fn func(rel s
 	for _, s := range opts.SkipDirs {
 		skip[s] = true
 	}
-	w := walker{ctx: ctx, root: abs, fsys: osfs.New(abs), opts: opts, skip: skip, fn: fn}
-	if err := w.dir(nil, nil, true); err != nil {
+	var customRules []gitignore.Pattern
+	var initMatcher gitignore.Matcher
+	if !opts.ShowIgnored {
+		for _, pat := range opts.CustomIgnorePatterns {
+			pat = strings.TrimSpace(pat)
+			if pat == "" || strings.HasPrefix(pat, "#") {
+				continue
+			}
+			customRules = append(customRules, gitignore.ParsePattern(pat, nil))
+		}
+		if len(customRules) > 0 {
+			initMatcher = gitignore.NewMatcher(customRules)
+		}
+	}
+	w := walker{
+		ctx:         ctx,
+		root:        abs,
+		fsys:        osfs.New(abs),
+		opts:        opts,
+		skip:        skip,
+		customRules: customRules,
+		fn:          fn,
+	}
+	if err := w.dir(nil, nil, initMatcher, true); err != nil {
 		return err
 	}
 	return nil
 }
 
 type walker struct {
-	ctx  context.Context
-	root string
-	fsys billy.Filesystem // rooted at root; reads .gitignore files
-	opts WalkOptions
-	skip map[string]bool // opts.SkipDirs as a set
-	fn   func(rel string) bool
-	stop bool // fn returned false
+	ctx         context.Context
+	root        string
+	fsys        billy.Filesystem // rooted at root; reads .gitignore files
+	opts        WalkOptions
+	skip        map[string]bool // opts.SkipDirs as a set
+	customRules []gitignore.Pattern
+	fn          func(rel string) bool
+	stop        bool // fn returned false
 }
 
-// dir visits the directory rel below root. rules are the patterns inherited
-// from its ancestors. It returns an error only for the top directory, or for a
-// done context.
-func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
+// dir visits the directory rel below root. rules and m are the patterns and
+// matcher inherited from its ancestors. It returns an error only for the top
+// directory, or for a done context.
+func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matcher, top bool) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
@@ -79,21 +102,22 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
 		}
 		return nil
 	}
-	var m gitignore.Matcher
-	if !w.opts.ShowIgnored {
-		if w.opts.RespectGitignoreEnabled() {
-			rules = slices.Concat(rules, readIgnore(w.fsys, rel))
-		}
-		var allRules []gitignore.Pattern
-		allRules = append(allRules, rules...)
-		for _, pat := range w.opts.CustomIgnorePatterns {
-			pat = strings.TrimSpace(pat)
-			if pat == "" || strings.HasPrefix(pat, "#") {
-				continue
+	if !w.opts.ShowIgnored && w.opts.RespectGitignoreEnabled() && hasGitignoreEntry(entries) {
+		if local := readIgnore(w.fsys, rel); len(local) > 0 {
+			nextRules := make([]gitignore.Pattern, len(rules)+len(local))
+			copy(nextRules, rules)
+			copy(nextRules[len(rules):], local)
+			rules = nextRules
+
+			if len(w.customRules) == 0 {
+				m = gitignore.NewMatcher(rules)
+			} else {
+				allRules := make([]gitignore.Pattern, len(rules)+len(w.customRules))
+				copy(allRules, rules)
+				copy(allRules[len(rules):], w.customRules)
+				m = gitignore.NewMatcher(allRules)
 			}
-			allRules = append(allRules, gitignore.ParsePattern(pat, nil))
 		}
-		m = gitignore.NewMatcher(allRules)
 	}
 	for _, e := range entries {
 		name := e.Name()
@@ -110,14 +134,14 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
 				continue
 			}
 		}
-		if !w.opts.ShowIgnored && m.Match(childRel, isDir) {
+		if !w.opts.ShowIgnored && m != nil && m.Match(childRel, isDir) {
 			continue
 		}
 		if isDir {
 			if w.skip[name] {
 				continue
 			}
-			if err := w.dir(childRel, rules, false); err != nil {
+			if err := w.dir(childRel, rules, m, false); err != nil {
 				return err
 			}
 		} else if !w.fn(strings.Join(childRel, "/")) {
@@ -128,4 +152,13 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, top bool) error {
 		}
 	}
 	return nil
+}
+
+func hasGitignoreEntry(entries []os.DirEntry) bool {
+	for _, e := range entries {
+		if e.Name() == gitignoreFile {
+			return true
+		}
+	}
+	return false
 }
