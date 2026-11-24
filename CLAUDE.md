@@ -85,6 +85,18 @@ go test -race ./...                              # test-only; needs cgo
 go run . [DIR] [FILE[:LINE[:COL]]]...           # launch the TUI
 ```
 
+CI (`.github/workflows/ci.yml`) additionally runs, and a change should pass:
+
+```
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...   # Windows cross-build
+go list -f '{{if not .Doc}}{{.ImportPath}}{{end}}' ./...   # must print nothing: every package needs a doc comment
+go test -short -p 2 ./...                        # -short skips wall-clock budget and peak-memory tests
+```
+
+`-race` gates PRs only for `internal/{app,daemon,tui,lsphost,filewatch,pluginhost,terminal}`, `lsp` and
+`plugin`; `nightly.yml` runs the full suite under `-race` and the budget tests without `-short`.
+A budget test failing only under `-race` or on a loaded machine is a timing artefact, not a regression.
+
 ### Architecture
 
 The design record is `docs/architecture.md` (package table, import rules R1-R16,
@@ -170,7 +182,7 @@ package maps). The shape that needs several files to see:
   `python3 commands/gen/generate.py refs/fresh`. Do not edit by hand.
 - `internal/tui/menubar/menu_table_gen.go`: regenerate with `python3 tools/gen_menus.py`
   (`--check` reports drift). It reads `refs/fresh`. Do not edit by hand.
-- `refs/` (crush, fresh, lazygit, micro, orbiton, toast) are read-only reference checkouts. They
+- `refs/` (crush, fresh, lazygit, micro, orbiton, toast, zed; gitignored) are read-only reference checkouts. They
   are not part of the build (`go list ./...` lists nothing under `refs`). Do not edit or import
   them.
 
