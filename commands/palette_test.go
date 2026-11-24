@@ -22,7 +22,7 @@ func find(t *testing.T, entries []commands.Entry, name string) commands.Entry {
 
 func TestCommandsFromBuiltinTable(t *testing.T) {
 	entries := commands.Commands(nil)
-	// 206 generated rows, then the hand-written rows: the Open Menu Bar and Live Grep rows
+	// 205 generated rows, then the hand-written rows: the Open Menu Bar and Live Grep rows
 	// of keys_commands.go, the Reload Configuration row of settings_commands.go, the
 	// Search and Replace in Project, Git Grep and Project Search Results in List rows of
 	// search_commands.go, the Edit Theme row of theme_commands.go, the 2 Compare
@@ -32,8 +32,8 @@ func TestCommandsFromBuiltinTable(t *testing.T) {
 	// rows of terminal_commands.go and agent_discover_commands.go, and the 7 terminal-tab
 	// rows of terminal_commands.go, the Toggle Hex View row of binary_commands.go,
 	// and the Sticky Scroll and About gvim rows of gvim_commands.go.
-	if len(entries) != 245 {
-		t.Fatalf("Commands() = %d entries, want 245", len(entries))
+	if len(entries) != 244 {
+		t.Fatalf("Commands() = %d entries, want 244", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)

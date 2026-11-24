@@ -382,8 +382,6 @@
   "cmd.toggle_occurrence_highlight_desc": "显示或隐藏光标下单词所有出现位置的高亮",
   "cmd.toggle_page_view": "切换页面视图",
   "cmd.toggle_page_view_desc": "切换当前缓冲区的窄页面视图（撰写）模式",
-  "cmd.toggle_prompt_line": "切换提示行",
-  "cmd.toggle_prompt_line_desc": "显示或隐藏提示行",
   "cmd.toggle_read_only": "切换只读模式（当前缓冲区）",
   "cmd.toggle_read_only_desc": "为当前缓冲区启用或禁用只读模式",
   "cmd.toggle_scroll_sync": "切换滚动同步",

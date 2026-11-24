@@ -34,9 +34,8 @@ const (
 	trustCancelLabel = "Cancel (Esc)"
 	trustQuitLabel   = "Quit"
 
-	// trustMinContent and trustMaxContent bound the card's content width in
-	// cells. The maximum makes the card 68 cells wide, Fresh's dialog width.
-	trustMinContent = 40
+	// trustMaxContent bounds the card's content width in cells. It makes the
+	// card 68 cells wide, Fresh's dialog width.
 	trustMaxContent = 64
 	// trustDescriptionIndent is the leading cells of an option description,
 	// Fresh's hanging indent.

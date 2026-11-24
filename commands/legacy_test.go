@@ -48,10 +48,23 @@ func freshCommands() []Entry {
 	return out
 }
 
+// retiredNames are Fresh palette commands gvim does not ship. The captured
+// lists are Fresh's and stay untouched, so the comparison drops these names;
+// the relative order of the rest does not change.
+var retiredNames = map[string]bool{
+	"Toggle Prompt Line": true,
+}
+
 // TestSearchMatchesLegacyPalette checks the complete ranked list, not only the
 // first rows, for every query captured from the legacy palette.
 func TestSearchMatchesLegacyPalette(t *testing.T) {
-	for query, want := range loadLegacyLists(t) {
+	for query, raw := range loadLegacyLists(t) {
+		var want []string
+		for _, n := range raw {
+			if !retiredNames[n] {
+				want = append(want, n)
+			}
+		}
 		var got []string
 		for _, e := range Search(freshCommands(), ">"+query) {
 			got = append(got, e.Name)
