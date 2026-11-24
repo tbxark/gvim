@@ -157,8 +157,8 @@ func TestTrustDialogStringsAndMarkersAreDrawn(t *testing.T) {
 		"Trust folder & Allow Tooling (T)",
 		"Keep Restricted (Default) (K)",
 		"Block All Execution (B)",
-		"[ OK ]",
-		"[ Cancel (Esc) ]",
+		"  OK  ",
+		"  Cancel (Esc)  ",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the frame does not show %q:\n%s", want, joined)
@@ -451,7 +451,7 @@ func TestTrustDialogFitsAShortFrame(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 18})
 	d := topTrustDialog(t, m)
 	joined := strings.Join(trustFrame(m), "\n")
-	for _, want := range []string{"SECURITY WARNING", "Keep Restricted (Default) (K)", "[ OK ]", "[ Quit (Ctrl+Q) ]"} {
+	for _, want := range []string{"SECURITY WARNING", "Keep Restricted (Default) (K)", "  OK  ", "  Quit (Ctrl+Q)  "} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("a short frame does not show %q:\n%s", want, joined)
 		}

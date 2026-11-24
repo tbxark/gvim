@@ -362,7 +362,12 @@ func TestPromptMouseClickThroughRoot(t *testing.T) {
 	p := prompt.NewLine(m.styles, prompt.LineOptions{Label: "", Input: "abcd"})
 	m.pushOverlay(p)
 	_ = m.View() // paints the prompt and records the input window
-	m.Update(tea.MouseClickMsg(tea.Mouse{X: 4, Y: 29, Button: tea.MouseLeft}))
+	cx, cy, ok := m.caret()
+	if !ok {
+		t.Fatal("the prompt reported no caret")
+	}
+	// The caret sits at the end of "abcd"; two cells left of it is between b and c.
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: cx - 2, Y: cy, Button: tea.MouseLeft}))
 	m.Update(typed("X"))
 	if got := p.Value(); got != "abXcd" {
 		t.Fatalf("click + X = %q, want abXcd", got)
@@ -888,11 +893,10 @@ func TestPromptClipboardStaleAndSupersededResults(t *testing.T) {
 func TestOverlayContextOfCoversChoiceAndPopups(t *testing.T) {
 	t.Parallel()
 	m := overlayModel(t, fakeKeymap{})
-	ch := prompt.NewChoice(m.styles, "Save?", "tag", []prompt.ChoiceOption{{Key: "y", Label: "Yes"}})
+	ch := prompt.NewChoice(m.styles, "Save", "Save?", "tag", []prompt.ChoiceOption{{Key: "y", Label: "Yes"}})
 	if ctx, ok := overlayContextOf(ch); !ok || ctx != KeyContextPrompt {
 		t.Fatalf("overlayContextOf(*prompt.Choice) = %q,%v, want %q,true", ctx, ok, KeyContextPrompt)
 	}
-	var _ prompt.RowOwner = ch
 	pop := &popup.Popup{}
 	if ctx, ok := overlayContextOf(pop); !ok || ctx != KeyContextPopup {
 		t.Fatalf("overlayContextOf(*popup.Popup) = %q,%v, want %q,true", ctx, ok, KeyContextPopup)

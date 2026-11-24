@@ -197,17 +197,12 @@ func TestStatusRowKeepsEdgePadding(t *testing.T) {
 	}
 }
 
-// TestStatusRowIsTheLastRowWithoutAPrompt checks the prompt row rule at the frame
-// level: the status row is the last row unless a prompt row is asked for.
-func TestStatusRowIsTheLastRowWithoutAPrompt(t *testing.T) {
+// TestStatusRowIsTheLastRow checks the status row is the last row of the frame:
+// prompts are centred cards and never reserve a row.
+func TestStatusRowIsTheLastRow(t *testing.T) {
 	idle := ComputeLayout(80, 24, Input{})
-	if !idle.StatusOn || idle.StatusY != 23 || idle.PromptOn {
-		t.Fatalf("idle: status row %d on=%v prompt=%v, want row 23 and no prompt", idle.StatusY, idle.StatusOn, idle.PromptOn)
-	}
-	asked := ComputeLayout(80, 24, Input{ShowPromptLine: true})
-	if !asked.PromptOn || asked.PromptY != 23 || asked.StatusY != 22 {
-		t.Fatalf("prompt row %d on=%v, status %d; want the prompt on row 23 above the status row 22",
-			asked.PromptY, asked.PromptOn, asked.StatusY)
+	if !idle.StatusOn || idle.StatusY != 23 {
+		t.Fatalf("idle: status row %d on=%v, want row 23 on", idle.StatusY, idle.StatusOn)
 	}
 }
 

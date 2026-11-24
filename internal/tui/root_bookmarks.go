@@ -16,10 +16,13 @@ type bookmarkTag struct{ jump bool }
 // openBookmarkPrompt asks for a bookmark slot, a digit from 0 to 9, to set or to jump to.
 func (m *Model) openBookmarkPrompt(jump bool) {
 	label := "Set bookmark (0-9):"
+	title := uiText("gvim.prompt.title.set_bookmark", "Set Bookmark")
 	if jump {
 		label = "Jump to bookmark (0-9):"
+		title = uiText("gvim.prompt.title.jump_bookmark", "Jump to Bookmark")
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    title,
 		Label:    label,
 		Tag:      bookmarkTag{jump: jump},
 		Validate: validateSlot,

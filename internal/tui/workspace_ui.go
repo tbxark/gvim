@@ -374,6 +374,7 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 	case "workspace_rename":
 		m.openWorkspacePicker(uiText("gvim.workspace.picker_rename", "Rename Workspace"), func(e WorkspaceEntry) tea.Cmd {
 			m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+				Title: uiText("gvim.workspace.picker_rename", "Rename Workspace"),
 				Label: uiText("gvim.workspace.label_prompt", "Workspace label:"),
 				Input: e.Label,
 				Tag:   workspaceRenameTag{id: e.ID},
@@ -396,7 +397,7 @@ func (m *Model) workspaceCloseEntry(e WorkspaceEntry) tea.Cmd {
 		m.pushOverlay(prompt.NewConfirmWith(m.styles,
 			uiTextVars("gvim.workspace.close_question", "Close workspace %{label}? This stops %{summary}", map[string]any{"label": fmt.Sprintf("%q", e.Label), "summary": workspaceRunningSummary(running)}),
 			workspaceCloseRunningTag{id: e.ID},
-			prompt.ConfirmOptions{Yes: uiText("gvim.workspace.close_button", "Close"), No: uiText("gvim.dialog.button.cancel", "Cancel"), DefaultYes: true}))
+			prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.close_workspace", "Close Workspace"), Yes: uiText("gvim.workspace.close_button", "Close"), No: uiText("gvim.dialog.button.cancel", "Cancel"), DefaultYes: true}))
 		return nil
 	}
 	cmd, err := m.workspace.Close(e.ID)
@@ -808,6 +809,7 @@ func (m *Model) openWorkspacePicker(title string, choose func(WorkspaceEntry) te
 // openNewWorkspacePrompt asks for the root, then the label.
 func (m *Model) openNewWorkspacePrompt() {
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    uiText("gvim.prompt.title.new_workspace", "New Workspace"),
 		Label:    "Workspace root:",
 		Tag:      workspaceNewRootTag{},
 		Validate: validateWorkspaceRoot,
@@ -824,6 +826,7 @@ func validateWorkspaceRoot(text string) error {
 // openNewWorkspaceLabelPrompt asks for the label of the workspace rooted at root.
 func (m *Model) openNewWorkspaceLabelPrompt(root string) {
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title: uiText("gvim.prompt.title.new_workspace", "New Workspace"),
 		Label: "Workspace label (empty: the folder name):",
 		Tag:   workspaceNewLabelTag{root: root},
 	}))

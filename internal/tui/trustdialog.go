@@ -21,7 +21,7 @@ import (
 //
 // The prompt is exclusive: while it is up, it takes every key and mouse message
 // and nothing behind it is interactive. A click on a radio selects the option
-// and does not consent — only [ OK ] / Enter commits, the two-step Fresh's
+// and does not consent — only the OK button / Enter commits, the two-step Fresh's
 // dialog keeps for the same reason.
 const (
 	trustDialogTitle = "⚠ SECURITY WARNING"
@@ -270,26 +270,23 @@ func (d *trustDialog) buttonAt(x, y int) int {
 func (d *trustDialog) Draw(g *grid.Grid) {
 	ov := d.m.styles.Overlay
 	cw := trustContentWidth(g.Width())
-	w := cw + 4
 	maxHeight := max(g.Height()-2, 3)
 	lines := d.lines(cw, d.naturalDescRows(cw))
 	for descRows := d.naturalDescRows(cw) - 1; descRows >= 0 && len(lines)+2 > maxHeight; descRows-- {
 		lines = d.lines(cw, descRows)
 	}
-	h := min(len(lines)+2, g.Height())
-	if w < 10 || h < 3 {
+	d.box = space.CardBox(g.Width(), g.Height(), cw, min(len(lines), g.Height()-2))
+	if d.box.W < 10 || d.box.H < 3 {
 		return
 	}
-	x := max((g.Width()-w)/2, 0)
-	y := max((g.Height()-h)/2, 0)
-	d.box = space.Rect{X: x, Y: y, W: w, H: h}
+	x, y := d.box.X, d.box.Y
 	d.radios = [3]space.Rect{}
 	d.ok, d.secondary = space.Rect{}, space.Rect{}
-	ov.PaintBox(g, x, y, w, h, trustDialogTitle)
-	inner, end := x+2, x+w-2
+	ov.PaintBox(g, x, y, d.box.W, d.box.H, trustDialogTitle)
+	inner, end := x+2, x+d.box.W-2
 	for i, line := range lines {
 		row := y + 1 + i
-		if row > y+h-2 {
+		if row > y+d.box.H-2 {
 			break
 		}
 		switch line.kind {
@@ -320,16 +317,15 @@ func (d *trustDialog) Draw(g *grid.Grid) {
 	}
 }
 
-// drawTrustButtons paints [ OK ] centred in the left half of the row and the
-// secondary button centred in the right half, and records their places.
+// drawTrustButtons paints the OK button centred in the left half of the row and
+// the secondary button centred in the right half, and records their places.
 func (d *trustDialog) drawTrustButtons(g *grid.Grid, x0, y, cw int, ov style.Overlay) {
-	okLabel := "[ " + trustOKLabel + " ]"
-	secLabel := "[ " + d.secondaryLabel() + " ]"
+	secLabel := d.secondaryLabel()
 	half := cw / 2
-	okX := x0 + max((half-ansi.StringWidth(okLabel))/2, 0)
-	secX := x0 + half + max((cw-half-ansi.StringWidth(secLabel))/2, 0)
-	d.ok = space.Rect{X: okX, Y: y, W: ansi.StringWidth(okLabel), H: 1}
-	d.secondary = space.Rect{X: secX, Y: y, W: ansi.StringWidth(secLabel), H: 1}
+	okX := x0 + max((half-ov.ButtonWidth(trustOKLabel))/2, 0)
+	secX := x0 + half + max((cw-half-ov.ButtonWidth(secLabel))/2, 0)
+	d.ok = space.Rect{X: okX, Y: y, W: ov.ButtonWidth(trustOKLabel), H: 1}
+	d.secondary = space.Rect{X: secX, Y: y, W: ov.ButtonWidth(secLabel), H: 1}
 	okStyle, secStyle := ov.Focus, ov.Idle
 	if d.hover == 0 {
 		okStyle = ov.Hover
@@ -337,8 +333,8 @@ func (d *trustDialog) drawTrustButtons(g *grid.Grid, x0, y, cw int, ov style.Ove
 	if d.hover == 1 {
 		secStyle = ov.Hover
 	}
-	g.Put(okX, y, x0+cw, okLabel, okStyle)
-	g.Put(secX, y, x0+cw, secLabel, secStyle)
+	ov.PaintButton(g, okX, y, trustOKLabel, -1, okStyle)
+	ov.PaintButton(g, secX, y, secLabel, -1, secStyle)
 }
 
 // lines returns the body rows of the dialog at content width cw, with each

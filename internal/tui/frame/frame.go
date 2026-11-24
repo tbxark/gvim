@@ -75,7 +75,6 @@ type Input struct {
 	DockRows        int        // optional user-dragged height of the terminal dock; 0 uses default third
 	HideTabBar      bool       // the tab Strip row is not drawn; the body takes it
 	Style           Style      // the frame's look; nil is Classic, the workbench frame
-	ShowPromptLine  bool       // reserve the prompt row under the status row (only while a prompt is open)
 	HideVScroll     bool       // the vertical scrollbar is not drawn, so its column is text
 	IconMode        icons.Mode // the glyphs of the explorer buttons and the tab buttons
 
@@ -372,12 +371,6 @@ type Layout struct {
 	NoticeY int
 	Notice  []string
 
-	// The prompt row sits under the status row, above the find bar. It is reserved
-	// only while PromptOn is set, which the root does while a prompt overlay is
-	// open; with no prompt open the status row is the last row of the frame.
-	PromptOn bool
-	PromptY  int
-
 	// The terminal dock (internal/tui/dock) is the bottom of the editor column:
 	// columns DockX..DockX+EditorW-1 and rows DockY..DockY+DockH-1, a title row and
 	// then the shell's rows. The explorer column runs beside it to BodyBottom, so
@@ -490,10 +483,6 @@ func ComputeLayout(w, h int, in Input) Layout {
 	}
 	l.ExBodyTop = l.ExTitleY + 1
 	l.StatusY = h - 1 - in.FindRows
-	if in.ShowPromptLine {
-		l.PromptOn, l.PromptY = true, l.StatusY
-		l.StatusY--
-	}
 	l.StatusOn = !in.HideStatus
 	l.BodyBottom = l.StatusY - 1
 	if !l.StatusOn {

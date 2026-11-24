@@ -268,6 +268,7 @@ func (p *themeEditorPage) editColor() tea.Cmd {
 	}
 	value, _ := p.working.Value(row.key.Section, row.key.Key)
 	return p.pushOverlay(prompt.NewLine(p.model.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.edit_color", "Edit Color"),
 		Label:     row.key.Name() + ": ",
 		Input:     value.Hex(),
 		SelectAll: true,
@@ -284,6 +285,7 @@ func (p *themeEditorPage) editAttrs() tea.Cmd {
 	}
 	value, _ := p.working.Value(row.key.Section, row.key.Key)
 	return p.pushOverlay(prompt.NewLine(p.model.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.edit_attributes", "Edit Attributes"),
 		Label:     row.key.Name() + " attributes: ",
 		Input:     theme.FormatModifiers(value.Modifiers),
 		SelectAll: true,
@@ -378,6 +380,7 @@ func (p *themeEditorPage) saveAs() tea.Cmd {
 		return nil
 	}
 	return p.pushOverlay(prompt.NewLine(p.model.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.save_theme", "Save Theme"),
 		Label:     "Save theme as: ",
 		Input:     p.name + "-copy",
 		SelectAll: true,
@@ -391,7 +394,7 @@ func (p *themeEditorPage) delete() tea.Cmd {
 		p.model.notice = uiTextVars("gvim.theme_editor.bundled_delete", "Theme %{name} is bundled and cannot be deleted", map[string]any{"name": p.name})
 		return nil
 	}
-	return p.pushOverlay(prompt.NewConfirm(p.model.styles, "Delete theme "+p.name+"?", themeEditorDeleteTag{page: p}))
+	return p.pushOverlay(prompt.NewConfirmWith(p.model.styles, "Delete theme "+p.name+"?", themeEditorDeleteTag{page: p}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.delete_theme", "Delete Theme")}))
 }
 
 // openPicker lists the catalog's themes to open.
@@ -431,7 +434,7 @@ func (p *themeEditorPage) cancel() tea.Cmd {
 		p.closeAndRestore()
 		return nil
 	}
-	return p.pushOverlay(prompt.NewConfirm(p.model.styles, "Discard theme changes?", themeEditorDiscardTag{page: p}))
+	return p.pushOverlay(prompt.NewConfirmWith(p.model.styles, "Discard theme changes?", themeEditorDiscardTag{page: p}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.discard_changes", "Discard Changes")}))
 }
 
 // closeAndRestore puts the theme that was applied before the editor opened back.

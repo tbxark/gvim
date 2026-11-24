@@ -195,23 +195,6 @@ func TestStatusBarToggleGivesItsRowToTheBody(t *testing.T) {
 	}
 }
 
-// TestPromptLineToggleKeepsTheStatusRowWhileNoPromptIsOpen checks that the setting
-// alone reserves no row: the status bar is the last row until a prompt opens.
-func TestPromptLineToggleKeepsTheStatusRowWhileNoPromptIsOpen(t *testing.T) {
-	m, _ := viewModel(t, DefaultViewOptions(), "hello\n", 60, 12)
-	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
-		t.Fatalf("setup: promptOn %v statusY %d, want off and 11", l.PromptOn, l.StatusY)
-	}
-	runAction(t, m, "toggle_prompt_line")
-	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
-		t.Fatalf("setting on with no prompt: promptOn %v statusY %d, want off and 11",
-			l.PromptOn, l.StatusY)
-	}
-	runAction(t, m, "toggle_prompt_line")
-	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
-		t.Fatalf("second toggle: promptOn %v statusY %d, want off and 11", l.PromptOn, l.StatusY)
-	}
-}
 
 func TestVerticalScrollbarToggleClearsTheColumn(t *testing.T) {
 	long := strings.Repeat("line\n", 60)
@@ -717,9 +700,9 @@ func TestViewOptionsSetTheStartingState(t *testing.T) {
 func TestViewDefaultsKeepTheStartingLayout(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 8)
 	l := m.layout()
-	if l.StripY != 2 || l.StatusY != 7 || l.PromptOn || !l.MenuOn {
-		t.Errorf("default layout: strip %d status %d prompt %v menu %v, want 2, 7, off, on",
-			l.StripY, l.StatusY, l.PromptOn, l.MenuOn)
+	if l.StripY != 2 || l.StatusY != 7 || !l.MenuOn {
+		t.Errorf("default layout: strip %d status %d menu %v, want 2, 7, on",
+			l.StripY, l.StatusY, l.MenuOn)
 	}
 }
 

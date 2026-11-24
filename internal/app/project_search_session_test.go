@@ -61,7 +61,7 @@ func TestProjectSearchPanelEndToEnd(t *testing.T) {
 	s.Type("bar")
 	s.Key("alt+enter")
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Replace 2 matches in 2 files?") })
-	if !sc.Contains("[ No ]") {
+	if !sc.Contains("  No  ") {
 		t.Fatalf("the confirmation does not offer No:\n%s", sc)
 	}
 	s.Key("y")

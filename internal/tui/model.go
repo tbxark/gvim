@@ -1083,9 +1083,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ExtractConflictMsg:
 		// The extraction command detected target conflicts BEFORE writing anything.
 		// Ask here; the answer retries with replace or cancels untouched.
-		m.pushOverlay(prompt.NewConfirm(m.styles, extractConflictQuestion(msg), extractConflictAnswer{
+		m.pushOverlay(prompt.NewConfirmWith(m.styles, extractConflictQuestion(msg), extractConflictAnswer{
 			selection: msg.Selection, targetID: msg.TargetID,
-		}))
+		}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.extract_tabs", "Extract Tabs")}))
 	case fileResultMsg:
 		cmd = tea.Batch(m.fileDone(msg), m.gitCmd())
 	case urlOpenedMsg:
@@ -1552,6 +1552,7 @@ type fileRecorder interface {
 // "N" or "N:COL", and Enter moves the caret there.
 func (m *Model) openGoto(input string) {
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    uiText("gvim.prompt.title.goto_line", "Go to Line"),
 		Label:    uiText("gvim.prompt.goto_line", "Go to line:"),
 		Input:    input,
 		Tag:      gotoTag{},
@@ -1627,14 +1628,20 @@ func (m *Model) askRemoteClipboard(kind, path string, paths []string, dir string
 		return m.runRemoteClipboard(remoteClipboardTag{kind: kind, paths: paths, dir: dir})
 	}
 	q := remoteClipboardQuestion(kind, paths, dir, target)
-	if kind == remoteClipboardPaste {
+	title := uiText("gvim.prompt.title.paste", "Paste")
+	switch kind {
+	case remoteClipboardCopy:
+		title = uiText("gvim.prompt.title.copy", "Copy")
+	case remoteClipboardCut:
+		title = uiText("gvim.prompt.title.cut", "Cut")
+	case remoteClipboardPaste:
 		count := 0
 		if m.clip != nil {
 			count = len(m.clip.paths)
 		}
 		q = pasteQuestion(count, dir, target)
 	}
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, remoteClipboardTag{kind: kind, paths: paths, dir: dir}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, remoteClipboardTag{kind: kind, paths: paths, dir: dir}, prompt.ConfirmOptions{Title: title}))
 	return nil
 }
 
@@ -1731,7 +1738,12 @@ func (m *Model) askName(dir string, folder bool) {
 	if !m.needOps() {
 		return
 	}
+	title := uiText("gvim.prompt.title.new_file", "New File")
+	if folder {
+		title = uiText("gvim.prompt.title.new_folder", "New Folder")
+	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    title,
 		Label:    newEntryLabel(folder, m.remoteExplorerTarget()),
 		Tag:      newNameTag{dir: dir, folder: folder},
 		Validate: validateName,
@@ -1744,6 +1756,7 @@ func (m *Model) askRename(path string) {
 		return
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    uiText("gvim.prompt.title.rename", "Rename"),
 		Label:    renamePromptLabel(m.remoteExplorerTarget()),
 		Input:    filepath.Base(path),
 		Tag:      renameTag{path: path},
@@ -1758,14 +1771,14 @@ func (m *Model) askDelete(paths ...string) {
 		return
 	}
 	q := deleteQuestion(paths, m.remoteExplorerTarget())
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, deleteTag{paths: paths}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, deleteTag{paths: paths}, prompt.ConfirmOptions{Title: uiText("gvim.dialog.title.confirm_delete", "Confirm Delete")}))
 }
 
 // askOverwrite asks whether a local copy that hit an existing destination may replace
 // it. Yes runs the copy with the overwrite policy, and No runs it with skip.
 func (m *Model) askOverwrite(job fileJob) {
 	q := "Overwrite " + filepath.Base(job.path) + "?"
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, overwriteTag{job: job}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, overwriteTag{job: job}, prompt.ConfirmOptions{Title: uiText("gvim.dialog.title.replace_file", "Replace File")}))
 }
 
 // askRemotePasteConflict asks what a remote paste should do when its destination
@@ -1779,8 +1792,9 @@ func (m *Model) askRemotePasteConflict(job fileJob) {
 	}
 	q := "Remote destination exists on " + m.remoteExplorerTarget() + ": overwrite " + name + "?"
 	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, remotePasteConflictTag{job: job}, prompt.ConfirmOptions{
-		Yes: "Overwrite",
-		No:  "Rename",
+		Title: uiText("gvim.prompt.title.paste_conflict", "Paste Conflict"),
+		Yes:   "Overwrite",
+		No:    "Rename",
 	}))
 }
 
@@ -1791,6 +1805,7 @@ func (m *Model) askRemotePasteRename(job fileJob) {
 		name = filepath.Base(job.path)
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    uiText("gvim.prompt.title.paste_as", "Paste As"),
 		Label:    pasteAsLabel(m.remoteExplorerTarget()),
 		Input:    name,
 		Tag:      remotePasteRenameTag{job: job},
@@ -1826,7 +1841,7 @@ func (m *Model) askRemoteMultiPasteConflict(job fileJob) {
 		name = filepath.Base(job.path)
 	}
 	q := uiTextVars("gvim.notice.remote_destination_exists", "Remote destination exists on %{target}: %{name}", map[string]any{"target": m.remoteExplorerTarget(), "name": name})
-	m.pushOverlay(prompt.NewChoice(m.styles, q, remotePasteMultiTag{job: job}, remoteMultiPasteOptions()))
+	m.pushOverlay(prompt.NewChoice(m.styles, uiText("gvim.prompt.title.paste_conflict", "Paste Conflict"), q, remotePasteMultiTag{job: job}, remoteMultiPasteOptions()))
 }
 
 // answerRemoteMultiPaste applies one multi-item conflict answer. Overwrite asks for the
@@ -1896,7 +1911,7 @@ func (m *Model) askMoveTo(dir string, paths []string) tea.Cmd {
 		what = uiTextVars("gvim.prompt.move_entries", "%{count} entries", map[string]any{"count": len(paths)})
 	}
 	q := uiTextVars("gvim.prompt.move_remote", "Move %{what} on %{target} to %{dir}?", map[string]any{"what": what, "target": m.remoteExplorerTarget(), "dir": dir})
-	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, moveToTag{dir: dir, paths: paths}, prompt.ConfirmOptions{Yes: uiText("gvim.prompt.move", "Move"), No: uiText("gvim.dialog.button.cancel", "Cancel")}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, moveToTag{dir: dir, paths: paths}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.move", "Move"), Yes: uiText("gvim.prompt.move", "Move"), No: uiText("gvim.dialog.button.cancel", "Cancel")}))
 	return nil
 }
 

@@ -375,3 +375,33 @@ func (o Overlay) PaintFooter(g *grid.Grid, x, y, w int, hints string) {
 	room := w - 3 // from x+2 up to the cell before the right corner
 	g.Put(x+2, y, x+w-1, space.End(" "+hints+" ", room), o.Muted)
 }
+
+// PaintButton paints one card button: the label with two spaces of padding on
+// each side. The rune at index under is underlined (a dialog's hotkey); a
+// negative under underlines nothing. It returns the cells drawn.
+func (o Overlay) PaintButton(g *grid.Grid, x, y int, label string, under int, st grid.Style) int {
+	w := g.Width()
+	x0 := x
+	runes := []rune(label)
+	draw := func(s string, st grid.Style) {
+		x += g.Put(x, y, w, s, st)
+	}
+	draw("  ", st)
+	if under >= 0 && under < len(runes) {
+		underlined := st
+		underlined.Underline = true
+		draw(string(runes[:under]), st)
+		draw(string(runes[under]), underlined)
+		draw(string(runes[under+1:]), st)
+	} else {
+		draw(label, st)
+	}
+	draw("  ", st)
+	return x - x0
+}
+
+// ButtonWidth is the cells a PaintButton label takes: the label and the two
+// spaces of padding on each side.
+func (o Overlay) ButtonWidth(label string) int {
+	return ansi.StringWidth(label) + 4
+}

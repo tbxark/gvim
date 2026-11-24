@@ -41,13 +41,13 @@ func lastResolved(t *testing.T, rt *fakeRuntime) pluginapi.Completion {
 	return rt.resolved[len(rt.resolved)-1]
 }
 
-// frameRow paints the overlays over an empty frame and returns row y as text.
-func frameRow(m *Model, y int) string {
+// frameRows paints the overlays over an empty frame and returns every row as text.
+func frameRows(m *Model) string {
 	g := grid.New(m.width, m.height)
 	for _, o := range m.overlays {
 		o.Draw(g)
 	}
-	return strings.TrimRight(g.Plain()[y], " ")
+	return strings.Join(g.Plain(), "\n")
 }
 
 func TestPluginInputRoundTrip(t *testing.T) {
@@ -77,8 +77,8 @@ func TestPluginInputRoundTrip(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("%d overlays after the command, want the prompt", len(m.overlays))
 			}
-			if row := frameRow(m, m.height-1); !strings.HasPrefix(row, " Name: x") {
-				t.Fatalf("prompt row = %q", row)
+			if text := frameRows(m); !strings.Contains(text, "Name:") || !strings.Contains(text, "x") {
+				t.Fatalf("prompt card = %q", text)
 			}
 			tt.keys(m)
 			got := lastResolved(t, rt)
@@ -117,8 +117,8 @@ func TestPluginInputSelectAllAndHooks(t *testing.T) {
 	if len(m.overlays) != 1 || len(rt.resolved) != 0 {
 		t.Fatalf("a rejected text closed the prompt: overlays %d resolved %v", len(m.overlays), rt.resolved)
 	}
-	if row := frameRow(m, m.height-1); !strings.Contains(row, "not allowed") {
-		t.Fatalf("prompt row = %q, want the rejection", row)
+	if text := frameRows(m); !strings.Contains(text, "not allowed") {
+		t.Fatalf("prompt card = %q, want the rejection", text)
 	}
 	feed(m, runKey(m, special(tea.KeyBackspace)))
 	feed(m, runKey(m, special(tea.KeyEnter)))
@@ -172,8 +172,8 @@ func TestPluginConfirmRoundTrip(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if row := frameRow(m, m.height-1); !strings.Contains(row, "Sure?") || !strings.Contains(row, "[ Do it ] [ Keep ]") {
-				t.Fatalf("question row = %q", row)
+			if text := frameRows(m); !strings.Contains(text, "Sure?") || !strings.Contains(text, "  Do it  ") || !strings.Contains(text, "  Keep  ") {
+				t.Fatalf("question card = %q", text)
 			}
 			feed(m, runKey(m, tt.key))
 			got := lastResolved(t, rt)
@@ -566,8 +566,8 @@ func TestPluginDismissDoesNotRunThePluginInsideRouteOverlay(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("%d overlays, want only the next prompt", len(m.overlays))
 			}
-			if row := frameRow(m, m.height-1); !strings.HasPrefix(row, " Next:") {
-				t.Fatalf("top overlay row = %q", row)
+			if text := frameRows(m); !strings.Contains(text, "Next:") {
+				t.Fatalf("top overlay card = %q", text)
 			}
 			if m.plug.ui.busy != inRoute {
 				t.Fatal("busy was left set")

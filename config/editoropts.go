@@ -388,7 +388,10 @@ var editorOptions = []option{
 	boolOpt("show_status_bar", "show_status_bar", func(c *Config) *bool { return &c.ShowStatusBar }),
 	{key: "status_bar", apply: applyStatusBar},
 	{key: "search", apply: applySearch},
-	boolOpt("show_prompt_line", "show_prompt_line", func(c *Config) *bool { return &c.ShowPromptLine }),
+	// show_prompt_line is retired: prompts are centred cards, so the key is accepted
+	// and ignored like fileOnlyKeys, in both its nested and its flat spelling.
+	{key: "show_prompt_line", flat: "show_prompt_line", nullable: true,
+		apply: func(*Config, json.RawMessage) error { return nil }},
 	boolOpt("show_vertical_scrollbar", "show_vertical_scrollbar", func(c *Config) *bool { return &c.ShowVerticalScrollbar }),
 	boolOpt("show_horizontal_scrollbar", "show_horizontal_scrollbar", func(c *Config) *bool { return &c.ShowHorizontalScrollbar }),
 	boolOpt("show_tilde", "", func(c *Config) *bool { return &c.ShowTilde }),

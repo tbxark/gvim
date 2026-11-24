@@ -674,6 +674,7 @@ func (p *settingsPage) pick(it SettingsItem) tea.Cmd {
 // value while it is typed; a valid answer becomes pending. Nothing is saved.
 func (p *settingsPage) prompt(it SettingsItem) tea.Cmd {
 	p.m.pushOverlay(prompt.NewLine(p.m.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.edit_setting", "Edit Setting"),
 		Label:     it.Name + ": ",
 		Input:     it.Value,
 		SelectAll: true,
@@ -795,7 +796,7 @@ func (p *settingsPage) confirmCancel() {
 		label += "s"
 	}
 	label += "?"
-	p.m.pushOverlay(prompt.NewConfirm(p.m.styles, label, settingsDiscardTag{page: p}))
+	p.m.pushOverlay(prompt.NewConfirmWith(p.m.styles, label, settingsDiscardTag{page: p}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.discard_changes", "Discard Changes")}))
 }
 
 // applied takes the result of a Save: on success the page shows the new
@@ -1127,8 +1128,6 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 		m.view.tabBar = v.ShowTabBar
 	case "editor.show_status_bar":
 		m.view.statusBar = v.ShowStatusBar
-	case "editor.show_prompt_line":
-		m.view.promptLine = v.ShowPromptLine
 	case "editor.show_vertical_scrollbar":
 		m.view.vScroll = v.ShowVerticalScrollbar
 	case "editor.show_horizontal_scrollbar":

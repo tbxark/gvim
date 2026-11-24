@@ -1862,6 +1862,7 @@ func (m *Model) askLSPRename() {
 	}
 	at := doc.Cursor()
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title: uiText("gvim.prompt.title.rename", "Rename"),
 		Label: uiText("gvim.prompt.new_name", "New name:"),
 		Input: lspWordAt(doc.Line(at.Line), at.Col),
 		Tag:   lspRenameTag{path: path, at: at},

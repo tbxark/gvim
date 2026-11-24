@@ -117,7 +117,6 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 	return &tui.ViewOptions{
 		ShowTabBar:              cfg.ShowTabBar,
 		ShowStatusBar:           cfg.ShowStatusBar,
-		ShowPromptLine:          cfg.ShowPromptLine,
 		ShowVerticalScrollbar:   cfg.ShowVerticalScrollbar,
 		ShowHorizontalScrollbar: cfg.ShowHorizontalScrollbar,
 		LineWrap:                cfg.LineWrap,

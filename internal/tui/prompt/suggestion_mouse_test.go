@@ -11,12 +11,13 @@ func TestSuggestionMouseSelect(t *testing.T) {
 	var changed string
 	l := NewLine(testStyles(), LineOptions{OnChange: func(s string) { changed = s }})
 	l.SetSuggestions([]Suggestion{{Text: "first"}, {Text: "disabled", Disabled: true}, {Text: "third", Value: "value"}}, -1)
-	l.Draw(grid.New(30, 8))
-	l.Update(tea.MouseClickMsg{X: 2, Y: 5, Button: tea.MouseLeft})
+	g := grid.New(30, 10)
+	l.Draw(g)
+	l.Update(tea.MouseClickMsg{X: l.suggestionX, Y: l.suggestionY + 1, Button: tea.MouseLeft})
 	if l.Value() != "" {
 		t.Fatal("disabled suggestion selected")
 	}
-	l.Update(tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseLeft})
+	l.Update(tea.MouseClickMsg{X: l.suggestionX, Y: l.suggestionY + 2, Button: tea.MouseLeft})
 	if l.Value() != "value" || changed != "value" {
 		t.Fatalf("click: value=%q changed=%q", l.Value(), changed)
 	}

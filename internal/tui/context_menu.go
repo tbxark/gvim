@@ -269,7 +269,7 @@ func (m *Model) explorerMenuAction(action string, paths []string) tea.Cmd {
 	case "duplicate":
 		if target := m.remoteExplorerTarget(); target != "" {
 			q := remoteClipboardQuestion(remoteClipboardDuplicate, paths, "", target)
-			m.pushOverlay(prompt.NewConfirm(m.styles, q, remoteClipboardTag{kind: remoteClipboardDuplicate, paths: paths}))
+			m.pushOverlay(prompt.NewConfirmWith(m.styles, q, remoteClipboardTag{kind: remoteClipboardDuplicate, paths: paths}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.duplicate", "Duplicate")}))
 			return nil
 		}
 		return m.duplicatePaths(paths)

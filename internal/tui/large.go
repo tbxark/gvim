@@ -281,7 +281,7 @@ func (m *Model) askFullLoad(err editor.ErrLargeNeedsFullLoad) {
 		return
 	}
 	q := err.Error() + ". Load it?"
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, fullLoadTag{err: err}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, fullLoadTag{err: err}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.load_file", "Load File")}))
 }
 
 // maybeAskFullLoad asks the question when err is the error of a large file that is not

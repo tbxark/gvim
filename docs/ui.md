@@ -48,12 +48,9 @@ The chrome rows, from the top:
    editor panes stop above it; the sidebar column keeps its rows beside it. The dock
    is part of the working column, not a band across the frame, so the shell is sized
    to the width it is painted in. `docs/terminal.md` records the dock itself.
-5. **Status bar**, one row, on the last row of the frame. With the `show_prompt_line`
-   setting on, an open prompt takes the row below the status bar: the status row moves
-   up one row **only while a prompt is open**, so when nothing is open the status bar
-   keeps the last row and the space above and below it stays the same. With the setting
-   off (the default) a prompt paints over the status row, as Fresh's auto-hide
-   prompt line does. A message too long for the row wraps onto the **notice band**: at
+5. **Status bar**, one row, on the last row of the frame. Prompts are centred cards,
+   so no prompt row is ever reserved: the status bar is always the last row.
+   A message too long for the row wraps onto the **notice band**: at
    most three rows directly above the status row, inside the editor column, and above
    the dock when it is open, so a status message never paints over the shell.
 
@@ -76,9 +73,8 @@ Every surface that is drawn over the frame is one of three placements:
   a command input. The command palette and the find/replace bar use it: a card whose
   bottom border is on the frame's last row, with the title on the top border, the rows,
   the input row directly above the bottom border, and the key hints on the bottom
-  border. The prompt line is the input row of a sheet without the card frame: when it
-  covers the status row it is one row, with the same muted label and raised field.
-- **Card**: a floating box, centred (dialogs, lists, text boxes) or centred
+  border.
+- **Card**: a floating box, centred (prompts, dialogs, lists, text boxes) or centred
   horizontally and anchored above the status row (the file browser, the picker). Cards
   keep `Margin(w)` from the left and right edges and at least one row from the top and
   bottom; a card with no query line puts its bottom border on the last row (the
@@ -487,7 +483,7 @@ result region:
 | Command palette (Ctrl+P) | sheet | `internal/tui/palette` |
 | Project search & replace, Git Grep | sheet | `internal/tui/searchpanel` |
 | Find / replace bar | sheet | `internal/tui/find` |
-| One-line prompt, confirm | sheet (input row) | `internal/tui/prompt` |
+| One-line prompt, confirm, choice | card, centred | `internal/tui/prompt` |
 | File browser, switch project | card, above the status row | `internal/tui/browser` |
 | Dialogs (confirm, error, save as, ...) | card, centred | `internal/tui/dialog` |
 | Workspace-trust prompt | card, centred, exclusive | `internal/tui/trustdialog.go` |
@@ -549,9 +545,12 @@ as the other writes.
 
 1. Decide the placement first: sheet, card or menu. Do not invent a fourth one.
 2. Paint the frame with `PaintBox`; put the hints on the bottom border with
-   `PaintFooter`. Do not build border glyphs or title text by hand.
+   `PaintFooter`, and the buttons with `Overlay.PaintButton` (`ButtonWidth` gives
+   a button's cell count). Do not build border glyphs, button padding or title
+   text by hand.
 3. Use `space.Margin(w)` for the edge gap and `space.PadX` for the inside
-   padding. Do not use a literal column or a different margin.
+   padding. A centred card's content width and box come from `space.CardWidth`
+   and `space.CardBox`. Do not use a literal column or a different margin.
 4. The title is bare text ("Open File", not " Open File "). Keep it short enough for
    the box; `PaintBox` cuts a title that cannot fit.
 5. Keep the placement geometry in one pure function that painting and hit testing

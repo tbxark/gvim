@@ -36,7 +36,6 @@ const (
 type ViewOptions struct {
 	ShowTabBar              bool
 	ShowStatusBar           bool
-	ShowPromptLine          bool
 	ShowVerticalScrollbar   bool
 	ShowHorizontalScrollbar bool
 	LineWrap                bool
@@ -175,15 +174,15 @@ func DefaultViewOptions() ViewOptions {
 // viewState is the display state of the root that the view commands change. The
 // menu bar and the line numbers keep their fields on Model, as the layout reads them.
 type viewState struct {
-	tabBar, statusBar, promptLine bool
-	vScroll, hScroll              bool
-	lineWrap, currentLine         bool
-	occurrences, whitespace       bool
-	cursor                        string
-	mouseCapture, mouseHover      bool
-	scrollSync                    bool
-	debug                         bool // the status row shows the highlight ranges
-	icons                         icons.Mode
+	tabBar, statusBar        bool
+	vScroll, hScroll         bool
+	lineWrap, currentLine    bool
+	occurrences, whitespace  bool
+	cursor                   string
+	mouseCapture, mouseHover bool
+	scrollSync               bool
+	debug                    bool // the status row shows the highlight ranges
+	icons                    icons.Mode
 	// opts are the starting options, kept whole so that the Fresh display options
 	// above the toggles are readable by the painting (m.view.opts.ShowTilde, ...).
 	opts ViewOptions
@@ -207,7 +206,6 @@ func newViewState(o ViewOptions) viewState {
 		icons:        mode,
 		tabBar:       o.ShowTabBar,
 		statusBar:    o.ShowStatusBar,
-		promptLine:   o.ShowPromptLine,
 		vScroll:      o.ShowVerticalScrollbar,
 		hScroll:      o.ShowHorizontalScrollbar,
 		lineWrap:     o.LineWrap,
@@ -270,9 +268,6 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "toggle_status_bar":
 		m.view.statusBar = !m.view.statusBar
 		m.notice = shownNotice("Status bar", m.view.statusBar)
-	case "toggle_prompt_line":
-		m.view.promptLine = !m.view.promptLine
-		m.notice = shownNotice("Prompt line", m.view.promptLine)
 	case "toggle_vertical_scrollbar":
 		m.view.vScroll = !m.view.vScroll
 		m.notice = shownNotice("Vertical scrollbar", m.view.vScroll)
@@ -306,17 +301,17 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 		if _, ok := args["column"]; ok {
 			return nil, false
 		}
-		m.askNumber(action, "column", "Ruler column:", editor.MaxViewColumn)
+		m.askNumber(action, "column", uiText("gvim.prompt.title.ruler_column", "Ruler Column"), "Ruler column:", editor.MaxViewColumn)
 	case "set_tab_size":
 		if _, ok := args["size"]; ok {
 			return nil, false
 		}
-		m.askNumber(action, "size", "Tab size:", editor.MaxViewTabSize)
+		m.askNumber(action, "size", uiText("gvim.prompt.title.tab_size", "Tab Size"), "Tab size:", editor.MaxViewTabSize)
 	case "set_page_width":
 		if _, ok := args["width"]; ok {
 			return nil, false
 		}
-		m.askNumber(action, "width", "Page width:", editor.MaxViewColumn)
+		m.askNumber(action, "width", uiText("gvim.prompt.title.page_width", "Page Width"), "Page width:", editor.MaxViewColumn)
 	case "set_language":
 		return m.languageAction(args)
 	case "select_cursor_style":
@@ -406,8 +401,9 @@ func (m *Model) bufferFlag(action string, args map[string]any, cur bool) (tea.Cm
 }
 
 // askNumber opens the prompt for the number a view command takes as its argument.
-func (m *Model) askNumber(action, key, label string, hi int) {
+func (m *Model) askNumber(action, key, title, label string, hi int) {
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title: title,
 		Label: label,
 		Tag:   viewTag{action: action, key: key},
 		Validate: func(text string) error {
@@ -692,10 +688,6 @@ func (m *Model) setLocale(code string) tea.Cmd {
 func (m *Model) viewLayout(in *frame.Input) {
 	in.HideTabBar = !m.view.tabBar
 	in.HideStatus = in.HideStatus || !m.view.statusBar
-	// The prompt row is reserved only while a prompt is open: with no prompt the
-	// status row is the last row of the frame, so the bar keeps the same air above
-	// and below it. The setting says whether an open prompt gets the row of its own.
-	in.ShowPromptLine = m.view.promptLine && m.promptOpen()
 	in.HideVScroll = !m.view.vScroll
 	in.IconMode = m.view.icons
 	if doc := m.ed.Active(); doc != nil {
@@ -703,17 +695,6 @@ func (m *Model) viewLayout(in *frame.Input) {
 		// active document.
 		in.HideLineNumbers = !editor.OverrideOr(docViewOf(doc).LineNumbers, !m.hideLineNumbers)
 	}
-}
-
-// promptOpen reports whether the top overlay is one of the bottom-row prompts: the
-// built-in one-line prompt or confirm, or a plugin prompt that draws on the same row.
-// Only then is the prompt row reserved.
-func (m *Model) promptOpen() bool {
-	if len(m.overlays) == 0 {
-		return false
-	}
-	_, ok := m.overlays[len(m.overlays)-1].(prompt.RowOwner)
-	return ok
 }
 
 // viewPane sets the display options of p, the editor pane of the split pane sp, from

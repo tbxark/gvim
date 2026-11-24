@@ -249,8 +249,9 @@ the theme's accent, buttons inside the card. The texts are Fresh's locale string
 - "How would you like to proceed?";
 - three radio rows with descriptions — "Trust folder & Allow Tooling (T)", "Keep
   Restricted (Default) (K)", "Block All Execution (B)";
-- `[ OK ]` and the secondary button: `[ Cancel (Esc) ]` for a cancellable prompt,
-  `[ Quit (<the keymap's quit key>) ]` for the mandatory open-time one.
+- an **OK** button and the secondary button — **Cancel (Esc)** for a cancellable
+  prompt, **Quit (<the keymap's quit key>)** for the mandatory open-time one —
+  painted by `Overlay.PaintButton` like every card's buttons.
 
 The card is sized to its content and shrinks the option descriptions when the frame is too
 short for the whole text, so the buttons always stay on it. It is an exclusive modal: while

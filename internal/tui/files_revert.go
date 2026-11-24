@@ -116,7 +116,7 @@ func (m *Model) revertFile(force bool) tea.Cmd {
 		return nil
 	}
 	if doc.Modified() && !force {
-		m.pushOverlay(prompt.NewConfirm(m.styles, "Discard changes?", revertTag{}))
+		m.pushOverlay(prompt.NewConfirmWith(m.styles, "Discard changes?", revertTag{}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.discard_changes", "Discard Changes")}))
 		return nil
 	}
 	return m.startRevert(force)
@@ -192,7 +192,7 @@ func (m *Model) revertDoneErr(msg revertDoneMsg) error {
 	}
 	switch {
 	case errors.Is(err, editor.ErrStaleRevert) && !msg.auto:
-		m.pushOverlay(prompt.NewConfirm(m.styles, "Text changed during the revert. Try again?", revertRetryTag{}))
+		m.pushOverlay(prompt.NewConfirmWith(m.styles, "Text changed during the revert. Try again?", revertRetryTag{}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.revert_file", "Revert File")}))
 	case err != nil:
 		m.notice = err.Error()
 	}

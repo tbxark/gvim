@@ -47,30 +47,6 @@ func TestShownTabBarKeepsItsRow(t *testing.T) {
 	}
 }
 
-func TestPromptLineSitsUnderTheStatusRow(t *testing.T) {
-	shown := layoutFor(80, 24, frame.Input{Lines: 4})
-	withPrompt := layoutFor(80, 24, frame.Input{Lines: 4, ShowPromptLine: true})
-	if shown.StatusY != 23 || shown.BodyBottom != 21 {
-		t.Fatalf("without the prompt line: status %d body bottom %d, want 23 and 21", shown.StatusY, shown.BodyBottom)
-	}
-	if withPrompt.StatusY != 22 || withPrompt.BodyBottom != 20 {
-		t.Fatalf("with the prompt line: status %d body bottom %d, want 22 and 20", withPrompt.StatusY, withPrompt.BodyBottom)
-	}
-	if !withPrompt.PromptOn || withPrompt.PromptY != 23 {
-		t.Fatalf("prompt row %d on=%v, want row 23 on", withPrompt.PromptY, withPrompt.PromptOn)
-	}
-	if got := withPrompt.Hit(10, 23); got.Kind != frame.HitNone {
-		t.Errorf("the prompt row hits %v, want nothing", got.Kind)
-	}
-}
-
-func TestPromptLineStaysAboveTheFindBar(t *testing.T) {
-	l := layoutFor(80, 24, frame.Input{Lines: 4, ShowPromptLine: true, FindRows: 2})
-	if l.PromptY != 21 || l.StatusY != 20 {
-		t.Fatalf("prompt %d status %d, want 21 and 20 above a two-row find bar", l.PromptY, l.StatusY)
-	}
-}
-
 func TestHiddenVerticalScrollbarClearsTheScrollbarColumn(t *testing.T) {
 	shown := layoutFor(80, 24, frame.Input{Lines: 200, ExplorerRows: 0})
 	hidden := layoutFor(80, 24, frame.Input{Lines: 200, HideVScroll: true})

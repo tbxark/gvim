@@ -112,7 +112,11 @@ func TestEveryBoundActionRunsOrIsListed(t *testing.T) {
 // is removed here, and it fails on a new command with no handler until it is listed. An
 // action that answers with a notice (a command the port does not apply, with the reason
 // in the notice) is handled, so it does not belong here.
-var unhandledPaletteActions = map[string]bool{}
+var unhandledPaletteActions = map[string]bool{
+	// Fresh still ships the command and commands_gen.go is generated, so it stays
+	// in the palette; gvim retired the prompt line with the centred prompt cards.
+	"toggle_prompt_line": true,
+}
 
 // TestEveryPaletteActionRunsOrIsListed runs the action of every builtin palette command on
 // the default keymap's probe model, and checks it against unhandledPaletteActions.

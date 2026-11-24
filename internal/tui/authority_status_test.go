@@ -85,7 +85,7 @@ func TestAuthorityPasswordPrompt(t *testing.T) {
 	if cmd := m.beginAuthorityReconnect(); cmd != nil {
 		t.Fatal("an auth-needed reconnect ran without the prompt")
 	}
-	if !m.promptOpen() {
+	if !linePromptOpen(m) {
 		t.Fatal("the SSH password prompt did not open")
 	}
 	cmd := m.answer(prompt.Done{Tag: authorityPasswordTag{}, Outcome: prompt.Submitted, Text: "secret"})
@@ -131,20 +131,20 @@ func TestAuthorityCancelledPromptIsNotReopenedByThePoll(t *testing.T) {
 		Reconnect:     func(context.Context, string) error { return nil },
 	})
 	m.authorityPollTick()
-	if !m.promptOpen() {
+	if !linePromptOpen(m) {
 		t.Fatal("the poll did not open the SSH password prompt")
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.promptOpen() {
+	if linePromptOpen(m) {
 		t.Fatal("Esc did not close the SSH password prompt")
 	}
 	m.authorityPollTick()
-	if m.promptOpen() {
+	if linePromptOpen(m) {
 		t.Fatal("the poll reopened the cancelled SSH password prompt")
 	}
 	// The user can still ask again: an explicit reconnect is not blocked by the cancel.
 	m.beginAuthorityReconnect()
-	if !m.promptOpen() {
+	if !linePromptOpen(m) {
 		t.Fatal("an explicit reconnect after Esc did not prompt")
 	}
 }

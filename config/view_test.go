@@ -19,8 +19,6 @@ func TestLoadViewKeysSetTheirFields(t *testing.T) {
 			func(c Config) bool { return !c.ShowTabBar }, ""},
 		{"status bar off", `{"show_status_bar": false}`,
 			func(c Config) bool { return !c.ShowStatusBar }, ""},
-		{"prompt line on", `{"show_prompt_line": true}`,
-			func(c Config) bool { return c.ShowPromptLine }, ""},
 		{"vertical scrollbar off", `{"show_vertical_scrollbar": false}`,
 			func(c Config) bool { return !c.ShowVerticalScrollbar }, ""},
 		{"horizontal scrollbar off", `{"show_horizontal_scrollbar": false}`,
@@ -98,7 +96,6 @@ func TestViewKeysDefaultsMatchTheStartingLayout(t *testing.T) {
 	}{
 		{"tab bar shown", d.ShowTabBar, true},
 		{"status bar shown", d.ShowStatusBar, true},
-		{"prompt line hidden", d.ShowPromptLine, false},
 		{"vertical scrollbar shown", d.ShowVerticalScrollbar, true},
 		{"horizontal scrollbar shown", d.ShowHorizontalScrollbar, true},
 		{"line wrap on", d.LineWrap, true},
@@ -160,5 +157,21 @@ func TestUIIconsLayers(t *testing.T) {
 				t.Errorf("diagnostics %v, want one for %s", diags, tt.diagKey)
 			}
 		})
+	}
+}
+
+// TestRetiredShowPromptLineIsIgnored checks a config written before the prompts
+// became centred cards still loads: the retired show_prompt_line key is accepted
+// and ignored, nested and flat, without a diagnostic.
+func TestRetiredShowPromptLineIsIgnored(t *testing.T) {
+	for _, body := range []string{
+		`{"show_prompt_line": true}`,
+		`{"editor": {"show_prompt_line": false}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		writeFile(t, path, body)
+		if _, diags, err := Load(Options{UserFile: path}); err != nil || len(diags) != 0 {
+			t.Fatalf("%s: err %v diagnostics %v", body, err, diags)
+		}
 	}
 }

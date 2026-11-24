@@ -240,6 +240,7 @@ func (m *Model) openAgentDirPrompt(name, dir string) tea.Cmd {
 		dir = m.dock.LaunchDir()
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.run_agent", "Run Agent"),
 		Label:     uiText("gvim.prompt.run_agent_directory", "Run Agent directory:"),
 		Input:     dir,
 		SelectAll: true,

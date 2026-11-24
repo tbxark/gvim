@@ -45,7 +45,7 @@ func (m *Model) quitDiscard() tea.Cmd {
 		}
 		q += " and quit?"
 	}
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, quitDiscardTag{}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, quitDiscardTag{}, prompt.ConfirmOptions{Title: uiText("gvim.dialog.title.confirm_quit", "Confirm Quit")}))
 	return nil
 }
 

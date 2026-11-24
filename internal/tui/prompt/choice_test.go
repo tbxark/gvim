@@ -19,7 +19,7 @@ func choiceOptions() []ChoiceOption {
 func TestChoiceMnemonicKeys(t *testing.T) {
 	t.Parallel()
 	for i, mnemonic := range []string{"o", "O", "s", "S", "c"} {
-		c := NewChoice(testStyles(), "Conflict", "tag", choiceOptions())
+		c := NewChoice(testStyles(), "Conflict", "Conflict", "tag", choiceOptions())
 		_, cmd := c.Update(key(mnemonic))
 		d, ok := emitted(cmd)
 		if !ok || d.Choice != i || d.Tag != "tag" {
@@ -35,7 +35,7 @@ func TestChoiceMnemonicKeys(t *testing.T) {
 // must not be dropped by an unknown key) and Esc closes without an answer.
 func TestChoiceIgnoresUnknownKeysAndEscCloses(t *testing.T) {
 	t.Parallel()
-	c := NewChoice(testStyles(), "Conflict", nil, choiceOptions())
+	c := NewChoice(testStyles(), "Conflict", "Conflict", nil, choiceOptions())
 	_, cmd := c.Update(key("x"))
 	if _, ok := emitted(cmd); ok || !c.Active() {
 		t.Fatal("an unknown key answered or closed the choice")
@@ -50,7 +50,7 @@ func TestChoiceIgnoresUnknownKeysAndEscCloses(t *testing.T) {
 // the focus moves with the arrows.
 func TestChoiceArrowsAndEnter(t *testing.T) {
 	t.Parallel()
-	c := NewChoice(testStyles(), "Conflict", nil, choiceOptions())
+	c := NewChoice(testStyles(), "Conflict", "Conflict", nil, choiceOptions())
 	c.Update(key("right"))
 	c.Update(key("right"))
 	_, cmd := c.Update(key("enter"))
@@ -60,18 +60,18 @@ func TestChoiceArrowsAndEnter(t *testing.T) {
 	}
 }
 
-// TestChoiceDrawShowsEveryAnswer checks the bottom row names each option with its key.
+// TestChoiceDrawShowsEveryAnswer checks the card names the title, the question and each
+// option with its key.
 func TestChoiceDrawShowsEveryAnswer(t *testing.T) {
 	t.Parallel()
-	c := NewChoice(testStyles(), "Conflict:", nil, choiceOptions())
-	rows := draw(c, 120, 3)
-	row := strings.TrimRight(rows[2], " ")
-	for _, want := range []string{"Conflict:", "o Overwrite", "O Overwrite All", "s Skip", "S Skip All", "c Cancel"} {
-		if !strings.Contains(row, want) {
-			t.Fatalf("row = %q, missing %q", row, want)
+	c := NewChoice(testStyles(), "Conflict", "Paste conflict:", nil, choiceOptions())
+	text := strings.Join(draw(c, 120, 10), "\n")
+	for _, want := range []string{"Conflict", "Paste conflict:", "o Overwrite", "O Overwrite All", "s Skip", "S Skip All", "c Cancel"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("card = %q, missing %q", text, want)
 		}
 	}
-	if _, _, ok := c.Cursor(120, 3); ok {
+	if _, _, ok := c.Cursor(120, 10); ok {
 		t.Fatal("a choice reported a text caret")
 	}
 }

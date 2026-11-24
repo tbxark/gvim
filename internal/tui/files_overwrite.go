@@ -29,7 +29,7 @@ func (m *Model) askOverwriteSave(err error, f flow) bool {
 	}
 	m.notice = err.Error()
 	q := "File changed on disk. Overwrite it?"
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, overwriteSaveTag{f: f}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, overwriteSaveTag{f: f}, prompt.ConfirmOptions{Title: uiText("gvim.dialog.title.replace_file", "Replace File")}))
 	return true
 }
 

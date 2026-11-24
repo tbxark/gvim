@@ -7,9 +7,12 @@ JSON (refs/fresh/crates/fresh-editor-core/locales) and, for a native equivalent 
 Fresh plugin command, from that plugin's own catalogue
 (refs/fresh/crates/fresh-editor/plugins/<name>.i18n.json), using the explicit mapping in
 i18n/fresh_map.json (gvim key -> Fresh key, or "plugin:<name>:<Fresh key>"). Only keys
-whose English wording/meaning matches Fresh are mapped; gvim-only keys stay absent from
-the translated files and fall back to English at runtime. refs/fresh is read only by this
-generation/check step: the runtime embeds the committed locale files and never reads refs.
+whose English wording/meaning matches Fresh are mapped. gvim-only keys (no Fresh
+counterpart) get their translations from the hand-written i18n/manual/<locale>.json
+files, which the tool merges after the Fresh imports and validates against en.json;
+gvim-only keys absent from the manual files stay absent from the translated files and
+fall back to English at runtime. refs/fresh is read only by this generation/check step:
+the runtime embeds the committed locale files and never reads refs or i18n/manual.
 
 Usage:
   python3 tools/i18n_import.py           # rewrite the translated locale files
@@ -143,6 +146,25 @@ def main():
                     f"{placeholders(english)}"
                 )
             table[key] = text
+        # Manual gvim-only translations last: hand-written keys that Fresh does not
+        # have. The file is optional; every key must be a gvim.* catalogue key that is
+        # not already sourced from fresh_map.json, and its placeholders must match the
+        # English text's.
+        manual_path = ROOT / "i18n" / "manual" / f"{locale}.json"
+        if manual_path.exists():
+            for key, text in load(manual_path).items():
+                if key not in en:
+                    raise SystemExit(f"{locale}: manual key {key} is not in the English catalogue")
+                if not key.startswith("gvim."):
+                    raise SystemExit(f"{locale}: manual key {key} does not start with gvim.")
+                if key in mapping:
+                    raise SystemExit(f"{locale}: manual key {key} is also in fresh_map.json")
+                if sorted(placeholders(text)) != sorted(placeholders(en[key])):
+                    raise SystemExit(
+                        f"{locale}: manual key {key} placeholders {placeholders(text)} do not match "
+                        f"English {placeholders(en[key])}"
+                    )
+                table[key] = text
         data = json.dumps(dict(sorted(table.items())), ensure_ascii=False, indent=2) + "\n"
         out = LOCALES / f"{locale}.json"
         current = out.read_text(encoding="utf-8") if out.exists() else None

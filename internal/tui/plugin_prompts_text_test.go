@@ -122,12 +122,17 @@ func TestPluginInputShowsTheCaret(t *testing.T) {
 	t.Parallel()
 	m, rt := newPromptModel(t)
 	openVia(t, m, rt, func(h pluginapi.Host) { _ = h.Input(1, pluginapi.InputSpec{Prompt: "Name:", Default: "ab"}) })
+	ov := m.plugTopLine()
+	if ov == nil {
+		t.Fatal("the input prompt did not open")
+	}
+	wantX, wantY, wantOK := ov.l.Cursor(m.width, m.height)
 	x, y, ok := m.caret()
-	if !ok || y != m.height-1 || x != 1+len("Name: ab") {
-		t.Fatalf("caret = %d,%d,%v, want the end of the text on the bottom row", x, y, ok)
+	if !ok || x != wantX || y != wantY {
+		t.Fatalf("caret = %d,%d,%v, want the field caret %d,%d,%v", x, y, ok, wantX, wantY, wantOK)
 	}
 	typeInto(m, "c")
-	if x, _, _ := m.caret(); x != 1+len("Name: abc") {
-		t.Fatalf("caret after typing at column %d", x)
+	if x, y, ok := m.caret(); !ok || x != wantX+1 || y != wantY {
+		t.Fatalf("caret after typing = %d,%d,%v", x, y, ok)
 	}
 }

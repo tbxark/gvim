@@ -1,21 +1,17 @@
 package dialog
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
-// The width of a dialog's content, in cells. The box adds two border cells and
-// two padding cells on each side.
+// boxRows is the chrome the box adds to the body rows: the top border with the
+// title, the blank row above the buttons, the button row and the bottom border.
+// gapButtons is the gap between two buttons.
 const (
-	minContent = 40
-	maxContent = 64
-	boxChrome  = 4
-	boxRows    = 4 // top border with the title, the blank row above the buttons, the button row, the bottom border
+	boxRows    = 4
 	gapButtons = 2
 )
 
@@ -38,30 +34,16 @@ func textRow(s string, st grid.Style) row {
 // textRows returns one row per wrapped line of text, at width cw.
 func textRows(text string, cw int, st grid.Style) []row {
 	var rows []row
-	for _, line := range wrapText(text, cw) {
+	for _, line := range space.Wrap(text, cw, 1<<10) {
 		rows = append(rows, textRow(line, st))
 	}
 	return rows
 }
 
-// wrapText breaks s into lines no wider than width cells.
-func wrapText(s string, width int) []string {
-	return strings.Split(ansi.Wrap(s, max(width, 1), ""), "\n")
-}
-
-// fitWidth returns the content width for a dialog whose widest line is natural
-// cells: at least minContent, at most maxContent, and no wider than the frame
-// allows.
-func fitWidth(frameWidth, natural int) int {
-	cw := min(max(natural, minContent), maxContent)
-	cw = min(cw, frameWidth-boxChrome-2*space.Margin(frameWidth))
-	return max(cw, 1)
-}
-
 // natural returns the width the dialog wants: the title, the buttons, and the
 // widest of texts.
 func (m *modal) natural(texts ...string) int {
-	n := max(ansi.StringWidth(m.title)+boxChrome, m.buttonsWidth())
+	n := max(ansi.StringWidth(m.title)+space.CardChrome, m.buttonsWidth())
 	for _, t := range texts {
 		n = max(n, ansi.StringWidth(t))
 	}
@@ -73,19 +55,16 @@ func (m *modal) natural(texts ...string) int {
 // under the top border, and the buttons sit under it after one blank row, on the last
 // row inside the border. Hit regions and the caret are recorded for the next event.
 func (m *modal) frame(g *grid.Grid, natural int, body func(cw int) []row) {
-	cw := fitWidth(g.Width(), natural)
+	cw := space.CardWidth(g.Width(), natural)
 	rows := body(cw)
-	w, h := cw+boxChrome, len(rows)+boxRows
-	x := max((g.Width()-w)/2, 0)
-	y := max((g.Height()-h)/2, 0)
-	m.box = rect{X: x, Y: y, W: w, H: h}
+	m.box = space.CardBox(g.Width(), g.Height(), cw, len(rows)+boxRows-2)
 	m.caretOK = false
 	m.hits = m.hits[:0]
 	m.ov.PaintBox(g, m.box.X, m.box.Y, m.box.W, m.box.H, m.title)
 	for i, r := range rows {
-		r(g, x+2, y+1+i, cw)
+		r(g, m.box.X+2, m.box.Y+1+i, cw)
 	}
-	m.drawButtons(g, x+2, y+len(rows)+2, cw)
+	m.drawButtons(g, m.box.X+2, m.box.Y+len(rows)+2, cw)
 }
 
 // drawText paints a dialog whose body is plain text.
@@ -95,16 +74,11 @@ func (m *modal) drawText(g *grid.Grid, text string) {
 	})
 }
 
-// buttonWidth is the cells a button takes: its label and two spaces on each side.
-func buttonWidth(b button) int {
-	return ansi.StringWidth(b.label) + 4
-}
-
 // buttonsWidth is the width of the button row.
 func (m *modal) buttonsWidth() int {
 	total := 0
 	for i, b := range m.buttons {
-		total += buttonWidth(b)
+		total += m.ov.ButtonWidth(b.label)
 		if i > 0 {
 			total += gapButtons
 		}
@@ -125,23 +99,9 @@ func (m *modal) drawButtons(g *grid.Grid, x0, y, w int) {
 		case i == m.hover:
 			st = m.ov.Hover
 		}
-		bw := buttonWidth(b)
-		drawButton(g, x, y, b, st)
+		bw := m.ov.ButtonWidth(b.label)
+		m.ov.PaintButton(g, x, y, b.label, b.under, st)
 		m.hits = append(m.hits, rect{X: x, Y: y, W: bw, H: 1})
 		x += bw + gapButtons
 	}
-}
-
-// drawButton paints one button. The hotkey letter is underlined, and only that
-// letter. The label is padded with two spaces on each side.
-func drawButton(g *grid.Grid, x, y int, b button, st grid.Style) {
-	r := []rune(b.label)
-	underlined := st
-	underlined.Underline = true
-	w := g.Width()
-	x += g.Put(x, y, w, "  ", st)
-	x += g.Put(x, y, w, string(r[:b.under]), st)
-	x += g.Put(x, y, w, string(r[b.under]), underlined)
-	x += g.Put(x, y, w, string(r[b.under+1:]), st)
-	g.Put(x, y, w, "  ", st)
 }

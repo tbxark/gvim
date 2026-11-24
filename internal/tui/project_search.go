@@ -339,7 +339,7 @@ func (m *Model) askProjectReplace(req searchpanel.ReplaceRequest) tea.Cmd {
 	if isRemote {
 		target = remote.RemoteTarget()
 	}
-	m.pushOverlay(prompt.NewConfirm(m.styles, projectReplaceQuestion(req, target), projectReplaceTag{req: req}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, projectReplaceQuestion(req, target), projectReplaceTag{req: req}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.replace_project", "Replace in Project")}))
 	return nil
 }
 

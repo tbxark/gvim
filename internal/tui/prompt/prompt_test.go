@@ -77,8 +77,9 @@ func TestLineStartsWithInputAndCaretAtEnd(t *testing.T) {
 	if got := l.Value(); got != "/tmp/a.txt" {
 		t.Fatalf("Value = %q", got)
 	}
+	lay := l.layout(40, 5)
 	x, y, ok := l.Cursor(40, 5)
-	if !ok || y != 4 || x != 1+len("Save as: /tmp/a.txt") {
+	if !ok || y != lay.fieldY || x != lay.box.X+2+len("/tmp/a.txt") {
 		t.Fatalf("Cursor = (%d, %d, %v)", x, y, ok)
 	}
 }
@@ -94,15 +95,20 @@ func TestLineValidationKeepsPromptOpen(t *testing.T) {
 	if !l.Active() {
 		t.Fatal("rejected input closed the prompt")
 	}
-	rows := draw(l, 40, 5)
-	if !strings.Contains(rows[4], "Not a line number: x") {
-		t.Fatalf("bottom row %q does not show the rejection", rows[4])
+	// The rejection sits on its own row under the field.
+	lay := l.layout(40, 8)
+	if lay.errY <= lay.fieldY {
+		t.Fatalf("the rejection row %d is not under the field row %d", lay.errY, lay.fieldY)
+	}
+	rows := draw(l, 40, 8)
+	if !strings.Contains(rows[lay.errY], "Not a line number: x") {
+		t.Fatalf("rejection row %q does not show the rejection", rows[lay.errY])
 	}
 
 	// Editing clears the rejection, and a valid line then submits.
 	l.Update(key("backspace"))
 	typeText(l, "7")
-	if strings.Contains(draw(l, 40, 5)[4], "Not a line") {
+	if strings.Contains(strings.Join(draw(l, 40, 8), "\n"), "Not a line") {
 		t.Fatal("rejection still shown after the input changed")
 	}
 	_, cmd = l.Update(key("enter"))
@@ -137,12 +143,13 @@ func TestLineEditsAtTheCaret(t *testing.T) {
 func TestLineDrawShowsLabelAndInput(t *testing.T) {
 	t.Parallel()
 	l := NewLine(testStyles(), LineOptions{Label: "New folder:", Input: "src"})
+	lay := l.layout(30, 6)
 	rows := draw(l, 30, 6)
-	if !strings.HasPrefix(rows[5], " New folder: src") {
-		t.Fatalf("bottom row = %q", rows[5])
+	if !strings.Contains(rows[lay.labelY], "New folder:") {
+		t.Fatalf("label row %q has no label", rows[lay.labelY])
 	}
-	if strings.TrimSpace(rows[4]) != "" {
-		t.Fatalf("the prompt covered row 4: %q", rows[4])
+	if !strings.Contains(rows[lay.fieldY], "src") {
+		t.Fatalf("field row %q has no input", rows[lay.fieldY])
 	}
 }
 
@@ -229,11 +236,14 @@ func TestConfirmEscCloses(t *testing.T) {
 func TestConfirmDrawShowsBothAnswers(t *testing.T) {
 	t.Parallel()
 	c := NewConfirm(testStyles(), "Delete a.txt? (y/n)", nil)
-	rows := draw(c, 50, 4)
-	if !strings.HasPrefix(rows[3], " Delete a.txt? (y/n) [ Yes ] [ No ]") {
-		t.Fatalf("bottom row = %q", rows[3])
+	rows := draw(c, 50, 8)
+	text := strings.Join(rows, "\n")
+	for _, want := range []string{"Delete a.txt? (y/n)", "  Yes  ", "  No  "} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("card = %q, missing %q", text, want)
+		}
 	}
-	if _, _, ok := c.Cursor(50, 4); ok {
+	if _, _, ok := c.Cursor(50, 8); ok {
 		t.Fatal("confirm reported a text caret")
 	}
 }

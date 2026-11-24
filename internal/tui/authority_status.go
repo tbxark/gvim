@@ -127,6 +127,7 @@ func (m *Model) beginAuthorityReconnect() tea.Cmd {
 	if m.auth.NeedsPassword != nil && m.auth.NeedsPassword() {
 		m.authorityBusy = true
 		m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+			Title:    uiText("gvim.prompt.title.ssh_password", "SSH Password"),
 			Label:    uiText("gvim.prompt.ssh_password", "SSH password:"),
 			Tag:      authorityPasswordTag{},
 			Secret:   true,
@@ -137,6 +138,7 @@ func (m *Model) beginAuthorityReconnect() tea.Cmd {
 	if m.auth.NeedsPassphrase != nil && m.auth.NeedsPassphrase() {
 		m.authorityBusy = true
 		m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+			Title:    uiText("gvim.prompt.title.ssh_passphrase", "SSH Passphrase"),
 			Label:    uiText("gvim.prompt.ssh_key_passphrase", "SSH key passphrase:"),
 			Tag:      authorityPassphraseTag{},
 			Secret:   true,
@@ -357,6 +359,7 @@ func (m *Model) askAuthorityChallenge() tea.Cmd {
 		m.authorityEchos = m.authorityEchos[1:]
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:    uiText("gvim.prompt.title.ssh_authentication", "SSH Authentication"),
 		Label:    question,
 		Tag:      authorityChallengeTag{},
 		Secret:   secret,

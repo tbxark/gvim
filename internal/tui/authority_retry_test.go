@@ -10,6 +10,16 @@ import (
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
+// linePromptOpen reports whether the top overlay is a text prompt, like the
+// credential prompts the authority flow opens.
+func linePromptOpen(m *Model) bool {
+	if len(m.overlays) == 0 {
+		return false
+	}
+	_, ok := m.overlays[len(m.overlays)-1].(*prompt.Line)
+	return ok
+}
+
 // TestAuthorityPassphrasePrompt checks an encrypted key's passphrase is asked for by the
 // activation path and the submitted secret is used for the reconnect.
 func TestAuthorityPassphrasePrompt(t *testing.T) {
@@ -29,7 +39,7 @@ func TestAuthorityPassphrasePrompt(t *testing.T) {
 	if cmd := m.beginAuthorityReconnect(); cmd != nil {
 		t.Fatal("a passphrase reconnect ran without the prompt")
 	}
-	if !m.promptOpen() {
+	if !linePromptOpen(m) {
 		t.Fatal("the key passphrase prompt did not open")
 	}
 	cmd := m.answer(prompt.Done{Tag: authorityPassphraseTag{}, Outcome: prompt.Submitted, Text: "sekret"})
@@ -65,13 +75,13 @@ func TestAuthorityKeyboardInteractivePromptsEachQuestion(t *testing.T) {
 	if cmd := m.beginAuthorityReconnect(); cmd != nil {
 		t.Fatal("a keyboard-interactive reconnect ran without asking")
 	}
-	if !m.promptOpen() {
+	if !linePromptOpen(m) {
 		t.Fatal("the first 2FA question did not open")
 	}
 	if cmd := m.answer(prompt.Done{Tag: authorityChallengeTag{}, Outcome: prompt.Submitted, Text: "111111"}); cmd != nil {
 		t.Fatal("the reconnect ran before the second question")
 	}
-	if !m.promptOpen() {
+	if !linePromptOpen(m) {
 		t.Fatal("the second 2FA question did not open")
 	}
 	cmd := m.answer(prompt.Done{Tag: authorityChallengeTag{}, Outcome: prompt.Submitted, Text: "222222"})

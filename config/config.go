@@ -225,7 +225,6 @@ type Config struct {
 	// defaults keep the layout gvim had before they existed.
 	ShowTabBar              bool   // show the tab strip row, default true
 	ShowStatusBar           bool   // show the status row, default true
-	ShowPromptLine          bool   // show the prompt row under the status row, default false
 	ShowVerticalScrollbar   bool   // draw the vertical scrollbar, default true
 	ShowHorizontalScrollbar bool   // draw the horizontal scrollbar when lines are wider, default true
 	LineWrap                bool   // wrap long lines, default true
@@ -281,7 +280,7 @@ type Config struct {
 	// consumer are in editoropts.go and in the contract. The existing fields above
 	// that have a Fresh name are aliases of editor.<name>: LineNumbers, LineWrap,
 	// AutoIndent, TabSize, HighlightCurrentLine, HighlightOccurrences,
-	// ShowMenuBar, ShowTabBar, ShowStatusBar, ShowPromptLine and the scrollbars.
+	// ShowMenuBar, ShowTabBar, ShowStatusBar and the scrollbars.
 	// InsertSpaces is the inverse of editor.use_tabs.
 	EditorOptions
 

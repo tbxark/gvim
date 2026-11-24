@@ -59,6 +59,7 @@ func (m *Model) renameDockTabPrompt() {
 		return
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.rename_tab", "Rename Tab"),
 		Label:     uiText("gvim.prompt.rename_terminal_tab", "Rename terminal tab:"),
 		Input:     m.dock.ActiveName(),
 		SelectAll: true,

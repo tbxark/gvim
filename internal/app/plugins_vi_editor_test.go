@@ -81,9 +81,9 @@ func TestViModeCtrlC(t *testing.T) {
 	}
 	for _, open := range []string{":", "/"} {
 		s.typeText(open)
-		s.until("the prompt", func() bool { return s.screenHas(open) && !strings.Contains(s.statusRow(), "-- NORMAL --") })
+		s.until("the prompt", func() bool { return s.screenHas("Input") && s.screenHas(open) })
 		s.press(ctrlC)
-		s.until("the prompt to close", func() bool { return strings.Contains(s.statusRow(), "-- NORMAL --") })
+		s.until("the prompt to close", func() bool { return !s.screenHas("Input") && strings.Contains(s.statusRow(), "-- NORMAL --") })
 		s.settle(50 * time.Millisecond) // vi drops keys while it waits for the prompt's answer
 		before := s.text()
 		s.typeText("x")
@@ -100,11 +100,11 @@ func TestViModeCtrlC(t *testing.T) {
 func TestViModeEscMashingIsNotThePanicChord(t *testing.T) {
 	s := viSession(t, "alpha beta\n")
 	s.typeText(":")
-	s.until("the prompt", func() bool { return !strings.Contains(s.statusRow(), "-- NORMAL --") })
+	s.until("the prompt", func() bool { return s.screenHas("Input") })
 	s.esc()
 	s.esc()
 	s.esc()
-	s.until("normal", func() bool { return strings.Contains(s.statusRow(), "-- NORMAL --") })
+	s.until("normal", func() bool { return !s.screenHas("Input") && strings.Contains(s.statusRow(), "-- NORMAL --") })
 	s.settle(50 * time.Millisecond)
 	if !strings.Contains(s.statusRow(), "-- NORMAL --") {
 		t.Fatalf("vi went off: %q", s.statusRow())

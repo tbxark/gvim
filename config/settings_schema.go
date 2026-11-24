@@ -152,10 +152,6 @@ var settingsTable = []Setting{
 	{Path: []string{"editor", "show_status_bar"}, Section: SectionInterface, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ShowStatusBar }), encode: encodeBool},
-	{Path: []string{"editor", "show_prompt_line"}, Section: SectionInterface, Kind: SettingBool,
-		Layers: LayerUser | LayerProject, Apply: ApplyLive,
-		value: boolValue(func(c Config) bool { return c.ShowPromptLine }), encode: encodeBool},
-
 	// Display.
 	{Path: []string{"editor", "line_numbers"}, Section: SectionDisplay, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,

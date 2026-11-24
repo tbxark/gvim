@@ -89,7 +89,7 @@ func (h *pluginHost) OpenURL(raw string) error {
 // No/Esc closes it; the dialog is a normal prompt overlay, reachable from the keyboard.
 func (m *Model) confirmOpenURL(raw string) {
 	q := uiTextVars("gvim.url.open_confirm", "Open %{url} in the system browser?", map[string]any{"url": displayURL(raw)})
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, urlOpenTag{url: raw}))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, urlOpenTag{url: raw}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.open_link", "Open Link")}))
 }
 
 // openURLCmd starts the platform opener off the update loop. The validated URL is passed

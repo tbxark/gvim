@@ -287,8 +287,8 @@ service and the root:
   through the per-language settings (tab size, use tabs, auto indent, auto
   close, auto surround, line wrap and the whitespace flags) and the
   `languages`/`formatters` sections take effect for every open document;
-- the root applies the display options (tab bar, status bar, prompt line,
-  scrollbars, line numbers, line wrap, current-line/occurrence/column
+- the root applies the display options (tab bar, status bar, scrollbars,
+  line numbers, line wrap, current-line/occurrence/column
   highlights, whitespace, cursor style, indent guides, rainbow brackets, smooth
   scroll, mouse wheel/double-click/hover delays, the Completion section
   (editor.completion_popup_auto_show, editor.quick_suggestions,

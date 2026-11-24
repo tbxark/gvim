@@ -228,11 +228,12 @@ source: `ComputeLayout`, the `Style` chrome a look is built from, hit map, tab-s
 welcome placement), `sidebar` (the explorer
 column's section stack: `Layout`, header rows, the Contents widget; docs/sidebar.md), `split` (the split tree
 and pure pane geometry), `tabstrip` (strip painting and pointer mapping), `grid` (cell
-surface on `x/ansi`), `space` (padding, text fitting and `Rect`), `style` (theme → lipgloss
+surface on `x/ansi`), `space` (padding, text fitting, `Rect` and the shared card
+geometry `CardWidth`/`CardBox`), `style` (theme → lipgloss
 styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
 (paints the text area; pure renderer, no tea), `menubar` (menu bar + dropdowns; generated
 menu table), `explorer` (file-tree panel), `palette` (command palette overlay), `find`
-(find bar), `prompt` (bottom-row prompts), `browser` (file/folder browser), `picker`
+(find bar), `prompt` (the centred prompt cards), `browser` (file/folder browser), `picker`
 (plugin list picker), `popup` (anchored list popup), `ctxmenu` (right-click menu),
 `searchpanel` (project search and replace panel; docs/keybindings.md),
 `dialog` (modal dialogs), `dock` (the terminal dock panel: PTY lifecycle, input/paste,

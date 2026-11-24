@@ -39,9 +39,11 @@ func TestLineOnChangeSeesEveryEditedText(t *testing.T) {
 func TestConfirmWithLabelsAndDefault(t *testing.T) {
 	t.Parallel()
 	c := NewConfirmWith(testStyles(), "Replace?", "tag", ConfirmOptions{Yes: "Do it", No: "Keep", DefaultYes: true})
-	rows := draw(c, 60, 3)
-	if got := strings.TrimRight(rows[2], " "); got != " Replace? [ Do it ] [ Keep ]" {
-		t.Fatalf("row = %q", got)
+	text := strings.Join(draw(c, 60, 8), "\n")
+	for _, want := range []string{"Replace?", "  Do it  ", "  Keep  "} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("card = %q, missing %q", text, want)
+		}
 	}
 	// The focus starts on Yes, so Enter answers it.
 	_, cmd := c.Update(key("enter"))
@@ -50,7 +52,10 @@ func TestConfirmWithLabelsAndDefault(t *testing.T) {
 	}
 	// NewConfirm is the plain form.
 	plain := NewConfirm(testStyles(), "Q?", "t")
-	if got := strings.TrimRight(draw(plain, 60, 3)[2], " "); got != " Q? [ Yes ] [ No ]" {
-		t.Fatalf("plain row = %q", got)
+	text = strings.Join(draw(plain, 60, 8), "\n")
+	for _, want := range []string{"Q?", "  Yes  ", "  No  "} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("plain card = %q, missing %q", text, want)
+		}
 	}
 }

@@ -141,8 +141,8 @@ func TestPluginValidateErrorIsCleaned(t *testing.T) {
 			}
 		}
 	}
-	if row := frameRow(m, m.height-1); !strings.Contains(row, "bad") {
-		t.Fatalf("prompt row = %q, want the rejection text", row)
+	if text := frameRows(m); !strings.Contains(text, "bad") {
+		t.Fatalf("prompt card = %q, want the rejection text", text)
 	}
 }
 

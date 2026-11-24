@@ -155,6 +155,7 @@ func (m *Model) askMacroName(promote bool) {
 		return
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Title:     uiText("gvim.prompt.title.save_macro", "Save Macro"),
 		Label:     "Command name for the macro:",
 		Input:     "macro",
 		SelectAll: true,

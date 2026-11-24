@@ -1,6 +1,7 @@
-// Package prompt holds the overlays that take one answer at the bottom row of
-// the frame: a one-line text prompt (go to line, save as, the explorer's new
-// names) and a Yes/No confirm (overwrite, delete).
+// Package prompt holds the overlays that take one answer in a centred card on top
+// of the frame: a one-line text prompt (go to line, save as, the explorer's new
+// names), a Yes/No confirm (overwrite, delete) and a multi-option choice (the
+// paste conflict).
 //
 // A prompt never acts on the editor or the file system. When it ends, it emits
 // a Done message as a command, and the root applies the answer. Done carries the
@@ -81,18 +82,20 @@ func (e lineError) Error() string {
 	return i18n.TOr("", "gvim.prompt.not_a_line", "Not a line number: "+e.text, map[string]any{"line": e.text})
 }
 
-// styles are the grid styles of the prompt rows.
+// styles are the grid styles of the prompt cards.
 type styles struct {
+	ov                                       style.Overlay
 	bar, label, field, active, warn, selected grid.Style
 }
 
 // newStyles derives the prompt styles from the overlay palette, so the prompt reads
-// as the input row of the same bottom sheet as the palette and the find bar: the card
-// fill for the row, a muted label, a raised field, the focused choice in the accent,
-// and a rejection in the error color.
+// as one of the floating surfaces: the box fill for its rows, a muted label, a
+// raised field, the focused choice in the accent, and a rejection in the error
+// color.
 func newStyles(st style.Styles) styles {
 	ov := st.Overlay
 	return styles{
+		ov:       ov,
 		bar:      ov.Box,
 		label:    ov.Muted,
 		field:    ov.Idle,
@@ -100,28 +103,6 @@ func newStyles(st style.Styles) styles {
 		warn:     ov.Error,
 		selected: ov.Selected,
 	}
-}
-
-// RowOwner is implemented by the overlays that paint on the bottom prompt row. The
-// root reserves that row for the top overlay only while one of them is open, so the
-// status bar keeps the last row otherwise.
-type RowOwner interface {
-	UsesPromptRow()
-}
-
-// UsesPromptRow marks Line as a bottom-row prompt.
-func (*Line) UsesPromptRow() {}
-
-// UsesPromptRow marks Confirm as a bottom-row prompt.
-func (*Confirm) UsesPromptRow() {}
-
-// promptRow is the row a prompt draws on: the bottom row of the frame. It is -1
-// for an empty frame.
-func promptRow(h int) int {
-	if h <= 0 {
-		return -1
-	}
-	return h - 1
 }
 
 // Suggestion is one row of a prompt's suggestion list: the plugin's completion candidates
@@ -135,6 +116,7 @@ type Suggestion struct {
 
 // LineOptions configure a text prompt.
 type LineOptions struct {
+	Title     string                  // the card's title; empty falls back to "Input"
 	Label     string                  // shown before the input, for example "Go to line:"
 	Input     string                  // the text the field starts with; the caret goes to its end
 	SelectAll bool                    // Input starts selected: typing/paste replaces it, arrows cancel
@@ -153,6 +135,7 @@ type LineOptions struct {
 // Line is a one-line text prompt. Enter submits the input, Esc closes the
 // prompt, and every other key edits the text.
 type Line struct {
+	title    string
 	label    string
 	field    textinput.Model
 	tag      any
@@ -177,10 +160,10 @@ type Line struct {
 	at      int      // the entry of history shown; len(history) is the text being typed
 	draft   string   // the text being typed, while an entry is shown
 	// suggestions are the plugin's completion candidates (gvim.ui.set_prompt_suggestions),
-	// shown above the prompt row. selSuggestion is the highlighted one, -1 for none.
-	suggestions                                             []Suggestion
-	selSuggestion                                           int
-	suggestionY, suggestionW, suggestionRows, suggestionTop int
+	// shown inside the card under the field. selSuggestion is the highlighted one, -1 for none.
+	suggestions                                                   []Suggestion
+	selSuggestion                                                 int
+	suggestionX, suggestionY, suggestionW, suggestionRows, suggestionTop int
 	// paste reads the clipboard for Ctrl+V. It is textinput.Paste in production; a
 	// test can substitute a deterministic result without touching the system clipboard.
 	paste func() tea.Msg
@@ -204,6 +187,7 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 	f.CursorEnd()
 	f.Focus()
 	return &Line{
+		title:    cardTitle(o.Title, "gvim.prompt.title.input", "Input"),
 		label:    o.Label,
 		field:    f,
 		tag:      o.Tag,
@@ -689,78 +673,138 @@ func (l *Line) edit(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// Draw paints the prompt on the bottom row of g: the label, the input, and a
-// rejection message at the right when there is one.
+// maxSuggestionRows is the most suggestion rows drawn at once; the rest scroll.
+const maxSuggestionRows = 4
+
+// lineLayout is where a Line's card and its body rows sit in a frame: the wrapped
+// label, the field, the wrapped rejection and the suggestion rows. It is a pure
+// function of the frame size and the prompt state, so Draw and Cursor agree.
+type lineLayout struct {
+	box     space.Rect // the card
+	cw      int        // the content width, the field's width
+	labelY  int        // the first row of the wrapped label
+	fieldY  int        // the field's row
+	errY    int        // the first row of the wrapped rejection, -1 when there is none
+	suggY   int        // the first suggestion row, -1 when the list is hidden
+	suggN   int        // the suggestion rows shown
+	suggTop int        // the index of the first shown suggestion
+}
+
+// natural is the width the card wants: the label, the input and the title.
+func (l *Line) natural() int {
+	n := max(ansi.StringWidth(l.label), ansi.StringWidth(l.shown()))
+	return max(n, ansi.StringWidth(l.title)+space.CardChrome)
+}
+
+// layout computes the card's geometry in a frame of fw by fh cells. The box is
+// centred on the body without the rejection and the suggestion list and grows
+// downward for them, so a rejection or a list that appears does not move the
+// card's top.
+func (l *Line) layout(fw, fh int) lineLayout {
+	cw := space.CardWidth(fw, l.natural())
+	errRows := 0
+	if l.errText != "" {
+		errRows = len(space.Wrap(l.errText, cw, 1<<10))
+	}
+	lay := lineLayout{
+		box:    space.CardBox(fw, fh, cw, len(space.Wrap(l.label, cw, 1<<10))+1),
+		cw:     cw,
+		errY:   -1,
+		suggY:  -1,
+		suggN:  min(len(l.suggestions), maxSuggestionRows),
+	}
+	y := lay.box.Y + 1
+	lay.labelY = y
+	lay.fieldY = y + len(space.Wrap(l.label, cw, 1<<10))
+	// The rows below the field, keeping the bottom border inside the frame.
+	room := max(fh-lay.fieldY-2, 0)
+	errRows = min(errRows, room)
+	lay.suggN = min(lay.suggN, room-errRows)
+	bottom := lay.fieldY + 1
+	if errRows > 0 {
+		lay.errY = bottom
+		bottom += errRows
+	}
+	if lay.suggN > 0 {
+		lay.suggY = bottom
+		lay.suggTop = 0
+		if l.selSuggestion >= lay.suggN {
+			lay.suggTop = l.selSuggestion - lay.suggN + 1
+		}
+		bottom += lay.suggN
+	}
+	if errRows > 0 || lay.suggN > 0 {
+		lay.box.H = bottom + 1 - lay.box.Y
+	}
+	return lay
+}
+
+// Draw paints the prompt's centred card: the title on the border, the label, the
+// input field, the rejection under the field when there is one, and the
+// suggestion list under that.
 func (l *Line) Draw(g *grid.Grid) {
-	y := promptRow(g.Height())
-	if y < 0 {
-		return
+	lay := l.layout(g.Width(), g.Height())
+	ov := l.styles.ov
+	ov.PaintBox(g, lay.box.X, lay.box.Y, lay.box.W, lay.box.H, l.title)
+	x0, maxX := lay.box.X+2, lay.box.X+2+lay.cw
+	for i, line := range space.Wrap(l.label, lay.cw, 1<<10) {
+		g.Put(x0, lay.labelY+i, maxX, line, l.styles.label)
 	}
-	w := g.Width()
-	l.drawSuggestions(g, y, w)
-	g.Fill(0, w, y, l.styles.bar)
-	end := l.inputEnd(w)
-	if end < w {
-		g.Put(end+1, y, w, l.errText, l.styles.warn)
-	}
-	x := space.PadX + g.Put(space.PadX, y, end, l.label+" ", l.styles.label)
-	g.Fill(x, end, y, l.styles.field)
+	g.Fill(x0, maxX, lay.fieldY, l.styles.field)
 	runes := []rune(l.shown())
-	start, stop := space.WindowRange(string(runes), l.field.Position(), end-x)
-	l.fieldX, l.fieldY, l.fieldW = x, y, end-x
-	l.winStart, l.winStop, l.drawn = start, stop, x < end
+	start, stop := space.WindowRange(string(runes), l.field.Position(), lay.cw)
+	l.fieldX, l.fieldY, l.fieldW = x0, lay.fieldY, lay.cw
+	l.winStart, l.winStop, l.drawn = start, stop, lay.cw > 0
 	selStart, selEnd, hasSel := l.selectionRange()
-	for i := start; i < stop && x < end; i++ {
+	x := x0
+	for i := start; i < stop; i++ {
 		st := l.styles.field
 		if hasSel && i >= selStart && i < selEnd {
 			st = l.styles.selected
 		}
-		x += g.Put(x, y, end, string(runes[i]), st)
+		x += g.Put(x, lay.fieldY, maxX, string(runes[i]), st)
 	}
+	if lay.errY >= 0 {
+		for i, line := range space.Wrap(l.errText, lay.cw, 1<<10) {
+			g.Put(x0, lay.errY+i, maxX, line, l.styles.warn)
+		}
+	}
+	l.drawSuggestions(g, lay)
 }
 
-// maxSuggestionRows is the most suggestion rows drawn at once; the rest scroll.
-const maxSuggestionRows = 4
-
-// drawSuggestions paints the suggestion list in the rows above the prompt row, nearest
-// first, the highlighted row on the raised field style.
-func (l *Line) drawSuggestions(g *grid.Grid, y, w int) {
-	l.suggestionY, l.suggestionW, l.suggestionRows = y, w, 0
-	if len(l.suggestions) == 0 {
+// drawSuggestions paints the suggestion list inside the card, under the field and
+// the rejection, the highlighted row on the raised field style.
+func (l *Line) drawSuggestions(g *grid.Grid, lay lineLayout) {
+	l.suggestionX, l.suggestionY, l.suggestionW, l.suggestionRows = 0, 0, 0, 0
+	if lay.suggY < 0 {
 		return
 	}
-	rows := min(len(l.suggestions), maxSuggestionRows)
-	top := 0
-	if l.selSuggestion >= rows {
-		top = l.selSuggestion - rows + 1
-	}
-	l.suggestionRows, l.suggestionTop = min(rows, max(y-1, 0)), top
-	for k := rows - 1; k >= 0; k-- {
-		i := top + k
+	l.suggestionX, l.suggestionY = lay.box.X+2, lay.suggY
+	l.suggestionW, l.suggestionRows, l.suggestionTop = lay.cw, lay.suggN, lay.suggTop
+	x0, maxX := lay.box.X+2, lay.box.X+2+lay.cw
+	for k := 0; k < lay.suggN; k++ {
+		i := lay.suggTop + k
 		if i >= len(l.suggestions) {
 			continue
 		}
-		row := y - k - 1
-		if row < 1 {
-			continue
-		}
+		row := lay.suggY + k
 		s := l.suggestions[i]
 		st := l.styles.bar
 		if i == l.selSuggestion {
 			st = l.styles.field
 		}
-		g.Fill(0, w, row, st)
-		x := 1 + g.Put(1, row, w, space.End(s.Text, max(w-2, 0)), st)
-		if s.Description != "" && x+2 < w {
-			g.Put(x+2, row, w, space.End(s.Description, w-x-2), l.styles.label)
+		g.Fill(x0, maxX, row, st)
+		x := x0 + g.Put(x0, row, maxX, space.End(s.Text, lay.cw), st)
+		if s.Description != "" && x+2 < maxX {
+			g.Put(x+2, row, maxX, space.End(s.Description, maxX-x-2), l.styles.label)
 		}
 	}
 }
 
 // clickSuggestion fills the clicked visible completion, just as keyboard navigation does.
 func (l *Line) clickSuggestion(x, y int) bool {
-	k := l.suggestionY - y - 1
-	if x < 0 || x >= l.suggestionW || k < 0 || k >= l.suggestionRows {
+	k := y - l.suggestionY
+	if x < l.suggestionX || x >= l.suggestionX+l.suggestionW || k < 0 || k >= l.suggestionRows {
 		return false
 	}
 	i := l.suggestionTop + k
@@ -772,38 +816,24 @@ func (l *Line) clickSuggestion(x, y int) bool {
 	return true
 }
 
-// inputEnd is the column where the input stops on a row w cells wide: before the
-// rejection message when there is one.
-func (l *Line) inputEnd(w int) int {
-	if l.errText != "" {
-		if x := w - ansi.StringWidth(l.errText) - 1; x > 0 {
-			return x - 1
-		}
-	}
-	return w
-}
-
-// Cursor returns the caret in a frame of w by h cells. ok is false when the
-// caret is off the right edge.
+// Cursor returns the caret in a frame of w by h cells: inside the field of the
+// centred card, with ok false when the field is off the frame.
 func (l *Line) Cursor(w, h int) (x, y int, ok bool) {
-	y = promptRow(h)
-	if y < 0 {
+	lay := l.layout(w, h)
+	_, col := space.Window(l.shown(), l.field.Position(), lay.cw)
+	x = lay.box.X + 2 + col
+	if x >= w || lay.fieldY >= h {
 		return 0, 0, false
 	}
-	x = space.PadX + ansi.StringWidth(l.label+" ")
-	_, col := space.Window(l.shown(), l.field.Position(), l.inputEnd(w)-x)
-	x += col
-	if x >= w {
-		return 0, 0, false
-	}
-	return x, y, true
+	return x, lay.fieldY, true
 }
 
-// Confirm is a Yes/No question on the bottom row. Enter takes the focused
+// Confirm is a Yes/No question in a centred card. Enter takes the focused
 // answer, which starts on No so a stray Enter cannot confirm a destructive
 // action. y and n answer at once, Left, Right and Tab move the focus, and Esc
 // closes the prompt without an answer.
 type Confirm struct {
+	title  string
 	label  string
 	tag    any
 	yes    bool // the focus is on Yes
@@ -821,6 +851,7 @@ func NewConfirm(st style.Styles, label string, tag any) *Confirm {
 
 // ConfirmOptions tune a Yes/No prompt. The zero value is the plain prompt.
 type ConfirmOptions struct {
+	Title      string // the card's title; empty falls back to "Confirm"
 	Yes, No    string // the labels of the answers; empty keeps "Yes" and "No"
 	DefaultYes bool   // the focus starts on Yes
 }
@@ -828,7 +859,7 @@ type ConfirmOptions struct {
 // NewConfirmWith returns a Yes/No prompt that asks label, with the labels and the first
 // focus of o.
 func NewConfirmWith(st style.Styles, label string, tag any, o ConfirmOptions) *Confirm {
-	c := &Confirm{label: label, tag: tag, styles: newStyles(st), yes: o.DefaultYes, yesText: o.Yes, noText: o.No}
+	c := &Confirm{label: label, title: cardTitle(o.Title, "gvim.prompt.title.confirm", "Confirm"), tag: tag, styles: newStyles(st), yes: o.DefaultYes, yesText: o.Yes, noText: o.No}
 	if c.yesText == "" {
 		c.yesText = i18n.TOr("", "gvim.prompt.yes", "Yes", nil)
 	}
@@ -892,28 +923,38 @@ func (c *Confirm) answer(o Outcome) (*Confirm, tea.Cmd) {
 	return c, done(Done{Tag: c.tag, Outcome: o})
 }
 
-// Draw paints the question on the bottom row of g, followed by the two answers.
+// Draw paints the question in a centred card: the title on the border, the
+// wrapped question, one blank row, then the two answers on a centred button row.
 // The focused answer takes the active style.
 func (c *Confirm) Draw(g *grid.Grid) {
 	c.hits = [2]space.Rect{}
-	y := promptRow(g.Height())
-	if y < 0 {
-		return
+	ov := c.styles.ov
+	yesW, noW := ov.ButtonWidth(c.yesText), ov.ButtonWidth(c.noText)
+	natural := max(ansi.StringWidth(c.label), ansi.StringWidth(c.title)+space.CardChrome)
+	natural = max(natural, yesW+cardGap+noW)
+	cw := space.CardWidth(g.Width(), natural)
+	lines := space.Wrap(c.label, cw, 1<<10)
+	// The body is the wrapped question, one blank row and the button row.
+	box := space.CardBox(g.Width(), g.Height(), cw, len(lines)+2)
+	ov.PaintBox(g, box.X, box.Y, box.W, box.H, c.title)
+	x0, maxX := box.X+2, box.X+2+cw
+	y := box.Y + 1
+	for _, line := range lines {
+		g.Put(x0, y, maxX, line, ov.Box)
+		y++
 	}
-	w := g.Width()
-	g.Fill(0, w, y, c.styles.bar)
-	x := space.PadX + g.Put(space.PadX, y, w, c.label+" ", c.styles.label)
+	y++ // the blank row above the buttons
+	x := x0 + max((cw-yesW-cardGap-noW)/2, 0)
 	yesStyle, noStyle := c.styles.field, c.styles.field
 	if c.yes {
 		yesStyle = c.styles.active
 	} else {
 		noStyle = c.styles.active
 	}
-	n := g.Put(x, y, w, "[ "+c.yesText+" ]", yesStyle)
+	n := ov.PaintButton(g, x, y, c.yesText, -1, yesStyle)
 	c.hits[0] = space.Rect{X: x, Y: y, W: n, H: 1}
-	x += n
-	x += g.Put(x, y, w, " ", c.styles.bar)
-	n = g.Put(x, y, w, "[ "+c.noText+" ]", noStyle)
+	x += n + cardGap
+	n = ov.PaintButton(g, x, y, c.noText, -1, noStyle)
 	c.hits[1] = space.Rect{X: x, Y: y, W: n, H: 1}
 }
 
