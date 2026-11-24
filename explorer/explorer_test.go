@@ -444,7 +444,8 @@ func TestTreeOptionsAndDynamicIgnoreRules(t *testing.T) {
 	}
 
 	// Because RespectGitignore is false, ignored.txt is NOT ignored, but custom.log IS ignored.
-	// tree defaults to showIgnored = false.
+	// Ignored entries are drawn by default; hide them to check the filters.
+	tree.SetShowIgnored(false)
 	rows := tree.Rows()
 	hasIgnoredTxt := false
 	hasCustomLog := false
@@ -563,6 +564,7 @@ func TestExpandWithChainStopsOnSymlinkLoopAndFindHidesIgnored(t *testing.T) {
 		t.Fatalf("Expand on symlink loop = %v", err)
 	}
 	// Ignored directory must not be found/expanded when showIgnored is false.
+	tree.SetShowIgnored(false)
 	if err := tree.Expand(filepath.Join(root, "ignored_dir")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Expand ignored dir = %v, want ErrNotFound", err)
 	}

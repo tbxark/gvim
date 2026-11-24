@@ -92,7 +92,7 @@ func TestBuildRuntimeRestorePreviousSessionOffKeepsTheUnsavedText(t *testing.T) 
 	}
 	// The directory argument still opens the tree, but the saved tree settings
 	// are part of the layout, so they are not restored.
-	if st := rt.model.ExplorerState(); !st.ShowHidden || st.ShowIgnored {
+	if st := rt.model.ExplorerState(); !st.ShowHidden || !st.ShowIgnored {
 		t.Errorf("explorer settings = %+v, want the layout's settings skipped", st)
 	}
 	if rt.sessionDir != sessDir {

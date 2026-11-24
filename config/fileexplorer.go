@@ -31,6 +31,11 @@ type FileExplorerConfig struct {
 	CompactDirectories bool
 	// RespectGitignore is file_explorer.respect_gitignore, default true.
 	RespectGitignore *bool
+	// HideGitignore is file_explorer.hide_gitignore: hide .gitignore-matched
+	// entries instead of drawing them dimmed, default false. The older flat
+	// explorer_show_ignored and file_explorer.show_gitignored keys still load
+	// as its inverted spelling.
+	HideGitignore bool
 	// CustomIgnorePatterns is file_explorer.custom_ignore_patterns.
 	CustomIgnorePatterns []string
 	// PreviewTabs is file_explorer.preview_tabs, default true.
@@ -161,6 +166,17 @@ func setFileExplorerBool(raw json.RawMessage, dst *bool) error {
 		return errors.New("must be true or false")
 	}
 	*dst = v
+	return nil
+}
+
+// setFileExplorerBoolInv applies one boolean file_explorer key inverted: the
+// stored value becomes !raw. Used by the legacy show_ignored-style keys.
+func setFileExplorerBoolInv(raw json.RawMessage, dst *bool) error {
+	var v bool
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return errors.New("must be true or false")
+	}
+	*dst = !v
 	return nil
 }
 

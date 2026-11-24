@@ -327,6 +327,44 @@ func TestRemoteIgnoreDisconnectedTouchesNothing(t *testing.T) {
 	}
 }
 
+// TestRemoteScanFilterAppliesToExplorerListing checks the file_scan_* lists on the
+// remote loader: an exclusion drops the entry entirely and an inclusion marks the
+// entry, which the tree reads as not ignored — the local tree's semantics.
+func TestRemoteScanFilterAppliesToExplorerListing(t *testing.T) {
+	fs := newIgnoreFS()
+	fs.file("/remote/w/.gitignore", "*.log\n.env\n")
+	fs.dir("/remote/w", "a.go", "b.log", ".DS_Store", ".env", ".env.local")
+	loader := newAuthorityDirLoader(ignoreSlot(fs), nil, "/remote/w")
+	loader.SetIgnoreOptions(nil, nil, []string{".DS_Store", "b.log"}, []string{".env*"})
+	got, err := loader.ReadDirs(context.Background(), []string{"/remote/w"})
+	if err != nil {
+		t.Fatalf("ReadDirs: %v", err)
+	}
+	entries := got["/remote/w"]
+	byName := map[string]tui.RemoteDirEntry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	if _, ok := byName[".DS_Store"]; ok {
+		t.Fatal(".DS_Store was listed; the exclusion must drop it")
+	}
+	if _, ok := byName["b.log"]; ok {
+		t.Fatal("b.log was listed; the exclusion beats the gitignore match")
+	}
+	for _, name := range []string{".env", ".env.local"} {
+		e, ok := byName[name]
+		if !ok {
+			t.Fatalf("%s was not listed; the inclusion must rescue it", name)
+		}
+		if !e.Included {
+			t.Fatalf("%s = %+v, want the inclusion flag (the tree clears ignored from it)", name, e)
+		}
+	}
+	if e, ok := byName["a.go"]; !ok || e.Ignored || e.Included {
+		t.Fatalf("a.go = %+v (present %v), want a plain entry", e, ok)
+	}
+}
+
 var _ = time.Second
 
 // TestRemoteIgnoreRulesApplyToEveryEntry checks the rule budget is per directory: a

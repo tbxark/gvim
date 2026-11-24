@@ -112,7 +112,7 @@ func TestRemoteFileIndexUsesAuthorityOnly(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, &remoteOneShotFake{}), "/remote/w")
+	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, &remoteOneShotFake{}), "/remote/w", nil, nil)
 	select {
 	case <-idx.Done():
 	case <-time.After(10 * time.Second):
@@ -140,7 +140,7 @@ func TestRemoteFileIndexExpandsTildeRoot(t *testing.T) {
 	one := &remoteOneShotFake{stdout: "/home/u/proj\n"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "~/proj")
+	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "~/proj", nil, nil)
 	select {
 	case <-idx.Done():
 	case <-time.After(10 * time.Second):
@@ -167,7 +167,7 @@ func TestRemoteFileIndexExpandsTildeRoot(t *testing.T) {
 func TestRemoteFileIndexRootFailureSurfaced(t *testing.T) {
 	fs := newRemoteFinderFake()
 	fs.err = errors.New("connection down")
-	idx, _ := newRemoteFileIndex(context.Background(), remoteFinderSlot(fs, &remoteOneShotFake{}), "/remote/w")
+	idx, _ := newRemoteFileIndex(context.Background(), remoteFinderSlot(fs, &remoteOneShotFake{}), "/remote/w", nil, nil)
 	select {
 	case <-idx.Done():
 	case <-time.After(10 * time.Second):

@@ -276,7 +276,7 @@ func TestAuthorityDirLoaderProbeWatchAndIgnoreOptions(t *testing.T) {
 
 	// CustomIgnorePatterns + RespectGitignore=false.
 	respectFalse := false
-	loader.SetIgnoreOptions(&respectFalse, []string{"*.log"})
+	loader.SetIgnoreOptions(&respectFalse, []string{"*.log"}, nil, nil)
 	got, err := loader.ReadDirs(context.Background(), []string{"/srv/proj"})
 	if err != nil {
 		t.Fatalf("ReadDirs custom ignore: %v", err)

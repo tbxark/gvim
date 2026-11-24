@@ -116,7 +116,7 @@ const freshEditorDefaults = `{
   "ephemeral_file_patterns": [
     "**/.git/**"
   ],
-  "auto_create_empty_buffer_on_last_buffer_close": true,
+  "auto_create_empty_buffer_on_last_buffer_close": false,
   "recovery_enabled": true,
   "auto_recovery_save_interval_secs": 2,
   "auto_revert_poll_interval_ms": 2000,
@@ -407,7 +407,7 @@ func TestEditorDefaultValues(t *testing.T) {
 		{"restore_previous_session", d.RestorePreviousSession, true},
 		{"skip_session_restore_when_files_passed", d.SkipSessionRestoreWhenFilesPassed, true},
 		{"ephemeral_file_patterns", d.EphemeralFilePatterns, []string{"**/.git/**"}},
-		{"auto_create_empty_buffer_on_last_buffer_close", d.AutoCreateEmptyBufferOnLastBufferClose, true},
+		{"auto_create_empty_buffer_on_last_buffer_close", d.AutoCreateEmptyBufferOnLastBufferClose, false},
 		{"snapshot_interval", d.SnapshotInterval, 100},
 		{"auto_revert_poll_interval_ms", d.AutoRevertPollIntervalMS, 2000},
 		{"search", d.Search, SearchDefaults{}},
@@ -449,8 +449,8 @@ func TestNestedEditorParsing(t *testing.T) {
 		{"status_bar partial", `{"editor": {"status_bar": {"separator": " | "}}}`, func(c Config) bool {
 			return c.StatusBar.Separator == " | " && len(c.StatusBar.Left) == 7 && len(c.StatusBar.Right) == 8
 		}},
-		{"file_explorer", `{"file_explorer": {"show_hidden": true, "show_gitignored": true, "width": 0.3}}`, func(c Config) bool {
-			return c.ExplorerShowHidden && c.ExplorerShowIgnored
+		{"file_explorer", `{"file_explorer": {"show_hidden": true, "hide_gitignore": true, "width": 0.3}}`, func(c Config) bool {
+			return c.ExplorerShowHidden && c.FileExplorer.HideGitignore
 		}},
 		{"default_language", `{"default_language": "bash"}`, func(c Config) bool { return c.DefaultLanguage == "bash" }},
 		{"empty keybindings list", `{"keybindings": []}`, func(c Config) bool { return c.Keybindings == nil }},

@@ -14,29 +14,29 @@ import (
 // uses. It has the settings the root is given, which is the snapshot the app takes
 // when it starts.
 type configDump struct {
-	Theme               string `json:"theme"`
-	Keymap              string `json:"keymap"`
-	TabSize             int    `json:"tab_size"`
-	InsertSpaces        bool   `json:"insert_spaces"`
-	AutoIndent          bool   `json:"auto_indent"`
-	LineNumbers         bool   `json:"line_numbers"`
-	ShowMenuBar         bool   `json:"show_menu_bar"`
-	ExplorerShowHidden  bool   `json:"explorer_show_hidden"`
-	ExplorerShowIgnored bool   `json:"explorer_show_ignored"`
+	Theme                 string `json:"theme"`
+	Keymap                string `json:"keymap"`
+	TabSize               int    `json:"tab_size"`
+	InsertSpaces          bool   `json:"insert_spaces"`
+	AutoIndent            bool   `json:"auto_indent"`
+	LineNumbers           bool   `json:"line_numbers"`
+	ShowMenuBar           bool   `json:"show_menu_bar"`
+	ExplorerShowHidden    bool   `json:"explorer_show_hidden"`
+	ExplorerHideGitignore bool   `json:"file_explorer.hide_gitignore"`
 }
 
 // dumpConfig returns the settings s as indented JSON, with a final newline.
 func dumpConfig(s Settings) string {
 	b, _ := json.MarshalIndent(configDump{
-		Theme:               s.Theme,
-		Keymap:              s.Keymap,
-		TabSize:             s.TabSize,
-		InsertSpaces:        s.InsertSpaces,
-		AutoIndent:          s.AutoIndent,
-		LineNumbers:         s.LineNumbers,
-		ShowMenuBar:         s.MenuBar,
-		ExplorerShowHidden:  s.ExplorerShowHidden,
-		ExplorerShowIgnored: s.ExplorerShowIgnored,
+		Theme:                 s.Theme,
+		Keymap:                s.Keymap,
+		TabSize:               s.TabSize,
+		InsertSpaces:          s.InsertSpaces,
+		AutoIndent:            s.AutoIndent,
+		LineNumbers:           s.LineNumbers,
+		ShowMenuBar:           s.MenuBar,
+		ExplorerShowHidden:    s.ExplorerShowHidden,
+		ExplorerHideGitignore: s.ExplorerHideGitignore,
 	}, "", "  ")
 	return string(b) + "\n"
 }

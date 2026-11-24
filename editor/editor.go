@@ -105,7 +105,7 @@ type Options struct {
 	// has unsaved edits (see QuitNeedsConfirm).
 	ConfirmQuit bool
 	// AutoCreateEmptyBufferOnLastBufferClose is
-	// editor.auto_create_empty_buffer_on_last_buffer_close (default true): closing the
+	// editor.auto_create_empty_buffer_on_last_buffer_close (default false): closing the
 	// last tab opens an empty buffer instead of the welcome screen.
 	AutoCreateEmptyBufferOnLastBufferClose bool
 	// RecoveryEnabled is editor.recovery_enabled (default true), and

@@ -103,7 +103,7 @@ type effectiveSettings struct {
 	LineNumbers            bool            `json:"line_numbers"`
 	ShowMenuBar            bool            `json:"show_menu_bar"`
 	ExplorerShowHidden     bool            `json:"explorer_show_hidden"`
-	ExplorerShowIgnored    bool            `json:"explorer_show_ignored"`
+	ExplorerHideGitignore  bool            `json:"file_explorer.hide_gitignore"`
 	Keybindings            json.RawMessage `json:"keybindings,omitempty"`
 }
 
@@ -156,7 +156,7 @@ func Load(root string, opts Options) (ConfigView, error) {
 		LineNumbers:            cfg.LineNumbers,
 		ShowMenuBar:            cfg.ShowMenuBar,
 		ExplorerShowHidden:     cfg.ExplorerShowHidden,
-		ExplorerShowIgnored:    cfg.ExplorerShowIgnored,
+		ExplorerHideGitignore:  cfg.FileExplorer.HideGitignore,
 		Keybindings:            cfg.Keybindings,
 	}, "", "  ")
 	if err != nil {

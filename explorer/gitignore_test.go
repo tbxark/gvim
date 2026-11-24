@@ -193,6 +193,7 @@ func TestHiddenSetMatchesRule(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			tree.SetShowIgnored(false)
 			expandAll(t, tree, root)
 			got := hiddenEntries(t, tree, root)
 			slices.Sort(got)
@@ -205,8 +206,8 @@ func TestHiddenSetMatchesRule(t *testing.T) {
 	}
 }
 
-// TestRevealRefusesIgnoredEntry checks that Reveal does not select an entry the
-// tree is hiding.
+// TestRevealRefusesIgnoredEntry checks that Reveal selects a drawn ignored
+// entry but still refuses one the tree is hiding.
 func TestRevealRefusesIgnoredEntry(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{".gitignore": "*.log\n", "a.log": ""})
@@ -214,8 +215,12 @@ func TestRevealRefusesIgnoredEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := tree.Reveal(filepath.Join(root, "a.log")); err != nil {
+		t.Fatalf("Reveal(ignored, drawn) = %v, want nil", err)
+	}
+	tree.SetShowIgnored(false)
 	if err := tree.Reveal(filepath.Join(root, "a.log")); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Reveal(ignored) = %v, want ErrNotFound", err)
+		t.Fatalf("Reveal(ignored, hidden) = %v, want ErrNotFound", err)
 	}
 }
 
@@ -234,6 +239,7 @@ func TestNegationCannotReincludeUnderIgnoredDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tree.SetShowIgnored(false)
 	expandAll(t, tree, root)
 	if got := hiddenEntries(t, tree, root); len(got) != 3 {
 		t.Fatalf("hidden = %v, want build/, build/keep.txt, build/o", got)
@@ -251,6 +257,7 @@ func TestExpandAppliesIgnoreFileWrittenAfterOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTree(t, root, map[string]string{".gitignore": "*.tmp\n"})
+	tree.SetShowIgnored(false)
 	if err := tree.Expand(filepath.Join(root, "sub")); err != nil {
 		t.Fatal(err)
 	}
@@ -384,14 +391,14 @@ func TestWalkFilesCustomIgnorePatternsAndRespectGitignore(t *testing.T) {
 func TestWalkFilesNestedAndSiblingGitignoreIsolation(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"a/.gitignore":    "*.local\n",
-		"a/drop.local":    "",
-		"a/keep.txt":      "",
+		"a/.gitignore":       "*.local\n",
+		"a/drop.local":       "",
+		"a/keep.txt":         "",
 		"a/empty/.gitignore": "# comment only\n\n",
-		"a/empty/x.local": "",
-		"a/empty/ok.txt":  "",
-		"b/keep.local":    "",
-		"b/drop.log":      "",
+		"a/empty/x.local":    "",
+		"a/empty/ok.txt":     "",
+		"b/keep.local":       "",
+		"b/drop.log":         "",
 	})
 	var got []string
 	err := WalkFiles(context.Background(), root, WalkOptions{

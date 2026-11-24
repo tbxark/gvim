@@ -151,7 +151,7 @@ func TestRemoteFileIndexInstallsTheProbe(t *testing.T) {
 	fs.stats["/remote/w/a.go"] = hostos.FileStat{Kind: "file"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, root := newRemoteFileIndex(ctx, remoteProbeSlot(fs), "/remote/w")
+	idx, root := newRemoteFileIndex(ctx, remoteProbeSlot(fs), "/remote/w", nil, nil)
 	if root != "/remote/w" {
 		t.Fatalf("root = %q, want /remote/w", root)
 	}

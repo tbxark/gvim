@@ -49,6 +49,8 @@ type authorityDirLoader struct {
 	notice               string
 	respectGitignore     *bool
 	customIgnorePatterns []string
+	scanExclusions       []string
+	scanInclusions       []string
 }
 
 // newAuthorityDirLoader returns the loader of remoteRoot over slot. A nil gate skips
@@ -57,9 +59,9 @@ func newAuthorityDirLoader(slot authority.Slot, gate func(ctx context.Context, a
 	return &authorityDirLoader{slot: slot, gate: gate, root: remoteRoot}
 }
 
-// SetIgnoreOptions updates the .gitignore toggle and custom wildcard ignore patterns
-// applied on subsequent remote directory listings.
-func (l *authorityDirLoader) SetIgnoreOptions(respectGitignore *bool, customPatterns []string) {
+// SetIgnoreOptions updates the .gitignore toggle, custom wildcard ignore patterns
+// and the file_scan_* lists applied on subsequent remote directory listings.
+func (l *authorityDirLoader) SetIgnoreOptions(respectGitignore *bool, customPatterns, scanExclusions, scanInclusions []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if respectGitignore != nil {
@@ -69,6 +71,8 @@ func (l *authorityDirLoader) SetIgnoreOptions(respectGitignore *bool, customPatt
 		l.respectGitignore = nil
 	}
 	l.customIgnorePatterns = slices.Clone(customPatterns)
+	l.scanExclusions = slices.Clone(scanExclusions)
+	l.scanInclusions = slices.Clone(scanInclusions)
 }
 
 // installRemoteExplorer wires the remote explorer tree and its file-operation adapter
@@ -76,9 +80,10 @@ func (l *authorityDirLoader) SetIgnoreOptions(respectGitignore *bool, customPatt
 // once that bridge exists.
 func installRemoteExplorer(deps *tui.Deps, slot authority.Slot, root string, gate func(ctx context.Context, argv []string, cwd string) error, ed *editor.Editor, cfg config.Config, showExplorer bool) *authorityDirLoader {
 	loader := newAuthorityDirLoader(slot, gate, root)
-	loader.SetIgnoreOptions(cfg.FileExplorer.RespectGitignore, cfg.FileExplorer.CustomIgnorePatterns)
+	loader.SetIgnoreOptions(cfg.FileExplorer.RespectGitignore, cfg.FileExplorer.CustomIgnorePatterns, cfg.FileScanExclusions, cfg.FileScanInclusions)
 	tree := tui.NewRemoteExplorerTree(root, loader)
 	tree.SetShowHidden(cfg.ExplorerShowHidden)
+	tree.SetShowIgnored(!cfg.FileExplorer.HideGitignore)
 	deps.Explorer = tree
 	deps.ShowExplorer = showExplorer
 	deps.Ops = newRemoteExplorerOps(slot, root, slot.Label(), gate, ed)
@@ -171,8 +176,10 @@ func (l *authorityDirLoader) ReadDirs(ctx context.Context, dirs []string) (map[s
 	watcher := l.watcher
 	respectGitignore := l.respectGitignore == nil || *l.respectGitignore
 	customPatterns := slices.Clone(l.customIgnorePatterns)
+	scanExclusions := slices.Clone(l.scanExclusions)
+	scanInclusions := slices.Clone(l.scanInclusions)
 	l.mu.Unlock()
-	ignore := newIgnoreBatchWithOptions(func() authority.FileSystem { return l.slot.Files() }, l.root, respectGitignore, customPatterns)
+	ignore := newIgnoreBatchWithOptions(func() authority.FileSystem { return l.slot.Files() }, l.root, respectGitignore, customPatterns, scanExclusions, scanInclusions)
 	watching := watcher != nil && l.probeWatch(ctx, files)
 	if watcher == nil {
 		l.addNotice("remote directory watching is unavailable; refresh manually (Ctrl+R)")
@@ -198,11 +205,15 @@ func (l *authorityDirLoader) ReadDirs(ctx context.Context, dirs []string) (map[s
 				continue
 			}
 			isDir := e.Kind == "dir" || (e.Kind == "symlink" && e.TargetKind == "dir")
+			if ignore.excluded(dir, e.Name, isDir) {
+				continue
+			}
 			converted = append(converted, tui.RemoteDirEntry{
-				Name:    e.Name,
-				IsDir:   isDir,
-				Hidden:  strings.HasPrefix(e.Name, "."),
-				Ignored: ignore.ignored(ctx, dir, e.Name, isDir),
+				Name:     e.Name,
+				IsDir:    isDir,
+				Hidden:   strings.HasPrefix(e.Name, "."),
+				Ignored:  ignore.ignored(ctx, dir, e.Name, isDir),
+				Included: ignore.included(dir, e.Name, isDir),
 			})
 		}
 		out[dir] = converted

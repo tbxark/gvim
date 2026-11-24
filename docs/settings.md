@@ -24,7 +24,7 @@ written.
 ## 1. The schema
 
 `config/settings_schema.go` holds the descriptor table the page is built from:
-82 settings rows, each a `config.Setting` with
+84 settings rows, each a `config.Setting` with
 
 - `Path`: where the value lives in the file, such as `{"editor", "tab_size"}`;
 - `Kind`: `bool`, `int`, `enum`, `string`, or `page` (a row that opens
@@ -323,8 +323,8 @@ their own restart boundary when edited by hand.
 
 **Config-file-only editor options.** `editor.confirm_quit` (default off: a Quit/Cancel
 dialog, Cancel the default, appears when a quit finds no unsaved tab) and
-`editor.auto_create_empty_buffer_on_last_buffer_close` (default on: closing the last tab
-leaves one untitled tab; off shows the welcome screen) are read from the config file when
+`editor.auto_create_empty_buffer_on_last_buffer_close` (default off: closing the last tab
+shows the welcome screen; on leaves one untitled tab) are read from the config file when
 the editor starts. They have no row on the Settings page, so edit the file and restart.
 
 **Command-line flags win over the file** for the running editor, as they already

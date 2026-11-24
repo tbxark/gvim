@@ -55,6 +55,7 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 		return errors.New("finder: remote enumeration without a file system")
 	}
 	matcher := explorer.NewPatternMatcher(opts.CustomIgnorePatterns)
+	scan := explorer.NewScanMatcher(opts.ScanExclusions, opts.ScanInclusions)
 	stack := []remoteDir{{abs: root}}
 	visited := 0
 	for len(stack) > 0 {
@@ -70,7 +71,7 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 		if visited > MaxRemoteDirs {
 			return ErrRemoteTooManyDirs
 		}
-		entries, err := fs.ReadDir(ctx, d.abs, opts.ShowHidden)
+		entries, err := fs.ReadDir(ctx, d.abs, opts.ShowHidden || scan.HasInclusions())
 		if err != nil {
 			if d.rel == "" {
 				return err
@@ -83,18 +84,24 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 			if !safeRemoteName(e.Name) {
 				continue
 			}
-			if !opts.ShowHidden && strings.HasPrefix(e.Name, ".") {
-				continue
-			}
 			rel := e.Name
 			if d.rel != "" {
 				rel = d.rel + "/" + e.Name
 			}
 			isDir := e.Kind == "dir"
+			if scan.ExcludedPath(rel, isDir) {
+				continue
+			}
+			// An inclusion rescues a hidden name too (".env" is hidden *and*
+			// ignored): it is what puts the file in the scan scope.
+			included := scan.IncludedPath(rel, isDir)
+			if !opts.ShowHidden && strings.HasPrefix(e.Name, ".") && !included {
+				continue
+			}
 			if isDir && skipDirName(e.Name) {
 				continue
 			}
-			if matcher != nil && matcher(rel, isDir) {
+			if matcher != nil && matcher(rel, isDir) && !included {
 				continue
 			}
 			abs := joinRemotePath(d.abs, e.Name)

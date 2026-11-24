@@ -60,6 +60,9 @@ func TestDefaults(t *testing.T) {
 		ExplorerShowHidden: true,
 		PluginTimeout:      500 * time.Millisecond,
 
+		FileScanExclusions: DefaultFileScanExclusions(),
+		FileScanInclusions: DefaultFileScanInclusions(),
+
 		Terminal:     DefaultTerminalOptions(),
 		Daemon:       DefaultDaemonConfig(),
 		FileExplorer: DefaultFileExplorer(),
@@ -384,13 +387,18 @@ func TestLoadValidKeyAfterBadKeyStillApplies(t *testing.T) {
 func TestLoadAcceptsDeclaredValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeFile(t, path, `{"tab_size": 16, "line_ending": "lf", "trim_trailing_whitespace": true,
-		"ensure_final_newline": true, "explorer_show_hidden": true, "explorer_show_ignored": true}`)
+		"ensure_final_newline": true, "explorer_show_hidden": true, "explorer_show_ignored": false,
+		"file_scan_exclusions": ["*.tmp"], "file_scan_inclusions": [".env*"]}`)
 	cfg, diags, err := Load(Options{UserFile: path})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
 	}
+	// explorer_show_ignored is the inverted legacy spelling of
+	// file_explorer.hide_gitignore: false here means "hide them".
 	if cfg.TabSize != 16 || cfg.LineEnding != "lf" || !cfg.TrimTrailingWhitespace ||
-		!cfg.EnsureFinalNewline || !cfg.ExplorerShowHidden || !cfg.ExplorerShowIgnored {
+		!cfg.EnsureFinalNewline || !cfg.ExplorerShowHidden || !cfg.FileExplorer.HideGitignore ||
+		!reflect.DeepEqual(cfg.FileScanExclusions, []string{"*.tmp"}) ||
+		!reflect.DeepEqual(cfg.FileScanInclusions, []string{".env*"}) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 }

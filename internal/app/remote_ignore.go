@@ -53,6 +53,9 @@ type ignoreBatch struct {
 	root             string
 	respectGitignore bool
 	customMatcher    gitignore.Matcher
+	// scan is the file_scan_exclusions/file_scan_inclusions pair: an exclusion
+	// hard-drops an entry, an inclusion clears a .gitignore match.
+	scan explorer.ScanMatcher
 
 	mu       sync.Mutex
 	cache    map[string][]gitignore.Pattern
@@ -76,14 +79,15 @@ func parseRemoteCustomIgnore(pats []string) []gitignore.Pattern {
 // function so a reconnected authority resolves the current carrier; a nil result is
 // treated as "no ignore files" (filtering is not applicable), never a local fallback.
 func newIgnoreBatch(files func() authority.FileSystem, root string) *ignoreBatch {
-	return newIgnoreBatchWithOptions(files, root, true, nil)
+	return newIgnoreBatchWithOptions(files, root, true, nil, nil, nil)
 }
 
-func newIgnoreBatchWithOptions(files func() authority.FileSystem, root string, respectGitignore bool, customPatterns []string) *ignoreBatch {
+func newIgnoreBatchWithOptions(files func() authority.FileSystem, root string, respectGitignore bool, customPatterns, scanExclusions, scanInclusions []string) *ignoreBatch {
 	b := &ignoreBatch{
 		files:            files,
 		root:             root,
 		respectGitignore: respectGitignore,
+		scan:             explorer.NewScanMatcher(scanExclusions, scanInclusions),
 		cache:            map[string][]gitignore.Pattern{},
 		matchers:         map[string]gitignore.Matcher{},
 	}
@@ -219,4 +223,18 @@ func (b *ignoreBatch) ignored(ctx context.Context, dir, name string, isDir bool)
 		return false
 	}
 	return b.matcher(ctx, dir).Match(rel, isDir)
+}
+
+// excluded reports whether the entry name of dir matches a scan exclusion:
+// those entries are dropped from listings entirely.
+func (b *ignoreBatch) excluded(dir, name string, isDir bool) bool {
+	rel := append(append([]string(nil), b.relParts(dir)...), name)
+	return b.scan.Excluded(rel, isDir)
+}
+
+// included reports whether the entry name of dir matches a scan inclusion,
+// which clears a .gitignore match (and inherits through an ignored parent).
+func (b *ignoreBatch) included(dir, name string, isDir bool) bool {
+	rel := append(append([]string(nil), b.relParts(dir)...), name)
+	return b.scan.Included(rel, isDir)
 }

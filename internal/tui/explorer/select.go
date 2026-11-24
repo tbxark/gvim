@@ -269,14 +269,16 @@ func pathSet(paths []string) map[string]bool {
 }
 
 // rowStyle is the style of one tree row: the body style, the selection background
-// on a picked row, and faint text on a row under a pending cut.
+// on a picked row, and faint text on a row under a pending cut or matched by a
+// .gitignore (the dimmed-but-listed default; file_explorer.hide_gitignore
+// removes those rows instead).
 func (p Panel) rowStyle(r tree.Row, body grid.Style) grid.Style {
 	s := p.state()
 	st := body
 	if s.picked[r.Path] {
 		st = style.Cell(p.styles.Selection)
 	}
-	if s.cut[r.Path] {
+	if s.cut[r.Path] || r.Ignored {
 		st.Faint = true
 	}
 	return st

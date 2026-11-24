@@ -202,6 +202,81 @@ func TestEnumerateAllIncludesHiddenAndIgnored(t *testing.T) {
 	}
 }
 
+// TestEnumerateScanExclusionsAndInclusions checks the file_scan_* options: an
+// exclusion drops entries at any depth (ignored or not), an inclusion rescues a
+// gitignored-and-hidden file back into the listing, and an exclusion wins over an
+// inclusion.
+func TestEnumerateScanExclusionsAndInclusions(t *testing.T) {
+	opts := Options{ScanExclusions: []string{".DS_Store", "drop.txt"}, ScanInclusions: []string{".env*"}}
+	files := map[string]string{
+		".gitignore":    "*.log\n.env\n",
+		"a.go":          "",
+		"b.log":         "",
+		".env":          "",
+		".env.local":    "",
+		"drop.txt":      "",
+		".DS_Store":     "",
+		"sub/.DS_Store": "",
+		"sub/c.go":      "",
+	}
+	want := []string{".env", ".env.local", "a.go", "sub/c.go"}
+
+	// The walk path (a plain directory).
+	root := t.TempDir()
+	writeFiles(t, root, files)
+	var got []string
+	err := EnumerateWithOptions(context.Background(), root, opts, func(rel string) bool {
+		got = append(got, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("walk scan = %v, want %v", got, want)
+	}
+
+	// The git fast path: exclusions filter the listing too, and an inclusion
+	// disables it so the walk can rescue the ignored file.
+	requireGit(t)
+	gitRoot := t.TempDir()
+	writeFiles(t, gitRoot, files)
+	for _, args := range [][]string{{"init", "-q"}, {"add", "a.go"}} {
+		if out, err := exec.Command("git", append([]string{"-C", gitRoot}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	got = got[:0]
+	err = EnumerateWithOptions(context.Background(), gitRoot, opts, func(rel string) bool {
+		got = append(got, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("git scan = %v, want %v", got, want)
+	}
+
+	// Exclusions alone keep the fast path: they filter the git listing itself.
+	got = got[:0]
+	err = EnumerateWithOptions(context.Background(), gitRoot, Options{
+		ScanExclusions: opts.ScanExclusions,
+	}, func(rel string) bool {
+		got = append(got, rel)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if want := []string{".env.local", ".gitignore", "a.go", "sub/c.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("git exclusions-only scan = %v, want %v", got, want)
+	}
+}
+
 func TestIndexCapsAtMaxFiles(t *testing.T) {
 	var x Index
 	for i := range MaxFiles {
@@ -223,10 +298,10 @@ func TestEnumerateCustomIgnorePatterns(t *testing.T) {
 	requireGit(t)
 	gitRoot := t.TempDir()
 	writeFiles(t, gitRoot, map[string]string{
-		".gitignore":  "gitignored.txt\n",
-		"tracked.txt": "hello",
-		"app.log":     "log",
-		"build/out":   "binary",
+		".gitignore":   "gitignored.txt\n",
+		"tracked.txt":  "hello",
+		"app.log":      "log",
+		"build/out":    "binary",
 		"sub/deep.log": "deep log",
 		"sub/keep.txt": "keep",
 	})

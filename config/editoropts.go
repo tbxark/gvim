@@ -157,7 +157,7 @@ type EditorOptions struct {
 	// EphemeralFilePatterns is ephemeral_file_patterns: globs of files that are not
 	// remembered in the session. Default ["**/.git/**"].
 	EphemeralFilePatterns                  []string
-	AutoCreateEmptyBufferOnLastBufferClose bool // auto_create_empty_buffer_on_last_buffer_close, default true
+	AutoCreateEmptyBufferOnLastBufferClose bool // auto_create_empty_buffer_on_last_buffer_close, default false
 
 	// Keyboard protocol.
 
@@ -229,10 +229,9 @@ func defaultEditorOptions() EditorOptions {
 		AutoRecoverySaveIntervalSecs: 2,
 		AutoRevertPollIntervalMS:     2000,
 
-		RestorePreviousSession:                 true,
-		SkipSessionRestoreWhenFilesPassed:      true,
-		EphemeralFilePatterns:                  []string{"**/.git/**"},
-		AutoCreateEmptyBufferOnLastBufferClose: true,
+		RestorePreviousSession:            true,
+		SkipSessionRestoreWhenFilesPassed: true,
+		EphemeralFilePatterns:             []string{"**/.git/**"},
 
 		KeyboardDisambiguateEscapeCodes: true,
 		KeyboardReportAlternateKeys:     true,
@@ -707,8 +706,11 @@ func (c *Config) setFileExplorer(key string, raw json.RawMessage) error {
 	switch key {
 	case "show_hidden":
 		return boolOpt(key, "", func(c *Config) *bool { return &c.ExplorerShowHidden }).set(c, raw)
+	case "hide_gitignore":
+		return setFileExplorerBool(raw, &c.FileExplorer.HideGitignore)
 	case "show_gitignored":
-		return boolOpt(key, "", func(c *Config) *bool { return &c.ExplorerShowIgnored }).set(c, raw)
+		// The old spelling of hide_gitignore, inverted.
+		return setFileExplorerBoolInv(raw, &c.FileExplorer.HideGitignore)
 	case "width":
 		return c.setFileExplorerWidth(raw)
 	case "side":

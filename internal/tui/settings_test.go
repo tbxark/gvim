@@ -11,20 +11,20 @@ import (
 // value, so each row shows what it reads.
 func testSettings() Settings {
 	return Settings{
-		Theme:               "light",
-		Keymap:              "macos",
-		TabSize:             2,
-		InsertSpaces:        false,
-		AutoIndent:          false,
-		LineNumbers:         true,
-		MenuBar:             true,
-		ExplorerShowHidden:  false,
-		ExplorerShowIgnored: true,
-		UIIcons:             "nerd",
-		UIIconsFont:         "JetBrainsMono Nerd Font Mono",
-		IconsMode:           "nerd",
-		IconsWhy:            "set by ui_icons",
-		ConfigFile:          "/home/u/.config/gvim/config.json",
+		Theme:                 "light",
+		Keymap:                "macos",
+		TabSize:               2,
+		InsertSpaces:          false,
+		AutoIndent:            false,
+		LineNumbers:           true,
+		MenuBar:               true,
+		ExplorerShowHidden:    false,
+		ExplorerHideGitignore: true,
+		UIIcons:               "nerd",
+		UIIconsFont:           "JetBrainsMono Nerd Font Mono",
+		IconsMode:             "nerd",
+		IconsWhy:              "set by ui_icons",
+		ConfigFile:            "/home/u/.config/gvim/config.json",
 	}
 }
 
@@ -38,7 +38,7 @@ func TestSettingsRowsShowTheEffectiveValues(t *testing.T) {
 		"line_numbers=on",
 		"show_menu_bar=on",
 		"explorer_show_hidden=off",
-		"explorer_show_ignored=on",
+		"file_explorer.hide_gitignore=on",
 		"ui_icons=nerd",
 		"ui_icons_font=JetBrainsMono Nerd Font Mono",
 		"image_protocol=auto",

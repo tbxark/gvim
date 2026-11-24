@@ -28,13 +28,18 @@ const (
 
 // Session is the saved state of one editor session.
 type Session struct {
-	Version     int         `json:"version"`
-	Root        string      `json:"root"`
-	Explorer    bool        `json:"explorer"`
-	ShowHidden  bool        `json:"showHidden"`
-	ShowIgnored bool        `json:"showIgnored"`
-	Active      int         `json:"active"`
-	Files       []FileState `json:"files"`
+	Version    int    `json:"version"`
+	Root       string `json:"root"`
+	Explorer   bool   `json:"explorer"`
+	ShowHidden bool   `json:"showHidden"`
+	// HideGitignore is the saved form of the explorer's ignored-entry toggle:
+	// ignored entries are drawn dimmed by default, true hides them. It replaces
+	// the old showIgnored key on purpose — sessions written before the flip
+	// stored false for "hidden by default", and restoring that would keep
+	// hiding entries after the upgrade.
+	HideGitignore bool        `json:"hideGitignore"`
+	Active        int         `json:"active"`
+	Files         []FileState `json:"files"`
 	// MRU is the most-recently-used order of the saved documents, newest first. It
 	// names documents by their saved path (or by label for a pathless buffer), not by
 	// runtime identity or tab index, so a reference cannot point at a different

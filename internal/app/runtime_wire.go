@@ -261,6 +261,7 @@ func (b *runtimeBuild) wireRootDeps() {
 	deps.MarkdownTOC = markdownTOCConfig(cfg)
 	b.projSearch = newProjectSearch(b.edOpts, cfg.FileExplorer.CustomIgnorePatterns)
 	b.grep = grepFor(b.edOpts, cfg.FileExplorer.CustomIgnorePatterns)
+	b.grep.SetScanFilter(cfg.FileScanExclusions, cfg.FileScanInclusions)
 	deps.Root = tui.RootPorts{
 		Projects:       b.proj,
 		Grep:           b.grep,

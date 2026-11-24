@@ -65,7 +65,7 @@ func TestRemoteFileIndexTildeRootRealShell(t *testing.T) {
 	fs := newRemoteFinderFake().dir(proj, "main.go")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, execOneShot{home: home}), "~/my proj")
+	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, execOneShot{home: home}), "~/my proj", nil, nil)
 	select {
 	case <-idx.Done():
 	case <-time.After(10 * time.Second):
@@ -91,7 +91,7 @@ func TestRemoteFileIndexTildeInjectionNotRun(t *testing.T) {
 	injected := "~/$(touch " + pwn + ")/x"
 	bad := newRemoteFinderFake()
 	bad.err = os.ErrNotExist
-	idx, root := newRemoteFileIndex(context.Background(), remoteFinderSlot(bad, execOneShot{home: home}), injected)
+	idx, root := newRemoteFileIndex(context.Background(), remoteFinderSlot(bad, execOneShot{home: home}), injected, nil, nil)
 	select {
 	case <-idx.Done():
 	case <-time.After(10 * time.Second):

@@ -68,7 +68,7 @@ func (b *runtimeBuild) wireRemote() {
 	// root is that remote workspace and a local project switch would enumerate
 	// the local disk, so it is refused for a remote launch.
 	var remoteRoot string
-	b.remoteFiles, remoteRoot = newRemoteFileIndex(ctx, authSlot, opts.Remote.Workspace())
+	b.remoteFiles, remoteRoot = newRemoteFileIndex(ctx, authSlot, opts.Remote.Workspace(), b.cfg.FileScanExclusions, b.cfg.FileScanInclusions)
 	b.denoRoot = remoteRoot
 	deps.Files = b.remoteFiles
 	deps.FileRoot = remoteRoot
@@ -157,10 +157,10 @@ func (b *runtimeBuild) restoreRemoteSession() {
 	case b.plan.tabs:
 		b.failed = restore.RestoreSessionAccess(b.ed, opts.SessionDir, sess, exists)
 		b.tree.SetShowHidden(sess.ShowHidden)
-		b.tree.SetShowIgnored(sess.ShowIgnored)
+		b.tree.SetShowIgnored(!sess.HideGitignore)
 		if deps.Explorer != nil {
 			deps.Explorer.SetShowHidden(sess.ShowHidden)
-			deps.Explorer.SetShowIgnored(sess.ShowIgnored)
+			deps.Explorer.SetShowIgnored(!sess.HideGitignore)
 		}
 	case b.plan.hot:
 		b.failed = restore.RestoreHotExitAccess(b.ed, opts.SessionDir, sess, exists)

@@ -198,7 +198,7 @@ was built. Where a reference doc has the detail it is named.
   writer, no per-field reset-vs-inherit display, no full undo, Reload is a palette row only.
 - Overlay keymap contexts: no multi-key bindings, and `completion`, `compositeBuffer` and the
   text-field contexts are not keymap surfaces (`docs/keybindings.md`).
-- Explorer: `respect_gitignore`, `custom_ignore_patterns`, `preview_tabs` and the tree glyph keys
+- Explorer: `preview_tabs` and the tree glyph keys
   are accepted and ignored; per-segment compact-row clicks and context menus; the side toggle is
   session-only.
 - Finder and Live Grep: no workspaces provider; Resume restores controls only; the plain

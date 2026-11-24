@@ -24,6 +24,15 @@ type WalkOptions struct {
 	RespectGitignore *bool
 	// CustomIgnorePatterns are additional wildcard patterns (e.g. *.log, build/).
 	CustomIgnorePatterns []string
+	// ScanExclusions are gitignore-style patterns relative to root
+	// (file_scan_exclusions): a match is never visited, files and directories
+	// alike.
+	ScanExclusions []string
+	// ScanInclusions are gitignore-style patterns relative to root
+	// (file_scan_inclusions): a match is visited even when a .gitignore matches
+	// it, and an ignored directory is descended so included files under it are
+	// found. Exclusions win over inclusions.
+	ScanInclusions []string
 }
 
 // RespectGitignoreEnabled reports whether gitignore is respected (default true).
@@ -68,9 +77,10 @@ func WalkFiles(ctx context.Context, root string, opts WalkOptions, fn func(rel s
 		opts:        opts,
 		skip:        skip,
 		customRules: customRules,
+		scan:        scanMatchersFor(opts.ScanExclusions, opts.ScanInclusions),
 		fn:          fn,
 	}
-	if err := w.dir(nil, nil, initMatcher, true); err != nil {
+	if err := w.dir(nil, nil, initMatcher, true, false); err != nil {
 		return err
 	}
 	return nil
@@ -83,14 +93,17 @@ type walker struct {
 	opts        WalkOptions
 	skip        map[string]bool // opts.SkipDirs as a set
 	customRules []gitignore.Pattern
+	scan        scanMatchers
 	fn          func(rel string) bool
 	stop        bool // fn returned false
 }
 
 // dir visits the directory rel below root. rules and m are the patterns and
-// matcher inherited from its ancestors. It returns an error only for the top
+// matcher inherited from its ancestors, and parentIgnored says whether the
+// directory itself is ignored (the walk descends an ignored directory only to
+// reach files a scan inclusion names). It returns an error only for the top
 // directory, or for a done context.
-func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matcher, top bool) error {
+func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matcher, top, parentIgnored bool) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
@@ -121,9 +134,6 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matche
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !w.opts.ShowHidden && strings.HasPrefix(name, ".") {
-			continue
-		}
 		childRel := append(slices.Clip(rel), name)
 		isDir := e.IsDir()
 		if e.Type()&os.ModeSymlink != 0 {
@@ -134,18 +144,36 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matche
 				continue
 			}
 		}
-		if !w.opts.ShowIgnored && m != nil && m.Match(childRel, isDir) {
+		if w.scan.excluded(childRel, isDir) {
 			continue
+		}
+		// A scan inclusion also rescues a hidden name (".env" is hidden *and*
+		// ignored): it is what puts the file in the finder/grep scope.
+		included := w.scan.included(childRel, isDir)
+		if !w.opts.ShowHidden && strings.HasPrefix(name, ".") && !included {
+			continue
+		}
+		ignored := parentIgnored || (!w.opts.ShowIgnored && m != nil && m.Match(childRel, isDir))
+		if ignored && included {
+			ignored = false
 		}
 		if isDir {
 			if w.skip[name] {
 				continue
 			}
-			if err := w.dir(childRel, rules, m, false); err != nil {
+			if ignored && !w.opts.ShowIgnored && !w.scan.hasInclusions() {
+				continue
+			}
+			if err := w.dir(childRel, rules, m, false, ignored); err != nil {
 				return err
 			}
-		} else if !w.fn(strings.Join(childRel, "/")) {
-			w.stop = true
+		} else {
+			if ignored && !w.opts.ShowIgnored {
+				continue
+			}
+			if !w.fn(strings.Join(childRel, "/")) {
+				w.stop = true
+			}
 		}
 		if w.stop {
 			return nil

@@ -555,9 +555,9 @@ gvim builds the page into the TUI frame instead (`internal/tui/frame/welcome.go`
 model when a tab would otherwise be empty): the three-line wordmark, the `v0.1.0 · Go editor`
 subtitle, the doors **New File**, **Open File**, **Open Folder**, **Command Palette** and
 **Explorer** with the shortcuts of the active keymap, and up to five recent folders. Doors run the
-native actions; rows are mouse targets. The page shows when the editor has no tab open; with
-`editor.auto_create_empty_buffer_on_last_buffer_close` off it also stays after the last tab closes
-(the default leaves one untitled tab instead, see `docs/settings.md`). There is no plugin, no
+native actions; rows are mouse targets. The page shows when the editor has no tab open, including after the last tab closes
+(default; set `editor.auto_create_empty_buffer_on_last_buffer_close` on to open an
+untitled tab instead, see `docs/settings.md`). There is no plugin, no
 `auto_open`/`show_on_startup` toggle and no dashboard-section rows: the dashboard plugin is the
 start-screen surface for that. Not ported from Fresh's page: onboarding levels, chips/hover styling,
 page focus-follows-cursor/scroll-to-widget composition, the Contents sidebar and

@@ -39,9 +39,12 @@ type RemoteDirEntry struct {
 	Name   string
 	IsDir  bool
 	Hidden bool
-	// Ignored is set when a remote .gitignore matches the entry; Rows hides it unless
-	// the tree's show-ignored setting is on.
+	// Ignored is set when a remote .gitignore matches the entry; Rows dims it by
+	// default and hides it when the tree's show-ignored setting is off.
 	Ignored bool
+	// Included marks an entry a file_scan_inclusions match rescues: it is never
+	// ignored, not even through an ignored parent.
+	Included bool
 }
 
 // RemoteDirLoader lists remote directories. The app implements it over
@@ -100,6 +103,7 @@ type RemoteExplorerTree struct {
 
 // NewRemoteExplorerTree returns the tree of root, whose directories come from
 // loader. It reads nothing: the root row is shown until the first listing.
+// Ignored entries are drawn dimmed by default, like the local tree.
 func NewRemoteExplorerTree(root string, loader RemoteDirLoader) *RemoteExplorerTree {
 	name := path.Base(root)
 	if root == "/" || root == "~" || name == "." || name == "/" {
@@ -107,8 +111,9 @@ func NewRemoteExplorerTree(root string, loader RemoteDirLoader) *RemoteExplorerT
 	}
 	t := &RemoteExplorerTree{
 		root: root, loader: loader, timeout: DefaultRemoteExplorerTimeout,
-		nodes:   map[string]*remoteNode{},
-		pending: map[string]uint64{},
+		nodes:       map[string]*remoteNode{},
+		pending:     map[string]uint64{},
+		showIgnored: true,
 	}
 	t.nodes[root] = &remoteNode{path: root, name: name, isDir: true, expanded: true}
 	return t
@@ -180,7 +185,7 @@ func (t *RemoteExplorerTree) rowsLocked() []explorer.Row {
 				parent = i
 			}
 		}
-		row := explorer.Row{Name: n.name, Path: n.path, Depth: depth, IsDir: n.isDir, Expanded: n.expanded, Parent: parent}
+		row := explorer.Row{Name: n.name, Path: n.path, Depth: depth, IsDir: n.isDir, Expanded: n.expanded, Parent: parent, Ignored: n.ignored}
 		rows = append(rows, row)
 		if !n.isDir || !n.expanded || !n.loaded {
 			return
@@ -557,7 +562,9 @@ func (t *RemoteExplorerTree) mergeLocked(dir string, entries []RemoteDirEntry) {
 			t.nodes[cp] = child
 		}
 		child.hidden = strings.HasPrefix(e.Name, ".")
-		child.ignored = e.Ignored
+		// Same rule as the local tree: ignored inherits through an ignored parent,
+		// and a scan inclusion clears it either way.
+		child.ignored = (n.ignored || e.Ignored) && !e.Included
 		fresh = append(fresh, cp)
 	}
 	for _, old := range n.children {

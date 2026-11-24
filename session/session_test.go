@@ -42,11 +42,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		{
 			name: "every field set",
 			in: session.Session{
-				Root:        "/work/project",
-				Explorer:    true,
-				ShowHidden:  true,
-				ShowIgnored: true,
-				Active:      1,
+				Root:          "/work/project",
+				Explorer:      true,
+				ShowHidden:    true,
+				HideGitignore: true,
+				Active:        1,
 				Files: []session.FileState{
 					{Path: "/work/project/main.go", Line: 12, Col: 4, Top: 3},
 					{Path: "/work/project/notes.md", Line: 1, Col: 0, Top: 0, StashFile: "stash-123.txt"},
@@ -332,6 +332,24 @@ func TestSaveWithUnreadablePreviousSessionDeletesNoStash(t *testing.T) {
 	assertExists(t, filepath.Join(dir, stash))
 	if got, ok, err := session.Load(dir); err != nil || !ok || got.Root != "/work" {
 		t.Fatalf("Load() = %+v, %v, %v; want the new session", got, ok, err)
+	}
+}
+
+// TestLoadDropsLegacyShowIgnored checks the migration across the gitignore-model
+// flip: sessions written before it stored "showIgnored":false for "ignored
+// entries hidden by default". The key is retired on purpose, so decoding drops it
+// and HideGitignore stays false — otherwise an upgrade would keep hiding entries
+// the new default shows dimmed.
+func TestLoadDropsLegacyShowIgnored(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "session.json"),
+		fmt.Sprintf(`{"version":%d,"root":"/w","explorer":true,"showHidden":true,"showIgnored":false,"files":[]}`, session.Version))
+	s, ok, err := session.Load(dir)
+	if err != nil || !ok {
+		t.Fatalf("session.Load = %+v, %v, %v", s, ok, err)
+	}
+	if s.HideGitignore {
+		t.Fatal("legacy showIgnored:false leaked into HideGitignore; want ignored entries shown after upgrade")
 	}
 }
 

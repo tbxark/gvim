@@ -195,11 +195,18 @@ type Config struct {
 	LineNumbers            bool   // show the line-number gutter, default true
 	ShowMenuBar            bool   // show the menu bar row, default true
 	ExplorerShowHidden     bool   // list dot-files in the explorer
-	ExplorerShowIgnored    bool   // list files matched by .gitignore in the explorer
 
 	// FileExplorer is the file_explorer section: width, side and the navigation
 	// behaviour options (see config/fileexplorer.go). Fresh's defaults.
 	FileExplorer FileExplorerConfig
+
+	// FileScanExclusions / FileScanInclusions are the top-level
+	// file_scan_exclusions / file_scan_inclusions lists (see
+	// config/filescan.go): gitignore-style root-relative patterns. Exclusions
+	// hard-drop entries from the tree, finder and grep; inclusions clear the
+	// ignored flag of a .gitignore-matched entry. Exclusions beat inclusions.
+	FileScanExclusions []string
+	FileScanInclusions []string
 
 	// Contents is the contents section: settings of the native Contents (Markdown
 	// outline) sidebar section, formerly Fresh's bundled markdown_toc plugin (see
@@ -347,6 +354,9 @@ func Defaults() Config {
 
 		ExplorerShowHidden: true,
 		PluginTimeout:      DefaultPluginTimeout,
+
+		FileScanExclusions: DefaultFileScanExclusions(),
+		FileScanInclusions: DefaultFileScanInclusions(),
 
 		Terminal:      DefaultTerminalOptions(),
 		Daemon:        DefaultDaemonConfig(),
@@ -885,6 +895,21 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		c.Formatters = formatters
 	case "check_for_updates", "update_check_url", "update_command":
 		return c.setUpdate(key, raw)
+	case "file_scan_exclusions":
+		return setFileExplorerStringList(raw, &c.FileScanExclusions)
+	case "file_scan_inclusions":
+		return setFileExplorerStringList(raw, &c.FileScanInclusions)
+	case "explorer_show_ignored":
+		{
+			// The old spelling of file_explorer.hide_gitignore, inverted: files that
+			// asked to show ignored entries now mean "don't hide them".
+			var v bool
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return fmt.Errorf("must be true or false")
+			}
+			c.FileExplorer.HideGitignore = !v
+			return nil
+		}
 	default:
 		if slices.Contains(fileOnlyKeys, key) {
 			return nil // a Fresh key that gvim has no use for
@@ -908,12 +933,11 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 // boolKeys maps each boolean setting that has no Fresh counterpart to the field it
 // sets. The settings that do have one are in editorOptions.
 var boolKeys = map[string]func(*Config) *bool{
-	"insert_spaces":         func(c *Config) *bool { return &c.InsertSpaces },
-	"explorer_show_hidden":  func(c *Config) *bool { return &c.ExplorerShowHidden },
-	"explorer_show_ignored": func(c *Config) *bool { return &c.ExplorerShowIgnored },
-	"mouse_capture":         func(c *Config) *bool { return &c.MouseCapture },
-	"scroll_sync":           func(c *Config) *bool { return &c.ScrollSync },
-	"lsp_enabled":           func(c *Config) *bool { return &c.LSPEnabled },
+	"insert_spaces":        func(c *Config) *bool { return &c.InsertSpaces },
+	"explorer_show_hidden": func(c *Config) *bool { return &c.ExplorerShowHidden },
+	"mouse_capture":        func(c *Config) *bool { return &c.MouseCapture },
+	"scroll_sync":          func(c *Config) *bool { return &c.ScrollSync },
+	"lsp_enabled":          func(c *Config) *bool { return &c.LSPEnabled },
 }
 
 // lspEntry is one language server entry, as Fresh writes it. gvim keeps every field:

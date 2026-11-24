@@ -98,7 +98,7 @@ func TestRemoteFileIndexUsesGitCandidateList(t *testing.T) {
 	one := &finderGitOneShot{repo: true, listing: listing}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w")
+	idx, root := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w", nil, nil)
 	waitRemoteIndex(t, idx)
 	if root != "/remote/w" {
 		t.Fatalf("root = %q", root)
@@ -127,7 +127,7 @@ func TestRemoteFileIndexGitRestartRelists(t *testing.T) {
 	one := &finderGitOneShot{repo: true, listing: []byte(gitLsEntry("100644", "a.go"))}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w")
+	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w", nil, nil)
 	waitRemoteIndex(t, idx)
 	if files, _ := idx.Snapshot(); strings.Join(files, ",") != "a.go" {
 		t.Fatalf("first snapshot = %v", files)
@@ -167,7 +167,7 @@ func TestRemoteFileIndexFallsBackToWalk(t *testing.T) {
 			fs := newRemoteFinderFake().dir("/remote/w", "a.go", "src/", "vendor/").dir("/remote/w/src", "b.go").dir("/remote/w/vendor", "inner.go")
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, makeOne()), "/remote/w")
+			idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, makeOne()), "/remote/w", nil, nil)
 			waitRemoteIndex(t, idx)
 			files, _ := idx.Snapshot()
 			sort.Strings(files)
@@ -188,7 +188,7 @@ func TestRemoteFileIndexGitCandidateCancellation(t *testing.T) {
 	fs := newRemoteFinderFake()
 	one := &finderGitOneShot{repo: true, blockList: true}
 	ctx, cancel := context.WithCancel(context.Background())
-	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w")
+	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w", nil, nil)
 	deadline := time.After(10 * time.Second)
 	for {
 		_, lists := one.counts()
@@ -252,7 +252,7 @@ func TestRemoteFileIndexFallbackNotice(t *testing.T) {
 			fs := newRemoteFinderFake().dir("/remote/w", "walked.go")
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, tc.makeOne()), "/remote/w")
+			idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, tc.makeOne()), "/remote/w", nil, nil)
 			waitRemoteIndex(t, idx)
 			files, _ := idx.Snapshot()
 			if tc.want == "" {
@@ -279,7 +279,7 @@ func TestRemoteFileIndexNoticeClearsOnRefresh(t *testing.T) {
 	one := &finderGitOneShot{repo: true, listCode: 128}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w")
+	idx, _ := newRemoteFileIndex(ctx, remoteFinderSlot(fs, one), "/remote/w", nil, nil)
 	waitRemoteIndex(t, idx)
 	if got := idx.Notice(); !strings.Contains(got, "git file list failed") {
 		t.Fatalf("first notice = %q", got)

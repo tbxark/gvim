@@ -5,10 +5,11 @@
 // directories come before files, and names are compared naturally, so
 // "chapter-2" sorts before "chapter-10" and letter case is ignored. Entries
 // whose name starts with "." are hidden by default, as in the legacy explorer.
-// Entries matched by a .gitignore are hidden by default too
-// (refs/fresh/docs/features/file-explorer.md, "Visibility and .gitignore"). Each
-// directory's own .gitignore applies to it and below. SetShowHidden and
-// SetShowIgnored lift the two rules.
+// Entries matched by a .gitignore are drawn dimmed, as Zed's project panel does
+// (file_explorer.hide_gitignore hides them instead). Each directory's own
+// .gitignore applies to it and below; file_scan_exclusions entries never appear
+// and file_scan_inclusions rescue a .gitignore match. SetShowHidden and
+// SetShowIgnored lift the two visibility rules.
 package explorer
 
 import (
@@ -42,6 +43,9 @@ type Row struct {
 	// first: the ancestors whose single-child directories share this row. It is
 	// nil when compact mode is off or this row starts no chain.
 	Chain []ChainSegment
+	// Ignored marks a row matched by a .gitignore (or below one that is): the
+	// panel draws it dimmed. Rows carries it only when the row is drawn at all.
+	Ignored bool
 }
 
 // ChainSegment is one folder folded into a compact row: the name it shows and
@@ -80,6 +84,8 @@ type Tree struct {
 	respectGitignore     *bool
 	customIgnorePatterns []string
 	previewTabs          *bool
+	scanExclusions       []string // file_scan_exclusions: never a node
+	scanInclusions       []string // file_scan_inclusions: clears ignored
 }
 
 // Open returns a tree rooted at dir, expanded, with its first level loaded.
@@ -110,6 +116,9 @@ func OpenWithOptions(dir string, opts Options) (*Tree, error) {
 		respectGitignore:     opts.RespectGitignore,
 		customIgnorePatterns: slices.Clone(opts.CustomIgnorePatterns),
 		previewTabs:          opts.PreviewTabs,
+		showIgnored:          !opts.HideGitignore,
+		scanExclusions:       slices.Clone(opts.ScanExclusions),
+		scanInclusions:       slices.Clone(opts.ScanInclusions),
 	}
 	t.root = &node{name: filepath.Base(abs), path: abs, isDir: true, expanded: true}
 	t.byPath[abs] = t.root
@@ -138,7 +147,7 @@ func (t *Tree) SetShowHidden(v bool) {
 }
 
 // ShowIgnored reports whether entries matched by .gitignore are drawn. The
-// default is false.
+// default is true; Options.HideGitignore flips it (file_explorer.hide_gitignore).
 func (t *Tree) ShowIgnored() bool { return t.showIgnored }
 
 // SetShowIgnored draws gitignored entries when v is true and hides them when
@@ -149,6 +158,22 @@ func (t *Tree) SetShowIgnored(v bool) {
 		t.dirty = true
 		t.promoteSelection()
 	}
+}
+
+// ScanFilter returns the file_scan_exclusions/file_scan_inclusions lists.
+func (t *Tree) ScanFilter() (exclusions, inclusions []string) {
+	return slices.Clone(t.scanExclusions), slices.Clone(t.scanInclusions)
+}
+
+// SetScanFilter sets the file_scan_exclusions/file_scan_inclusions lists and
+// reloads, since a changed pattern changes which entries the disk scan keeps.
+func (t *Tree) SetScanFilter(exclusions, inclusions []string) {
+	if slices.Equal(t.scanExclusions, exclusions) && slices.Equal(t.scanInclusions, inclusions) {
+		return
+	}
+	t.scanExclusions = slices.Clone(exclusions)
+	t.scanInclusions = slices.Clone(inclusions)
+	_ = t.Reload()
 }
 
 // CompactDirectories reports whether compact-directory rendering is on: a folder
@@ -251,6 +276,7 @@ func (t *Tree) Rows() []Row {
 			Expanded: n.expanded,
 			Parent:   parent,
 			Chain:    chain,
+			Ignored:  n.ignored,
 		})
 		if !n.expanded {
 			return
@@ -665,6 +691,8 @@ func (t *Tree) scan(n *node) ([]*node, error) {
 		IgnoreCache:          t.ignoreCache,
 		RespectGitignore:     t.respectGitignore,
 		CustomIgnorePatterns: t.customIgnorePatterns,
+		ScanExclusions:       t.scanExclusions,
+		ScanInclusions:       t.scanInclusions,
 	})
 	if err != nil {
 		return nil, err
@@ -677,8 +705,9 @@ func (t *Tree) scan(n *node) ([]*node, error) {
 			isDir:  e.IsDir,
 			hidden: e.IsHidden,
 			// git excludes everything under an excluded directory, so a
-			// negation cannot re-include an entry whose parent is ignored.
-			ignored: n.ignored || e.IsIgnored,
+			// negation cannot re-include an entry whose parent is ignored —
+			// but a scan inclusion can.
+			ignored: (n.ignored || e.IsIgnored) && !e.IsIncluded,
 			parent:  n,
 		})
 	}

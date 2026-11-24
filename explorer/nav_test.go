@@ -207,31 +207,31 @@ func TestReloadTable(t *testing.T) {
 			},
 		},
 		{
-			name: "new .gitignore hides entries on the next reload",
+			name: "new .gitignore marks entries ignored on the next reload",
 			mutate: func(t *testing.T, root string) {
 				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("Beta.txt\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
 			check: func(t *testing.T, tree *Tree, root string) {
-				if hasRow(tree, "Beta.txt") {
-					t.Fatal("Beta.txt still listed after its .gitignore rule was added")
+				if r, ok := findRow(tree, "Beta.txt"); !ok || !r.Ignored {
+					t.Fatalf("Beta.txt after its .gitignore rule was added = %+v, want a drawn ignored row", r)
 				}
-				if !hasRow(tree, "Zeta.txt") {
-					t.Fatal("Zeta.txt wrongly hidden")
+				if r, ok := findRow(tree, "Zeta.txt"); !ok || r.Ignored {
+					t.Fatalf("Zeta.txt = %+v, want a drawn non-ignored row", r)
 				}
 			},
 		},
 		{
-			name: "removed .gitignore shows entries again",
+			name: "removed .gitignore clears the ignored mark",
 			mutate: func(t *testing.T, root string) {
 				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.md\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
 			check: func(t *testing.T, tree *Tree, root string) {
-				if hasRow(tree, "chapter-2.md") {
-					t.Fatal("chapter-2.md listed while *.md is ignored")
+				if r, ok := findRow(tree, "chapter-2.md"); !ok || !r.Ignored {
+					t.Fatalf("chapter-2.md while *.md is ignored = %+v, want a drawn ignored row", r)
 				}
 				if err := os.Remove(filepath.Join(root, ".gitignore")); err != nil {
 					t.Fatal(err)
@@ -239,8 +239,8 @@ func TestReloadTable(t *testing.T) {
 				if err := tree.Reload(); err != nil {
 					t.Fatal(err)
 				}
-				if !hasRow(tree, "chapter-2.md") {
-					t.Fatal("chapter-2.md still hidden after .gitignore removed")
+				if r, ok := findRow(tree, "chapter-2.md"); !ok || r.Ignored {
+					t.Fatalf("chapter-2.md after .gitignore removed = %+v, want a drawn non-ignored row", r)
 				}
 			},
 		},
@@ -265,6 +265,16 @@ func TestReloadTable(t *testing.T) {
 			tc.check(t, tree, root)
 		})
 	}
+}
+
+// findRow returns the drawn row with the given name.
+func findRow(tree *Tree, name string) (Row, bool) {
+	for _, r := range tree.Rows() {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return Row{}, false
 }
 
 // hasRow reports whether a drawn row has the given name.

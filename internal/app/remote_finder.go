@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -61,8 +62,13 @@ func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) (
 	out := make([]finder.RemoteEntry, 0, len(entries))
 	for _, e := range entries {
 		isDir := e.Kind == "dir" || (e.Kind == "symlink" && e.TargetKind == "dir")
-		if r.ignore != nil && r.ignore.ignored(ctx, path, e.Name, isDir) {
-			continue
+		if r.ignore != nil {
+			if r.ignore.excluded(path, e.Name, isDir) {
+				continue
+			}
+			if r.ignore.ignored(ctx, path, e.Name, isDir) && !r.ignore.included(path, e.Name, isDir) {
+				continue
+			}
 		}
 		out = append(out, finder.RemoteEntry{Name: e.Name, Kind: e.Kind})
 	}
@@ -75,9 +81,10 @@ func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) (
 // fails the unexpanded root is kept and the enumeration error is surfaced by the index,
 // never by falling back to local files. The enumeration function runs once per index run,
 // so a Restart/refresh re-reads the remote git listing.
-func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (*finder.Index, string) {
+func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string, scanExclusions, scanInclusions []string) (*finder.Index, string) {
 	expanded := expandRemoteRoot(ctx, slot, root)
 	files := func() authority.FileSystem { return slot.Files() }
+	scan := explorer.NewScanMatcher(scanExclusions, scanInclusions)
 	enum := func(ctx context.Context, emit func(string) bool, notify func(string)) error {
 		candidates, ok, notice := remoteFinderGitCandidates(ctx, slot, expanded)
 		if ok {
@@ -85,8 +92,26 @@ func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+				if scan.ExcludedPath(rel, false) {
+					continue
+				}
 				if !emit(rel) {
 					return nil
+				}
+			}
+			if scan.HasInclusions() {
+				// The same rescue the local walk performs: ignored files an
+				// inclusion matches are indexed anyway.
+				for _, rel := range remoteFinderGitIgnored(ctx, slot, expanded) {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if !scan.IncludedPath(rel, false) || scan.ExcludedPath(rel, false) {
+						continue
+					}
+					if !emit(rel) {
+						return nil
+					}
 				}
 			}
 			return nil
@@ -94,7 +119,9 @@ func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (
 		if notice != "" {
 			notify(notice)
 		}
-		return finder.EnumerateRemote(ctx, remoteFinderFS{files: files, ignore: newIgnoreBatch(files, expanded)}, expanded, finder.Options{}, emit)
+		return finder.EnumerateRemote(ctx,
+			remoteFinderFS{files: files, ignore: newIgnoreBatchWithOptions(files, expanded, true, nil, scanExclusions, scanInclusions)},
+			expanded, finder.Options{ScanExclusions: scanExclusions, ScanInclusions: scanInclusions}, emit)
 	}
 	x := finder.StartFuncNotify(ctx, enum)
 	// The literal-path probe is authority-only too: it resolves the candidate through
@@ -233,10 +260,56 @@ func remoteFinderGitCandidates(ctx context.Context, slot authority.Slot, root st
 	return out, true, ""
 }
 
+// remoteFinderGitIgnored lists the remote work tree's ignored untracked files
+// (`git ls-files -o -i --exclude-standard`): the pool the file_scan_inclusions
+// rescue into the index. nil on any failure — the rescue pass is best-effort,
+// the base candidates are already emitted.
+func remoteFinderGitIgnored(ctx context.Context, slot authority.Slot, root string) []string {
+	if slot == nil {
+		return nil
+	}
+	one := slot.OneShot()
+	if one == nil {
+		return nil
+	}
+	listCtx, stop := context.WithTimeout(ctx, remoteFinderGitListTimeout)
+	list, err := one.Run(listCtx, []string{"git", "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--others", "-i", "--exclude-standard"}, hostos.ProcOptions{Cwd: root, MaxOutput: remoteFinderGitMaxBytes})
+	stop()
+	if err != nil || list.Code != 0 || list.Truncated {
+		return nil
+	}
+	var out []string
+	for _, raw := range strings.Split(string(list.Stdout), "\x00") {
+		if raw == "" {
+			continue
+		}
+		rel, _, submodule := parseGitLsFilesEntry(raw)
+		if submodule || (!strings.ContainsRune(raw, '\t') && strings.HasSuffix(rel, "/")) {
+			continue
+		}
+		if remoteFinderCandidateAllowDot(rel) {
+			out = append(out, rel)
+		}
+	}
+	return out
+}
+
+// remoteFinderCandidate is remoteFinderCandidateCheck with hidden names refused,
+// the quick-open scope.
+func remoteFinderCandidate(rel string) bool {
+	return remoteFinderCandidateCheck(rel, false)
+}
+
+// remoteFinderCandidateAllowDot is remoteFinderCandidateCheck with dot segments
+// allowed: the inclusion-rescue pass lists ignored dotfiles like .env.
+func remoteFinderCandidateAllowDot(rel string) bool {
+	return remoteFinderCandidateCheck(rel, true)
+}
+
 // remoteFinderCandidate accepts one slash-relative git listing path in the quick-open
 // scope: it rejects .git internals, hidden segments, skip directories, invalid names,
 // non-UTF-8 names and paths deeper than the finder's remote walk bound.
-func remoteFinderCandidate(rel string) bool {
+func remoteFinderCandidateCheck(rel string, allowDot bool) bool {
 	if rel == "" || rel == ".git" || strings.HasPrefix(rel, ".git/") || !utf8.ValidString(rel) {
 		return false
 	}
@@ -248,7 +321,7 @@ func remoteFinderCandidate(rel string) bool {
 		if seg == "" || seg == "." || seg == ".." || strings.ContainsAny(seg, "\\\x00") {
 			return false
 		}
-		if strings.HasPrefix(seg, ".") {
+		if strings.HasPrefix(seg, ".") && !allowDot {
 			return false
 		}
 		if i < len(segs)-1 && remoteFinderSkipDir(seg) {

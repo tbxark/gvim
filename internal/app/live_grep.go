@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,12 @@ type liveGrep struct {
 
 	customMu      sync.Mutex
 	customMatcher gitignore.Matcher
+
+	// scanExclusions/scanInclusions are the file_scan_* lists handed to the
+	// ignored-scope walk: exclusions hard-drop entries, inclusions rescue
+	// gitignored (and hidden) files into the searched set.
+	scanExclusions []string
+	scanInclusions []string
 
 	// mu guards the listing of the hidden and ignored files. That listing walks the
 	// tree, which is expensive, so it is cached for the root last searched, for
@@ -74,6 +81,15 @@ func (g *liveGrep) SetCustomIgnorePatterns(pats []string) {
 	g.customMu.Unlock()
 
 	g.mu.Lock()
+	g.walkList = nil
+	g.mu.Unlock()
+}
+
+// SetScanFilter configures the file_scan_exclusions/file_scan_inclusions lists.
+func (g *liveGrep) SetScanFilter(exclusions, inclusions []string) {
+	g.mu.Lock()
+	g.scanExclusions = slices.Clone(exclusions)
+	g.scanInclusions = slices.Clone(inclusions)
 	g.walkList = nil
 	g.mu.Unlock()
 }
@@ -347,7 +363,12 @@ func (g *liveGrep) ignoredFiles(root string) []string {
 		return g.walkList
 	}
 	list := make([]string, 0, 1024)
-	_ = finder.EnumerateAll(context.Background(), root, finder.Options{ShowHidden: true, ShowIgnored: true}, func(rel string) bool {
+	_ = finder.EnumerateAll(context.Background(), root, finder.Options{
+		ShowHidden:     true,
+		ShowIgnored:    true,
+		ScanExclusions: g.scanExclusions,
+		ScanInclusions: g.scanInclusions,
+	}, func(rel string) bool {
 		if g.matchesCustom(rel) {
 			return true
 		}

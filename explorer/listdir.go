@@ -34,6 +34,13 @@ type ListOptions struct {
 	RespectGitignore *bool
 	// CustomIgnorePatterns are additional wildcard patterns (e.g. *.log, build/).
 	CustomIgnorePatterns []string
+	// ScanExclusions are gitignore-style patterns relative to IgnoreRoot
+	// (file_scan_exclusions): a match is a hard exclusion and never listed.
+	ScanExclusions []string
+	// ScanInclusions are gitignore-style patterns relative to IgnoreRoot
+	// (file_scan_inclusions): a match clears IsIgnored even when a .gitignore
+	// matches the entry. Exclusions win over inclusions.
+	ScanInclusions []string
 }
 
 // RespectGitignoreEnabled reports whether gitignore is respected (default true).
@@ -50,8 +57,11 @@ type Entry struct {
 	IsSymlink bool
 	IsHidden  bool
 	IsIgnored bool // matched by a .gitignore; only listed when ShowIgnored is set
-	Size      int64
-	ModTime   time.Time
+	// IsIncluded marks an entry a scan inclusion rescues from a .gitignore
+	// match; such an entry is never ignored, not even through a parent that is.
+	IsIncluded bool
+	Size       int64
+	ModTime    time.Time
 }
 
 // ListDir returns the entries of dir in tree display order: directories first,
@@ -93,6 +103,7 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 	if len(rules) > 0 {
 		m = gitignore.NewMatcher(rules)
 	}
+	scan := scanMatchersFor(opts.ScanExclusions, opts.ScanInclusions)
 
 	out := make([]Entry, 0, len(dirents))
 	for _, d := range dirents {
@@ -126,21 +137,28 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 			size = info.Size()
 			modTime = info.ModTime()
 		}
+		entryRel := append(slices.Clip(rel), name)
+		if scan.excluded(entryRel, isDir) {
+			continue
+		}
 		var ignored bool
 		if m != nil {
-			ignored = m.Match(append(slices.Clip(rel), name), isDir)
+			ignored = m.Match(entryRel, isDir)
 		}
+		included := scan.included(entryRel, isDir)
+		ignored = ignored && !included
 		if ignored && !opts.ShowIgnored {
 			continue
 		}
 		out = append(out, Entry{
-			Name:      name,
-			IsDir:     isDir,
-			IsSymlink: isSymlink,
-			IsHidden:  hidden,
-			IsIgnored: ignored,
-			Size:      size,
-			ModTime:   modTime,
+			Name:       name,
+			IsDir:      isDir,
+			IsSymlink:  isSymlink,
+			IsHidden:   hidden,
+			IsIgnored:  ignored,
+			IsIncluded: included,
+			Size:       size,
+			ModTime:    modTime,
 		})
 	}
 	slices.SortFunc(out, func(a, b Entry) int {

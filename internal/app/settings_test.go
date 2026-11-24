@@ -18,7 +18,7 @@ func TestNestedConfigReachesEditorAndUI(t *testing.T) {
 	body := `{"editor": {
 		"auto_close": false, "auto_surround": false, "virtual_space": "on", "scroll_offset": 7,
 		"auto_read_only": false, "snapshot_interval": 10, "confirm_quit": true,
-		"auto_create_empty_buffer_on_last_buffer_close": false,
+		"auto_create_empty_buffer_on_last_buffer_close": true,
 		"recovery_enabled": false, "auto_recovery_save_interval_secs": 9,
 		"auto_revert_poll_interval_ms": 11, "large_file_threshold_bytes": 12, "estimated_line_length": 13,
 		"ephemeral_file_patterns": ["**/tmp/**"],
@@ -33,7 +33,7 @@ func TestNestedConfigReachesEditorAndUI(t *testing.T) {
 	}
 	o := got.editor
 	if o.AutoClose || o.AutoSurround || o.VirtualSpace != "on" || o.ScrollOffset != 7 || o.AutoReadOnly ||
-		o.SnapshotInterval != 10 || !o.ConfirmQuit || o.AutoCreateEmptyBufferOnLastBufferClose ||
+		o.SnapshotInterval != 10 || !o.ConfirmQuit || !o.AutoCreateEmptyBufferOnLastBufferClose ||
 		o.RecoveryEnabled || o.AutoRecoverySaveIntervalSecs != 9 || o.AutoRevertPollIntervalMS != 11 ||
 		o.LargeFileThresholdBytes != 12 || o.EstimatedLineLength != 13 {
 		t.Errorf("editor.Options = %+v", o)
@@ -80,6 +80,10 @@ func TestDefaultConfigGivesFreshViewDefaults(t *testing.T) {
 	// image_protocol has a config default ("auto") while DefaultViewOptions leaves
 	// the field empty; the empty value reads as auto at runtime.
 	v.ImageProtocol = want.ImageProtocol
+	if !slices.Equal(v.Explorer.ScanExclusions, config.Defaults().FileScanExclusions) || !slices.Equal(v.Explorer.ScanInclusions, config.Defaults().FileScanInclusions) {
+		t.Errorf("explorer scan lists = %v / %v, want the config defaults", v.Explorer.ScanExclusions, v.Explorer.ScanInclusions)
+	}
+	v.Explorer.ScanExclusions, v.Explorer.ScanInclusions = want.Explorer.ScanExclusions, want.Explorer.ScanInclusions
 	if !reflect.DeepEqual(v, want) {
 		t.Errorf("Deps.View = %+v\nwant       %+v", v, want)
 	}

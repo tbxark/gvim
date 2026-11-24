@@ -81,7 +81,7 @@ func TestRemoteFileIndexRestartUsesRecoveredFilesystem(t *testing.T) {
 	slot := &dynamicFilesSlot{Fake: authoritytest.New(), fs: oldFS}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	idx, root := newRemoteFileIndex(ctx, slot, "/remote/w")
+	idx, root := newRemoteFileIndex(ctx, slot, "/remote/w", nil, nil)
 	if root != "/remote/w" {
 		t.Fatalf("root = %q", root)
 	}

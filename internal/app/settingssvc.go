@@ -56,7 +56,7 @@ type settingsService struct {
 	// envWatch is the env-input/detector watcher of the launch (local fsnotify or the
 	// remote authority watcher). A config Reload that changes env.detectors re-plans its
 	// bounded watch set.
-	envWatch envWatchReplanner
+	envWatch     envWatchReplanner
 	configReload func(config.Config)
 
 	// lastDiags are the diagnostics of the last reload, so a write-then-reload
@@ -719,6 +719,12 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 		return s.structureStatusBar(cfg, object, structureKey), nil
 	case structureKey == "terminal.shell.args":
 		return s.structureShellArgs(cfg, object), nil
+	case structureKey == "file_scan_exclusions":
+		return structureStringList(object, "file_scan_exclusions", "File Scan Exclusions", "exclusion", cfg.FileScanExclusions), nil
+	case structureKey == "file_scan_inclusions":
+		return structureStringList(object, "file_scan_inclusions", "File Scan Inclusions", "inclusion", cfg.FileScanInclusions), nil
+	case structureKey == "file_explorer.custom_ignore_patterns":
+		return structureStringList(object, "file_explorer.custom_ignore_patterns", "Custom Ignore Patterns", "pattern", cfg.FileExplorer.CustomIgnorePatterns), nil
 	}
 	return tui.SettingsStructure{}, fmt.Errorf("unknown settings structure %q", structureKey)
 }
@@ -927,6 +933,27 @@ func (s *settingsService) structureStatusBar(cfg config.Config, object map[strin
 	return st
 }
 
+// structureStringList is a generic string-list sub-page for a config path that
+// holds a whole JSON array of strings (file_scan_* and
+// file_explorer.custom_ignore_patterns): each element is one row, the layer's
+// value wins over the effective config when it sets the key.
+func structureStringList(object map[string]json.RawMessage, key, title, noun string, cfgList []string) tui.SettingsStructure {
+	st := tui.SettingsStructure{Key: key, Title: settingsPage(key, title), Kind: "list", AddLabel: settingsAdd(noun, "Add "+noun+"…")}
+	list := cfgList
+	path := strings.Split(key, ".")
+	if raw, ok := layerRawAt(object, path); ok {
+		if decoded, ok := stringList(raw); ok {
+			list = decoded
+		}
+	}
+	for _, item := range list {
+		st.Rows = append(st.Rows, tui.SettingsStructureRow{
+			Path: path, Name: item, Value: item,
+		})
+	}
+	return st
+}
+
 // structureShellArgs is the terminal.shell.args list sub-page.
 func (s *settingsService) structureShellArgs(cfg config.Config, object map[string]json.RawMessage) tui.SettingsStructure {
 	st := tui.SettingsStructure{Key: "terminal.shell.args", Title: settingsPage("shell_arguments", "Shell Arguments"), Kind: "list", AddLabel: settingsAdd("argument", "Add argument…")}
@@ -981,6 +1008,10 @@ func structuredSettingChanged(key string, old, next config.Config) bool {
 		return !slices.Equal(old.Terminal.Shell.Args, next.Terminal.Shell.Args)
 	case "file_explorer.custom_ignore_patterns":
 		return !slices.Equal(old.FileExplorer.CustomIgnorePatterns, next.FileExplorer.CustomIgnorePatterns)
+	case "file_scan_exclusions":
+		return !slices.Equal(old.FileScanExclusions, next.FileScanExclusions)
+	case "file_scan_inclusions":
+		return !slices.Equal(old.FileScanInclusions, next.FileScanInclusions)
 	}
 	return false
 }

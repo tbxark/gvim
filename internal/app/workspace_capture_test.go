@@ -115,7 +115,7 @@ func TestWorkspaceCaptureMatchesWriteSession(t *testing.T) {
 		t.Fatalf("captured session = %+v, %v, %v", got, ok, err)
 	}
 	if got.Root != ref.Root || got.Explorer != ref.Explorer || got.ShowHidden != ref.ShowHidden ||
-		got.ShowIgnored != ref.ShowIgnored || got.Active != ref.Active {
+		got.HideGitignore != ref.HideGitignore || got.Active != ref.Active {
 		t.Fatalf("layout differs:\n got %+v\nref %+v", got, ref)
 	}
 	if !reflect.DeepEqual(got.Sidebar, ref.Sidebar) {

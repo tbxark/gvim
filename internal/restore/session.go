@@ -128,15 +128,15 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 		layout = SplitLayoutFor(files, layouts[0])
 	}
 	return session.Save(dir, session.Session{
-		Root:        st.Root,
-		Explorer:    st.Open,
-		ShowHidden:  st.ShowHidden,
-		ShowIgnored: st.ShowIgnored,
-		Active:      active,
-		Files:       files,
-		MRU:         mru,
-		Sidebar:     SaveSidebarState(st.Sidebar),
-		Layout:      layout,
+		Root:          st.Root,
+		Explorer:      st.Open,
+		ShowHidden:    st.ShowHidden,
+		HideGitignore: !st.ShowIgnored,
+		Active:        active,
+		Files:         files,
+		MRU:           mru,
+		Sidebar:       SaveSidebarState(st.Sidebar),
+		Layout:        layout,
 	})
 }
 

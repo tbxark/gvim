@@ -139,19 +139,18 @@ var defaultEditorOptions = editor.Options{
 	DefaultLineEnding: "LF",
 
 	// The Fresh editor.* defaults, which the config supplies without a file.
-	AutoClose:                              true,
-	AutoSurround:                           true,
-	VirtualSpace:                           "off",
-	ScrollOffset:                           3,
-	AutoReadOnly:                           true,
-	SnapshotInterval:                       100,
-	AutoCreateEmptyBufferOnLastBufferClose: true,
-	RecoveryEnabled:                        true,
-	AutoRecoverySaveIntervalSecs:           2,
-	AutoRevertPollIntervalMS:               2000,
-	LargeFileThresholdBytes:                10485760,
-	LargeFileMode:                          true,
-	EstimatedLineLength:                    80,
+	AutoClose:                    true,
+	AutoSurround:                 true,
+	VirtualSpace:                 "off",
+	ScrollOffset:                 3,
+	AutoReadOnly:                 true,
+	SnapshotInterval:             100,
+	RecoveryEnabled:              true,
+	AutoRecoverySaveIntervalSecs: 2,
+	AutoRevertPollIntervalMS:     2000,
+	LargeFileThresholdBytes:      10485760,
+	LargeFileMode:                true,
+	EstimatedLineLength:          80,
 }
 
 // withEditorDefaults is defaultEditorOptions with the tab size and line ending replaced.
@@ -352,19 +351,27 @@ func TestConfigExplorerSettingsReachTree(t *testing.T) {
 	tests := []struct {
 		name        string
 		body        string
+		gitignore   string
 		wantHidden  bool // .env is listed
 		wantIgnored bool // build.log is listed
 	}{
-		{"defaults", ``, true, false},
-		{"explorer_show_hidden", `{"explorer_show_hidden": false}`, false, false},
-		{"explorer_show_ignored", `{"explorer_show_ignored": true}`, true, true},
+		{"defaults", ``, "", true, true},
+		{"explorer_show_hidden", `{"explorer_show_hidden": false}`, "", false, true},
+		{"explorer_show_ignored alias hides", `{"explorer_show_ignored": false}`, "", true, false},
+		{"hide_gitignore", `{"file_explorer": {"hide_gitignore": true}}`, "", true, false},
+		{"file_scan_exclusions", `{"file_scan_exclusions": ["*.log"]}`, "", true, false},
+		{"file_scan_inclusions un-ignore", `{"file_explorer": {"hide_gitignore": true}}`, "*.log\n.env\n", true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := projectRoot(t, tt.body)
 			writeTestFile(t, filepath.Join(opts.Root, ".env"), "SECRET=1\n")
 			writeTestFile(t, filepath.Join(opts.Root, "build.log"), "log\n")
-			writeTestFile(t, filepath.Join(opts.Root, ".gitignore"), "*.log\n")
+			gitignore := tt.gitignore
+			if gitignore == "" {
+				gitignore = "*.log\n"
+			}
+			writeTestFile(t, filepath.Join(opts.Root, ".gitignore"), gitignore)
 			got, err := buildCaptured(t, opts)
 			if err != nil {
 				t.Fatalf("buildModel() error = %v", err)

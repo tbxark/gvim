@@ -276,14 +276,14 @@ func (b *runtimeBuild) loadConfig() error {
 // opens the files named on the command line and runs crash recovery.
 func (b *runtimeBuild) openEditor() error {
 	opts, cfg, root, plan := &b.opts, b.cfg, b.root, b.plan
-	expOpts := explorerOptions(cfg.FileExplorer)
+	expOpts := explorerOptions(cfg)
 	tree, err := explorer.OpenWithOptions(root, expOpts)
 	if err != nil {
 		return err
 	}
 	b.tree = tree
 	tree.SetShowHidden(cfg.ExplorerShowHidden)
-	tree.SetShowIgnored(cfg.ExplorerShowIgnored)
+	tree.SetShowIgnored(!cfg.FileExplorer.HideGitignore)
 	if cfg.FileExplorer.RespectGitignore != nil {
 		tree.SetRespectGitignore(*cfg.FileExplorer.RespectGitignore)
 	}
@@ -329,7 +329,7 @@ func (b *runtimeBuild) openEditor() error {
 			case plan.tabs:
 				b.failed = restore.RestoreSession(ed, opts.SessionDir, s)
 				tree.SetShowHidden(s.ShowHidden)
-				tree.SetShowIgnored(s.ShowIgnored)
+				tree.SetShowIgnored(!s.HideGitignore)
 				// The sidebar UI state is restored with the saved layout; a hot-exit
 				// restore and a file launch keep the config defaults.
 				b.sidebarState = restore.SidebarState(s)
@@ -421,6 +421,8 @@ func (b *runtimeBuild) startWorkspace() {
 		b.files = uiadapter.StartFiles(b.ctx, b.root, finder.Options{
 			RespectGitignore:     b.cfg.FileExplorer.RespectGitignore,
 			CustomIgnorePatterns: b.cfg.FileExplorer.CustomIgnorePatterns,
+			ScanExclusions:       b.cfg.FileScanExclusions,
+			ScanInclusions:       b.cfg.FileScanInclusions,
 		})
 	}
 	b.watcher, b.events = startWatcher(b.watching)

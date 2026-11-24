@@ -50,6 +50,11 @@ type Options struct {
 	RespectGitignore *bool
 	// CustomIgnorePatterns are additional wildcard patterns (e.g. *.log, build/).
 	CustomIgnorePatterns []string
+	// ScanExclusions are the top-level file_scan_exclusions: matched entries are
+	// never emitted. ScanInclusions are file_scan_inclusions: a match makes a
+	// .gitignore-matched file emit anyway (exclusions beat inclusions).
+	ScanExclusions []string
+	ScanInclusions []string
 }
 
 // RespectGitignoreEnabled reports whether gitignore is respected (default true).
@@ -59,8 +64,17 @@ func (o Options) RespectGitignoreEnabled() bool {
 
 // EnumerateWithOptions calls emit with each project file under root using the given options.
 func EnumerateWithOptions(ctx context.Context, root string, opts Options, emit func(rel string) bool) error {
-	if opts.RespectGitignoreEnabled() && !opts.ShowHidden && !opts.ShowIgnored {
+	scan := explorer.NewScanMatcher(opts.ScanExclusions, opts.ScanInclusions)
+	// The git fast path lists only non-ignored files; with inclusions configured
+	// the walk must run anyway to find the rescued files under ignored dirs.
+	if opts.RespectGitignoreEnabled() && !opts.ShowHidden && !opts.ShowIgnored && !scan.HasInclusions() {
 		matcher := explorer.NewPatternMatcher(opts.CustomIgnorePatterns)
+		if scan.HasExclusions() {
+			base := matcher
+			matcher = func(rel string, isDir bool) bool {
+				return scan.ExcludedPath(rel, isDir) || (base != nil && base(rel, isDir))
+			}
+		}
 		done, err := gitFilesFiltered(ctx, root, matcher, emit)
 		if done {
 			return err
@@ -75,6 +89,8 @@ func EnumerateWithOptions(ctx context.Context, root string, opts Options, emit f
 		SkipDirs:             skipDirs,
 		RespectGitignore:     opts.RespectGitignore,
 		CustomIgnorePatterns: opts.CustomIgnorePatterns,
+		ScanExclusions:       opts.ScanExclusions,
+		ScanInclusions:       opts.ScanInclusions,
 	}, emit)
 }
 

@@ -301,11 +301,11 @@ func TestRemoteTreeReveal(t *testing.T) {
 }
 
 // TestRemoteTreeWriteCapabilities checks the remote tree's ignored-entry setting
-// round-trips (remote gitignore filtering stays unsupported).
+// round-trips.
 func TestRemoteTreeWriteCapabilities(t *testing.T) {
 	tree := NewRemoteExplorerTree("/srv/proj", remoteTreeTestLoader())
-	if tree.ShowIgnored() {
-		t.Fatal("the remote tree lists ignored entries by default")
+	if !tree.ShowIgnored() {
+		t.Fatal("the remote tree hides ignored entries by default")
 	}
 	tree.SetShowIgnored(true)
 	if !tree.ShowIgnored() {
@@ -317,20 +317,25 @@ func TestRemoteTreeWriteCapabilities(t *testing.T) {
 	}
 }
 
-// TestRemoteTreeHidesIgnoredRows checks the loader's Ignored flag hides rows by default
-// and the show-ignored toggle shows them, as the local tree does.
-func TestRemoteTreeHidesIgnoredRows(t *testing.T) {
+// TestRemoteTreeDimsIgnoredRows checks the loader's Ignored flag dims rows by
+// default and the hide-ignored toggle removes them, as the local tree does.
+func TestRemoteTreeDimsIgnoredRows(t *testing.T) {
 	loader := (&fakeRemoteLoader{}).set("/srv/proj",
 		RemoteDirEntry{Name: "a.go"},
 		RemoteDirEntry{Name: "b.log", Ignored: true},
 	)
 	tree := NewRemoteExplorerTree("/srv/proj", loader)
 	applyRemoteInitial(t, tree)
+	wantRemoteRows(t, tree, "proj", "a.go", "b.log")
+	for _, r := range tree.Rows() {
+		if r.Name == "b.log" && !r.Ignored {
+			t.Fatalf("b.log row = %+v, want the ignored mark", r)
+		}
+	}
+	tree.SetShowIgnored(false)
 	wantRemoteRows(t, tree, "proj", "a.go")
 	tree.SetShowIgnored(true)
 	wantRemoteRows(t, tree, "proj", "a.go", "b.log")
-	tree.SetShowIgnored(false)
-	wantRemoteRows(t, tree, "proj", "a.go")
 }
 
 // TestRemoteTreeTakeLoadNotice checks a degraded load/watch notice is handed to the root

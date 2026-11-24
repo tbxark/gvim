@@ -146,6 +146,15 @@ type Options struct {
 	// PreviewTabs is file_explorer.preview_tabs: whether single-clicking or
 	// navigating files opens a preview tab. Default true.
 	PreviewTabs *bool
+	// HideGitignore is file_explorer.hide_gitignore: hide entries matched by a
+	// .gitignore instead of drawing them dimmed. Default false.
+	HideGitignore bool
+	// ScanExclusions is the top-level file_scan_exclusions list: gitignore-style
+	// root-relative patterns whose entries never become nodes.
+	ScanExclusions []string
+	// ScanInclusions is the top-level file_scan_inclusions list: a match clears
+	// the ignored flag even when a .gitignore matches.
+	ScanInclusions []string
 }
 
 // DefaultOptions returns Fresh's defaults for the non-width explorer options:

@@ -80,10 +80,15 @@ func (b *runtimeBuild) wireSettingsService() {
 			files.SetOptions(root, finder.Options{
 				RespectGitignore:     next.FileExplorer.RespectGitignore,
 				CustomIgnorePatterns: next.FileExplorer.CustomIgnorePatterns,
+				ScanExclusions:       next.FileScanExclusions,
+				ScanInclusions:       next.FileScanInclusions,
 			})
 		}
+		if grep != nil {
+			grep.SetScanFilter(next.FileScanExclusions, next.FileScanInclusions)
+		}
 		if isRemote && remoteLoader != nil {
-			remoteLoader.SetIgnoreOptions(next.FileExplorer.RespectGitignore, next.FileExplorer.CustomIgnorePatterns)
+			remoteLoader.SetIgnoreOptions(next.FileExplorer.RespectGitignore, next.FileExplorer.CustomIgnorePatterns, next.FileScanExclusions, next.FileScanInclusions)
 		}
 	})
 	if b.localWatchRetryObj != nil {

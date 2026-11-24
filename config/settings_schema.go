@@ -287,9 +287,12 @@ var settingsTable = []Setting{
 	{Path: []string{"explorer_show_hidden"}, Section: SectionExplorer, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ExplorerShowHidden }), encode: encodeBool},
-	{Path: []string{"explorer_show_ignored"}, Section: SectionExplorer, Kind: SettingBool,
+	{Path: []string{"file_scan_exclusions"}, Section: SectionExplorer, Kind: SettingPage,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
-		value: boolValue(func(c Config) bool { return c.ExplorerShowIgnored }), encode: encodeBool},
+		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileScanExclusions)) }},
+	{Path: []string{"file_scan_inclusions"}, Section: SectionExplorer, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileScanInclusions)) }},
 
 	// Contents (the Markdown outline sidebar section; the retired markdown_toc
 	// plugin's fold_buffer setting is the same behavior under Fresh's plugin path).
@@ -384,6 +387,9 @@ var settingsTable = []Setting{
 	{Path: []string{"file_explorer", "respect_gitignore"}, Section: SectionFileExplorer, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.FileExplorer.RespectGitignoreEnabled() }), encode: encodeBool},
+	{Path: []string{"file_explorer", "hide_gitignore"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.FileExplorer.HideGitignore }), encode: encodeBool},
 	{Path: []string{"file_explorer", "custom_ignore_patterns"}, Section: SectionFileExplorer, Kind: SettingPage,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileExplorer.CustomIgnorePatterns)) }},

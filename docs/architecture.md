@@ -931,9 +931,12 @@ of any other version is skipped with a diagnostic and never modified.
   `authority.Files()` (never the local disk), bounded to 64 directory levels, 64 KiB per
   file and 4096 accumulated rules; a missing file is normal, while an oversized or
   unreadable one (or a depth/rule overflow) keeps the listing working with ignore
-  filtering incomplete and one explicit notice. Ignored entries are hidden by default
-  and revealed by the existing show-gitignored toggle (rows carry the loader's Ignored
-  flag); the remote finder index filters through the same ignore batch, so the palette
+  filtering incomplete and one explicit notice. Ignored entries are drawn dimmed by
+  default (rows carry the loader's Ignored flag), the toggle-gitignored command /
+  `file_explorer.hide_gitignore` hides them, the file_scan_exclusions patterns drop
+  entries from the listing entirely and file_scan_inclusions rescues ignored ones —
+  the same semantics as the local tree; the remote finder index filters through the
+  same ignore batch, so the palette
   stops listing ignored files and directories. Remote directory watching reuses the
   existing authority-backed `remoteWatch` bridge: the explorer loader adds each listed
   directory to `RootPorts.WatchDirs`, so the polled authority Watch refreshes the listing

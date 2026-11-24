@@ -27,21 +27,21 @@ import (
 // rows of SettingsSnapshot. Settings stays because gvim.config.get and the dump
 // command read it.
 type Settings struct {
-	Theme               string
-	Keymap              string
-	TabSize             int
-	InsertSpaces        bool
-	AutoIndent          bool
-	LineNumbers         bool
-	MenuBar             bool
-	ExplorerShowHidden  bool
-	ExplorerShowIgnored bool
-	UIIcons             string // the ui_icons setting: "auto", "plain" or "nerd"; empty reads as auto
-	UIIconsFont         string // the ui_icons_font setting
-	UIImageProtocol     string // the image_protocol setting: "auto", "kitty" or "off"; empty reads as auto
-	IconsMode           string // the icon set in use, "plain" or "nerd", after "auto" is resolved
-	IconsWhy            string // why that set: the setting, the font or the terminal
-	ConfigFile          string
+	Theme                 string
+	Keymap                string
+	TabSize               int
+	InsertSpaces          bool
+	AutoIndent            bool
+	LineNumbers           bool
+	MenuBar               bool
+	ExplorerShowHidden    bool
+	ExplorerHideGitignore bool
+	UIIcons               string // the ui_icons setting: "auto", "plain" or "nerd"; empty reads as auto
+	UIIconsFont           string // the ui_icons_font setting
+	UIImageProtocol       string // the image_protocol setting: "auto", "kitty" or "off"; empty reads as auto
+	IconsMode             string // the icon set in use, "plain" or "nerd", after "auto" is resolved
+	IconsWhy              string // why that set: the setting, the font or the terminal
+	ConfigFile            string
 	// FoldBuffer is contents.fold_buffer, the Contents section's heading-fold
 	// switch. It is applied live by applyLiveSetting.
 	FoldBuffer bool
@@ -69,7 +69,7 @@ func settingsRows(s Settings) []list.Row {
 		{Left: "line_numbers", Right: onOff(s.LineNumbers)},
 		{Left: "show_menu_bar", Right: onOff(s.MenuBar)},
 		{Left: "explorer_show_hidden", Right: onOff(s.ExplorerShowHidden)},
-		{Left: "explorer_show_ignored", Right: onOff(s.ExplorerShowIgnored)},
+		{Left: "file_explorer.hide_gitignore", Right: onOff(s.ExplorerHideGitignore)},
 		{Left: settingsIconsKey, Right: iconsSettingText(s, iconModeOf(s))},
 		{Left: "ui_icons_font", Right: orNone(s.UIIconsFont)},
 		{Left: "image_protocol", Right: imageProtocolText(s.UIImageProtocol)},
@@ -1161,10 +1161,6 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 		if m.tree != nil {
 			m.tree.SetShowHidden(change.Settings.ExplorerShowHidden)
 		}
-	case "explorer_show_ignored":
-		if m.tree != nil {
-			m.tree.SetShowIgnored(change.Settings.ExplorerShowIgnored)
-		}
 	case "editor.status_bar.left", "editor.status_bar.right", "editor.status_bar.separator":
 		m.view.opts.StatusBar = v.StatusBar
 	case "file_explorer.width":
@@ -1189,6 +1185,17 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 		m.view.opts.Explorer.CompactDirectories = v.Explorer.CompactDirectories
 		if c, ok := m.tree.(interface{ SetCompactDirectories(bool) }); ok {
 			c.SetCompactDirectories(v.Explorer.CompactDirectories)
+		}
+	case "file_scan_exclusions", "file_scan_inclusions":
+		m.view.opts.Explorer.ScanExclusions = slices.Clone(v.Explorer.ScanExclusions)
+		m.view.opts.Explorer.ScanInclusions = slices.Clone(v.Explorer.ScanInclusions)
+		if c, ok := m.tree.(interface{ SetScanFilter([]string, []string) }); ok {
+			c.SetScanFilter(v.Explorer.ScanExclusions, v.Explorer.ScanInclusions)
+		}
+	case "file_explorer.hide_gitignore":
+		m.view.opts.Explorer.HideGitignore = v.Explorer.HideGitignore
+		if m.tree != nil {
+			m.tree.SetShowIgnored(!v.Explorer.HideGitignore)
 		}
 	case "file_explorer.respect_gitignore":
 		m.view.opts.Explorer.RespectGitignore = v.Explorer.RespectGitignore

@@ -316,7 +316,7 @@ func TestConfigShowReal(t *testing.T) {
   "line_numbers": true,
   "show_menu_bar": true,
   "explorer_show_hidden": true,
-  "explorer_show_ignored": false
+  "file_explorer.hide_gitignore": false
 }
 `
 	if got := stdout.String(); got != want {

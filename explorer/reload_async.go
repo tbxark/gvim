@@ -16,6 +16,8 @@ type Snapshot struct {
 	dirs                 []string // the loaded directories, the root first
 	respectGitignore     *bool
 	customIgnorePatterns []string
+	scanExclusions       []string
+	scanInclusions       []string
 }
 
 // Snapshot returns the loaded directories of t. It reads nothing from disk.
@@ -39,6 +41,8 @@ func (t *Tree) Snapshot() Snapshot {
 		dirs:                 dirs,
 		respectGitignore:     t.respectGitignore,
 		customIgnorePatterns: slices.Clone(t.customIgnorePatterns),
+		scanExclusions:       slices.Clone(t.scanExclusions),
+		scanInclusions:       slices.Clone(t.scanInclusions),
 	}
 }
 
@@ -74,6 +78,8 @@ func (s Snapshot) Read() Listing {
 			IgnoreCache:          ignoreCache,
 			RespectGitignore:     s.respectGitignore,
 			CustomIgnorePatterns: s.customIgnorePatterns,
+			ScanExclusions:       s.scanExclusions,
+			ScanInclusions:       s.scanInclusions,
 		})
 		if err != nil {
 			l.errs = append(l.errs, err)
@@ -112,7 +118,7 @@ func (t *Tree) applyListing(n *node, l Listing) {
 				path:    filepath.Join(n.path, e.Name),
 				isDir:   e.IsDir,
 				hidden:  e.IsHidden,
-				ignored: n.ignored || e.IsIgnored,
+				ignored: (n.ignored || e.IsIgnored) && !e.IsIncluded,
 				parent:  n,
 			})
 		}
