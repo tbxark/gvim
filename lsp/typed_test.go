@@ -429,16 +429,12 @@ func TestWorkspaceDiagnostics(t *testing.T) {
 	ctx := newTestContext(t)
 	f.srv.Canned.WorkspaceItems = []protocol.WorkspaceDocumentDiagnosticReport{
 		&protocol.WorkspaceFullDocumentDiagnosticReport{
-			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
-				Kind: string(protocol.DocumentDiagnosticReportKindFull), ResultID: &resultID, Items: items,
-			},
+			Kind: string(protocol.DocumentDiagnosticReportKindFull), ResultID: &resultID, Items: items,
 			URI:     "file:///work/proj/b.go",
 			Version: &version,
 		},
 		&protocol.WorkspaceUnchangedDocumentDiagnosticReport{
-			UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
-				Kind: string(protocol.DocumentDiagnosticReportKindUnchanged), ResultID: "r2",
-			},
+			Kind: string(protocol.DocumentDiagnosticReportKindUnchanged), ResultID: "r2",
 			URI: "file:///work/proj/c.go",
 		},
 	}

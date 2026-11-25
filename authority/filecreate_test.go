@@ -123,11 +123,9 @@ func TestSSHFilesCreateNewConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan error, n)
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results <- creator.CreateNew(ctx, p, hostos.WriteOptions{})
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -285,7 +283,7 @@ func TestSSHFilesCreateNewWithContent(t *testing.T) {
 	}
 	results := make(chan result, n)
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -392,13 +390,11 @@ func TestSSHCreateNewWithContentSymlinkRaceKeepsCanary(t *testing.T) {
 	if creator == nil {
 		t.Fatal("the SSH file backend does not implement FileContentCreator")
 	}
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		target := filepath.Join(dir, fmt.Sprintf("race-%d.toml", i))
 		stop := make(chan struct{})
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -408,7 +404,7 @@ func TestSSHCreateNewWithContentSymlinkRaceKeepsCanary(t *testing.T) {
 				_ = os.Remove(target)
 				_ = os.Symlink(canary, target)
 			}
-		}()
+		})
 		err := creator.CreateNewWithContent(ctx, target, []byte("payload"), hostos.WriteOptions{})
 		close(stop)
 		wg.Wait()

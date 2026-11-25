@@ -57,9 +57,6 @@ func (s *scanBudget) Take(b *buffer.Buffer, line int) bool {
 	return true
 }
 
-// Exhausted reports whether the budget refused a line.
-func (s *scanBudget) Exhausted() bool { return s != nil && s.Spent }
-
 // indexUnfinished reports whether b is a large buffer whose line index is incomplete,
 // so that a scan that ran to its last line has not seen the end of the document.
 func indexUnfinished(b *buffer.Buffer) bool {

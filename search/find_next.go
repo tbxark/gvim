@@ -3,6 +3,7 @@ package search
 import (
 	"math"
 	"regexp"
+	"slices"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -254,8 +255,7 @@ func (n *nextSearch) backward(p phase) (Match, bool, bool, error) {
 			return Match{}, false, false, err
 		}
 		hits := n.locate(first, text)
-		for i := len(hits) - 1; i >= 0; i-- {
-			h := hits[i]
+		for _, h := range slices.Backward(hits) {
 			if h.Start.Less(n.from) == p.wrapped {
 				if p.wrapped {
 					break // every earlier match starts before from too

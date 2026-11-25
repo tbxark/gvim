@@ -124,7 +124,7 @@ func FuzzLargeBufferEdits(f *testing.F) {
 		if !validUTF8(initial) || strings.Contains(initial, "\r") {
 			t.Skip()
 		}
-		for _, l := range strings.Split(initial, "\n") {
+		for l := range strings.SplitSeq(initial, "\n") {
 			if len(l) > 60 {
 				t.Skip()
 			}

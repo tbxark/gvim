@@ -366,8 +366,7 @@ func (h *httpState) get(ctx context.Context, pluginName, version, raw string, ti
 // check and the dialer report it as a plugin error inside the transport's), a deadline is
 // timeout, DNS/resolution and every other network failure is io. No fallback happens here.
 func httpError(ctx context.Context, err error) error {
-	var pe *pluginapi.Error
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*pluginapi.Error](err); ok {
 		return pe
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {

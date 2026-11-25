@@ -217,8 +217,8 @@ func (d *Document) ClearCarets() {
 	d.Block = nil
 }
 
-// edit replaces the text from from to to with text. An edit with from equal
-// to to only inserts.
+// edit replaces the text between from and to with text. An edit where from
+// equals to only inserts.
 type edit struct {
 	From, To buffer.Pos
 	Text     string

@@ -87,7 +87,7 @@ func activationFromLua(v lua.LValue) (pluginapi.Activation, error) {
 
 // scopeFromLua reads an optional scope {start_line=, end_line=}.
 func scopeFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
-	v := lua.LValue(lua.LNil)
+	v := lua.LNil
 	if t != nil {
 		v = t.RawGetString("scope")
 	}
@@ -110,7 +110,7 @@ func scopeFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
 
 // prefixFromLua reads an optional soft-break prefix {text=, style=}.
 func prefixFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
-	v := lua.LValue(lua.LNil)
+	v := lua.LNil
 	if t != nil {
 		v = t.RawGetString("prefix")
 	}

@@ -90,7 +90,7 @@ func fenceQuotePrefix(s string) (depth int, rest string) {
 // the line does not carry them.
 func stripQuotePrefix(s string, want int) (string, bool) {
 	rest := s
-	for i := 0; i < want; i++ {
+	for range want {
 		trimmed := strings.TrimLeft(rest, " ")
 		if len(rest)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
 			return "", false

@@ -737,7 +737,7 @@ func encodingOf(path, text string) string {
 	if path == "" {
 		return "UTF-8"
 	}
-	for i := 0; i < len(text); i++ {
+	for i := range len(text) {
 		if text[i] >= 0x80 {
 			return "UTF-8"
 		}

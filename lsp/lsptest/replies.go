@@ -148,17 +148,13 @@ func (s *FakeServer) Diagnostic(ctx context.Context, p *protocol.DocumentDiagnos
 	resultID := s.Canned.PullResultID
 	if s.Canned.PullUnchanged {
 		return &protocol.RelatedUnchangedDocumentDiagnosticReport{
-			UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
-				Kind:     string(protocol.DocumentDiagnosticReportKindUnchanged),
-				ResultID: resultID,
-			},
+			Kind:     string(protocol.DocumentDiagnosticReportKindUnchanged),
+			ResultID: resultID,
 		}, nil
 	}
 	report := &protocol.RelatedFullDocumentDiagnosticReport{
-		FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
-			Kind:  string(protocol.DocumentDiagnosticReportKindFull),
-			Items: s.Canned.PullItems,
-		},
+		Kind:  string(protocol.DocumentDiagnosticReportKindFull),
+		Items: s.Canned.PullItems,
 	}
 	if resultID != "" {
 		report.ResultID = &resultID

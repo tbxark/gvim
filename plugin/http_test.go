@@ -201,7 +201,6 @@ func TestHTTPRejectsPrivateAddressSyntax(t *testing.T) {
 		"https://[2001:0:7f00:1::]/x",
 		"https://[::7f00:1]/x",
 	} {
-		raw := raw
 		t.Run(raw, func(t *testing.T) {
 			x := newHTTPTest(t, func(w http.ResponseWriter, r *http.Request) {
 				t.Error("a private-address URL reached the transport")

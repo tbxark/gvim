@@ -262,7 +262,7 @@ func TestEventFairnessRoundRobin(t *testing.T) {
 	// The 50 ms slice of an event handler is real time: on a loaded machine a 5 ms busy wait
 	// is descheduled for longer and the handler times out, so the test raises the cap.
 	h := startFiles(t, plugintest.Files{"a.lua": src("a"), "b.lua": src("b")}, plugintest.Options{Timeout: 500 * time.Millisecond, EventBudget: 500 * time.Millisecond})
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		h.RT.Emit(pluginapi.Event{Name: "x"})
 	}
 	h.Settle()
@@ -333,7 +333,7 @@ T.command("count", function() T.spy(n) end)`, plugintest.Options{Timeout: 500 * 
 
 func TestSubscriptionDroppedAfterFiveFailures(t *testing.T) {
 	h := start(t, `T.on("x", function() error("nope") end)`)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		h.Emit(pluginapi.Event{Name: "x"})
 	}
 	if h.RT.Wants("x") {
@@ -367,7 +367,7 @@ T.on("flaky", function() calls = calls + 1 if calls % 2 == 1 then error("odd", 0
 	if got := spyText(h); got != "once" {
 		t.Fatalf("once handler ran: %q", got)
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		h.Emit(pluginapi.Event{Name: "flaky"})
 	}
 	if !h.RT.Wants("flaky") {
@@ -504,12 +504,12 @@ func TestHeapGuardStopsADoublingString(t *testing.T) {
 		haveLeft    bool
 		haveNotice  bool
 	)
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		rest, ok := strings.CutPrefix(line, "HEAP_DOUBLING ")
 		if !ok {
 			continue
 		}
-		for _, field := range strings.Fields(rest) {
+		for field := range strings.FieldsSeq(rest) {
 			key, val, ok := strings.Cut(field, "=")
 			if !ok {
 				t.Fatalf("the child's report has a malformed field %q\n%s", field, out)
@@ -656,7 +656,7 @@ T.command("go", function() `+row.body+` end)`, plugintest.Options{Timeout: 500 *
 				t.Fatal(err)
 			}
 			prev := len(spy(h))
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				t0 := time.Now()
 				_, more := h.RT.Drain(capacity)
 				d := time.Since(t0)
@@ -754,7 +754,7 @@ end)`, plugintest.Options{Timeout: 500 * time.Millisecond})
 	if err := h.RT.Run("t.go", nil, pluginapi.SrcAPI); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		if _, more := h.RT.Drain(2 * time.Millisecond); !more {
 			break
 		}

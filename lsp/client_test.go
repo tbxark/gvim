@@ -395,11 +395,11 @@ func TestCloseIsIdempotent(t *testing.T) {
 
 			errs := make(chan error, tt.closeCount)
 			go func() {
-				for i := 0; i < tt.closeCount; i++ {
+				for range tt.closeCount {
 					errs <- f.client.Close()
 				}
 			}()
-			for i := 0; i < tt.closeCount; i++ {
+			for i := range tt.closeCount {
 				var err error
 				select {
 				case err = <-errs:

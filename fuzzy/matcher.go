@@ -77,7 +77,7 @@ func prepareTargetASCII(tc, tl []rune, s string) ([]rune, []rune) {
 	}
 	_ = tc[n-1]
 	_ = tl[n-1]
-	for i := 0; i < n; i++ {
+	for i := range n {
 		b := s[i]
 		tc[i] = rune(b)
 		if b >= 'A' && b <= 'Z' {
@@ -95,7 +95,7 @@ func isSubsequenceASCIIString(q []byte, target string) bool {
 		return true
 	}
 	qi := 0
-	for i := 0; i < len(target); i++ {
+	for i := range len(target) {
 		b := target[i]
 		if b >= 'A' && b <= 'Z' {
 			b += 'a' - 'A'

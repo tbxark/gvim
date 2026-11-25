@@ -193,7 +193,7 @@ func TestPathCompleteSymlinks(t *testing.T) {
 func TestPathCompleteCapAndHidden(t *testing.T) {
 	t.Parallel()
 	host, os := pathHost(t)
-	for i := 0; i < 150; i++ {
+	for i := range 150 {
 		os.SetFile("/work/many/file"+threeDigits(i)+".txt", "x\n")
 	}
 	h := startPathComplete(t, host, os)

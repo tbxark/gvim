@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -30,9 +31,7 @@ func FreshMap() map[string]string {
 		}
 	})
 	out := make(map[string]string, len(freshMap))
-	for k, v := range freshMap {
-		out[k] = v
-	}
+	maps.Copy(out, freshMap)
 	return out
 }
 
@@ -47,7 +46,7 @@ func allowedCategories(locale string) map[string]bool {
 	allowed := map[string]bool{}
 	// The runtime rule is an integer rule; 0..200 covers every residue class the
 	// CLDR rules distinguish.
-	for n := 0; n <= 200; n++ {
+	for n := range 201 {
 		allowed[PluralCategory(locale, n)] = true
 	}
 	allowed["other"] = true

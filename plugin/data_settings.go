@@ -85,10 +85,8 @@ func (s *settingSpec) check(v any) (any, error) {
 		return nil, fmt.Errorf("expected a string")
 	case "enum":
 		if str, ok := v.(string); ok {
-			for _, c := range s.values {
-				if c == str {
-					return str, nil
-				}
+			if slices.Contains(s.values, str) {
+				return str, nil
 			}
 		}
 		return nil, fmt.Errorf("expected one of %v", s.values)

@@ -353,8 +353,7 @@ func (s *fakeSSH) runLocally() {
 		c := exec.Command("sh", "-c", cmd)
 		c.Stdin, c.Stdout, c.Stderr = stdin, stdout, stderr
 		if err := c.Run(); err != nil {
-			var exit *exec.ExitError
-			if errors.As(err, &exit) {
+			if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 				return exit.ExitCode()
 			}
 			_, _ = io.WriteString(stderr, "sh: "+err.Error())

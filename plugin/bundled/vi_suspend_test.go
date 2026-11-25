@@ -24,7 +24,7 @@ func TestViSuspendedDropsItsStatusAndMode(t *testing.T) {
 	if v.label() != "-- NORMAL --" {
 		t.Fatalf("label = %q before", v.label())
 	}
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		p, _ := v.h.Plugin(viPlugin)
 		if p.Status == "suspended" {
 			break

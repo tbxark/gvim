@@ -54,10 +54,6 @@ var envInputFiles = []string{
 	".venv/pyvenv.cfg",
 }
 
-// EnvInputFiles returns the workspace-relative files whose changes affect the activated
-// environment (a copy; the local fingerprint cache and the remote watcher both use it).
-func EnvInputFiles() []string { return append([]string(nil), envInputFiles...) }
-
 // EnvInputNestedDirs returns the workspace-relative parent directories of nested inputs
 // (".venv"): the remote watcher must also watch those directories, because changing the
 // content of .venv/pyvenv.cfg changes the file but not the .venv directory mtime the root
@@ -468,7 +464,7 @@ func (p *Provider) fingerprintLocked() string {
 // parseEnv parses NUL-separated KEY=VALUE entries.
 func parseEnv(text string) map[string]string {
 	out := make(map[string]string)
-	for _, entry := range strings.Split(text, "\x00") {
+	for entry := range strings.SplitSeq(text, "\x00") {
 		name, value, ok := strings.Cut(entry, "=")
 		if !ok || name == "" {
 			continue
@@ -498,8 +494,7 @@ func runShell(dir, command string) (string, error) {
 		return "", fmt.Errorf("timed out after %s", captureTimeout)
 	}
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			return "", fmt.Errorf("exit status %d: %s", exit.ExitCode(), strings.TrimSpace(stderr.String()))
 		}
 		return "", err

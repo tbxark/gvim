@@ -78,8 +78,6 @@ const (
 // textLanguage is the id of a file whose type is not detected.
 const textLanguage = "text"
 
-func ptr[T any](v T) *T { return &v }
-
 // builtinLanguages holds the languages.<id> entries that Fresh ships with and that
 // differ from the global options, plus the file names and extensions that find them
 // when a document has no language name. Entries that would change nothing are left
@@ -87,38 +85,38 @@ func ptr[T any](v T) *T { return &v }
 var builtinLanguages = map[string]LanguageSettings{
 	"makefile": {
 		Extensions: []string{"mk"}, Filenames: []string{"Makefile", "makefile", "GNUmakefile"},
-		AutoIndent: ptr(false), UseTabs: ptr(true), TabSize: ptr(8),
+		AutoIndent: new(false), UseTabs: new(true), TabSize: new(8),
 	},
 	// Markdown is prose: quotes and brackets are mostly literal text, so neither
 	// auto_close nor auto_surround is on, and each can be turned back on alone.
 	"markdown": {
 		Extensions: []string{"md", "markdown"}, Filenames: []string{"README"},
-		AutoIndent: ptr(false), AutoClose: ptr(false), AutoSurround: ptr(false),
+		AutoIndent: new(false), AutoClose: new(false), AutoSurround: new(false),
 	},
 	"go": {
 		Extensions: []string{"go"},
-		UseTabs:    ptr(true), TabSize: ptr(8), ShowWhitespaceTabs: ptr(false),
+		UseTabs:    new(true), TabSize: new(8), ShowWhitespaceTabs: new(false),
 	},
 	"odin": {
 		Extensions: []string{"odin"},
-		UseTabs:    ptr(true), TabSize: ptr(8), ShowWhitespaceTabs: ptr(false),
+		UseTabs:    new(true), TabSize: new(8), ShowWhitespaceTabs: new(false),
 	},
-	"justfile": {Filenames: []string{"justfile", "Justfile", ".justfile"}, UseTabs: ptr(true)},
-	"gomod":    {Filenames: []string{"go.mod", "go.sum"}, UseTabs: ptr(true)},
+	"justfile": {Filenames: []string{"justfile", "Justfile", ".justfile"}, UseTabs: new(true)},
+	"gomod":    {Filenames: []string{"go.mod", "go.sum"}, UseTabs: new(true)},
 
-	"po":         {Extensions: []string{"po", "pot"}, AutoIndent: ptr(false)},
-	"git-rebase": {Filenames: []string{"git-rebase-todo"}, AutoIndent: ptr(false)},
-	"git-commit": {Filenames: []string{"COMMIT_EDITMSG", "MERGE_MSG", "SQUASH_MSG", "TAG_EDITMSG"}, AutoIndent: ptr(false)},
-	"gitignore":  {Extensions: []string{"gitignore"}, Filenames: []string{".gitignore", ".dockerignore", ".npmignore", ".hgignore"}, AutoIndent: ptr(false)},
+	"po":         {Extensions: []string{"po", "pot"}, AutoIndent: new(false)},
+	"git-rebase": {Filenames: []string{"git-rebase-todo"}, AutoIndent: new(false)},
+	"git-commit": {Filenames: []string{"COMMIT_EDITMSG", "MERGE_MSG", "SQUASH_MSG", "TAG_EDITMSG"}, AutoIndent: new(false)},
+	"gitignore":  {Extensions: []string{"gitignore"}, Filenames: []string{".gitignore", ".dockerignore", ".npmignore", ".hgignore"}, AutoIndent: new(false)},
 	"gitattributes": {
-		Extensions: []string{"gitattributes"}, Filenames: []string{".gitattributes"}, AutoIndent: ptr(false),
+		Extensions: []string{"gitattributes"}, Filenames: []string{".gitattributes"}, AutoIndent: new(false),
 	},
-	"cmake-cache":    {Filenames: []string{"CMakeCache.txt", "cmakecache.txt"}, AutoIndent: ptr(false)},
-	"pkg-config":     {Extensions: []string{"pc"}, Filenames: []string{"*.pc.in"}, AutoIndent: ptr(false)},
-	"wavefront-obj":  {Extensions: []string{"obj"}, AutoIndent: ptr(false)},
-	"doxygen":        {Extensions: []string{"dox", "doxy"}, AutoIndent: ptr(false)},
-	"doxygen-config": {Filenames: []string{"Doxyfile", "Doxyfile.in"}, AutoIndent: ptr(false)},
-	"ini":            {Extensions: []string{"ini", "cfg"}, AutoIndent: ptr(false)},
+	"cmake-cache":    {Filenames: []string{"CMakeCache.txt", "cmakecache.txt"}, AutoIndent: new(false)},
+	"pkg-config":     {Extensions: []string{"pc"}, Filenames: []string{"*.pc.in"}, AutoIndent: new(false)},
+	"wavefront-obj":  {Extensions: []string{"obj"}, AutoIndent: new(false)},
+	"doxygen":        {Extensions: []string{"dox", "doxy"}, AutoIndent: new(false)},
+	"doxygen-config": {Filenames: []string{"Doxyfile", "Doxyfile.in"}, AutoIndent: new(false)},
+	"ini":            {Extensions: []string{"ini", "cfg"}, AutoIndent: new(false)},
 }
 
 // languageAliases maps the lowercased language names that gvim's highlighter gives

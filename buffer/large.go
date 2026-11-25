@@ -112,18 +112,16 @@ func OpenLarge(src Source, o LargeOptions) (*Buffer, error) {
 	chunk := int64(o.Chunk)
 	stats := new(statCounters)
 	s := &bigStore{
-		baseReader: baseReader{
-			src: newSrcRef(src),
-			g: gridView{
-				chunk: chunk, skip: o.Skip, size: size,
-				nl: make([]int64, (size+chunk-1)/chunk+1),
-			},
-			pages:   newPageCache(chunk, o.CachePages, o.Budget, stats),
-			ranges:  newRangeMemo(),
-			huges:   newHugeMemo(),
-			stats:   stats,
-			maxLine: int64(o.MaxLine),
+		src: newSrcRef(src),
+		g: gridView{
+			chunk: chunk, skip: o.Skip, size: size,
+			nl: make([]int64, (size+chunk-1)/chunk+1),
 		},
+		pages:      newPageCache(chunk, o.CachePages, o.Budget, stats),
+		ranges:     newRangeMemo(),
+		huges:      newHugeMemo(),
+		stats:      stats,
+		maxLine:    int64(o.MaxLine),
 		budget:     o.Budget,
 		dec:        newLineCache(o.DecodedBudget),
 		maxOverlay: o.MaxOverlayBytes,

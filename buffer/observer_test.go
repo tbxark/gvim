@@ -162,7 +162,7 @@ type mirror [][]rune
 
 func newMirror(text string) mirror {
 	var m mirror
-	for _, l := range strings.Split(text, "\n") {
+	for l := range strings.SplitSeq(text, "\n") {
 		m = append(m, []rune(l))
 	}
 	return m
@@ -233,7 +233,7 @@ func TestChangeRecordsAreSequential(t *testing.T) {
 			l := rng.IntN(b.Lines())
 			return buffer.Pos{Line: l, Col: rng.IntN(b.LineLen(l) + 1)}
 		}
-		for step := 0; step < 120; step++ {
+		for step := range 120 {
 			switch rng.IntN(7) {
 			case 0, 1:
 				b.Insert(randPos(), pieces[rng.IntN(len(pieces))])
@@ -435,7 +435,7 @@ func TestByteOffsetRoundTrip(t *testing.T) {
 		}
 		b := buffer.New(sb.String())
 		text := b.Text()
-		for l := 0; l < b.Lines(); l++ {
+		for l := range b.Lines() {
 			for c := 0; c <= b.LineLen(l); c++ {
 				p := buffer.Pos{Line: l, Col: c}
 				off, err := b.ByteOffset(p)
@@ -465,7 +465,7 @@ func TestByteOffsetIncremental(t *testing.T) {
 	b := buffer.New(strings.Repeat("line é\n", 200) + "end")
 	// Learn every start offset, then edit near the bottom and compare with a
 	// fresh buffer, which has no cache, for every line.
-	for l := 0; l < b.Lines(); l++ {
+	for l := range b.Lines() {
 		if _, err := b.ByteOffset(buffer.Pos{Line: l}); err != nil {
 			t.Fatal(err)
 		}

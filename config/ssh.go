@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 )
 
 // SSHConfig is the ssh section: host-key verification policy, host-key algorithm
@@ -73,10 +74,8 @@ func (c *Config) setSSHKey(key string, raw json.RawMessage) error {
 		if err := json.Unmarshal(raw, &names); err != nil {
 			return errors.New("must be an array of host-key algorithm names")
 		}
-		for _, name := range names {
-			if name == "" {
-				return errors.New("algorithm names must not be empty")
-			}
+		if slices.Contains(names, "") {
+			return errors.New("algorithm names must not be empty")
 		}
 		c.SSH.HostKeyAlgorithms = append([]string(nil), names...)
 		return nil

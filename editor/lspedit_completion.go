@@ -24,7 +24,7 @@ import (
 // stay after their inserted text). Returns the number of carets; ErrStale leaves the
 // document untouched, and ErrOverlappingEdits refuses an ambiguous combined list.
 func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []LSPEdit, wordChars string, expect *Version) (int, error) {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}

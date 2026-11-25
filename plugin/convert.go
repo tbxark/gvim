@@ -253,7 +253,7 @@ func (p *plugin) toLua(v any) lua.LValue {
 	switch rv.Kind() {
 	case reflect.Slice, reflect.Array:
 		t := p.L.CreateTable(rv.Len(), 0)
-		for i := 0; i < rv.Len(); i++ {
+		for i := range rv.Len() {
 			t.Append(p.toLua(rv.Index(i).Interface()))
 		}
 		return t
@@ -275,7 +275,7 @@ func (p *plugin) toLua(v any) lua.LValue {
 		// fields with snake_case keys; a nil pointer or empty string field stays nil/"".
 		rt := rv.Type()
 		t := p.L.CreateTable(0, rt.NumField())
-		for i := 0; i < rt.NumField(); i++ {
+		for i := range rt.NumField() {
 			if f := rt.Field(i); f.IsExported() {
 				t.RawSetString(snakeCase(f.Name), p.toLua(rv.Field(i).Interface()))
 			}
@@ -701,8 +701,7 @@ func errTuple(err error) (lua.LValue, lua.LValue) {
 
 // errString is the "<code>: <message>" text of an error; a foreign error has code io.
 func errString(err error) string {
-	var e *pluginapi.Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*pluginapi.Error](err); ok {
 		return e.Error()
 	}
 	return string(pluginapi.CodeIO) + ": " + err.Error()

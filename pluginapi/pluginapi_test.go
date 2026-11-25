@@ -114,8 +114,7 @@ func TestUnsupportedRefusesEveryHostMethod(t *testing.T) {
 	var h Host = Unsupported{}
 	recv := reflect.ValueOf(h)
 	withError := 0
-	for i := range hostType.NumMethod() {
-		m := hostType.Method(i)
+	for m := range hostType.Methods() {
 		t.Run(m.Name, func(t *testing.T) {
 			args := make([]reflect.Value, m.Type.NumIn())
 			for j := range args {

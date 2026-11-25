@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -308,9 +309,7 @@ func (l *local) prepareProcEnv(o hostos.ProcOptions) (hostos.ProcOptions, map[st
 			env[k] = v
 		}
 	}
-	for k, v := range merged.Env {
-		env[k] = v
-	}
+	maps.Copy(env, merged.Env)
 	return merged, env
 }
 
@@ -329,9 +328,7 @@ func (l *local) envMap(o hostos.ProcOptions) hostos.ProcOptions {
 			m[k] = v
 		}
 	}
-	for k, v := range o.Env {
-		m[k] = v
-	}
+	maps.Copy(m, o.Env)
 	o.Env = m
 	return o
 }

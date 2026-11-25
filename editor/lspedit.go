@@ -17,24 +17,11 @@ var ErrNotOpen = errors.New("document is not open")
 // or removes lines above the caret leaves it on its text. It returns ErrNotOpen when no open document has path, and ErrReadOnly
 // for a read-only document, which is then left unchanged.
 func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
 	return d.ApplyEditList(edits, EditOptions{Cursor: CursorMap}, true)
-}
-
-// lspDocAt returns the open document whose path is path, or nil.
-func (e *Editor) lspDocAt(path string) *Document {
-	if path == "" {
-		return nil
-	}
-	for _, d := range e.docs {
-		if d.Path == path {
-			return d
-		}
-	}
-	return nil
 }
 
 // ApplyCompletionAtCarets replaces the identifier prefix before EVERY caret of the open
@@ -47,7 +34,7 @@ func (e *Editor) lspDocAt(path string) *Document {
 // edits), and ErrNotOpen for a path no open document has. An extra caret with an empty
 // prefix gets the text inserted, as Fresh does.
 func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *Version) (int, error) {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}

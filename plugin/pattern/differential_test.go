@@ -197,7 +197,7 @@ func TestDifferentialAgainstStock(t *testing.T) {
 	var diffs []diffRow
 	compared := 0
 	kinds := map[string]int{}
-	for i := 0; i < n; i++ {
+	for range n {
 		p, s := g.pattern(), g.subject()
 		rows := []convRow{
 			{op: "find", s: s, p: p},

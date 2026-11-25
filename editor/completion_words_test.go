@@ -98,7 +98,7 @@ func TestBufferWordCompletionsMinLengthAndLimit(t *testing.T) {
 		t.Fatalf("one-rune words offered: %v", candidateTexts(got))
 	}
 	lines := make([]string, 0, 200)
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		lines = append(lines, "alpha"+strings.Repeat("a", i%5)+string(rune('a'+i%26)))
 	}
 	lines = append(lines, "al")
@@ -198,7 +198,7 @@ func TestBufferWordCompletionsOtherBufferLimit(t *testing.T) {
 		Lines: []string{"alpha"}, StartLine: 0, CursorLine: 0, CursorCol: 5,
 		Prefix: "al", ViewportTop: 0, ViewportBottom: 0,
 	}
-	for i := 0; i < OtherWordBufferLimit+2; i++ {
+	for i := range OtherWordBufferLimit + 2 {
 		snap.Other = append(snap.Other, WordBuffer{Lines: []string{"alphabuffer" + string(rune('a'+i))}})
 	}
 	got := candidateTexts(BufferWordCompletions(snap))

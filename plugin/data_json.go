@@ -115,7 +115,7 @@ func (e *jsonEnc) newline(depth int) {
 		return
 	}
 	e.sb.WriteByte('\n')
-	for i := 0; i < depth; i++ {
+	for range depth {
 		e.sb.WriteString(e.indent)
 	}
 	e.check()
@@ -613,7 +613,7 @@ func (p *jsonParser) hex4() rune {
 		p.fail("invalid \\u escape")
 	}
 	var r rune
-	for k := 0; k < 4; k++ {
+	for k := range 4 {
 		d := digitVal(p.s[p.i+k])
 		if d < 0 || d >= 16 {
 			p.fail("invalid \\u escape")

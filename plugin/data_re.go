@@ -124,7 +124,7 @@ func installRE(e *apiEnv) *lua.LTable {
 	e.set(t, "compile", func(L *lua.LState) int {
 		pat := L.CheckString(1)
 		flags := L.OptString(2, "")
-		for i := 0; i < len(flags); i++ {
+		for i := range len(flags) {
 			if !strings.ContainsRune("ims", rune(flags[i])) {
 				L.ArgError(2, "flags may contain i, m and s")
 			}
@@ -151,7 +151,6 @@ func installRE(e *apiEnv) *lua.LTable {
 		"find": reFind, "match": reMatch, "test": reTest, "gmatch": reGMatch, "gsub": reGsub, "split": reSplit,
 	}
 	for name, f := range ops {
-		f := f
 		e.set(t, name, func(L *lua.LState) int {
 			r, err := p.reArg(L, 2)
 			if err != nil {

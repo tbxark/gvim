@@ -24,7 +24,7 @@ func TestValidateDashboardResultBounds(t *testing.T) {
 		t.Fatalf("oversize string = %v, want limit", err)
 	}
 	deep := any("leaf")
-	for i := 0; i < maxDashboardResultDepth+2; i++ {
+	for range maxDashboardResultDepth + 2 {
 		deep = []any{deep}
 	}
 	if err := validateDashboardResult(deep); err == nil || pluginapi.CodeOf(err) != pluginapi.CodeLimit {

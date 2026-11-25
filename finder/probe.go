@@ -185,10 +185,7 @@ func readLocalProbeDir(ctx context.Context, dir string) ([]os.DirEntry, error) {
 		// Request only what the bound still allows: a fixed ReadDir(128) would
 		// overshoot ProbeScanLimit by up to a batch on the final read.
 		remaining := ProbeScanLimit - len(out)
-		n := 128
-		if remaining < n {
-			n = remaining
-		}
+		n := min(remaining, 128)
 		batch, err := f.ReadDir(n)
 		out = append(out, batch...)
 		if err == io.EOF {

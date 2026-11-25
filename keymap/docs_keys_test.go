@@ -33,7 +33,7 @@ func TestDocsDefaultKeysAreBound(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, para := range strings.Split(string(data), "\n\n") {
+		for para := range strings.SplitSeq(string(data), "\n\n") {
 			flat := strings.Join(strings.Fields(para), " ")
 			if !strings.Contains(flat, "default keymap") && !strings.Contains(flat, "default key") {
 				continue

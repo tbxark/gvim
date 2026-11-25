@@ -180,3 +180,29 @@ func writeTemp(f *os.File, mode fs.FileMode, path string, old os.FileInfo, fill 
 	}
 	return note, errors.Join(err, f.Close())
 }
+
+// Create writes data to a new file in dir, named by pattern as os.CreateTemp
+// names it, and syncs it. It returns the new file's base name. Unlike WriteFile
+// nothing is replaced: each call makes a fresh file, and on failure the file is
+// removed.
+func Create(dir, pattern string, data []byte) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return filepath.Base(f.Name()), nil
+}

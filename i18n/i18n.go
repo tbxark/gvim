@@ -21,6 +21,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -78,7 +79,7 @@ func Normalize(tag string) string {
 		return ""
 	}
 	for _, l := range locales {
-		if strings.ToLower(l.Code) == lower {
+		if strings.EqualFold(l.Code, lower) {
 			return l.Code
 		}
 	}
@@ -265,9 +266,7 @@ func TN(locale, key string, n int, vars map[string]any) string {
 		vars = map[string]any{}
 	} else {
 		copied := make(map[string]any, len(vars)+1)
-		for k, v := range vars {
-			copied[k] = v
-		}
+		maps.Copy(copied, vars)
 		vars = copied
 	}
 	vars["count"] = count

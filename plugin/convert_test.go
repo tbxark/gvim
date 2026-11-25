@@ -157,7 +157,7 @@ T.command("go", function() T.spy(T.buf(1):valid(), T.buf(99):valid()) end)`, plu
 func TestHandleCachePerStatePurged(t *testing.T) {
 	host := plugintest.NewFakeHost()
 	var ids []pluginapi.BufferID
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		ids = append(ids, host.AddBuffer("f", "x"))
 	}
 	h := startFiles(t, plugintest.Files{
@@ -190,7 +190,7 @@ func TestHandleCachePerStatePurged(t *testing.T) {
 
 func TestHandleCacheCapEvictsInvalidFirst(t *testing.T) {
 	host := plugintest.NewFakeHost()
-	for i := 0; i < 10_050; i++ {
+	for range 10_050 {
 		host.AddBuffer("f", "x")
 	}
 	h := start(t, `T.command("make", function() for i = 1, 10050 do T.buf(i) end end)`, plugintest.Options{Host: host, Timeout: 5 * time.Second})

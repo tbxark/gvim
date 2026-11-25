@@ -880,7 +880,7 @@ func (p *plugin) contentFromLua(L *lua.LState, t *lua.LTable) ([]pluginapi.Conte
 					return nil, pluginapi.Errf(pluginapi.CodeLimit, "too many segments (max %d)", bufMaxContentSegments)
 				}
 				st, ok := sv.RawGetInt(j).(*lua.LTable)
-				text, tok := lua.LValue(lua.LNil), false
+				text, tok := lua.LNil, false
 				if ok {
 					text = st.RawGetString("text")
 					_, tok = text.(lua.LString)

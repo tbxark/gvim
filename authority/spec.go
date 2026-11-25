@@ -51,8 +51,8 @@ func (s RemoteSpec) Workspace() string {
 	if strings.HasPrefix(p, "~") && !strings.Contains(p, "/") && validTildeUser(p[1:]) {
 		return p
 	}
-	if strings.HasSuffix(p, "/") {
-		return strings.TrimSuffix(p, "/") + "/"
+	if before, ok := strings.CutSuffix(p, "/"); ok {
+		return before + "/"
 	}
 	if i := strings.LastIndex(p, "/"); i >= 0 {
 		if i == 0 {
@@ -276,13 +276,13 @@ func splitRemotePosition(p string) (path string, line, col int, ok bool) {
 	if i <= 0 {
 		return "", 0, 0, false
 	}
-	last, ok := parsePosition(p[i+1:])
+	last, ok := ParsePosition(p[i+1:])
 	if !ok {
 		return "", 0, 0, false
 	}
 	head := p[:i]
 	if j := strings.LastIndex(head, ":"); j > 0 {
-		if first, ok := parsePosition(head[j+1:]); ok {
+		if first, ok := ParsePosition(head[j+1:]); ok {
 			return head[:j], first, last, true
 		}
 	}
@@ -291,8 +291,8 @@ func splitRemotePosition(p string) (path string, line, col int, ok bool) {
 
 func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
 
-// parsePosition reads a positive decimal number.
-func parsePosition(s string) (int, bool) {
+// ParsePosition reads a positive decimal number.
+func ParsePosition(s string) (int, bool) {
 	if s == "" || strings.Trim(s, "0123456789") != "" {
 		return 0, false
 	}

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -152,15 +153,11 @@ func (k *keyState) publishModes() {
 // cloneMode copies the maps of a ModeInfo, so the host never shares them with the runtime.
 func cloneMode(m pluginapi.ModeInfo) pluginapi.ModeInfo {
 	b := make(map[string]string, len(m.Bindings))
-	for c, a := range m.Bindings {
-		b[c] = a
-	}
+	maps.Copy(b, m.Bindings)
 	m.Bindings = b
 	if m.Args != nil {
 		a := make(map[string]map[string]any, len(m.Args))
-		for c, v := range m.Args {
-			a[c] = v
-		}
+		maps.Copy(a, m.Args)
 		m.Args = a
 	}
 	return m
@@ -576,8 +573,7 @@ func parseModeSpec(L *lua.LState, p *plugin, spec *lua.LTable) (*modeDef, error)
 		L.RaiseError("gvim.mode.define: field %q must be a string or a function, got %s", "text", v.Type())
 	}
 	// paste: "pass" | "swallow" | "text" (the text function runs with paste = true)
-	switch v := field("paste", lua.LTString).(type) {
-	case lua.LString:
+	if v, ok := field("paste", lua.LTString).(lua.LString); ok {
 		switch v {
 		case "pass":
 		case "swallow":

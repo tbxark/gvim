@@ -47,7 +47,7 @@ func TestPluginDirectoryProblems(t *testing.T) {
 	t.Run("too many files", func(t *testing.T) {
 		e := newEnv(t)
 		e.user("p/init.lua", marker("p"))
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			e.user(fmt.Sprintf("p/lua/m%02d.lua", i), "return {}")
 		}
 		e.start()
@@ -58,7 +58,7 @@ func TestPluginDirectoryProblems(t *testing.T) {
 	t.Run("exactly 64 files", func(t *testing.T) {
 		e := newEnv(t)
 		e.user("p/init.lua", marker("p"))
-		for i := 0; i < 63; i++ {
+		for i := range 63 {
 			e.user(fmt.Sprintf("p/lua/m%02d.lua", i), "return {}")
 		}
 		e.start()
@@ -69,7 +69,7 @@ func TestPluginDirectoryProblems(t *testing.T) {
 	t.Run("more than 5 MiB", func(t *testing.T) {
 		e := newEnv(t)
 		e.user("p/init.lua", marker("p"))
-		for i := 0; i < 21; i++ {
+		for i := range 21 {
 			e.user(fmt.Sprintf("p/lua/m%02d.lua", i), big)
 		}
 		e.start()
@@ -82,7 +82,7 @@ func TestPluginDirectoryProblems(t *testing.T) {
 	t.Run("data files do not count", func(t *testing.T) {
 		e := newEnv(t)
 		e.user("p/init.lua", marker("p"))
-		for i := 0; i < 5000; i++ {
+		for i := range 5000 {
 			e.user(fmt.Sprintf("p/data/f%d.json", i), "{}")
 		}
 		e.start()

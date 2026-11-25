@@ -1,6 +1,7 @@
 package keymap
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -23,8 +24,7 @@ import (
 // Fresh's lookup does.
 func (m *Map) MenuMnemonic(name string) (rune, bool) {
 	for _, ctx := range []Context{ContextNormal, ContextGlobal} {
-		for i := len(m.bindings) - 1; i >= 0; i-- {
-			b := m.bindings[i]
+		for i, b := range slices.Backward(m.bindings) {
 			if b.When != ctx || b.Sequence != nil || b.Action != menuOpenAction {
 				continue
 			}
@@ -58,5 +58,6 @@ func altLetter(chord string) (rune, bool) {
 	if !ok || utf8.RuneCountInString(rest) != 1 {
 		return 0, false
 	}
-	return unicode.ToLower([]rune(rest)[0]), true
+	r, _ := utf8.DecodeRuneInString(rest)
+	return unicode.ToLower(r), true
 }

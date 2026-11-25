@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"slices"
+
 	lua "github.com/yuin/gopher-lua"
 
 	"github.com/tbxark/gvim/pluginapi"
@@ -60,8 +62,8 @@ func installWin(e *apiEnv) {
 	// still open, newest first.
 	var opened []pluginapi.WinID
 	p.addCleanup(func() {
-		for i := len(opened) - 1; i >= 0; i-- {
-			_ = p.r.host.CloseWindow(opened[i])
+		for _, o := range slices.Backward(opened) {
+			_ = p.r.host.CloseWindow(o)
 		}
 	})
 	forget := func(id pluginapi.WinID) {

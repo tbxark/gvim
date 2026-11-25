@@ -41,7 +41,7 @@ func TestClearRangeAfterRemoveKeepsRemovedItemsGone(t *testing.T) {
 	t.Parallel()
 	s := New()
 	var ids []int
-	for line := 0; line < 3; line++ {
+	for line := range 3 {
 		id, err := s.Add(1, "p", "n", lineItem(Gutter, line))
 		if err != nil {
 			t.Fatal(err)

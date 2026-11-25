@@ -411,7 +411,7 @@ func TestInvalidYieldStrike(t *testing.T) {
 	}
 	t.Run("three strikes suspend", func(t *testing.T) {
 		h := cmd(t, "", `T.yield_raw("x")`)
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			if err := h.Run("t.go", nil); err != nil {
 				t.Fatal(err)
 			}
@@ -452,7 +452,7 @@ T.command("probe", function()
   local v, e = T.host()
   T.spy(tostring(v), e)
 end)`)
-	for i := 0; i < plugin.QuotaParkedTasks; i++ {
+	for range plugin.QuotaParkedTasks {
 		if err := h.Run("t.park", nil); err != nil {
 			t.Fatal(err)
 		}
@@ -590,7 +590,7 @@ func TestWorkQuota(t *testing.T) {
 T.command("go", function() T.spy("woke", T.work("v", 10)) end)
 T.command("probe", function() local v, e = T.work("v", 10) T.spy(tostring(v), e) end)`)
 	// Run without settling: the Work stays in flight.
-	for i := 0; i < plugin.QuotaWork; i++ {
+	for range plugin.QuotaWork {
 		if err := h.RT.Run("t.go", nil, pluginapi.SrcAPI); err != nil {
 			t.Fatal(err)
 		}

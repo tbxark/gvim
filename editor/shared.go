@@ -88,9 +88,9 @@ func NewSharedBuffers() *SharedBuffers {
 	}
 }
 
-// sharedCanonical canonicalizes an open path for the registry: absolute and, when it
+// SharedCanonical canonicalizes an open path for the registry: absolute and, when it
 // resolves, symlink-free (the same identity the daemon's open-path routing uses).
-func sharedCanonical(path string) string {
+func SharedCanonical(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return path
@@ -117,7 +117,7 @@ func (s *SharedBuffers) Open(e *Editor, path string) (handled bool, err error) {
 	if s == nil || e == nil || path == "" {
 		return false, nil
 	}
-	canonical := sharedCanonical(path)
+	canonical := SharedCanonical(path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r := s.reserved[canonical]; r != nil {
@@ -191,7 +191,7 @@ func (s *SharedBuffers) AdoptLoaded(e *Editor, d *document.Document) (open, conf
 	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() || d.Large() || d.Virtual() || d.Binary() {
 		return d, nil, false
 	}
-	canonical := sharedCanonical(d.Path)
+	canonical := SharedCanonical(d.Path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.entries[canonical]
@@ -256,7 +256,7 @@ func (s *SharedBuffers) Register(e *Editor, d *document.Document) {
 	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() || d.Large() || d.Virtual() || d.Binary() {
 		return
 	}
-	canonical := sharedCanonical(d.Path)
+	canonical := SharedCanonical(d.Path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.entries[canonical]; ok {
@@ -346,7 +346,7 @@ func (s *SharedBuffers) checkTransferLocked(entry *sharedEntry, from, to *Editor
 	return fromIdx, toIdx, toMirror, snapshot, nil
 }
 
-// transferLocked moves the canonical document from from to to. The requester must have a
+// transferLocked moves the canonical document from editor from to editor to. The requester must have a
 // mirror of entry (to's slot); from gets a fresh read-only snapshot in the same tab, to
 // adopts the canonical Document with its undo and unsaved state. The stale-version guard
 // is checked before the move: the owner's recorded version must still be the mirror's.
@@ -395,7 +395,7 @@ func (s *SharedBuffers) adoptPendingLocked(e *Editor) {
 		if idx < 0 || d.Path == "" {
 			continue
 		}
-		canonical := sharedCanonical(d.Path)
+		canonical := SharedCanonical(d.Path)
 		entry := s.entries[canonical]
 		if entry == nil || entry.doc == nil || entry.owner == nil {
 			// The owner went away while this workspace was dormant: the restored
@@ -481,7 +481,7 @@ func (s *SharedBuffers) closeEntryLocked(e *Editor, d *document.Document) *share
 	if s == nil || e == nil || d == nil || d.Path == "" {
 		return nil
 	}
-	canonical := sharedCanonical(d.Path)
+	canonical := SharedCanonical(d.Path)
 	entry := s.entries[canonical]
 	if entry == nil {
 		return nil
@@ -652,7 +652,7 @@ func (s *SharedBuffers) ReserveSaveAs(e *Editor, d *document.Document, path stri
 	if d.SharedMirror() {
 		return nil, errors.New("save as: the tab is a read-only mirror of another workspace's buffer; focus its workspace to take ownership first")
 	}
-	canonical := sharedCanonical(path)
+	canonical := SharedCanonical(path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.saveAsRefusalLocked(e, d, canonical); err != nil {
@@ -690,10 +690,10 @@ func (s *SharedBuffers) AfterSaveAs(e *Editor, d *document.Document, oldPath, ne
 	if s == nil || e == nil || d == nil || newPath == "" || d.SharedMirror() {
 		return
 	}
-	newCanonical := sharedCanonical(newPath)
+	newCanonical := SharedCanonical(newPath)
 	oldCanonical := ""
 	if oldPath != "" {
-		oldCanonical = sharedCanonical(oldPath)
+		oldCanonical = SharedCanonical(oldPath)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -734,7 +734,7 @@ func (s *SharedBuffers) AfterSaveAs(e *Editor, d *document.Document, oldPath, ne
 
 // CanonicalPath returns the registry key of path (exposed for the app's open-path
 // routing to compare with its own canonical form).
-func (s *SharedBuffers) CanonicalPath(path string) string { return sharedCanonical(path) }
+func (s *SharedBuffers) CanonicalPath(path string) string { return SharedCanonical(path) }
 
 // Has reports whether a canonical path is shared.
 func (s *SharedBuffers) Has(canonical string) bool {

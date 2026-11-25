@@ -3,6 +3,7 @@ package search
 import (
 	"regexp"
 	"regexp/syntax"
+	"slices"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -28,7 +29,7 @@ func (sp hugeSpan) text(s *buffer.Snapshot, i, runes, lo, hi int) (first, end in
 }
 
 // hugeMatches returns the matches of re in text, which holds the runes [first, end) of line i
-// (which has runes runes in total), that start in columns [lo, hi), with the positions of the
+// (a line whose length is `runes`), that start in columns [lo, hi), with the positions of the
 // whole line. Line/text anchors (^, \A when first > 0; $, \z when end < runes) are disabled so
 // artificial window edges never produce false anchor matches. A match that starts in another
 // window is left to that window, so no match is returned twice.
@@ -162,8 +163,7 @@ func (n *nextSearch) backwardHuge(line, runes int, p phase, colHi int) (Match, b
 			return Match{}, false, false, err
 		}
 		ms := hugeMatches(line, first, end, runes, text, n.re, n.q, lo, hi)
-		for i := len(ms) - 1; i >= 0; i-- {
-			m := ms[i]
+		for _, m := range slices.Backward(ms) {
 			if m.Start.Less(n.from) == p.wrapped {
 				if p.wrapped {
 					// Every earlier match starts before from too.

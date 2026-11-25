@@ -251,7 +251,7 @@ func TestSetLinesRows(t *testing.T) {
 func TestBufReadLimitsAndErrors(t *testing.T) {
 	host := plugintest.NewFakeHost()
 	var sb strings.Builder
-	for i := 0; i < 200_001; i++ {
+	for range 200_001 {
 		sb.WriteString("x\n")
 	}
 	host.AddBuffer("big.txt", sb.String()) // 200 002 lines
@@ -283,7 +283,7 @@ T.spy(tostring(small:line(1.9)), tostring(small:line(3)), tostring(small:line(1e
 func TestBufLinesLargeFileUnknownCount(t *testing.T) {
 	host := plugintest.NewFakeHost()
 	var sb strings.Builder
-	for i := 0; i < 300_000; i++ {
+	for range 300_000 {
 		sb.WriteString("y\n")
 	}
 	host.AddBuffer("huge.log", sb.String())
@@ -653,7 +653,7 @@ func TestBufFindQueryReachesHost(t *testing.T) {
 
 func TestFindLinesBudgetNext(t *testing.T) {
 	var sb strings.Builder
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		if i%100 == 7 {
 			sb.WriteString("TODO item\n")
 		} else {
@@ -724,7 +724,7 @@ func TestFindLinesQueryReachesHost(t *testing.T) {
 func TestFindLinesChunkedLoop(t *testing.T) {
 	var sb strings.Builder
 	want, last := 0, 0
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		if i%97 == 0 {
 			sb.WriteString("<<<<<<< ours\n")
 			want++

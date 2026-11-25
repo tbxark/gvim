@@ -83,7 +83,7 @@ T.spy("refs", tostring(r3), err3, gvim.err_code(err3))`, plugintest.Options{Host
 	if got := len(host.LSP().Calls); got != 1 {
 		t.Fatalf("calls after the first await = %d, want 1 (the task is parked on the first)", got)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		h.CompleteLSP()
 	}
 	want := "hover {contents={value=doc},list={1=a,2=b},n=3} nil" +

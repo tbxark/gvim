@@ -113,7 +113,7 @@ func TestSafeHTTPDialNoFallback(t *testing.T) {
 func TestHTTPConcurrencyCaps(t *testing.T) {
 	h := newHTTPState(nil)
 	ctx := context.Background()
-	for i := 0; i < httpPerPlugin; i++ {
+	for i := range httpPerPlugin {
 		if err := h.acquire(ctx, "p"); err != nil {
 			t.Fatalf("acquire p %d: %v", i, err)
 		}
@@ -124,7 +124,7 @@ func TestHTTPConcurrencyCaps(t *testing.T) {
 		t.Fatalf("third per-plugin request err = %v, want a wait", err)
 	}
 	// A second plugin can take the other two global slots; a third plugin then waits.
-	for i := 0; i < httpPerPlugin; i++ {
+	for i := range httpPerPlugin {
 		if err := h.acquire(ctx, "q"); err != nil {
 			t.Fatalf("acquire q %d: %v", i, err)
 		}

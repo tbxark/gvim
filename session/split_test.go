@@ -60,7 +60,7 @@ func TestSplitLayoutBounds(t *testing.T) {
 	}
 	// A tree deeper than the depth bound is rejected even when it has few leaves.
 	deep := &SplitNode{File: 0, Path: "/a"}
-	for i := 0; i < MaxSplitDepth+1; i++ {
+	for range MaxSplitDepth + 1 {
 		deep = &SplitNode{Dir: SplitStacked, A: deep, B: &SplitNode{File: 0, Path: "/a"}}
 	}
 	if got := (&SplitLayout{Root: *deep}).Valid(1); got {

@@ -898,13 +898,13 @@ func TestAutoStartGateRaceBoundary(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			allowed.Store(i%2 == 0)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			_ = m.Open(mgrAPath, "go", "package a\n")
 		}
 	}()

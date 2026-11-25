@@ -60,7 +60,6 @@ func installRoot(e *apiEnv) {
 	// gvim.log.<level>(fmt, ...)
 	logT := e.L.CreateTable(0, 4)
 	for _, lvl := range []string{levelDebug, levelInfo, levelWarn, levelError} {
-		lvl := lvl
 		e.set(logT, lvl, func(L *lua.LState) int {
 			p.logLine(L, lvl)
 			return 0

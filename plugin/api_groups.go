@@ -119,7 +119,7 @@ func installGroups(e *apiEnv) {
 	e.set(buf, "set_panel_visible", func(L *lua.LState) int {
 		id := pluginapi.BufferGroupID(groupIDFromLua(L, 1))
 		panel := L.CheckString(2)
-		visible := bool(L.CheckBool(3))
+		visible := L.CheckBool(3)
 		if err := p.ownsGroup(id); err != nil {
 			return bufRet(L, err)
 		}
@@ -160,7 +160,7 @@ func installGroups(e *apiEnv) {
 			row.RawSetString("name", lua.LString(panel.Name))
 			row.RawSetString("buf", p.toLua(panel.Buffer))
 			if panel.Window != 0 {
-				row.RawSetString("window", p.toLua(pluginapi.WinID(panel.Window)))
+				row.RawSetString("window", p.toLua(panel.Window))
 			}
 			row.RawSetString("visible", lua.LBool(panel.Visible))
 			out.Append(row)

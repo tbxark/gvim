@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"runtime"
@@ -248,8 +249,8 @@ func (r *Runtime) setHost(h pluginapi.Host) {
 // Interface check.
 var _ pluginapi.Runtime = (*Runtime)(nil)
 
-// goid returns the id of the calling goroutine (debug use only).
-func goid() uint64 {
+// GoID returns the id of the calling goroutine (debug use only).
+func GoID() uint64 {
 	var buf [64]byte
 	b := buf[:runtime.Stack(buf[:], false)]
 	b = bytes.TrimPrefix(b, []byte("goroutine "))
@@ -278,7 +279,7 @@ func (r *Runtime) enter(name string) func() {
 
 // checkG enforces the single-goroutine rule when checking is on.
 func (r *Runtime) checkG() {
-	if r.check && r.started && goid() != r.gid {
+	if r.check && r.started && GoID() != r.gid {
 		panic("plugin: Runtime called from a goroutine other than the one that called Start")
 	}
 }
@@ -294,7 +295,7 @@ func (r *Runtime) Start(h pluginapi.Host) []pluginapi.Work {
 	r.setHost(h)
 	if !r.started {
 		r.started = true
-		r.gid = goid()
+		r.gid = GoID()
 	}
 	return r.startLoader()
 }
@@ -422,9 +423,7 @@ func (r *Runtime) emit(e pluginapi.Event, from *plugin) {
 				p.panelsBufferClosed(pluginapi.BufferID(id))
 			}
 			data := make(map[string]any, len(e.Data))
-			for k, v := range e.Data {
-				data[k] = v
-			}
+			maps.Copy(data, e.Data)
 			data["id"] = id
 			e.Data = data
 		}
@@ -751,7 +750,7 @@ func (r *Runtime) runEvents(left time.Duration) time.Duration {
 	var spent time.Duration
 	for spent < left {
 		ran := false
-		for i := 0; i < len(r.order); i++ {
+		for i := range len(r.order) {
 			n := len(r.order)
 			p := r.order[(r.rr+i)%n]
 			if p.dead || len(p.evq) == 0 {

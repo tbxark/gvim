@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -568,8 +569,7 @@ func readLua(fsys fs.FS, name, plugin string) rawFile {
 	}
 	data, err := readCapped(fsys, name, MaxLuaFile)
 	if err != nil {
-		var pe *pluginapi.Error
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[*pluginapi.Error](err); ok {
 			return rawFile{err: pluginapi.Errf(pe.Code, "%s/%s: %s", plugin, name, pe.Msg)}
 		}
 		return rawFile{err: pluginapi.Errf(pluginapi.CodeIO, "%s/%s: %v", plugin, name, err)}
@@ -640,9 +640,7 @@ func (c *candidate) compile() {
 		}
 		files[rel] = f.src
 	}
-	for rel, cc := range Compile(c.name, files) {
-		c.compiled[rel] = cc
-	}
+	maps.Copy(c.compiled, Compile(c.name, files))
 	c.raw = nil
 	rels := make([]string, 0, len(c.compiled))
 	for rel := range c.compiled {

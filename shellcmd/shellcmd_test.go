@@ -27,9 +27,9 @@ func TestRunSucceedsWhenABackgroundChildKeepsOutputOpen(t *testing.T) {
 	// The shell exits 0, but the background sleep keeps the output pipe open longer
 	// than WaitDelay (1s), so Wait returns exec.ErrWaitDelay. A command that exits 0
 	// must still succeed.
-	out, err := shellcmd.Run(dir, "echo hi; sleep 2 & echo $! > sleep.pid", "", 30*time.Second)
+	out, err := shellcmd.RunEnv(dir, "echo hi; sleep 2 & echo $! > sleep.pid", "", 30*time.Second, nil)
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatalf("RunEnv: %v", err)
 	}
 	if out != "hi\n" {
 		t.Fatalf("output = %q, want %q", out, "hi\n")

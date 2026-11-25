@@ -21,7 +21,7 @@ func TestScanBudget(t *testing.T) {
 		t.Fatalf("budget of a memory buffer = %+v, want none", got)
 	}
 	var none *scanBudget
-	if !none.Take(small, 0) || none.Exhausted() {
+	if !none.Take(small, 0) || (none != nil && none.Spent) {
 		t.Fatal("a nil budget must allow every line")
 	}
 
@@ -36,7 +36,7 @@ func TestScanBudget(t *testing.T) {
 			t.Fatalf("line %d refused with lines left", i)
 		}
 	}
-	if b.Take(d.Buffer, 3) || !b.Exhausted() {
+	if b.Take(d.Buffer, 3) || !b.Spent {
 		t.Fatal("the fourth line must be refused")
 	}
 	b = &scanBudget{Lines: 100, Bytes: 25}

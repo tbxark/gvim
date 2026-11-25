@@ -423,8 +423,7 @@ func withKept(cands, kept []*candidate) []*candidate {
 // every running plugin the new discovery no longer lists or now disables. Plugins loaded
 // from a buffer stay.
 func (r *Runtime) unloadForReload(restart map[string]bool, now, prev map[string]*candidate) {
-	for i := len(r.order) - 1; i >= 0; i-- {
-		p := r.order[i]
+	for _, p := range slices.Backward(r.order) {
 		if p.dead || p.kindStr == SourceBuffer {
 			continue
 		}

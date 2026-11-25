@@ -1,6 +1,9 @@
 package buffer
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // bigSnap is the state behind a Snapshot of a large buffer. It is a value
 // copy of what a reader needs: the immutable overlay state, a copy of the line
@@ -126,8 +129,8 @@ func (g *bigSnap) chunkBefore(to, maxBytes int) (first, n int, text string) {
 	first = to - n
 	var sb strings.Builder
 	sb.Grow(size)
-	for k := len(rev) - 1; k >= 0; k-- {
-		sb.WriteString(rev[k])
+	for k, r := range slices.Backward(rev) {
+		sb.WriteString(r)
 		if k > 0 {
 			sb.WriteByte('\n')
 		}
@@ -164,7 +167,7 @@ func (g *bigSnap) hugeOf(b int) *hugeLine {
 		g.fail(err)
 		return nil
 	}
-	if end-start <= int64(g.r.maxLine) {
+	if end-start <= g.r.maxLine {
 		return nil
 	}
 	h, err := indexHugeLine(&g.r, start, end-start, g.idxStride, g.idxChunk)

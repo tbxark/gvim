@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -279,10 +280,10 @@ func TestFindNextBackwardForwardAreInverse(t *testing.T) {
 	if !equalMatches(seen, all) {
 		t.Fatalf("forward walk = %v, want %v", seen, all)
 	}
-	for i := len(all) - 1; i >= 0; i-- {
+	for _, a := range slices.Backward(all) {
 		m, found, _, err := findNext(snap, q, from, Backward, 0, 4)
-		if err != nil || !found || m != all[i] {
-			t.Fatalf("backward from %v = %v, %v, %v; want %v", from, m, found, err, all[i])
+		if err != nil || !found || m != a {
+			t.Fatalf("backward from %v = %v, %v, %v; want %v", from, m, found, err, a)
 		}
 		from = m.Start
 	}

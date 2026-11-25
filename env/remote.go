@@ -642,7 +642,7 @@ func detectRemote(ctx context.Context, root string, detectors []config.EnvDetect
 		return trust.DetectedEnv{}, false, fmt.Errorf("env: probing the remote markers: %w", err)
 	}
 	exists := map[string]bool{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

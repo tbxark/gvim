@@ -133,7 +133,7 @@ func TestThemeKeyAliasesAndModifierOnly(t *testing.T) {
 
 // cut splits a canonical theme key.
 func cut(name string) (section, key string, ok bool) {
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		if name[i] == '.' {
 			return name[:i], name[i+1:], true
 		}

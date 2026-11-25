@@ -101,15 +101,15 @@ func installText(e *apiEnv) {
 			return errReturn(L, err)
 		}
 		if normalize {
-			out = normalizeEOL(out)
+			out = NormalizeEOL(out)
 		}
 		L.Push(lua.LString(out))
 		return 1
 	})
 }
 
-// normalizeEOL turns CRLF and lone CR into LF.
-func normalizeEOL(s string) string {
+// NormalizeEOL turns CRLF and lone CR into LF.
+func NormalizeEOL(s string) string {
 	if !strings.Contains(s, "\r") {
 		return s
 	}
@@ -165,7 +165,7 @@ func textSplit(L *lua.LState) int {
 		if strings.Count(s, sep) >= MaxSplitParts {
 			L.RaiseError("too many pieces (max %d)", MaxSplitParts)
 		}
-		for _, piece := range strings.Split(s, sep) {
+		for piece := range strings.SplitSeq(s, sep) {
 			t.Append(lua.LString(piece))
 		}
 		L.Push(t)

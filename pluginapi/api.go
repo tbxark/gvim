@@ -81,7 +81,7 @@ func parseCanonical(s string) (uint64, bool) {
 	if s == "" || (len(s) > 1 && s[0] == '0') {
 		return 0, false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] < '0' || s[i] > '9' {
 			return 0, false
 		}
@@ -128,8 +128,7 @@ func Errf(code Code, format string, a ...any) error {
 
 // CodeOf returns the code of err; any error that is not an *Error has code CodeIO.
 func CodeOf(err error) Code {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Code
 	}
 	return CodeIO

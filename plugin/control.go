@@ -264,11 +264,11 @@ func (r *Runtime) ctlDisable(name string) []pluginapi.Notice {
 	l.toggled(name)
 	deps := r.loadedDependants(name)
 	why := fmt.Sprintf("requires %q (disabled)", name)
-	for i := len(deps) - 1; i >= 0; i-- {
-		if p := r.plugins[deps[i]]; p != nil && !p.dead {
+	for _, dep := range slices.Backward(deps) {
+		if p := r.plugins[dep]; p != nil && !p.dead {
 			r.unload(p, unloadOptions{final: statusFailed, err: why})
 		}
-		if dc := l.byName[deps[i]]; dc != nil {
+		if dc := l.byName[dep]; dc != nil {
 			dc.reason = why
 		}
 	}

@@ -318,8 +318,7 @@ func (c *subCtl) coalesce(e pluginapi.Event) bool {
 		return false
 	}
 	evq := c.p.evq
-	for i := len(evq) - 1; i >= 0; i-- {
-		it := evq[i]
+	for _, it := range slices.Backward(evq) {
 		if it.t.sub != c.s || it.t.started || it.t.done || len(it.args) != 1 {
 			continue
 		}

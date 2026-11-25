@@ -116,7 +116,7 @@ func TestLogIsABoundedRing(t *testing.T) {
 
 func TestNoticeDedupe(t *testing.T) {
 	h := start(t, `T.command("go", function() error("same failure") end)`)
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		_ = h.Run("t.go", nil)
 	}
 	count := 0

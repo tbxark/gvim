@@ -1,6 +1,10 @@
 package plugintest
 
-import "github.com/tbxark/gvim/pluginapi"
+import (
+	"maps"
+
+	"github.com/tbxark/gvim/pluginapi"
+)
 
 // The theme part of the fake host (plugin API tier 1a): the session color overrides a plugin
 // applies. The fake keeps the map and can be told to reject one, as the ui does for a bad
@@ -53,9 +57,7 @@ func (f *FakeHost) ThemeOverrides() (map[string]string, bool) {
 		return nil, false
 	}
 	out := make(map[string]string, len(t.Overrides))
-	for k, v := range t.Overrides {
-		out[k] = v
-	}
+	maps.Copy(out, t.Overrides)
 	return out, true
 }
 
@@ -71,9 +73,7 @@ func (f *FakeHost) SetThemeOverrides(overrides map[string]string) error {
 		return nil
 	}
 	t.Overrides = make(map[string]string, len(overrides))
-	for k, v := range overrides {
-		t.Overrides[k] = v
-	}
+	maps.Copy(t.Overrides, overrides)
 	return nil
 }
 

@@ -308,7 +308,7 @@ gvim.once("resize", function(e) T.spy("resize once", e.width) end, { debounce = 
 		h := start(t, src+`
 gvim.command.register{ name = "hang", run = function() while true do end end }`, plugintest.Options{Timeout: 15 * time.Millisecond})
 		h.Emit(save("/1"))
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			_ = h.Run("t.hang", nil)
 		}
 		h.Advance(time.Second)
@@ -738,7 +738,7 @@ gvim.on("viewport_changed", function(e) T.spy("view", e.top_line) end)`)
 gvim.on("after_file_save", function() T.spy("save") end)
 gvim.on("pre_command", function(e) T.spy("pre", e.action) end)
 gvim.on("post_command", function(e) T.spy("post", e.action) end)`)
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			h.RT.Emit(ev("after_file_save", map[string]any{"buf": pluginapi.BufferID(1)}))
 			h.RT.Emit(ev("pre_command", map[string]any{"action": fmt.Sprint("a", i)}))
 			h.RT.Emit(ev("post_command", map[string]any{"action": fmt.Sprint("a", i)}))
@@ -793,7 +793,7 @@ func TestShutdownHandlersRunInStopWithin200msTotal(t *testing.T) {
 	})
 	t.Run("the total is bounded however many plugins hang", func(t *testing.T) {
 		files := plugintest.Files{}
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			files[fmt.Sprintf("p%d.lua", i)] = gv + `gvim.on("shutdown", function() while true do end end)`
 		}
 		h := startFiles(t, files, plugintest.Options{Timeout: 400 * time.Millisecond})

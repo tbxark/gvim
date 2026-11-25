@@ -120,7 +120,7 @@ func (d *Document) CodecName() string {
 // any other byte is "UTF-8".
 func encodingLabel(codec, text string) string {
 	if codec == "" || codec == defaultCodec {
-		if isASCII(text) {
+		if IsASCII(text) {
 			return "ASCII"
 		}
 		return "UTF-8"
@@ -128,8 +128,8 @@ func encodingLabel(codec, text string) string {
 	return labels[codec]
 }
 
-// isASCII reports whether s has no byte above 0x7f.
-func isASCII(s string) bool {
+// IsASCII reports whether s has no byte above 0x7f.
+func IsASCII(s string) bool {
 	for i := range len(s) {
 		if s[i] >= utf8.RuneSelf {
 			return false

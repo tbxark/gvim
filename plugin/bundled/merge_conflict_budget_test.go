@@ -119,13 +119,13 @@ func TestMergeConflictScanFitsTheEventBudget(t *testing.T) {
 	t.Parallel()
 	const conflicts = 2000 // 6000 markers in 10 000 lines
 	var sb strings.Builder
-	for i := 0; i < conflicts; i++ {
+	for range conflicts {
 		sb.WriteString("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> other\n")
 	}
 	text := sb.String()
 	var tos []string
 	var e *mcEnv
-	for attempt := 0; attempt < 10; attempt++ {
+	for range 10 {
 		e = newMCRealClock(t, text, 500*time.Millisecond)
 		e.open()
 		e.drain()

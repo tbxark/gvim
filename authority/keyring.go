@@ -193,8 +193,7 @@ func runKeyringCommand(ctx context.Context, name string, args []string, stdin []
 		if ctx.Err() != nil {
 			return nil, nil, 0, ctx.Err()
 		}
-		var exit *exec.ExitError
-		if errors.As(runErr, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](runErr); ok {
 			return out.buf.Bytes(), errOut.buf.Bytes(), exit.ExitCode(), nil
 		}
 		return nil, nil, 0, fmt.Errorf("ssh keyring: run %s: %w", name, runErr)

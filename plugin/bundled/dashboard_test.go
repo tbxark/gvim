@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -589,7 +590,7 @@ func dashboardGitHubSettings(network bool) map[string]plugin.PluginSettings {
 func dashboardSettle(t *testing.T, r *rig, want string) string {
 	t.Helper()
 	var text string
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		r.h.Settle()
 		text = dashboardText(t, r.host)
 		if strings.Contains(text, want) {
@@ -851,9 +852,7 @@ func TestDashboardGitHubPRRowCap(t *testing.T) {
 
 func dashboardWeatherSettings(network bool, extra map[string]any) map[string]plugin.PluginSettings {
 	user := map[string]any{"weather": true, "network": network}
-	for k, v := range extra {
-		user[k] = v
-	}
+	maps.Copy(user, extra)
 	return map[string]plugin.PluginSettings{dashboardPlugin: {User: user}}
 }
 
@@ -961,7 +960,6 @@ func TestDashboardWeatherUnavailable(t *testing.T) {
 		"http error": {status: 500, body: "oops", want: "unavailable"},
 		"malformed":  {status: 200, body: "{not json", want: "invalid response"},
 	} {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			tr := &githubTransport{status: tc.status, body: tc.body}
 			r := startRig(t, rigOpts{
@@ -1058,7 +1056,7 @@ func TestDashboardDiskMeter(t *testing.T) {
 		}
 	}
 	var diskLine string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if strings.Contains(line, "95%") {
 			diskLine = line
 			break
@@ -1110,7 +1108,6 @@ func TestDashboardDiskMalformedFields(t *testing.T) {
 
 	t.Run("non-integer or misplaced percentage is unavailable", func(t *testing.T) {
 		for _, pct := range []string{"1.5%", "+95%", "-5%", "95%%", "95 %"} {
-			pct := pct
 			t.Run(pct, func(t *testing.T) {
 				r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
 					o.SetDir("/work")

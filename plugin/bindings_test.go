@@ -14,7 +14,7 @@ import (
 func luaString(s string) string {
 	var sb strings.Builder
 	sb.WriteByte('"')
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c < 0x20 || c >= 0x7f || c == '"' || c == '\\' {
 			fmt.Fprintf(&sb, "\\%03d", c)

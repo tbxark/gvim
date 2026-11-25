@@ -183,7 +183,7 @@ func TestSuspendedPluginIsMuted(t *testing.T) {
 require("gvim").on("resize", function() T.spy("ran") end)
 require("gvim").on("before_file_save", function() return false end)
 T.command("hang", function() while true do end end)`, plugintest.Options{Timeout: 15 * time.Millisecond})
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_ = h.Run("t.hang", nil)
 	}
 	if status(h, "t") != "suspended" {

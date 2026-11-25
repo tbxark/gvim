@@ -127,12 +127,6 @@ func ClassifyCause(cause string, budget time.Duration) (kind, msg string) {
 	return names[re.kind], re.msg
 }
 
-// AddSubscription subscribes fn (a Lua function value of that plugin) to event.
-func AddSubscription(r *Runtime, plugin, event string, fn *lua.LFunction, once bool) error {
-	_, err := r.plugins[plugin].addSub(event, fn, once)
-	return err
-}
-
 func init() {
 	registerAwait("t_echo", func(c *awaitCall) { c.Return(c.args...) })
 	registerAwaitV("t_echo_all", func(c *awaitCall) { c.Return(c.args...) })

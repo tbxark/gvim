@@ -204,11 +204,9 @@ func TestIndexJobRunsBesideTheEditor(t *testing.T) {
 		}
 		var res IndexResult
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			res = job.Run(context.Background())
-		}()
+		})
 		// The editor's goroutine keeps reading while the job reads.
 		for i := range d.Buffer.Lines() {
 			if got, want := d.Buffer.Line(i), fmt.Sprintf("line %04d", i); got != want {

@@ -634,7 +634,7 @@ func (r *Runtime) report(p *plugin, label string, re *runError, limit time.Durat
 			return
 		}
 		n, suspended := r.strike(p, label)
-		text := ""
+		var text string
 		switch re.kind {
 		case failTimeout:
 			text = fmt.Sprintf("%s: %s timed out (%d ms), strike %d/%d", p.name, label, limit.Milliseconds(), min(n, strikeLimit), strikeLimit)
@@ -716,7 +716,7 @@ func (r *Runtime) strike(p *plugin, why string) (n int, suspended bool) {
 // carries no stack trace.
 func traceback(th *lua.LState) string {
 	var sb strings.Builder
-	for lvl := 0; lvl < 30; lvl++ {
+	for lvl := range 30 {
 		dbg, ok := th.GetStack(lvl)
 		if !ok {
 			break
@@ -761,7 +761,7 @@ func (p *plugin) awaitWhere() string {
 // callerWhere returns "<chunk>:<line>: " of the innermost plugin frame of a parked
 // thread, skipping the runtime's own prelude wrappers; "" when unknown.
 func callerWhere(th *lua.LState) string {
-	for lvl := 0; lvl < 8; lvl++ {
+	for lvl := range 8 {
 		dbg, ok := th.GetStack(lvl)
 		if !ok {
 			return ""

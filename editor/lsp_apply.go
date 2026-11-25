@@ -9,7 +9,7 @@ import (
 // with ErrStale and nothing changes. The language-server port uses it for a
 // workspace edit that was computed against an older text.
 func (e *Editor) ApplyLSPEditsExpect(path string, edits []LSPEdit, expect *Version) error {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
@@ -20,7 +20,7 @@ func (e *Editor) ApplyLSPEditsExpect(path string, edits []LSPEdit, expect *Versi
 // whether an open document has that path. The language-server port uses it to
 // capture the version a workspace edit must still see.
 func (e *Editor) OpenDocumentVersion(path string) (Version, bool) {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return Version{}, false
 	}

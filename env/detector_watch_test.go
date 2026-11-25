@@ -34,7 +34,7 @@ func TestDetectorWatchPathsCustom(t *testing.T) {
 
 func TestDetectorWatchPathsBound(t *testing.T) {
 	var detectors []config.EnvDetector
-	for i := 0; i < MaxDetectorWatchDirs+5; i++ {
+	for i := range MaxDetectorWatchDirs + 5 {
 		detectors = append(detectors, config.EnvDetector{
 			Name: "d" + strings.Repeat("x", i), Markers: []string{strings.Repeat("d", i+1) + "/marker"},
 			Kind: config.EnvKindShell,

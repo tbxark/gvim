@@ -129,7 +129,7 @@ func TestLocalPrefixProbeHonorsCancellation(t *testing.T) {
 // ProbeLimit returns at most ProbeLimit, in sorted order.
 func TestLocalPrefixProbeResultLimit(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < ProbeLimit+10; i++ {
+	for i := range ProbeLimit + 10 {
 		if err := os.WriteFile(filepath.Join(root, "f"+fmt.Sprintf("%03d", i)+".go"), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +260,7 @@ func TestIndexSetProbeShowHidden(t *testing.T) {
 // of overshooting with a full batch.
 func TestReadLocalProbeDirNeverExceedsTheScanCap(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < ProbeScanLimit+40; i++ {
+	for i := range ProbeScanLimit + 40 {
 		name := "f" + fmt.Sprintf("%05d", i)
 		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)

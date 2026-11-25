@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -93,7 +94,7 @@ func NewFakeOS() *FakeOS {
 		nodes:     map[string]*fakeNode{},
 		failWatch: map[string]error{},
 		wake:      make(chan struct{}),
-		ui:        goid(),
+		ui:        plugin.GoID(),
 	}
 	for _, d := range []string{"/home/u", "/home/u/.config/gvim", "/tmp", "/work"} {
 		f.mkdirAll(d)
@@ -300,7 +301,7 @@ func notFound(p string) error {
 
 func (f *FakeOS) rec(name, path string) {
 	f.calls = append(f.calls, name+" "+path)
-	if goid() == f.ui {
+	if plugin.GoID() == f.ui {
 		f.uiCalls++
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -78,8 +79,8 @@ func resolveExisting(abs string) string {
 	var tail []string
 	for {
 		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
-			for i := len(tail) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, tail[i])
+			for _, t := range slices.Backward(tail) {
+				resolved = filepath.Join(resolved, t)
 			}
 			return resolved
 		}

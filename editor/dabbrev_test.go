@@ -167,14 +167,14 @@ func TestDabbrevMultiBufferDeduplicates(t *testing.T) {
 func TestDabbrevMultiBufferBoundedBuffers(t *testing.T) {
 	t.Parallel()
 	texts := []string{"fo"}
-	for i := 0; i < document.DabbrevOtherBufferLimit+4; i++ {
+	for i := range document.DabbrevOtherBufferLimit + 4 {
 		texts = append(texts, fmt.Sprintf("fooword%d\n", i))
 	}
 	e := withDabbrevDocs(0, texts...)
 	marksCaret(e, 0, 2)
 	// Candidate i (0-based) comes from other buffer i; after the last included
 	// buffer the next press restores the prefix.
-	for i := 0; i < document.DabbrevOtherBufferLimit; i++ {
+	for i := range document.DabbrevOtherBufferLimit {
 		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
 			t.Fatalf("press %d: %v", i+1, r.Err)
 		}
@@ -199,7 +199,7 @@ func TestDabbrevMultiBufferWindowIsBounded(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("foofar\n")
 	const filler = 3000
-	for i := 0; i < filler; i++ {
+	for i := range filler {
 		if i == filler/2 {
 			sb.WriteString("foonear\n")
 			continue
@@ -257,7 +257,7 @@ func TestDabbrevCandidateLimit(t *testing.T) {
 	line := strings.Join(words, " ") + " fo"
 	e := withDabbrevDocs(0, line)
 	marksCaret(e, 0, len([]rune(line)))
-	for i := 0; i < document.DabbrevMaxCandidates; i++ {
+	for i := range document.DabbrevMaxCandidates {
 		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
 			t.Fatalf("press %d: %v", i+1, r.Err)
 		}

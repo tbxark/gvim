@@ -242,7 +242,7 @@ func luaToNumber(L *lua.LState) int {
 		return 1
 	}
 	v := 0.0
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		d := digitVal(s[i])
 		if d < 0 || d >= base {
 			L.Push(lua.LNil)
@@ -271,7 +271,7 @@ func luaUnpack(L *lua.LState) int {
 		L.RaiseError("too many results to unpack")
 	}
 	n := int(j - i + 1)
-	for k := 0; k < n; k++ {
+	for k := range n {
 		L.Push(t.RawGetInt(int(i) + k))
 	}
 	return n
@@ -426,7 +426,7 @@ func tableMove(L *lua.LState) int {
 			a2.RawSetInt(int(tpos+i), a1.RawGetInt(int(f+i)))
 		}
 		if tpos > e || tpos <= f || a1 != a2 {
-			for i := int64(0); i < n; i++ {
+			for i := range n {
 				move(i)
 			}
 		} else {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -227,9 +228,7 @@ func (m *Map) layer(own []Binding) *Map {
 	// were deliberately disabled rather than unbound and free to fall back.
 	if len(m.unbound) > 0 {
 		layered.unbound = make(map[lookupKey]bool, len(m.unbound))
-		for k, v := range m.unbound {
-			layered.unbound[k] = v
-		}
+		maps.Copy(layered.unbound, m.unbound)
 	}
 	for _, b := range own {
 		if b.Action != ActionUnbind {

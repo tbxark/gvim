@@ -14,7 +14,7 @@ func linesOf(text string) []string {
 // headingAt is the byte offset of line i in lines, the values Scan reports.
 func headingAt(lines []string, i int) int {
 	off := 0
-	for j := 0; j < i; j++ {
+	for j := range i {
 		off += len(lines[j]) + 1
 	}
 	return off

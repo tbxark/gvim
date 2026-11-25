@@ -284,8 +284,8 @@ func checkSteps(L *lua.LState, p *plugin, n int) ([]pluginapi.Step, error) {
 	total := 0
 	for i := 1; i <= count; i++ {
 		var s pluginapi.Step
-		argv := lua.LValue(lua.LNil)
-		cv := lua.LValue(lua.LNil)
+		argv := lua.LNil
+		cv := lua.LNil
 		switch v := t.RawGetInt(i).(type) {
 		case lua.LString:
 			s.Action = string(v)

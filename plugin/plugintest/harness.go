@@ -1,13 +1,10 @@
 package plugintest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
-	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -83,7 +80,7 @@ type timer struct {
 // New builds a harness and the runtime; nothing is loaded until Start.
 func New(t *testing.T, files Files, o Options) *Harness {
 	t.Helper()
-	h := &Harness{T: t, Files: files, Host: o.Host, now: time.Unix(1_700_000_000, 0), gid: goid()}
+	h := &Harness{T: t, Files: files, Host: o.Host, now: time.Unix(1_700_000_000, 0), gid: plugin.GoID()}
 	if h.Host == nil {
 		h.Host = NewFakeHost()
 	}
@@ -201,7 +198,7 @@ func (h *Harness) sources() []plugin.Source {
 		// Compile in Work, on another goroutine, like the loader does.
 		done := make(chan map[string]*plugin.Compiled)
 		go func() {
-			if goid() == h.gid {
+			if plugin.GoID() == h.gid {
 				h.CompileOnUIGoroutine = true
 			}
 			done <- plugin.Compile(n, g.files)
@@ -276,7 +273,7 @@ func (h *Harness) Control(c pluginapi.Control) []pluginapi.Notice {
 // returns, resolve it, repeat until nothing is queued.
 func (h *Harness) Settle() {
 	h.T.Helper()
-	for i := 0; i < 10_000; i++ {
+	for range 10_000 {
 		work, more := h.RT.Drain(100 * time.Millisecond)
 		ran := h.runWork(work)
 		if h.pollStreams() {
@@ -411,15 +408,4 @@ func (h *Harness) Plugin(name string) (pluginapi.PluginInfo, bool) {
 		}
 	}
 	return pluginapi.PluginInfo{}, false
-}
-
-func goid() uint64 {
-	var buf [64]byte
-	b := buf[:runtime.Stack(buf[:], false)]
-	b = bytes.TrimPrefix(b, []byte("goroutine "))
-	if i := bytes.IndexByte(b, ' '); i >= 0 {
-		b = b[:i]
-	}
-	n, _ := strconv.ParseUint(string(b), 10, 64)
-	return n
 }

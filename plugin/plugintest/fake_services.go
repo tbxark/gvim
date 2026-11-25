@@ -261,7 +261,7 @@ func (*FakeServices) ValidateChord(chord string) error {
 			}
 		}
 		if mods != "" {
-			for _, m := range strings.Split(mods, "+") {
+			for m := range strings.SplitSeq(mods, "+") {
 				if !chordMods[strings.ToLower(m)] {
 					return pluginapi.Errf(pluginapi.CodeInvalid, "keymap: %q: unknown key name %q", step, m)
 				}

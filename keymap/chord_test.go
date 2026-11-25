@@ -66,7 +66,7 @@ func panicConflicts(m *keymap.Map) []string {
 			if err != nil {
 				continue // not a key chord of this vocabulary
 			}
-			for _, step := range strings.Fields(canon) {
+			for step := range strings.FieldsSeq(canon) {
 				if forbidden[step] || (step == alias && b.Action != "set_bookmark") {
 					out = append(out, fmt.Sprintf("%q is bound to %q in the %s context", s, b.Action, b.When))
 				}

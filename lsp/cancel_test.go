@@ -30,11 +30,9 @@ func workspaceItem(t *testing.T) []protocol.WorkspaceDocumentDiagnosticReport {
 	t.Helper()
 	return []protocol.WorkspaceDocumentDiagnosticReport{
 		&protocol.WorkspaceFullDocumentDiagnosticReport{
-			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
-				Kind:  string(protocol.DocumentDiagnosticReportKindFull),
-				Items: []protocol.Diagnostic{{Message: protocol.String("later")}},
-			},
-			URI: "file:///work/proj/held.go",
+			Kind:  string(protocol.DocumentDiagnosticReportKindFull),
+			Items: []protocol.Diagnostic{{Message: protocol.String("later")}},
+			URI:   "file:///work/proj/held.go",
 		},
 	}
 }

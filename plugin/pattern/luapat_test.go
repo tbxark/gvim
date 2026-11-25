@@ -27,7 +27,7 @@ type convRow struct {
 func quoteLua(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		switch c := s[i]; {
 		case c == '"':
 			b.WriteString(`\"`)
@@ -325,12 +325,12 @@ func TestIterStops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, ok, _ := it.Next(); !ok {
 			t.Fatalf("match %d missing", i)
 		}
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, ok, err := it.Next(); ok || err != nil {
 			t.Fatalf("exhausted iterator returned %v %v", ok, err)
 		}

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -86,22 +87,10 @@ func depsPlaced(c *candidate, left []*candidate, in map[string]*candidate) bool 
 		if dep == nil || dep == c {
 			return false
 		}
-		for _, l := range left {
-			if l == dep {
-				return true
-			}
-		}
+		return slices.Contains(left, dep)
+	}
+	if slices.ContainsFunc(c.man.Requires, waiting) {
 		return false
 	}
-	for _, n := range c.man.Requires {
-		if waiting(n) {
-			return false
-		}
-	}
-	for _, n := range c.man.After {
-		if waiting(n) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(c.man.After, waiting)
 }

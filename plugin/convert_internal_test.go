@@ -30,7 +30,7 @@ func reflectToLua(p *plugin, v any) lua.LValue {
 	switch rv.Kind() {
 	case reflect.Slice, reflect.Array:
 		t := p.L.CreateTable(rv.Len(), 0)
-		for i := 0; i < rv.Len(); i++ {
+		for i := range rv.Len() {
 			t.Append(reflectToLua(p, rv.Index(i).Interface()))
 		}
 		return t
@@ -50,7 +50,7 @@ func reflectToLua(p *plugin, v any) lua.LValue {
 	case reflect.Struct:
 		rt := rv.Type()
 		t := p.L.CreateTable(0, rt.NumField())
-		for i := 0; i < rt.NumField(); i++ {
+		for i := range rt.NumField() {
 			if f := rt.Field(i); f.IsExported() {
 				t.RawSetString(snakeCase(f.Name), reflectToLua(p, rv.Field(i).Interface()))
 			}
@@ -199,9 +199,7 @@ func TestSnakeCaseCacheConcurrent(t *testing.T) {
 	want := []string{"id", "old_start", "line_count", "http_server", "socket_only", "cursor_byte", "fg"}
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 100 {
 				for i, in := range inputs {
 					if got := snakeCase(in); got != want[i] {
@@ -209,7 +207,7 @@ func TestSnakeCaseCacheConcurrent(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

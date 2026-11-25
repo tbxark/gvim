@@ -259,7 +259,7 @@ func TestGitGutterLongRunOfChanges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			attempts(t, 3, func(p *attempt) {
 				var head, text []string
-				for i := 0; i < tt.changed; i++ {
+				for i := range tt.changed {
 					head = append(head, "old "+strconv.Itoa(i))
 					text = append(text, "new "+strconv.Itoa(i))
 				}
@@ -296,7 +296,7 @@ func TestGitBlameBigBufferStaysWithinBudgets(t *testing.T) {
 	}
 	attempts(t, 3, func(p *attempt) {
 		var sb strings.Builder
-		for i := 0; i < 150_000; i++ {
+		for i := range 150_000 {
 			sb.WriteString("line " + strconv.Itoa(i) + "\n")
 		}
 		text := sb.String()

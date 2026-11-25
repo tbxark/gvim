@@ -295,7 +295,7 @@ func TestFindReferencesRowCap(t *testing.T) {
 	t.Parallel()
 	host, _ := findRefHost(t)
 	locs := make([]any, 0, 150)
-	for i := 0; i < 150; i++ {
+	for i := range 150 {
 		locs = append(locs, refLocation("/work/a.go", float64(i%5), 0))
 	}
 	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) { return locs, "" }

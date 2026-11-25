@@ -95,7 +95,7 @@ func (t *tailBuffer) tail(lines, limit int) string {
 	text := string(t.data)
 	t.mu.Unlock()
 	var keep []string
-	for _, l := range strings.Split(text, "\n") {
+	for l := range strings.SplitSeq(text, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			keep = append(keep, l)
 		}

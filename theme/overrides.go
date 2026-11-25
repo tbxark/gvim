@@ -105,7 +105,7 @@ func cutKey(name string) (section, key string, ok bool) {
 
 // splitThemeKey splits a "section.key" theme key.
 func splitThemeKey(name string) (section, key string, ok bool) {
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		if name[i] == '.' {
 			return name[:i], name[i+1:], true
 		}

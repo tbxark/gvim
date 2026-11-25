@@ -57,7 +57,7 @@ func TestActionPopupWaitAndEvent(t *testing.T) {
 		t.Fatalf("popup = %+v", ov.ActionPopup)
 	}
 	// The plugin hears the result event, and the call returns the chosen id.
-	h.Emit(pluginapi.Event{Name: "action_popup_result", Data: map[string]any{"popup": uint64(ov.ID), "action": "install"}})
+	h.Emit(pluginapi.Event{Name: "action_popup_result", Data: map[string]any{"popup": ov.ID, "action": "install"}})
 	h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"install"}})
 	notices := h.NoticeTexts()
 	if len(notices) == 0 || notices[len(notices)-1] != "chose:install" {

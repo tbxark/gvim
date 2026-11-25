@@ -52,8 +52,7 @@ func TestLocalWatch(t *testing.T) {
 	fos := plugintest.NewFakeOS()
 	fos.SetDir("/w")
 	a := authority.Local(authority.LocalOptions{OS: fos})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w, err := a.Files().Watch(ctx, "/w", hostos.WatchOptions{})
 	if err != nil {
 		t.Fatal(err)

@@ -96,8 +96,8 @@ func ParseColorText(text string) (Color, error) {
 	if s == "" {
 		return Color{}, fmt.Errorf("a color is required")
 	}
-	if strings.HasPrefix(s, "#") {
-		hex := strings.TrimPrefix(s, "#")
+	if after, ok := strings.CutPrefix(s, "#"); ok {
+		hex := after
 		if len(hex) != 6 {
 			return Color{}, fmt.Errorf("a hex color is #RRGGBB, got %q", text)
 		}

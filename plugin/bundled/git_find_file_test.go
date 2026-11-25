@@ -136,7 +136,7 @@ func TestGitFindFileSaysWhyNot(t *testing.T) {
 
 func TestGitFindFileCapsHugeRepositories(t *testing.T) {
 	var sb strings.Builder
-	for i := 0; i < 50_010; i++ {
+	for i := range 50_010 {
 		sb.WriteString("dir/file")
 		sb.WriteString(strconv.Itoa(i))
 		sb.WriteByte(0)

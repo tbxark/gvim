@@ -15,16 +15,11 @@ import (
 	"unicode/utf8"
 )
 
-// Run runs command with sh -c in dir, with input on its standard input, and
+// RunEnv runs command with sh -c in dir, with input on its standard input, and
 // returns its standard output with CRLF breaks turned into LF. timeout bounds the
 // run. A non-zero exit, a timeout, or output that is not UTF-8 is an error. A
 // background child that keeps the output open after the shell exited 0 does not
-// make a successful command fail.
-func Run(dir, command, input string, timeout time.Duration) (string, error) {
-	return RunEnv(dir, command, input, timeout, nil)
-}
-
-// RunEnv is Run with extra environment entries appended to the inherited
+// make a successful command fail. extraEnv is appended to the inherited
 // environment (the active project environment's set-only overlay). A nil or
 // empty overlay leaves the child's environment inherited.
 func RunEnv(dir, command, input string, timeout time.Duration, extraEnv []string) (string, error) {
@@ -49,8 +44,7 @@ func RunEnv(dir, command, input string, timeout time.Duration, extraEnv []string
 	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return "", fmt.Errorf("shell command timed out after %s", timeout)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		msg := fmt.Sprintf("shell command failed: exit status %d", exitErr.ExitCode())
 		if s := strings.TrimSpace(stderr.String()); s != "" {
 			first, _, _ := strings.Cut(s, "\n")

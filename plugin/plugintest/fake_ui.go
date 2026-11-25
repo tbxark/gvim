@@ -2,6 +2,7 @@ package plugintest
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -72,9 +73,9 @@ func (u *FakeUI) Opened() []*FakeOverlay {
 // Last returns the most recent overlay of the kind ("" for any), open or not; nil when
 // there is none.
 func (u *FakeUI) Last(kind string) *FakeOverlay {
-	for i := len(u.Overlays) - 1; i >= 0; i-- {
-		if kind == "" || u.Overlays[i].Kind == kind {
-			return u.Overlays[i]
+	for _, v := range slices.Backward(u.Overlays) {
+		if kind == "" || v.Kind == kind {
+			return v
 		}
 	}
 	return nil
@@ -82,9 +83,9 @@ func (u *FakeUI) Last(kind string) *FakeOverlay {
 
 // ByID returns the picker or popup with the id (the latest one when an id was reused).
 func (u *FakeUI) ByID(id uint64) *FakeOverlay {
-	for i := len(u.Overlays) - 1; i >= 0; i-- {
-		if u.Overlays[i].ID == id {
-			return u.Overlays[i]
+	for _, v := range slices.Backward(u.Overlays) {
+		if v.ID == id {
+			return v
 		}
 	}
 	return nil

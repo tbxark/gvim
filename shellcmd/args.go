@@ -44,8 +44,7 @@ func RunArgsEnv(dir string, argv []string, input string, timeout time.Duration, 
 		return "", 0, errors.New("shell command output is not valid UTF-8")
 	}
 	text := strings.ReplaceAll(out.String(), "\r\n", "\n")
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](runErr); ok {
 		return text, exitErr.ExitCode(), nil
 	}
 	if runErr != nil {

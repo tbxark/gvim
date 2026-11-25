@@ -12,7 +12,7 @@ import "github.com/tbxark/gvim/fold"
 // empty list clears them. A path that is not open is ignored, as for
 // SetExternalFolds.
 func (e *Editor) SetOutlineFolds(path string, ranges []fold.Range, textVersion uint64) {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return
 	}

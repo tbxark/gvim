@@ -1133,7 +1133,7 @@ func TestAuditModeOverlappingRefreshOnlyNewestApplies(t *testing.T) {
 				t.Fatal(err)
 			}
 			var firstDone chan pluginapi.Completion
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				w := runnableWork(h)
 				if w == nil {
 					t.Fatal("no first refresh Work")
@@ -1160,7 +1160,7 @@ func TestAuditModeOverlappingRefreshOnlyNewestApplies(t *testing.T) {
 			if err := h.RT.Run(auditPlugin+".refresh", nil, pluginapi.SrcAPI); err != nil {
 				t.Fatal(err)
 			}
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				w := runnableWork(h)
 				if w == nil {
 					break
@@ -1704,7 +1704,7 @@ func TestAuditModeSaveReloadSurvivesPickerCloseDuringRefresh(t *testing.T) {
 
 func drainRunnableWorks(t *testing.T, h *plugintest.Harness) []*pluginapi.Work {
 	t.Helper()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		work, _ := h.RT.Drain(50 * time.Millisecond)
 		var out []*pluginapi.Work
 		for j := range work {
@@ -1722,7 +1722,7 @@ func drainRunnableWorks(t *testing.T, h *plugintest.Harness) []*pluginapi.Work {
 
 func runAllWork(h *plugintest.Harness) {
 	idle := 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		work, more := h.RT.Drain(50 * time.Millisecond)
 		ran := false
 		for j := range work {
@@ -1745,7 +1745,7 @@ func runAllWork(h *plugintest.Harness) {
 // runnableWork drains until the runtime hands out a Work with a Run closure, ignoring
 // queued timers, so tests can interleave host completions around async work.
 func runnableWork(h *plugintest.Harness) *pluginapi.Work {
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		work, more := h.RT.Drain(100 * time.Millisecond)
 		for j := range work {
 			if work[j].Run != nil {
@@ -1762,7 +1762,7 @@ func runnableWork(h *plugintest.Harness) *pluginapi.Work {
 // drainRuntime pumps the runtime without running any Work so async scans can be stepped
 // by hand alongside host completions.
 func drainRuntime(h *plugintest.Harness) {
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		work, more := h.RT.Drain(100 * time.Millisecond)
 		if len(work) == 0 && !more {
 			return

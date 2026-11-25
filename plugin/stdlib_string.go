@@ -201,7 +201,7 @@ func stringGsub(L *lua.LState) int {
 		repl.Template = r.String()
 	case *lua.LTable:
 		repl.Func = func(m pattern.Result) (string, bool, error) {
-			key := lua.LValue(lua.LNil)
+			key := lua.LNil
 			if len(m.Caps) > 0 {
 				key = capValue(m.Caps[0])
 			}

@@ -54,7 +54,7 @@ func TestMemBombChild(t *testing.T) {
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
 		t.Fatal(err)
 	}
-	peak := int64(ru.Maxrss)
+	peak := ru.Maxrss
 	if runtime.GOOS != "darwin" {
 		peak <<= 10 // kilobytes elsewhere
 	}
@@ -72,7 +72,7 @@ func vmHWM() (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if rest, ok := strings.CutPrefix(line, "VmHWM:"); ok {
 			fields := strings.Fields(rest)
 			if len(fields) == 0 {
@@ -129,7 +129,7 @@ func TestPeakMemoryUnderTheHeapGuard(t *testing.T) {
 					t.Fatalf("child: %v\n%s", err, out)
 				}
 				got := int64(0)
-				for _, line := range strings.Split(string(out), "\n") {
+				for line := range strings.SplitSeq(string(out), "\n") {
 					if v, ok := strings.CutPrefix(line, "PEAK_RSS="); ok {
 						got, _ = strconv.ParseInt(v, 10, 64)
 					}

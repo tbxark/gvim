@@ -133,11 +133,11 @@ func TestInPlaceLineEditsKeepUndoExact(t *testing.T) {
 		if got := b.Text(); got != strings.Join(model, "\n") {
 			t.Fatalf("round %d: text %q, model %q", round, got, strings.Join(model, "\n"))
 		}
-		for k := len(snapshots) - 1; k >= 0; k-- {
+		for k, snapshot := range slices.Backward(snapshots) {
 			if _, ok := b.Undo(); !ok {
 				t.Fatalf("round %d: undo %d refused", round, k)
 			}
-			if got, want := b.Text(), strings.Join(snapshots[k], "\n"); got != want {
+			if got, want := b.Text(), strings.Join(snapshot, "\n"); got != want {
 				t.Fatalf("round %d: after undo %d text %q, want %q", round, k, got, want)
 			}
 		}

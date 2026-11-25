@@ -137,7 +137,7 @@ func (e *Editor) newline(d *Document) {
 	rules := indentRulesOf(s)
 	d.EditPlaced(func(c caret) (edit, placeFn) {
 		lo, hi := c.Bounds()
-		width := 0
+		var width int
 		if rules != nil {
 			width = rules.NewLineIndent(e.indentViewOf(d, tab), lo)
 		} else {

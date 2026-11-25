@@ -451,9 +451,9 @@ func CopyName(dir, name string) (string, error) {
 	if err := Validate(dir, name); err != nil {
 		return "", err
 	}
-	stem, ext := splitStemExt(name)
+	stem, ext := SplitStemExt(name)
 	for n := 1; n <= maxCopyAttempts; n++ {
-		candidate := copyCandidate(stem, ext, n)
+		candidate := CopyCandidate(stem, ext, n)
 		_, err := os.Lstat(filepath.Join(dir, candidate))
 		if errors.Is(err, fs.ErrNotExist) {
 			return candidate, nil
@@ -465,8 +465,8 @@ func CopyName(dir, name string) (string, error) {
 	return "", fmt.Errorf("fsops: no free copy name for %s in %s: %w", name, dir, ErrConflict)
 }
 
-// copyCandidate builds the n-th duplicate name. n = 1 gives no number.
-func copyCandidate(stem, ext string, n int) string {
+// CopyCandidate builds the n-th duplicate name. n = 1 gives no number.
+func CopyCandidate(stem, ext string, n int) string {
 	suffix := " copy"
 	if n > 1 {
 		suffix = fmt.Sprintf(" copy %d", n)
@@ -477,9 +477,9 @@ func copyCandidate(stem, ext string, n int) string {
 	return stem + suffix + "." + ext
 }
 
-// splitStemExt splits name at its last dot. A leading dot does not start an
+// SplitStemExt splits name at its last dot. A leading dot does not start an
 // extension.
-func splitStemExt(name string) (stem, ext string) {
+func SplitStemExt(name string) (stem, ext string) {
 	if i := strings.LastIndexByte(name, '.'); i > 0 {
 		return name[:i], name[i+1:]
 	}

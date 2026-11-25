@@ -41,7 +41,7 @@ func TestClusterBoundariesOfAVeryLongLine(t *testing.T) {
 		isBoundary[c] = true
 	}
 	n := len([]rune(text))
-	for trial := 0; trial < 2000; trial++ {
+	for range 2000 {
 		col := 1 + rng.IntN(n-1)
 		// The reference: the largest boundary below col, and the smallest above it.
 		prev, next := 0, n

@@ -270,7 +270,7 @@ type foldScan struct {
 	n      *foldNeedle
 	text   string
 	at     int   // byte offset of the next rune to read
-	k      int   // runes of the needle matched ending at at
+	k      int   // runes of the needle matched up to `at`
 	seen   int   // runes read since the last reset
 	starts []int // byte offsets of the last len(want) runes, a ring
 }

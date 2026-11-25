@@ -38,7 +38,7 @@ func (d *treeDoc) replace(i, j int, repl []litLine) {
 // flatten lists the document lines of st through at() and the virtual tail.
 func flatten(st bigState, baseLines int) []docLine {
 	var out []docLine
-	for i := 0; i < st.root.size(); i++ {
+	for i := range st.root.size() {
 		p, k, ok := at(st.root, i)
 		if !ok {
 			panic("at failed inside the tree")
@@ -175,7 +175,7 @@ func TestTreeReplaceMatchesOracle(t *testing.T) {
 			want []docLine
 		}
 		var history []kept
-		for step := 0; step < 150; step++ {
+		for step := range 150 {
 			n := len(model)
 			if d.lines() != n {
 				t.Fatalf("seed %d step %d: lines()=%d, model has %d", seed, step, d.lines(), n)
@@ -426,10 +426,10 @@ func TestLitBytesSummaryInvariant(t *testing.T) {
 	d := newTreeDoc(30)
 	want := 0 // bytes of literal lines currently in the tree
 	var model []docLine
-	for b := 0; b < 30; b++ {
+	for b := range 30 {
 		model = append(model, docLine{base: b})
 	}
-	for step := 0; step < 100; step++ {
+	for step := range 100 {
 		n := len(model)
 		i := rng.Intn(n + 1)
 		j := i + rng.Intn(min(n-i, 5)+1)
@@ -512,7 +512,7 @@ func TestTreeShapeIsDeterministicAndBalanced(t *testing.T) {
 		d := newTreeDoc(5000)
 		// Successive edits at ascending and descending lines are the usual
 		// worst case for an unbalanced tree.
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			d.replace(i*2, i*2+1, []litLine{{runes: []rune("x")}})
 		}
 		for i := 999; i >= 0; i-- {

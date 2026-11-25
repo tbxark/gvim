@@ -57,7 +57,7 @@ func buildHandlers() map[Action]handler {
 		d.SelectAll()
 		return nil
 	})
-	h["insert_char"] = docAction(insertChar)
+	h["insert_char"] = docAction(typeAtCarets)
 	h["insert_newline"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
 		d.ClearVirtual()
 		e.newline(d)
@@ -345,15 +345,6 @@ func moveHandler(m motion, extend, vertical bool, virtual virtualMoveKind) handl
 		e.moveCarets(d, m, extend || e.marking(d), vertical)
 		return nil
 	})
-}
-
-func insertChar(e *Editor, d *Document, args map[string]any) error {
-	text, ok := args["text"].(string)
-	if !ok {
-		return errors.New("insert_char: missing string argument \"text\"")
-	}
-	e.typeText(d, text)
-	return nil
 }
 
 // closeTab closes the active tab. A modified buffer is kept unless force is set.

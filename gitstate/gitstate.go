@@ -232,7 +232,7 @@ func isLowerHex40(s string) bool {
 	if len(s) != 40 {
 		return false
 	}
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		c := s[i]
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false

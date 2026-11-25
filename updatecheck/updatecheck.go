@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -447,17 +448,15 @@ func parseVersion(s string) (nums []int, pre []string, err error) {
 	if v == "" {
 		return nil, nil, fmt.Errorf("%q has no release number", s)
 	}
-	for _, part := range strings.Split(v, ".") {
+	for part := range strings.SplitSeq(v, ".") {
 		n, convErr := strconv.Atoi(part)
 		if convErr != nil || n < 0 {
 			return nil, nil, fmt.Errorf("%q is not a version", s)
 		}
 		nums = append(nums, n)
 	}
-	for _, p := range pre {
-		if p == "" {
-			return nil, nil, fmt.Errorf("%q has an empty prerelease part", s)
-		}
+	if slices.Contains(pre, "") {
+		return nil, nil, fmt.Errorf("%q has an empty prerelease part", s)
 	}
 	return nums, pre, nil
 }

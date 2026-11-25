@@ -6,6 +6,8 @@ package theme
 // keys_table_test.go checks the required set, the fallback chains and the
 // count (91); update both together.
 
+import "slices"
+
 // KeyKind is what a theme key names.
 type KeyKind int
 
@@ -197,10 +199,8 @@ func CanonicalKey(name string) (string, bool) {
 	if _, ok := themeKeysByName[name]; ok {
 		return name, true
 	}
-	for _, k := range modifierOnlyKeys {
-		if k == name {
-			return name, true
-		}
+	if slices.Contains(modifierOnlyKeys, name) {
+		return name, true
 	}
 	return name, false
 }

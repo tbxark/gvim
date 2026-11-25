@@ -152,16 +152,13 @@ func ScanDoc(doc Lines, maxBytes int) (headings []Heading, complete bool) {
 	if maxBytes <= 0 {
 		maxBytes = MaxScanBytes
 	}
-	n := doc.LineCount()
-	if n < 0 {
-		n = 0
-	}
+	n := max(doc.LineCount(), 0)
 	if n > maxBytes {
 		return nil, false
 	}
 	lines := make([]string, 0, min(n, 256))
 	total := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		line := doc.Line(i)
 		total += len(line) + 1
 		if total > maxBytes {

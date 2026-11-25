@@ -227,7 +227,7 @@ func TestSSHNewTargetStreamMultiChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 	var want string
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		chunk := strings.Repeat(string(rune('a'+i)), 4096)
 		want += chunk
 		if err := s.Write(ctx, []byte(chunk)); err != nil {

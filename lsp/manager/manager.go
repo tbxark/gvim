@@ -1166,8 +1166,7 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool,
 	})
 	cancel()
 	if err != nil {
-		var ni *lsp.NotInstalledError
-		if errors.As(err, &ni) {
+		if ni, ok := errors.AsType[*lsp.NotInstalledError](err); ok {
 			ni.Language, ni.Install = language, cfg.Install
 		}
 		return nil, err

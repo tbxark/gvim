@@ -221,7 +221,7 @@ func TestGitExplorerWorksWithoutRootRepo(t *testing.T) {
 func TestGitExplorerDiscoveryIsBounded(t *testing.T) {
 	r := startRig(t, rigOpts{plugins: []string{"git_explorer"}, script: func(o *plugintest.FakeOS) {
 		explorerOS(" M a.go\x00")(o)
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			o.SetDir("/work/d" + fmt.Sprintf("%03d", i))
 		}
 	}})

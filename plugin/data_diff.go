@@ -49,7 +49,7 @@ func installDiff(e *apiEnv) {
 func pickHunk(L *lua.LState, next bool) int {
 	hunks := L.CheckTable(1)
 	line := float64(L.CheckNumber(2))
-	best := lua.LValue(lua.LNil)
+	best := lua.LNil
 	bestStart := 0.0
 	for i := 1; i <= hunks.Len(); i++ {
 		h, ok := hunks.RawGetInt(i).(*lua.LTable)

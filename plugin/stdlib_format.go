@@ -185,7 +185,7 @@ func padBytes(s string, w int, left bool) string {
 func quoteLua(s string) string {
 	var sb strings.Builder
 	sb.WriteByte('"')
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		switch c := s[i]; c {
 		case '"', '\\', '\n':
 			sb.WriteByte('\\')

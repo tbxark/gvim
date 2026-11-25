@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -494,8 +495,8 @@ func (r *Runtime) unload(p *plugin, o unloadOptions) {
 	p.evq = nil
 	r.userq = filterItems(r.userq, p)
 	r.cmdq = filterCmds(r.cmdq, p)
-	for i := len(p.cleanups) - 1; i >= 0; i-- {
-		p.cleanups[i]()
+	for _, v := range slices.Backward(p.cleanups) {
+		v()
 	}
 	p.cleanups = nil
 	r.host.OwnerGone(p.name, p.gen)

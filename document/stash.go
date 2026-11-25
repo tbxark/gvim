@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 )
 
@@ -52,7 +53,7 @@ func StashOverlay(dir string, o OverlayStash) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("session: encode overlay: %w", err)
 	}
-	return writeStash(dir, overlayPrefix+"*"+overlaySuffix, data)
+	return atomicfile.Create(dir, overlayPrefix+"*"+overlaySuffix, data)
 }
 
 // ReadOverlay returns the overlay stash file name in dir. name must be an overlay
@@ -84,27 +85,4 @@ func isOverlayName(name string) bool {
 	return strings.HasPrefix(name, overlayPrefix) &&
 		strings.HasSuffix(name, overlaySuffix) &&
 		filepath.Base(name) == name
-}
-
-// writeStash writes data to a new file in dir, named by pattern, and syncs it.
-func writeStash(dir, pattern string, data []byte) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	f, err := os.CreateTemp(dir, pattern)
-	if err != nil {
-		return "", err
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		_ = os.Remove(f.Name())
-		return "", err
-	}
-	return filepath.Base(f.Name()), nil
 }

@@ -279,13 +279,15 @@ func TestEnumerateScanExclusionsAndInclusions(t *testing.T) {
 
 func TestIndexCapsAtMaxFiles(t *testing.T) {
 	var x Index
-	for i := range MaxFiles {
-		if !x.addFor(0, fmt.Sprintf("f%05d", i)) {
-			t.Fatalf("addFor %d refused below the cap", i)
-		}
+	names := make([]string, MaxFiles)
+	for i := range names {
+		names[i] = fmt.Sprintf("f%05d", i)
 	}
-	if x.addFor(0, "overflow") {
-		t.Fatal("addFor accepted a file past MaxFiles")
+	if !x.addBatchFor(0, names) {
+		t.Fatal("addBatchFor refused a batch at the cap")
+	}
+	if x.addBatchFor(0, []string{"overflow"}) {
+		t.Fatal("addBatchFor accepted a file past MaxFiles")
 	}
 	files, _ := x.Snapshot()
 	if len(files) != MaxFiles || !x.Truncated() {

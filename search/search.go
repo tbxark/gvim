@@ -284,8 +284,7 @@ func compileQuery(q Query) (*regexp.Regexp, error) {
 	if err != nil {
 		if len(q.Text) > maxErrorQuery {
 			// The cause quotes the pattern too, so only its code is kept.
-			var se *syntax.Error
-			if errors.As(err, &se) {
+			if se, ok := errors.AsType[*syntax.Error](err); ok {
 				return nil, fmt.Errorf("search: invalid pattern (%d bytes): %s", len(q.Text), se.Code)
 			}
 			return nil, fmt.Errorf("search: invalid pattern (%d bytes)", len(q.Text))
@@ -337,7 +336,7 @@ func (d document) hits(re *regexp.Regexp, q Query) []hit {
 	out := make([]hit, len(locs))
 	for i, loc := range locs {
 		out[i] = hit{
-			Match:  Match{Start: cur.pos(loc[0]), End: cur.pos(loc[1])},
+			Start: cur.pos(loc[0]), End: cur.pos(loc[1]),
 			start:  loc[0],
 			end:    loc[1],
 			groups: loc,

@@ -3,6 +3,7 @@ package bundled_test
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -88,9 +89,7 @@ func startRig(t *testing.T, o rigOpts) *rig {
 	if o.probe != "" {
 		files["probe/init.lua"] = o.probe
 	}
-	for name, src := range o.extra {
-		files[name] = src
-	}
+	maps.Copy(files, o.extra)
 	r := &rig{t: t, host: plugintest.NewFakeHost(), os: plugintest.NewFakeOS(), ids: map[string]pluginapi.BufferID{}}
 	r.host.Workspace().FileLaunch = o.fileLaunch
 	if !o.noGit {
@@ -142,9 +141,7 @@ func startRig(t *testing.T, o rigOpts) *rig {
 func (r *rig) emit(name, path string, extra map[string]any) {
 	r.t.Helper()
 	data := map[string]any{"buf": r.ids[path], "path": path}
-	for k, v := range extra {
-		data[k] = v
-	}
+	maps.Copy(data, extra)
 	r.h.Emit(pluginapi.Event{Name: name, Data: data})
 }
 

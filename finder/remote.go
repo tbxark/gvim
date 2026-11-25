@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -113,8 +114,8 @@ func EnumerateRemote(ctx context.Context, fs RemoteFS, root string, opts Options
 				return nil
 			}
 		}
-		for i := len(dirs) - 1; i >= 0; i-- {
-			stack = append(stack, dirs[i])
+		for _, dir := range slices.Backward(dirs) {
+			stack = append(stack, dir)
 		}
 	}
 	return nil
@@ -142,12 +143,7 @@ func joinRemotePath(dir, name string) string {
 
 // skipDirName reports whether the local walk's skipDirs list excludes a directory.
 func skipDirName(name string) bool {
-	for _, skip := range skipDirs {
-		if name == skip {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(skipDirs, name)
 }
 
 // Idle returns an index that is finished, has no files and is safe to read: a remote

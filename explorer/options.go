@@ -54,8 +54,7 @@ func (w Width) Cols(frameWidth int) int {
 // preserve.
 func (w Width) WithCols(cols, frameWidth int) Width {
 	cols = min(max(cols, 0), max(frameWidth, 0))
-	switch w.Mode {
-	case WidthPercent:
+	if w.Mode == WidthPercent {
 		if frameWidth <= 0 {
 			return w
 		}

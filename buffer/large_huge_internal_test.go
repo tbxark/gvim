@@ -61,7 +61,7 @@ func TestHugeLineIsReadToItsEnd(t *testing.T) {
 				if !b.LineCut(1) {
 					t.Error("a line over MaxLine is still cut for the reads that need it whole")
 				}
-				for k := 0; k < 300; k++ {
+				for range 300 {
 					col, n := rng.IntN(len(runes)+20)-10, rng.IntN(150)
 					lo := min(max(col, 0), len(runes))
 					hi := min(lo+n, len(runes))

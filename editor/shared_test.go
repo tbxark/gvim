@@ -365,7 +365,7 @@ func TestSharedBuffersAdoptLoadedStartupRestore(t *testing.T) {
 		t.Fatal("the focused restored workspace did not take ownership")
 	}
 	var conflict *document.Document
-	for i := 0; i < len(b.Tabs()); i++ {
+	for i := range len(b.Tabs()) {
 		if d := b.DocAt(i); d != nil && d.Path == "" {
 			conflict = d
 			break
@@ -441,7 +441,7 @@ func sharedConflictEditor(t *testing.T, shared *SharedBuffers) (a, b *Editor, pa
 	b.OpenLoaded(restored)
 	shared.Focus(b)
 	shared.Focus(a)
-	for i := 0; i < len(b.Tabs()); i++ {
+	for i := range len(b.Tabs()) {
 		if d := b.DocAt(i); d != nil && d.Path == "" {
 			conflictText = d.Buffer.Text()
 		}
@@ -467,7 +467,7 @@ func TestSharedBuffersConflictSaveAsCannotOverwriteOwner(t *testing.T) {
 	a, b, path, _ := sharedConflictEditor(t, shared)
 	// Close the mirror tab: only the conflict copy is left in b, so the ordinary open-tab
 	// check cannot catch the target; the shared registry must.
-	for i := 0; i < len(b.Tabs()); i++ {
+	for i := range len(b.Tabs()) {
 		if d := b.DocAt(i); d != nil && d.Path == path {
 			if err := b.CloseTab(i, true); err != nil {
 				t.Fatalf("close mirror: %v", err)
@@ -476,7 +476,7 @@ func TestSharedBuffersConflictSaveAsCannotOverwriteOwner(t *testing.T) {
 		}
 	}
 	var conflictIdx = -1
-	for i := 0; i < len(b.Tabs()); i++ {
+	for i := range len(b.Tabs()) {
 		if d := b.DocAt(i); d != nil && d.Path == "" && d.Modified() {
 			conflictIdx = i
 			break
@@ -515,7 +515,7 @@ func TestSharedBuffersConflictSaveAsNewPathBecomesShared(t *testing.T) {
 	labels[a], labels[b] = "A", "B"
 	newPath := filepath.Join(t.TempDir(), "kept.txt")
 	var conflictIdx = -1
-	for i := 0; i < len(b.Tabs()); i++ {
+	for i := range len(b.Tabs()) {
 		if d := b.DocAt(i); d != nil && d.Path == "" && d.Modified() {
 			conflictIdx = i
 			break
@@ -605,7 +605,7 @@ func TestSharedBuffersOwnerSaveAsRekeysViews(t *testing.T) {
 	if c.Active().SharedMirror() {
 		t.Fatal("the old path reopened as a mirror")
 	}
-	for i := 0; i < len(b.Tabs()); i++ {
+	for i := range len(b.Tabs()) {
 		if d := b.DocAt(i); d != nil && d.Path == path1 {
 			t.Fatal("b still has a view of the old path")
 		}
@@ -782,10 +782,8 @@ func TestSharedBuffersSaveAsReservationConcurrentSingleWinner(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan *sharedSaveReservation, n)
 	errsCh := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			<-start
 			r, err := shared.ReserveSaveAs(a, doc, target)
 			if err != nil {
@@ -793,7 +791,7 @@ func TestSharedBuffersSaveAsReservationConcurrentSingleWinner(t *testing.T) {
 				return
 			}
 			results <- r
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

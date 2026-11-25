@@ -133,7 +133,7 @@ func isThematicBreak(s string) bool {
 		return false
 	}
 	n := 0
-	for i := 0; i < len(body); i++ {
+	for i := range len(body) {
 		switch body[i] {
 		case body[0]:
 			n++

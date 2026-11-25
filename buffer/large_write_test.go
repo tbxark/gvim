@@ -596,7 +596,7 @@ func TestLargeRebase(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r := prepareRebase(t, []byte(tc.data), int64(tc.skip), tc.edit)
+			r := prepareRebase(t, []byte(tc.data), tc.skip, tc.edit)
 			b := r.b
 			want := b.Text()
 			r.read0 = b.Stats().ReadBytes

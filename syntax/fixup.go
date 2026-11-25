@@ -196,7 +196,7 @@ func numberType(m string) chroma.TokenType {
 			return chroma.LiteralNumberBin
 		}
 	}
-	for i := 0; i < len(m); i++ {
+	for i := range len(m) {
 		if m[i] == '.' || m[i] == 'e' || m[i] == 'E' {
 			return chroma.LiteralNumberFloat
 		}

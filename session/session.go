@@ -197,7 +197,7 @@ func Load(dir string) (Session, bool, error) {
 // StashContent stores text in a new stash file in dir and returns the file's
 // name. Put the name in FileState.StashFile so that Save keeps the file.
 func StashContent(dir, text string) (string, error) {
-	return writeStash(dir, stashPrefix+"*"+stashSuffix, []byte(text))
+	return atomicfile.Create(dir, stashPrefix+"*"+stashSuffix, []byte(text))
 }
 
 // StashOverlay stores the overlay of a large file as document.StashOverlay does.
@@ -208,29 +208,6 @@ func StashOverlay(dir string, o OverlayStash) (string, error) {
 // ReadOverlay reads an overlay stash file as document.ReadOverlay does.
 func ReadOverlay(dir, name string) (OverlayStash, error) {
 	return document.ReadOverlay(dir, name)
-}
-
-// writeStash writes data to a new file in dir, named by pattern, and syncs it.
-func writeStash(dir, pattern string, data []byte) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	f, err := os.CreateTemp(dir, pattern)
-	if err != nil {
-		return "", err
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		_ = os.Remove(f.Name())
-		return "", err
-	}
-	return filepath.Base(f.Name()), nil
 }
 
 // ReadStash returns the text of the stash file name in dir. name must be a

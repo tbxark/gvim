@@ -420,22 +420,6 @@ func (x *Index) Restart() {
 	go x.run(ctx, gen, done)
 }
 
-// addFor appends one file of run gen. It returns false when the run was superseded or
-// MaxFiles files are held.
-func (x *Index) addFor(gen uint64, rel string) bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if x.gen != gen {
-		return false
-	}
-	if len(x.files) >= MaxFiles {
-		x.truncated = true
-		return false
-	}
-	x.files = append(x.files, rel)
-	return true
-}
-
 // addBatchFor appends a batch of files of run gen. It returns false when the run was
 // superseded or MaxFiles files are already held.
 func (x *Index) addBatchFor(gen uint64, rels []string) bool {

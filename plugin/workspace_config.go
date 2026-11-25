@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"sort"
 
 	"github.com/tbxark/gvim/pluginapi"
@@ -106,11 +107,11 @@ func (r *Runtime) ApplyWorkspacePluginConfig(enabled map[string]bool, settings m
 			// layer is not a user choice.
 			why := fmt.Sprintf("requires %q (disabled by the workspace config)", name)
 			deps := r.loadedDependants(name)
-			for i := len(deps) - 1; i >= 0; i-- {
-				if p := r.plugins[deps[i]]; p != nil && !p.dead {
+			for _, dep := range slices.Backward(deps) {
+				if p := r.plugins[dep]; p != nil && !p.dead {
 					r.unload(p, unloadOptions{final: statusFailed, err: why})
 				}
-				if dc := l.byName[deps[i]]; dc != nil {
+				if dc := l.byName[dep]; dc != nil {
 					dc.reason = why
 				}
 			}

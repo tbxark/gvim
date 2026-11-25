@@ -116,8 +116,8 @@ func TestProjectSettingsOnlyForProjectKeys(t *testing.T) {
 			}
 			var warns []string
 			for _, l := range h.LogText("t") {
-				if strings.HasPrefix(l, "warn: ") {
-					warns = append(warns, strings.TrimPrefix(l, "warn: "))
+				if after, ok := strings.CutPrefix(l, "warn: "); ok {
+					warns = append(warns, after)
 				}
 			}
 			for _, want := range r.warns {

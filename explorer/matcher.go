@@ -10,10 +10,10 @@ import (
 // PatternMatcher reports whether rel matches any parsed wildcard pattern.
 type PatternMatcher func(rel string, isDir bool) bool
 
-// parsePatterns parses pats as gitignore-style patterns relative to the root:
+// ParsePatterns parses pats as gitignore-style patterns relative to the root:
 // blank lines and #-comments are skipped. A pattern without a slash matches at
 // any depth; one with a slash is anchored at the root.
-func parsePatterns(pats []string) []gitignore.Pattern {
+func ParsePatterns(pats []string) []gitignore.Pattern {
 	var rules []gitignore.Pattern
 	for _, p := range pats {
 		p = strings.TrimSpace(p)
@@ -27,7 +27,7 @@ func parsePatterns(pats []string) []gitignore.Pattern {
 
 // patternMatcherFor returns pats as a matcher, or nil when none parses.
 func patternMatcherFor(pats []string) gitignore.Matcher {
-	if rules := parsePatterns(pats); len(rules) > 0 {
+	if rules := ParsePatterns(pats); len(rules) > 0 {
 		return gitignore.NewMatcher(rules)
 	}
 	return nil

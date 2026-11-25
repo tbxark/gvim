@@ -3,6 +3,7 @@ package theme
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -117,12 +118,7 @@ func isBareColorJSON(raw json.RawMessage) bool {
 
 // isModifierOnly reports whether name is an attribute-only theme key.
 func isModifierOnly(name string) bool {
-	for _, key := range modifierOnlyKeys {
-		if key == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(modifierOnlyKeys, name)
 }
 
 // modifierTarget maps an attribute-only key to the color key whose attributes it

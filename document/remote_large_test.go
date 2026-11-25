@@ -97,7 +97,7 @@ func (f *fakeRangeAccess) counts() (reads, bytes int64) {
 // lines of roughly lineWidth bytes.
 func remoteLargeContent(lines, lineWidth int) []byte {
 	var sb strings.Builder
-	for i := 0; i < lines; i++ {
+	for i := range lines {
 		text := fmt.Sprintf("line%08d", i)
 		if len(text) < lineWidth {
 			text += strings.Repeat("x", lineWidth-len(text))
@@ -117,7 +117,7 @@ func TestRemoteLargeWindowSourceLRUAndCancellation(t *testing.T) {
 	}
 	defer func() { _ = src.Close() }()
 	// The constructor loads window 0; load windows 1..11, which exceeds the cache.
-	for i := int64(0); i < 12; i++ {
+	for i := range int64(12) {
 		if err := src.LoadWindow(context.Background(), i*RemoteWindowSize, RemoteWindowSize); err != nil {
 			t.Fatalf("LoadWindow(%d): %v", i, err)
 		}
@@ -291,7 +291,7 @@ func TestReadRemoteLargeDocumentNonUTF8FailsClearly(t *testing.T) {
 // inserted before that line, so the same helper builds the expected saved file.
 func remoteLargeSaveContent(n int, edits map[int]string) []byte {
 	var sb strings.Builder
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if prefix, ok := edits[i]; ok {
 			sb.WriteString(prefix)
 		}

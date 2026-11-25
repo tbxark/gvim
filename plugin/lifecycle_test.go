@@ -2,6 +2,7 @@ package plugin_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -107,12 +108,7 @@ func TestUnloadLeavesNothingBehind(t *testing.T) {
 }
 
 func contains(l []string, s string) bool {
-	for _, x := range l {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(l, s)
 }
 
 func TestUnloadCancelsWorkAndIgnoresItsCompletion(t *testing.T) {

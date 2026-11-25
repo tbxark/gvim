@@ -3,6 +3,7 @@ package trust
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -98,10 +99,5 @@ func TestExpandSnippetDirQuoting(t *testing.T) {
 }
 
 func containsString(list []string, want string) bool {
-	for _, item := range list {
-		if item == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }

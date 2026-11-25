@@ -17,7 +17,7 @@ var externalFoldRev atomic.Uint64
 // clears them. A path that is not open is ignored: the ranges belong to a text the
 // server has, and opening the document asks for them again.
 func (e *Editor) SetExternalFolds(path string, ranges []fold.Range) {
-	d := e.lspDocAt(path)
+	d := e.docWithPath(path)
 	if d == nil {
 		return
 	}

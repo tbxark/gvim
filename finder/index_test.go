@@ -263,7 +263,7 @@ func TestRestartAfterCloseIsANoOp(t *testing.T) {
 // coherent index (this is the palette loading-poll pattern).
 func TestRestartIsRaceFree(t *testing.T) {
 	x := startWith(context.Background(), func(ctx context.Context, emit func(string) bool) error {
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -274,9 +274,7 @@ func TestRestartIsRaceFree(t *testing.T) {
 	defer x.Close()
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -290,8 +288,8 @@ func TestRestartIsRaceFree(t *testing.T) {
 			_ = x.Truncated()
 			_ = x.Err()
 		}
-	}()
-	for i := 0; i < 20; i++ {
+	})
+	for range 20 {
 		x.Restart()
 		<-x.Done()
 	}

@@ -248,8 +248,7 @@ func TestRevertToAFileThatIsNotUTF8AsksForAFullLoad(t *testing.T) {
 	latin := strings.Repeat("caf\xe9 au lait\n", 200)
 	replaceFile(t, d.Path, latin)
 	err := e.Revert(false)
-	var full ErrLargeNeedsFullLoad
-	if !errors.As(err, &full) {
+	if _, ok := errors.AsType[ErrLargeNeedsFullLoad](err); !ok {
 		t.Fatalf("Revert = %v, want ErrLargeNeedsFullLoad", err)
 	}
 	if d.Buffer.Line(0) != "line 0000" || d.Modified() {

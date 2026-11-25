@@ -853,11 +853,9 @@ func TestLargeSaveRacesWithEdits(t *testing.T) {
 	}
 	var results []SaveResult
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		results = plan.Run()
-	}()
+	})
 	for i := range 50 {
 		d.Buffer.Insert(buffer.Pos{Line: i}, "e")
 		_ = d.Buffer.Line(i)

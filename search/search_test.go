@@ -293,9 +293,7 @@ func TestFindStringMatchesFind(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 50 {
 				ms := cq.FindString("one FOO two foo")
 				if len(ms) != 2 {
@@ -303,7 +301,7 @@ func TestFindStringMatchesFind(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

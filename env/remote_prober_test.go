@@ -96,7 +96,7 @@ func TestRemoteAuthorityProbeFailureIsExplicit(t *testing.T) {
 
 func TestRemoteAuthorityProbeIsPathBounded(t *testing.T) {
 	var dets []config.EnvDetector
-	for i := 0; i < MaxMarkerProbePaths+1; i++ {
+	for i := range MaxMarkerProbePaths + 1 {
 		dets = append(dets, config.EnvDetector{
 			Name: fmt.Sprintf("d%d", i), Markers: []string{fmt.Sprintf("marker-%d", i)},
 			Kind: config.EnvKindShell,

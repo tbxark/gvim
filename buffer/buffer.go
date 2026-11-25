@@ -137,7 +137,7 @@ func (b *Buffer) setText(text string) {
 		}
 		slab := make([]rune, total)
 		lineIdx, lineStart, off := 0, 0, 0
-		for i := 0; i < len(text); i++ {
+		for i := range len(text) {
 			if text[i] == '\n' {
 				if off > lineStart {
 					b.lines[lineIdx] = slab[lineStart:off:off]
@@ -184,7 +184,7 @@ func (b *Buffer) NonASCII() bool { return b.nonASCII > 0 }
 
 // countNonASCII is the number of runes above 0x7f in s.
 func countNonASCII(s string) int {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] >= utf8.RuneSelf {
 			n := 0
 			for j := i; j < len(s); {

@@ -274,7 +274,7 @@ func TestMergeConflictRandomEdits(t *testing.T) {
 			rng := rand.New(rand.NewSource(seed))
 			e := newMC(t, mcTwo)
 			e.open()
-			for step := 0; step < 60; step++ {
+			for step := range 60 {
 				var edits []pluginapi.Edit
 				for n := 1 + rng.Intn(3); n > 0; n-- {
 					lines := e.b.Lines

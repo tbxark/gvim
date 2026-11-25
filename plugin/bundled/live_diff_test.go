@@ -237,7 +237,7 @@ func TestLiveDiffUntrackedStaysIdle(t *testing.T) {
 	if n := r.runs("show"); n != 1 {
 		t.Fatalf("git show ran %d times, want 1", n)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		r.edit(liveDiffFile, "a\nB\nx\n")
 		r.h.Emit(pluginapi.Event{Name: "buffer_changed", Data: map[string]any{"buf": r.ids[liveDiffFile]}})
 		r.h.Advance(75 * time.Millisecond)
@@ -533,7 +533,7 @@ func TestLiveDiffFullRenderingCapsRowsPerAnchor(t *testing.T) {
 	if got := lines[63].Text; !strings.Contains(got, "7 more deleted lines") {
 		t.Errorf("summary row = %q, want the 7 remaining lines", got)
 	}
-	for i := 0; i < len(lines)-1; i++ {
+	for i := range len(lines) - 1 {
 		if lines[i].Priority != i {
 			t.Errorf("row %d priority = %d, want ascending order %d", i, lines[i].Priority, i)
 		}
