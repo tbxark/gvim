@@ -31,7 +31,7 @@ func isSetextUnderline(raw []rune) bool {
 	if c != '=' && c != '-' {
 		return false
 	}
-	for i := 0; i < len(body); i++ {
+	for i := range len(body) {
 		if body[i] != c {
 			return false
 		}

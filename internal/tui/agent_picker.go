@@ -234,7 +234,7 @@ func (m *Model) openAgentActionPickerAt(name, dir string) tea.Cmd {
 // openAgentDirPrompt asks for the Run Agent start directory, prefilled with the
 // current one. The answer is checked off the update loop and comes back as
 // agentRunDirMsg.
-func (m *Model) openAgentDirPrompt(name, dir string) tea.Cmd {
+func (m *Model) openAgentDirPrompt(name, dir string) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		dir = m.dock.LaunchDir()
@@ -246,7 +246,6 @@ func (m *Model) openAgentDirPrompt(name, dir string) tea.Cmd {
 		SelectAll: true,
 		Tag:       agentRunDirTag{name: name},
 	}))
-	return nil
 }
 
 // agentDirAnswer checks the directory prompt's answer as a command (an os.Stat

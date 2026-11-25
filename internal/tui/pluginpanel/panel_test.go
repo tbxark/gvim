@@ -268,7 +268,7 @@ func TestWidgetCommand(t *testing.T) {
 func TestValidateCaps(t *testing.T) {
 	deep := pluginapi.Widget{Kind: pluginapi.WidgetCol}
 	cur := &deep
-	for i := 0; i < MaxDepth+1; i++ {
+	for range MaxDepth + 1 {
 		child := pluginapi.Widget{Kind: pluginapi.WidgetCol}
 		cur.Children = []pluginapi.Widget{child}
 		cur = &cur.Children[0]

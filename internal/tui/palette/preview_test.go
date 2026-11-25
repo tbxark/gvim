@@ -456,7 +456,7 @@ func TestPreviewKeyboardScrolling(t *testing.T) {
 	}
 
 	// PageDown multiple times clamps at maxScroll
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		p.update(key(tea.KeyPgDown))
 	}
 	if p.preview.scrollOffset != maxScroll {
@@ -471,7 +471,7 @@ func TestPreviewKeyboardScrolling(t *testing.T) {
 	}
 
 	// PageUp clamps at 0
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		p.update(key(tea.KeyPgUp))
 	}
 	if p.preview.scrollOffset != 0 {
@@ -578,7 +578,7 @@ func TestPreviewSelectionChangeResetsScrollOffset(t *testing.T) {
 	draw(p, 120, 30)
 
 	// Scroll a.txt down
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		p.update(altKey(tea.KeyDown))
 	}
 	if p.preview.scrollOffset != 5 {
@@ -595,7 +595,7 @@ func TestPreviewSelectionChangeResetsScrollOffset(t *testing.T) {
 	}
 
 	// Scroll b.txt down
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		p.update(altKey(tea.KeyDown))
 	}
 	if p.preview.scrollOffset != 3 {

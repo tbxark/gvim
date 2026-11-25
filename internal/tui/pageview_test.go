@@ -30,8 +30,6 @@ type largePageDoc struct{ pageDoc }
 func (largePageDoc) Large() bool             { return true }
 func (largePageDoc) Index() buffer.IndexInfo { return buffer.IndexInfo{} }
 
-func boolPtrPage(v bool) *bool { return &v }
-
 func TestMarkdownDocDetection(t *testing.T) {
 	t.Parallel()
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 8)
@@ -56,19 +54,19 @@ func TestPageViewForResolvesTheBufferOverride(t *testing.T) {
 	t.Parallel()
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 8)
 	doc := pageDoc{fakeDoc: &fakeDoc{lines: []string{"x"}}, path: "/w/a.md",
-		view: editor.ViewSettings{PageView: boolPtrPage(true), PageWidth: 42}}
+		view: editor.ViewSettings{PageView: new(true), PageWidth: 42}}
 	pv := m.pageViewFor(doc)
 	if !pv.On || pv.Measure != 42 || !pv.Markdown {
 		t.Fatalf("pageViewFor = %+v, want on at 42 with Markdown", pv)
 	}
 	off := pageDoc{fakeDoc: &fakeDoc{lines: []string{"x"}}, path: "/w/a.md",
-		view: editor.ViewSettings{PageView: boolPtrPage(false)}}
+		view: editor.ViewSettings{PageView: new(false)}}
 	if pv := m.pageViewFor(off); pv.On {
 		t.Fatalf("pageViewFor on an off override = %+v", pv)
 	}
 	// A large file falls back to the normal pane.
 	large := largePageDoc{pageDoc{fakeDoc: &fakeDoc{lines: []string{"x"}}, path: "/w/a.md",
-		view: editor.ViewSettings{PageView: boolPtrPage(true)}}}
+		view: editor.ViewSettings{PageView: new(true)}}}
 	if pv := m.pageViewFor(large); pv.On {
 		t.Fatalf("large-file page view = %+v, want the fallback", pv)
 	}
@@ -79,7 +77,7 @@ func TestPageViewReachesThePaneThroughTheView(t *testing.T) {
 	t.Parallel()
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 8)
 	doc := pageDoc{fakeDoc: &fakeDoc{lines: []string{"Some **bold** text"}}, path: "/w/a.md",
-		view: editor.ViewSettings{PageView: boolPtrPage(true), PageWidth: 30}}
+		view: editor.ViewSettings{PageView: new(true), PageWidth: 30}}
 	p := m.viewPane(split.Pane{}, editorpane.Pane{}, doc)
 	if p.PageView != (editorpane.PageView{On: true, Measure: 30, Markdown: true}) {
 		t.Fatalf("pane page view = %+v", p.PageView)

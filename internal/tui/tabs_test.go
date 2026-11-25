@@ -339,7 +339,7 @@ func TestDrawTabStripWithNoTabsDoesNotPanic(t *testing.T) {
 
 func TestPlaceStripWithNarrowRowDoesNotPanic(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.go", Active: true}}
-	for w := 0; w <= 6; w++ {
+	for w := range 7 {
 		g := grid.New(w, 2)
 		tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, w, tabs, 0, icons.Plain), frame.HitTarget{})
 	}

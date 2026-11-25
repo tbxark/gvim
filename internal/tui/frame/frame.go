@@ -601,7 +601,7 @@ func wrapText(s string, width int) []string {
 		return nil
 	}
 	cur := ""
-	for _, word := range strings.Fields(s) {
+	for word := range strings.FieldsSeq(s) {
 		for word != "" {
 			sep := ""
 			if cur != "" {

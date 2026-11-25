@@ -330,7 +330,7 @@ func TestWrapperKinds(t *testing.T) {
 
 func TestPageModeScrollsContent(t *testing.T) {
 	children := make([]pluginapi.Widget, 0, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		children = append(children, pluginapi.Widget{Kind: pluginapi.WidgetLabel, Text: "row" + strconv.Itoa(i)})
 	}
 	root := pluginapi.Widget{Kind: pluginapi.WidgetCol, Children: children}

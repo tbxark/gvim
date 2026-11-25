@@ -87,7 +87,7 @@ func TestMnemonicsOffLeavesNoUnderline(t *testing.T) {
 	letters := map[string]rune{"File": 'f', "Edit": 'e', "View": 'v', "Selection": 's', "Go": 'g', "LSP": 'l', "Help": 'h'}
 	m := mnemonicBar(false, letters)
 	g := barCells(m)
-	for x := 0; x < 100; x++ {
+	for x := range 100 {
 		if g.At(x, 0).Style.Underline {
 			t.Fatalf("column %d underlines a letter with mnemonics off", x)
 		}
@@ -99,7 +99,7 @@ func TestMnemonicsOffLeavesNoUnderline(t *testing.T) {
 func TestPortWithoutMnemonicerUnderlinesNothing(t *testing.T) {
 	m := newBar(allOn(), 100, 24).WithMnemonics(true)
 	g := barCells(m)
-	for x := 0; x < 100; x++ {
+	for x := range 100 {
 		if g.At(x, 0).Style.Underline {
 			t.Fatalf("column %d underlines a letter without a mnemonic port", x)
 		}

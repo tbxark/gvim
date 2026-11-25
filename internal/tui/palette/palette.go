@@ -22,7 +22,6 @@ package palette
 import (
 	"cmp"
 	"context"
-	"image/color"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -333,7 +332,7 @@ func newSyntaxStyles(th theme.Theme, base grid.Style) [syntax.KindCount]grid.Sty
 		kind := syntax.Kind(k)
 		st := base
 		if kind != syntax.KindPlain && kind != syntax.KindDiffAdd && kind != syntax.KindDiffRemove {
-			if fg := syntaxFG(th, kind, base.FG); fg != nil {
+			if fg := style.SyntaxFG(th, kind, base.FG); fg != nil {
 				st.FG = fg
 			}
 			attrs := kind.Attrs()
@@ -342,49 +341,12 @@ func newSyntaxStyles(th theme.Theme, base grid.Style) [syntax.KindCount]grid.Sty
 			st.Underline = attrs&syntax.AttrUnderline != 0
 			st.Strike = attrs&syntax.AttrStrike != 0
 			if c, ok := th.Syntax(kind.ThemeKey()); ok {
-				applyAttributeNames(&st, c.Modifiers)
+				style.ApplyAttributeNames(&st, c.Modifiers)
 			}
 		}
 		styles[k] = st
 	}
 	return styles
-}
-
-func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
-	key := kind.ThemeKey()
-	c, ok := th.Syntax(key)
-	if fb := kind.ThemeFallbackKey(); !ok && fb != "" {
-		key = fb
-		c, ok = th.Syntax(key)
-	}
-	switch {
-	case !ok:
-		return base
-	case c.IsTerminalDefault():
-		return nil
-	default:
-		if col := style.Color(th, "syntax", key); col != nil {
-			return col
-		}
-		return base
-	}
-}
-
-func applyAttributeNames(st *grid.Style, names []string) {
-	for _, name := range theme.NormalizeModifiers(names) {
-		switch name {
-		case "bold":
-			st.Bold = true
-		case "italic":
-			st.Italic = true
-		case "underlined":
-			st.Underline = true
-		case "dim":
-			st.Faint = true
-		case "reversed":
-			st.Reverse = true
-		}
-	}
 }
 
 // nextPaletteToken numbers palette instances, so a late result of a closed palette

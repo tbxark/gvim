@@ -60,7 +60,7 @@ func TestTabIDsStableAcrossMoveCloseAndDuplicateLabels(t *testing.T) {
 	if _, ok := tabs.IndexForID(second); ok {
 		t.Fatal("a closed tab's id still resolves")
 	}
-	for i := 0; i < tabs.Count(); i++ {
+	for i := range tabs.Count() {
 		if tabs.TabID(i) == second {
 			t.Fatalf("closed id %d is still in use", second)
 		}
@@ -229,7 +229,7 @@ func TestRevealValidatesContentAndRelocatesAfterEviction(t *testing.T) {
 	// different line, so the reveal must relocate by the unique text instead of landing
 	// on 250.
 	shifted := append([]string(nil), term.history[50:]...)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		shifted = append(shifted, "new row")
 	}
 	term.history = shifted
@@ -325,7 +325,7 @@ func TestRevealBlankLineValidates(t *testing.T) {
 	// Shift: drop 3 old rows and append 3 new ones; the blank line moves to 2 with the
 	// same neighbours and must relocate there, never clamp to the stored 5.
 	shifted := append([]string(nil), term.history[3:]...)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		shifted = append(shifted, "new row")
 	}
 	term.history = shifted

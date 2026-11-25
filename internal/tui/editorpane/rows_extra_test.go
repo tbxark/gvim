@@ -137,7 +137,7 @@ func TestSoftBreakActivation(t *testing.T) {
 // thumb to the bottom of the track.
 func TestScrollbarThumbCountsInsertedRows(t *testing.T) {
 	var lines []string
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		lines = append(lines, fmt.Sprintf("line %d", i))
 	}
 	doc := newDoc(lines...)

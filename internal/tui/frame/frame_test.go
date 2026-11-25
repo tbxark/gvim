@@ -107,7 +107,7 @@ func TestNewTabButtonIsThreeCellsAtTheRightEdge(t *testing.T) {
 // TestNewTabButtonNeedsThreeCells checks the narrow frames: the button is drawn
 // only when the row still has three cells, and it is drawn whole.
 func TestNewTabButtonNeedsThreeCells(t *testing.T) {
-	for w := 0; w < 3; w++ {
+	for w := range 3 {
 		if s := PlaceStrip(0, w, nil, 0, icons.Plain); len(s.Runs) != 0 {
 			t.Errorf("a %d-cell strip draws %+v, want no button", w, s.Runs)
 		}

@@ -69,8 +69,7 @@ func (m *Model) insertUnderAlerts(o Overlay) bool {
 // Live Grep controls are captured before the palette goes, so Resume still works. An
 // alert keeps the input and its question; an alert under the closed layers stays.
 func (m *Model) closeExclusiveOverlays() {
-	for i := len(m.overlays) - 1; i >= 0; i-- {
-		o := m.overlays[i]
+	for i, o := range slices.Backward(m.overlays) {
 		if _, ok := o.(overlay.Exclusive); !ok {
 			continue
 		}

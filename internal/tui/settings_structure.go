@@ -34,13 +34,11 @@ type settingsStructurePage struct {
 	side    string            // dual kind: the focused side
 	filter  []rune            // the typed row filter (st.Filter)
 	rows    []structureRow
-	sel     int
-	top      int
-	page     int
+	pageScroll
 	startRow int
 	seq      int // generation of the child structure request in flight
-	active  bool
-	box     space.Rect
+	active   bool
+	box      space.Rect
 }
 
 // structureRow is one line of a structure page: a group header, an entry, or the
@@ -53,6 +51,8 @@ type structureRow struct {
 	index  int    // element index within list or dual group (-1 if not indexed)
 	item   SettingsStructureRow
 }
+
+func (r structureRow) isHeader() bool { return r.header }
 
 var _ Overlay = (*settingsStructurePage)(nil)
 
@@ -181,7 +181,7 @@ func (p *settingsStructurePage) layout() {
 		rows = append(rows, structureRow{add: true, item: SettingsStructureRow{Name: p.st.AddLabel}})
 	}
 	p.rows = rows
-	p.sel = p.firstRow()
+	p.sel = firstRowOf(p.rows)
 	if selected != "" {
 		for i, row := range p.rows {
 			if !row.header && rowKey(row) == selected {
@@ -190,7 +190,7 @@ func (p *settingsStructurePage) layout() {
 			}
 		}
 	}
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 }
 
 // filterRows narrows the rows to those matching the typed filter, on the name,
@@ -254,16 +254,6 @@ func (p *settingsStructurePage) available() []string {
 	return out
 }
 
-// firstRow returns the index of the first non-header row, or 0.
-func (p *settingsStructurePage) firstRow() int {
-	for i, row := range p.rows {
-		if !row.header {
-			return i
-		}
-	}
-	return 0
-}
-
 // itemAt returns the row at i.
 func (p *settingsStructurePage) itemAt(i int) (structureRow, bool) {
 	if i < 0 || i >= len(p.rows) {
@@ -284,11 +274,11 @@ func (p *settingsStructurePage) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgdown":
 		p.move(p.pageCount())
 	case "home":
-		p.sel = p.firstRow()
-		p.keepVisible()
+		p.sel = firstRowOf(p.rows)
+		p.keepVisible(len(p.rows))
 	case "end":
-		p.sel = p.lastRow()
-		p.keepVisible()
+		p.sel = lastRowOf(p.rows)
+		p.keepVisible(len(p.rows))
 	case "enter":
 		return p.edit()
 	case "delete":
@@ -336,53 +326,7 @@ func (p *settingsStructurePage) key(msg tea.KeyPressMsg) tea.Cmd {
 
 // move shifts the highlight by d rows, stopping at the ends and skipping
 // headers.
-func (p *settingsStructurePage) move(d int) {
-	step, n := 1, d
-	if d < 0 {
-		step, n = -1, -d
-	}
-	for range n {
-		next := p.sel + step
-		for next >= 0 && next < len(p.rows) && p.rows[next].header {
-			next += step
-		}
-		if next < 0 || next >= len(p.rows) {
-			break
-		}
-		p.sel = next
-	}
-	p.keepVisible()
-}
-
-// lastRow returns the index of the last non-header row.
-func (p *settingsStructurePage) lastRow() int {
-	for i := len(p.rows) - 1; i >= 0; i-- {
-		if !p.rows[i].header {
-			return i
-		}
-	}
-	return 0
-}
-
-// pageCount is the visible row count of the last draw.
-func (p *settingsStructurePage) pageCount() int {
-	if p.page > 0 {
-		return p.page
-	}
-	return list.DefaultPage
-}
-
-// keepVisible scrolls so that the highlight is inside the page.
-func (p *settingsStructurePage) keepVisible() {
-	page := p.pageCount()
-	if p.sel < p.top {
-		p.top = p.sel
-	}
-	if p.sel >= p.top+page {
-		p.top = p.sel - page + 1
-	}
-	p.top = max(0, min(p.top, len(p.rows)-page))
-}
+func (p *settingsStructurePage) move(d int) { moveSel(&p.pageScroll, d, p.rows) }
 
 // edit opens the editor of the highlighted row:
 //   - dual: a left/right entry moves to the other side, an available element is
@@ -808,7 +752,7 @@ func (p *settingsStructurePage) reorder(d int) {
 			}
 		}
 	}
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 }
 
 // removeString returns s without the first item equal to value.
@@ -1028,7 +972,7 @@ func (p *settingsStructurePage) Draw(g *grid.Grid) {
 	}
 	p.startRow = min(startRow, box.H-1)
 	p.page = max(box.H-1-p.startRow, 0)
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 	for k := 0; k < p.page && p.top+k < len(p.rows); k++ {
 		row := p.rows[p.top+k]
 		y := box.Y + startRow + k

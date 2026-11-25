@@ -226,7 +226,7 @@ type countingSearch struct {
 }
 
 func (f *countingSearch) Active() Document {
-	return versionedSelDoc{selDoc: selDoc{fakeDoc: f.doc, s: f.searchFake}, ver: &f.ver}
+	return versionedSelDoc{fakeDoc: f.doc, s: f.searchFake, ver: &f.ver}
 }
 
 func (f *countingSearch) FindMatches(q search.Query) ([]search.Match, error) {

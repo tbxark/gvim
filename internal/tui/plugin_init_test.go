@@ -35,7 +35,7 @@ func TestInitTemplate(t *testing.T) {
 	}
 	_, rest, _ = strings.Cut(rest, "\n")
 	var code []string
-	for _, l := range strings.Split(rest, "\n") {
+	for l := range strings.SplitSeq(rest, "\n") {
 		l = strings.TrimPrefix(l, "--")
 		code = append(code, strings.TrimPrefix(l, " "))
 	}

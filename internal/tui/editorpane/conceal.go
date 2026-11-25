@@ -124,7 +124,7 @@ func (f frame) paintCursorLineOverlay(g *grid.Grid) {
 	if !ok || y < 0 || y >= f.h {
 		return
 	}
-	for x := 0; x < f.w-1; x++ {
+	for x := range f.w - 1 {
 		c := g.At(x, y)
 		if c.Text == "" {
 			// The continuation cell of a wide character takes the style with its lead,

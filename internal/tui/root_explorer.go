@@ -82,7 +82,7 @@ func (m *Model) revealActiveFile(feedback bool) tea.Cmd {
 		}
 		return nil
 	}
-	revealed := false
+	var revealed bool
 	if r, ok := m.tree.(treeRevealer); ok {
 		revealed = r.RevealLoaded(path) == nil
 	} else {

@@ -343,7 +343,7 @@ func wrapNote(note string, width int) []string {
 		return nil
 	}
 	var lines []string
-	for _, para := range strings.Split(note, "\n") {
+	for para := range strings.SplitSeq(note, "\n") {
 		words := strings.Fields(para)
 		if len(words) == 0 {
 			lines = append(lines, "")

@@ -78,7 +78,7 @@ func (m *Model) scrollMarginFor(msg tea.Msg) int {
 // noteMods records the modifiers of a left press. Shift and Ctrl both extend the
 // selection, since some terminals swallow Shift+click.
 func (m *Model) noteMods(mo tea.Mouse) {
-	altGr := isAltGr(tea.KeyMod(mo.Mod))
+	altGr := isAltGr(mo.Mod)
 	m.mx.alt = mo.Mod&tea.ModAlt != 0 && !altGr
 	m.mx.ctrl = mo.Mod&tea.ModCtrl != 0 && !altGr
 	m.mx.super = mo.Mod&(tea.ModSuper|tea.ModMeta) != 0
@@ -262,7 +262,7 @@ func (m *Model) panBar(x int) {
 // Shift held. It reports whether the notch was one of those, even when the pane
 // cannot pan. Only the focused pane pans, and only with Wrap off.
 func (m *Model) panWheel(i int, mo tea.Mouse) bool {
-	dx := 0
+	var dx int
 	switch mo.Button {
 	case tea.MouseWheelLeft:
 		dx = -wheelColumns

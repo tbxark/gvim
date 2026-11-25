@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
-	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
@@ -57,8 +56,8 @@ func TestSeparatorsDrawInTheSplitColour(t *testing.T) {
 func TestSeparatorsDrawCrossAtIntersection(t *testing.T) {
 	g := grid.New(80, 24)
 	borders := []split.Border{
-		{Rect: space.Rect{X: 40, Y: 2, W: 1, H: 20}, Vertical: true},
-		{Rect: space.Rect{X: 0, Y: 12, W: 80, H: 1}, Vertical: false},
+		{X: 40, Y: 2, W: 1, H: 20, Vertical: true},
+		{X: 0, Y: 12, W: 80, H: 1, Vertical: false},
 	}
 	drawBorders(g, borders, grid.Style{})
 	if got := g.At(40, 12).Text; got != splitCross {

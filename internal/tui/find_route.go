@@ -82,7 +82,7 @@ func (h findHost) Streaming() bool {
 	return ok
 }
 
-// Next is the match to go to from from in a large document: the first match that
+// Next is the match to go to from position `from` in a large document: the first match that
 // starts at or after from, or with forward unset the last one that starts before it.
 func (h findHost) Next(q search.Query, from buffer.Pos, forward bool) (search.Match, bool, error) {
 	ss, ok := h.m.streamSearch()

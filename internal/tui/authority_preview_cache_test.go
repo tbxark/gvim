@@ -18,7 +18,7 @@ func (o *invalidateOverlay) InvalidatePreviews() { o.calls++ }
 // reconnect both drop cached remote preview reads; the overlay is not closed.
 func TestAuthorityCarrierChangesInvalidatePreviews(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("x"), nil, 80, 24)
-	o := &invalidateOverlay{fakeOverlay: fakeOverlay{open: true}}
+	o := &invalidateOverlay{open: true}
 	m.pushOverlay(o)
 	connected := true
 	m.SetAuthorityHooks(AuthorityHooks{
@@ -58,7 +58,7 @@ func TestAuthorityCarrierChangesInvalidatePreviews(t *testing.T) {
 // still detected.
 func TestAuthorityHooksSeedConnectionState(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("x"), nil, 80, 24)
-	o := &invalidateOverlay{fakeOverlay: fakeOverlay{open: true}}
+	o := &invalidateOverlay{open: true}
 	m.pushOverlay(o)
 	connected := true
 	m.SetAuthorityHooks(AuthorityHooks{
@@ -77,7 +77,7 @@ func TestAuthorityHooksSeedConnectionState(t *testing.T) {
 // preview painted while waiting for the next poll.
 func TestReconnectFailureClearsPreviewsImmediately(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("x"), nil, 80, 24)
-	o := &invalidateOverlay{fakeOverlay: fakeOverlay{open: true}}
+	o := &invalidateOverlay{open: true}
 	m.pushOverlay(o)
 	connected := true
 	m.SetAuthorityHooks(AuthorityHooks{

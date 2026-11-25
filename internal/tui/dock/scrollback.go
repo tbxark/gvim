@@ -637,7 +637,7 @@ func (p *Panel) searchCommand(query string, regex, matchCase, commit bool) tea.C
 				matches = append(matches, len(prior)+i)
 			}
 			sc := t.Screen()
-			for r := 0; r < min(sc.Rows, rows); r++ {
+			for r := range min(sc.Rows, rows) {
 				if match(screenRowText(sc, r, false)) {
 					matches = append(matches, len(prior)+total+r)
 				}

@@ -21,6 +21,8 @@
 // it is filled with the column's background and has no walls.
 package sidebar
 
+import "slices"
+
 // Kind names what a section of the column holds.
 type Kind int
 
@@ -177,13 +179,7 @@ func distribute(body int, specs []Spec, collapsed []bool) []int {
 	}
 	fixed := make(map[int]int, len(open)-len(flex))
 	for _, i := range open {
-		isFlex := false
-		for _, f := range flex {
-			if f == i {
-				isFlex = true
-				break
-			}
-		}
+		isFlex := slices.Contains(flex, i)
 		if !isFlex {
 			fixed[i] = max(specs[i].Rows, 1)
 		}

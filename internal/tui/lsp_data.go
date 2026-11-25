@@ -259,14 +259,7 @@ func lspInlayHintCells(h InlayHint, lineLen int) string {
 // of the pane are composed, never replaced, so a plugin's decorations keep
 // painting. The spans have priority -1: they paint below the plugin decorations
 // (priority 0 and up) and above the syntax colors.
-func sameTokenSlice(a, b []SemanticToken) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	return len(a) == 0 || &a[0] == &b[0]
-}
-
-func sameHintSlice(a, b []InlayHint) bool {
+func sameSlice[T any](a, b []T) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -278,7 +271,7 @@ func (m *Model) lspDocCacheFor(path string, hints []InlayHint, tokens []Semantic
 		m.lsp.renderCache = make(map[string]*lspDocRenderCache)
 	}
 	rc := m.lsp.renderCache[path]
-	if rc == nil || !sameTokenSlice(rc.tokens, tokens) {
+	if rc == nil || !sameSlice(rc.tokens, tokens) {
 		var rawTokens map[int][]SemanticToken
 		if len(tokens) > 0 {
 			rawTokens = make(map[int][]SemanticToken, len(tokens))
@@ -287,7 +280,7 @@ func (m *Model) lspDocCacheFor(path string, hints []InlayHint, tokens []Semantic
 			}
 		}
 		var rawHints map[int][]InlayHint
-		if rc != nil && sameHintSlice(rc.hints, hints) {
+		if rc != nil && sameSlice(rc.hints, hints) {
 			rawHints = rc.rawHintsLn
 		}
 		rc = &lspDocRenderCache{
@@ -298,7 +291,7 @@ func (m *Model) lspDocCacheFor(path string, hints []InlayHint, tokens []Semantic
 		}
 		m.lsp.renderCache[path] = rc
 	}
-	if (rc.rawHintsLn == nil && len(hints) > 0) || !sameHintSlice(rc.hints, hints) {
+	if (rc.rawHintsLn == nil && len(hints) > 0) || !sameSlice(rc.hints, hints) {
 		if len(hints) == 0 {
 			rc.rawHintsLn = nil
 		} else {
@@ -344,7 +337,7 @@ func (m *Model) lspData(pane editorpane.Pane, doc Document) editorpane.Pane {
 				}
 				return inner(line)
 			}
-			lineLen := 0
+			var lineLen int
 			if ll, ok := doc.(interface{ LineLen(int) int }); ok {
 				lineLen = ll.LineLen(line)
 			} else {

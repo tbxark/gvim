@@ -14,7 +14,7 @@ import (
 
 func TestHeaderExplorerAloneKeepsTheOldCells(t *testing.T) {
 	t.Parallel()
-	for width := 0; width <= 60; width++ {
+	for width := range 61 {
 		want := explorer.HeaderFor(width, icons.Plain)
 		got := HeaderFor(width, icons.Plain, HeaderSpec{Kind: KindExplorer, First: true})
 		if got.Text != want.Text || got.Reload != want.Reload || got.Close != want.Close ||

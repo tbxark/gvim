@@ -88,7 +88,7 @@ func TestPlugDecorPluginFolds(t *testing.T) {
 	p = m.paneFor(split.Pane{Focused: true}, doc)
 	g = p.Render(40, 6)
 	shown := false
-	for y := 0; y < 6; y++ {
+	for y := range 6 {
 		if g.At(6, y).Text == "e" {
 			shown = true
 		}

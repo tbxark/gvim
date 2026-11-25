@@ -449,7 +449,7 @@ func TestPanelShiftEnterScopesTheConfirmation(t *testing.T) {
 	projectSearch(t, m, "foo")
 	// Focus the result rows (search -> replace -> files -> results), then the a.go
 	// header, and ask for the scoped replacement.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, cmd := m.Update(projectSpecialKey(tea.KeyTab)); cmd != nil {
 			feed(m, cmd)
 		}

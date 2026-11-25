@@ -112,7 +112,7 @@ func (m *Model) lineTargetAt(doc Document, line int) (pluginapi.LineTarget, bool
 	if !ok {
 		return pluginapi.LineTarget{}, false
 	}
-	set := m.plug.lineTargets[pluginapi.BufferID(bd.BufferID())]
+	set := m.plug.lineTargets[bd.BufferID()]
 	if set == nil {
 		return pluginapi.LineTarget{}, false
 	}
@@ -174,10 +174,7 @@ func (m *Model) openLineTarget(t pluginapi.LineTarget, source Document) tea.Cmd 
 	if !placed && m.ed.Active() == source {
 		m.trySplit(split.SideBySide)
 	}
-	line := t.Target
-	if line < 0 {
-		line = 0
-	}
+	line := max(t.Target, 0)
 	cmd, err := m.openFileCmdErr(path, false, line, 0)
 	if err != nil {
 		m.notice = err.Error()

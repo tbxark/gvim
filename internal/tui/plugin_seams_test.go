@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/tbxark/gvim/pluginapi"
@@ -75,12 +76,7 @@ func TestPluginWindowEvents(t *testing.T) {
 		names = append(names, e.Name)
 	}
 	found := func(name string) bool {
-		for _, n := range names {
-			if n == name {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(names, name)
 	}
 	if !found("active_window_changed") || !found("focus_gained") {
 		t.Fatalf("events = %v", names)

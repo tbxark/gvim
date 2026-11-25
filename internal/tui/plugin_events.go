@@ -279,11 +279,11 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	for _, b := range before.bufs {
 		if !has(cur.bufs, b.ID) {
 			m.plugEmit("buffer_closed", map[string]any{"id": m.gb(b.ID), "path": b.Path})
-			m.plugGroupsBufferClosed(pluginapi.BufferID(b.ID))
-			m.plugPanelsBufferClosed(pluginapi.BufferID(b.ID))
+			m.plugGroupsBufferClosed(b.ID)
+			m.plugPanelsBufferClosed(b.ID)
 			m.plugViewStateDrop(b.ID)
-			m.plugLineTargetsDrop(pluginapi.BufferID(b.ID))
-			m.plug.folds.dropBuffer(pluginapi.BufferID(b.ID))
+			m.plugLineTargetsDrop(b.ID)
+			m.plug.folds.dropBuffer(b.ID)
 		}
 	}
 	for _, b := range cur.bufs {
@@ -491,7 +491,7 @@ func (m *Model) saveGateBuffers(autosave bool) []pluginapi.BufferInfo {
 }
 
 // pluginSaveAllGate runs before_file_save for every document Save All would write, with
-// source ("manual" for the command). One handler that cancels cancels the whole save:
+// source ("manual" for the command). A single cancel vetoes the whole save:
 // the editor plans all files together. The reason goes to the notice row.
 func (m *Model) pluginSaveAllGate(source string) (cancel bool, cmd tea.Cmd) {
 	var cmds []tea.Cmd

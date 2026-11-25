@@ -33,9 +33,7 @@ type themeEditorPage struct {
 	readOnly bool
 
 	rows []themeEditorRow
-	sel  int
-	top  int
-	page int
+	pageScroll
 
 	dirty  bool
 	active bool
@@ -48,6 +46,8 @@ type themeEditorRow struct {
 	title  string
 	key    theme.Key
 }
+
+func (r themeEditorRow) isHeader() bool { return r.header }
 
 var _ Overlay = (*themeEditorPage)(nil)
 
@@ -98,7 +98,7 @@ func (p *themeEditorPage) layout() {
 		}
 		p.rows = append(p.rows, themeEditorRow{key: key})
 	}
-	p.sel = p.firstRow()
+	p.sel = firstRowOf(p.rows)
 	if selected != "" {
 		for i, row := range p.rows {
 			if !row.header && row.key.Name() == selected {
@@ -106,7 +106,7 @@ func (p *themeEditorPage) layout() {
 			}
 		}
 	}
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 }
 
 // selectedKey is the theme key of the highlighted row.
@@ -115,15 +115,6 @@ func (p *themeEditorPage) selectedKey() string {
 		return ""
 	}
 	return p.rows[p.sel].key.Name()
-}
-
-func (p *themeEditorPage) firstRow() int {
-	for i, row := range p.rows {
-		if !row.header {
-			return i
-		}
-	}
-	return 0
 }
 
 // Active reports whether the editor is open.
@@ -186,11 +177,11 @@ func (p *themeEditorPage) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgdown":
 		p.move(p.pageCount())
 	case "home":
-		p.sel = p.firstRow()
-		p.keepVisible()
+		p.sel = firstRowOf(p.rows)
+		p.keepVisible(len(p.rows))
 	case "end":
-		p.sel = p.lastRow()
-		p.keepVisible()
+		p.sel = lastRowOf(p.rows)
+		p.keepVisible(len(p.rows))
 	case "enter":
 		return p.editColor()
 	case "p":
@@ -212,53 +203,7 @@ func (p *themeEditorPage) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // move shifts the highlight by d, skipping headers.
-func (p *themeEditorPage) move(d int) {
-	step, n := 1, d
-	if d < 0 {
-		step, n = -1, -d
-	}
-	for range n {
-		next := p.sel + step
-		for next >= 0 && next < len(p.rows) && p.rows[next].header {
-			next += step
-		}
-		if next < 0 || next >= len(p.rows) {
-			break
-		}
-		p.sel = next
-	}
-	p.keepVisible()
-}
-
-// lastRow is the index of the last color key.
-func (p *themeEditorPage) lastRow() int {
-	for i := len(p.rows) - 1; i >= 0; i-- {
-		if !p.rows[i].header {
-			return i
-		}
-	}
-	return 0
-}
-
-// pageCount is the visible row count of the last draw.
-func (p *themeEditorPage) pageCount() int {
-	if p.page > 0 {
-		return p.page
-	}
-	return list.DefaultPage
-}
-
-// keepVisible scrolls the highlight into the page.
-func (p *themeEditorPage) keepVisible() {
-	page := p.pageCount()
-	if p.sel < p.top {
-		p.top = p.sel
-	}
-	if p.sel >= p.top+page {
-		p.top = p.sel - page + 1
-	}
-	p.top = max(0, min(p.top, len(p.rows)-page))
-}
+func (p *themeEditorPage) move(d int) { moveSel(&p.pageScroll, d, p.rows) }
 
 // editColor opens the color prompt of the highlighted key.
 func (p *themeEditorPage) editColor() tea.Cmd {
@@ -642,7 +587,7 @@ func (p *themeEditorPage) Draw(g *grid.Grid) {
 		return
 	}
 	p.page = box.H - 3
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 	ov := p.model.styles.Overlay
 	title := "Theme editor — " + p.name
 	if p.readOnly {

@@ -389,7 +389,7 @@ func TestDiagnosticHighlightUsesMessageMatch(t *testing.T) {
 	if at < 0 {
 		t.Fatalf("row %q has no match text", label)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !g.At(at+i, geo.top+1).Style.Bold {
 			t.Fatalf("match rune %d is not bold in %q", i, label)
 		}
@@ -607,7 +607,7 @@ func TestLiveGrepTerminalScope(t *testing.T) {
 func TestBoundTerminalSources(t *testing.T) {
 	t.Parallel()
 	longRows := make([]string, 0, 600)
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		longRows = append(longRows, "line")
 	}
 	src := make([]TerminalSource, 0, 20)
@@ -635,11 +635,11 @@ func TestBoundTerminalSources(t *testing.T) {
 	// The total byte cap leaves later tabs out once it is spent.
 	filler := strings.Repeat("x", 1000)
 	rows := make([]string, 0, GrepTerminalsMaxRows)
-	for i := 0; i < GrepTerminalsMaxRows; i++ {
+	for range GrepTerminalsMaxRows {
 		rows = append(rows, filler)
 	}
 	big := make([]TerminalSource, 0, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		big = append(big, TerminalSource{ID: uint64(i + 30), Index: i, Lines: rows})
 	}
 	total := 0

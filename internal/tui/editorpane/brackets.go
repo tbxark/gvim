@@ -148,7 +148,7 @@ func (f frame) bracketAtCaret() (buffer.Pos, bool) {
 	return buffer.Pos{}, false
 }
 
-// partnerOf scans from the bracket at at for the bracket that closes or opens it,
+// partnerOf scans from the bracket at position `at` for the bracket that closes or opens it,
 // counting only brackets of its own kind and leaving out comments and strings. It
 // reads at most bracketReachLines lines each way.
 func (f frame) partnerOf(at buffer.Pos) (buffer.Pos, bool) {

@@ -70,7 +70,7 @@ func (m *Model) openActionPopup(t pluginapi.Token, id uint64, o pluginapi.Action
 	title := cleanText(o.Title)
 	p := popup.New(popupStyles(m.styles))
 	p.ShowNote(m.popupAnchor("center", title, items, 0), title, cleanText(o.Message), items)
-	m.pushOverlay(&pluginActionPopupOverlay{plugBase: plugBase{m: m, tok: t}, id: id, p: p})
+	m.pushOverlay(&pluginActionPopupOverlay{m: m, tok: t, id: id, p: p})
 	return nil
 }
 

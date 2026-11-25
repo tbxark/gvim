@@ -40,7 +40,7 @@ func TestPaintButtonNoUnderline(t *testing.T) {
 	if n != 6 || g.Plain()[0][:6] != "  OK  " {
 		t.Fatalf("button row = %q (%d cells), want %q", g.Plain()[0][:6], n, "  OK  ")
 	}
-	for x := 0; x < 6; x++ {
+	for x := range 6 {
 		if g.At(x, 0).Style.Underline {
 			t.Fatalf("cell %d is underlined with under = -1", x)
 		}

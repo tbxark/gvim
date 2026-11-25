@@ -199,7 +199,7 @@ still large internally, so a reader can find a feature without grepping by memor
 | terminal dock | `dock_glue.go`, `dock_commands.go`, `dock_text.go` (`shell.go` is editor shell commands) | root glue over `tui/dock`: port aliases, action routing, paint calls, selection helpers |
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
 | plugin host | `plugin_*.go`, plus the plugin host files `plugin_panels.go` (widget panels and sidebar sections), `plugin_menus.go` (menu bar rows), `plugin_actionpopup.go` (action popups) and `plugin_themes.go` (theme-file APIs), `plugin_groups.go` (buffer groups and scroll sync), `plugin_folds.go` (plugin folding ranges), `plugin_seams.go` (split labels and window state) | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua, the declarative panels/sections, menus, action popups and prompt suggestions |
-| overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | keybinding editor, help/settings/tour/notices/pickers; the list/box machinery lives in `tui/list` |
+| overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go`, `pagescroll.go` | keybinding editor, help/settings/tour/notices/pickers, the shared page-scroll state of the list pages; the list/box machinery lives in `tui/list` |
 | frame glue | `welcome.go` | welcome screen; the root uses the `tui/frame` geometry types directly |
 | view / display | `view.go`, `view_render.go` | display settings and per-document view settings |
 | find glue | `find_route.go`, `find_highlight.go`, `find_mouse.go` | controller between the find bar and the editor |
@@ -229,9 +229,10 @@ source: `ComputeLayout`, the `Style` chrome a look is built from, hit map, tab-s
 welcome placement), `sidebar` (the explorer
 column's section stack: `Layout`, header rows, the Contents widget; docs/sidebar.md), `split` (the split tree
 and pure pane geometry), `tabstrip` (strip painting and pointer mapping), `grid` (cell
-surface on `x/ansi`), `space` (padding, text fitting, `Rect` and the shared card
-geometry `CardWidth`/`CardBox`), `style` (theme → lipgloss
-styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
+surface on `x/ansi`), `space` (padding, text fitting, `Rect`, the shared card
+geometry `CardWidth`/`CardBox`, and the shared click counter, scrollbar thumb and
+checkbox widgets), `style` (theme → lipgloss
+styles and syntax-kind foregrounds; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
 (paints the text area; pure renderer, no tea), `menubar` (menu bar + dropdowns; generated
 menu table), `explorer` (file-tree panel), `palette` (command palette overlay), `find`
 (find bar), `prompt` (the centred prompt cards), `browser` (file/folder browser), `picker`

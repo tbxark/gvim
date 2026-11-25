@@ -38,7 +38,7 @@ func TestPlugDecorComposeOrdering(t *testing.T) {
 	// the composed text rows and the compose-only decorations paint on them.
 	page := m.paneFor(split.Pane{Focused: true}, doc)
 	page.PageView = editorpane.PageView{On: true, Measure: 30, Markdown: true}
-	page.PageExtraRows = editorpane.PageViewTableBorders(doc, page.Styles)
+	page.PageExtraRows = editorpane.PageViewTableBordersFor(doc, page.Styles, false)
 	page = m.plugDecor(page, doc)
 	if page.ExtraRows == nil || page.Conceals == nil || page.Overlays == nil {
 		t.Fatalf("compose hooks not wired: extra rows %v conceals %v overlays %v",
@@ -70,7 +70,7 @@ func TestPlugDecorComposeOrdering(t *testing.T) {
 	// The overlay kinds stay off the composed rows by design (the mapped-decoration
 	// no-paint decision in docs/markdown.md): conceal and virtual rows survive the
 	// compose, a line background and a highlight do not.
-	for x := 0; x < g.Width(); x++ {
+	for x := range g.Width() {
 		c := g.At(x, alpha)
 		if c.Style.BG == dBlue || c.Style.FG == dRed {
 			t.Fatalf("a line/highlight overlay painted on the composed row at x=%d: %+v", x, c.Style)
@@ -89,7 +89,7 @@ func TestPlugDecorComposeOrdering(t *testing.T) {
 	// Ordinary (not compose-only) items paint on the normal pane: the mapped-decoration
 	// no-paint rule is a page-view rule, not a normal-pane one.
 	findBlue, findRed := false, false
-	for x := 0; x < ng.Width(); x++ {
+	for x := range ng.Width() {
 		if ng.At(x, 0).Style.BG == dBlue {
 			findBlue = true
 		}

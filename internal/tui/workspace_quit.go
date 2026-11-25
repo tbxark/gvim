@@ -1,6 +1,10 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"slices"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // workspaceQuitPort coordinates the one quit confirmation across live workspaces.
 type workspaceQuitPort interface {
@@ -17,8 +21,8 @@ func (m *Model) QuitDiscardModified() error {
 		return nil
 	}
 	tabs := m.ed.Tabs()
-	for i := len(tabs) - 1; i >= 0; i-- {
-		if tabs[i].Modified {
+	for i, tab := range slices.Backward(tabs) {
+		if tab.Modified {
 			if err := m.closeTab(t, i, true); err != nil {
 				return err
 			}

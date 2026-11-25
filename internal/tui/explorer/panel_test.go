@@ -17,6 +17,7 @@ import (
 	tree "github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
@@ -121,7 +122,7 @@ func TestHeaderFor(t *testing.T) {
 func TestHeaderForNerdKeepsTheColumns(t *testing.T) {
 	t.Parallel()
 	refresh, closeBtn := icons.Nerd.Glyph(icons.Refresh), icons.Nerd.Glyph(icons.Close)
-	for width := 0; width <= 60; width++ {
+	for width := range 61 {
 		plain, nerd := HeaderFor(width, icons.Plain), HeaderFor(width, icons.Nerd)
 		if nerd.Reload != plain.Reload || nerd.Close != plain.Close {
 			t.Errorf("width %d: nerd buttons at %d and %d, plain at %d and %d",
@@ -591,15 +592,15 @@ func TestDrawSkipsTinyPanel(t *testing.T) {
 
 func TestThumbOf(t *testing.T) {
 	t.Parallel()
-	start, length := thumbOf(11, 4, 0)
+	start, length := space.Thumb(11, 4, 0)
 	if start != 0 || length != 1 {
-		t.Errorf("thumbOf(11,4,0) = %d,%d", start, length)
+		t.Errorf("space.Thumb(11,4,0) = %d,%d", start, length)
 	}
-	start, length = thumbOf(4, 4, 0)
+	start, length = space.Thumb(4, 4, 0)
 	if start != 0 || length != 4 {
-		t.Errorf("thumbOf(4,4,0) = %d,%d, want the whole body", start, length)
+		t.Errorf("space.Thumb(4,4,0) = %d,%d, want the whole body", start, length)
 	}
-	start, _ = thumbOf(11, 4, 10)
+	start, _ = space.Thumb(11, 4, 10)
 	if start > 3 {
 		t.Errorf("thumb start %d past the body", start)
 	}
@@ -763,13 +764,13 @@ func TestCompactChainAncestorClickAndTrailingGitMarkHitWidth(t *testing.T) {
 
 func TestThumbOfZeroAndLargeLines(t *testing.T) {
 	t.Parallel()
-	if s, l := thumbOf(0, 6, 0); s != 0 || l != 0 {
-		t.Fatalf("thumbOf(0,6,0) = %d,%d, want 0,0", s, l)
+	if s, l := space.Thumb(0, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("space.Thumb(0,6,0) = %d,%d, want 0,0", s, l)
 	}
-	if s, l := thumbOf(-3, 6, 0); s != 0 || l != 0 {
-		t.Fatalf("thumbOf(-3,6,0) = %d,%d, want 0,0", s, l)
+	if s, l := space.Thumb(-3, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("space.Thumb(-3,6,0) = %d,%d, want 0,0", s, l)
 	}
-	if s, l := thumbOf(10_000_000, 1_000_000, 5_000_000); s < 400_000 || s > 600_000 || l < 1 {
+	if s, l := space.Thumb(10_000_000, 1_000_000, 5_000_000); s < 400_000 || s > 600_000 || l < 1 {
 		t.Fatalf("thumbOf large = %d,%d, unexpected overflow or clamp", s, l)
 	}
 }

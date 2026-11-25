@@ -81,7 +81,7 @@ func Place(n *Node, r space.Rect, rects *[]space.Rect, borders *[]Border) {
 		first, second := Span(r.W, n.Share())
 		a = space.Rect{X: r.X, Y: r.Y, W: first, H: r.H}
 		b = space.Rect{X: r.X + first + 1, Y: r.Y, W: second, H: r.H}
-		line = Border{Rect: space.Rect{X: r.X + first, Y: r.Y, W: 1, H: r.H}, Vertical: true, Node: n, Area: r}
+		line = Border{X: r.X + first, Y: r.Y, W: 1, H: r.H, Vertical: true, Node: n, Area: r}
 		if r.W > 0 {
 			*borders = append(*borders, line)
 		}
@@ -89,7 +89,7 @@ func Place(n *Node, r space.Rect, rects *[]space.Rect, borders *[]Border) {
 		first, second := Span(r.H, n.Share())
 		a = space.Rect{X: r.X, Y: r.Y, W: r.W, H: first}
 		b = space.Rect{X: r.X, Y: r.Y + first + 1, W: r.W, H: second}
-		line = Border{Rect: space.Rect{X: r.X, Y: r.Y + first, W: r.W, H: 1}, Vertical: false, Node: n, Area: r}
+		line = Border{X: r.X, Y: r.Y + first, W: r.W, H: 1, Vertical: false, Node: n, Area: r}
 		if r.H > 0 {
 			*borders = append(*borders, line)
 		}

@@ -313,8 +313,8 @@ func (p *Panel) contentCols() int {
 	return cols
 }
 
-// selectUnit selects the word (count 2) or the row (count 3 and more) at body
-// row row of the current scrollback window.
+// selectUnit selects the word (count 2) or the row (count 3 and more) at the
+// given body row of the current scrollback window.
 func (p *Panel) selectUnit(row, col, count int) {
 	abs := p.scroll.top + row
 	cells, ok := p.rowCells(abs)

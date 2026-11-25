@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -609,9 +610,7 @@ func (m *Model) rebuildStyles() {
 // gvim.theme.override map) and rebuilds the theme. An empty map clears them.
 func (m *Model) SetThemeOverrides(overrides map[string]string) error {
 	copied := make(map[string]string, len(overrides))
-	for key, value := range overrides {
-		copied[key] = value
-	}
+	maps.Copy(copied, overrides)
 	// Validate against the active theme before touching the frame, so a bad
 	// override is reported to the caller and the look stays as it was.
 	if _, err := theme.WithOverrides(m.theme, copied); err != nil {
@@ -625,9 +624,7 @@ func (m *Model) SetThemeOverrides(overrides map[string]string) error {
 // ThemeOverrides returns the current session override map.
 func (m *Model) ThemeOverrides() map[string]string {
 	out := make(map[string]string, len(m.themeOverrides))
-	for key, value := range m.themeOverrides {
-		out[key] = value
-	}
+	maps.Copy(out, m.themeOverrides)
 	return out
 }
 
@@ -852,7 +849,7 @@ func (m *Model) markdownHeadingMarks(doc Document, p editorpane.Pane) []editorpa
 	compute := func() any {
 		style := p.Styles.Syntax[syntax.KindHeading]
 		var marks []editorpane.TrackMark
-		for i := 0; i < doc.LineCount(); i++ {
+		for i := range doc.LineCount() {
 			if !headingLine(doc.Line(i)) {
 				continue
 			}

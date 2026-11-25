@@ -143,7 +143,7 @@ type Panel struct {
 	tree   Tree
 	styles style.Styles
 	now    func() time.Time
-	clicks clickCounter
+	clicks space.ClickCounter
 	grip   bool       // a grip drag is in progress
 	thumb  bool       // a scrollbar drag is in progress
 	st     *transient // picks, pending cut and search text, shared by the copies of the panel
@@ -382,7 +382,7 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 	sel, hasSel := p.tree.Selected()
 	thumbStart, thumbLen := 0, 0
 	if over {
-		thumbStart, thumbLen = thumbOf(len(rows), n, off)
+		thumbStart, thumbLen = space.Thumb(len(rows), n, off)
 	}
 	track := grid.Style{BG: style.Cell(p.styles.Scrollbar).FG, BGKey: style.KeyIDFor("ui", "scrollbar_track_fg")}
 	thumb := grid.Style{BG: style.Cell(p.styles.ScrollbarThumb).FG, BGKey: style.KeyIDFor("ui", "scrollbar_thumb_fg")}
@@ -658,7 +658,7 @@ func (p Panel) press(m tea.Mouse, g Geometry) (Panel, tea.Cmd) {
 	if m.Button != tea.MouseLeft {
 		return p, nil
 	}
-	n := p.clicks.press(p.now(), m.X, m.Y)
+	n := p.clicks.Press(p.now(), m.X, m.Y)
 	p.grip, p.thumb = false, false
 	p.clearDragMove()
 	t := p.hitAt(g, m.X, m.Y)
@@ -1021,15 +1021,4 @@ func (p Panel) follow(g Geometry) {
 // emit returns a command that sends msg.
 func emit(msg tea.Msg) tea.Cmd {
 	return func() tea.Msg { return msg }
-}
-
-// thumbOf sizes the scrollbar thumb for lines rows in a body of h rows, with the
-// first visible row top. The thumb is at least one row and at most the body.
-func thumbOf(lines, h, top int) (start, length int) {
-	if lines <= 0 || h <= 0 {
-		return 0, 0
-	}
-	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
-	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
-	return min(start, max(h-length, 0)), length
 }

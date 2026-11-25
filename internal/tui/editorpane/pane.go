@@ -858,7 +858,7 @@ func (f frame) paintCurrentColumn(g *grid.Grid) {
 	colBG := f.styles.CurrentLine.BG
 	colBGKey := f.styles.CurrentLine.BGKey
 	textBG := f.styles.Text.BG
-	for y := 0; y < f.h; y++ {
+	for y := range f.h {
 		c := g.At(cx, y)
 		if c.Text == "" || c.Style.BG != textBG {
 			continue

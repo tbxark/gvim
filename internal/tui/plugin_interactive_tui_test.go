@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,8 +43,7 @@ func interactivePanelModel(t *testing.T) (*Model, *fakeRuntime) {
 }
 
 func widgetEventData(rt *fakeRuntime, kind string) map[string]any {
-	for i := len(rt.emitted) - 1; i >= 0; i-- {
-		e := rt.emitted[i]
+	for _, e := range slices.Backward(rt.emitted) {
 		if e.Name == "widget_event" && e.Data["event"] == kind {
 			return e.Data
 		}

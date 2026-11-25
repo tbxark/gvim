@@ -441,7 +441,7 @@ func (m *Model) openInput(t pluginapi.Token, o pluginapi.InputSpec) tea.Cmd {
 	if _, ok := m.plug.waits[t]; !ok {
 		return nil
 	}
-	ov := &pluginLineOverlay{plugBase: plugBase{m: m, tok: t}}
+	ov := &pluginLineOverlay{m: m, tok: t}
 	opts := prompt.LineOptions{
 		Label:     cleanText(o.Prompt),
 		Input:     cleanText(o.Default),
@@ -487,7 +487,7 @@ func (m *Model) openConfirm(t pluginapi.Token, o pluginapi.ConfirmSpec) tea.Cmd 
 	}
 	c := prompt.NewConfirmWith(m.styles, cleanText(o.Message), pluginConfirmTag{tok: t},
 		prompt.ConfirmOptions{Yes: cleanText(o.Yes), No: cleanText(o.No), DefaultYes: o.Default})
-	m.pushOverlay(&pluginConfirmOverlay{plugBase: plugBase{m: m, tok: t}, c: c})
+	m.pushOverlay(&pluginConfirmOverlay{m: m, tok: t, c: c})
 	return nil
 }
 
@@ -524,8 +524,8 @@ func (h *pluginHost) SetPromptSuggestions(items []pluginapi.PromptSuggestion, se
 
 // plugTopLine returns the topmost open plugin prompt, nil when none is open.
 func (m *Model) plugTopLine() *pluginLineOverlay {
-	for i := len(m.overlays) - 1; i >= 0; i-- {
-		if o, ok := m.overlays[i].(*pluginLineOverlay); ok && !o.closed && o.l.Active() {
+	for _, v := range slices.Backward(m.overlays) {
+		if o, ok := v.(*pluginLineOverlay); ok && !o.closed && o.l.Active() {
 			return o
 		}
 	}
@@ -588,7 +588,7 @@ func (m *Model) openPicker(id uint64, pp *pendingPicker) tea.Cmd {
 		Title: cleanText(o.Title), Footer: cleanText(o.Footer), Placeholder: cleanText(o.Placeholder), InitialQuery: cleanText(o.InitialQuery),
 		Items: pickerItems(o.Items), Fuzzy: o.Fuzzy, Live: o.Live, Preview: o.Preview,
 	})
-	ov := &pluginPickerOverlay{plugBase: plugBase{m: m, tok: t}, id: id, p: p}
+	ov := &pluginPickerOverlay{m: m, tok: t, id: id, p: p}
 	m.pushOverlay(ov)
 	cmds := []tea.Cmd{ov.cmdFor(p.Init())}
 	if pp.status != nil {
@@ -700,7 +700,7 @@ func (m *Model) openPopup(t pluginapi.Token, id uint64, o pluginapi.PopupSpec) t
 	}
 	p := popup.New(popupStyles(m.styles))
 	p.Show(m.popupAnchor(o.Anchor, title, items, o.Width), title, items)
-	m.pushOverlay(&pluginPopupOverlay{plugBase: plugBase{m: m, tok: t}, id: id, p: p})
+	m.pushOverlay(&pluginPopupOverlay{m: m, tok: t, id: id, p: p})
 	return nil
 }
 

@@ -47,10 +47,6 @@ import (
 // wheelRows is the number of rows one wheel notch scrolls (blueprint section 3.2).
 const wheelRows = 3
 
-// doubleClickWindow is the time within which presses in one cell count as a
-// double or triple press (blueprint section 3.4).
-const doubleClickWindow = 500 * time.Millisecond
-
 // Model is the root tea.Model. It routes input to the editor, the explorer and
 // the sub-models, holds the focus, and lays out the frame. The root does no file
 // IO itself. Explorer moves and scrolls are in memory. Editor actions run
@@ -212,7 +208,7 @@ type Model struct {
 	updates    UpdateHooks
 	updateInfo *UpdateInfo
 
-	clicks    clickCounter
+	clicks    space.ClickCounter
 	lastPress int // the count of the last editor press, see pressEditor
 	drag      drag
 	mx        mouseExtra // modifier clicks and the sideways pan, see motion_mouse.go
@@ -476,10 +472,6 @@ func RunWorkspaceHost(ctx context.Context, h *WorkspaceHost, in io.Reader, out i
 	h.stop()
 	return err
 }
-
-// OpenFileMessage is the message a hosted daemon sends to open a path a client asked
-// for. It is the message the explorer sends when a row is activated.
-func OpenFileMessage(path string) tea.Msg { return expanel.OpenFileMsg{Path: path} }
 
 // resetCursorStyle is the terminal's own caret shape. The frame sets a blinking block
 // as its caret shape, and the renderer restores only the shapes it did not start with,
@@ -2447,10 +2439,7 @@ func (m *Model) gotoRelativeLine(delta, col int) {
 	if doc == nil {
 		return
 	}
-	line := doc.Cursor().Line + 1 + delta
-	if line < 1 {
-		line = 1
-	}
+	line := max(doc.Cursor().Line+1+delta, 1)
 	if col < 1 {
 		col = 1
 	}
@@ -2914,7 +2903,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	// selection and the editor's word/line selection both read the count once.
 	count := 0
 	if mo.Button == tea.MouseLeft {
-		count = m.clicks.pressWindow(m.now(), mo.X, mo.Y, m.doubleClickWindow())
+		count = m.clicks.PressWindow(m.now(), mo.X, mo.Y, m.doubleClickWindow())
 	}
 	// The dock's rows belong to the shell: the dock decides whether the press is
 	// forwarded, opens a link, scrolls the scrollback or only takes the focus.
@@ -3918,15 +3907,6 @@ func (m *Model) imageDocShown() bool {
 	return false
 }
 
-// paint draws the frame into a new grid. The editor pane fills the body to the
-// right of the explorer. Each other band is painted from the layout runs, so the
-// hit map and the paint cannot drift apart. The open overlays are drawn last.
-func (m *Model) paint() *grid.Grid {
-	g := grid.New(m.width, m.height)
-	m.paintInto(g)
-	return g
-}
-
 // paintInto draws the frame into g. The theme inspector calls it once with key
 // capture enabled on a fresh grid, so the paint path itself is the same in both
 // cases; normal frames capture nothing.
@@ -4151,11 +4131,9 @@ func (m *Model) routeSettingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 	if page == nil || !page.Active() {
 		return nil, true
 	}
-	for _, o := range m.overlays {
-		if o == Overlay(page) {
-			_, cmd := page.Update(msg)
-			return cmd, true
-		}
+	if slices.Contains(m.overlays, Overlay(page)) {
+		_, cmd := page.Update(msg)
+		return cmd, true
 	}
 	return nil, true
 }
@@ -4576,8 +4554,8 @@ func (m *Model) unsavedAnswer(f flow, c dialog.Choice) tea.Cmd {
 				return m.quit()
 			}
 			tabs := m.ed.Tabs()
-			for i := len(tabs) - 1; i >= 0; i-- {
-				if tabs[i].Modified {
+			for i, tab := range slices.Backward(tabs) {
+				if tab.Modified {
 					if err := m.closeTab(t, i, true); err != nil {
 						m.notice = err.Error()
 						return nil
@@ -4734,14 +4712,6 @@ func lowerIfLetter(r rune) string {
 	return string(r)
 }
 
-// clickCounter counts presses in one cell. The count runs 1, 2, 3, then 1, and
-// a press restarts it when it is outside the cell or the window.
-type clickCounter struct {
-	at   time.Time
-	x, y int
-	n    int
-}
-
 // wheelRows returns the configured mouse wheel scroll lines (default 3).
 func (m *Model) wheelRows() int {
 	if m.view.opts.MouseWheelScrollLines > 0 {
@@ -4755,7 +4725,7 @@ func (m *Model) doubleClickWindow() time.Duration {
 	if m.view.opts.DoubleClickTimeMS > 0 {
 		return time.Duration(m.view.opts.DoubleClickTimeMS) * time.Millisecond
 	}
-	return doubleClickWindow
+	return space.DoubleClickWindow
 }
 
 // clearMouseHover clears all chrome hover highlights and in-flight drag state.
@@ -4764,26 +4734,6 @@ func (m *Model) clearMouseHover() {
 	m.cancelMouseHover()
 	m.drag = drag{}
 	m.dock.ClearHover()
-}
-
-// press records a left press at (x, y) at time at using the default window.
-func (c *clickCounter) press(at time.Time, x, y int) int {
-	return c.pressWindow(at, x, y, doubleClickWindow)
-}
-
-// pressWindow records a left press at (x, y) at time at with an explicit window
-// and returns its count.
-func (c *clickCounter) pressWindow(at time.Time, x, y int, window time.Duration) int {
-	if window <= 0 {
-		window = doubleClickWindow
-	}
-	if c.n > 0 && at.Sub(c.at) <= window && c.x == x && c.y == y {
-		c.n = c.n%3 + 1
-	} else {
-		c.n = 1
-	}
-	c.at, c.x, c.y = at, x, y
-	return c.n
 }
 
 // isAltGr reports Windows AltGr, which its console reports as Ctrl+Alt. It is a

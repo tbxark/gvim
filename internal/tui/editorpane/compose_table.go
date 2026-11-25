@@ -261,7 +261,7 @@ func (f frame) composeTableLine(i int, tl syntax.TableLine, reveal bool) compose
 	if tl.Kind == syntax.TableSeparator {
 		add('├', syntax.KindPlain, 0)
 		for c, w := range layout.widths {
-			for j := 0; j < w+2; j++ {
+			for range w + 2 {
 				add('─', syntax.KindPlain, 0)
 			}
 			if c == len(layout.widths)-1 {
@@ -284,7 +284,7 @@ func (f frame) composeTableLine(i int, tl syntax.TableLine, reveal bool) compose
 	add('│', syntax.KindPlain, pipeAt(0))
 	widths := layout.widths
 	cellsAtLine := f.tables().cells[i]
-	for c := 0; c < len(widths); c++ {
+	for c := range widths {
 		add(' ', syntax.KindPlain, pipeAt(c))
 		var content []tableCellRune
 		start := 0
@@ -317,13 +317,13 @@ func (f frame) composeTableLine(i int, tl syntax.TableLine, reveal bool) compose
 		case syntax.AlignCenter:
 			before, after = pad/2, pad-pad/2
 		}
-		for j := 0; j < before; j++ {
+		for j := range before {
 			add(' ', syntax.KindPlain, start+j)
 		}
 		for _, cr := range content {
 			add(cr.r, cr.k, cr.src)
 		}
-		for j := 0; j < after; j++ {
+		for j := range after {
 			add(' ', syntax.KindPlain, min(start+len(content)+j, len(raw)))
 		}
 		add(' ', syntax.KindPlain, pipeAt(c))

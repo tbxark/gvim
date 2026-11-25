@@ -3,6 +3,7 @@ package dock
 import (
 	"strconv"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -30,7 +31,7 @@ func kittyDockKey(k tea.Key, flags int) (string, bool) {
 	}
 	code := k.Code
 	if code == 0 && k.Text != "" {
-		code = []rune(k.Text)[0]
+		code, _ = utf8.DecodeRuneInString(k.Text)
 	}
 	bits := kittyModBits(k.Mod)
 	// A legacy-compatible uppercase letter carries Shift; a kitty report can omit

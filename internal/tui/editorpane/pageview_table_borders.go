@@ -2,7 +2,7 @@ package editorpane
 
 import "github.com/tbxark/gvim/syntax"
 
-// PageViewTableBorders builds the page-view extra rows that draw a Markdown
+// PageViewTableBordersFor builds the page-view extra rows that draw a Markdown
 // table's missing frame: the top border (┌─┬─┐) above the table's header line and
 // the bottom border (└─┴─┘) below its last line. The middle border is the source
 // separator row (compose_table.go). The rows go through the shared inserted-row
@@ -14,12 +14,9 @@ import "github.com/tbxark/gvim/syntax"
 // border text matches the row width the compose used: the same table model and
 // column widths (memoized per text version) size both. A page too narrow for the
 // table gets no borders: its rows wrap, and a border would not line up.
-func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter, measure int) ExtraRows {
-	return PageViewTableBordersFor(doc, styles, false)
-}
-
-// PageViewTableBordersFor is PageViewTableBorders with explicit control over whether the
-// caret's line reveals raw cell/fence text (false for an unfocused dual-view pane).
+//
+// noCaretReveal controls whether the caret's line reveals raw cell/fence text
+// (false for an unfocused dual-view pane).
 func PageViewTableBordersFor(doc Document, styles Styles, noCaretReveal bool) func(line, width, gutter, measure int) ExtraRows {
 	if doc == nil {
 		return nil
@@ -121,7 +118,7 @@ func tableBorder(widths []int, left, mid, right string) string {
 	var b []rune
 	b = append(b, []rune(left)...)
 	for i, w := range widths {
-		for j := 0; j < w+2; j++ {
+		for range w + 2 {
 			b = append(b, '─')
 		}
 		switch {

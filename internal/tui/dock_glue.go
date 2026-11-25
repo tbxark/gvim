@@ -29,8 +29,8 @@ func noTerminalNotice() string { return dock.NoTerminalNotice() }
 
 // SetDock gives the terminal dock its ports. The app calls it once, after New.
 func (m *Model) SetDock(p DockPorts) {
-	m.dock.SetPorts(dock.Ports(p))
-	m.dock.SetEffects(dock.Effects(p.Effects))
+	m.dock.SetPorts(p)
+	m.dock.SetEffects(p.Effects)
 }
 
 // dockNewPanel returns the dock's tab container with the root services it needs.
@@ -133,7 +133,8 @@ func (m *Model) dockAction(action string) (tea.Cmd, bool) {
 		m.dock.MoveActive(1)
 		return nil, true
 	case "send_selection_to_terminal":
-		return m.sendSelection(), true
+		m.sendSelection()
+		return nil, true
 	}
 	return nil, false
 }
@@ -238,23 +239,22 @@ func (m *Model) dockKey(k tea.Key, kp KeyPress) tea.Cmd {
 // sendSelection queues the selection, or the cursor line, for the shell. The text has
 // the same line breaks and ESC rule as a paste, and it ends in a line break, so the
 // shell runs it. The dock takes the focus, as Fresh's send does.
-func (m *Model) sendSelection() tea.Cmd {
+func (m *Model) sendSelection() {
 	if !m.dockRunning() {
 		m.notice = noTerminalNotice()
-		return nil
+		return
 	}
 	doc := m.ed.Active()
 	if doc == nil {
-		return nil
+		return
 	}
 	text, ok := sentText(doc)
 	if !ok {
 		m.notice = "Selection too large to send in large file mode"
-		return nil
+		return
 	}
 	m.dock.SendToShell(text)
 	m.focusDock()
-	return nil
 }
 
 // closeDock ends the shell. Run calls it when the program ends.

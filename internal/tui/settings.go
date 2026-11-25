@@ -169,9 +169,7 @@ type settingsPage struct {
 	layer  string
 	filter []rune
 	rows   []settingsRow
-	sel    int
-	top    int
-	page   int
+	pageScroll
 	// pending holds the changes the user made but did not save yet, by setting
 	// key (scalar rows) or path id (structured entries). The page shows them in
 	// place of the snapshot's values.
@@ -307,6 +305,8 @@ type settingsRow struct {
 	item   SettingsItem
 }
 
+func (r settingsRow) isHeader() bool { return r.header }
+
 var _ Overlay = (*settingsPage)(nil)
 
 // newSettingsPage returns the page over port, on the User layer.
@@ -403,7 +403,7 @@ func (p *settingsPage) rebuild() {
 			}
 		}
 	}
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 }
 
 // settingsMatches reports whether row passes the filter.
@@ -453,7 +453,7 @@ func (p *settingsPage) startSearch() {
 	p.filter = nil
 	p.rebuild()
 	p.sel = p.firstItem()
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 }
 
 // key handles one key press. It returns the command the press starts.
@@ -489,7 +489,7 @@ func (p *settingsPage) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "home":
 		p.sel = p.firstItem()
 	case "end":
-		p.sel = p.lastItem()
+		p.sel = lastRowOf(p.rows)
 	case "enter":
 		return p.edit()
 	case "tab":
@@ -520,54 +520,7 @@ func (p *settingsPage) key(msg tea.KeyPressMsg) tea.Cmd {
 
 // move shifts the highlight by d rows, stopping at the ends and skipping
 // headers.
-func (p *settingsPage) move(d int) {
-	step, n := 1, d
-	if d < 0 {
-		step, n = -1, -d
-	}
-	for range n {
-		next := p.sel + step
-		for next >= 0 && next < len(p.rows) && p.rows[next].header {
-			next += step
-		}
-		if next < 0 || next >= len(p.rows) {
-			break
-		}
-		p.sel = next
-	}
-	p.keepVisible()
-}
-
-// lastItem returns the index of the last item row, or 0.
-func (p *settingsPage) lastItem() int {
-	for i := len(p.rows) - 1; i >= 0; i-- {
-		if !p.rows[i].header {
-			return i
-		}
-	}
-	return 0
-}
-
-// pageCount is the number of item rows the last draw showed, for PageUp and
-// PageDown.
-func (p *settingsPage) pageCount() int {
-	if p.page > 0 {
-		return p.page
-	}
-	return list.DefaultPage
-}
-
-// keepVisible scrolls the rows so that the highlight is inside the page.
-func (p *settingsPage) keepVisible() {
-	page := p.pageCount()
-	if p.sel < p.top {
-		p.top = p.sel
-	}
-	if p.sel >= p.top+page {
-		p.top = p.sel - page + 1
-	}
-	p.top = max(0, min(p.top, len(p.rows)-page))
-}
+func (p *settingsPage) move(d int) { moveSel(&p.pageScroll, d, p.rows) }
 
 // edit opens the editor of the highlighted setting: a bool toggles, an enum
 // opens a picker, and an int or a string opens its one-line prompt. A setting
@@ -967,8 +920,8 @@ func (m *Model) settingsAction(action string, args map[string]any) (tea.Cmd, boo
 
 // topSettingsPage returns the Settings page on the overlay stack, or nil.
 func (m *Model) topSettingsPage() *settingsPage {
-	for i := len(m.overlays) - 1; i >= 0; i-- {
-		if page, ok := m.overlays[i].(*settingsPage); ok {
+	for _, v := range slices.Backward(m.overlays) {
+		if page, ok := v.(*settingsPage); ok {
 			return page
 		}
 	}
@@ -1281,7 +1234,7 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 		return
 	}
 	p.page = box.H - 3
-	p.keepVisible()
+	p.keepVisible(len(p.rows))
 	ov := p.m.styles.Overlay
 	title := "Settings — " + settingsLayerTitle(p.layer)
 	if p.dirty() {

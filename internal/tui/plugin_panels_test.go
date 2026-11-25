@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,8 +67,7 @@ func widgetEvents(rt *fakeRuntime) []map[string]any {
 
 // lastWidgetEvent returns the last widget_event of the kind, nil when none.
 func lastWidgetEvent(rt *fakeRuntime, kind string) map[string]any {
-	for i := len(rt.emitted) - 1; i >= 0; i-- {
-		e := rt.emitted[i]
+	for _, e := range slices.Backward(rt.emitted) {
 		if e.Name == "widget_event" && e.Data["event"] == kind {
 			return e.Data
 		}

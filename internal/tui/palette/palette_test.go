@@ -594,8 +594,8 @@ func TestClosedPaletteIgnoresInput(t *testing.T) {
 }
 
 func TestSmallFramesDoNotPanic(t *testing.T) {
-	for w := 0; w <= 12; w++ {
-		for h := 0; h <= 6; h++ {
+	for w := range 13 {
+		for h := range 7 {
 			p := New(commandOptions(">save", nil))
 			draw(p, w, h)
 			p.update(click(w/2, h/2))
@@ -948,7 +948,7 @@ func (f *blockingProbeFiles) Probe(ctx context.Context, _ string) ([]string, err
 // TestFileModeUsesTheLiteralPathProbe: the exact path is added before ranking while
 // the index is loading, and the probe runs only in the tea.Cmd (never in New/Update).
 func TestFileModeUsesTheLiteralPathProbe(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files := &probeFiles{loading: true}
 	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	if files.calls != 0 {
@@ -977,7 +977,7 @@ func TestFileModeUsesTheLiteralPathProbe(t *testing.T) {
 // TestFileProbeResultIsDroppedForAChangedQuery: a probe/ranking message is displayed
 // only for the current seq and text.
 func TestFileProbeResultIsDroppedForAChangedQuery(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files := &probeFiles{loading: true}
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	// Force a newer query without running the old command.
 	p.update(typed("x"))
@@ -998,9 +998,9 @@ func TestFileProbeResultIsDroppedForAChangedQuery(t *testing.T) {
 // is blocked, and the next query cancels the in-flight probe context.
 func TestFileProbeIsCanceledWhenTheQueryChanges(t *testing.T) {
 	files := &blockingProbeFiles{
-		fakeFiles: fakeFiles{loading: true},
-		started:   make(chan struct{}),
-		canceled:  make(chan struct{}),
+		loading:  true,
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
 	}
 	p := New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}})
 	cmd := p.Init()
@@ -1032,7 +1032,7 @@ func TestFileProbeIsCanceledWhenTheQueryChanges(t *testing.T) {
 // TestFileProbeIsCachedWhileLoading: poll ticks while the index is still loading reuse
 // the probe answer instead of probing once per tick.
 func TestFileProbeIsCachedWhileLoading(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files := &probeFiles{loading: true}
 	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	msg := p.Init()()
@@ -1053,7 +1053,7 @@ func TestFileProbeIsCachedWhileLoading(t *testing.T) {
 // TestFileProbeRunsAfterLoading: Fresh probes the literal path even after the index
 // has completed, so an unindexed/truncated exact file can still be opened.
 func TestFileProbeRunsAfterLoading(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
+	files := &probeFiles{loading: false}
 	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	p.update(p.Init()())
@@ -1069,7 +1069,7 @@ func TestFileProbeRunsAfterLoading(t *testing.T) {
 // literal path, so the bounded cache serves the probe and no second Stat runs. It also
 // covers a multi-word literal path and a mode-prefix escaped path.
 func TestFileProbeCacheAvoidsRepeatedStatForSamePath(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
+	files := &probeFiles{loading: false}
 	files.probe = func(_ context.Context, query string) ([]string, error) {
 		return []string{query}, nil
 	}
@@ -1121,7 +1121,7 @@ func TestFileProbeCacheAvoidsRepeatedStatForSamePath(t *testing.T) {
 // TestProbeCacheIsBounded: the palette keeps at most probeCacheSize answers.
 func TestProbeCacheIsBounded(t *testing.T) {
 	p := New(Options{})
-	for i := 0; i < probeCacheSize+3; i++ {
+	for i := range probeCacheSize + 3 {
 		p.rememberProbe(fmt.Sprintf("p%d", i), []string{fmt.Sprintf("p%d", i)})
 	}
 	if len(p.probeCache) != probeCacheSize {
@@ -1139,9 +1139,9 @@ func TestProbeCacheIsBounded(t *testing.T) {
 // must cancel an in-flight literal-path probe.
 func TestPaletteDismissCancelsTheProbe(t *testing.T) {
 	files := &blockingProbeFiles{
-		fakeFiles: fakeFiles{loading: true},
-		started:   make(chan struct{}),
-		canceled:  make(chan struct{}),
+		loading:  true,
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
 	}
 	p := New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}})
 	cmd := p.Init()
@@ -1168,7 +1168,7 @@ func TestPaletteDismissCancelsTheProbe(t *testing.T) {
 // TestFileResultWithTheWrongTextIsDropped: even with the current seq, a result whose
 // text is not the palette's current file text is not displayed or cached.
 func TestFileResultWithTheWrongTextIsDropped(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files := &probeFiles{loading: true}
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	if cmd := p.update(FileRankedMsg{Token: p.token, Seq: p.seq, Text: "other.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
 		t.Fatalf("wrong-text result returned a command: %v", cmd)
@@ -1186,7 +1186,7 @@ func TestFileResultWithTheWrongTextIsDropped(t *testing.T) {
 // TestFileProbeMergesPrefixResults: the parent-prefix probe can return several files;
 // all are merged, deduplicated and ranked through the normal path.
 func TestFileProbeMergesPrefixResults(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files := &probeFiles{loading: true}
 	files.probe = func(context.Context, string) ([]string, error) {
 		return []string{"save_file.rs", "save_other.rs"}, nil
 	}
@@ -1209,7 +1209,7 @@ func TestFileProbeMergesPrefixResults(t *testing.T) {
 // TestFileProbeCachesANegativeAnswer: a completed index and a missing exact path are
 // cached too, so a poll or a :line change for the same path does not Stat again.
 func TestFileProbeCachesANegativeAnswer(t *testing.T) {
-	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
+	files := &probeFiles{loading: false}
 	files.probe = func(context.Context, string) ([]string, error) { return nil, nil }
 	p := New(Options{Query: "missing.go:4", Files: files, Ranker: &fakeRanker{}})
 	p.update(p.Init()())
@@ -1243,7 +1243,7 @@ func (f *generatedProbeFiles) Generation() uint64 { return f.gen }
 // still reuses the cache, and the probe still runs only in the command.
 func TestFileProbeCacheInvalidatesOnIndexGeneration(t *testing.T) {
 	files := &generatedProbeFiles{
-		probeFiles: &probeFiles{fakeFiles: fakeFiles{loading: false}},
+		probeFiles: &probeFiles{loading: false},
 		gen:        1,
 	}
 	files.probe = func(context.Context, string) ([]string, error) {
@@ -1303,12 +1303,12 @@ func (f *hiddenSetterFiles) SetProbeShowHidden(show bool) {
 // TestPalettePassesTheShowHiddenSetting: the palette applies the explorer setting to the
 // probe port at construction (no I/O in the probe itself).
 func TestPalettePassesTheShowHiddenSetting(t *testing.T) {
-	files := &hiddenSetterFiles{probeFiles: &probeFiles{fakeFiles: fakeFiles{loading: false}}}
+	files := &hiddenSetterFiles{probeFiles: &probeFiles{loading: false}}
 	New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}, ShowHidden: true})
 	if files.sets != 1 || !files.hidden {
 		t.Fatalf("show-hidden setting = %v after %d sets, want true after one", files.hidden, files.sets)
 	}
-	files2 := &hiddenSetterFiles{probeFiles: &probeFiles{fakeFiles: fakeFiles{loading: false}}}
+	files2 := &hiddenSetterFiles{probeFiles: &probeFiles{loading: false}}
 	New(Options{Query: "a", Files: files2, Ranker: &fakeRanker{}})
 	if files2.sets != 1 || files2.hidden {
 		t.Fatalf("default show-hidden = %v after %d sets, want false", files2.hidden, files2.sets)

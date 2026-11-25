@@ -40,7 +40,7 @@ func TestPreviewCancelsOnSelectionChange(t *testing.T) {
 	t.Parallel()
 	p, cp := newCancelPreviewPanel(t)
 	var cmd tea.Cmd
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, cmd = p.Update(specialKey(tea.KeyTab))
 	}
 	if cmd == nil {
@@ -74,7 +74,7 @@ func TestPreviewCancelsOnDismiss(t *testing.T) {
 	t.Parallel()
 	p, cp := newCancelPreviewPanel(t)
 	var cmd tea.Cmd
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, cmd = p.Update(specialKey(tea.KeyTab))
 	}
 	if cmd == nil {
@@ -97,7 +97,7 @@ func TestExportCancelsPreviewRead(t *testing.T) {
 	t.Parallel()
 	p, cp := newCancelPreviewPanel(t)
 	var cmd tea.Cmd
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, cmd = p.Update(specialKey(tea.KeyTab))
 	}
 	if cmd == nil {

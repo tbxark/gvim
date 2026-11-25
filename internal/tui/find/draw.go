@@ -167,15 +167,7 @@ func (b *Bar) statusText() string {
 
 // optionLabel is the label of option i with its checkbox.
 func optionLabel(i int, on bool) string {
-	return checkbox(on) + optionLabels[i]
-}
-
-// checkbox is the box before an option name.
-func checkbox(on bool) string {
-	if on {
-		return "[x] "
-	}
-	return "[ ] "
+	return space.Checkbox(on) + optionLabels[i]
 }
 
 // optionName is the name of option i without its key hint: "Case Sensitive" for
@@ -196,8 +188,8 @@ var optionShort = [numOptions]string{"Case", "Word", "Regex", "Confirm"}
 // leaves out are the last ones.
 func (b *Bar) optionRow(w int) (labels []string, gap int) {
 	full := func(i int) string { return optionLabel(i, b.opts[i]) }
-	named := func(i int) string { return checkbox(b.opts[i]) + optionName(i) }
-	short := func(i int) string { return checkbox(b.opts[i]) + optionShort[i] }
+	named := func(i int) string { return space.Checkbox(b.opts[i]) + optionName(i) }
+	short := func(i int) string { return space.Checkbox(b.opts[i]) + optionShort[i] }
 	forms := []struct {
 		label func(int) string
 		gap   int

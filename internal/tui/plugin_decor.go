@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -324,7 +325,7 @@ func (m *Model) plugDecor(p editorpane.Pane, doc Document) editorpane.Pane {
 	// decorations are set.
 	if len(m.plug.folds.byBuffer) > 0 {
 		if bd, ok := doc.(bufferIdentified); ok {
-			if len(m.plug.folds.byBuffer[pluginapi.BufferID(bd.BufferID())]) > 0 {
+			if len(m.plug.folds.byBuffer[bd.BufferID()]) > 0 {
 				p.PluginFolds = func() ([]fold.Range, map[int]bool, map[int]string) { return m.plugFolds(doc) }
 			}
 		}
@@ -386,17 +387,8 @@ func (v *decorView) lineText(line int) (string, bool) {
 		return "", false
 	}
 	v.text = v.doc.Line(line)
-	v.ascii = isASCII(v.text)
+	v.ascii = document.IsASCII(v.text)
 	return v.text, true
-}
-
-func isASCII(s string) bool {
-	for i := range len(s) {
-		if s[i] >= utf8.RuneSelf {
-			return false
-		}
-	}
-	return true
 }
 
 // col converts a byte column of the line to a rune column.

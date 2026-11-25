@@ -119,7 +119,7 @@ func (f frame) composeLine(i int) composedLine {
 	// keeps the heading kind (bold keyword styling) and the caret line reveals the
 	// markers like the other compose conceals.
 	if n := headingMarkerLen(raw); n > 0 {
-		for j := 0; j < len(raw); j++ {
+		for j := range raw {
 			if j < n {
 				continue
 			}
@@ -202,7 +202,7 @@ func composePrefix(raw []rune) (prefix []preRune, contentStart, hang int) {
 		start := pos
 		for _, r := range m {
 			if r == '\t' {
-				for q := 0; q < 4; q++ {
+				for range 4 {
 					prefix = append(prefix, preRune{' ', start})
 				}
 				continue
@@ -278,7 +278,7 @@ func isRuleRunes(raw []rune) bool {
 	}
 	first := body[0]
 	n := 0
-	for i := 0; i < len(body); i++ {
+	for i := range len(body) {
 		switch body[i] {
 		case first:
 			n++

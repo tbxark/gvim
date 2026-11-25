@@ -63,7 +63,7 @@ func TestDrawNeverPanicsAtAnyWidth(t *testing.T) {
 			{Name: "a_long_file_name.go", Path: "/r/a_long_file_name.go", Depth: 3},
 		},
 	}
-	for w := 0; w <= 40; w++ {
+	for w := range 41 {
 		for _, focus := range []bool{true, false} {
 			g := grid.New(max(w, 1), 6)
 			New(ft, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: w, Bottom: 5, Focused: focus, Marks: map[string]rune{"/r/a_long_file_name.go": 'M'}})

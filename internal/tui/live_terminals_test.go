@@ -22,7 +22,7 @@ func TestTerminalSourcesSnapshotBoundsAndNames(t *testing.T) {
 		t.Fatalf("a dock without tabs offered terminals: %+v", got)
 	}
 	long := make([]string, 0, 600)
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		long = append(long, "row")
 	}
 	tabs := []terminal.SavedTab{
@@ -31,7 +31,7 @@ func TestTerminalSourcesSnapshotBoundsAndNames(t *testing.T) {
 		{LaunchArgv: []string{"/usr/bin/claude", "--x"}, Open: true, Rows: []string{"agent row"}},
 		{Open: true, Rows: long},
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		tabs = append(tabs, terminal.SavedTab{Open: true, Rows: []string{"t"}})
 	}
 	m.RestoreTerminal(terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs})
@@ -75,7 +75,7 @@ func TestTerminalSourcesSnapshotBoundsAndNames(t *testing.T) {
 func TestTerminalSourceLinesKeepsTheNewestRows(t *testing.T) {
 	t.Parallel()
 	rows := make([]string, 0, 600)
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		rows = append(rows, "row")
 	}
 	got, first := terminalSourceLines(rows, 10)
@@ -191,7 +191,7 @@ func TestOpenTerminalMsgRevealsTheTranscriptRow(t *testing.T) {
 	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
 	term := starter.terms[0]
 	term.history = make([]string, 0, 100)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		term.history = append(term.history, "row")
 	}
 	id := m.dock.TabID(0)
@@ -219,7 +219,7 @@ func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
 	openDock(t, m)
 	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
 	term := starter.terms[0]
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		term.history = append(term.history, "row")
 	}
 	term.history[42] = "needle"
@@ -248,7 +248,7 @@ func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
 	// ones so the needle moves to 30 while the total stays 100. The quickfix callback
 	// must relocate by the carried text/context, not jump to 42.
 	shifted := append([]string(nil), term.history[12:]...)
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		shifted = append(shifted, "new row")
 	}
 	term.history = shifted
@@ -285,7 +285,7 @@ func TestOpenTerminalMsgValidatesAndRelocatesAfterDrift(t *testing.T) {
 	// Shift: 50 old rows drop, 50 new arrive; the needle moves from 250 to 200 while
 	// the total stays 600, so the stored row 250 now holds another line.
 	shifted := append([]string(nil), term.history[50:]...)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		shifted = append(shifted, "new row")
 	}
 	term.history = shifted
@@ -405,7 +405,7 @@ func TestOpenTerminalMsgValidatesBlankLineHit(t *testing.T) {
 	src := m.terminalSources()[0]
 	// Shift three rows: the blank line moves from 5 to 2 with the same a/b neighbours.
 	shifted := append([]string(nil), term.history[3:]...)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		shifted = append(shifted, "new row")
 	}
 	term.history = shifted
@@ -488,7 +488,7 @@ func TestLiveGrepTerminalExportBlankLineDrift(t *testing.T) {
 	m.openLiveGrepResultsList(palette.GrepExportMsg{Root: "/ws", Query: "^$", Hits: []palette.GrepHit{hit}})
 	// Shift three rows: the blank line moves to 2 with the same a/b neighbours.
 	shifted := append([]string(nil), term.history[3:]...)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		shifted = append(shifted, "new row")
 	}
 	term.history = shifted

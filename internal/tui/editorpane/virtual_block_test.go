@@ -65,7 +65,7 @@ func TestBlockVirtualRectWithinTextPaintsNoStrip(t *testing.T) {
 		Head: buffer.Pos{Line: 0, Col: 4}, Virtual: true,
 	})
 	g := p.Render(10, 2)
-	for x := 0; x < 6; x++ {
+	for x := range 6 {
 		if bg := g.At(x, 0).Style.BG; bg == styles.Selection.BG {
 			t.Fatalf("cell %d painted as the virtual strip, want nothing", x)
 		}

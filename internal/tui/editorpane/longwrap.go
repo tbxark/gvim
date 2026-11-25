@@ -93,8 +93,8 @@ func (f frame) segBound(i, j, n int) int {
 		return n
 	}
 	back := []rune(f.win.LineSlice(i, pos-segmentLookback, segmentLookback))
-	for k := len(back) - 1; k >= 0; k-- {
-		if back[k] == ' ' {
+	for k, b := range slices.Backward(back) {
+		if b == ' ' {
 			return pos - len(back) + k + 1
 		}
 	}

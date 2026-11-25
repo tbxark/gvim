@@ -21,7 +21,7 @@ func (c htmlClipboard) WriteHTML(html, text string) error {
 func TestCopyWithFormattingWritesHTMLAndTellsTheTheme(t *testing.T) {
 	var native, rich []string
 	ed := &copyEditor{docEditor: newDocEditor("/ws/a.txt", false), text: "a<b"}
-	m := clipModel(t, ed, htmlClipboard{recClipboard: recClipboard{writes: &native}, html: &rich})
+	m := clipModel(t, ed, htmlClipboard{writes: &native, html: &rich})
 	cmd := m.dispatch(Command{Action: "copy_with_theme", Args: map[string]any{"theme": "dracula"}})
 	msgs := collect(cmd)
 	if len(rich) != 1 || !strings.HasPrefix(rich[0], "<pre ") || !strings.Contains(rich[0], "a&lt;b") {
@@ -49,7 +49,7 @@ func TestCopyWithFormattingFallsBackToPlainText(t *testing.T) {
 	}{
 		{"no rich clipboard", func(n, _ *[]string) ClipboardReader { return recClipboard{writes: n} }, nil, "plain text"},
 		{"unknown theme", func(n, r *[]string) ClipboardReader {
-			return htmlClipboard{recClipboard: recClipboard{writes: n}, html: r}
+			return htmlClipboard{writes: n, html: r}
 		}, map[string]any{"theme": "no-such-theme"}, "not found"},
 	}
 	for _, tt := range tests {
@@ -71,7 +71,7 @@ func TestCopyWithFormattingFallsBackToPlainText(t *testing.T) {
 func TestFailedHTMLWriteSaysPlainText(t *testing.T) {
 	var native, rich []string
 	ed := &copyEditor{docEditor: newDocEditor("/ws/a.txt", false), text: "abc"}
-	m := clipModel(t, ed, htmlClipboard{recClipboard: recClipboard{writes: &native}, html: &rich, err: errors.New("no tool")})
+	m := clipModel(t, ed, htmlClipboard{writes: &native, html: &rich, err: errors.New("no tool")})
 	cmd := m.dispatch(Command{Action: "copy_with_theme"})
 	for _, msg := range collect(cmd) {
 		m.Update(msg)

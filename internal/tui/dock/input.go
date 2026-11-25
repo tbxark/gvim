@@ -320,7 +320,7 @@ func mouseMods(m tea.KeyMod) terminal.MouseMods {
 	}
 }
 
-// linkCmd resolves the path token at cell x of body row row and asks the root to
+// linkCmd resolves the path token at cell x of the given body row and asks the root to
 // open it, in a command: the existence check and the working-directory read are
 // off the update loop.
 func (p *Panel) linkCmd(x, row int) tea.Cmd {
@@ -362,7 +362,7 @@ func (p *Panel) linkAt(x, row int) (string, bool) {
 	return tokenAt([]rune(text), x)
 }
 
-// visibleRowText is the text of body row row in the mode the dock shows.
+// visibleRowText is the text of the given body row in the mode the dock shows.
 func (p *Panel) visibleRowText(row int) (string, bool) {
 	if p.scroll.on {
 		return p.combinedText(p.scroll.top+row, true)

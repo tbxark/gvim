@@ -117,7 +117,7 @@ func TestTabsAreBounded(t *testing.T) {
 	t.Parallel()
 	var notices []string
 	tabs, _ := newTestTabs(t, &notices)
-	for i := 0; i < MaxTerminalTabs; i++ {
+	for range MaxTerminalTabs {
 		startTab(t, tabs)
 	}
 	if got := tabs.Count(); got != MaxTerminalTabs {
@@ -407,7 +407,7 @@ func TestTabsTitleStripIsCellAware(t *testing.T) {
 // tabX returns the first and middle title-row columns of tab i's strip label.
 func tabX(tabs *Tabs, i int) (start, mid int) {
 	col := 1
-	for j := 0; j < i; j++ {
+	for j := range i {
 		col += ansi.StringWidth(" " + tabs.stripLabel(j) + " ")
 	}
 	n := ansi.StringWidth(" " + tabs.stripLabel(i) + " ")
@@ -886,7 +886,7 @@ func TestDockWideContinuationStylesSearchBarHideShowAndCopyScreen(t *testing.T) 
 	var rp Panel
 	var copied string
 	rp.SetHost(Host{
-		Copy: func(s string) tea.Cmd { copied = s; return nil },
+		Copy:   func(s string) tea.Cmd { copied = s; return nil },
 		Notice: func(string) {},
 	})
 	rp.Restore(terminal.SavedTab{Open: true, Rows: []string{"restored-line"}})

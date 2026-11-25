@@ -49,12 +49,7 @@ func TestResolveLink(t *testing.T) {
 	t.Parallel()
 	stat := func(paths ...string) func(string) bool {
 		return func(path string) bool {
-			for _, p := range paths {
-				if path == p {
-					return true
-				}
-			}
-			return false
+			return slices.Contains(paths, path)
 		}
 	}
 	tests := []struct {

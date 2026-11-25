@@ -119,7 +119,7 @@ func contentsSection(l frame.Layout) (sidebar.Section, bool) {
 // headingTitles is the visible title of every row of the Contents body.
 func headingTitles(m *Model) []string {
 	var out []string
-	for pos := 0; pos < m.contents.Len(); pos++ {
+	for pos := range m.contents.Len() {
 		row, _ := m.contents.RowAt(pos - m.contents.Scroll())
 		out = append(out, row.Heading.Title)
 	}

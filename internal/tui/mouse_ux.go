@@ -38,7 +38,7 @@ func (m *Model) hoverDelay() time.Duration {
 	if m.view.opts.MouseHoverDelayMS > 0 {
 		return time.Duration(m.view.opts.MouseHoverDelayMS) * time.Millisecond
 	}
-	return doubleClickWindow
+	return space.DoubleClickWindow
 }
 
 // cancelMouseHover disarms any pending hover tick so stale motions cannot pop a tip.

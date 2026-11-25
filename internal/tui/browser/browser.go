@@ -151,7 +151,7 @@ type Browser struct {
 	styles         style.Styles
 	now            func() time.Time
 	list           func(string, explorer.ListOptions) ([]explorer.Entry, error)
-	clicks         clickCounter
+	clicks         space.ClickCounter
 
 	loaded       bool // entries were read for loadedDir with loadedHidden
 	loadedDir    string
@@ -330,7 +330,7 @@ func (b *Browser) click(m tea.Mouse) tea.Cmd {
 		b.scrollToRow(m.Y)
 		return nil
 	}
-	n := b.clicks.press(b.now(), m.X, m.Y)
+	n := b.clicks.Press(b.now(), m.X, m.Y)
 	i, ok := b.rowAt(m.X, m.Y)
 	if !ok {
 		return nil
@@ -715,7 +715,7 @@ func (b *Browser) Draw(g *grid.Grid) {
 	over := len(b.rows) > vis
 	thumbStart, thumbLen := 0, 0
 	if over {
-		thumbStart, thumbLen = thumbOf(len(b.rows), vis, b.top)
+		thumbStart, thumbLen = space.Thumb(len(b.rows), vis, b.top)
 	}
 	track := grid.Style{BG: ov.Idle.BG}
 	thumbSt := grid.Style{BG: ov.Muted.FG}
@@ -763,15 +763,4 @@ func boxLine(g *grid.Grid, x0, y, bw int, text string, inner grid.Style, reserve
 	g.Fill(x0+1, x0+bw-1, y, inner)
 	end := x0 + bw - 1 - space.PadX - reserve
 	g.Put(x0+2, y, end, space.End(text, end-(x0+2)), inner)
-}
-
-// thumbOf sizes the scrollbar thumb for lines rows in a window of h rows, with
-// the first window row top. The thumb is at least one row long.
-func thumbOf(lines, h, top int) (start, length int) {
-	if lines <= 0 || h <= 0 {
-		return 0, 0
-	}
-	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
-	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
-	return min(start, max(h-length, 0)), length
 }

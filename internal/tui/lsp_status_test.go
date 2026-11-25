@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/list"
@@ -9,8 +10,8 @@ import (
 // overlayList returns the list view on top of the overlay stack.
 func overlayList(t *testing.T, m *Model) *list.View {
 	t.Helper()
-	for i := len(m.overlays) - 1; i >= 0; i-- {
-		if v, ok := m.overlays[i].(*list.View); ok {
+	for _, v := range slices.Backward(m.overlays) {
+		if v, ok := v.(*list.View); ok {
 			return v
 		}
 	}

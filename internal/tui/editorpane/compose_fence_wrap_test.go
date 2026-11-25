@@ -22,7 +22,7 @@ func TestFenceContinuationRails(t *testing.T) {
 	t.Parallel()
 	doc := fenceWrapDoc("0123456789ABCDEFGHIJ")
 	p := composePane(doc, 20)
-	p.PageExtraRows = PageViewTableBorders(doc, Styles{})
+	p.PageExtraRows = PageViewTableBordersFor(doc, Styles{}, false)
 	rows := p.Render(24, 10).Plain()
 	trim := func(y int) string { return strings.TrimRight(rows[y][1:], " ") }
 	if !strings.HasPrefix(trim(0), "╭") {
@@ -47,7 +47,7 @@ func TestFenceCaretLineKeepsTheWholeBody(t *testing.T) {
 	doc := fenceWrapDoc("0123456789ABCDEFGHIJ")
 	doc.cursor = buffer.Pos{Line: 1, Col: 0}
 	p := composePane(doc, 20)
-	p.PageExtraRows = PageViewTableBorders(doc, Styles{})
+	p.PageExtraRows = PageViewTableBordersFor(doc, Styles{}, false)
 	rows := p.Render(24, 12).Plain()
 	joined := strings.Join(rows, "\n")
 	if !strings.Contains(joined, "0123456789ABCDEFGHIJ") {

@@ -84,7 +84,7 @@ func (e lineError) Error() string {
 
 // styles are the grid styles of the prompt cards.
 type styles struct {
-	ov                                       style.Overlay
+	ov                                        style.Overlay
 	bar, label, field, active, warn, selected grid.Style
 }
 
@@ -161,8 +161,8 @@ type Line struct {
 	draft   string   // the text being typed, while an entry is shown
 	// suggestions are the plugin's completion candidates (gvim.ui.set_prompt_suggestions),
 	// shown inside the card under the field. selSuggestion is the highlighted one, -1 for none.
-	suggestions                                                   []Suggestion
-	selSuggestion                                                 int
+	suggestions                                                          []Suggestion
+	selSuggestion                                                        int
 	suggestionX, suggestionY, suggestionW, suggestionRows, suggestionTop int
 	// paste reads the clipboard for Ctrl+V. It is textinput.Paste in production; a
 	// test can substitute a deterministic result without touching the system clipboard.
@@ -707,11 +707,11 @@ func (l *Line) layout(fw, fh int) lineLayout {
 		errRows = len(space.Wrap(l.errText, cw, 1<<10))
 	}
 	lay := lineLayout{
-		box:    space.CardBox(fw, fh, cw, len(space.Wrap(l.label, cw, 1<<10))+1),
-		cw:     cw,
-		errY:   -1,
-		suggY:  -1,
-		suggN:  min(len(l.suggestions), maxSuggestionRows),
+		box:   space.CardBox(fw, fh, cw, len(space.Wrap(l.label, cw, 1<<10))+1),
+		cw:    cw,
+		errY:  -1,
+		suggY: -1,
+		suggN: min(len(l.suggestions), maxSuggestionRows),
 	}
 	y := lay.box.Y + 1
 	lay.labelY = y
@@ -782,7 +782,7 @@ func (l *Line) drawSuggestions(g *grid.Grid, lay lineLayout) {
 	l.suggestionX, l.suggestionY = lay.box.X+2, lay.suggY
 	l.suggestionW, l.suggestionRows, l.suggestionTop = lay.cw, lay.suggN, lay.suggTop
 	x0, maxX := lay.box.X+2, lay.box.X+2+lay.cw
-	for k := 0; k < lay.suggN; k++ {
+	for k := range lay.suggN {
 		i := lay.suggTop + k
 		if i >= len(l.suggestions) {
 			continue

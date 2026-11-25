@@ -325,7 +325,7 @@ func (m *Model) paintDiagPanel(dst *grid.Grid, l frame.Layout, sec sidebar.Secti
 		return
 	}
 	selected := diagFlatIndex(flat, m.diag.sel)
-	for off := 0; off < rows; off++ {
+	for off := range rows {
 		pos := m.diag.scroll + off
 		if pos >= len(flat) {
 			break

@@ -39,11 +39,11 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 	}
 	// The fence sits inside its blockquote: the container's bars come first, then
 	// the frame at the block's own indent.
-	for q := 0; q < depth; q++ {
+	for range depth {
 		add('│', syntax.KindQuote, src)
 		add(' ', syntax.KindQuote, src)
 	}
-	for j := 0; j < indent; j++ {
+	for j := range indent {
 		if base+j < len(raw) {
 			add(raw[base+j], kindAt(kinds, base+j), base+j)
 		}
@@ -53,7 +53,7 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 		f.composeFenceOpen(&out, fl, width, src, add)
 	case syntax.FenceClose:
 		add('╰', syntax.KindPlain, src)
-		for j := 0; j < width-2; j++ {
+		for range width - 2 {
 			add('─', syntax.KindPlain, src)
 		}
 		add('╯', syntax.KindPlain, src)
@@ -107,7 +107,7 @@ func fenceContent(raw []rune, start int) []fenceBodyRune {
 	for k := start; k < len(raw); k++ {
 		r := raw[k]
 		if r == '\t' {
-			for q := 0; q < 4; q++ {
+			for range 4 {
 				content = append(content, fenceBodyRune{' ', k})
 			}
 			continue
@@ -170,10 +170,10 @@ func wrapRuneRows[T any](content []T, width int, runeOf func(T) rune) [][]T {
 // indent, "| ", the segment padded to inner, " |".
 func fenceBodyRowText(quoteDepth, indent, inner int, seg []fenceBodyRune) string {
 	var b []rune
-	for q := 0; q < quoteDepth; q++ {
+	for range quoteDepth {
 		b = append(b, '│', ' ')
 	}
-	for j := 0; j < indent; j++ {
+	for range indent {
 		b = append(b, ' ')
 	}
 	b = append(b, '\u2502', ' ')
@@ -202,14 +202,14 @@ func (f frame) composeFenceOpen(out *composedLine, fl syntax.FenceLine, width, s
 			add(r, syntax.KindString, src)
 		}
 		add(' ', syntax.KindPlain, src)
-		for j := 0; j < width-4-ansi.StringWidth(label); j++ {
+		for range width - 4 - ansi.StringWidth(label) {
 			add('─', syntax.KindPlain, src)
 		}
 		add('╮', syntax.KindPlain, src)
 		return
 	}
 	add('╭', syntax.KindPlain, src)
-	for j := 0; j < width-2; j++ {
+	for range width - 2 {
 		add('─', syntax.KindPlain, src)
 	}
 	add('╮', syntax.KindPlain, src)
@@ -243,7 +243,7 @@ func fenceLabel(info string) string {
 // level.
 func quotePrefixLen(raw []rune, depth int) int {
 	i := 0
-	for level := 0; level < depth; level++ {
+	for range depth {
 		for i < len(raw) && raw[i] == ' ' && i < 3 {
 			i++
 		}

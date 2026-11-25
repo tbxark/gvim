@@ -110,7 +110,7 @@ func TestTerminalStateRestoresThroughTheModel(t *testing.T) {
 // liveCellsForDock is a fake screen with the rows live-1 to live-4.
 func liveCellsForDock() []terminal.Cell {
 	cells := make([]terminal.Cell, 4*80)
-	for r := 0; r < 4; r++ {
+	for r := range 4 {
 		for i, ch := range []rune("live-" + string(rune('1'+r))) {
 			cells[r*80+i] = terminal.Cell{Rune: ch}
 		}

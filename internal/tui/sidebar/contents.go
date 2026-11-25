@@ -617,7 +617,7 @@ func (c *Contents) Follow(cursorLine, topLine int, editorFocused bool) {
 			return
 		}
 	}
-	derive := false
+	var derive bool
 	line := cursorLine
 	switch {
 	case c.FollowMode() == FollowScroll:
@@ -705,7 +705,7 @@ func (c *Contents) Draw(dst *grid.Grid, x, width int, sec Section, ic icons.Mode
 		return
 	}
 	end := right - 1 - space.PadX
-	for off := 0; off < rows; off++ {
+	for off := range rows {
 		pos := c.scroll + off
 		if pos >= len(c.entries) {
 			break

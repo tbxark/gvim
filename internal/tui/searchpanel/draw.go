@@ -231,7 +231,7 @@ func (p *Panel) paintResults(g *grid.Grid, geo geometry) {
 		return
 	}
 	y := geo.resultsTop
-	for k := 0; k < geo.results; k++ {
+	for k := range geo.results {
 		i := p.top + k
 		if i >= len(p.rows) {
 			break
@@ -251,7 +251,7 @@ func (p *Panel) paintRow(g *grid.Grid, geo geometry, y, i int) {
 		g.Fill(geo.left+1, geo.listEnd, y, p.styles.selected)
 		base = p.styles.selected
 	}
-	box := checkbox(p.fileChecked(r.file))
+	box := space.Checkbox(p.fileChecked(r.file))
 	if r.kind == rowFile {
 		mark := fileOpenMark
 		if r.file < len(p.expanded) && !p.expanded[r.file] {
@@ -269,7 +269,7 @@ func (p *Panel) paintRow(g *grid.Grid, geo geometry, y, i int) {
 		g.Put(geo.x0, y, geo.listEnd, fmt.Sprintf("%s%s%s (%d/%d)", box, mark, r.path, done, r.count), base)
 		return
 	}
-	box = checkbox(p.matchChecked(r.file, r.match))
+	box = space.Checkbox(p.matchChecked(r.file, r.match))
 	prefix := fmt.Sprintf("%s%s%d:%d ", box, fileIndent, r.line, r.col)
 	if m := p.fileMatches[r.file].Matches[r.match]; m.MultiLine() {
 		prefix = fmt.Sprintf("%s%s%d:%d–%d:%d ", box, fileIndent, r.line, r.col, m.EndLine, m.EndCol)
@@ -326,7 +326,7 @@ func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 		p.previewBox = previewBox{}
 		return
 	}
-	for k := 0; k < geo.results; k++ {
+	for k := range geo.results {
 		g.Put(geo.divX, geo.resultsTop+k, geo.divX+1, "│", p.styles.hint)
 	}
 	p.previewBox = previewBox{
@@ -381,10 +381,7 @@ func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 func (p *Panel) paintPreviewWrapped(g *grid.Grid, geo geometry, height int, req PreviewRequest, s previewState, spansByLine map[int][]PreviewSpan) {
 	first, count := p.previewWindow(height)
 	gutter := p.previewGutter(first, count, s.result)
-	width := geo.prevEnd - (geo.prevX + gutter + 3)
-	if width < 1 {
-		width = 1
-	}
+	width := max(geo.prevEnd-(geo.prevX+gutter+3), 1)
 	switch {
 	case s.loading && len(s.result.Lines) == 0:
 		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated, s.result.Window), p.styles.label)
@@ -736,7 +733,7 @@ func (p *Panel) paintOptions(g *grid.Grid, geo geometry) {
 	}
 	var opts []opt
 	if p.git {
-		opts = []opt{{p.modes.CaseSensitive, checkbox(p.modes.CaseSensitive) + "Case (Alt+C)"}}
+		opts = []opt{{p.modes.CaseSensitive, space.Checkbox(p.modes.CaseSensitive) + "Case (Alt+C)"}}
 	} else {
 		// The scope is one of three, cycled by Alt+A: the chip always carries the
 		// current scope's name.
@@ -748,10 +745,10 @@ func (p *Panel) paintOptions(g *grid.Grid, geo geometry) {
 			scopeName = "Current File"
 		}
 		opts = []opt{
-			{true, checkbox(true) + scopeName + " (Alt+A)"},
-			{p.modes.CaseSensitive, checkbox(p.modes.CaseSensitive) + "Case (Alt+C)"},
-			{p.modes.Regex, checkbox(p.modes.Regex) + "Regex (Alt+R)"},
-			{p.modes.WholeWord, checkbox(p.modes.WholeWord) + "Whole (Alt+W)"},
+			{true, space.Checkbox(true) + scopeName + " (Alt+A)"},
+			{p.modes.CaseSensitive, space.Checkbox(p.modes.CaseSensitive) + "Case (Alt+C)"},
+			{p.modes.Regex, space.Checkbox(p.modes.Regex) + "Regex (Alt+R)"},
+			{p.modes.WholeWord, space.Checkbox(p.modes.WholeWord) + "Whole (Alt+W)"},
 		}
 	}
 	right := ""
@@ -837,14 +834,6 @@ func plural(n int, word string) string {
 		}
 	}
 	return word + "s"
-}
-
-// checkbox is the box before an option name.
-func checkbox(on bool) string {
-	if on {
-		return "[x] "
-	}
-	return "[ ] "
 }
 
 // faint returns st with the faint attribute.

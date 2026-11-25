@@ -22,7 +22,7 @@ func TestWrappedTableCellsUseContinuationRows(t *testing.T) {
 	t.Parallel()
 	doc := wrapTableDoc("| alpha beta gamma | q |", "| --- | --- |", "| delta epsilon zeta | r |")
 	p := composePane(doc, 20)
-	p.PageExtraRows = PageViewTableBorders(doc, Styles{})
+	p.PageExtraRows = PageViewTableBordersFor(doc, Styles{}, false)
 	rows := p.Render(24, 12).Plain()
 	trim := func(y int) string { return strings.TrimRight(rows[y][1:], " ") }
 	if !strings.HasPrefix(trim(0), "┌") {
@@ -62,7 +62,7 @@ func TestWrappedTableCaretLineHidesContinuations(t *testing.T) {
 	// The caret on the header line reveals it raw and its continuation rows stand down.
 	doc.cursor = buffer.Pos{Line: 0, Col: 2}
 	p := composePane(doc, 20)
-	p.PageExtraRows = PageViewTableBorders(doc, Styles{})
+	p.PageExtraRows = PageViewTableBordersFor(doc, Styles{}, false)
 	rows := p.Render(24, 12).Plain()
 	trim := func(y int) string { return strings.TrimRight(rows[y][1:], " ") }
 	if !strings.HasPrefix(trim(0), "┌") {
@@ -83,7 +83,7 @@ func TestWrappedTablePrimaryRowHitIsExact(t *testing.T) {
 	t.Parallel()
 	doc := wrapTableDoc("| alpha beta gamma | q |", "| --- | --- |", "| delta epsilon zeta | r |")
 	p := composePane(doc, 20)
-	p.PageExtraRows = PageViewTableBorders(doc, Styles{})
+	p.PageExtraRows = PageViewTableBordersFor(doc, Styles{}, false)
 	// Primary header row: margin 1, "│"(col 0) " "(1) then "alpha".
 	hit := p.Hit(24, 12, 1+2, 1)
 	if hit.Kind != HitText || hit.Pos.Line != 0 || hit.Pos.Col != 2 {

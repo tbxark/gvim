@@ -87,7 +87,7 @@ func stepFrom(rows []Row, cur, dir int) int {
 // highlighted row that the scroll takes out of the window loses its highlight, so
 // the window is not pulled back to it.
 func (m Model) wheel(mo tea.Mouse) Model {
-	d := 0
+	var d int
 	switch mo.Button {
 	case tea.MouseWheelUp:
 		d = -wheelRows

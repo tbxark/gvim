@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -408,10 +409,5 @@ func TestCompletionMultiCursorTypingAndBackspaceUseTheSameActions(t *testing.T) 
 // explorer test package has a same-shaped helper for its own prefixed actions, so this
 // one stays local to the completion tests.
 func completionActionRan(actions []string, action string) bool {
-	for _, got := range actions {
-		if got == action {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(actions, action)
 }

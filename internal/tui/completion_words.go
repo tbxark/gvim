@@ -184,10 +184,7 @@ func (m *Model) afterTypedCompletionText(text string) tea.Cmd {
 	if prefix == "" {
 		return nil
 	}
-	delay := m.view.opts.QuickSuggestionsDelayMS
-	if delay < 0 {
-		delay = 0
-	}
+	delay := max(m.view.opts.QuickSuggestionsDelayMS, 0)
 	version, versioned := docVersion(doc)
 	msg := completionAutoMsg{
 		seq: m.view.completionAutoSeq, path: docPath(doc), at: at,
@@ -363,10 +360,7 @@ func (m *Model) wordSnapshot(doc Document) (editor.WordSnapshot, bool) {
 		return editor.WordSnapshot{}, false
 	}
 	at := doc.Cursor()
-	cursorLine := at.Line
-	if cursorLine < 0 {
-		cursorLine = 0
-	}
+	cursorLine := max(at.Line, 0)
 	if cursorLine >= count {
 		cursorLine = count - 1
 	}

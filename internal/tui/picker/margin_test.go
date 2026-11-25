@@ -55,8 +55,8 @@ func TestClicksOnTheMarginAndBordersAreNotRows(t *testing.T) {
 
 func TestTinyFramesDoNotPanic(t *testing.T) {
 	t.Parallel()
-	for w := 0; w <= 14; w++ {
-		for h := 0; h <= 6; h++ {
+	for w := range 15 {
+		for h := range 7 {
 			p := New(style.New(theme.Theme{}), Options{Title: "Pick", Items: items("alpha", "beta"), Fuzzy: true, Placeholder: "type"})
 			p.Draw(grid.New(w, h))
 			p.rowAt(w/2, h/2)

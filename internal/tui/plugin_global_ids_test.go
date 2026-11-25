@@ -25,7 +25,7 @@ func TestPluginGlobalIDsAcrossWorkspaces(t *testing.T) {
 	if ga == 0 || wa == 0 {
 		t.Fatalf("workspace A ids = buffer %d window %d", ga, wa)
 	}
-	if ga == pluginapi.BufferID(pea.active) {
+	if ga == pea.active {
 		t.Fatalf("workspace A buffer id %d is still a bare local id", ga)
 	}
 	winA := h.Windows()

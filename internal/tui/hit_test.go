@@ -5,6 +5,7 @@ import (
 
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/space"
 )
 
 func TestHitTabsCloseAndNew(t *testing.T) {
@@ -107,7 +108,7 @@ func TestHitStatusRowIsNotTheBody(t *testing.T) {
 }
 
 func TestClickCounterCyclesInTheWindow(t *testing.T) {
-	var c clickCounter
+	var c space.ClickCounter
 	base := testClock()
 	steps := []struct {
 		at   int // milliseconds after base
@@ -126,7 +127,7 @@ func TestClickCounterCyclesInTheWindow(t *testing.T) {
 		{1900, 6, 5, 3},
 	}
 	for _, s := range steps {
-		if got := c.press(base.Add(ms(s.at)), s.x, s.y); got != s.want {
+		if got := c.Press(base.Add(ms(s.at)), s.x, s.y); got != s.want {
 			t.Errorf("press at %dms (%d,%d) = %d, want %d", s.at, s.x, s.y, got, s.want)
 		}
 	}

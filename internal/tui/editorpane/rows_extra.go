@@ -123,10 +123,7 @@ func (f frame) wrapExtraRows(rows []ExtraRow) []ExtraRow {
 	if len(rows) == 0 {
 		return rows
 	}
-	avail := f.w - 1 - f.gutter
-	if avail < 1 {
-		avail = 1
-	}
+	avail := max(f.w-1-f.gutter, 1)
 	out := make([]ExtraRow, 0, len(rows))
 	for _, row := range rows {
 		text := cleanVirtual(row.Text)

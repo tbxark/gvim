@@ -964,8 +964,8 @@ func (t *Tabs) Update(msg tea.Msg) (tea.Cmd, bool) {
 // closeExited removes tabs whose shell exited under close_on_exit. A restored
 // transcript is not a live shell and stays.
 func (t *Tabs) closeExited() {
-	for i := len(t.tabs) - 1; i >= 0; i-- {
-		if t.tabs[i].Exited() && !t.tabs[i].Restored() {
+	for i, v := range slices.Backward(t.tabs) {
+		if v.Exited() && !v.Restored() {
 			t.removeAt(i)
 		}
 	}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,12 +43,7 @@ func (m *Model) completionTriggerCharacters(doc Document) []string {
 // completionTriggeredLocally reports whether r is one of doc's advertised trigger
 // characters.
 func (m *Model) completionTriggeredLocally(doc Document, r rune) bool {
-	for _, ch := range m.completionTriggerCharacters(doc) {
-		if ch == string(r) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.completionTriggerCharacters(doc), string(r))
 }
 
 // completionTyped inserts a printable word character into the document and

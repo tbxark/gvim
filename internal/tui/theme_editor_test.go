@@ -222,7 +222,7 @@ func TestThemeEditorOpenDoneUpdatesRefAndSwatchClickBounds(t *testing.T) {
 
 	// Swatch is 2 cells ("██" at box.X+2..box.X+3); border at box.X+1 must not open picker.
 	page.sel = editorRowIndex(t, page, "editor.bg")
-	page.keepVisible()
+	page.keepVisible(len(page.rows))
 	page.Draw(grid.New(100, 30))
 	rowY := page.box.Y + 1 + (page.sel - page.top)
 	if _, borderCmd := page.Update(tea.MouseClickMsg(tea.Mouse{X: page.box.X + 1, Y: rowY, Button: tea.MouseLeft})); borderCmd != nil {

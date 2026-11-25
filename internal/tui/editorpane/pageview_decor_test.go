@@ -24,8 +24,8 @@ func TestPageViewKeepsRulersAndGuidesOff(t *testing.T) {
 	if strings.Contains(strings.Join(rows, "\n"), "▏") {
 		t.Fatalf("the page view drew an indent guide: %q", rows)
 	}
-	for y := 0; y < g.Height(); y++ {
-		for x := 0; x < g.Width(); x++ {
+	for y := range g.Height() {
+		for x := range g.Width() {
 			if c := g.At(x, y); c.Style.BG == styles.Ruler.BG {
 				t.Fatalf("the page view drew a ruler at (%d,%d): %q", x, y, rows)
 			}

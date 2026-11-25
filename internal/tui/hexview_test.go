@@ -128,7 +128,7 @@ func TestHexToggleLoadsAWindowAndDrawsTheDump(t *testing.T) {
 		t.Fatal("hexPane = false")
 	}
 	var line strings.Builder
-	for x := 0; x < 70; x++ {
+	for x := range 70 {
 		line.WriteString(g.At(x, 0).Text)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(line.String()), "00000000  41 42 43") {

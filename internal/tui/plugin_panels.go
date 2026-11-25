@@ -2,6 +2,7 @@ package tui
 
 import (
 	"image/color"
+	"slices"
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
@@ -813,8 +814,8 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	// The floating and buffer panels first, newest on top.
 	ps := &m.plug.panels
-	for i := len(ps.order) - 1; i >= 0; i-- {
-		mp := ps.get(ps.order[i])
+	for _, v := range slices.Backward(ps.order) {
+		mp := ps.get(v)
 		if mp == nil || mp.mount.Placement == pluginapi.PlacementSidebar {
 			continue
 		}

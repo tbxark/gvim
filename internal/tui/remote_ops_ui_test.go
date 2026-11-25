@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 
@@ -230,12 +231,7 @@ func TestRemoteExplorerMenuHasClipboard(t *testing.T) {
 }
 
 func containsAction(items []string, action string) bool {
-	for _, a := range items {
-		if a == "explorer:"+action {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, "explorer:"+action)
 }
 
 // TestRemoteConfirmationsNameTheTarget checks the name/rename/delete prompts state the

@@ -485,10 +485,7 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewNoLinesText(), muted)
 		return
 	}
-	startLine := s.data.StartLine
-	if startLine < 1 {
-		startLine = 1
-	}
+	startLine := max(s.data.StartLine, 1)
 	target := p.fileLine
 	if p.live {
 		target = s.target

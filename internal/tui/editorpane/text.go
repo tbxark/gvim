@@ -545,7 +545,7 @@ func (f frame) lastRowOf(i int) rowDesc {
 	return rowDesc{ln: ln, k: k, sp: ln.spans[k], first: k == 0, last: true}
 }
 
-// rowAt maps body row row (0 is the top body row) to the display row shown there.
+// rowAt maps the given body row (0 is the top body row) to the display row shown there.
 // Rows count from the top line through the wrapped lines. A row above the body
 // maps to a line above the window, and a row past the document maps to the last
 // row of the last line with valid false.

@@ -829,7 +829,7 @@ func previewPanel(t *testing.T, pv *fakePreviewer) (*Panel, *fakeSearcher) {
 // program does when the selection moves.
 func focusResultsFeeding(t *testing.T, p *Panel) {
 	t.Helper()
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, cmd := p.Update(specialKey(tea.KeyTab))
 		feedPanel(t, p, cmd)
 	}
@@ -953,7 +953,7 @@ func TestPreviewLoadingAndDedupe(t *testing.T) {
 	pv := &fakePreviewer{result: PreviewResult{Start: 0, Lines: []string{"x", "func foo() {", "y"}}}
 	p, _ := previewPanel(t, pv)
 	// Entering the rows shows loading until the command runs.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, cmd := p.Update(specialKey(tea.KeyTab))
 		if i == 2 {
 			if cmd == nil {
@@ -1336,7 +1336,7 @@ func TestPreviewScrollsWithinTheCacheAndRefetchesAtTheEdge(t *testing.T) {
 	// Page down until the window leaves the cached lines: that refetches from the new
 	// start.
 	var cmd tea.Cmd
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		_, cmd = p.Update(specialKey(tea.KeyPgDown))
 		if cmd != nil {
 			break

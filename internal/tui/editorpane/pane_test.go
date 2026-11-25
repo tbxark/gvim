@@ -542,11 +542,10 @@ func (d *memoDoc) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, s
 }
 
 func TestChangeMarksAskTheDocumentThatKeepsThem(t *testing.T) {
-	d := &memoDoc{fakeDoc: fakeDoc{
+	d := &memoDoc{
 		lines:    []string{"one", "TWO", "three"},
 		saved:    []string{"one", "two", "three"},
-		modified: true,
-	}}
+		modified: true}
 	g := Pane{Doc: d}.Render(20, 3)
 	if d.memoCalls != 1 {
 		t.Fatalf("MemoChanges called %d times, want 1", d.memoCalls)

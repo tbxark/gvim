@@ -11,7 +11,7 @@ import (
 // the shared extra-row hook.
 func borderPane(doc *fakeDoc) Pane {
 	p := composePane(doc, 30)
-	p.PageExtraRows = PageViewTableBorders(doc, Styles{})
+	p.PageExtraRows = PageViewTableBordersFor(doc, Styles{}, false)
 	return p
 }
 
@@ -74,7 +74,7 @@ func TestTableBordersSkippedWhenTheTableWraps(t *testing.T) {
 	doc := tableDoc("| aaaaaaaaaa | bbbbbbbbbb |", "| --- | --- |", "| c | d |")
 	doc.cursor = buffer.Pos{Line: 4, Col: 0}
 	p := Pane{Doc: doc, PageView: PageView{On: true, Measure: 11, Markdown: true},
-		PageExtraRows: PageViewTableBorders(doc, Styles{})}
+		PageExtraRows: PageViewTableBordersFor(doc, Styles{}, false)}
 	rows := p.Render(12, 8).Plain()
 	for _, row := range rows {
 		if strings.Contains(row, "┌") || strings.Contains(row, "└") {
@@ -88,7 +88,7 @@ func TestTableBordersOnlyOnTheComposedPane(t *testing.T) {
 	doc := tableDoc("| Name | Qty |", "| --- | --- |", "| a | 1 |")
 	doc.cursor = buffer.Pos{Line: 3, Col: 0}
 	// No page view: the hook is never asked for rows.
-	p := Pane{Doc: doc, PageExtraRows: PageViewTableBorders(doc, Styles{})}
+	p := Pane{Doc: doc, PageExtraRows: PageViewTableBordersFor(doc, Styles{}, false)}
 	if rows := p.Render(40, 8).Plain(); strings.Contains(strings.Join(rows, "\n"), "┌") {
 		t.Fatalf("a normal pane drew table borders: %q", rows)
 	}

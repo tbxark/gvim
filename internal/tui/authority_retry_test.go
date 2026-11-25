@@ -169,7 +169,7 @@ func TestAuthorityConnectingStatus(t *testing.T) {
 // carrier disconnected before the dial command runs.
 func TestAuthorityRetryTickInvalidatesPreviewsBeforeDial(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("x"), nil, 80, 24)
-	o := &invalidateOverlay{fakeOverlay: fakeOverlay{open: true}}
+	o := &invalidateOverlay{open: true}
 	m.pushOverlay(o)
 	connected := true
 	dials := 0

@@ -99,7 +99,7 @@ func nextRune(s string, i int) int {
 // lineColOf returns the 0-based line and the byte column of the offset.
 func lineColOf(text string, off int) (line, col int) {
 	off = space.Clamp(off, 0, len(text))
-	for i := 0; i < off; i++ {
+	for i := range off {
 		if text[i] == '\n' {
 			line++
 			col = 0
@@ -113,7 +113,7 @@ func lineColOf(text string, off int) (line, col int) {
 // offsetOf returns the byte offset of the 0-based line and byte column.
 func offsetOf(text string, line, col int) int {
 	off := 0
-	for l := 0; l < line; l++ {
+	for range line {
 		i := strings.IndexByte(text[off:], '\n')
 		if i < 0 {
 			return len(text)
@@ -275,10 +275,7 @@ func (p *Panel) editFocusedText(w pluginapi.Widget, k Key) (Result, bool) {
 
 // optionIndex returns the effective selected option of a dropdown/radio widget.
 func (p *Panel) optionIndex(w pluginapi.Widget) int {
-	sel := p.selected(w)
-	if sel < 0 {
-		sel = 0
-	}
+	sel := max(p.selected(w), 0)
 	return space.Clamp(sel, 0, max(len(w.Options)-1, 0))
 }
 
@@ -420,7 +417,7 @@ func (pt *painter) textMultiLine(node pluginapi.Widget, x, y, field, rows int, b
 		in.textTop = space.Clamp(line-rows/2, 0, max(lineCount(text)-rows, 0))
 	}
 	lines := strings.Split(text, "\n")
-	for r := 0; r < rows; r++ {
+	for r := range rows {
 		ln := top + r
 		if ln >= len(lines) {
 			g.Fill(x, x+field, y+r, pt.p.chrome.Box)
@@ -594,14 +591,11 @@ func (pt *painter) dualList(node pluginapi.Widget, x, y, wd, h int) {
 	p := pt.p
 	base := p.styleOf(node)
 	focused := pt.ownsFocus(node)
-	sel := p.selected(node)
-	if sel < 0 {
-		sel = 0
-	}
+	sel := max(p.selected(node), 0)
 	set := p.includedSet(node)
 	rows := min(len(node.Options), h)
 	top := windowTop(sel, rows, len(node.Options))
-	for k := 0; k < rows; k++ {
+	for k := range rows {
 		i := top + k
 		st := base
 		if focused && i == sel {

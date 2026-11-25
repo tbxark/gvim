@@ -139,7 +139,7 @@ func TestSearchHistoryIsBoundedAndSkipsDuplicates(t *testing.T) {
 	if len(p.searchHistoryEntries()) != 1 || p.searchHistoryEntries()[0] != "a" {
 		t.Fatalf("history after duplicates = %v", p.searchHistoryEntries())
 	}
-	for i := 0; i < terminal.MaxSearchHistoryEntries+20; i++ {
+	for i := range terminal.MaxSearchHistoryEntries + 20 {
 		p.rememberSearch(fmt.Sprintf("q%d", i))
 	}
 	if len(p.searchHistoryEntries()) != terminal.MaxSearchHistoryEntries {
@@ -327,7 +327,7 @@ func TestDockSearchHistoryMergeBoundsAndCleans(t *testing.T) {
 	}
 	// The merge honors the record cap too.
 	queries := make([]string, 0, terminal.MaxSearchHistoryEntries+10)
-	for i := 0; i < terminal.MaxSearchHistoryEntries+10; i++ {
+	for i := range terminal.MaxSearchHistoryEntries + 10 {
 		queries = append(queries, fmt.Sprintf("m%d", i))
 	}
 	tabs.MergeSearchHistory(queries)

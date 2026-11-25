@@ -255,7 +255,7 @@ type LSPSession interface {
 	// zero-based inclusive lines.
 	FoldingRanges(path string) ([]FoldRange, error)
 	// Definition, Implementation and References return the places the symbol at
-	// at refers to.
+	// position `at` refers to.
 	Definition(path string, at buffer.Pos) ([]LSPLocation, error)
 	Implementation(path string, at buffer.Pos) ([]LSPLocation, error)
 	References(path string, at buffer.Pos) ([]LSPLocation, error)
@@ -264,7 +264,7 @@ type LSPSession interface {
 	// Completion returns the completion items at at, merged over the servers
 	// that serve completion for the language.
 	Completion(path string, at buffer.Pos) ([]CompletionItem, error)
-	// Rename renames the symbol at at to name and returns the workspace edit to
+	// Rename renames the symbol at position `at` to name and returns the workspace edit to
 	// apply: the text edits per file and any file create, rename or delete.
 	Rename(path string, at buffer.Pos, name string) (WorkspaceEdit, error)
 	// CodeActions returns the code actions at at, merged over the servers that

@@ -2,6 +2,7 @@ package pluginpanel
 
 import (
 	"image/color"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -42,9 +43,9 @@ type hit struct {
 
 // hitAt returns the hit under the cell, the last drawn region first.
 func (p *Panel) hitAt(x, y int) (hit, bool) {
-	for i := len(p.hits) - 1; i >= 0; i-- {
-		if p.hits[i].r.Contains(x, y) {
-			return p.hits[i], true
+	for _, v := range slices.Backward(p.hits) {
+		if v.r.Contains(x, y) {
+			return v, true
 		}
 	}
 	return hit{}, false
@@ -99,7 +100,7 @@ func (p *Panel) drawPage(g *grid.Grid, x, y, w, h int) {
 	p.contentRows = contentH
 	p.pageTop = space.Clamp(p.pageTop, 0, max(contentH-h, 0))
 	// Blit the visible window: runs of styled cells, wide graphemes kept whole.
-	for row := 0; row < h; row++ {
+	for row := range h {
 		src := p.pageTop + row
 		if src >= contentH {
 			break
@@ -111,17 +112,18 @@ func (p *Panel) drawPage(g *grid.Grid, x, y, w, h int) {
 				col++
 				continue
 			}
-			run := cell.Text
+			var run strings.Builder
+			run.WriteString(cell.Text)
 			end := col + 1
 			for end < w {
 				next := scratch.At(end, src)
 				if next.Text == "" || !sameCellStyle(next.Style, cell.Style) {
 					break
 				}
-				run += next.Text
+				run.WriteString(next.Text)
 				end++
 			}
-			g.Put(x+col, y+row, x+w, run, cell.Style)
+			g.Put(x+col, y+row, x+w, run.String(), cell.Style)
 			col = end
 		}
 	}
@@ -380,7 +382,7 @@ func measureWidth(w pluginapi.Widget) int {
 		return ansi.StringWidth(Sanitize(w.Text))
 	case pluginapi.WidgetText:
 		n := 0
-		for _, line := range strings.Split(w.Text, "\n") {
+		for line := range strings.SplitSeq(w.Text, "\n") {
 			n = max(n, ansi.StringWidth(Sanitize(line)))
 		}
 		return n
@@ -708,7 +710,7 @@ func (pt *painter) list(node pluginapi.Widget, x, y, wd, h int) {
 		pt.g.Put(x, y, x+wd, space.End("(empty)", wd), pt.p.chrome.Muted)
 		return
 	}
-	for k := 0; k < rows; k++ {
+	for k := range rows {
 		i := top + k
 		if i >= len(items) {
 			break
@@ -762,13 +764,7 @@ func windowTop(sel, rows, n int) int {
 	if sel < 0 {
 		return 0
 	}
-	top := sel - rows/2
-	if top < 0 {
-		top = 0
-	}
-	if top > n-rows {
-		top = n - rows
-	}
+	top := min(max(sel-rows/2, 0), n-rows)
 	return top
 }
 
@@ -812,7 +808,7 @@ func (pt *painter) tree(node pluginapi.Widget, x, y, wd, h int) {
 	if selPos >= 0 {
 		top = windowTop(selPos, rows, len(vis))
 	}
-	for k := 0; k < rows; k++ {
+	for k := range rows {
 		pos := top + k
 		if pos >= len(vis) {
 			break

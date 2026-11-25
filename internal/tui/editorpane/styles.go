@@ -1,8 +1,6 @@
 package editorpane
 
 import (
-	"image/color"
-
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/syntax"
@@ -82,7 +80,7 @@ func NewStyles(th theme.Theme) Styles {
 		if kind == syntax.KindPlain || kind == syntax.KindDiffAdd || kind == syntax.KindDiffRemove {
 			continue
 		}
-		st.Syntax[k].FG = syntaxFG(th, kind, text.FG)
+		st.Syntax[k].FG = style.SyntaxFG(th, kind, text.FG)
 		// Record the theme key for provenance; terminal default or unrecognized values
 		// fall back to the editor foreground.
 		if section, key, ok := syntaxThemeKey(th, kind); ok {
@@ -97,7 +95,7 @@ func NewStyles(th theme.Theme) Styles {
 		st.Syntax[k].Underline = attrs&syntax.AttrUnderline != 0
 		st.Syntax[k].Strike = attrs&syntax.AttrStrike != 0
 		if c, ok := th.Syntax(kind.ThemeKey()); ok {
-			applyAttributeNames(&st.Syntax[k], c.Modifiers)
+			style.ApplyAttributeNames(&st.Syntax[k], c.Modifiers)
 		}
 	}
 	return st
@@ -118,28 +116,6 @@ func syntaxThemeKey(th theme.Theme, kind syntax.Kind) (section, key string, ok b
 	return "syntax", name, true
 }
 
-// syntaxFG resolves the foreground of one syntax kind. base is the editor
-// foreground, which a missing or unknown value falls back to.
-func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
-	key := kind.ThemeKey()
-	c, ok := th.Syntax(key)
-	if fb := kind.ThemeFallbackKey(); !ok && fb != "" {
-		key = fb
-		c, ok = th.Syntax(key)
-	}
-	switch {
-	case !ok:
-		return base
-	case c.IsTerminalDefault():
-		return nil
-	default:
-		if col := style.Color(th, "syntax", key); col != nil {
-			return col
-		}
-		return base
-	}
-}
-
 // withBackground returns st with role's background and text attributes: a
 // theme value's attributes apply to the text drawn over its background, so an
 // attribute on a *_bg color (or the legacy selection_modifier) reaches the cell.
@@ -152,22 +128,4 @@ func withBackground(st, role grid.Style) grid.Style {
 	st.Strike = st.Strike || role.Strike
 	st.Reverse = st.Reverse || role.Reverse
 	return st
-}
-
-// applyAttributeNames applies theme attribute names to a grid style.
-func applyAttributeNames(st *grid.Style, names []string) {
-	for _, name := range theme.NormalizeModifiers(names) {
-		switch name {
-		case "bold":
-			st.Bold = true
-		case "italic":
-			st.Italic = true
-		case "underlined":
-			st.Underline = true
-		case "dim":
-			st.Faint = true
-		case "reversed":
-			st.Reverse = true
-		}
-	}
 }

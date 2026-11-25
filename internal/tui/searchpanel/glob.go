@@ -105,7 +105,7 @@ func globRegexp(pattern string) (string, error) {
 				b.WriteByte('^')
 				class = class[1:]
 			}
-			for k := 0; k < len(class); k++ {
+			for k := range len(class) {
 				switch ch := class[k]; ch {
 				case '\\', ']':
 					b.WriteByte('\\')

@@ -32,7 +32,7 @@ func scanContents(t *testing.T, st Settings, text string) Contents {
 // titles is the heading titles of the visible rows, in order.
 func titles(c Contents) []string {
 	out := make([]string, c.Len())
-	for pos := 0; pos < c.Len(); pos++ {
+	for pos := range c.Len() {
 		row, _ := c.RowAt(pos - c.Scroll())
 		out[pos] = row.Heading.Title
 	}
@@ -47,7 +47,7 @@ func TestContentsScanBuildsTheTree(t *testing.T) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 	rows := []Row{}
-	for pos := 0; pos < c.Len(); pos++ {
+	for pos := range c.Len() {
 		r, _ := c.RowAt(pos)
 		rows = append(rows, r)
 	}

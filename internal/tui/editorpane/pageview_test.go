@@ -79,7 +79,7 @@ func TestPageViewKeepsTheVerticalScrollbar(t *testing.T) {
 	g := p.Render(30, 6)
 	last := g.Width() - 1
 	thumb := false
-	for y := 0; y < g.Height(); y++ {
+	for y := range g.Height() {
 		if g.At(last, y).Text == thumbGlyph {
 			thumb = true
 		}

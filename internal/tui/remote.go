@@ -192,8 +192,7 @@ func (m *Model) remoteChosen(c popup.Chosen) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
-	switch choice.action {
-	case "reconnect":
+	if choice.action == "reconnect" {
 		if m.auth.Status == nil || m.auth.Reconnect == nil {
 			m.notice = uiText("gvim.remote.no_authority", "No remote authority to reconnect")
 			return nil, true

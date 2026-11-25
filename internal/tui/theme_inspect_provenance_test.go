@@ -18,8 +18,8 @@ func keysOf(section, key string) uint16 { return style.KeyIDFor(section, key) }
 // findCaptured returns the first cell whose captured ids match want on the given
 // side ("fg" or "bg" and its id; the other side is unconstrained).
 func findCaptured(g *grid.Grid, side string, id uint16) (x, y int, ok bool) {
-	for y := 0; y < g.Height(); y++ {
-		for x := 0; x < g.Width(); x++ {
+	for y := range g.Height() {
+		for x := range g.Width() {
 			fg, bg := g.KeysAt(x, y)
 			if (side == "fg" && fg == id) || (side == "bg" && bg == id) {
 				return x, y, true
@@ -146,7 +146,7 @@ func TestInspectFallsBackToColourMatch(t *testing.T) {
 	var x, y int
 	found := false
 	for yy := 0; yy < g.Height() && !found; yy++ {
-		for xx := 0; xx < g.Width(); xx++ {
+		for xx := range g.Width() {
 			fg, bg := g.KeysAt(xx, yy)
 			cell := g.At(xx, yy)
 			if fg == 0 && bg == 0 && cell.Style.FG != nil {

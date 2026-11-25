@@ -24,7 +24,7 @@ func TestConfirmCardIsCentred(t *testing.T) {
 	}
 	row := func(y int) string { return g.Plain()[y] }
 	var top, bottom = -1, -1
-	for y := 0; y < g.Height(); y++ {
+	for y := range g.Height() {
 		if strings.Contains(row(y), "Delete a.txt?") {
 			if top == -1 {
 				top = y

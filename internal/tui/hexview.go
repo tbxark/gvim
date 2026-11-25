@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
@@ -526,7 +527,7 @@ func (m *Model) hexReleaseClosed() {
 func hexLine(offset int64, data []byte) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%08X  ", offset)
-	for i := 0; i < hexBytesPerRow; i++ {
+	for i := range hexBytesPerRow {
 		if i == hexBytesPerRow/2 {
 			b.WriteByte(' ')
 		}
@@ -565,7 +566,7 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 	cell := style.Cell(m.styles.Editor)
 	dim := cell
 	dim.Faint = true
-	for y := 0; y < p.H; y++ {
+	for y := range p.H {
 		g.Fill(p.X, p.X+p.W, p.Y+y, cell)
 	}
 	visible := hexPaneVisibleRows(p)
@@ -581,7 +582,7 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 		textEnd--
 	}
 	start := int64(h.top) * hexBytesPerRow
-	for row := 0; row < visible; row++ {
+	for row := range visible {
 		off := start + int64(row)*hexBytesPerRow
 		var bytes []byte
 		if off >= h.dataOff && off < h.dataOff+int64(len(h.data)) {
@@ -603,11 +604,11 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 	}
 	if drawScrollbar {
 		maxTop := max(total-visible, 0)
-		thumbStart, thumbLen := hexThumbOf(maxTop+p.H, p.H, h.top)
+		thumbStart, thumbLen := space.Thumb(maxTop+p.H, p.H, h.top)
 		trackCell := style.Cell(m.styles.Scrollbar)
 		thumbCell := style.Cell(m.styles.ScrollbarThumb)
 		sbX := p.X + p.W - 1
-		for y := 0; y < p.H; y++ {
+		for y := range p.H {
 			if y >= thumbStart && y < thumbStart+thumbLen {
 				g.Set(sbX, p.Y+y, "┃", thumbCell)
 			} else {
@@ -616,15 +617,6 @@ func (m *Model) hexPane(g *grid.Grid, p split.Pane, doc Document) bool {
 		}
 	}
 	return true
-}
-
-func hexThumbOf(lines, h, top int) (start, length int) {
-	if lines <= 0 || h <= 0 {
-		return 0, 0
-	}
-	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
-	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
-	return min(start, max(h-length, 0)), length
 }
 
 // hexNotice is the status-row hint while the active tab is in hex mode.

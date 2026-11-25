@@ -498,10 +498,7 @@ func (p *Palette) exportGrep() tea.Cmd {
 		return nil
 	}
 	hits := append([]GrepHit(nil), p.grep.hits...)
-	total := p.grep.count
-	if total < len(hits) {
-		total = len(hits)
-	}
+	total := max(p.grep.count, len(hits))
 	if len(hits) > liveExportCap {
 		hits = hits[:liveExportCap]
 	}

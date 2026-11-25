@@ -148,7 +148,7 @@ func (m *Model) plugFolds(doc Document) ([]fold.Range, map[int]bool, map[int]str
 	if !ok {
 		return nil, nil, nil
 	}
-	id := pluginapi.BufferID(bd.BufferID())
+	id := bd.BufferID()
 	if len(m.plug.folds.byBuffer[id]) == 0 {
 		return nil, nil, nil
 	}
@@ -190,7 +190,7 @@ func (m *Model) togglePluginFold(doc Document, line int) bool {
 	if !ok {
 		return false
 	}
-	id := pluginapi.BufferID(bd.BufferID())
+	id := bd.BufferID()
 	for _, f := range m.plug.folds.byBuffer[id] {
 		for _, r := range f.ranges {
 			if r.Range.From.Line != line {

@@ -35,7 +35,7 @@ func bodyRows(g *grid.Grid) []string {
 	out := make([]string, g.Height())
 	for y := range out {
 		var b strings.Builder
-		for x := 0; x < g.Width()-1; x++ {
+		for x := range g.Width() - 1 {
 			b.WriteString(g.At(x, y).Text)
 		}
 		out[y] = strings.TrimRight(b.String(), " ")

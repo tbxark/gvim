@@ -227,10 +227,7 @@ func (p *Panel) radioKey(w pluginapi.Widget, k Key) (Result, bool) {
 
 // dualKey moves the focused dual list's cursor and toggles inclusion with Space/Enter.
 func (p *Panel) dualKey(w pluginapi.Widget, k Key) (Result, bool) {
-	sel := p.selected(w)
-	if sel < 0 {
-		sel = 0
-	}
+	sel := max(p.selected(w), 0)
 	switch k.Name {
 	case "up":
 		p.setSelected(w, space.Clamp(sel-1, 0, max(len(w.Options)-1, 0)))
@@ -362,10 +359,7 @@ func (p *Panel) moveSelection(delta int) Result {
 		if len(items) == 0 {
 			return Result{Handled: true}
 		}
-		sel := p.selected(w)
-		if sel < 0 {
-			sel = 0
-		}
+		sel := max(p.selected(w), 0)
 		sel = space.Clamp(sel+delta, 0, len(items)-1)
 		p.setSelected(w, sel)
 		e := p.ev("select")
@@ -401,10 +395,7 @@ func (p *Panel) moveSelection(delta int) Result {
 	case pluginapi.WidgetRadio:
 		return Result{Handled: true, Events: []pluginapi.WidgetEvent{p.changeOption(w, p.optionIndex(w)+sign(delta))}}
 	case pluginapi.WidgetDualList:
-		sel := p.selected(w)
-		if sel < 0 {
-			sel = 0
-		}
+		sel := max(p.selected(w), 0)
 		p.setSelected(w, space.Clamp(sel+sign(delta), 0, max(len(w.Options)-1, 0)))
 		return Result{Handled: true}
 	}

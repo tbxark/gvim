@@ -518,7 +518,7 @@ func TestPostOpenFileAtBoundedWhenQueueFull(t *testing.T) {
 	t.Parallel()
 	a := newTestModel(t, newFakeEditor("a"), newFakeTree(1), 80, 24)
 	h := NewWorkspaceHost(a)
-	for i := 0; i < hostOutboundQueue; i++ {
+	for range hostOutboundQueue {
 		h.outbound <- modelCmdMsg{}
 	}
 	start := time.Now()
@@ -598,7 +598,7 @@ func TestQueueForIsBounded(t *testing.T) {
 	a := newTestModel(t, newFakeEditor("a"), newFakeTree(1), 80, 24)
 	h := NewWorkspaceHost(a)
 	cmd := func() tea.Msg { return palette.RunCommandMsg{Action: "open_settings"} }
-	for i := 0; i < hostPendingCap; i++ {
+	for i := range hostPendingCap {
 		if !h.QueueFor(a, cmd) {
 			t.Fatalf("queue rejected command %d before the cap", i)
 		}

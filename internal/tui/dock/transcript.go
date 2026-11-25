@@ -1,6 +1,7 @@
 package dock
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -163,7 +164,7 @@ func captureTranscript(t Terminal) ([]terminal.Line, int) {
 		lines, _ := t.Scrollback(from, count)
 		out = append(out, lines...)
 	}
-	for r := 0; r < sc.Rows; r++ {
+	for r := range sc.Rows {
 		cells := make([]terminal.Cell, sc.Cols)
 		for c := range sc.Cols {
 			cells[c] = sc.Cell(r, c)
@@ -222,7 +223,7 @@ func (p *Panel) transcriptRows() (rows []string, first int) {
 	if p.term != nil {
 		sc := p.term.Screen()
 		screenRows = sc.Rows
-		for r := 0; r < sc.Rows; r++ {
+		for r := range sc.Rows {
 			add(screenRowText(sc, r, false), prior+total+r)
 		}
 	}
@@ -240,8 +241,8 @@ func (p *Panel) transcriptRows() (rows []string, first int) {
 	}
 	size := 0
 	drop := 0
-	for i := len(rows) - 1; i >= 0; i-- {
-		size += len(rows[i]) + 1
+	for i, row := range slices.Backward(rows) {
+		size += len(row) + 1
 		if size > maxSavedBytes {
 			drop = i + 1
 			break

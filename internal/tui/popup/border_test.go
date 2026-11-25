@@ -199,8 +199,8 @@ func TestTheHitTargetOfEveryRowIsTheRowPaintedThere(t *testing.T) {
 
 func TestTinyFramesDoNotPanic(t *testing.T) {
 	t.Parallel()
-	for w := 0; w <= 12; w++ {
-		for h := 0; h <= 6; h++ {
+	for w := range 13 {
+		for h := range 7 {
 			p := New(style.Overlay{})
 			p.Show(Point{w / 2, h / 2}, "Title", items(5))
 			p.Draw(grid.New(w, h))

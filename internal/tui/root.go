@@ -84,7 +84,8 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 	case agentActionMsg:
 		return m.startAgentChoice(msg.name, msg.resume, msg.dir), true
 	case agentChangeDirMsg:
-		return m.openAgentDirPrompt(msg.name, msg.dir), true
+		m.openAgentDirPrompt(msg.name, msg.dir)
+		return nil, true
 	case agentRunDirMsg:
 		return m.agentDirChosen(msg), true
 	case completionReplyMsg:

@@ -345,7 +345,7 @@ func newUIMode(info pluginapi.ModeInfo) (*uiMode, []string) {
 			continue
 		}
 		node := um.root
-		for _, step := range strings.Fields(canon) {
+		for step := range strings.FieldsSeq(canon) {
 			if node.next == nil {
 				node.next = make(map[string]*keyNode)
 			}
@@ -832,14 +832,14 @@ func (m *Model) plugPanic() tea.Cmd {
 	// The prompts, pickers and popups of the prompt stage close through plugOverlaysCancel,
 	// which resolves their waits; they must not see the Dismiss/delete below.
 	cmds := []tea.Cmd{m.plugOverlaysCancel("plugin input cleared")}
-	for i := len(m.overlays) - 1; i >= 0; i-- {
-		if _, ok := m.overlays[i].(pluginOverlay); ok {
+	for i, v := range slices.Backward(m.overlays) {
+		if _, ok := v.(pluginOverlay); ok {
 			continue
 		}
-		if _, ok := m.overlays[i].(plugOverlay); !ok {
+		if _, ok := v.(plugOverlay); !ok {
 			continue
 		}
-		if d, ok := m.overlays[i].(interface{ Dismiss() }); ok {
+		if d, ok := v.(interface{ Dismiss() }); ok {
 			d.Dismiss()
 		}
 		m.overlays = slices.Delete(m.overlays, i, i+1)

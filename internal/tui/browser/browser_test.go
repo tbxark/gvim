@@ -695,28 +695,28 @@ func TestPrintableAndClamp(t *testing.T) {
 
 func TestThumbOf(t *testing.T) {
 	t.Parallel()
-	if start, length := thumbOf(40, 6, 0); start != 0 || length != 1 {
-		t.Errorf("thumbOf(40,6,0) = %d,%d", start, length)
+	if start, length := space.Thumb(40, 6, 0); start != 0 || length != 1 {
+		t.Errorf("space.Thumb(40,6,0) = %d,%d", start, length)
 	}
-	if start, length := thumbOf(6, 6, 0); start != 0 || length != 6 {
-		t.Errorf("thumbOf(6,6,0) = %d,%d", start, length)
+	if start, length := space.Thumb(6, 6, 0); start != 0 || length != 6 {
+		t.Errorf("space.Thumb(6,6,0) = %d,%d", start, length)
 	}
-	if start, _ := thumbOf(40, 6, 39); start > 5 {
+	if start, _ := space.Thumb(40, 6, 39); start > 5 {
 		t.Errorf("thumb past the window: %d", start)
 	}
 }
 
 func TestDoubleClickWindowExpires(t *testing.T) {
 	t.Parallel()
-	var c clickCounter
+	var c space.ClickCounter
 	t0 := time.Unix(0, 0)
-	if c.press(t0, 1, 1) != 1 {
+	if c.Press(t0, 1, 1) != 1 {
 		t.Fatal("first press not 1")
 	}
-	if c.press(t0.Add(time.Second), 1, 1) != 1 {
+	if c.Press(t0.Add(time.Second), 1, 1) != 1 {
 		t.Error("press after the window still counted")
 	}
-	if c.press(t0.Add(time.Second+10*time.Millisecond), 2, 1) != 1 {
+	if c.Press(t0.Add(time.Second+10*time.Millisecond), 2, 1) != 1 {
 		t.Error("press in another cell counted")
 	}
 }
@@ -859,13 +859,13 @@ func TestScrollToRowReachesTopWhenViewportHeightIsTwo(t *testing.T) {
 
 func TestThumbOfZeroAndLargeLines(t *testing.T) {
 	t.Parallel()
-	if s, l := thumbOf(0, 6, 0); s != 0 || l != 0 {
-		t.Fatalf("thumbOf(0,6,0) = %d,%d, want 0,0", s, l)
+	if s, l := space.Thumb(0, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("space.Thumb(0,6,0) = %d,%d, want 0,0", s, l)
 	}
-	if s, l := thumbOf(-5, 6, 0); s != 0 || l != 0 {
-		t.Fatalf("thumbOf(-5,6,0) = %d,%d, want 0,0", s, l)
+	if s, l := space.Thumb(-5, 6, 0); s != 0 || l != 0 {
+		t.Fatalf("space.Thumb(-5,6,0) = %d,%d, want 0,0", s, l)
 	}
-	if s, l := thumbOf(10_000_000, 1_000_000, 5_000_000); s < 400_000 || s > 600_000 || l < 1 {
+	if s, l := space.Thumb(10_000_000, 1_000_000, 5_000_000); s < 400_000 || s > 600_000 || l < 1 {
 		t.Fatalf("thumbOf large = %d,%d, unexpected overflow or clamp", s, l)
 	}
 }

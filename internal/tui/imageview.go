@@ -274,8 +274,8 @@ func paintImage(g *grid.Grid, area imageRegion, info document.ImageInfo, id, pla
 	if fit.w <= 0 || fit.h <= 0 {
 		return
 	}
-	for row := 0; row < fit.h; row++ {
-		for col := 0; col < fit.w; col++ {
+	for row := range fit.h {
+		for col := range fit.w {
 			text := placeholderCell(row, col)
 			if row == 0 && col == 0 {
 				// The placement must exist before the cells that name it are drawn, and
