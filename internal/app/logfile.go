@@ -68,8 +68,8 @@ func (l *fileLog) Notice(text string) {
 		return
 	}
 	keys := []string{text}
-	if i := strings.Index(text, ": "); i >= 0 {
-		keys = append(keys, text[i+2:])
+	if _, after, ok := strings.Cut(text, ": "); ok {
+		keys = append(keys, after)
 	}
 	if l.echoed(chanNotice, keys...) {
 		return

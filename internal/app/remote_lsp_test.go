@@ -45,11 +45,11 @@ func (p *fakeLSPProc) Write(data []byte) error {
 	if replied || !bytes.Contains(buffered, []byte(`"method":"initialize"`)) {
 		return nil
 	}
-	head := bytes.Index(buffered, []byte("\r\n\r\n"))
-	if head < 0 {
+	_, after, ok := bytes.Cut(buffered, []byte("\r\n\r\n"))
+	if !ok {
 		return nil
 	}
-	body := buffered[head+4:]
+	body := after
 	var req struct {
 		ID     int    `json:"id"`
 		Method string `json:"method"`

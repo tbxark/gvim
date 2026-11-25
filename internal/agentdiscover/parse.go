@@ -75,7 +75,7 @@ func isOctal3(s string) bool {
 	if len(s) != 3 {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] < '0' || s[i] > '7' {
 			return false
 		}

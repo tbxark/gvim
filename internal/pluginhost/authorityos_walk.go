@@ -27,6 +27,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -248,8 +249,8 @@ func (o *authorityOS) copyDestinationRealPath(ctx context.Context, rp authority.
 			if !path.IsAbs(real) {
 				return "", pluginapi.Errf(pluginapi.CodeUnsupported, "%s: copy: realpath returned a non-absolute destination %q", dst, real)
 			}
-			for i := len(suffix) - 1; i >= 0; i-- {
-				real = path.Join(real, suffix[i])
+			for _, s := range slices.Backward(suffix) {
+				real = path.Join(real, s)
 			}
 			if real == "" {
 				return "", pluginapi.Errf(pluginapi.CodeIO, "%s: destination realpath returned no path", dst)
@@ -335,7 +336,7 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 	if err != nil {
 		return err
 	}
-	if err := claimCtx(ctx); err != nil {
+	if err := ctxErr(ctx); err != nil {
 		return err
 	}
 	// Create missing ancestors (a benign operation), then claim the destination root with
@@ -353,7 +354,7 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 		return mapErr(err, dst)
 	}
 	for _, entry := range res.Entries {
-		if err := claimCtx(ctx); err != nil {
+		if err := ctxErr(ctx); err != nil {
 			return err
 		}
 		target := path.Join(dst, entry.Rel)
@@ -445,12 +446,5 @@ func (o *authorityOS) copyStreamedFile(ctx context.Context, opener copyStreamOpe
 		return copyStreamError(err, dst)
 	}
 	committed = true
-	return nil
-}
-
-func claimCtx(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return mapErr(err, "")
-	}
 	return nil
 }

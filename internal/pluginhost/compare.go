@@ -5,6 +5,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -49,7 +50,7 @@ func (p *pluginEditor) DiffSource(id pluginapi.BufferID) (pluginapi.DiffSource, 
 		Version:    versionOf(d),
 	}
 	off := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		line := b.Line(i)
 		src.Starts[i] = off
 		src.Lines[i] = line
@@ -107,7 +108,7 @@ func (p *pluginEditor) ReplaceRange(id pluginapi.BufferID, start, end int, text 
 	if expect != nil {
 		opts.Expect = &editor.Version{Gen: expect.Gen, Ver: expect.Ver}
 	}
-	edit := []editor.LSPEdit{{From: from, To: to, Text: normalizeEOL(text)}}
+	edit := []editor.LSPEdit{{From: from, To: to, Text: plugin.NormalizeEOL(text)}}
 	err = p.ed.ApplyEdits(editor.DocID(id), edit, opts)
 	switch {
 	case err == nil:

@@ -18,6 +18,7 @@ import (
 	"github.com/tbxark/gvim/fuzzy"
 	"github.com/tbxark/gvim/gitstate"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/search"
 )
@@ -51,16 +52,9 @@ func (pluginServices) Diff(a, b []string) []pluginapi.Hunk {
 // DiffText is Diff over two texts. With IgnoreEOL, CRLF and a lone CR are LF on both sides.
 func (pluginServices) DiffText(a, b string, o pluginapi.DiffOptions) []pluginapi.Hunk {
 	if o.IgnoreEOL {
-		a, b = normalizeEOL(a), normalizeEOL(b)
+		a, b = plugin.NormalizeEOL(a), plugin.NormalizeEOL(b)
 	}
 	return convertHunks(diff.Lines(strings.Split(a, "\n"), strings.Split(b, "\n")))
-}
-
-func normalizeEOL(s string) string {
-	if !strings.Contains(s, "\r") {
-		return s
-	}
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
 }
 
 func convertHunks(hs []diff.Hunk) []pluginapi.Hunk {

@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -60,18 +61,6 @@ type stringCache struct {
 func NewContextPair() (editor.StringContext, editor.NonCodeContext) {
 	c := &stringCache{}
 	return c.inString, c.nonCode
-}
-
-// NewStringContext returns the editor.StringContext that the editor installs.
-func NewStringContext() editor.StringContext {
-	c := &stringCache{}
-	return c.inString
-}
-
-// NewNonCodeContext returns the editor.NonCodeContext that the editor installs.
-func NewNonCodeContext() editor.NonCodeContext {
-	c := &stringCache{}
-	return c.nonCode
 }
 
 // stringWindow returns the lines [start, end) to lex for a query on line of a document
@@ -183,8 +172,8 @@ func (c *stringCache) localStringWindow(b *buffer.Buffer, line int) (start int, 
 		used += len(s)
 	}
 	lines = make([]string, 0, len(back)+1+len(forward))
-	for i := len(back) - 1; i >= 0; i-- {
-		lines = append(lines, back[i])
+	for _, b := range slices.Backward(back) {
+		lines = append(lines, b)
 	}
 	lines = append(lines, text)
 	lines = append(lines, forward...)
@@ -243,8 +232,8 @@ func (c *stringCache) largeStringWindow(doc *editor.Document, b *buffer.Buffer, 
 		used += len(s)
 	}
 	lines = make([]string, 0, len(back)+1+len(forward))
-	for i := len(back) - 1; i >= 0; i-- {
-		lines = append(lines, back[i])
+	for _, b := range slices.Backward(back) {
+		lines = append(lines, b)
 	}
 	lines = append(lines, text)
 	lines = append(lines, forward...)

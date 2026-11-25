@@ -14,7 +14,7 @@ import (
 // literal and a comment.
 func remoteQuoteContent(lines int) []byte {
 	var sb strings.Builder
-	for i := 0; i < lines; i++ {
+	for i := range lines {
 		fmt.Fprintf(&sb, "var x%08d = \"hello\" // c\n", i)
 	}
 	return []byte(sb.String())
@@ -113,7 +113,7 @@ func TestStringContextRemoteLargeUnloadedWindowIsSafe(t *testing.T) {
 	if _, ok := doc.TakePendingLargeWindow(); ok {
 		t.Fatal("a context query on a loaded window recorded a window miss")
 	}
-	mask := NewNonCodeContext()(doc, 0)
+	mask := (&stringCache{}).nonCode(doc, 0)
 	if len(mask) == 0 || !mask[17] || !mask[24] {
 		t.Fatalf("non-code mask = %v; want the string at 17 and the comment at 24 masked", mask)
 	}

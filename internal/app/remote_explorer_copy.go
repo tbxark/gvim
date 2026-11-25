@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -510,8 +511,7 @@ func (o *remoteExplorerOps) applyCopyMetadata(ctx context.Context, dst string, n
 	}
 	failed, total := 0, 0
 	var firstErr error
-	for i := len(nodes) - 1; i >= 0; i-- {
-		node := nodes[i]
+	for _, node := range slices.Backward(nodes) {
 		if node.mode == 0 && node.mtime.IsZero() {
 			continue
 		}
@@ -538,9 +538,9 @@ func (o *remoteExplorerOps) uniqueCopyName(ctx context.Context, dir, name string
 	if err := fsops.Validate(dir, name); err != nil {
 		return "", err
 	}
-	stem, ext := splitCopyStemExt(name)
+	stem, ext := fsops.SplitStemExt(name)
 	for n := 1; n <= remoteCopyNameAttempts; n++ {
-		candidate := copyNameCandidate(stem, ext, n)
+		candidate := fsops.CopyCandidate(stem, ext, n)
 		ok, _, err := o.exists(ctx, path.Join(dir, candidate))
 		if err != nil {
 			return "", fmt.Errorf("remote copy: stat %s: %w", path.Join(dir, candidate), err)
@@ -550,25 +550,4 @@ func (o *remoteExplorerOps) uniqueCopyName(ctx context.Context, dir, name string
 		}
 	}
 	return "", fmt.Errorf("remote copy: no free copy name for %s in %s after %d attempts", name, dir, remoteCopyNameAttempts)
-}
-
-// copyNameCandidate builds the n-th duplicate name (n = 1 has no number).
-func copyNameCandidate(stem, ext string, n int) string {
-	suffix := " copy"
-	if n > 1 {
-		suffix = fmt.Sprintf(" copy %d", n)
-	}
-	if ext == "" {
-		return stem + suffix
-	}
-	return stem + suffix + "." + ext
-}
-
-// splitCopyStemExt splits at the last dot; a leading dot does not start an extension
-// (the same rule as fsops.CopyName).
-func splitCopyStemExt(name string) (stem, ext string) {
-	if i := strings.LastIndexByte(name, '.'); i > 0 {
-		return name[:i], name[i+1:]
-	}
-	return name, ""
 }

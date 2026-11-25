@@ -233,7 +233,7 @@ func TestStringContextOfALargeDocumentReadsABoundedWindow(t *testing.T) {
 	ed := openBig(t, bigLines(t, t.TempDir()))
 	doc := ed.Active()
 	before := doc.Buffer.Stats()
-	if highlight.NewStringContext()(doc, buffer.Pos{Line: 2, Col: 3}) {
+	if sc, _ := highlight.NewContextPair(); sc(doc, buffer.Pos{Line: 2, Col: 3}) {
 		t.Errorf("a position of a large document with no string is reported inside a string")
 	}
 	after := doc.Buffer.Stats()

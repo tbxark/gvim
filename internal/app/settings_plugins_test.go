@@ -231,7 +231,7 @@ func TestPluginsPageShowsDeclaredSettings(t *testing.T) {
 		infos: []pluginapi.PluginInfo{{Name: "hello", Source: "user", Status: "loaded", Enabled: true}},
 		schemas: map[string][]pluginapi.PluginSettingSpec{"hello": {
 			{Key: "mode", Type: "enum", Default: "fast", Choices: []string{"fast", "slow"}, Description: "pace"},
-			{Key: "count", Type: "integer", Default: float64(3), Min: floatPtr(1), Max: floatPtr(10), Project: true},
+			{Key: "count", Type: "integer", Default: float64(3), Min: new(float64(1)), Max: new(float64(10)), Project: true},
 		}},
 		values: map[string][]pluginapi.PluginSettingValue{"hello": {
 			{Key: "mode", Value: "slow"},
@@ -259,5 +259,3 @@ func TestPluginsPageShowsDeclaredSettings(t *testing.T) {
 		t.Fatalf("count row = %+v", count)
 	}
 }
-
-func floatPtr(f float64) *float64 { return &f }

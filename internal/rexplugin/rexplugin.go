@@ -113,13 +113,13 @@ func (i Installer) Install() (Report, error) {
 		}
 		rep.Changed = true
 	}
-	if _, err := i.rex("config", "check", rep.RexConfig); err != nil {
+	if err := i.rex("config", "check", rep.RexConfig); err != nil {
 		restore(rep.RexConfig, previous, existed)
 		rollbackPlugin()
 		return rep, fmt.Errorf("gvim rex: rex rejected the new init.lua: %w", err)
 	}
 	if rep.Changed {
-		_, err := i.rex("config", "reload")
+		err := i.rex("config", "reload")
 		rep.Reloaded = err == nil
 	}
 	return rep, nil
@@ -145,7 +145,7 @@ func (i Installer) Uninstall() (Report, error) {
 			return rep, err
 		}
 		rep.Changed = true
-		if _, err := i.rex("config", "check", rep.RexConfig); err != nil {
+		if err := i.rex("config", "check", rep.RexConfig); err != nil {
 			restore(rep.RexConfig, previous, existed)
 			return rep, fmt.Errorf("gvim rex: rex rejected the new init.lua: %w", err)
 		}
@@ -156,7 +156,7 @@ func (i Installer) Uninstall() (Report, error) {
 	// Its folder too, unless something else was put there.
 	_ = os.Remove(filepath.Dir(rep.RexPlugin))
 	if rep.Changed {
-		_, err := i.rex("config", "reload")
+		err := i.rex("config", "reload")
 		rep.Reloaded = err == nil
 	}
 	return rep, nil
@@ -178,24 +178,25 @@ func (i Installer) paths() (Report, error) {
 	}, nil
 }
 
-// rex runs one rex command and returns its trimmed output.
-func (i Installer) rex(args ...string) (string, error) {
+// rex runs one rex command. A nonzero exit carries the command's trimmed output.
+func (i Installer) rex(args ...string) error {
 	if i.Rex != nil {
-		return i.Rex(args...)
+		_, err := i.Rex(args...)
+		return err
 	}
 	bin := rexBinary()
 	if bin == "" {
-		return "", errors.New("rex is not on PATH; install Rex, or put rex on PATH")
+		return errors.New("rex is not on PATH; install Rex, or put rex on PATH")
 	}
 	out, err := exec.Command(bin, args...).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
 		if text != "" {
-			return text, fmt.Errorf("%s: %w", text, err)
+			return fmt.Errorf("%s: %w", text, err)
 		}
-		return "", err
+		return err
 	}
-	return text, nil
+	return nil
 }
 
 // rexConfigPath is Rex's init.lua: REX_CONFIG, else the account's config
@@ -304,7 +305,7 @@ func luaString(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 2)
 	b.WriteByte('"')
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		switch c := s[i]; c {
 		case '\\':
 			b.WriteString(`\\`)

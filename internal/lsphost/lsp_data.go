@@ -110,10 +110,7 @@ func (p *lspPort) InlayHints(path string) ([]tui.InlayHint, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
 	defer cancel()
-	last := len(rec.lines) - 1
-	if last < 0 {
-		last = 0
-	}
+	last := max(len(rec.lines)-1, 0)
 	lastLine := rec.lines.line(last)
 	hints, err := hs[0].Client().InlayHints(ctx, lsp.PathURI(path), protocol.Range{
 		Start: protocol.Position{Line: 0, Character: 0},

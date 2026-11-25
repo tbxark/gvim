@@ -218,14 +218,15 @@ func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection
 		Kind: "page", Value: strconv.Itoa(len(languages)) + " languages",
 		Layers: []string{tui.SettingsLayerUser, tui.SettingsLayerProject},
 	}}}}
-	out = append(out, tui.SettingsSection{Name: "Plugins", Items: []tui.SettingsItem{{
-		Key: "plugins", Path: []string{"plugins"}, Name: "Plugins", Section: "Plugins",
-		Kind: "page", Value: s.pluginSummary(), Layers: []string{tui.SettingsLayerUser},
-	}}})
-	out = append(out, tui.SettingsSection{Name: "Keybindings", Items: []tui.SettingsItem{{
-		Key: "keybindings", Path: []string{"keybindings"}, Name: "Keybindings", Section: "Keybindings",
-		Kind: "page", Value: s.keybindingsSummary(cfg), Layers: []string{tui.SettingsLayerUser},
-	}}})
+	out = append(out,
+		tui.SettingsSection{Name: "Plugins", Items: []tui.SettingsItem{{
+			Key: "plugins", Path: []string{"plugins"}, Name: "Plugins", Section: "Plugins",
+			Kind: "page", Value: s.pluginSummary(), Layers: []string{tui.SettingsLayerUser},
+		}}},
+		tui.SettingsSection{Name: "Keybindings", Items: []tui.SettingsItem{{
+			Key: "keybindings", Path: []string{"keybindings"}, Name: "Keybindings", Section: "Keybindings",
+			Kind: "page", Value: s.keybindingsSummary(cfg), Layers: []string{tui.SettingsLayerUser},
+		}}})
 	items := make([]tui.SettingsItem, 0, 8)
 	for _, fact := range s.envFacts(cfg) {
 		items = append(items, tui.SettingsItem{

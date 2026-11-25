@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -40,9 +41,7 @@ type fakeOneShot struct {
 func (f *fakeOneShot) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
 	f.mu.Lock()
 	call := oneShotCall{argv: append([]string(nil), argv...), cwd: o.Cwd, env: map[string]string{}}
-	for k, v := range o.Env {
-		call.env[k] = v
-	}
+	maps.Copy(call.env, o.Env)
 	f.calls = append(f.calls, call)
 	f.mu.Unlock()
 	if f.script == nil {
@@ -828,7 +827,7 @@ func TestRemoteSearchAppliesGlobWithoutAGlobbedFileSnapshot(t *testing.T) {
 func TestRemoteSearchSplitsLargeCandidateLists(t *testing.T) {
 	var ls strings.Builder
 	var paths []string
-	for i := 0; i < searchScopeBatchFiles*2+17; i++ {
+	for i := range searchScopeBatchFiles*2 + 17 {
 		p := fmt.Sprintf("src/f%04d.go", i)
 		paths = append(paths, p)
 		ls.WriteString(gitLsEntry("100644", p))
@@ -953,7 +952,7 @@ func TestRemoteSearchTruncatedCandidateListingKeepsResultsWithNotice(t *testing.
 // whole-tree widened scan and says so, rather than silently scanning ignored entries.
 func TestRemoteSearchFallsBackWithNoticeWhenCandidateListTooLarge(t *testing.T) {
 	var ls strings.Builder
-	for i := 0; i < searchScopeMaxBatches*searchScopeBatchFiles+1; i++ {
+	for i := range searchScopeMaxBatches*searchScopeBatchFiles + 1 {
 		ls.WriteString(gitLsEntry("100644", fmt.Sprintf("src/f%05d.go", i)))
 	}
 	base := candidateRgScript(true, []byte(ls.String()), 0, false)
@@ -1064,7 +1063,7 @@ func TestRemoteSearchCancellationWithCandidateScope(t *testing.T) {
 // loop between commands: the stream closes with no Done batch and never falls back locally.
 func TestRemoteSearchBatchedPathCancellation(t *testing.T) {
 	var ls strings.Builder
-	for i := 0; i < searchScopeBatchFiles*2+1; i++ {
+	for i := range searchScopeBatchFiles*2 + 1 {
 		ls.WriteString(gitLsEntry("100644", fmt.Sprintf("src/f%04d.go", i)))
 	}
 	base := candidateRgScript(true, []byte(ls.String()), 0, false)
@@ -1183,7 +1182,7 @@ func TestRemoteSearchPreviewSyntaxSpans(t *testing.T) {
 	}
 	// Over the preview line cap: plain text, matching the local preview's bound.
 	var many strings.Builder
-	for i := 0; i < previewHighlightLines+5; i++ {
+	for range previewHighlightLines + 5 {
 		many.WriteString("x\n")
 	}
 	fs.put("/remote/w/many.go", many.String())
@@ -1387,7 +1386,7 @@ func TestRemoteSearchPreviewWindowScanBudgetIsHonest(t *testing.T) {
 	base := newRemoteFS()
 	var text strings.Builder
 	line := strings.Repeat("x", 1024)
-	for i := 0; i < 9000; i++ {
+	for range 9000 {
 		text.WriteString(line)
 		text.WriteString("\n")
 	}
@@ -1844,7 +1843,7 @@ func TestRemoteSearchWidenedCapMarkedIncomplete(t *testing.T) {
 // too-large candidate-list widened fallback (roots are the whole tree there).
 func TestRemoteSearchTooLargeWidenedCapMarkedIncomplete(t *testing.T) {
 	var ls strings.Builder
-	for i := 0; i < searchScopeMaxBatches*searchScopeBatchFiles+1; i++ {
+	for i := range searchScopeMaxBatches*searchScopeBatchFiles + 1 {
 		ls.WriteString(gitLsEntry("100644", fmt.Sprintf("src/f%05d.go", i)))
 	}
 	base := candidateRgScript(true, []byte(ls.String()), 0, false)
@@ -2385,12 +2384,7 @@ func TestRemoteAllowedFilesNormalizes(t *testing.T) {
 func TestRemoteSearchArgvUsesNullFileDelimiter(t *testing.T) {
 	req := searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles}
 	hasNull := func(argv []string) bool {
-		for _, a := range argv {
-			if a == "--null" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(argv, "--null")
 	}
 	for _, argv := range [][]string{
 		remoteSearchArgv("rg", req, false, nil),
@@ -2862,4 +2856,11 @@ func TestRemoteSearchAndGitGrepCacheProbesPerConnectionGen(t *testing.T) {
 	if shCalls != 2 || gitInsideCalls != 2 || topLevelCalls != 2 {
 		t.Fatalf("after reconnect gen probes: sh=%d gitInside=%d topLevel=%d, want 2/2/2", shCalls, gitInsideCalls, topLevelCalls)
 	}
+}
+
+// remoteLineMatches is remoteLineMatchesCompiled for tests: it compiles the query first,
+// as the search path does.
+func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, limit int) []searchpanel.Match {
+	cq, _ := search.CompileQuery(q)
+	return remoteLineMatchesCompiled(cq, q.Text, lineNo, line, byteCol, total, limit)
 }

@@ -62,8 +62,7 @@ func TestRemoteEnvWatchCoversCustomDetectorPaths(t *testing.T) {
 	}}
 	slot := watchSlot(raw)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	defer watch.Close()
 	waitWatchCount(t, raw, 3)
@@ -111,7 +110,7 @@ func TestRemoteEnvWatchBoundsCustomDetectorDirs(t *testing.T) {
 	var detect atomic.Int32
 	var detectors []config.EnvDetector
 	dirs := map[string]bool{}
-	for i := 0; i < env.MaxDetectorWatchDirs+4; i++ {
+	for i := range env.MaxDetectorWatchDirs + 4 {
 		dir := strings.Repeat("d", i+1)
 		detectors = append(detectors, config.EnvDetector{Name: dir, Markers: []string{dir + "/marker"}, Kind: config.EnvKindShell})
 		dirs["/remote/proj/"+dir] = true
@@ -125,8 +124,7 @@ func TestRemoteEnvWatchBoundsCustomDetectorDirs(t *testing.T) {
 	fs := &statDirFS{fakeWatchFS: raw, dirs: dirs}
 	slot := watchSlot(raw)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	defer watch.Close()
 	waitWatchCount(t, raw, 1+env.MaxDetectorWatchDirs)

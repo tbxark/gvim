@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"maps"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
@@ -15,9 +16,7 @@ func TestRemoteProjectSearchUsesTheRemoteEnv(t *testing.T) {
 	var calls []oneShotCall
 	script := func(_ context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
 		call := oneShotCall{argv: append([]string(nil), argv...), cwd: o.Cwd, env: map[string]string{}}
-		for k, v := range o.Env {
-			call.env[k] = v
-		}
+		maps.Copy(call.env, o.Env)
 		calls = append(calls, call)
 		if len(argv) >= 2 && argv[0] == "sh" && argv[1] == "-c" {
 			return hostos.ProcResult{Stdout: []byte("rg")}, nil

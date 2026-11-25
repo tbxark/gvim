@@ -148,7 +148,7 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, limit int) (ke
 		// Never evict unsaved work without a durable session: confirm with the synchronous
 		// fallback save first. If that cannot be confirmed either, keep the workspace.
 		if ferr := m.fallbackSave(sess); ferr != nil {
-			return true, fmt.Errorf("cannot evict workspace %q: the capture write failed (%v) and the fallback save failed: %w; the workspace stays materialized", label, captureErr, ferr)
+			return true, fmt.Errorf("cannot evict workspace %q: the capture write failed (%w) and the fallback save failed: %w; the workspace stays materialized", label, captureErr, ferr)
 		}
 	}
 	// Recheck under the lock: a switch that raced the pass must win over eviction.

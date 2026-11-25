@@ -143,7 +143,7 @@ func parseKey(spec string) (keyName, error) {
 	}
 	k := keyName{name: name}
 	if mods != "" {
-		for _, m := range strings.Split(mods, "+") {
+		for m := range strings.SplitSeq(mods, "+") {
 			switch strings.ToLower(m) {
 			case "ctrl":
 				k.ctrl = true

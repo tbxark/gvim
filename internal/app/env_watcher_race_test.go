@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -20,8 +19,7 @@ func TestLocalEnvWatchConcurrentReplanAndClose(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, []config.EnvDetector{{Name: "node", Markers: []string{".nvmrc"}, Kind: config.EnvKindShell, Snippet: "true"}}, func() bool { return true })
 	fake := newFakeEnvFileWatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	if lw == nil {
 		t.Fatal("no local watcher")
@@ -29,9 +27,7 @@ func TestLocalEnvWatchConcurrentReplanAndClose(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	started := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		close(started)
 		for i := 0; ; i++ {
 			select {
@@ -41,10 +37,8 @@ func TestLocalEnvWatchConcurrentReplanAndClose(t *testing.T) {
 			}
 			lw.Replan([]config.EnvDetector{{Name: "node", Markers: []string{".nvmrc", ".direnv"}, Kind: config.EnvKindShell}})
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		marker := filepath.Join(root, ".nvmrc")
 		for {
 			select {
@@ -55,10 +49,8 @@ func TestLocalEnvWatchConcurrentReplanAndClose(t *testing.T) {
 			case fake.events <- filewatch.Changed{Files: []string{marker}}:
 			}
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -69,7 +61,7 @@ func TestLocalEnvWatchConcurrentReplanAndClose(t *testing.T) {
 			_ = provider.WatchNotice()
 			_, _ = provider.Active()
 		}
-	}()
+	})
 	<-started
 	lw.Close()
 	close(stop)
@@ -81,8 +73,7 @@ func TestRemoteEnvWatchConcurrentReplanAndClose(t *testing.T) {
 	provider := envWatchProvider(t, &detect, &capture)
 	raw := &fakeWatchFS{}
 	slot := watchSlot(raw)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	if watch == nil {
 		t.Fatal("no remote watcher")
@@ -91,9 +82,7 @@ func TestRemoteEnvWatchConcurrentReplanAndClose(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	started := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		close(started)
 		for {
 			select {
@@ -103,10 +92,8 @@ func TestRemoteEnvWatchConcurrentReplanAndClose(t *testing.T) {
 			}
 			watch.Replan([]config.EnvDetector{{Name: "direnv", Markers: []string{".envrc", ".direnv"}, Kind: config.EnvKindShell, Snippet: "true"}})
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -116,10 +103,8 @@ func TestRemoteEnvWatchConcurrentReplanAndClose(t *testing.T) {
 			case fw.events <- hostos.WatchEvent{Path: "/remote/proj/.envrc", Kind: "write"}:
 			}
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -130,7 +115,7 @@ func TestRemoteEnvWatchConcurrentReplanAndClose(t *testing.T) {
 			_ = provider.WatchNotice()
 			_, _ = provider.Active()
 		}
-	}()
+	})
 	<-started
 	watch.Close()
 	close(stop)

@@ -65,7 +65,7 @@ func TestTerminalStateStripsControlCharactersAndBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	rows := make([]string, 0, maxSavedTerminalRows+100)
-	for i := 0; i < maxSavedTerminalRows+100; i++ {
+	for range maxSavedTerminalRows + 100 {
 		rows = append(rows, "row")
 	}
 	rows = append(rows, "evil \x1b[31mred")

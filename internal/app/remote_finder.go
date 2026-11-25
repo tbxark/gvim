@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -242,7 +243,7 @@ func remoteFinderGitCandidates(ctx context.Context, slot authority.Slot, root st
 		return nil, false, gitListFailed
 	}
 	var out []string
-	for _, raw := range strings.Split(string(list.Stdout), "\x00") {
+	for raw := range strings.SplitSeq(string(list.Stdout), "\x00") {
 		if raw == "" {
 			continue
 		}
@@ -279,7 +280,7 @@ func remoteFinderGitIgnored(ctx context.Context, slot authority.Slot, root strin
 		return nil
 	}
 	var out []string
-	for _, raw := range strings.Split(string(list.Stdout), "\x00") {
+	for raw := range strings.SplitSeq(string(list.Stdout), "\x00") {
 		if raw == "" {
 			continue
 		}
@@ -334,12 +335,7 @@ func remoteFinderCandidateCheck(rel string, allowDot bool) bool {
 // remoteFinderSkipDir is the walk's skip-dir rule, used on the git listing's intermediate
 // segments (a file whose own name is "target" is not skipped).
 func remoteFinderSkipDir(name string) bool {
-	for _, skip := range remoteGrepSkipDirs {
-		if name == skip {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(remoteGrepSkipDirs, name)
 }
 
 // expandRemoteRoot turns a remote ~/... or ~user/... workspace root into the remote

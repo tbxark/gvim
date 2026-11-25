@@ -296,7 +296,7 @@ func (m *workspaceManager) quiesceModelForTeardown(sess *workspaceSession) error
 		prepare()
 		return nil
 	}
-	ok := false
+	var ok bool
 	if m.doTimeout > 0 {
 		ok = h.DoWithTimeout(m.doTimeout, prepare)
 	} else {
@@ -971,7 +971,7 @@ func (m *workspaceManager) handleRequest(req daemon.WorkspaceRequest) daemon.Wor
 	case req.List != nil:
 		return m.listResult()
 	case req.Select != nil:
-		if _, err := m.selectSync(req.Select.ID); err != nil {
+		if err := m.selectSync(req.Select.ID); err != nil {
 			res := m.listResult()
 			res.Notice = err.Error()
 			return res
@@ -993,7 +993,7 @@ func (m *workspaceManager) handleRequest(req daemon.WorkspaceRequest) daemon.Wor
 			}
 		}
 		if want != "" {
-			if _, err := m.selectSync(want); err != nil {
+			if err := m.selectSync(want); err != nil {
 				res := m.listResult()
 				res.Notice = err.Error()
 				return res
@@ -1030,21 +1030,21 @@ func (m *workspaceManager) listResult() daemon.WorkspaceResult {
 
 // selectSync starts a switch and waits for the build; it is called from the daemon's
 // connection goroutine (never the UI goroutine).
-func (m *workspaceManager) selectSync(id string) (func() error, error) {
+func (m *workspaceManager) selectSync(id string) error {
 	var wait func() error
 	var err error
 	if !m.runOnUI(func() { wait, err = m.beginSelect(id) }) {
-		return nil, errors.New("workspace: the daemon is not ready")
+		return errors.New("workspace: the daemon is not ready")
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if wait != nil {
 		if err := wait(); err != nil && !errors.Is(err, errWorkspaceStale) {
-			return nil, err
+			return err
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // closeSync closes a workspace from the connection goroutine.
@@ -1098,7 +1098,7 @@ func openTargetsFromRequest(req daemon.OpenFile) []workspaceOpenTarget {
 // openTarget routes one resolved path to its owning workspace and posts the open at the
 // requested position.
 func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
-	canonical := canonicalWorkspaceFile(target.path)
+	canonical := editor.SharedCanonical(target.path)
 	// The tabs of a runtime are editor state: read them on the UI goroutine, not on the
 	// socket goroutine this runs on.
 	ownerID, active, activeRemote := "", "", false
@@ -1137,7 +1137,7 @@ func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 		// the path (the established #19a routing and its parity floor). Cross-workspace
 		// sharing starts when a file is opened INSIDE another workspace (OpenFile from the
 		// finder/explorer); see editor.SharedBuffers and the architecture bullet.
-		if _, err := m.selectSync(ownerID); err != nil {
+		if err := m.selectSync(ownerID); err != nil {
 			// The owner was detected but could not be materialized. Report and keep
 			// the current workspace: opening the path in another workspace would
 			// violate the single-writer rule and could conflict with the dormant
@@ -1198,7 +1198,7 @@ func (m *workspaceManager) dormantOwner(canonical string) (string, workspacePosi
 			continue
 		}
 		for _, f := range layout.Files {
-			if f.Path == "" || canonicalWorkspaceFile(f.Path) != canonical {
+			if f.Path == "" || editor.SharedCanonical(f.Path) != canonical {
 				continue
 			}
 			if f.StashFile == "" && f.OverlayFile == "" {
@@ -1212,18 +1212,6 @@ func (m *workspaceManager) dormantOwner(canonical string) (string, workspacePosi
 	return "", workspacePosition{}, false
 }
 
-// canonicalWorkspaceFile makes an absolute clean path for the open-path comparison.
-func canonicalWorkspaceFile(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return path
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved
-	}
-	return abs
-}
-
 // sessionHasPath reports whether the runtime has the canonical path open in a tab.
 func sessionHasPath(rt *runtime, canonical string) bool {
 	if rt == nil || rt.ed == nil {
@@ -1233,7 +1221,7 @@ func sessionHasPath(rt *runtime, canonical string) bool {
 		if tab.Path == "" {
 			continue
 		}
-		if canonicalWorkspaceFile(tab.Path) == canonical {
+		if editor.SharedCanonical(tab.Path) == canonical {
 			return true
 		}
 	}

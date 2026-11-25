@@ -16,6 +16,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/tui"
+	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/session"
 )
 
@@ -65,7 +66,7 @@ func pumpModel(t *testing.T, m *tui.Model, first tea.Cmd) {
 // openInModel opens path in the model the way an explorer activation does.
 func openInModel(t *testing.T, m *tui.Model, path string) {
 	t.Helper()
-	_, cmd := m.Update(tui.OpenFileMessage(path))
+	_, cmd := m.Update(expanel.OpenFileMsg{Path: path})
 	pumpModel(t, m, cmd)
 }
 

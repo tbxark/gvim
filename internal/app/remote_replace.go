@@ -239,7 +239,7 @@ func remoteReplaceText(text string, edits []search.Edit) (string, error) {
 	lineStarts := make([]int, lineCount)
 	lineEnds := make([]int, lineCount)
 	idx := 0
-	for i := 0; i < len(text); i++ {
+	for i := range len(text) {
 		if text[i] == '\n' {
 			lineEnds[idx] = i
 			idx++

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/decorations"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -48,23 +49,23 @@ func virtualOwner(id pluginapi.BufferID) string {
 // cleanText is the text of a content piece as the buffer holds it: LF line breaks and valid
 // UTF-8, so the byte columns that styles and properties carry are the buffer's.
 func cleanText(s string) string {
-	s = normalizeEOL(s)
+	s = plugin.NormalizeEOL(s)
 	if !utf8.ValidString(s) {
 		s = strings.ToValidUTF8(s, "\uFFFD")
 	}
 	return s
 }
 
-// virtualDoc returns the open document of id when it is a virtual buffer.
-func (p *pluginEditor) virtualDoc(id pluginapi.BufferID) (*editor.Document, error) {
+// virtualDoc reports whether the open document of id is a virtual buffer.
+func (p *pluginEditor) virtualDoc(id pluginapi.BufferID) error {
 	d, err := p.doc(id)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !d.Virtual() {
-		return nil, pluginapi.Errf(pluginapi.CodeInvalid, "buffer %d is not a virtual buffer", id)
+		return pluginapi.Errf(pluginapi.CodeInvalid, "buffer %d is not a virtual buffer", id)
 	}
-	return d, nil
+	return nil
 }
 
 // sweepVirtual drops the content styles of virtual buffers that are closed. Buffer ids are
@@ -129,7 +130,7 @@ func (p *pluginEditor) virtualRoom(owner string, add bool, replace editor.DocID,
 
 // SetReadOnly sets the read-only flag of a virtual buffer.
 func (p *pluginEditor) SetReadOnly(id pluginapi.BufferID, ro bool) error {
-	if _, err := p.virtualDoc(id); err != nil {
+	if err := p.virtualDoc(id); err != nil {
 		return err
 	}
 	return editorErr(p.ed.SetReadOnlyID(editor.DocID(id), ro))
@@ -231,7 +232,7 @@ func contentStyle(s pluginapi.Style) decorations.Style {
 // entries, concatenated as given, all in one step: a content that does not fit changes
 // nothing.
 func (p *pluginEditor) SetContent(id pluginapi.BufferID, entries []pluginapi.ContentEntry) error {
-	if _, err := p.virtualDoc(id); err != nil {
+	if err := p.virtualDoc(id); err != nil {
 		return err
 	}
 	var c contentBuilder

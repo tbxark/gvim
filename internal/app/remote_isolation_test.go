@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/daemon"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/session"
@@ -54,7 +55,7 @@ func TestRemoteWorkspaceIsolationInHostAndExtract(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = m.reg.UpdateLayout(remoteWS.File.StableID, &layout)
-	if ownerID, _, ok := m.dormantOwner(canonicalWorkspaceFile(decoyFile)); ok {
+	if ownerID, _, ok := m.dormantOwner(editor.SharedCanonical(decoyFile)); ok {
 		t.Fatalf("dormantOwner matched remote workspace %q for local file", ownerID)
 	}
 

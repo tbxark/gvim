@@ -165,10 +165,7 @@ func (p *remotePreviewer) ReadWindow(ctx context.Context, path string, line, max
 		// The scan stopped on a budget/line bound, not EOF: the last line may be partial.
 		lines = lines[:len(lines)-1]
 	}
-	first := line - before
-	if first < 1 {
-		first = 1
-	}
+	first := max(line-before, 1)
 	if first > len(lines) {
 		return nil, 0, false, nil
 	}

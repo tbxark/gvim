@@ -62,8 +62,8 @@ func newRemoteOpsFake() *remoteOpsFake {
 func (f *remoteOpsFake) put(path, text string) *remoteOpsFake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if strings.HasSuffix(path, "/") {
-		f.dirs[strings.TrimSuffix(path, "/")] = true
+	if before, ok := strings.CutSuffix(path, "/"); ok {
+		f.dirs[before] = true
 		return f
 	}
 	f.files[path] = []byte(text)
@@ -561,12 +561,10 @@ func TestRemoteExplorerCreateFileConcurrentExactlyOne(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan error, n)
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := ops.CreateFile(context.Background(), "/remote/w", "race.go")
 			results <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)

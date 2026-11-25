@@ -173,7 +173,6 @@ func TestSlangBuiltinCacheContentAddressed(t *testing.T) {
 	}
 	done := make(chan result, 2)
 	for _, src := range [][]byte{[]byte("float a;\n"), []byte("float b;\n")} {
-		src := src
 		go func() {
 			path, err := writeSlangBuiltin("core", src)
 			done <- result{path: path, err: err}

@@ -62,7 +62,7 @@ func (a *remoteHighlightAccess) counts() (reads int, bytes int64) {
 // remoteHighlightContent is a UTF-8 Go-looking file of lines of about lineWidth bytes.
 func remoteHighlightContent(lines, lineWidth int) []byte {
 	var sb strings.Builder
-	for i := 0; i < lines; i++ {
+	for i := range lines {
 		text := fmt.Sprintf("var x%08d = 1", i)
 		if len(text) < lineWidth {
 			text += strings.Repeat("x", lineWidth-len(text))
@@ -191,7 +191,7 @@ func TestRemoteLargeDocumentWindowHighlighting(t *testing.T) {
 	// A repaint of the loaded window, and scrolling inside it, lex and read nothing
 	// remote: the cache and the loaded window serve the plain frame.
 	readsLexed, bytesLexed := access.counts()
-	for line := 0; line < 40; line++ {
+	for line := range 40 {
 		cache.LineSpans(doc, line)
 	}
 	if reads, bytes := access.counts(); reads != readsLexed || bytes != bytesLexed {

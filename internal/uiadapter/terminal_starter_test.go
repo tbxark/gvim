@@ -18,8 +18,8 @@ func waitScreenText(t *testing.T, term tui.Terminal, text string) {
 	for time.Now().Before(deadline) {
 		var b strings.Builder
 		sc := term.Screen()
-		for r := 0; r < sc.Rows; r++ {
-			for c := 0; c < sc.Cols; c++ {
+		for r := range sc.Rows {
+			for c := range sc.Cols {
 				ch := sc.Cell(r, c).Rune
 				if ch == 0 {
 					ch = ' '

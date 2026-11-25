@@ -53,7 +53,7 @@ func TestTerminalTabsMigrationAndBounds(t *testing.T) {
 	// A corrupt record cannot exceed the tab or row bounds, and control characters
 	// are stripped.
 	var tabs []terminal.SavedTab
-	for i := 0; i < maxSavedTerminalTabs+4; i++ {
+	for range maxSavedTerminalTabs + 4 {
 		rows := make([]string, maxSavedTerminalRows+10)
 		for j := range rows {
 			rows[j] = "row\x01"

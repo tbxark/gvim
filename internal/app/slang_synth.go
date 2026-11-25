@@ -193,7 +193,7 @@ func slangSynthModule(rawURI string) (string, error) {
 	if u.User != nil || u.Port() != "" || u.RawQuery != "" || u.Fragment != "" {
 		return "", fmt.Errorf("slang-synth: %q carries userinfo, port, query or fragment", rawURI)
 	}
-	for _, seg := range strings.Split(u.Path, "/") {
+	for seg := range strings.SplitSeq(u.Path, "/") {
 		if seg == ".." || seg == "." || strings.ContainsRune(seg, '\\') {
 			return "", fmt.Errorf("slang-synth: %q has an unsafe path", rawURI)
 		}

@@ -41,8 +41,8 @@ func (s *settingsService) structureLanguageChild(object map[string]json.RawMessa
 // languageOfChild is the language id of a child structure key: everything before
 // the first "." of the suffix ("go.extensions" gives go).
 func languageOfChild(rest string) string {
-	if i := strings.IndexByte(rest, '.'); i >= 0 {
-		return rest[:i]
+	if before, _, ok := strings.Cut(rest, "."); ok {
+		return before
 	}
 	return rest
 }
@@ -194,8 +194,8 @@ func countText(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun
 	}
-	if strings.HasSuffix(noun, "y") {
-		return strconv.Itoa(n) + " " + strings.TrimSuffix(noun, "y") + "ies"
+	if before, ok := strings.CutSuffix(noun, "y"); ok {
+		return strconv.Itoa(n) + " " + before + "ies"
 	}
 	return strconv.Itoa(n) + " " + noun + "s"
 }

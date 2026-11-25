@@ -48,8 +48,7 @@ func TestSettingsDetectorChangeReplansWatcher(t *testing.T) {
 	fs := &statDirFS{fakeWatchFS: raw, dirs: map[string]bool{"/remote/proj/config": true}}
 	slot := watchSlot(raw)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	defer watch.Close()
 	waitWatchCount(t, raw, 1)

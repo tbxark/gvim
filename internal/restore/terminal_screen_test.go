@@ -342,7 +342,7 @@ func TestSearchHistoryPersistenceBoundsAndCompat(t *testing.T) {
 	}
 	// The cap keeps the newest entries in order.
 	var many []string
-	for i := 0; i < terminal.MaxSearchHistoryEntries+20; i++ {
+	for i := range terminal.MaxSearchHistoryEntries + 20 {
 		many = append(many, fmt.Sprintf("q%d", i))
 	}
 	st.SearchHistory = many
@@ -409,13 +409,13 @@ func TestSaveTerminalBoundsTheGenericEntryPoint(t *testing.T) {
 	huge := strings.Repeat("x", 600)
 	longArg := strings.Repeat("a", 5000)
 	tabs := make([]terminal.SavedTab, 0, 40)
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		rows := make([]string, 0, 1000)
-		for j := 0; j < 1000; j++ {
+		for range 1000 {
 			rows = append(rows, huge)
 		}
 		args := make([]string, 0, 200)
-		for j := 0; j < 200; j++ {
+		for range 200 {
 			args = append(args, longArg)
 		}
 		tabs = append(tabs, terminal.SavedTab{
@@ -426,7 +426,7 @@ func TestSaveTerminalBoundsTheGenericEntryPoint(t *testing.T) {
 		})
 	}
 	history := make([]string, 0, 300)
-	for i := 0; i < 300; i++ {
+	for range 300 {
 		history = append(history, strings.Repeat("q", 2000))
 	}
 	st := terminal.SavedState{Version: terminal.SavedStateVersion, Tabs: tabs, ActiveTab: 1, SearchHistory: history}
@@ -525,7 +525,7 @@ func TestBoundedStateFitsTheReaderCap(t *testing.T) {
 	// escapes each backslash, so this is the 2x worst case at the byte bound.
 	row := strings.Repeat("\\", 1000)
 	rows := make([]string, 0, 500)
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		rows = append(rows, row)
 	}
 	// Sixfold JSON escape worst case: 32 KiB of control bytes per argv list.
@@ -533,7 +533,7 @@ func TestBoundedStateFitsTheReaderCap(t *testing.T) {
 	argv := []string{arg}
 	labels := strings.Repeat("n", 4096)
 	tabs := make([]terminal.SavedTab, 0, 16)
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		tabs = append(tabs, terminal.SavedTab{
 			Name: labels, Open: true, Cwd: "/" + strings.Repeat("c", 4096),
 			Rows: rows, LaunchArgv: argv, ResumeArgv: argv,

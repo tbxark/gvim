@@ -81,13 +81,11 @@ func TestFrameWriterSerializesConcurrentFrames(t *testing.T) {
 	}()
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := fw.WriteFrame(TypeOutput, want[i]); err != nil {
 				t.Errorf("WriteFrame(%d): %v", i, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	var got [][]byte

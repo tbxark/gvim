@@ -30,8 +30,7 @@ func openTargets(ed *editor.Editor, targets []FileTarget, reuseOpen bool) (notic
 			}
 		}
 		if err := ed.OpenFile(f.Path); err != nil {
-			var need editor.ErrLargeNeedsFullLoad
-			if errors.As(err, &need) {
+			if need, ok := errors.AsType[editor.ErrLargeNeedsFullLoad](err); ok {
 				// Decoding it whole would hold the first frame back. The UI asks.
 				fullLoads = append(fullLoads, need)
 				continue

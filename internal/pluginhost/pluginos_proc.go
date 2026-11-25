@@ -43,12 +43,12 @@ type osProc struct {
 	started   bool       // cmd.Start succeeded
 	termTimer *time.Timer
 	exited    atomic.Bool
-	timedOut atomic.Bool
-	termOnce sync.Once
-	quitOnce sync.Once
-	quit     chan struct{} // closed by Terminate and Shutdown: output is discarded from then on
-	done     chan struct{} // closed when the child is reaped and its output was read
-	res      hostos.ProcResult
+	timedOut  atomic.Bool
+	termOnce  sync.Once
+	quitOnce  sync.Once
+	quit      chan struct{} // closed by Terminate and Shutdown: output is discarded from then on
+	done      chan struct{} // closed when the child is reaped and its output was read
+	res       hostos.ProcResult
 
 	// Start only.
 	out     chan osChunk
@@ -367,11 +367,9 @@ func (o *pluginOS) Start(ctx context.Context, argv []string, opts hostos.ProcOpt
 	}
 	var rwg sync.WaitGroup
 	for i, r := range readers {
-		rwg.Add(1)
-		go func() {
-			defer rwg.Done()
+		rwg.Go(func() {
 			p.readLoop(r, i == 1)
-		}()
+		})
 	}
 	go func() {
 		werr := cmd.Wait() // returns at exit: the pipes are our own files

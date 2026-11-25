@@ -140,11 +140,9 @@ func TestDockOSC52QueryConcurrentTrustChanges(t *testing.T) {
 	var trusted atomic.Bool
 	query := dockOSC52Query(cfg, trusted.Load, func() (string, error) { return "hello", nil })
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for j := range 100 {
 				trusted.Store(j%2 == 0)
 				text, ok := query("c")
 				if ok && text != "hello" {
@@ -152,7 +150,7 @@ func TestDockOSC52QueryConcurrentTrustChanges(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

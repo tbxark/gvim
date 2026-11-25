@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -25,9 +26,7 @@ type remoteEnvScript struct {
 
 func (s *remoteEnvScript) Run(_ context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
 	s.calls = append(s.calls, oneShotCall{argv: append([]string(nil), argv...), cwd: o.Cwd, env: map[string]string{}})
-	for k, v := range o.Env {
-		s.calls[len(s.calls)-1].env[k] = v
-	}
+	maps.Copy(s.calls[len(s.calls)-1].env, o.Env)
 	if len(argv) < 3 || argv[0] != "sh" || argv[1] != "-c" {
 		return hostos.ProcResult{}, errors.New("unexpected remote command")
 	}

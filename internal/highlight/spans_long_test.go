@@ -3,6 +3,7 @@ package highlight
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,12 +14,7 @@ import (
 
 // containsKind reports whether kinds holds k.
 func containsKind(kinds []syntax.Kind, k syntax.Kind) bool {
-	for _, x := range kinds {
-		if x == k {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(kinds, k)
 }
 
 // A segment of a very long line has syntax colors, found by lexing the segment with a stretch of the

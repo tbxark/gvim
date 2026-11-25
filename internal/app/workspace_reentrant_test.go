@@ -118,12 +118,10 @@ func TestHostNotifyFromOtherGoroutinesWhileHostCallRuns(t *testing.T) {
 		t.Fatal("blocker host call did not start")
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			host.Notify("notice from another goroutine")
-		}()
+		})
 	}
 	wg.Wait()
 	close(release)

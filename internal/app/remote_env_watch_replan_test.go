@@ -37,8 +37,7 @@ func TestRemoteEnvWatchReplansOnDetectorChange(t *testing.T) {
 	fs := &statDirFS{fakeWatchFS: raw, dirs: map[string]bool{"/remote/proj/config": true}}
 	slot := watchSlot(raw)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	if watch == nil {
 		t.Fatal("no watcher")
@@ -87,7 +86,7 @@ func TestRemoteEnvWatchReplanRespectsBounds(t *testing.T) {
 	raw := &fakeWatchFS{}
 	files := map[string]bool{}
 	var detectors []config.EnvDetector
-	for i := 0; i < env.MaxDetectorWatchDirs+4; i++ {
+	for i := range env.MaxDetectorWatchDirs + 4 {
 		dir := strings.Repeat("d", i+1)
 		dirs := "/remote/proj/" + dir
 		files[dirs] = true
@@ -96,8 +95,7 @@ func TestRemoteEnvWatchReplanRespectsBounds(t *testing.T) {
 	fs := &statDirFS{fakeWatchFS: raw, dirs: files}
 	slot := watchSlot(raw)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	defer watch.Close()
 	waitWatchCount(t, raw, 1)
@@ -122,8 +120,7 @@ func TestRemoteEnvWatchReconnectedRearmsAndRecaptures(t *testing.T) {
 	provider.Warm(context.Background())
 	raw := &fakeWatchFS{}
 	slot := watchSlot(raw)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	if watch == nil {
 		t.Fatal("no watcher")

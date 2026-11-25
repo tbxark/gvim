@@ -63,25 +63,10 @@ type ignoreBatch struct {
 	notice   string
 }
 
-func parseRemoteCustomIgnore(pats []string) []gitignore.Pattern {
-	var rules []gitignore.Pattern
-	for _, p := range pats {
-		p = strings.TrimSpace(p)
-		if p == "" || strings.HasPrefix(p, "#") {
-			continue
-		}
-		rules = append(rules, gitignore.ParsePattern(p, nil))
-	}
-	return rules
-}
-
-// newIgnoreBatch returns a batch for the remote workspace root over files. files is a
-// function so a reconnected authority resolves the current carrier; a nil result is
-// treated as "no ignore files" (filtering is not applicable), never a local fallback.
-func newIgnoreBatch(files func() authority.FileSystem, root string) *ignoreBatch {
-	return newIgnoreBatchWithOptions(files, root, true, nil, nil, nil)
-}
-
+// newIgnoreBatchWithOptions returns a batch for the remote workspace root over files.
+// files is a function so a reconnected authority resolves the current carrier; a nil
+// result is treated as "no ignore files" (filtering is not applicable), never a local
+// fallback.
 func newIgnoreBatchWithOptions(files func() authority.FileSystem, root string, respectGitignore bool, customPatterns, scanExclusions, scanInclusions []string) *ignoreBatch {
 	b := &ignoreBatch{
 		files:            files,
@@ -91,7 +76,7 @@ func newIgnoreBatchWithOptions(files func() authority.FileSystem, root string, r
 		cache:            map[string][]gitignore.Pattern{},
 		matchers:         map[string]gitignore.Matcher{},
 	}
-	if rules := parseRemoteCustomIgnore(customPatterns); len(rules) > 0 {
+	if rules := explorer.ParsePatterns(customPatterns); len(rules) > 0 {
 		b.customMatcher = gitignore.NewMatcher(rules)
 	}
 	return b

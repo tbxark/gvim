@@ -86,8 +86,7 @@ func TestLocalEnvWatchRefreshesDetection(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, []config.EnvDetector{{Name: "node", Markers: []string{".nvmrc"}, Kind: config.EnvKindShell, Snippet: "true"}}, func() bool { return true })
 	fake := newFakeEnvFileWatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	if lw == nil {
 		t.Fatal("no local watcher")
@@ -120,8 +119,7 @@ func TestLocalEnvWatchReplansRuntimeDetectors(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, []config.EnvDetector{{Name: "node", Markers: []string{".nvmrc"}, Kind: config.EnvKindShell}}, func() bool { return true })
 	fake := newFakeEnvFileWatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	defer lw.Close()
 	if err := os.WriteFile(filepath.Join(root, ".envrc"), []byte("x"), 0o600); err != nil {
@@ -151,7 +149,7 @@ func TestLocalEnvWatchDegradesWithoutFsnotify(t *testing.T) {
 func TestLocalEnvWatchBoundsDetectorDirs(t *testing.T) {
 	root := t.TempDir()
 	var detectors []config.EnvDetector
-	for i := 0; i < env.MaxDetectorWatchDirs+4; i++ {
+	for i := range env.MaxDetectorWatchDirs + 4 {
 		dir := strings.Repeat("d", i+1)
 		if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
@@ -160,8 +158,7 @@ func TestLocalEnvWatchBoundsDetectorDirs(t *testing.T) {
 	}
 	provider := env.New(root, detectors, func() bool { return true })
 	fake := newFakeEnvFileWatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	defer lw.Close()
 	if got, want := fake.addedCount(), 1+env.MaxDetectorWatchDirs; got > want {
@@ -198,8 +195,7 @@ func TestLocalEnvWatchCloseIsCancellable(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, nil, func() bool { return true })
 	fake := newFakeEnvFileWatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	if lw == nil {
 		t.Fatal("no local watcher")
@@ -251,8 +247,7 @@ func TestLocalEnvWatchRootAddFailureReclaimsAndNotices(t *testing.T) {
 	provider := env.New(root, testLocalDetector("node", ".nvmrc"), func() bool { return true })
 	fake := newFakeEnvFileWatch()
 	fake.failDir = rootAbs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil); lw != nil {
 		lw.Close()
 		t.Fatal("a watcher started although the workspace root could not be watched")
@@ -276,8 +271,7 @@ func TestLocalEnvWatchPartialAddFailureRecoversAndClearsNotice(t *testing.T) {
 	provider := env.New(root, testLocalDetector("node", ".nvmrc"), func() bool { return true })
 	fake := newFakeEnvFileWatch()
 	fake.failDir = nested
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	if lw == nil {
 		t.Fatal("no local watcher")
@@ -331,8 +325,7 @@ func TestLocalEnvWatchRetryAfterRootAddFailure(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "workspace-does-not-exist-yet")
 	provider := env.New(root, testLocalDetector("node", ".nvmrc"), func() bool { return true })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	first := startLocalEnvWatch(ctx, provider, root)
 	if first != nil {
 		first.Close()
@@ -376,8 +369,7 @@ func TestLocalEnvWatchRetrySkipsLiveWatcher(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, nil, func() bool { return true })
 	fake := newFakeEnvFileWatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
 	if lw == nil {
 		t.Fatal("no watcher")
@@ -400,8 +392,7 @@ func TestLocalEnvWatchRetrySkipsLiveWatcher(t *testing.T) {
 func TestLocalEnvWatchRetryReplacesDeadWatcher(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, nil, func() bool { return true })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	firstFake := newFakeEnvFileWatch()
 	first := startLocalEnvWatchWith(ctx, provider, root, firstFake, nil)
 	if first == nil {
@@ -447,8 +438,7 @@ func TestLocalEnvWatchRetryHonoursCancelledContext(t *testing.T) {
 func TestLocalEnvWatchRetrySetInstallAppliesRecoveredWatcher(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, nil, func() bool { return true })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	fake := newFakeEnvFileWatch()
 	var lw *localEnvWatch
 	retry := &localEnvWatchRetry{
@@ -480,8 +470,7 @@ func TestLocalEnvWatchRetrySetInstallAppliesRecoveredWatcher(t *testing.T) {
 func TestLocalEnvWatchRetrySetInstallConcurrent(t *testing.T) {
 	root := t.TempDir()
 	provider := env.New(root, nil, func() bool { return true })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	started := make(chan struct{}, 4)
 	retry := &localEnvWatchRetry{
 		ctx: ctx,

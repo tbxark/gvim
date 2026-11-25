@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -310,8 +311,7 @@ func scanCodexStore(ctx context.Context, home string, getenv func(string) string
 		}
 		// The store is date-sharded (YYYY/MM/DD), so name order is time order: walk
 		// newest first, so the entry bound drops the oldest days, not the newest.
-		for i := len(items) - 1; i >= 0; i-- {
-			entry := items[i]
+		for _, entry := range slices.Backward(items) {
 			if ctx.Err() != nil {
 				return true
 			}
@@ -484,7 +484,7 @@ func safeSessionID(id string) bool {
 	if id == "" || len(id) > maxExternalIDBytes || id[0] == '-' {
 		return false
 	}
-	for i := 0; i < len(id); i++ {
+	for i := range len(id) {
 		c := id[i]
 		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' {
 			continue

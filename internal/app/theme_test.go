@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -77,12 +78,7 @@ func TestRunThemeForms(t *testing.T) {
 
 // containsString reports whether s contains value.
 func containsString(s []string, value string) bool {
-	for _, item := range s {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, value)
 }
 
 // TestThemeCatalogSaveAndDelete checks the editor's save path: one atomic write
@@ -192,12 +188,7 @@ func TestRunThemeHonorsNoColorUnlessOverridden(t *testing.T) {
 
 // sliceContains reports whether s contains value.
 func sliceContains(s []string, value string) bool {
-	for _, item := range s {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, value)
 }
 
 var _ = config.Config{}

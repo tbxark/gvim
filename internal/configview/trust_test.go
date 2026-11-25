@@ -55,8 +55,8 @@ func TestLoadGatesTheProjectLayerByTrust(t *testing.T) {
 		wantSkip bool
 	}{
 		{"no trust information", nil, 2, true},
-		{"untrusted", boolPtr(false), 2, true},
-		{"trusted", boolPtr(true), 8, false},
+		{"untrusted", new(false), 2, true},
+		{"trusted", new(true), 8, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,6 +105,3 @@ func TestLoadWithoutAProjectFileHasNoSkipNote(t *testing.T) {
 		}
 	}
 }
-
-// boolPtr returns a pointer to b.
-func boolPtr(b bool) *bool { return &b }

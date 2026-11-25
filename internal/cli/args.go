@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"strconv"
 	"strings"
 
 	"github.com/tbxark/gvim/authority"
@@ -96,27 +95,15 @@ func splitPosition(arg string) (path string, line, col int, ok bool) {
 	if i <= 0 {
 		return "", 0, 0, false
 	}
-	last, ok := parsePosition(arg[i+1:])
+	last, ok := authority.ParsePosition(arg[i+1:])
 	if !ok {
 		return "", 0, 0, false
 	}
 	head := arg[:i]
 	if j := strings.LastIndex(head, ":"); j > 0 {
-		if first, ok := parsePosition(head[j+1:]); ok {
+		if first, ok := authority.ParsePosition(head[j+1:]); ok {
 			return head[:j], first, last, true
 		}
 	}
 	return head, last, 0, true
-}
-
-// parsePosition reads a positive decimal number that has only digits.
-func parsePosition(s string) (int, bool) {
-	if s == "" || strings.Trim(s, "0123456789") != "" {
-		return 0, false
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 {
-		return 0, false
-	}
-	return n, true
 }

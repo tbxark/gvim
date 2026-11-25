@@ -73,10 +73,7 @@ func (f *daemonRemoteFS) ReadRange(_ context.Context, path string, off, n int64)
 	if off >= int64(len(data)) {
 		return nil, nil
 	}
-	end := off + n
-	if end > int64(len(data)) {
-		end = int64(len(data))
-	}
+	end := min(off+n, int64(len(data)))
 	return append([]byte(nil), data[off:end]...), nil
 }
 

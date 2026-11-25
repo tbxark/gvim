@@ -76,7 +76,7 @@ func TestProjectReplaceReachesAnOpenTabWithCanonicalisedPaths(t *testing.T) {
 
 // noticeRow returns the last screen row that holds a replace notice, trimmed.
 func noticeRow(screen string) string {
-	for _, line := range strings.Split(screen, "\n") {
+	for line := range strings.SplitSeq(screen, "\n") {
 		if strings.Contains(line, "files changed in") {
 			return strings.TrimSpace(line)
 		}

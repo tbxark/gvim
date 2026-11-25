@@ -101,8 +101,7 @@ func TestLocalEnvWatchRealFsnotifyNestedParentAppears(t *testing.T) {
 func TestLocalEnvWatchRealFsnotifyUnwatchableRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	provider := env.New(missing, testDetector("node", ".nvmrc"), func() bool { return true })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	lw := startLocalEnvWatch(ctx, provider, missing)
 	if lw != nil {
 		lw.Close()

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -226,7 +227,7 @@ func TerminalRecordSymlink(dir string) (string, bool) {
 // terminal.json.rejected, then terminal.json.rejected.1, .2, ... It stops after
 // maxQuarantineAttempts rather than scanning forever.
 func quarantinePath(path string) (string, error) {
-	for i := 0; i < maxQuarantineAttempts; i++ {
+	for i := range maxQuarantineAttempts {
 		candidate := path + ".rejected"
 		if i > 0 {
 			candidate = fmt.Sprintf("%s.rejected.%d", path, i)
@@ -502,8 +503,8 @@ func boundTerminalRows(rows []string) []string {
 		rows = rows[len(rows)-maxSavedTerminalRows:]
 	}
 	size := 0
-	for i := len(rows) - 1; i >= 0; i-- {
-		size += len(rows[i]) + 1
+	for i, row := range slices.Backward(rows) {
+		size += len(row) + 1
 		if size > maxSavedTerminalBytes {
 			rows = rows[i+1:]
 			break

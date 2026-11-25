@@ -576,7 +576,7 @@ func (r *Registry) path(root, id string) string {
 // root inside the file is authoritative, so the name is only a locator.
 func encodeRoot(root string) string {
 	var b strings.Builder
-	for i := 0; i < len(root); i++ {
+	for i := range len(root) {
 		ch := root[i]
 		switch {
 		case ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch >= '0' && ch <= '9', ch == '-', ch == '_', ch == '.':

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,8 +57,7 @@ func TestEnvPortDetectedEnvTriggersNeededWatchRetry(t *testing.T) {
 	provider := env.New(root, []config.EnvDetector{{
 		Name: "node", Markers: []string{".nvmrc"}, Kind: config.EnvKindShell, Snippet: "true",
 	}}, func() bool { return true })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Simulate the initial root-Add failure (the real path is covered by the local watcher
 	// retry test; this test drives the env-port read that Env: Reload performs first).
 	provider.SetWatchRetryNeeded(true)

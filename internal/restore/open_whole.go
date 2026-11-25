@@ -13,8 +13,7 @@ import (
 // editor.ErrTooLargeToTranscode.
 func openFile(ed *editor.Editor, path string) error {
 	err := ed.OpenFile(path)
-	var need editor.ErrLargeNeedsFullLoad
-	if !errors.As(err, &need) {
+	if _, ok := errors.AsType[editor.ErrLargeNeedsFullLoad](err); !ok {
 		return err
 	}
 	d, err := ed.LoadFullFunc(path)()

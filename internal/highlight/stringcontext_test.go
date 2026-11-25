@@ -48,7 +48,7 @@ func TestStringContext(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ed := openText(t, tt.file, tt.text)
-			if got := NewStringContext()(ed.Active(), tt.at); got != tt.want {
+			if got := (&stringCache{}).inString(ed.Active(), tt.at); got != tt.want {
 				t.Fatalf("stringContext(%+v) = %v, want %v", tt.at, got, tt.want)
 			}
 		})
@@ -139,7 +139,7 @@ func TestNonCodeContextMasksCommentsAndStrings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ed := openText(t, tt.file, tt.text)
-			mask := NewNonCodeContext()(ed.Active(), tt.line)
+			mask := (&stringCache{}).nonCode(ed.Active(), tt.line)
 			var got strings.Builder
 			for _, m := range mask {
 				if m {

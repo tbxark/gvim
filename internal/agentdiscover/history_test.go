@@ -170,7 +170,7 @@ func TestScanExternalClaudeUntrustedIDFallsBackOrSkips(t *testing.T) {
 func TestScanExternalClaudeNewestSessionsBound(t *testing.T) {
 	t.Parallel()
 	h := newHistoryHome(t)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		name := "00000000-0000-0000-0000-00000000000" + strconv.Itoa(i)
 		path := h.claudeFile(t, "bucket", name, `{"type":"user","cwd":"/w","sessionId":"`+name+`"}`)
 		h.setModTime(t, path)

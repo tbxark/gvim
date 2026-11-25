@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -98,13 +99,11 @@ func mapErr(err error, path string) error {
 	if err == nil {
 		return nil
 	}
-	var pe *pluginapi.Error
-	if errors.As(err, &pe) {
+	if _, ok := errors.AsType[*pluginapi.Error](err); ok {
 		return err
 	}
 	msg := err.Error()
-	var perr *fs.PathError
-	if errors.As(err, &perr) {
+	if perr, ok := errors.AsType[*fs.PathError](err); ok {
 		msg = fmt.Sprintf("%s: %v", perr.Path, perr.Err)
 	} else if path != "" {
 		msg = path + ": " + msg
@@ -614,8 +613,8 @@ func realCopyDestination(p string) (string, error) {
 	cur := filepath.Clean(p)
 	for {
 		if real, err := filepath.EvalSymlinks(cur); err == nil {
-			for i := len(suffix) - 1; i >= 0; i-- {
-				real = filepath.Join(real, suffix[i])
+			for _, s := range slices.Backward(suffix) {
+				real = filepath.Join(real, s)
 			}
 			return filepath.Clean(real), nil
 		}

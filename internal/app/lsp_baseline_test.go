@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -65,8 +64,7 @@ func waitBaselineApplied(t *testing.T, b *lspBaselineUpdater) {
 // baseline, and the latest config+trust snapshot is applied last.
 func TestLSPBaselineLatestConfigWinsOverStaleTrustCallback(t *testing.T) {
 	fake := &fakeLSPConfigSetter{started: make(chan struct{}), release: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	b := newLSPBaselineUpdater(ctx, fake, config.Defaults(), trust.State{Level: trust.Trusted})
 	if b == nil {
 		t.Fatal("baseline updater was not built")
@@ -102,8 +100,7 @@ func TestLSPBaselineLatestConfigWinsOverStaleTrustCallback(t *testing.T) {
 
 func TestLSPBaselineWaitBlocksUntilPendingConfigApplied(t *testing.T) {
 	fake := &fakeLSPConfigSetter{started: make(chan struct{}), release: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	b := newLSPBaselineUpdater(ctx, fake, config.Defaults(), trust.State{Level: trust.Restricted})
 	b.UpdateTrust(trust.State{Level: trust.Trusted})
 	select {
@@ -130,8 +127,7 @@ func TestLSPBaselineWaitBlocksUntilPendingConfigApplied(t *testing.T) {
 // UpdateConfig/UpdateTrust return promptly because only the worker applies.
 func TestLSPBaselineUpdateDoesNotBlockCaller(t *testing.T) {
 	fake := &fakeLSPConfigSetter{started: make(chan struct{}), release: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	b := newLSPBaselineUpdater(ctx, fake, config.Defaults(), trust.State{Level: trust.Trusted})
 	b.UpdateConfig(config.Defaults(), trust.State{Level: trust.Trusted})
 	select {

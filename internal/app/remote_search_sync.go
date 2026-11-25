@@ -162,10 +162,7 @@ func (s *remoteSearch) PreviewWindowContext(ctx context.Context, req searchpanel
 	first := req.Start + 1
 	if req.Start < 0 {
 		start := req.Line - 1
-		end := req.EndLine - 1
-		if end < start {
-			end = start
-		}
+		end := max(req.EndLine-1, start)
 		span := end - start + 1
 		first = start + 1
 		if span < req.Lines {
@@ -227,11 +224,8 @@ func previewStoredText(req searchpanel.PreviewRequest, cache *previewHighlighter
 	total := len(lines)
 	out.Total = total
 	start := clampInt(req.Line-1, 0, max(total-1, 0))
-	end := req.EndLine - 1
-	if end < start {
-		end = start
-	}
-	first := 0
+	end := max(req.EndLine-1, start)
+	var first int
 	if req.Start >= 0 {
 		first = clampInt(req.Start, 0, max(total-req.Lines, 0))
 	} else {

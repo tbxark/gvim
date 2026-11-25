@@ -120,8 +120,8 @@ func ParseKey(spec string) (tea.KeyPressMsg, error) {
 	var mods []string
 	name := spec
 	if spec != "+" {
-		if strings.HasSuffix(spec, "++") {
-			mods = strings.Split(strings.TrimSuffix(spec, "++"), "+")
+		if before, ok := strings.CutSuffix(spec, "++"); ok {
+			mods = strings.Split(before, "+")
 			name = "+"
 		} else if i := strings.LastIndexByte(spec, '+'); i >= 0 {
 			mods = strings.Split(spec[:i], "+")

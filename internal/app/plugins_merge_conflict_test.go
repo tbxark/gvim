@@ -34,8 +34,8 @@ var bgSGR = regexp.MustCompile(`48;2;\d+;\d+;\d+|48;5;\d+`)
 func (s *pluginSession) rowBackgrounds(text string) map[string]bool {
 	s.t.Helper()
 	out := map[string]bool{}
-	raw := strings.Split(s.m.View().Content, "\n")
-	for _, r := range raw {
+	raw := strings.SplitSeq(s.m.View().Content, "\n")
+	for r := range raw {
 		if !strings.Contains(stripANSI(r), text) {
 			continue
 		}

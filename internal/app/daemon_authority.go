@@ -109,7 +109,7 @@ type daemonAuthorityPrompter interface {
 // daemon was not started interactively: a password prompt must fail, never hang waiting on
 // a stdin nobody answers.
 func newDaemonAuthorityPrompter() (daemonAuthorityPrompter, error) {
-	if !term.IsTerminal(uintptr(os.Stdin.Fd())) {
+	if !term.IsTerminal(os.Stdin.Fd()) {
 		return nil, errors.New("daemon: the remote workspace needs SSH authentication, but stdin is not an interactive terminal; start the daemon from a terminal to answer prompts, or configure an SSH key/agent so no prompt is needed")
 	}
 	return &terminalDaemonPrompter{in: bufio.NewReader(os.Stdin)}, nil
@@ -125,7 +125,7 @@ type terminalDaemonPrompter struct {
 
 func (p *terminalDaemonPrompter) Secret(prompt string) (string, error) {
 	_, _ = fmt.Fprint(os.Stderr, prompt)
-	data, err := term.ReadPassword(uintptr(os.Stdin.Fd()))
+	data, err := term.ReadPassword(os.Stdin.Fd())
 	_, _ = fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", err
@@ -195,7 +195,7 @@ func connectDaemonAuthority(ctx context.Context, slot authority.Slot, prompter d
 	if last == nil {
 		return nil
 	}
-	for attempt := 0; attempt < attempts; attempt++ {
+	for range attempts {
 		switch {
 		case needsPassword():
 			answer, perr := prompter.Secret("SSH password for " + slot.Label() + ": ")

@@ -260,7 +260,7 @@ func (s *settingsService) setPluginEnabled(name string, enabled bool) error {
 	}
 	if _, err := s.reloadUnlocked([]string{"plugins." + name + ".enabled"}, "user"); err != nil {
 		if rerr := rollback(); rerr != nil {
-			return fmt.Errorf("%w (rollback failed: %v)", err, rerr)
+			return fmt.Errorf("%w (rollback failed: %w)", err, rerr)
 		}
 		return err
 	}
@@ -270,7 +270,7 @@ func (s *settingsService) setPluginEnabled(name string, enabled bool) error {
 	if diags := s.diagnosticsOf(path); len(diags) > 0 {
 		err := fmt.Errorf("the config file does not load after the write: %s", diags[0])
 		if rerr := rollback(); rerr != nil {
-			return fmt.Errorf("%w (rollback failed: %v)", err, rerr)
+			return fmt.Errorf("%w (rollback failed: %w)", err, rerr)
 		}
 		return err
 	}

@@ -27,7 +27,7 @@ func pluginGoroutines() []string {
 	buf := make([]byte, 4<<20)
 	buf = buf[:goruntime.Stack(buf, true)]
 	var out []string
-	for _, g := range strings.Split(string(buf), "\n\n") {
+	for g := range strings.SplitSeq(string(buf), "\n\n") {
 		for _, marker := range []string{"gvim/plugin.", "app.(*osProc)", "app.(*osWatch)", "app.(*pluginOS)"} {
 			if strings.Contains(g, marker) {
 				out = append(out, g)

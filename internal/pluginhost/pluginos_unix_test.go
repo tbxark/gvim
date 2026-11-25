@@ -375,9 +375,7 @@ func TestOSTablesRaceFree(t *testing.T) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for i := range 12 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			switch i % 3 {
 			case 0:
 				_, _ = o.Run(ctx, []string{"sh", "-c", "echo hi"}, hostos.ProcOptions{})
@@ -401,10 +399,9 @@ func TestOSTablesRaceFree(t *testing.T) {
 					w.Stop()
 				}
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() { defer wg.Done(); time.Sleep(50 * time.Millisecond); o.Shutdown() }()
+	wg.Go(func() { ; time.Sleep(50 * time.Millisecond); o.Shutdown() })
 	wg.Wait()
 }
 

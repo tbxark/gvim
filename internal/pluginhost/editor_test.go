@@ -582,7 +582,7 @@ func applyRec(t *testing.T, text string, r pluginapi.ChangeRec) string {
 	off := func(p pluginapi.Pos) int {
 		lines := strings.Split(text, "\n")
 		n := 0
-		for i := 0; i < p.Line; i++ {
+		for i := range p.Line {
 			n += len(lines[i]) + 1
 		}
 		return n + p.Col

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -716,7 +717,7 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 	scope.listed = true
 	scope.tracked = make(map[string]bool)
 	scope.untracked = make(map[string]bool)
-	for _, raw := range strings.Split(string(files.Stdout), "\x00") {
+	for raw := range strings.SplitSeq(string(files.Stdout), "\x00") {
 		if raw == "" {
 			continue
 		}
@@ -781,7 +782,7 @@ func (s *remoteSearch) resolveNestedPrefixes(ctx context.Context, scope *remoteP
 			return
 		}
 		entry := nestedListing{prefix: prefix, tracked: map[string]bool{}, untracked: map[string]bool{}}
-		for _, raw := range strings.Split(string(res.Stdout), "\x00") {
+		for raw := range strings.SplitSeq(string(res.Stdout), "\x00") {
 			if raw == "" {
 				continue
 			}
@@ -828,8 +829,8 @@ func (s *remoteSearch) resolveNestedPrefixes(ctx context.Context, scope *remoteP
 // "<mode> <object> <stage>\t<path>" (mode 160000 is a submodule), an untracked one is the
 // bare path (a nested repository path ends with '/').
 func parseGitLsFilesEntry(entry string) (pathPart string, tracked, submodule bool) {
-	if tab := strings.IndexByte(entry, '\t'); tab >= 0 {
-		header, pathPart := entry[:tab], entry[tab+1:]
+	if before, after, ok := strings.Cut(entry, "\t"); ok {
+		header, pathPart := before, after
 		fields := strings.Fields(header)
 		if len(fields) > 0 && fields[0] == "160000" {
 			return pathPart, true, true
@@ -862,11 +863,11 @@ func (sc *remoteProjectResultScope) allows(rel string) bool {
 		return !hiddenRemotePath(clean)
 	}
 	for _, prefix := range sc.prefixes {
-		if strings.HasPrefix(clean, prefix) {
+		if after, ok := strings.CutPrefix(clean, prefix); ok {
 			// The nested repository is walked by Fresh's walk rules: hidden directories
 			// and IGNORED_DIRS inside it are left out (its own .gitignore still cannot be
 			// applied by this single listing; that remains a recorded residual).
-			return walkedRemotePathAllowed(strings.TrimPrefix(clean, prefix))
+			return walkedRemotePathAllowed(after)
 		}
 	}
 	return false
@@ -874,7 +875,7 @@ func (sc *remoteProjectResultScope) allows(rel string) bool {
 
 // hiddenRemotePath reports a dot-named path segment (the hidden-file rule).
 func hiddenRemotePath(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
+	for seg := range strings.SplitSeq(p, "/") {
 		if strings.HasPrefix(seg, ".") {
 			return true
 		}
@@ -885,11 +886,9 @@ func hiddenRemotePath(p string) bool {
 // skippedRemotePath reports a path segment Fresh's directory walk never enters
 // (IGNORED_DIRS: .git, node_modules, target, __pycache__, .hg, .svn, .DS_Store).
 func skippedRemotePath(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
-		for _, skip := range remoteGrepSkipDirs {
-			if seg == skip {
-				return true
-			}
+	for seg := range strings.SplitSeq(p, "/") {
+		if slices.Contains(remoteGrepSkipDirs, seg) {
+			return true
 		}
 	}
 	return false
@@ -1365,15 +1364,11 @@ func cleanRemoteDisplayText(s string) string {
 	return clean
 }
 
-// remoteLineMatches finds the matches on one output line with the same search engine the
-// local project search uses (no IO: the line text came from the remote process). When the
-// engine finds nothing (for example a regex the line split broke), a synthetic match at
-// the reported byte column keeps the hit visible. It returns at most limit-total matches.
-func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, limit int) []searchpanel.Match {
-	cq, _ := search.CompileQuery(q)
-	return remoteLineMatchesCompiled(cq, q.Text, lineNo, line, byteCol, total, limit)
-}
-
+// remoteLineMatchesCompiled finds the matches on one output line with the same search
+// engine the local project search uses (no IO: the line text came from the remote
+// process). When the engine finds nothing (for example a regex the line split broke), a
+// synthetic match at the reported byte column keeps the hit visible. It returns at most
+// limit-total matches.
 func remoteLineMatchesCompiled(cq *search.CompiledQuery, queryText string, lineNo int, line string, byteCol, total, limit int) []searchpanel.Match {
 	line = strings.TrimRight(line, "\r")
 	remaining := limit - total

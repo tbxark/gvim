@@ -246,10 +246,10 @@ func (s *Session) Screen() Screen {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc := Screen{w: s.w, h: s.h, cells: make([][]Cell, s.h)}
-	for y := 0; y < s.h; y++ {
+	for y := range s.h {
 		row := make([]Cell, s.w)
 		skip := 0
-		for x := 0; x < s.w; x++ {
+		for x := range s.w {
 			c := s.emu.CellAt(x, y)
 			if skip > 0 {
 				row[x] = cellFromUV(c, true)

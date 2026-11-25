@@ -8,6 +8,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -218,8 +219,6 @@ func cloneMarks(in map[string]rune) map[string]rune {
 		return nil
 	}
 	out := make(map[string]rune, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }

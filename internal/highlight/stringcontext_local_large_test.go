@@ -40,7 +40,7 @@ func openLocalLargeDoc(t *testing.T, content string) *editor.Editor {
 // and a comment.
 func localLargeQuoteContent(lines int) string {
 	var sb strings.Builder
-	for i := 0; i < lines; i++ {
+	for i := range lines {
 		fmt.Fprintf(&sb, "var x%05d = \"hello\" // c\n", i)
 	}
 	return sb.String()
@@ -104,7 +104,7 @@ func TestStringContextLocalLargeIsBounded(t *testing.T) {
 	}
 
 	// The non-code mask marks the string and the comment on a local large line.
-	mask := NewNonCodeContext()(doc, target)
+	mask := (&stringCache{}).nonCode(doc, target)
 	var masked int
 	for _, m := range mask {
 		if m {
@@ -123,11 +123,11 @@ func TestStringContextLocalLargeLongLineBoundary(t *testing.T) {
 	t.Parallel()
 	huge := "var huge = \"" + strings.Repeat("x", 10000) + "\""
 	lines := make([]string, 0, 102)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		lines = append(lines, fmt.Sprintf("var before%02d = \"hello\" // c", i))
 	}
 	lines = append(lines, huge)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		lines = append(lines, fmt.Sprintf("var after%02d = \"hello\" // c", i))
 	}
 	ed := openLocalLargeDoc(t, strings.Join(lines, "\n")+"\n")

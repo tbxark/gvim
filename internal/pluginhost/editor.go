@@ -9,6 +9,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/decorations"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/search"
 	"github.com/tbxark/gvim/syntax"
@@ -359,7 +360,7 @@ func (p *pluginEditor) Edit(id pluginapi.BufferID, edits []pluginapi.Edit, o plu
 		if to.Less(from) {
 			from, to = to, from
 		}
-		text := normalizeEOL(e.Text)
+		text := plugin.NormalizeEOL(e.Text)
 		total += int64(len(text)) + removedBytes(b, from, to, pluginMaxEditBytes)
 		if total > pluginMaxEditBytes {
 			return pluginapi.Errf(pluginapi.CodeLimit, "edit is over %d bytes (inserted plus removed)", pluginMaxEditBytes)

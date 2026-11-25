@@ -100,11 +100,11 @@ func TestAuthorityOSCopyTreeConcurrentSameDestination(t *testing.T) {
 	files := copyTreeFixture()
 	osys, _ := authorityOSForAtomic(t, files)
 	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() { errs <- osys.Copy(context.Background(), "src", "dst") }()
 	}
 	var ok, conflict int
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		err := <-errs
 		switch {
 		case err == nil:

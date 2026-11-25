@@ -14,8 +14,7 @@ import (
 )
 
 func exclusiveCodeOf(err error) pluginapi.Code {
-	var pe *pluginapi.Error
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*pluginapi.Error](err); ok {
 		return pe.Code
 	}
 	return ""

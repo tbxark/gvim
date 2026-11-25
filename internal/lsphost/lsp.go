@@ -361,7 +361,7 @@ func (p *lspPort) resolveServerRoot(filePath, language, workspace string, checke
 	key := strings.Join(markers, "\x00")
 	dir := path.Dir(filePath)
 	startGen := p.generation()
-	for steps := 0; steps < remoteRootMaxDepth; steps++ {
+	for range remoteRootMaxDepth {
 		if p.generation() != startGen {
 			p.setNotice(tui.LSPNotice{
 				Key: "gvim.notice.lsp.remote_root_changed", English: "Remote LSP root_markers scan abandoned after the workspace changed; using the workspace root",
@@ -683,7 +683,7 @@ func (p *lspPort) uiCompletion(path string, rec lspDocRec, h *manager.Handle, ca
 	return out
 }
 
-// Rename renames the symbol at at to name and returns the workspace edit to
+// Rename renames the symbol at position `at` to name and returns the workspace edit to
 // apply: the text edits per file and any file create, rename or delete.
 func (p *lspPort) Rename(path string, at buffer.Pos, name string) (tui.WorkspaceEdit, error) {
 	var edit *protocol.WorkspaceEdit
@@ -877,7 +877,7 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 					return tui.WorkspaceEdit{}, err
 				}
 			case *protocol.CreateFile:
-				file := uri.URI(change.URI).FsPath()
+				file := change.URI.FsPath()
 				op := tui.WorkspaceOp{Kind: tui.WorkspaceOpCreate, Path: file}
 				if change.Options != nil {
 					op.Overwrite = boolValue(change.Options.Overwrite)
@@ -895,8 +895,8 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 				delete(deleted, file)
 				out.Ops = append(out.Ops, op)
 			case *protocol.RenameFile:
-				oldPath := uri.URI(change.OldURI).FsPath()
-				newPath := uri.URI(change.NewURI).FsPath()
+				oldPath := change.OldURI.FsPath()
+				newPath := change.NewURI.FsPath()
 				op := tui.WorkspaceOp{Kind: tui.WorkspaceOpRename, Path: oldPath, NewPath: newPath}
 				if change.Options != nil {
 					op.Overwrite = boolValue(change.Options.Overwrite)
@@ -910,7 +910,7 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 				delete(deleted, newPath)
 				out.Ops = append(out.Ops, op)
 			case *protocol.DeleteFile:
-				file := uri.URI(change.URI).FsPath()
+				file := change.URI.FsPath()
 				delete(virtualText, file)
 				deleted[file] = true
 				out.Ops = append(out.Ops, tui.WorkspaceOp{Kind: tui.WorkspaceOpDelete, Path: file})

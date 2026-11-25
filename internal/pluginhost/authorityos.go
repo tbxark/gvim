@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"maps"
 	"path"
 	"strings"
 	"time"
@@ -54,9 +55,7 @@ func (o *authorityOS) checkGate(ctx context.Context, argv []string, opts hostos.
 		return nil
 	}
 	env := make(map[string]string, len(opts.Env))
-	for k, v := range opts.Env {
-		env[k] = v
-	}
+	maps.Copy(env, opts.Env)
 	return o.gate(ctx, argv, o.resolveCwd(opts.Cwd), env)
 }
 

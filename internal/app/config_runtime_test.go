@@ -124,8 +124,8 @@ func splitTestChord(c string) (key string, mods []string) {
 	if c == "+" {
 		return "+", []string{}
 	}
-	if strings.HasSuffix(c, "++") {
-		return "+", strings.Split(strings.TrimSuffix(c, "++"), "+")
+	if before, ok := strings.CutSuffix(c, "++"); ok {
+		return "+", strings.Split(before, "+")
 	}
 	parts := strings.Split(c, "+")
 	return parts[len(parts)-1], append([]string{}, parts[:len(parts)-1]...)

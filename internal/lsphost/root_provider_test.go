@@ -264,7 +264,7 @@ func TestProviderChangeAndExplicitStartRace(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			port.SetRootServerProvider(root, func(language string) (manager.ServerConfig, bool) {
 				if language != "typescript" {
 					return manager.ServerConfig{}, false
@@ -276,7 +276,7 @@ func TestProviderChangeAndExplicitStartRace(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			_ = port.StartLanguage("typescript")
 		}
 	}()

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -29,9 +30,7 @@ func (s *shellScript) Run(ctx context.Context, argv []string, o hostos.ProcOptio
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	call := oneShotCall{argv: append([]string(nil), argv...), cwd: o.Cwd, env: map[string]string{}}
-	for k, v := range o.Env {
-		call.env[k] = v
-	}
+	maps.Copy(call.env, o.Env)
 	s.calls = append(s.calls, call)
 	switch {
 	case len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" && argv[2] == remoteEnvShellProbe:
@@ -237,13 +236,11 @@ func TestRemoteEnvShellConcurrentCaptureAndReprobe(t *testing.T) {
 	runner := newShellEnvRunner(t, script, nil)
 	runner.Prepare(context.Background())
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			runner.Reprobes(context.Background())
 			_, _ = runner.RunCapture(context.Background(), "cd /remote/proj && env -0")
-		}()
+		})
 	}
 	wg.Wait()
 	if got := runner.Notice(); got != "" {

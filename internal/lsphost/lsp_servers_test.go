@@ -233,8 +233,8 @@ func TestOpenLanguageTellsTsxFromTypeScript(t *testing.T) {
 		{"/w/a.tsx", "go", "go"},
 	}
 	for _, tt := range tests {
-		if got := openLanguage(tt.path, tt.lang); got != tt.want {
-			t.Errorf("openLanguage(%q, %q) = %q, want %q", tt.path, tt.lang, got, tt.want)
+		if got := openLanguageWith(tt.path, tt.lang, false, cppSibling); got != tt.want {
+			t.Errorf("openLanguageWith(%q, %q) = %q, want %q", tt.path, tt.lang, got, tt.want)
 		}
 	}
 	plan := lspPlanFor(config.Defaults())
@@ -424,8 +424,8 @@ func TestOpenLanguageRoutesAHeaderWithACppSibling(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := openLanguage(filepath.Join(dir, tt.file), tt.lang); got != tt.want {
-				t.Errorf("openLanguage(%s, %q) = %q, want %q", tt.file, tt.lang, got, tt.want)
+			if got := openLanguageWith(filepath.Join(dir, tt.file), tt.lang, false, cppSibling); got != tt.want {
+				t.Errorf("openLanguageWith(%s, %q) = %q, want %q", tt.file, tt.lang, got, tt.want)
 			}
 		})
 	}

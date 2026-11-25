@@ -243,10 +243,6 @@ func serverConfig(entry config.LSPServer, spec manager.Spec) manager.ServerConfi
 // .tsx file the name of TypeScript, but the server must be told "typescriptreact", or it
 // reads the JSX as a syntax error. A .h file in a directory with a C++ source or header is
 // opened as C++, as Fresh does, so that clangd reads it as C++.
-func openLanguage(filePath, lang string) string {
-	return openLanguageWith(filePath, lang, false, cppSibling)
-}
-
 func (p *lspPort) openLanguage(filePath, lang string) string {
 	p.mu.Lock()
 	isRemote := p.remoteMarkers != nil || p.remoteReadDir != nil || p.remoteReadFile != nil

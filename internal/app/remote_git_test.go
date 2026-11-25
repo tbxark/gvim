@@ -112,7 +112,7 @@ func TestRemoteGitStatusCacheAndInvalidate(t *testing.T) {
 	g := newRemoteGitStatus(one, "/remote/w", nil)
 	g.now = func() time.Time { return now }
 	g.ttl = time.Second
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := g.Marks(""); err != nil {
 			t.Fatal(err)
 		}

@@ -285,8 +285,8 @@ func (r *remoteEnvShell) RunCapture(ctx context.Context, command string) (string
 	res, err := runRemoteEnvArgv(ctx, r.slot, r.root, []string{shell, "-ilc", wrapped})
 	if err == nil && res.Code == 0 {
 		out := string(res.Stdout)
-		if idx := strings.Index(out, remoteEnvShellMarker); idx >= 0 {
-			return out[idx+len(remoteEnvShellMarker):], nil
+		if _, after, ok := strings.Cut(out, remoteEnvShellMarker); ok {
+			return after, nil
 		}
 		err = fmt.Errorf("%s -ilc produced no environment-output marker", shell)
 	} else if err == nil {

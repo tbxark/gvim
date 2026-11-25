@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -262,14 +263,12 @@ func joinRemoteLiveGrepNotice(a, b string) string {
 // ignoredRemotePath reports a path under .git or a tool-hardcoded skip directory. The
 // widened rg argv already excludes .git; this is the defensive filter for grep/older tools.
 func ignoredRemotePath(rel string) bool {
-	for _, segment := range strings.Split(rel, "/") {
+	for segment := range strings.SplitSeq(rel, "/") {
 		if segment == ".git" {
 			return true
 		}
-		for _, skip := range remoteGrepSkipDirs {
-			if segment == skip {
-				return true
-			}
+		if slices.Contains(remoteGrepSkipDirs, segment) {
+			return true
 		}
 	}
 	return false

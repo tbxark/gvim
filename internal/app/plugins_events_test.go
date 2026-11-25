@@ -192,7 +192,7 @@ func (c *changeApplier) apply(entry string) {
 	if recs == "" {
 		return
 	}
-	for _, r := range strings.Split(recs, ";") {
+	for r := range strings.SplitSeq(recs, ";") {
 		f := strings.Split(r, ":")
 		if len(f) != 6 {
 			c.t.Fatalf("bad record %q", r)

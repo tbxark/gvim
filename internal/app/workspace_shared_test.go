@@ -214,7 +214,7 @@ func TestWorkspaceSharedBuffersStartupRestoreConflict(t *testing.T) {
 	// The stale unsaved stash text is kept in an untitled conflict tab, not written
 	// into the shared buffer and not silently discarded.
 	var conflict *editor.Document
-	for i := 0; i < len(bSession.rt.ed.Tabs()); i++ {
+	for i := range len(bSession.rt.ed.Tabs()) {
 		if d := bSession.rt.ed.DocAt(i); d != nil && d.Path == "" {
 			conflict = d
 			break
@@ -239,7 +239,7 @@ func conflictDocFrom(ed *editor.Editor) *editor.Document {
 	if ed == nil {
 		return nil
 	}
-	for i := 0; i < len(ed.Tabs()); i++ {
+	for i := range len(ed.Tabs()) {
 		d := ed.DocAt(i)
 		if d != nil && d.Path == "" && d.Modified() && strings.Contains(d.Label(), "[shared conflict]") {
 			return d
@@ -376,7 +376,7 @@ func TestWorkspaceSharedBuffersConflictLabelSurvivesRepeatedRestore(t *testing.T
 		t.Fatal("no conflict tab before save-as")
 	}
 	idx := -1
-	for i := 0; i < len(bSession.rt.ed.Tabs()); i++ {
+	for i := range len(bSession.rt.ed.Tabs()) {
 		if bSession.rt.ed.DocAt(i) == conflict {
 			idx = i
 		}
@@ -399,7 +399,7 @@ func TestWorkspaceSharedBuffersConflictLabelSurvivesRepeatedRestore(t *testing.T
 	evictB()
 	bSession = selectB()
 	found := false
-	for i := 0; i < len(bSession.rt.ed.Tabs()); i++ {
+	for i := range len(bSession.rt.ed.Tabs()) {
 		if d := bSession.rt.ed.DocAt(i); d != nil && d.Path == newPath {
 			found = true
 		}

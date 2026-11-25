@@ -114,7 +114,7 @@ func TestRemoteLargeEditAndSaveThroughEditor(t *testing.T) {
 	fs := newRemoteFS()
 	path := filepath.Join(t.TempDir(), "remote-edit-large.txt")
 	var sb strings.Builder
-	for i := 0; i < 20000; i++ {
+	for range 20000 {
 		sb.WriteString("line-content-")
 		sb.WriteString(strings.Repeat("x", 20))
 		sb.WriteString("\n")

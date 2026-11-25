@@ -54,8 +54,7 @@ func TestRemoteEnvWatchInvalidatesOnEnvInputChange(t *testing.T) {
 	initialDetect, initialCapture := detect.Load(), capture.Load()
 	fs := &fakeWatchFS{}
 	slot := watchSlot(fs)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	if watch == nil {
 		t.Fatal("no remote env watch")
@@ -94,8 +93,7 @@ func TestRemoteEnvWatchDegradesWithoutCapability(t *testing.T) {
 	fs := &noWatchFS{fakeWatchFS: &fakeWatchFS{}}
 	slot := watchSlot(fs.fakeWatchFS)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	if watch == nil {
 		t.Fatal("no remote env watch")
@@ -159,8 +157,7 @@ func TestRemoteEnvWatchAddsNestedInputDirectory(t *testing.T) {
 	fs := &envWatchFS{fakeWatchFS: raw}
 	slot := watchSlot(raw)
 	slot.FileSystem = fs
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	watch := startRemoteEnvWatch(ctx, slot, provider, "/remote/proj")
 	defer watch.Close()
 	root := raw.waitWatch(t, 1)

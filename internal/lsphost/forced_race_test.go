@@ -68,29 +68,29 @@ func TestClearForcedConcurrentStartsRace(t *testing.T) {
 	port.SetAutoStartGate(func() bool { return true })
 	_, _ = port.Open(filepath.Join(root, "main.ts"), "typescript", "const x = 1\n")
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		wg.Add(4)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 20; j++ {
+			for range 20 {
 				port.ClearForced()
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 20; j++ {
+			for range 20 {
 				_ = port.StartLanguage("typescript")
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 20; j++ {
+			for range 20 {
 				_ = port.RestartServer("typescript", "")
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				port.SetAutoStartGate(func() bool { return j%2 == 0 })
 				_, _ = port.Open(filepath.Join(root, "main.ts"), "typescript", "const x = 1\n")
 			}

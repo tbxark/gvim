@@ -48,8 +48,8 @@ func (f *ignoreFS) dir(p string, names ...string) *ignoreFS {
 	defer f.mu.Unlock()
 	for _, name := range names {
 		kind := "file"
-		if strings.HasSuffix(name, "/") {
-			kind, name = "dir", strings.TrimSuffix(name, "/")
+		if before, ok := strings.CutSuffix(name, "/"); ok {
+			kind, name = "dir", before
 		}
 		f.dirs[p] = append(f.dirs[p], hostos.DirEntry{Name: name, Kind: kind})
 	}
@@ -215,7 +215,7 @@ func TestRemoteIgnoreFiltersExplorerListing(t *testing.T) {
 func TestRemoteIgnoreFiltersFinder(t *testing.T) {
 	fs := ignoreFixture()
 	files := func() authority.FileSystem { return fs }
-	r := remoteFinderFS{files: files, ignore: newIgnoreBatch(files, "/remote/w")}
+	r := remoteFinderFS{files: files, ignore: newIgnoreBatchWithOptions(files, "/remote/w", true, nil, nil, nil)}
 	root, err := r.ReadDir(context.Background(), "/remote/w", true)
 	if err != nil {
 		t.Fatalf("ReadDir root: %v", err)
@@ -268,7 +268,7 @@ func TestRemoteIgnoreDepthBound(t *testing.T) {
 		parts[i] = "d"
 	}
 	deep := "/remote/w/" + strings.Join(parts, "/")
-	batch := newIgnoreBatch(func() authority.FileSystem { return fs }, "/remote/w")
+	batch := newIgnoreBatchWithOptions(func() authority.FileSystem { return fs }, "/remote/w", true, nil, nil, nil)
 	_ = batch.rulesFor(context.Background(), deep)
 	if notice := batch.Notice(); !strings.Contains(notice, "below 64 directory levels") {
 		t.Fatalf("notice = %q, want the depth notice", notice)
@@ -376,7 +376,7 @@ func TestRemoteIgnoreRulesApplyToEveryEntry(t *testing.T) {
 	}
 	rules.WriteString("*.log\n")
 	fs := newIgnoreFS().file("/remote/w/.gitignore", rules.String())
-	batch := newIgnoreBatch(func() authority.FileSystem { return fs }, "/remote/w")
+	batch := newIgnoreBatchWithOptions(func() authority.FileSystem { return fs }, "/remote/w", true, nil, nil, nil)
 	ctx := context.Background()
 	for i := range 200 {
 		if !batch.ignored(ctx, "/remote/w", fmt.Sprintf("f%d.log", i), false) {

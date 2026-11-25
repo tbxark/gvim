@@ -12,8 +12,8 @@ import (
 func (s *pluginSession) at(text string) (x, y int) {
 	s.t.Helper()
 	for y, row := range s.rows() {
-		if i := strings.Index(row, text); i >= 0 {
-			return len([]rune(row[:i])), y
+		if before, _, ok := strings.Cut(row, text); ok {
+			return len([]rune(before)), y
 		}
 	}
 	s.t.Fatalf("%q is not on the screen:\n%s", text, strings.Join(s.rows(), "\n"))

@@ -41,13 +41,11 @@ func TestRemoteSearchPreviewContextReachesReadRange(t *testing.T) {
 		wg  sync.WaitGroup
 		err error
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, err = s.PreviewContext(ctx, searchpanel.PreviewRequest{
 			Path: "/remote/w/a.txt", Line: 1, EndLine: 1, EndCol: 2, Lines: 3,
 		})
-	}()
+	})
 	readCtx := <-fs.saw
 	if readCtx.Err() != nil {
 		t.Fatal("the read context was already cancelled")

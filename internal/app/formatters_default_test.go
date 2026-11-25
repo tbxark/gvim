@@ -2,6 +2,7 @@ package app
 
 import (
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,10 +12,8 @@ import (
 // found is a lookPath that finds every program in have.
 func found(have ...string) func(string) (string, error) {
 	return func(name string) (string, error) {
-		for _, h := range have {
-			if h == name {
-				return "/bin/" + name, nil
-			}
+		if slices.Contains(have, name) {
+			return "/bin/" + name, nil
 		}
 		return "", exec.ErrNotFound
 	}
