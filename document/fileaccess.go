@@ -14,7 +14,7 @@ import (
 // loads and saves in commands (off the update loop).
 type FileAccess interface {
 	// ReadFile reads at most max bytes of path. A missing path reports fs.ErrNotExist.
-	ReadFile(path string, max int64) ([]byte, error)
+	ReadFile(path string, limit int64) ([]byte, error)
 	// Stat reports the path state; a missing path is the zero AccessStat with a nil
 	// error, matching how diskStateOf treats a stat failure.
 	Stat(path string) (AccessStat, error)

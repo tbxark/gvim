@@ -315,7 +315,7 @@ func (f *FakeOS) UICalls() int {
 }
 
 // ReadFile implements hostos.OS.
-func (f *FakeOS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {
+func (f *FakeOS) ReadFile(_ context.Context, path string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p := f.abs(path)
@@ -326,8 +326,8 @@ func (f *FakeOS) ReadFile(_ context.Context, path string, max int64) ([]byte, er
 		return nil, notFound(p)
 	case n.dir:
 		return nil, pluginapi.Errf(pluginapi.CodeIO, "%s: is a directory", p)
-	case int64(len(n.data)) > max:
-		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes", p, max)
+	case int64(len(n.data)) > limit:
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes", p, limit)
 	}
 	return append([]byte(nil), n.data...), nil
 }

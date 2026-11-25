@@ -207,7 +207,7 @@ func readHeadBranch(headPath string) (string, bool) {
 	if err == nil {
 		return "", false
 	}
-	if err != io.EOF && err != io.ErrUnexpectedEOF {
+	if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return "", false
 	}
 	s := strings.TrimSpace(string(buf[:n]))

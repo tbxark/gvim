@@ -42,7 +42,7 @@ func (c *blockingPromptClipboard) Write(s string) error {
 	return nil
 }
 
-func (c *blockingPromptClipboard) snapshot() (max, writes int) {
+func (c *blockingPromptClipboard) snapshot() (peak, writes int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.max, len(c.writes)
@@ -116,8 +116,8 @@ func TestPromptClipboardSingleFlight(t *testing.T) {
 			if !strings.Contains(m.notice, "still in progress") {
 				t.Fatalf("busy notice = %q", m.notice)
 			}
-			if max, writes := cb.snapshot(); max != 1 || writes != 1 {
-				t.Fatalf("writer max concurrency %d writes %d, want one at a time", max, writes)
+			if peak, writes := cb.snapshot(); peak != 1 || writes != 1 {
+				t.Fatalf("writer max concurrency %d writes %d, want one at a time", peak, writes)
 			}
 			close(cb.release)
 			msgs := <-done
@@ -262,8 +262,8 @@ func TestPromptClipboardCrossModelWriterRejected(t *testing.T) {
 	if !strings.Contains(b.notice, "still in progress") {
 		t.Fatalf("new model busy notice = %q", b.notice)
 	}
-	if max, writes := cb.snapshot(); max != 1 || writes != 1 {
-		t.Fatalf("writer max %d writes %d while old write in flight", max, writes)
+	if peak, writes := cb.snapshot(); peak != 1 || writes != 1 {
+		t.Fatalf("writer max %d writes %d while old write in flight", peak, writes)
 	}
 
 	close(cb.release)
@@ -282,8 +282,8 @@ func TestPromptClipboardCrossModelWriterRejected(t *testing.T) {
 	if got := pb.Value(); got != "" {
 		t.Fatalf("new model's cut did not clear its prompt: %q", got)
 	}
-	if max, writes := cb.snapshot(); max != 1 || writes != 2 {
-		t.Fatalf("writer max %d writes %d, want two sequential writes", max, writes)
+	if peak, writes := cb.snapshot(); peak != 1 || writes != 2 {
+		t.Fatalf("writer max %d writes %d, want two sequential writes", peak, writes)
 	}
 }
 
@@ -393,8 +393,8 @@ func TestPromptClipboardCancelWaitsForInFlightWrite(t *testing.T) {
 	if !strings.Contains(m.notice, "still in progress") {
 		t.Fatalf("busy notice after cancel = %q", m.notice)
 	}
-	if max, writes := cb.snapshot(); max != 1 || writes != 1 {
-		t.Fatalf("writer max %d writes %d after cancel, want one in flight", max, writes)
+	if peak, writes := cb.snapshot(); peak != 1 || writes != 1 {
+		t.Fatalf("writer max %d writes %d after cancel, want one in flight", peak, writes)
 	}
 
 	close(cb.release)
@@ -416,7 +416,7 @@ func TestPromptClipboardCancelWaitsForInFlightWrite(t *testing.T) {
 	if got := p.Value(); got != "" {
 		t.Fatalf("the next cut did not clear: %q", got)
 	}
-	if max, writes := cb.snapshot(); max != 1 || writes != 2 {
-		t.Fatalf("writer max %d writes %d, want two sequential writes", max, writes)
+	if peak, writes := cb.snapshot(); peak != 1 || writes != 2 {
+		t.Fatalf("writer max %d writes %d, want two sequential writes", peak, writes)
 	}
 }

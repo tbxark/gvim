@@ -56,7 +56,7 @@ func (f *ignoreFS) dir(p string, names ...string) *ignoreFS {
 	return f
 }
 
-func (f *ignoreFS) ReadFile(_ context.Context, p string, max int64) ([]byte, error) {
+func (f *ignoreFS) ReadFile(_ context.Context, p string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads = append(f.reads, p)
@@ -64,7 +64,7 @@ func (f *ignoreFS) ReadFile(_ context.Context, p string, max int64) ([]byte, err
 	if !ok {
 		return nil, &os.PathError{Op: "open", Path: p, Err: fs.ErrNotExist}
 	}
-	if max > 0 && int64(len(data)) > max {
+	if limit > 0 && int64(len(data)) > limit {
 		return nil, errors.New("remote read: file exceeds the read cap")
 	}
 	return []byte(data), nil

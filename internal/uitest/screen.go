@@ -123,9 +123,9 @@ func ParseKey(spec string) (tea.KeyPressMsg, error) {
 		if before, ok := strings.CutSuffix(spec, "++"); ok {
 			mods = strings.Split(before, "+")
 			name = "+"
-		} else if i := strings.LastIndexByte(spec, '+'); i >= 0 {
-			mods = strings.Split(spec[:i], "+")
-			name = spec[i+1:]
+		} else if head, tail, ok := strings.CutLast(spec, "+"); ok {
+			mods = strings.Split(head, "+")
+			name = tail
 		}
 	}
 	var mod tea.KeyMod

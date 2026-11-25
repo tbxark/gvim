@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tbxark/gvim/buffer"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -164,8 +165,7 @@ func dabbrevCandidates(b *buffer.Buffer, start buffer.Pos, prefix string) (out [
 			end = min(start.Col, len(rs))
 		}
 		words := dabbrevWords(rs[:end])
-		for i := len(words) - 1; i >= 0; i-- {
-			w := words[i]
+		for _, w := range slices.Backward(words) {
 			key := strings.ToLower(w)
 			if utf8.RuneCountInString(w) <= plen || seen[key] {
 				continue

@@ -52,7 +52,7 @@ func (f *remoteReplaceFake) ReadRange(context.Context, string, int64, int64) ([]
 	return nil, errors.New("not used by replace")
 }
 
-func (f *remoteReplaceFake) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
+func (f *remoteReplaceFake) ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	data, ok := f.files[path]
 	hook := f.onRead

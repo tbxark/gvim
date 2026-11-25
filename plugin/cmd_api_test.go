@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -304,7 +305,7 @@ func TestCommandRunAll(t *testing.T) {
 		{"stops at the first error", `local ok, err = gvim.command.run_all{ "move_down", "undo", "delete_line" } T.spy(ok, err)`,
 			"nil io: boom", []plugintest.DoCall{
 				{Action: "move_down", Count: 1, Group: 1}, {Action: "undo", Count: 1, Group: 1},
-			}, map[string]error{"undo": fmt.Errorf("boom")}},
+			}, map[string]error{"undo": errors.New("boom")}},
 		{"bad count names the step", `local ok, err = gvim.command.run_all{ "move_down", { action = "undo", count = 0 } } T.spy(ok, err)`,
 			"nil invalid: step 2: count must be a positive integer", nil, nil},
 		{"too many repeats", `local ok, err = gvim.command.run_all{ { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 10000 }, { action = "undo", count = 1 } }

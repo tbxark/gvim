@@ -1,6 +1,7 @@
 package searchpanel
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -93,11 +94,11 @@ func globRegexp(pattern string) (string, error) {
 		case c == '[':
 			end := strings.IndexByte(pattern[i+1:], ']')
 			if end < 0 {
-				return "", fmt.Errorf("missing ]")
+				return "", errors.New("missing ]")
 			}
 			class := pattern[i+1 : i+1+end]
 			if class == "" || class == "^" || class == "!" {
-				return "", fmt.Errorf("empty character class")
+				return "", errors.New("empty character class")
 			}
 			b.WriteString("[")
 			if class[0] == '!' {

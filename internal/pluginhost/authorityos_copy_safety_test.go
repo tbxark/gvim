@@ -34,8 +34,8 @@ type fakeAliasFiles struct {
 }
 
 func (f *fakeAliasFiles) RealPath(ctx context.Context, p string) (string, error) {
-	if real, ok := f.real[path.Clean(p)]; ok {
-		return real, nil
+	if resolved, ok := f.real[path.Clean(p)]; ok {
+		return resolved, nil
 	}
 	if _, err := f.Stat(ctx, p); err != nil {
 		return "", err

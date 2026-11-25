@@ -26,19 +26,19 @@ func (e *Editor) forgetRecent(d *Document) {
 // RecentTabIndices would fall back to tab order for it, changing completion and dabbrev
 // other-buffer order after a handoff. A fallback (old not tracked) leaves any existing
 // rank of new alone, which is correct for a document that was already in the history.
-func (e *Editor) replaceRecent(old, new *Document) {
-	if new == nil || old == new {
+func (e *Editor) replaceRecent(old, next *Document) {
+	if next == nil || old == next {
 		return
 	}
 	if slices.Index(e.recent, old) < 0 {
 		return
 	}
-	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == new })
+	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == next })
 	pos := slices.Index(e.recent, old)
 	if pos < 0 {
 		return
 	}
-	e.recent[pos] = new
+	e.recent[pos] = next
 }
 
 // SetRecentTabIndices replaces the MRU history with the named tabs, most recent first.

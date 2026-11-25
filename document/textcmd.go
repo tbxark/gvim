@@ -74,11 +74,11 @@ func enclosingBrackets(line string, col int) (inFrom, inTo, outFrom, outTo int, 
 	col = min(max(col, 0), n)
 	bestDist := n + 1
 	for _, p := range pairs {
-		open, close := p[0], p[1]
-		nests := open != close
+		open, closeAt := p[0], p[1]
+		nests := open != closeAt
 		start, depth := -1, 0
 		for i := col - 1; i >= 0; i-- {
-			if nests && rs[i] == close {
+			if nests && rs[i] == closeAt {
 				depth++
 			} else if rs[i] == open {
 				if depth == 0 {
@@ -96,7 +96,7 @@ func enclosingBrackets(line string, col int) (inFrom, inTo, outFrom, outTo int, 
 		for i := col; i < n; i++ {
 			if nests && rs[i] == open {
 				depth++
-			} else if rs[i] == close {
+			} else if rs[i] == closeAt {
 				if depth == 0 {
 					end = i
 					break

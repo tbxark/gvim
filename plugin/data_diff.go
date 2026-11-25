@@ -72,10 +72,10 @@ func pickHunk(L *lua.LState, next bool) int {
 }
 
 // stringLines reads a Lua array of strings (numbers count as their text).
-func stringLines(t *lua.LTable, max int) ([]string, error) {
+func stringLines(t *lua.LTable, limit int) ([]string, error) {
 	n := t.Len()
-	if n > max {
-		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "diff.lines: more than %d lines per side", max)
+	if n > limit {
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "diff.lines: more than %d lines per side", limit)
 	}
 	out := make([]string, n)
 	for i := range out {

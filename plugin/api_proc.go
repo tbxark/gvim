@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -253,7 +254,7 @@ type process struct {
 
 func (pr *process) handleString() string {
 	if pr.started {
-		return fmt.Sprint(pr.pid)
+		return strconv.Itoa(pr.pid)
 	}
 	return fmt.Sprintf("#%d", pr.id)
 }

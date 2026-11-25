@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -746,7 +747,7 @@ func TestLargeLineDirtyFollowsEdits(t *testing.T) {
 	got := ""
 	for i := range b.Lines() {
 		if b.LineDirty(i) {
-			got += fmt.Sprint(i)
+			got += strconv.Itoa(i)
 		}
 	}
 	if got != "345" {

@@ -54,12 +54,12 @@ func TestWriteFileKeepsTheExistingMode(t *testing.T) {
 
 func TestWriteFileWritesThroughASymlink(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real.txt")
-	if err := os.WriteFile(real, []byte("old"), 0o644); err != nil {
+	resolved := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(resolved, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "link.txt")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(resolved, link); err != nil {
 		t.Skipf("no symlinks: %v", err)
 	}
 	if _, err := WriteFile(link, []byte("new")); err != nil {
@@ -68,7 +68,7 @@ func TestWriteFileWritesThroughASymlink(t *testing.T) {
 	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("the link was replaced: %v %v", fi, err)
 	}
-	if data, _ := os.ReadFile(real); string(data) != "new" {
+	if data, _ := os.ReadFile(resolved); string(data) != "new" {
 		t.Fatalf("target content = %q, want new", data)
 	}
 }

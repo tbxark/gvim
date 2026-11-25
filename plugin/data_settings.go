@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -61,7 +62,7 @@ func (s *settingSpec) check(v any) (any, error) {
 		if b, ok := v.(bool); ok {
 			return b, nil
 		}
-		return nil, fmt.Errorf("expected a boolean")
+		return nil, errors.New("expected a boolean")
 	case "integer", "number":
 		var f float64
 		if n, ok := wholeNumber(v); ok {
@@ -82,7 +83,7 @@ func (s *settingSpec) check(v any) (any, error) {
 		if str, ok := v.(string); ok {
 			return str, nil
 		}
-		return nil, fmt.Errorf("expected a string")
+		return nil, errors.New("expected a string")
 	case "enum":
 		if str, ok := v.(string); ok {
 			if slices.Contains(s.values, str) {
@@ -99,16 +100,16 @@ func (s *settingSpec) check(v any) (any, error) {
 			for _, el := range x {
 				str, ok := el.(string)
 				if !ok {
-					return nil, fmt.Errorf("expected a list of strings")
+					return nil, errors.New("expected a list of strings")
 				}
 				list = append(list, str)
 			}
 		default:
-			return nil, fmt.Errorf("expected a list of strings")
+			return nil, errors.New("expected a list of strings")
 		}
 		return list, nil
 	}
-	return nil, fmt.Errorf("unknown type")
+	return nil, errors.New("unknown type")
 }
 
 // settingLua converts a canonical setting value to Lua (a fresh table for lists).

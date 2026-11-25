@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -230,7 +230,7 @@ func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
 		TerminalBeforeKnown: true, TerminalAfterKnown: true}
 	value := liveGrepExportValue(hit)
 	kind, tab, rowStr, payloadStr, ok := parseLiveGrepExportValue(value)
-	if !ok || kind != "T" || tab != fmt.Sprint(id) || rowStr != "42" {
+	if !ok || kind != "T" || tab != strconv.FormatUint(id, 10) || rowStr != "42" {
 		t.Fatalf("terminal export value = %q (parsed %q %q %q %v)", value, kind, tab, rowStr, ok)
 	}
 	payload, valid := decodeTerminalExportPayload(payloadStr)

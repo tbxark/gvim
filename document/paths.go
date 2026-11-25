@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -112,12 +113,7 @@ func absPath(path string) (string, error) {
 // hasDotDotElement reports whether one element of path is exactly "..". A name
 // that only contains two dots, such as "a..b", is not a parent reference.
 func hasDotDotElement(path string) bool {
-	for _, el := range strings.Split(path, string(filepath.Separator)) {
-		if el == ".." {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(path, string(filepath.Separator)), "..")
 }
 
 // sameDirectory reports whether a and b are the same existing directory, so that

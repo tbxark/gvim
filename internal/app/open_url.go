@@ -5,6 +5,7 @@ package app
 // asks the user to confirm before calling this.
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -34,7 +35,7 @@ func openURL(raw string) error {
 func openURLOn(goos, raw string, start func(name string, arg ...string) error) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Opaque != "" {
-		return fmt.Errorf("open url: refusing malformed URL")
+		return errors.New("open url: refusing malformed URL")
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":

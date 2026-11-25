@@ -164,13 +164,13 @@ func formatPluginSettingValue(v any) string {
 }
 
 // rangeText is the min..max note of a numeric setting.
-func rangeText(min, max *float64) string {
+func rangeText(lower, upper *float64) string {
 	lo, hi := "-", "-"
-	if min != nil {
-		lo = formatPluginSettingValue(float64(*min))
+	if lower != nil {
+		lo = formatPluginSettingValue(float64(*lower))
 	}
-	if max != nil {
-		hi = formatPluginSettingValue(float64(*max))
+	if upper != nil {
+		hi = formatPluginSettingValue(float64(*upper))
 	}
 	return lo + ".." + hi
 }

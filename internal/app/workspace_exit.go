@@ -212,5 +212,5 @@ func recoveryNote(s *workspaceSession) string {
 	if err := s.rt.recoveryWriter.Plan()(); err != nil {
 		return fmt.Sprintf("the crash-recovery copy also failed (%v)", err)
 	}
-	return fmt.Sprintf("a crash-recovery copy was kept in %s", s.rt.recovery)
+	return "a crash-recovery copy was kept in " + s.rt.recovery
 }

@@ -162,12 +162,12 @@ func stockCall(t *testing.T, L *lua.LState, r convRow) string {
 	if r.init != 0 {
 		init = lua.LNumber(r.init)
 	}
-	max := lua.LNil
+	maxV := lua.LNil
 	if r.max != 0 {
-		max = lua.LNumber(r.max)
+		maxV = lua.LNumber(r.max)
 	}
 	err := L.CallByParam(lua.P{Fn: L.GetGlobal("run"), NRet: 1, Protect: true},
-		lua.LString(r.op), lua.LString(r.s), lua.LString(r.p), init, lua.LString(r.repl), lua.LString(r.fn), max)
+		lua.LString(r.op), lua.LString(r.s), lua.LString(r.p), init, lua.LString(r.repl), lua.LString(r.fn), maxV)
 	if err != nil {
 		t.Fatalf("stock run: %v", err)
 	}

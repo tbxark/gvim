@@ -72,7 +72,7 @@ func activationFromLua(v lua.LValue) (pluginapi.Activation, error) {
 	}
 	s, ok := v.(lua.LString)
 	if !ok {
-		return pluginapi.ActAlways, fmt.Errorf("activation must be a string")
+		return pluginapi.ActAlways, errors.New("activation must be a string")
 	}
 	switch string(s) {
 	case "", "always":
@@ -97,7 +97,7 @@ func scopeFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
 	}
 	st, ok := v.(*lua.LTable)
 	if !ok {
-		return fmt.Errorf("scope must be a table")
+		return errors.New("scope must be a table")
 	}
 	o := bufTableOpts{t: st}
 	d.ScopeStart = o.integer("start_line", 0)
@@ -119,7 +119,7 @@ func prefixFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
 	}
 	pt, ok := v.(*lua.LTable)
 	if !ok {
-		return fmt.Errorf("prefix must be a table")
+		return errors.New("prefix must be a table")
 	}
 	o := bufTableOpts{t: pt}
 	d.PrefixText = clipText(optString(&o, "text"), decorMaxVirtualText)
@@ -173,7 +173,7 @@ func colorFromLua(v lua.LValue) (pluginapi.Color, error) {
 				n, ok = c.RawGetString(key).(lua.LNumber)
 			}
 			if !ok {
-				return pluginapi.Color{}, fmt.Errorf("color table needs three numbers {r, g, b}")
+				return pluginapi.Color{}, errors.New("color table needs three numbers {r, g, b}")
 			}
 			f := float64(n)
 			if math.IsNaN(f) || f < 0 || f > 255 {
@@ -222,7 +222,7 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 	}
 	name, ok := t.RawGetString("kind").(lua.LString)
 	if !ok {
-		return d, fmt.Errorf("an item needs a string 'kind'")
+		return d, errors.New("an item needs a string 'kind'")
 	}
 	kind, ok := decorKinds[string(name)]
 	if !ok {
@@ -316,7 +316,7 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 		if tv := t.RawGetString("text_overlays"); tv != lua.LNil {
 			list, ok := tv.(*lua.LTable)
 			if !ok {
-				return d, fmt.Errorf("text_overlays must be a table")
+				return d, errors.New("text_overlays must be a table")
 			}
 			for i := 1; i <= min(list.Len(), 8); i++ {
 				row, ok := list.RawGetInt(i).(*lua.LTable)

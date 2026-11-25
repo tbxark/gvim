@@ -503,11 +503,11 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		// Remote documents are read whole through the access; the access bounds the
 		// transfer (authority/ssh_files.go), and large-file mode is local-only (a
 		// recorded residual), so a remote file over the cap fails clearly.
-		max := spec.LargeConf.FullMax
-		if max <= 0 {
-			max = maxFullLoad
+		fullMax := spec.LargeConf.FullMax
+		if fullMax <= 0 {
+			fullMax = maxFullLoad
 		}
-		data, err = spec.Access.ReadFile(path, max)
+		data, err = spec.Access.ReadFile(path, fullMax)
 	} else {
 		data, err = os.ReadFile(path)
 	}

@@ -61,15 +61,15 @@ func (m *memOS) Dirs() hostos.Dirs { return hostos.Dirs{Config: m.config} }
 
 func newMemOS() *memOS { return &memOS{files: map[string][]byte{}} }
 
-func (m *memOS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {
+func (m *memOS) ReadFile(_ context.Context, path string, limit int64) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	data, ok := m.files[path]
 	if !ok {
 		return nil, pluginapi.Errf(pluginapi.CodeNotFound, "%s does not exist", path)
 	}
-	if max > 0 && int64(len(data)) > max {
-		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s is larger than %d bytes", path, max)
+	if limit > 0 && int64(len(data)) > limit {
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s is larger than %d bytes", path, limit)
 	}
 	return append([]byte(nil), data...), nil
 }

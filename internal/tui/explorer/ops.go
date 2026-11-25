@@ -79,7 +79,7 @@ var ErrConflict = errors.New("destination already exists")
 // selected entry's path. With no selection it returns nil and nothing is sent. The
 // tree root cannot be renamed or deleted, so for it the command is a refusal, and
 // verb names the refused operation in the notice.
-func (p Panel) selectedMsg(verb string, make func(path string) tea.Msg) tea.Cmd {
+func (p Panel) selectedMsg(verb string, build func(path string) tea.Msg) tea.Cmd {
 	sel, ok := p.tree.Selected()
 	if !ok {
 		return nil
@@ -87,7 +87,7 @@ func (p Panel) selectedMsg(verb string, make func(path string) tea.Msg) tea.Cmd 
 	if sel.Path == p.tree.Root() {
 		return rootRefused(verb)
 	}
-	return emit(make(sel.Path))
+	return emit(build(sel.Path))
 }
 
 // deleteCmd is the DeleteMsg for the targets: the picked rows, or the cursor row when

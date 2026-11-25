@@ -43,11 +43,11 @@ func (f *remoteProbeFS) Stat(_ context.Context, path string) (hostos.FileStat, e
 func (f *remoteProbeFS) RealPath(_ context.Context, path string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	real, ok := f.reals[path]
+	resolved, ok := f.reals[path]
 	if !ok {
 		return "", errors.New("not found")
 	}
-	return real, nil
+	return resolved, nil
 }
 
 func remoteProbeSlot(fs authority.FileSystem) authority.Slot {

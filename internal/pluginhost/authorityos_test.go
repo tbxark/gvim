@@ -42,7 +42,7 @@ func newFakeRemoteFiles() *fakeRemoteFiles {
 		},
 	}
 }
-func (f *fakeRemoteFiles) ReadFile(_ context.Context, p string, max int64) ([]byte, error) {
+func (f *fakeRemoteFiles) ReadFile(_ context.Context, p string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads = append(f.reads, p)

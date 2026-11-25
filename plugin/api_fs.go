@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -522,8 +523,8 @@ func absPath(base, p string) string {
 func refuseProtected(ctx context.Context, o hostos.OS, abs string, protected []string) error {
 	targets := []string{abs}
 	if parent, err := o.RealPath(ctx, filepath.Dir(abs)); err == nil {
-		if real := filepath.Join(parent, filepath.Base(abs)); real != abs {
-			targets = append(targets, real)
+		if resolved := filepath.Join(parent, filepath.Base(abs)); resolved != abs {
+			targets = append(targets, resolved)
 		}
 	}
 	var guard []string
@@ -533,8 +534,8 @@ func refuseProtected(ctx context.Context, o hostos.OS, abs string, protected []s
 		}
 		p = filepath.Clean(p)
 		guard = append(guard, p)
-		if real, err := o.RealPath(ctx, p); err == nil && real != p {
-			guard = append(guard, real)
+		if resolved, err := o.RealPath(ctx, p); err == nil && resolved != p {
+			guard = append(guard, resolved)
 		}
 	}
 	for _, t := range targets {
@@ -565,7 +566,7 @@ type watcher struct {
 	live   *int
 }
 
-func (w *watcher) handleString() string { return fmt.Sprint(w.id) }
+func (w *watcher) handleString() string { return strconv.Itoa(w.id) }
 
 func (w *watcher) stop() {
 	if !w.active {

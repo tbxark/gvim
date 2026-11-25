@@ -59,7 +59,7 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 		}
 	}
 	var live []entry
-	var edits, real []edit
+	var edits, resolved []edit
 	for _, x := range entries {
 		if _, gone := absorbed[x.caret]; gone {
 			continue
@@ -67,7 +67,7 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 		live = append(live, x)
 		edits = append(edits, x.e)
 		if x.part == 0 {
-			real = append(real, x.e)
+			resolved = append(resolved, x.e)
 		}
 	}
 	before := d.Cursor
@@ -110,7 +110,7 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 	}
 	d.SetCarets(out)
 	if len(cs) > 1 {
-		d.noteMultiEdit(before, real)
+		d.noteMultiEdit(before, resolved)
 	}
 }
 

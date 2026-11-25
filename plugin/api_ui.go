@@ -900,10 +900,10 @@ func (pp *luaPopup) onItem(c pluginapi.Completion) {
 }
 
 // popupLines reads an array of strings (numbers are converted).
-func popupLines(t *lua.LTable, max int) ([]string, error) {
+func popupLines(t *lua.LTable, limit int) ([]string, error) {
 	n := t.Len()
-	if n > max {
-		return nil, pluginapi.Errf(pluginapi.CodeLimit, "too many lines (max %d)", max)
+	if n > limit {
+		return nil, pluginapi.Errf(pluginapi.CodeLimit, "too many lines (max %d)", limit)
 	}
 	out := make([]string, 0, n)
 	for i := 1; i <= n; i++ {

@@ -584,9 +584,9 @@ func remoteFileIndexFallbackNotice(req searchpanel.SearchRequest) string {
 	}
 	detail := func(text string) string {
 		text = strings.Join(strings.Fields(textsafe.Clean(text)), " ")
-		const max = 160
-		if r := []rune(text); len(r) > max {
-			text = string(r[:max-1]) + "…"
+		const maxLen = 160
+		if r := []rune(text); len(r) > maxLen {
+			text = string(r[:maxLen-1]) + "…"
 		}
 		return text
 	}

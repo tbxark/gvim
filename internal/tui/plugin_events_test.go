@@ -565,12 +565,12 @@ func TestAutoSaveRaisesTheGateAndTheSaveEvent(t *testing.T) {
 	for _, veto := range []bool{false, true} {
 		t.Run(fmt.Sprintf("veto=%v", veto), func(t *testing.T) {
 			t.Parallel()
-			real, path := openedEditor(t)
+			resolved, path := openedEditor(t)
 			rt := newFakeRuntime(t)
 			rt.wants["before_file_save"], rt.wants["after_file_save"] = true, true
 			rt.veto = func(pluginapi.Event) (bool, string) { return veto, "busy" }
 			fed := newFakeEditor("x")
-			as := &autoSaver{scriptEditor: &scriptEditor{fakeEditor: fed}, real: real}
+			as := &autoSaver{scriptEditor: &scriptEditor{fakeEditor: fed}, real: resolved}
 			pe := &eventsPE{fakePluginEditor: &fakePluginEditor{active: 1, bufs: []pluginapi.BufferInfo{
 				{ID: 1, Path: path, Modified: true}, {ID: 2, Path: "/w/clean.txt"},
 			}}}
@@ -608,7 +608,7 @@ func TestAutoSaveRaisesTheGateAndTheSaveEvent(t *testing.T) {
 			}
 			rt.emitted = nil
 			m.Update(done)
-			id := pluginapi.BufferID(real.Active().ID())
+			id := pluginapi.BufferID(resolved.Active().ID())
 			wantRows(t, evRows(rt.emitted), []string{fmt.Sprintf("after_file_save buf=%d path=%s", id, path)})
 		})
 	}
@@ -619,11 +619,11 @@ func TestAutoSaveRaisesTheGateAndTheSaveEvent(t *testing.T) {
 // before_file_save is raised for it and a veto of it cannot cancel the round of the others.
 func TestAutoSaveGateSkipsLargeDocuments(t *testing.T) {
 	t.Parallel()
-	real, path := openedEditor(t)
+	resolved, path := openedEditor(t)
 	rt := newFakeRuntime(t)
 	rt.wants["before_file_save"] = true
 	rt.veto = func(e pluginapi.Event) (bool, string) { return e.Data["buf"] == pluginapi.BufferID(9), "veto" }
-	as := &autoSaver{scriptEditor: &scriptEditor{fakeEditor: newFakeEditor("x")}, real: real}
+	as := &autoSaver{scriptEditor: &scriptEditor{fakeEditor: newFakeEditor("x")}, real: resolved}
 	pe := &eventsPE{fakePluginEditor: &fakePluginEditor{active: 1, bufs: []pluginapi.BufferInfo{
 		{ID: 9, Path: "/w/big.txt", Modified: true, Large: true},
 		{ID: 1, Path: path, Modified: true},
@@ -672,14 +672,14 @@ func TestSaveDoneRaisesAfterFileSave(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			real, path := openedEditor(t)
+			resolved, path := openedEditor(t)
 			rt := newFakeRuntime(t)
 			rt.wants["after_file_save"] = tt.wants
-			s := &saver{scriptEditor: &scriptEditor{fakeEditor: newFakeEditor("x")}, real: real}
+			s := &saver{scriptEditor: &scriptEditor{fakeEditor: newFakeEditor("x")}, real: resolved}
 			m := New(Deps{Editor: s, Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, Root: RootPorts{Plugins: rt}})
 			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 			useHost(rt, m)
-			plan, err := real.PlanSave()
+			plan, err := resolved.PlanSave()
 			must(t, err)
 			if tt.fail {
 				// The file changed on disk since the plan: the write is refused.
@@ -689,7 +689,7 @@ func TestSaveDoneRaisesAfterFileSave(t *testing.T) {
 			m.Update(saveDoneMsg{plan: plan, results: plan.Run()})
 			var want []string
 			if tt.want {
-				want = []string{fmt.Sprintf("after_file_save buf=%d path=%s", real.Active().ID(), path)}
+				want = []string{fmt.Sprintf("after_file_save buf=%d path=%s", resolved.Active().ID(), path)}
 			}
 			wantRows(t, evRows(rt.emitted), want)
 		})

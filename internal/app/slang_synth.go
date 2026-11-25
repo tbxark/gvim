@@ -122,7 +122,7 @@ func cleanupSlangCache(dir string) {
 func newSlangSynthOpener(remote bool, slot authority.Slot, gate authority.Gate, env func() []string, root string) lsphost.ExternalLocationOpener {
 	return func(ctx context.Context, req lsphost.ExternalLocationRequest) (string, error) {
 		if remote {
-			return "", fmt.Errorf("slang-synth: opening builtin modules is only supported on the local authority")
+			return "", errors.New("slang-synth: opening builtin modules is only supported on the local authority")
 		}
 		module, err := slangSynthModule(req.URI)
 		if err != nil {
@@ -130,7 +130,7 @@ func newSlangSynthOpener(remote bool, slot authority.Slot, gate authority.Gate, 
 		}
 		one := slot.OneShot()
 		if one == nil {
-			return "", fmt.Errorf("slang-synth: no authority one-shot")
+			return "", errors.New("slang-synth: no authority one-shot")
 		}
 		// Use the binary/environment of the server that answered, not a hard-coded
 		// PATH slangd. req.Program is the absolute executable the manager passed to
@@ -141,7 +141,7 @@ func newSlangSynthOpener(remote bool, slot authority.Slot, gate authority.Gate, 
 			program = strings.TrimSpace(req.Command[0])
 		}
 		if program == "" {
-			return "", fmt.Errorf("slang-synth: no answering server program to run")
+			return "", errors.New("slang-synth: no answering server program to run")
 		}
 		cwd := strings.TrimSpace(req.Root)
 		if cwd == "" {

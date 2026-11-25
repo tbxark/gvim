@@ -195,7 +195,6 @@ func TestStatusBarToggleGivesItsRowToTheBody(t *testing.T) {
 	}
 }
 
-
 func TestVerticalScrollbarToggleClearsTheColumn(t *testing.T) {
 	long := strings.Repeat("line\n", 60)
 	m, _ := viewModel(t, DefaultViewOptions(), long, 40, 10)

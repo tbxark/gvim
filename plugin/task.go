@@ -7,6 +7,7 @@ import (
 	"maps"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -578,9 +579,9 @@ func (r *Runtime) classify(t *task, sl *slice, res resumeResult) *runError {
 		re.kind = failTimeout
 		re.slow = sl.hostTime > 0 && sl.hostTime*2 > sl.elapsed()
 		if re.slow {
-			re.msg = pos + "slow host call (" + fmt.Sprint(sl.hostTime.Milliseconds()) + " ms in the editor)"
+			re.msg = pos + "slow host call (" + strconv.FormatInt(sl.hostTime.Milliseconds(), 10) + " ms in the editor)"
 		} else {
-			re.msg = pos + "timed out (" + fmt.Sprint(sl.budget.Milliseconds()) + " ms)"
+			re.msg = pos + "timed out (" + strconv.FormatInt(sl.budget.Milliseconds(), 10) + " ms)"
 		}
 	case errors.Is(cause, errMemory):
 		re.kind = failMemory

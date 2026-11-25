@@ -784,7 +784,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			c.Locale = ""
 			return nil
 		}
-		return fmt.Errorf("null is not a valid value")
+		return errors.New("null is not a valid value")
 	}
 	switch key {
 	case "locale":
@@ -793,7 +793,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		if s == "" {
-			return fmt.Errorf("must be a locale code or auto")
+			return errors.New("must be a locale code or auto")
 		}
 		if strings.EqualFold(s, "auto") {
 			c.Locale = ""
@@ -808,7 +808,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		if s == "" {
-			return fmt.Errorf("must not be empty")
+			return errors.New("must not be empty")
 		}
 		c.Theme = s
 	case "keymap", "active_keybinding_map":
@@ -823,12 +823,12 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 	case "keybinding_maps":
 		// Fresh's custom keymap files. gvim has none: its own bindings go in keybindings.
 		if trimmed := bytes.TrimSpace(raw); string(trimmed) != "{}" {
-			return fmt.Errorf("custom keybinding maps are not supported; put the keys in keybindings")
+			return errors.New("custom keybinding maps are not supported; put the keys in keybindings")
 		}
 	case "plugin_timeout_ms":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil {
-			return fmt.Errorf("must be an integer")
+			return errors.New("must be an integer")
 		}
 		if n < MinPluginTimeoutMS || n > MaxPluginTimeoutMS {
 			return fmt.Errorf("must be between %d and %d, got %d", MinPluginTimeoutMS, MaxPluginTimeoutMS, n)
@@ -865,7 +865,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return nil
 		}
 		if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') {
-			return fmt.Errorf("must be a list of bindings")
+			return errors.New("must be a list of bindings")
 		}
 		c.Keybindings = append(json.RawMessage(nil), trimmed...)
 	case "default_language":
@@ -904,7 +904,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			// asked to show ignored entries now mean "don't hide them".
 			var v bool
 			if err := json.Unmarshal(raw, &v); err != nil {
-				return fmt.Errorf("must be true or false")
+				return errors.New("must be true or false")
 			}
 			c.FileExplorer.HideGitignore = !v
 			return nil
@@ -918,11 +918,11 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		}
 		field, known := boolKeys[key]
 		if !known {
-			return fmt.Errorf("unknown setting")
+			return errors.New("unknown setting")
 		}
 		var v bool
 		if err := json.Unmarshal(raw, &v); err != nil {
-			return fmt.Errorf("must be true or false")
+			return errors.New("must be true or false")
 		}
 		*field(c) = v
 	}
@@ -978,7 +978,7 @@ func decodeLSP(raw json.RawMessage) (servers map[string][]LSPServer, disabled ma
 	trimmed := bytes.TrimSpace(raw)
 	var entries map[string]json.RawMessage
 	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &entries) != nil {
-		return nil, nil, fmt.Errorf("must be a JSON object")
+		return nil, nil, errors.New("must be a JSON object")
 	}
 	servers = make(map[string][]LSPServer, len(entries))
 	for _, lang := range sortedKeys(entries) {
@@ -1008,12 +1008,12 @@ func decodeUniversalLSP(raw json.RawMessage) (map[string][]LSPServer, error) {
 	trimmed := bytes.TrimSpace(raw)
 	var entries map[string]json.RawMessage
 	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &entries) != nil {
-		return nil, fmt.Errorf("must be a JSON object")
+		return nil, errors.New("must be a JSON object")
 	}
 	servers := make(map[string][]LSPServer, len(entries))
 	for _, name := range sortedKeys(entries) {
 		if name == "" {
-			return nil, fmt.Errorf("server name must not be empty")
+			return nil, errors.New("server name must not be empty")
 		}
 		list, _, err := decodeServerList("universal_lsp."+name, entries[name])
 		if err != nil {
@@ -1202,11 +1202,11 @@ func autoStartIs(e lspEntry, want bool) bool {
 func decodeFormatters(raw json.RawMessage) (map[string]string, error) {
 	var formatters map[string]string
 	if err := json.Unmarshal(raw, &formatters); err != nil {
-		return nil, fmt.Errorf("must be a JSON object of strings")
+		return nil, errors.New("must be a JSON object of strings")
 	}
 	for _, lang := range slices.Sorted(maps.Keys(formatters)) {
 		if lang == "" {
-			return nil, fmt.Errorf("language name must not be empty")
+			return nil, errors.New("language name must not be empty")
 		}
 		if strings.TrimSpace(formatters[lang]) == "" {
 			return nil, fmt.Errorf("%s: command must not be empty", lang)
@@ -1218,7 +1218,7 @@ func decodeFormatters(raw json.RawMessage) (map[string]string, error) {
 func decodeString(raw json.RawMessage) (string, error) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return "", fmt.Errorf("must be a string")
+		return "", errors.New("must be a string")
 	}
 	return s, nil
 }

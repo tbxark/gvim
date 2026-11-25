@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -141,7 +142,7 @@ func strftime(tm time.Time, format string) (string, error) {
 		}
 		i++
 		if i >= len(format) {
-			return "", fmt.Errorf("invalid conversion specifier '%%'")
+			return "", errors.New("invalid conversion specifier '%'")
 		}
 		d := format[i]
 		switch d {

@@ -66,7 +66,7 @@ func (f *remoteFS) ReadRange(_ context.Context, path string, off, n int64) ([]by
 	return out, nil
 }
 
-func (f *remoteFS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {
+func (f *remoteFS) ReadFile(_ context.Context, path string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -76,7 +76,7 @@ func (f *remoteFS) ReadFile(_ context.Context, path string, max int64) ([]byte, 
 	if !ok {
 		return nil, iofs.ErrNotExist
 	}
-	if int64(len(data)) > max {
+	if int64(len(data)) > limit {
 		return nil, errors.New(path + ": larger than the read cap")
 	}
 	return append([]byte(nil), data...), nil

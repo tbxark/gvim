@@ -61,14 +61,14 @@ func (o *authorityOS) RealPath(ctx context.Context, p string) (string, error) {
 		return "", pluginapi.Errf(pluginapi.CodeUnsupported,
 			"%s: the workspace authority has no realpath capability", p)
 	}
-	real, err := rp.RealPath(ctx, o.resolve(p))
+	resolved, err := rp.RealPath(ctx, o.resolve(p))
 	if err != nil {
 		return "", mapErr(err, p)
 	}
-	if real == "" {
+	if resolved == "" {
 		return "", pluginapi.Errf(pluginapi.CodeIO, "%s: the remote realpath returned no path", p)
 	}
-	return real, nil
+	return resolved, nil
 }
 
 // Walk implements hostos.OS over the authority's ReadDir.
@@ -239,23 +239,23 @@ func (o *authorityOS) copyDestinationRealPath(ctx context.Context, rp authority.
 	for {
 		st, err := o.files().Stat(ctx, cur)
 		if err == nil {
-			real, rerr := rp.RealPath(ctx, cur)
+			resolved, rerr := rp.RealPath(ctx, cur)
 			if rerr != nil {
 				if st.Kind == "symlink" {
 					return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: destination symbolic link cannot be resolved safely", dst)
 				}
 				return "", mapErr(rerr, cur)
 			}
-			if !path.IsAbs(real) {
-				return "", pluginapi.Errf(pluginapi.CodeUnsupported, "%s: copy: realpath returned a non-absolute destination %q", dst, real)
+			if !path.IsAbs(resolved) {
+				return "", pluginapi.Errf(pluginapi.CodeUnsupported, "%s: copy: realpath returned a non-absolute destination %q", dst, resolved)
 			}
 			for _, s := range slices.Backward(suffix) {
-				real = path.Join(real, s)
+				resolved = path.Join(resolved, s)
 			}
-			if real == "" {
+			if resolved == "" {
 				return "", pluginapi.Errf(pluginapi.CodeIO, "%s: destination realpath returned no path", dst)
 			}
-			return path.Clean(real), nil
+			return path.Clean(resolved), nil
 		}
 		if pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
 			return "", mapErr(err, cur)

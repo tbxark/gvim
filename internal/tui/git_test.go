@@ -41,7 +41,7 @@ func collect(cmd tea.Cmd) []tea.Msg {
 	if v := reflect.ValueOf(msg); v.Kind() == reflect.Slice {
 		var out []tea.Msg
 		for i := range v.Len() {
-			c, ok := v.Index(i).Interface().(tea.Cmd)
+			c, ok := reflect.TypeAssert[tea.Cmd](v.Index(i))
 			if !ok {
 				return []tea.Msg{msg}
 			}

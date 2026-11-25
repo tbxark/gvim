@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -310,7 +311,7 @@ func expandSSHValue(v, alias string, cur sshConfigValues, home, localUser string
 	}
 	port := "22"
 	if cur.Port != 0 {
-		port = fmt.Sprintf("%d", cur.Port)
+		port = strconv.Itoa(cur.Port)
 	}
 	var b strings.Builder
 	for i := 0; i < len(v); i++ {

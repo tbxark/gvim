@@ -90,12 +90,12 @@ func TestRegistryCreateListReopen(t *testing.T) {
 }
 
 func TestRegistrySymlinkRootIsOneWorkspace(t *testing.T) {
-	real, err := CanonicalRoot(t.TempDir())
+	resolved, err := CanonicalRoot(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(resolved, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	reg := newRegistry(t)
@@ -103,10 +103,10 @@ func TestRegistrySymlinkRootIsOneWorkspace(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("Create(symlink) = %+v, %v, %v", viaLink, created, err)
 	}
-	if viaLink.File.Root != real {
-		t.Fatalf("root = %q, want the resolved %q", viaLink.File.Root, real)
+	if viaLink.File.Root != resolved {
+		t.Fatalf("root = %q, want the resolved %q", viaLink.File.Root, resolved)
 	}
-	viaReal, created, err := reg.Create(real, "")
+	viaReal, created, err := reg.Create(resolved, "")
 	if err != nil || created || viaReal.File.StableID != viaLink.File.StableID {
 		t.Fatalf("Create(real) = %+v, created %v, %v", viaReal, created, err)
 	}

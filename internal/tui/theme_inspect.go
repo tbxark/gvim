@@ -153,7 +153,7 @@ func (m *Model) inspectThemeAt(x, y int) {
 	// screen has no document.
 	if doc != nil {
 		cur := doc.Cursor()
-		add(fmt.Sprintf("Current line: %s", yesNo(hasPos && pos.Line == cur.Line)), nil, false)
+		add("Current line: "+yesNo(hasPos && pos.Line == cur.Line), nil, false)
 		if a, h, ok := doc.Selection(); ok && hasPos {
 			from, to := buffer.Selection{Anchor: a, Head: h}.Ordered()
 			inSel := !pos.Less(from) && !to.Less(pos)

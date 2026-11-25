@@ -117,8 +117,8 @@ func (o *authorityOS) files() authority.FileSystem {
 	return o.slot.Files()
 }
 
-func (o *authorityOS) ReadFile(ctx context.Context, p string, max int64) ([]byte, error) {
-	data, err := o.files().ReadFile(ctx, o.resolve(p), max)
+func (o *authorityOS) ReadFile(ctx context.Context, p string, limit int64) ([]byte, error) {
+	data, err := o.files().ReadFile(ctx, o.resolve(p), limit)
 	return data, mapErr(err, p)
 }
 

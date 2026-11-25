@@ -143,7 +143,7 @@ func kindOfMode(m fs.FileMode) string {
 // ---------- files ----------
 
 // ReadFile implements hostos.OS.
-func (o *pluginOS) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
+func (o *pluginOS) ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
 	}
@@ -164,15 +164,15 @@ func (o *pluginOS) ReadFile(ctx context.Context, path string, max int64) ([]byte
 	if !st.Mode().IsRegular() {
 		return nil, pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file", p)
 	}
-	if st.Size() > max {
-		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes", p, max)
+	if st.Size() > limit {
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes", p, limit)
 	}
-	data, err := io.ReadAll(io.LimitReader(&ctxReader{ctx: ctx, r: f}, max+1))
+	data, err := io.ReadAll(io.LimitReader(&ctxReader{ctx: ctx, r: f}, limit+1))
 	if err != nil {
 		return nil, mapErr(err, p)
 	}
-	if int64(len(data)) > max {
-		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes", p, max)
+	if int64(len(data)) > limit {
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes", p, limit)
 	}
 	return data, nil
 }
@@ -262,8 +262,8 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo h
 	// Atomic: a temporary file in the same directory, then rename over the target. A
 	// symbolic link is written through, not replaced.
 	target := p
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		target = real
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		target = resolved
 	} else if li, lerr := os.Lstat(p); lerr == nil && li.Mode()&fs.ModeSymlink != 0 {
 		// A dangling link has no file to replace, and renaming over it would replace the
 		// link itself: refuse.
@@ -480,11 +480,11 @@ func (o *pluginOS) RealPath(ctx context.Context, path string) (string, error) {
 		return "", err
 	}
 	p := o.abs(path)
-	real, err := filepath.EvalSymlinks(p)
+	resolved, err := filepath.EvalSymlinks(p)
 	if err != nil {
 		return "", mapErr(err, p)
 	}
-	return filepath.Clean(real), nil
+	return filepath.Clean(resolved), nil
 }
 
 // Copy implements hostos.OS: a file, or a directory tree (symbolic links are copied as
@@ -612,11 +612,11 @@ func realCopyDestination(p string) (string, error) {
 	suffix := []string{}
 	cur := filepath.Clean(p)
 	for {
-		if real, err := filepath.EvalSymlinks(cur); err == nil {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
 			for _, s := range slices.Backward(suffix) {
-				real = filepath.Join(real, s)
+				resolved = filepath.Join(resolved, s)
 			}
-			return filepath.Clean(real), nil
+			return filepath.Clean(resolved), nil
 		}
 		if fi, err := os.Lstat(cur); err == nil {
 			if fi.Mode()&fs.ModeSymlink != 0 {

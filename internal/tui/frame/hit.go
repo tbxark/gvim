@@ -136,18 +136,18 @@ func hitRuns(runs []Run, x int, def HitTarget) HitTarget {
 // the explorer's code and tests read the cells they always did; with more than
 // one section its header is also the fold control and reports the section.
 func (l Layout) hitSectionHeader(sec sidebar.Section, x int) HitTarget {
-	reload, close := -1, -1
+	reload, closeAt := -1, -1
 	if sec.Index < len(l.SectionReload) {
 		reload = l.SectionReload[sec.Index]
 	}
 	if sec.Index < len(l.SectionClose) {
-		close = l.SectionClose[sec.Index]
+		closeAt = l.SectionClose[sec.Index]
 	}
 	if sec.Index == 0 {
 		switch {
 		case reload >= 0 && x == reload:
 			return HitTarget{Kind: HitExplorerTitleReload}
-		case close >= 0 && x == close:
+		case closeAt >= 0 && x == closeAt:
 			return HitTarget{Kind: HitExplorerTitleClose}
 		}
 		if len(l.Sections) == 1 {
@@ -155,7 +155,7 @@ func (l Layout) hitSectionHeader(sec sidebar.Section, x int) HitTarget {
 		}
 		return HitTarget{Kind: HitSidebarHeader, Section: 0}
 	}
-	if close >= 0 && x == close {
+	if closeAt >= 0 && x == closeAt {
 		return HitTarget{Kind: HitSidebarClose, Index: sec.Index, Section: sec.Index}
 	}
 	return HitTarget{Kind: HitSidebarHeader, Index: sec.Index, Section: sec.Index}

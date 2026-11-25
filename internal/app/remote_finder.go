@@ -15,7 +15,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path"
 	"slices"
 	"strings"
@@ -54,7 +53,7 @@ type remoteFinderFS struct {
 func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) ([]finder.RemoteEntry, error) {
 	fs := r.files()
 	if fs == nil {
-		return nil, fmt.Errorf("remote workspace has no file system")
+		return nil, errors.New("remote workspace has no file system")
 	}
 	entries, err := fs.ReadDir(ctx, path, hidden)
 	if err != nil {

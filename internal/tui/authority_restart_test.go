@@ -61,8 +61,8 @@ func TestReconnectRunsAfterReconnectWorkOnSuccessOnly(t *testing.T) {
 	var done *authorityRestartDoneMsg
 	for _, msg := range batchMessages(t, cmd) {
 		if r, ok := msg.(authorityRestartDoneMsg); ok {
-			copy := r
-			done = &copy
+			dup := r
+			done = &dup
 		}
 	}
 	if done == nil {
@@ -96,8 +96,8 @@ func TestReconnectRestartFailureIsANotice(t *testing.T) {
 	var done *authorityRestartDoneMsg
 	for _, msg := range msgs {
 		if r, ok := msg.(authorityRestartDoneMsg); ok {
-			copy := r
-			done = &copy
+			dup := r
+			done = &dup
 		}
 	}
 	if done == nil {

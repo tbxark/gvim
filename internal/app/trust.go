@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -115,7 +116,7 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 			state = c.state
 			c.mu.Unlock()
 			c.prepareMu.Unlock()
-			return state, fmt.Errorf("trust decision superseded")
+			return state, errors.New("trust decision superseded")
 		}
 		c.mu.Unlock()
 		err := prepare(state)
@@ -124,7 +125,7 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 		if c.transition != seq {
 			state = c.state
 			c.mu.Unlock()
-			return state, fmt.Errorf("trust decision superseded")
+			return state, errors.New("trust decision superseded")
 		}
 		if err != nil {
 			c.mu.Unlock()
@@ -142,7 +143,7 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 		state := c.state
 		c.mu.Unlock()
 		c.writeMu.Unlock()
-		return state, fmt.Errorf("trust decision superseded")
+		return state, errors.New("trust decision superseded")
 	}
 	recordKey, root, writeHook := c.recordKey, c.state.Root, c.writeStore
 	c.mu.Unlock()
@@ -160,7 +161,7 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 		state := c.state
 		c.mu.Unlock()
 		c.writeMu.Unlock()
-		return state, fmt.Errorf("trust decision superseded")
+		return state, errors.New("trust decision superseded")
 	}
 	c.state.Level = level
 	c.state.Decided = true
@@ -186,7 +187,7 @@ func (c *trustController) Load(root string) (trust.State, error) {
 		current := c.state
 		c.mu.Unlock()
 		c.writeMu.Unlock()
-		return current, fmt.Errorf("trust load superseded")
+		return current, errors.New("trust load superseded")
 	}
 	c.mu.Unlock()
 
@@ -197,7 +198,7 @@ func (c *trustController) Load(root string) (trust.State, error) {
 		current := c.state
 		c.mu.Unlock()
 		c.writeMu.Unlock()
-		return current, fmt.Errorf("trust load superseded")
+		return current, errors.New("trust load superseded")
 	}
 	if state.Root != "" {
 		c.state = state

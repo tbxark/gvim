@@ -22,7 +22,7 @@ import (
 // reported with code io.
 type OS interface {
 	// Files and directories.
-	ReadFile(ctx context.Context, path string, max int64) ([]byte, error) // larger: too_large
+	ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) // larger: too_large
 	WriteFile(ctx context.Context, path string, data []byte, o WriteOptions) error
 	ReadDir(ctx context.Context, path string, hidden bool) ([]DirEntry, error)
 	Stat(ctx context.Context, path string) (FileStat, error)

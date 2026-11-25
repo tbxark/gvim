@@ -2,6 +2,7 @@ package searchpanel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -1099,7 +1100,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		}
 		if g == nil {
 			return func() tea.Msg {
-				return gitDoneMsg{seq: seq, err: fmt.Errorf("git grep is not supported in this port"), owner: owner}
+				return gitDoneMsg{seq: seq, err: errors.New("git grep is not supported in this port"), owner: owner}
 			}
 		}
 		return func() tea.Msg {
@@ -1122,7 +1123,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 	}
 	if s == nil {
 		return func() tea.Msg {
-			return searchDoneMsg{seq: seq, err: fmt.Errorf("project search is not supported in this port"), owner: owner}
+			return searchDoneMsg{seq: seq, err: errors.New("project search is not supported in this port"), owner: owner}
 		}
 	}
 	if bs, ok := s.(BatchSearcher); ok {

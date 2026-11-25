@@ -2,6 +2,7 @@ package theme
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -100,7 +101,7 @@ func parseModifierOnly(raw json.RawMessage) ([]string, error) {
 		return nil, err
 	}
 	if c.IsRGB || c.Name != "" {
-		return nil, fmt.Errorf("names text attributes, not a color")
+		return nil, errors.New("names text attributes, not a color")
 	}
 	return c.Modifiers, nil
 }

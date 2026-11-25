@@ -50,15 +50,15 @@ func (f *daemonRemoteFS) ReadDir(_ context.Context, path string, hidden bool) ([
 	return append([]hostos.DirEntry(nil), entries...), nil
 }
 
-func (f *daemonRemoteFS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {
+func (f *daemonRemoteFS) ReadFile(_ context.Context, path string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	data, ok := f.files[path]
 	if !ok {
 		return nil, fmt.Errorf("%s: no such remote file", path)
 	}
-	if int64(len(data)) > max {
-		return nil, fmt.Errorf("%s: larger than %d bytes", path, max)
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s: larger than %d bytes", path, limit)
 	}
 	return append([]byte(nil), data...), nil
 }

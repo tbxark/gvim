@@ -2,6 +2,7 @@ package trust
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -130,7 +131,7 @@ func (s *Store) SetRecord(key string, level Level) error {
 		return fmt.Errorf("trust: invalid level %q", string(level))
 	}
 	if key == "" {
-		return fmt.Errorf("trust: empty workspace record key")
+		return errors.New("trust: empty workspace record key")
 	}
 	decisions := s.read()
 	decisions[key] = level
@@ -145,7 +146,7 @@ func (s *Store) SetRecord(key string, level Level) error {
 // The state's Root is the target text the caller can show.
 func (s *Store) OpenRecord(key string, markers []string) (State, error) {
 	if key == "" {
-		return State{Level: Restricted, Markers: markers}, fmt.Errorf("trust: empty workspace record key")
+		return State{Level: Restricted, Markers: markers}, errors.New("trust: empty workspace record key")
 	}
 	if level, decided := s.LevelForRecord(key); decided {
 		return State{Root: key, Level: level, Decided: true, Markers: markers}, nil

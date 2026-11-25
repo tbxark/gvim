@@ -24,14 +24,14 @@ type previewFS struct {
 	reads []int64
 }
 
-func (f *previewFS) ReadFile(_ context.Context, _ string, max int64) ([]byte, error) {
+func (f *previewFS) ReadFile(_ context.Context, _ string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.reads = append(f.reads, max)
+	f.reads = append(f.reads, limit)
 	if f.err != nil {
 		return nil, f.err
 	}
-	if int64(len(f.data)) > max {
+	if int64(len(f.data)) > limit {
 		return nil, errors.New("preview.txt: larger than N bytes")
 	}
 	return append([]byte(nil), f.data...), nil

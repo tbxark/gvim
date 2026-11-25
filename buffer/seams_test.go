@@ -142,14 +142,14 @@ func TestTextPrefix(t *testing.T) {
 	// than the limit, and as long as possible.
 	for _, c := range seamCorpus {
 		text := New(c.text).Text()
-		for max := 0; max <= len(text)+2; max++ {
-			got := New(c.text).TextPrefix(max)
-			if !strings.HasPrefix(text, got) || len(got) > max || !utf8.ValidString(got) {
-				t.Fatalf("%s: TextPrefix(%d) = %q is not a valid prefix of %q", c.name, max, got, text)
+		for limit := 0; limit <= len(text)+2; limit++ {
+			got := New(c.text).TextPrefix(limit)
+			if !strings.HasPrefix(text, got) || len(got) > limit || !utf8.ValidString(got) {
+				t.Fatalf("%s: TextPrefix(%d) = %q is not a valid prefix of %q", c.name, limit, got, text)
 			}
 			if rest := text[len(got):]; rest != "" {
-				if _, n := utf8.DecodeRuneInString(rest); len(got)+n <= max {
-					t.Fatalf("%s: TextPrefix(%d) = %q stops early", c.name, max, got)
+				if _, n := utf8.DecodeRuneInString(rest); len(got)+n <= limit {
+					t.Fatalf("%s: TextPrefix(%d) = %q stops early", c.name, limit, got)
 				}
 			}
 		}
@@ -316,30 +316,30 @@ func TestChunkWindowsConcatenateToText(t *testing.T) {
 	for _, c := range seamCorpus {
 		b := New(c.text)
 		s := b.Snapshot()
-		for _, max := range []int{0, 1, 3, 7, 16, 1 << 20} {
+		for _, limit := range []int{0, 1, 3, 7, 16, 1 << 20} {
 			var parts []string
 			for from := 0; ; {
-				first, n, text := s.Chunk(from, max)
+				first, n, text := s.Chunk(from, limit)
 				if n == 0 {
 					if first != s.Lines() {
-						t.Fatalf("%s max=%d: end chunk first = %d, want %d", c.name, max, first, s.Lines())
+						t.Fatalf("%s max=%d: end chunk first = %d, want %d", c.name, limit, first, s.Lines())
 					}
 					break
 				}
 				if first != from {
-					t.Fatalf("%s max=%d: first = %d, want %d", c.name, max, first, from)
+					t.Fatalf("%s max=%d: first = %d, want %d", c.name, limit, first, from)
 				}
-				if n > 1 && len(text) > max {
-					t.Fatalf("%s max=%d: %d lines in %d bytes", c.name, max, n, len(text))
+				if n > 1 && len(text) > limit {
+					t.Fatalf("%s max=%d: %d lines in %d bytes", c.name, limit, n, len(text))
 				}
 				if got := strings.Count(text, "\n"); got != n-1 {
-					t.Fatalf("%s max=%d: %d lines but %d newlines", c.name, max, n, got)
+					t.Fatalf("%s max=%d: %d lines but %d newlines", c.name, limit, n, got)
 				}
 				parts = append(parts, text)
 				from += n
 			}
 			if got := strings.Join(parts, "\n"); got != b.Text() {
-				t.Errorf("%s max=%d: windows join to %q, want %q", c.name, max, got, b.Text())
+				t.Errorf("%s max=%d: windows join to %q, want %q", c.name, limit, got, b.Text())
 			}
 		}
 	}
@@ -381,27 +381,27 @@ func TestChunkBeforeMirrorsChunk(t *testing.T) {
 	for _, c := range seamCorpus {
 		b := New(c.text)
 		s := b.Snapshot()
-		for _, max := range []int{0, 1, 3, 7, 16, 1 << 20} {
+		for _, limit := range []int{0, 1, 3, 7, 16, 1 << 20} {
 			var parts []string
 			for to := s.Lines(); ; {
-				first, n, text := s.ChunkBefore(to, max)
+				first, n, text := s.ChunkBefore(to, limit)
 				if n == 0 {
 					if to > 0 {
-						t.Fatalf("%s max=%d: empty chunk before line %d", c.name, max, to)
+						t.Fatalf("%s max=%d: empty chunk before line %d", c.name, limit, to)
 					}
 					break
 				}
 				if first+n != to {
-					t.Fatalf("%s max=%d: chunk [%d,+%d) does not end at %d", c.name, max, first, n, to)
+					t.Fatalf("%s max=%d: chunk [%d,+%d) does not end at %d", c.name, limit, first, n, to)
 				}
-				if n > 1 && len(text) > max {
-					t.Fatalf("%s max=%d: %d lines in %d bytes", c.name, max, n, len(text))
+				if n > 1 && len(text) > limit {
+					t.Fatalf("%s max=%d: %d lines in %d bytes", c.name, limit, n, len(text))
 				}
 				parts = append([]string{text}, parts...)
 				to = first
 			}
 			if got := strings.Join(parts, "\n"); got != b.Text() {
-				t.Errorf("%s max=%d: backward windows join to %q, want %q", c.name, max, got, b.Text())
+				t.Errorf("%s max=%d: backward windows join to %q, want %q", c.name, limit, got, b.Text())
 			}
 		}
 	}

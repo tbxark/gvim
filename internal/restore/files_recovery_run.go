@@ -12,16 +12,16 @@ import (
 // RecoveryRoot is the folder of the crash-recovery copies for a program run with session
 // directory sessionDir, or "" when there is none. Only a run that starts the program
 // (real is set) keeps a copy.
-func RecoveryRoot(sessionDir string, real bool) string {
-	if sessionDir == "" || !real {
+func RecoveryRoot(sessionDir string, live bool) string {
+	if sessionDir == "" || !live {
 		return ""
 	}
 	return RecoveryPath(sessionDir)
 }
 
 // RecoveryDirFor is the directory of this process's own crash-recovery copy, or "".
-func RecoveryDirFor(sessionDir string, real bool) string {
-	root := RecoveryRoot(sessionDir, real)
+func RecoveryDirFor(sessionDir string, live bool) string {
+	root := RecoveryRoot(sessionDir, live)
 	if root == "" {
 		return ""
 	}
@@ -30,8 +30,8 @@ func RecoveryDirFor(sessionDir string, real bool) string {
 
 // RecoveryPort returns the writer of the crash-recovery copy and its interval, or nil
 // when editor.recovery_enabled is off or there is no place to write it.
-func RecoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, real bool) (tui.RecoveryPort, time.Duration) {
-	dir := RecoveryDirFor(sessionDir, real)
+func RecoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, live bool) (tui.RecoveryPort, time.Duration) {
+	dir := RecoveryDirFor(sessionDir, live)
 	every := time.Duration(cfg.AutoRecoverySaveIntervalSecs) * time.Second
 	if dir == "" || !cfg.RecoveryEnabled || every <= 0 {
 		return nil, 0
@@ -43,8 +43,8 @@ func RecoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, real 
 // folder of sessionDir, except the copy of a run that is still going, and returns the notice
 // for the status row, or "" when there was nothing to recover. The copies it restored from
 // are removed once port, when it is not nil, has written the copy of this run.
-func RecoverFromCrash(ed *editor.Editor, sessionDir string, real bool, port tui.RecoveryPort) string {
-	root := RecoveryRoot(sessionDir, real)
+func RecoverFromCrash(ed *editor.Editor, sessionDir string, live bool, port tui.RecoveryPort) string {
+	root := RecoveryRoot(sessionDir, live)
 	if root == "" {
 		return ""
 	}

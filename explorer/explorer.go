@@ -492,8 +492,8 @@ func (t *Tree) expandWithChain(n *node) error {
 		return nil
 	}
 	seen := map[string]bool{}
-	if real, err := filepath.EvalSymlinks(n.path); err == nil {
-		seen[real] = true
+	if resolved, err := filepath.EvalSymlinks(n.path); err == nil {
+		seen[resolved] = true
 	} else {
 		seen[n.path] = true
 	}
@@ -504,8 +504,8 @@ func (t *Tree) expandWithChain(n *node) error {
 			break
 		}
 		key := next.path
-		if real, err := filepath.EvalSymlinks(next.path); err == nil {
-			key = real
+		if resolved, err := filepath.EvalSymlinks(next.path); err == nil {
+			key = resolved
 		}
 		if seen[key] {
 			break

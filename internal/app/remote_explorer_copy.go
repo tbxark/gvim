@@ -119,7 +119,7 @@ func (o *remoteExplorerOps) Copy(ctx context.Context, src, dstDir string, c expa
 // validates name as one path element and uses the same conflict policy as Copy.
 func (o *remoteExplorerOps) CopyAs(ctx context.Context, src, dstDir, name string, c expanel.Conflict) (string, error) {
 	if name == "" {
-		return "", fmt.Errorf("remote copy: empty destination name")
+		return "", errors.New("remote copy: empty destination name")
 	}
 	return o.transfer(ctx, src, dstDir, name, false, c, "copy")
 }
@@ -297,7 +297,7 @@ func (o *remoteExplorerOps) copyEndpoints(src, dstDir string) error {
 		return fmt.Errorf("remote file operation: %s is outside the remote workspace", dstDir)
 	}
 	if src == path.Clean(o.root) {
-		return fmt.Errorf("remote file operation: the workspace root cannot be copied or moved")
+		return errors.New("remote file operation: the workspace root cannot be copied or moved")
 	}
 	if dstDir == src || strings.HasPrefix(dstDir, src+"/") {
 		return fmt.Errorf("remote paste refused: the destination %s is inside the source %s", dstDir, src)

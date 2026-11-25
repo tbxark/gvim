@@ -48,7 +48,7 @@ func newRexInstallCommand(installer rexplugin.Installer) *cobra.Command {
 			if err := writeLine(w, "Installed gvim's Rex integration."); err != nil {
 				return err
 			}
-			if err := writeLine(w, fmt.Sprintf("  Rex plugin   %s", rep.RexPlugin)); err != nil {
+			if err := writeLine(w, "  Rex plugin   "+rep.RexPlugin); err != nil {
 				return err
 			}
 			if err := writeLine(w, fmt.Sprintf("  Rex config   %s%s", rep.RexConfig, reloaded(rep.Changed, rep.Reloaded))); err != nil {

@@ -356,11 +356,11 @@ func (p *problemList) list() []string { return p.items }
 
 // clipText bounds one text to max bytes, on a rune boundary: a split rune is
 // dropped rather than half-written.
-func clipText(text string, max int) string {
-	if len(text) <= max {
+func clipText(text string, limit int) string {
+	if len(text) <= limit {
 		return text
 	}
-	clipped := text[:max]
+	clipped := text[:limit]
 	for len(clipped) > 0 && !utf8.ValidString(clipped) {
 		clipped = clipped[:len(clipped)-1]
 	}

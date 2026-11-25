@@ -618,7 +618,7 @@ func (s *Store) ClearRange(doc uint64, owner, ns string, fromLine, toLine int) {
 	if toLine < fromLine {
 		fromLine, toLine = toLine, fromLine
 	}
-	clear := func(id uint64) {
+	clearFn := func(id uint64) {
 		d := s.docs[id]
 		if d == nil {
 			return
@@ -642,11 +642,11 @@ func (s *Store) ClearRange(doc uint64, owner, ns string, fromLine, toLine int) {
 		s.tidy(id)
 	}
 	if doc != 0 {
-		clear(doc)
+		clearFn(doc)
 		return
 	}
 	for id := range s.docs {
-		clear(id)
+		clearFn(id)
 	}
 }
 

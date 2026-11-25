@@ -19,6 +19,7 @@ import (
 	"bytes"
 	_ "embed" // for go:embed below
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -260,7 +261,7 @@ func (m *Map) WithOverrides(data []byte) (*Map, error) {
 		return nil, fmt.Errorf("keymap: overrides: %w", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("keymap: overrides: unexpected data after the object")
+		return nil, errors.New("keymap: overrides: unexpected data after the object")
 	}
 	own := make([]Binding, 0, len(f.Bindings))
 	for i, rb := range f.Bindings {
@@ -366,17 +367,17 @@ func sameArgs(a, b map[string]any) bool {
 // binding validates one raw entry and converts it to a Binding.
 func (rb rawBinding) binding() (Binding, error) {
 	if rb.Action == "" {
-		return Binding{}, fmt.Errorf("action is required")
+		return Binding{}, errors.New("action is required")
 	}
 	steps := rb.Keys
 	if rb.Key != "" {
 		if len(steps) > 0 {
-			return Binding{}, fmt.Errorf("give key or keys, not both")
+			return Binding{}, errors.New("give key or keys, not both")
 		}
 		steps = []rawKey{{Key: rb.Key, Modifiers: rb.Modifiers}}
 	}
 	if len(steps) == 0 {
-		return Binding{}, fmt.Errorf("key or keys is required")
+		return Binding{}, errors.New("key or keys is required")
 	}
 	chords := make([]string, len(steps))
 	for i, s := range steps {
@@ -960,7 +961,7 @@ func chordParts(chord string) []string {
 
 func keyName(key string) (string, error) {
 	if key == "" {
-		return "", fmt.Errorf("empty key name")
+		return "", errors.New("empty key name")
 	}
 	if functionKey.MatchString(key) {
 		return strings.ToUpper(key[:1]) + key[1:], nil

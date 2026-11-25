@@ -3,6 +3,7 @@ package theme
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -228,7 +229,7 @@ func (r *Registry) resolveRef(ref string) (builtin, path string, err error) {
 	_ = r.ensure()
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return "", "", fmt.Errorf("theme: the theme value is empty")
+		return "", "", errors.New("theme: the theme value is empty")
 	}
 	if IsURLForm(ref) {
 		// Load/Canonical handle URL values before this runs. The other callers
@@ -369,7 +370,7 @@ func (r *Registry) Canonical(ref string) (string, error) {
 // ThemePath returns where SaveTheme(name, ...) writes.
 func (r *Registry) ThemePath(name string) (string, error) {
 	if r.userDir == "" {
-		return "", fmt.Errorf("theme: there is no user theme dir")
+		return "", errors.New("theme: there is no user theme dir")
 	}
 	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
 		return "", fmt.Errorf("theme: %q is not a valid theme file name", name)
@@ -390,7 +391,7 @@ func (r *Registry) DeleteTheme(ref string) error {
 		return fmt.Errorf("theme: %q is a bundled theme and cannot be deleted", ref)
 	}
 	if r.userDir == "" {
-		return fmt.Errorf("theme: there is no user theme dir")
+		return errors.New("theme: there is no user theme dir")
 	}
 	if rel, err := filepath.Rel(r.userDir, path); err != nil || strings.HasPrefix(rel, "..") {
 		return fmt.Errorf("theme: %q is not a user theme in %s", ref, r.userDir)

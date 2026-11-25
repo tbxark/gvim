@@ -3,7 +3,7 @@ package pluginhost
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -89,7 +89,7 @@ func (o *pluginOS) command(argv []string, opts hostos.ProcOptions) (*exec.Cmd, e
 		if resolved, ok := trust.ResolveSpawnPath(o.gateCwd(opts), name, pathValue); ok {
 			name = resolved
 		} else {
-			return nil, execErr(argv, fmt.Errorf("executable file not found in the child PATH"))
+			return nil, execErr(argv, errors.New("executable file not found in the child PATH"))
 		}
 	}
 	cmd := exec.Command(name, argv[1:]...)

@@ -106,7 +106,7 @@ func (f *remoteOpsFake) putSymlink(p, target string) *remoteOpsFake {
 	return f
 }
 
-func (f *remoteOpsFake) ReadFile(ctx context.Context, p string, max int64) ([]byte, error) {
+func (f *remoteOpsFake) ReadFile(ctx context.Context, p string, limit int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads = append(f.reads, p)
@@ -614,8 +614,8 @@ func TestRemoteExplorerCreateFileKeepsDanglingSymlink(t *testing.T) {
 // for the explicit-refusal branch when promise.Creators is nil.
 type remoteOpsFilesNoCreate struct{ files *remoteOpsFake }
 
-func (f remoteOpsFilesNoCreate) ReadFile(ctx context.Context, p string, max int64) ([]byte, error) {
-	return f.files.ReadFile(ctx, p, max)
+func (f remoteOpsFilesNoCreate) ReadFile(ctx context.Context, p string, limit int64) ([]byte, error) {
+	return f.files.ReadFile(ctx, p, limit)
 }
 func (f remoteOpsFilesNoCreate) ReadRange(ctx context.Context, p string, off, n int64) ([]byte, error) {
 	return f.files.ReadRange(ctx, p, off, n)

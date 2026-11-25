@@ -111,7 +111,7 @@ func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.Buffe
 // everything the plugin set when ns is empty, or (id 0) on every buffer.
 func (h *pluginHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
 	pf := &h.model().plug.folds
-	clear := func(buf pluginapi.BufferID) {
+	clearFn := func(buf pluginapi.BufferID) {
 		kept := pf.byBuffer[buf][:0:0]
 		for _, f := range pf.byBuffer[buf] {
 			if f.owner == plugin && (ns == "" || f.ns == ns) {
@@ -129,11 +129,11 @@ func (h *pluginHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
 		if err != nil {
 			return
 		}
-		clear(local)
+		clearFn(local)
 		return
 	}
 	for buf := range pf.byBuffer {
-		clear(buf)
+		clearFn(buf)
 	}
 }
 

@@ -152,11 +152,11 @@ func runRow(r convRow) (string, error) {
 		if r.fn != "" {
 			rep.Func = namedFunc(r.fn)
 		}
-		max := r.max
-		if max == 0 {
-			max = Unlimited
+		limit := r.max
+		if limit == 0 {
+			limit = Unlimited
 		}
-		out, n, err := Gsub(r.s, r.p, rep, max, o)
+		out, n, err := Gsub(r.s, r.p, rep, limit, o)
 		if err != nil {
 			return "error", err
 		}

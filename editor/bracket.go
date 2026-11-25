@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -43,7 +44,7 @@ func (e *Editor) bracketPairsOf(d *Document) [][2]rune {
 		lang = strings.ToLower(d.Language())
 	}
 	if lang == "html" || lang == "templ" {
-		return append(bracketPairs[:len(bracketPairs):len(bracketPairs)], angleBrackets)
+		return append(slices.Clip(bracketPairs), angleBrackets)
 	}
 	return bracketPairs
 }

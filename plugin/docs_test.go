@@ -426,7 +426,7 @@ func TestDocsQuotasMatchLimits(t *testing.T) {
 		{"menu bar rows", plugin.QuotaMenuItems},
 	}
 	for _, r := range rows {
-		want := fmt.Sprintf("| %s", r.resource)
+		want := "| " + r.resource
 		i := strings.Index(doc, want)
 		if i < 0 {
 			t.Errorf("limits.md has no quota row for %q", r.resource)

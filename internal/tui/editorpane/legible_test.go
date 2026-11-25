@@ -62,14 +62,14 @@ func TestRepairedFGTakesTheNearestPaletteColor(t *testing.T) {
 func TestOccurrenceKeepsTextLegible(t *testing.T) {
 	band := color.RGBA{R: 60, G: 66, B: 78, A: 255}
 	hidden := color.RGBA{R: 70, G: 76, B: 88, A: 255} // text color close to the band
-	clear := color.RGBA{R: 240, G: 240, B: 240, A: 255}
+	clearFn := color.RGBA{R: 240, G: 240, B: 240, A: 255}
 	tests := []struct {
 		name string
 		text color.Color
 		keep bool
 	}{
 		{"text that would vanish is repaired", hidden, false},
-		{"readable text is not touched", clear, true},
+		{"readable text is not touched", clearFn, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

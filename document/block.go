@@ -122,10 +122,7 @@ func (d *Document) BlockStep(dLine, dCol int, virtual bool) {
 			col = prevBoundary(d.Buffer, at.Line, col)
 		}
 	}
-	line := at.Line + dLine
-	if line < 0 {
-		line = 0
-	}
+	line := max(at.Line+dLine, 0)
 	if line >= d.Buffer.Lines() {
 		line = d.Buffer.Lines() - 1
 	}

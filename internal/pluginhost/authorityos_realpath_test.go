@@ -23,8 +23,8 @@ func (f *fakeRealPathFiles) RealPath(_ context.Context, p string) (string, error
 	if f.err != nil {
 		return "", f.err
 	}
-	if real, ok := f.real[p]; ok {
-		return real, nil
+	if resolved, ok := f.real[p]; ok {
+		return resolved, nil
 	}
 	return "", pluginapi.Errf(pluginapi.CodeNotFound, "%s: no such path", p)
 }

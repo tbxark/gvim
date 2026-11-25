@@ -3,6 +3,7 @@ package keymap
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -184,7 +185,7 @@ func splitUserBindings(data []byte) ([]json.RawMessage, error) {
 		}
 		list = obj.Bindings
 	default:
-		return nil, fmt.Errorf("must be a list of bindings")
+		return nil, errors.New("must be a list of bindings")
 	}
 	return list, nil
 }

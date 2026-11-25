@@ -1,6 +1,7 @@
 package keymap
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,7 +18,7 @@ func NormalizeChord(chord string) (string, error) {
 	steps := strings.Fields(chord)
 	switch {
 	case len(steps) == 0:
-		return "", fmt.Errorf("keymap: empty chord")
+		return "", errors.New("keymap: empty chord")
 	case len(steps) > MaxChordSteps:
 		return "", fmt.Errorf("keymap: %q has more than %d steps", chord, MaxChordSteps)
 	}

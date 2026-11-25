@@ -1065,8 +1065,8 @@ func TestDashboardDiskMeter(t *testing.T) {
 	if diskLine == "" {
 		t.Fatalf("no disk meter line in:\n%s", text)
 	}
-	open, close := strings.Index(diskLine, "["), strings.LastIndex(diskLine, "]")
-	if open < 0 || close <= open || close-open+1 > 20 {
+	open, closeAt := strings.Index(diskLine, "["), strings.LastIndex(diskLine, "]")
+	if open < 0 || closeAt <= open || closeAt-open+1 > 20 {
 		t.Fatalf("disk meter is not a bounded bracket cell: %q", diskLine)
 	}
 }

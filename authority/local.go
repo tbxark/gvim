@@ -50,8 +50,8 @@ func Local(o LocalOptions) *Authority {
 	return New(Parts{Files: l, OneShot: l, LongRunning: l, Terminal: l})
 }
 
-func (l *local) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
-	return l.os.ReadFile(ctx, path, max)
+func (l *local) ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
+	return l.os.ReadFile(ctx, path, limit)
 }
 
 // localReadRangeCap bounds one local windowed read, matching the SSH transport cap.

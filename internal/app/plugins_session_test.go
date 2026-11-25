@@ -111,7 +111,7 @@ func (s *pluginSession) route(msg tea.Msg) {
 	}
 	if rv := reflect.ValueOf(msg); rv.Kind() == reflect.Slice && rv.Type().Elem() == cmdType {
 		for i := range rv.Len() {
-			if c, _ := rv.Index(i).Interface().(tea.Cmd); c != nil {
+			if c, _ := reflect.TypeAssert[tea.Cmd](rv.Index(i)); c != nil {
 				s.route(c())
 			}
 		}

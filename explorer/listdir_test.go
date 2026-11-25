@@ -279,7 +279,7 @@ func TestListDirCustomIgnorePatterns(t *testing.T) {
 func TestListDirRespectGitignoreFalseWithCustomPatterns(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		".gitignore": "*.gitignored\n",
+		".gitignore":   "*.gitignored\n",
 		"a.gitignored": "content",
 		"test.log":     "content",
 		"main.go":      "content",

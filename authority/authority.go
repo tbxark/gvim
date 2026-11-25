@@ -11,7 +11,7 @@ package authority
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io/fs"
 	"time"
 
@@ -21,7 +21,7 @@ import (
 // FileSystem is the file part of the slot. The value types are the ones the plugin OS
 // port already uses, so the local adapter is a forwarding layer.
 type FileSystem interface {
-	ReadFile(ctx context.Context, path string, max int64) ([]byte, error)
+	ReadFile(ctx context.Context, path string, limit int64) ([]byte, error)
 	// ReadRange reads at most n bytes at off; the portable windowed primitive for
 	// large files. A short answer is io.EOF. n is capped by the backend.
 	ReadRange(ctx context.Context, path string, off, n int64) ([]byte, error)
@@ -350,7 +350,7 @@ func (a *Authority) Close() error {
 // ErrUnsupportedFileIO is the error a slot whose backend mounts no file surface returns:
 // a slot always answers the FileSystem contract, and the SSH backend mounts the helper
 // backend of ssh_files.go instead of refusing.
-var ErrUnsupportedFileIO = fmt.Errorf("authority: this authority mounts no file surface")
+var ErrUnsupportedFileIO = errors.New("authority: this authority mounts no file surface")
 
 // UnsupportedFiles refuses every file operation with ErrUnsupportedFileIO.
 type UnsupportedFiles struct{}

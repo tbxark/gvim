@@ -26,7 +26,7 @@ type carets struct {
 }
 
 func (c carets) String() string {
-	s := fmt.Sprintf("primary %s", fmtCaret(c.Primary))
+	s := "primary " + fmtCaret(c.Primary)
 	for _, x := range c.extras {
 		s += ", extra " + fmtCaret(x)
 	}

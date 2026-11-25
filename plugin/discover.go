@@ -580,7 +580,7 @@ func readLua(fsys fs.FS, name, plugin string) rawFile {
 // readCapped reads a file of at most max bytes; a larger one is a CodeTooLarge error.
 // Anything but a regular file is refused before it is opened: open(2) of a FIFO waits for a
 // writer and would hold the whole discovery Work forever.
-func readCapped(fsys fs.FS, name string, max int64) ([]byte, error) {
+func readCapped(fsys fs.FS, name string, limit int64) ([]byte, error) {
 	fi, err := fs.Stat(fsys, name)
 	if err != nil {
 		return nil, err
@@ -593,12 +593,12 @@ func readCapped(fsys fs.FS, name string, max int64) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > max {
-		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "file is larger than %d bytes", max)
+	if int64(len(data)) > limit {
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "file is larger than %d bytes", limit)
 	}
 	return data, nil
 }

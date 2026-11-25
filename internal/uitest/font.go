@@ -1,6 +1,7 @@
 package uitest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -83,7 +84,7 @@ func newFace(f *opentype.Font, cellW, cellH int) (font.Face, int, error) {
 	}
 	adv, ok := probe.GlyphAdvance('0')
 	if !ok || adv <= 0 {
-		return nil, 0, fmt.Errorf("uitest: font has no advance for '0'")
+		return nil, 0, errors.New("uitest: font has no advance for '0'")
 	}
 	size := probeSize * float64(cellW) * 64 / float64(adv)
 	m := probe.Metrics()

@@ -55,16 +55,16 @@ func arange(l1, c1, l2, c2 int) pluginapi.Range {
 func TestPluginEditorFindsBufferBySpelling(t *testing.T) {
 	apptest.IsolateConfig(t)
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real")
-	apptest.Must(t, os.Mkdir(real, 0o755))
+	resolved := filepath.Join(dir, "real")
+	apptest.Must(t, os.Mkdir(resolved, 0o755))
 	link := filepath.Join(dir, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(resolved, link); err != nil {
 		t.Skipf("no symlinks: %v", err)
 	}
-	apptest.Must(t, os.WriteFile(filepath.Join(real, "a.txt"), []byte("a\n"), 0o644))
-	apptest.Must(t, os.WriteFile(filepath.Join(real, "b.txt"), []byte("b\n"), 0o644))
+	apptest.Must(t, os.WriteFile(filepath.Join(resolved, "a.txt"), []byte("a\n"), 0o644))
+	apptest.Must(t, os.WriteFile(filepath.Join(resolved, "b.txt"), []byte("b\n"), 0o644))
 	ed := editor.New(editor.Options{})
-	apptest.Must(t, ed.OpenFile(filepath.Join(real, "a.txt")))
+	apptest.Must(t, ed.OpenFile(filepath.Join(resolved, "a.txt")))
 	apptest.Must(t, ed.OpenFile(filepath.Join(link, "b.txt")))
 	pe := newPluginEditor(ed)
 	ids := map[string]pluginapi.BufferID{}
@@ -73,7 +73,7 @@ func TestPluginEditorFindsBufferBySpelling(t *testing.T) {
 	}
 	for name, spelling := range map[string]string{
 		"a.txt": filepath.Join(link, "a.txt"),
-		"b.txt": filepath.Join(real, "b.txt"),
+		"b.txt": filepath.Join(resolved, "b.txt"),
 	} {
 		if got := pe.FindBuffer(spelling); got == 0 || got != ids[name] {
 			t.Errorf("FindBuffer(%s) = %d, want %d", spelling, got, ids[name])

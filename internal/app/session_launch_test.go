@@ -251,15 +251,15 @@ func TestBuildRuntimeSimpleRestoresAndSavesNothing(t *testing.T) {
 	if rt.searchDir != freshDir {
 		t.Errorf("searchDir = %q, want the find history kept in every launch", rt.searchDir)
 	}
-	// Crash recovery is not session state either: a real run (watching starts the
+	// Crash recovery is not session state either: a resolved run (watching starts the
 	// watcher and the recovery copy) keeps it in --simple.
-	real, err := buildRuntime(t.Context(), Options{Root: root, SessionDir: freshDir, Simple: true}, true)
+	resolved, err := buildRuntime(t.Context(), Options{Root: root, SessionDir: freshDir, Simple: true}, true)
 	apptest.Must(t, err)
 	t.Cleanup(func() {
-		real.close()
-		real.ed.Close()
+		resolved.close()
+		resolved.ed.Close()
 	})
-	if real.recoveryWriter == nil {
+	if resolved.recoveryWriter == nil {
 		t.Error("--simple turned the crash-recovery copy off")
 	}
 }

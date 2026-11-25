@@ -30,7 +30,7 @@ type fakeRangeAccess struct {
 	mtime        time.Time
 }
 
-func (f *fakeRangeAccess) ReadFile(path string, max int64) ([]byte, error) {
+func (f *fakeRangeAccess) ReadFile(path string, limit int64) ([]byte, error) {
 	return nil, errors.New("test: whole-file read must not be used for a windowed large file")
 }
 func (f *fakeRangeAccess) Stat(path string) (AccessStat, error) {

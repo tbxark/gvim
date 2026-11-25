@@ -76,8 +76,8 @@ func (m *MuxOS) current() hostos.OS {
 	return osys
 }
 
-func (m *MuxOS) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
-	return m.current().ReadFile(ctx, path, max)
+func (m *MuxOS) ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
+	return m.current().ReadFile(ctx, path, limit)
 }
 func (m *MuxOS) WriteFile(ctx context.Context, path string, data []byte, o hostos.WriteOptions) error {
 	return m.current().WriteFile(ctx, path, data, o)

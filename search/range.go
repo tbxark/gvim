@@ -46,7 +46,7 @@ var ErrRangeTooLarge = errors.New("search: range too large")
 // regular expression is subject to MaxRegexWork, except one that is a plain
 // string. A large buffer returns ErrLargeBuffer without reading anything. An
 // empty query matches nothing. Positions are rune positions of b, as in Find.
-func FindRange(b *buffer.Buffer, q Query, from, to buffer.Pos, max int) (ms []Match, truncated bool, err error) {
+func FindRange(b *buffer.Buffer, q Query, from, to buffer.Pos, limit int) (ms []Match, truncated bool, err error) {
 	if b.Large() {
 		return nil, false, ErrLargeBuffer
 	}
@@ -54,10 +54,10 @@ func FindRange(b *buffer.Buffer, q Query, from, to buffer.Pos, max int) (ms []Ma
 		return nil, false, nil
 	}
 	switch {
-	case max <= 0:
-		max = DefaultFindMax
-	case max > MaxFindMax:
-		max = MaxFindMax
+	case limit <= 0:
+		limit = DefaultFindMax
+	case limit > MaxFindMax:
+		limit = MaxFindMax
 	}
 	from, to = b.Clamp(from), b.Clamp(to)
 	if to.Less(from) {
@@ -84,12 +84,12 @@ func FindRange(b *buffer.Buffer, q Query, from, to buffer.Pos, max int) (ms []Ma
 	if err != nil {
 		return nil, false, err
 	}
-	offs, err := next(text, max+1)
+	offs, err := next(text, limit+1)
 	if err != nil {
 		return nil, false, err
 	}
-	if len(offs) > max {
-		offs, truncated = offs[:max], true
+	if len(offs) > limit {
+		offs, truncated = offs[:limit], true
 	}
 	if len(offs) == 0 {
 		return nil, false, nil

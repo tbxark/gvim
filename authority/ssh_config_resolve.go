@@ -150,7 +150,7 @@ func splitSSHJump(s string) (host, user string, port int, err error) {
 	if at := strings.LastIndex(s, "@"); at >= 0 {
 		user, s = s[:at], s[at+1:]
 		if user == "" {
-			return "", "", 0, fmt.Errorf("ssh config ProxyJump: empty user")
+			return "", "", 0, errors.New("ssh config ProxyJump: empty user")
 		}
 	}
 	host, port, err = splitHostPort(s)
@@ -158,7 +158,7 @@ func splitSSHJump(s string) (host, user string, port int, err error) {
 		return "", "", 0, fmt.Errorf("ssh config ProxyJump: %w", err)
 	}
 	if host == "" {
-		return "", "", 0, fmt.Errorf("ssh config ProxyJump: empty host")
+		return "", "", 0, errors.New("ssh config ProxyJump: empty host")
 	}
 	return host, user, port, nil
 }

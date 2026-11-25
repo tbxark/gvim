@@ -256,7 +256,7 @@ type option struct {
 // set applies the option to c. On error c is unchanged.
 func (o option) set(c *Config, raw json.RawMessage) error {
 	if isNull(raw) && !o.nullable {
-		return fmt.Errorf("null is not a valid value")
+		return errors.New("null is not a valid value")
 	}
 	return o.apply(c, raw)
 }

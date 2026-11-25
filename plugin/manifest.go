@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -61,7 +62,7 @@ func parseManifest(data []byte) (manifest, error) {
 			var f float64
 			if err = json.Unmarshal(v, &f); err == nil {
 				if f < 1 || f != float64(int(f)) {
-					return m, fmt.Errorf(`plugin.json: "api" must be a positive integer`)
+					return m, errors.New(`plugin.json: "api" must be a positive integer`)
 				}
 				m.API = int(f)
 			}

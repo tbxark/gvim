@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -331,7 +332,7 @@ func layerObjectRaw(object map[string]json.RawMessage, key string) json.RawMessa
 // language, and optionally a server name, as "language\x00name".
 func (s *settingsService) lspAct(action, value string) (string, error) {
 	if s.rt.lsp == nil {
-		return "", fmt.Errorf("no language-server port is wired")
+		return "", errors.New("no language-server port is wired")
 	}
 	language, name, _ := strings.Cut(value, "\x00")
 	switch action {

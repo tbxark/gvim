@@ -131,14 +131,14 @@ func (r *remoteFileAccess) remoteHome() (string, error) {
 }
 
 // ReadFile implements document.FileAccess.
-func (r *remoteFileAccess) ReadFile(path string, max int64) ([]byte, error) {
+func (r *remoteFileAccess) ReadFile(path string, limit int64) ([]byte, error) {
 	p, err := r.expand(path)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := r.opCtx()
 	defer cancel()
-	return r.slot.Files().ReadFile(ctx, p, max)
+	return r.slot.Files().ReadFile(ctx, p, limit)
 }
 
 // ReadRange implements document.RangeAccess: one bounded window of the remote file,

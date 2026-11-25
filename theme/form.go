@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 func ValidateForm(ref string) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return fmt.Errorf("the theme value is empty")
+		return errors.New("the theme value is empty")
 	}
 	if IsURLForm(ref) {
 		u, err := url.Parse(ref)

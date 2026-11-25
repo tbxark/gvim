@@ -384,11 +384,11 @@ func TestGsubMaxOut(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			max := c.max
-			if max == 0 {
-				max = Unlimited
+			limit := c.max
+			if limit == 0 {
+				limit = Unlimited
 			}
-			out, _, err := Gsub(s, c.pat, c.rep, max, Options{MaxOut: 2000})
+			out, _, err := Gsub(s, c.pat, c.rep, limit, Options{MaxOut: 2000})
 			if !errors.Is(err, c.err) {
 				t.Fatalf("err = %v, want %v", err, c.err)
 			}

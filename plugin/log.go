@@ -50,11 +50,11 @@ func (l *logRing) snapshot() []pluginapi.LogEntry {
 }
 
 // clipMsg cuts msg to max bytes on a rune boundary and marks the cut.
-func clipMsg(msg string, max int) string {
-	if len(msg) <= max {
+func clipMsg(msg string, limit int) string {
+	if len(msg) <= limit {
 		return msg
 	}
-	cut := max - 3
+	cut := limit - 3
 	for cut > 0 && !utf8.RuneStart(msg[cut]) {
 		cut--
 	}

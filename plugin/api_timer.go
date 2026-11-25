@@ -3,6 +3,7 @@ package plugin
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -37,7 +38,7 @@ type luaTimer struct {
 	live   *int
 }
 
-func (t *luaTimer) handleString() string { return fmt.Sprint(t.id) }
+func (t *luaTimer) handleString() string { return strconv.Itoa(t.id) }
 
 func (t *luaTimer) arm() { t.stop = t.p.afterTimer(t.p.paceArm(t.period), t.fire) }
 

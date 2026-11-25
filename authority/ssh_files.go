@@ -189,16 +189,16 @@ func (f *sshFiles) Remove(ctx context.Context, path string, recursive bool) erro
 // ReadFile reads at most max bytes through `head -c max+1`, so a larger file is
 // detected from the answer size and reported in the port's too-large shape without
 // pulling the whole file.
-func (f *sshFiles) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
+func (f *sshFiles) ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if max < 0 {
-		max = 0
+	if limit < 0 {
+		limit = 0
 	}
 	// A remote read is a transfer: cap the caller's max at the transport cap, and read
 	// exactly effective+1 bytes so an oversized file is detected without pulling it.
-	effective := min(max, int64(sshFilesMaxReadBytes))
+	effective := min(limit, int64(sshFilesMaxReadBytes))
 	hr, err := f.execScript(ctx, sshReadScript, []string{path, strconv.FormatInt(effective+1, 10)}, nil, effective+1, sshFilesMaxStderrBytes)
 	if err != nil {
 		return nil, err

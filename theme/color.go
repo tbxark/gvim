@@ -2,6 +2,7 @@ package theme
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -94,7 +95,7 @@ func (t Theme) Dark() bool {
 func ParseColorText(text string) (Color, error) {
 	s := strings.TrimSpace(text)
 	if s == "" {
-		return Color{}, fmt.Errorf("a color is required")
+		return Color{}, errors.New("a color is required")
 	}
 	if after, ok := strings.CutPrefix(s, "#"); ok {
 		hex := after
@@ -192,7 +193,7 @@ func ParseColorJSON(raw json.RawMessage) (Color, error) {
 	var mods []string
 	if err := json.Unmarshal(raw, &mods); err == nil {
 		if len(mods) == 0 {
-			return Color{}, fmt.Errorf("modifier list must not be empty")
+			return Color{}, errors.New("modifier list must not be empty")
 		}
 		norm, err := parseModifierList(mods)
 		if err != nil {
@@ -228,7 +229,7 @@ func ParseColorJSON(raw json.RawMessage) (Color, error) {
 	}
 	switch {
 	case obj.Color == nil && obj.Modifier == nil:
-		return Color{}, fmt.Errorf("object has neither color nor modifier")
+		return Color{}, errors.New("object has neither color nor modifier")
 	case obj.Color == nil:
 		return Color{Modifiers: modsNorm}, nil
 	}

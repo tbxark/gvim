@@ -2,6 +2,7 @@ package document
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"slices"
 	"strings"
 )
 
@@ -14,9 +15,9 @@ func isBlank(r rune) bool { return r == ' ' || r == '\t' || r == '\r' }
 
 // lastNonBlank returns the last rune of line that is not blank.
 func lastNonBlank(line []rune) (rune, bool) {
-	for i := len(line) - 1; i >= 0; i-- {
-		if !isBlank(line[i]) {
-			return line[i], true
+	for _, r := range slices.Backward(line) {
+		if !isBlank(r) {
+			return r, true
 		}
 	}
 	return 0, false

@@ -317,7 +317,7 @@ func TestQuitConfirmsAllDirtyTabsOnce(t *testing.T) {
 
 func TestQuitSaveFailureAndSaveAsCancelStopQuit(t *testing.T) {
 	for _, untitled := range []bool{false, true} {
-		t.Run(fmt.Sprint(untitled), func(t *testing.T) {
+		t.Run(strconv.FormatBool(untitled), func(t *testing.T) {
 			tf := newTabFake("Untitled-1", "b.txt")
 			tf.dirty = []bool{true, true}
 			tf.untitled = untitled

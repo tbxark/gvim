@@ -125,7 +125,7 @@ func TestUnsupportedRefusesEveryHostMethod(t *testing.T) {
 				return
 			}
 			withError++
-			err, _ := out[len(out)-1].Interface().(error)
+			err, _ := reflect.TypeAssert[error](out[len(out)-1])
 			if err == nil {
 				t.Fatalf("%s returned a nil error", m.Name)
 			}

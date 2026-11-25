@@ -336,8 +336,7 @@ func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, s
 	info, err := readSample(path, src)
 	if err != nil {
 		_ = src.Close()
-		var need ErrLargeNeedsFullLoad
-		if errors.As(err, &need) {
+		if _, ok := errors.AsType[ErrLargeNeedsFullLoad](err); ok {
 			return nil, fmt.Errorf("open %s: remote large file is not UTF-8; a full remote load is not supported: %w", path, ErrTooLargeToTranscode)
 		}
 		return nil, err
@@ -409,7 +408,7 @@ func (d *Document) TakePendingLargeWindow() (LargeWindow, bool) {
 // refuses. The path must be this document: a load cannot cross documents.
 func (d *Document) LoadLargeWindow(ctx context.Context, w LargeWindow) error {
 	if d.Path != w.Path || !d.AsyncLarge() {
-		return fmt.Errorf("large window: not this remote document")
+		return errors.New("large window: not this remote document")
 	}
 	return d.Buffer.LoadWindow(ctx, w.Off, w.N)
 }

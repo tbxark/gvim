@@ -164,8 +164,8 @@ func indentUnit(root *hujson.Value) string {
 		return "  "
 	}
 	before := obj.Members[0].Name.BeforeExtra
-	if i := bytes.LastIndexByte(before, '\n'); i >= 0 {
-		if unit := string(before[i+1:]); strings.Trim(unit, " \t") == "" {
+	if _, after, ok := bytes.CutLast(before, []byte{'\n'}); ok {
+		if unit := string(after); strings.Trim(unit, " \t") == "" {
 			return unit
 		}
 	}

@@ -149,7 +149,7 @@ func TestHTTPConcurrencyCaps(t *testing.T) {
 func TestClientRedirectPolicy(t *testing.T) {
 	h := newHTTPState(nil)
 	c := h.clientFor()
-	req, _ := http.NewRequest("GET", "https://example.com/next", nil)
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com/next", nil)
 	if err := c.CheckRedirect(req, []*http.Request{req}); err != nil {
 		t.Fatalf("one https redirect = %v", err)
 	}
@@ -161,7 +161,7 @@ func TestClientRedirectPolicy(t *testing.T) {
 		"https://[2002:7f00:1::]/x",
 		"https://user:pass@example.com/x",
 	} {
-		redirectReq, _ := http.NewRequest("GET", raw, nil)
+		redirectReq, _ := http.NewRequest(http.MethodGet, raw, nil)
 		if err := c.CheckRedirect(redirectReq, []*http.Request{redirectReq}); err == nil {
 			t.Fatalf("redirect to %q was followed", raw)
 		}

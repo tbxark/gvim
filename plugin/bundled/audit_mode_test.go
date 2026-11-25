@@ -266,11 +266,11 @@ type slowReadFakeOS struct {
 	once    sync.Once
 }
 
-func (s *slowReadFakeOS) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
+func (s *slowReadFakeOS) ReadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
 	s.once.Do(func() { close(s.started) })
 	select {
 	case <-s.release:
-		return s.FakeOS.ReadFile(ctx, path, max)
+		return s.FakeOS.ReadFile(ctx, path, limit)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

@@ -227,8 +227,8 @@ func TestDiagCountsText(t *testing.T) {
 		if got := tt.c.Text(); got != tt.want {
 			t.Errorf("DiagCounts%+v.Text() = %q, want %q", tt.c, got, tt.want)
 		}
-		if any := tt.c.Any(); any != (tt.want != "") {
-			t.Errorf("DiagCounts%+v.Any() = %v, want %v", tt.c, any, tt.want != "")
+		if hasAny := tt.c.Any(); hasAny != (tt.want != "") {
+			t.Errorf("DiagCounts%+v.Any() = %v, want %v", tt.c, hasAny, tt.want != "")
 		}
 	}
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -511,7 +512,7 @@ func encodeString(emptyOK bool) func(string) (json.RawMessage, error) {
 	return func(text string) (json.RawMessage, error) {
 		text = strings.TrimSpace(text)
 		if text == "" && !emptyOK {
-			return nil, fmt.Errorf("must not be empty")
+			return nil, errors.New("must not be empty")
 		}
 		return json.Marshal(text)
 	}

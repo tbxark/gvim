@@ -469,11 +469,11 @@ func TestWorkspaceHostIgnoresZeroWindowSize(t *testing.T) {
 	}
 
 	cases := []struct {
-		name   string
-		msg    tea.Msg
-		keep   bool
-		wantW  int
-		wantH  int
+		name  string
+		msg   tea.Msg
+		keep  bool
+		wantW int
+		wantH int
 	}{
 		{name: "zero both", msg: tea.WindowSizeMsg{Width: 0, Height: 0}, keep: false, wantW: 100, wantH: 30},
 		{name: "zero width", msg: tea.WindowSizeMsg{Width: 0, Height: 30}, keep: false, wantW: 100, wantH: 30},

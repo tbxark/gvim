@@ -44,14 +44,14 @@ func (l *local) RealPath(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	real, err := filepath.EvalSymlinks(abs)
+	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	return filepath.Clean(real), nil
+	return filepath.Clean(resolved), nil
 }
 
 // RealPath implements RealPather over SSH: one bounded helper. realpath is preferred,

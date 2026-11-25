@@ -270,16 +270,16 @@ func TestTabStripHoverAndFocus(t *testing.T) {
 	s := frame.PlaceStrip(0, 40, tabs, 0, icons.Plain)
 	st := style.Styles{Accent: lipgloss.NewStyle().Background(lipgloss.Color("4"))}
 
-	var second, close frame.Run
+	var second, closeAt frame.Run
 	for _, r := range s.Runs {
 		if r.Kind == frame.HitTab && r.Index == 1 {
 			second = r
 		}
 		if r.Kind == frame.HitTabClose && r.Index == 0 {
-			close = r
+			closeAt = r
 		}
 	}
-	if second.W == 0 || close.W == 0 {
+	if second.W == 0 || closeAt.W == 0 {
 		t.Fatalf("strip runs = %+v, want the second tab and the first close", s.Runs)
 	}
 
@@ -295,8 +295,8 @@ func TestTabStripHoverAndFocus(t *testing.T) {
 	}
 	closed := grid.New(40, 2)
 	tabstrip.Draw(closed, st, 0, 1, s, frame.HitTarget{Kind: frame.HitTabClose, Index: 0})
-	if !closed.At(close.X, 1).Style.Underline {
-		t.Fatalf("the hovered close glyph at %d is not underlined", close.X)
+	if !closed.At(closeAt.X, 1).Style.Underline {
+		t.Fatalf("the hovered close glyph at %d is not underlined", closeAt.X)
 	}
 
 	focused := grid.New(40, 2)

@@ -263,10 +263,10 @@ func dragMotion(p *Panel, x, y int) tea.Cmd {
 
 // runTicks applies the auto-scroll commands until max ticks ran or the chain stops,
 // returning how many tick messages were applied.
-func runTicks(t *testing.T, p *Panel, cmd tea.Cmd, max int) int {
+func runTicks(t *testing.T, p *Panel, cmd tea.Cmd, limit int) int {
 	t.Helper()
 	ran := 0
-	for cmd != nil && ran < max {
+	for cmd != nil && ran < limit {
 		msgs := messages(cmd)
 		cmd = nil
 		for _, msg := range msgs {

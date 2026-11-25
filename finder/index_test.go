@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -138,7 +139,7 @@ func TestSnapshotWhileFilling(t *testing.T) {
 			}
 			return
 		}
-		_ = files[:len(files):len(files)]
+		_ = slices.Clip(files)
 	}
 }
 

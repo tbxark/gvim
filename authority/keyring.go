@@ -100,7 +100,7 @@ func (s *execPasswordStore) Lookup(ctx context.Context, host, user string) (stri
 		pw, ok := decodeKeyringAnswer(out)
 		return pw, ok, nil
 	}
-	return "", false, fmt.Errorf("ssh keyring: unknown backend")
+	return "", false, errors.New("ssh keyring: unknown backend")
 }
 
 // Store records the accepted password. macOS security takes it as the -w argument (an
@@ -123,7 +123,7 @@ func (s *execPasswordStore) Store(ctx context.Context, host, user, password stri
 			[]string{"store", "--label=gvim SSH password", "service", keyringService, "account", account},
 			[]byte(password))
 	default:
-		return fmt.Errorf("ssh keyring: unknown backend")
+		return errors.New("ssh keyring: unknown backend")
 	}
 	if runErr != nil {
 		return runErr

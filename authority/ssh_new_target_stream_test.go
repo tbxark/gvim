@@ -84,12 +84,12 @@ func TestSSHNewTargetStreamExistingEntriesConflict(t *testing.T) {
 	if err := os.WriteFile(regular, []byte("keep"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(dir, "real.txt")
-	if err := os.WriteFile(real, []byte("real"), 0o644); err != nil {
+	resolved := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(resolved, []byte("real"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "link.txt")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(resolved, link); err != nil {
 		t.Fatal(err)
 	}
 	dangling := filepath.Join(dir, "dangling")
@@ -119,7 +119,7 @@ func TestSSHNewTargetStreamExistingEntriesConflict(t *testing.T) {
 	if got, _ := os.ReadFile(regular); string(got) != "keep" {
 		t.Fatalf("regular target changed: %q", got)
 	}
-	if got, _ := os.ReadFile(real); string(got) != "real" {
+	if got, _ := os.ReadFile(resolved); string(got) != "real" {
 		t.Fatalf("symlink target changed: %q", got)
 	}
 	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
