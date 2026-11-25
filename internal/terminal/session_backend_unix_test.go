@@ -83,8 +83,7 @@ func (b *fakeBackend) lastResize() ([2]int, bool) {
 // TestStartWithBackend checks a session over a non-PTY transport: output paints,
 // input is written through, resize reaches the backend and Close releases it.
 func TestStartWithBackend(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	b := newFakeBackend()
 	s, err := StartWithBackend(ctx, Options{Cols: 80, Rows: 24}, b)
 	if err != nil {
@@ -142,8 +141,7 @@ func TestStartWithBackendBadOptions(t *testing.T) {
 // are suppressed, and enabling the mode while the terminal is focused sends the
 // initial focus-in. Before the mode is on, focus calls only record state.
 func TestFocusReportingFollowsDECSET1004(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	b := newFakeBackend()
 	s, err := StartWithBackend(ctx, Options{Cols: 80, Rows: 24}, b)
 	if err != nil {

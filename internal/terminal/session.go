@@ -26,10 +26,11 @@ var (
 //   - closeOnCancel closes the session when the Start context is cancelled.
 type Session struct {
 	pty ptyProc
-	// osc52 re-parses the child stream for OSC 52 clipboard sequences; the bytes
-	// still go to the emulator (session.go feed).
-	osc52p osc52Parser
-	osc52  osc52Handler
+	// osc52 is the clipboard hook the emulator's OSC 52 handler feeds; the
+	// handler queues osc52Events under mu and feed dispatches them to the hook
+	// after unlocking, because the hook may touch the system clipboard (IO).
+	osc52       osc52Handler
+	osc52Events []osc52Event
 	// title is the terminal title the child last set with OSC 0/2, cleaned and
 	// bounded. Its own mutex: the emulator's Title callback may run while feed
 	// holds s.mu.
@@ -44,6 +45,9 @@ type Session struct {
 	// dock reads it to encode keys in CSI-u form when the child enabled the
 	// protocol; zero means legacy encoding.
 	kitty kittyKeyboard
+	// kittyReplies are the CSI-u flags answers the emulator's kitty handlers
+	// queue while feed parses; they go to the child after emu.Write returns.
+	kittyReplies [][]byte
 	// The state the dock reads to decide about scrollback and mouse forwarding;
 	// all of it is reported by the child through the emulator's callbacks.
 	cwd       string             // OSC 7 working directory, or "" until the child reports one
@@ -103,6 +107,15 @@ func newSession(pty ptyProc, cols, rows, scrollbackLines int) *Session {
 		WorkingDirectory: func(path string) { s.cwd = osc7Path(path) },
 		Title:            s.setTitle,
 	})
+	// The emulator has no clipboard callback and no Kitty keyboard support, so
+	// the session answers OSC 52 and the protocol's prefixed CSI-u controls
+	// itself. The handlers run inside emu.Write under mu; see feed for how the
+	// replies and events they collect are dispatched.
+	s.emu.RegisterOscHandler(52, s.handleOSC52)
+	s.emu.RegisterCsiHandler(ansi.Command('?', 0, 'u'), s.kittyQuery)
+	s.emu.RegisterCsiHandler(ansi.Command('>', 0, 'u'), s.kittyPush)
+	s.emu.RegisterCsiHandler(ansi.Command('<', 0, 'u'), s.kittyPop)
+	s.emu.RegisterCsiHandler(ansi.Command('=', 0, 'u'), s.kittySet)
 	// relayReplies starts first: the emulator blocks on replies until they are read.
 	go s.relayReplies()
 	go s.writeInput()
@@ -380,29 +393,38 @@ func (s *Session) readOutput() {
 // feed gives child output to the emulator. It reports false, and writes nothing,
 // once the session is closed.
 func (s *Session) feed(p []byte) bool {
-	// The OSC 52 scan happens before the emulator write and outside the lock: the
-	// hook may touch the clipboard (IO), and x/vt ignores the sequence anyway.
-	s.osc52p.scan(p, s.osc52.emit, s.osc52.query)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return false
 	}
-	// Run the kitty scanner before emu.Write while tracking DECSET/DECRST alt-screen
-	// switches inline in stream order, so a combined chunk like Pop+LeaveAltScreen
-	// applies each operation against the screen active at its exact byte offset.
-	replies := s.kitty.scan(p)
+	// emu.Write runs the registered OSC 52 and Kitty CSI-u handlers in byte-stream
+	// order (alt-screen switches reach s.kitty through the AltScreen callback);
+	// they collect child replies and clipboard events under the lock.
 	_, _ = s.emu.Write(p)
-	for _, reply := range replies {
+	for _, reply := range s.kittyReplies {
 		s.in.push(reply)
 	}
-	// The child may just have enabled focus reporting; tell it it is focused once,
+	s.kittyReplies = s.kittyReplies[:0]
+	// The child may just have enabled focus reporting; tell it that it is focused once,
 	// after this output chunk (writing to the emulator's reply pipe from the parse
 	// callback would interleave with the parse).
 	if s.focusJustEnabled {
 		s.focusJustEnabled = false
 		if s.focused {
 			s.emu.Focus()
+		}
+	}
+	events := s.osc52Events
+	s.osc52Events = nil
+	s.mu.Unlock()
+	// The clipboard hook may touch the system clipboard (IO), so events collected
+	// during the parse are dispatched outside the lock.
+	for _, ev := range events {
+		if ev.query {
+			s.osc52.query(ev.selection)
+		} else {
+			s.osc52.emit(ev.selection, ev.text)
 		}
 	}
 	return true

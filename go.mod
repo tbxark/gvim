@@ -9,6 +9,8 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/charmbracelet/x/conpty v0.2.0
+	github.com/charmbracelet/x/mosaic v0.0.0-20260713092006-0d683c34c74b
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24

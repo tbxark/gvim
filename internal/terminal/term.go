@@ -3,8 +3,9 @@
 //
 // On Unix the PTY comes from github.com/creack/pty. The child runs in a new
 // session with the PTY as its controlling terminal. On Windows the terminal is a
-// ConPTY pseudo console (pty_windows.go), created with x/sys/windows. The child's
-// output is parsed by the terminal emulator in github.com/charmbracelet/x/vt, and
+// ConPTY pseudo console (pty_windows.go), driven through
+// github.com/charmbracelet/x/conpty. The child's output is parsed by the
+// terminal emulator in github.com/charmbracelet/x/vt, and
 // Screen returns a copy of the emulated grid.
 //
 // The ConPTY path is compile-verified (GOOS=windows build, vet and test compile)

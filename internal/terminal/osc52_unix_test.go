@@ -35,7 +35,7 @@ func TestSessionOSC52Hook(t *testing.T) {
 	}
 	// The child's other output still reaches the screen.
 	waitFor(t, s, "done on the screen", func(sc Screen) bool {
-		for col := 0; col < sc.Cols; col++ {
+		for col := range sc.Cols {
 			if sc.Cell(0, col).Rune == 'd' {
 				return true
 			}

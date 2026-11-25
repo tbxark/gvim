@@ -141,7 +141,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `internal/apptest` | Test-only shared helpers (config isolation, temp roots, session editor, big files). | `editor` (and test-only imports elsewhere) |
 | `internal/tui` | The Bubble Tea v2 root model: routing, focus, layout, hit map, painting; interfaces in `ports.go`. | engine value types, `pluginapi`, `decorations`, its own sub-packages, charm |
 | `internal/tui/*` | Widgets and panels (see 4.2). | kits (`grid`, `space`, `style`, `icons`), engine value types, charm |
-| `internal/terminal` | Runs a program in a PTY and keeps a model of its screen (`Screen`, `Cell`, styles, cursor, paste). Backend of the terminal dock. | `creack/pty`, `x/vt`, `ultraviolet`, stdlib |
+| `internal/terminal` | Runs a program in a PTY and keeps a model of its screen (`Screen`, `Cell`, styles, cursor, paste). Backend of the terminal dock. | `creack/pty`, `x/conpty` (Windows), `x/vt`, `ultraviolet`, stdlib |
 | `internal/filewatch` | fsnotify watcher with debounce and changed-directory coalescing. | fsnotify, stdlib |
 | `internal/uitest` | Test-only in-process Bubble Tea harness (keys, mouse, screen cells, PNG). | charm, stdlib |
 

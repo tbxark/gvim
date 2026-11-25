@@ -49,10 +49,7 @@ func ReflowLines(lines []Line, fromWidth, toWidth int) []Line {
 			if c.Rune < 0x80 {
 				w = 1
 			} else {
-				w = ansi.StringWidth(string(c.Rune))
-				if w < 1 {
-					w = 1
-				}
+				w = max(ansi.StringWidth(string(c.Rune)), 1)
 			}
 			hasCont := w > 1 && i+1 < end && cells[i+1].Rune == 0
 			advance := 1

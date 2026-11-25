@@ -3,236 +3,94 @@
 package terminal
 
 import (
+	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
-	"slices"
-	"strings"
-	"sync"
-	"unsafe"
+	"syscall"
 
+	"github.com/charmbracelet/x/conpty"
 	"golang.org/x/sys/windows"
 )
 
 // ConPTY: Windows' pseudo console. The child talks to a pseudo console object
-// instead of a Unix PTY; the session reads and writes the two anonymous pipes
-// the console was created over, and resizes and closes the console itself.
-// See https://learn.microsoft.com/windows/console/creating-a-pseudoconsole-session
-// and docs/terminal.md for the build/verification story and the real-Windows
-// acceptance checklist. There is no pure-Go pipe trick: the console and the
-// process creation are Win32 calls through x/sys/windows.
+// instead of a Unix PTY; the console, the pipes behind it and the process
+// creation are Win32 calls made by github.com/charmbracelet/x/conpty. See
+// docs/terminal.md for the build/verification story and the real-Windows
+// acceptance checklist.
 
 // spawn starts cmd in a new pseudo console of the given size.
 func spawn(cmd *exec.Cmd, cols, rows int) (ptyProc, error) {
-	inR, inW, err := os.Pipe()
+	cpty, err := conpty.New(cols, rows, 0)
 	if err != nil {
-		return nil, err
-	}
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		_ = inR.Close()
-		_ = inW.Close()
-		return nil, err
-	}
-	var console windows.Handle
-	err = windows.CreatePseudoConsole(
-		windows.Coord{X: int16(cols), Y: int16(rows)},
-		windows.Handle(inR.Fd()), windows.Handle(outW.Fd()), 0, &console)
-	if err != nil {
-		_ = inR.Close()
-		_ = inW.Close()
-		_ = outR.Close()
-		_ = outW.Close()
 		return nil, fmt.Errorf("term: ConPTY unavailable (Windows 10 version 1809, build 17763, or later is required; Windows Server 2019+): %w", err)
-	}
-	// The console owns the child-side ends now; the parent keeps the write and
-	// read ends of its own.
-	_ = inR.Close()
-	_ = outW.Close()
-	fail := func(e error) (ptyProc, error) {
-		windows.ClosePseudoConsole(console)
-		_ = inW.Close()
-		_ = outR.Close()
-		return nil, e
-	}
-	attrs, err := windows.NewProcThreadAttributeList(1)
-	if err != nil {
-		return fail(err)
-	}
-	defer attrs.Delete()
-	if err := attrs.Update(windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-		unsafe.Pointer(&console), unsafe.Sizeof(console)); err != nil {
-		return fail(err)
-	}
-	si := &windows.StartupInfoEx{
-		StartupInfo: windows.StartupInfo{
-			Cb:    uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
-			Flags: windows.STARTF_USESTDHANDLES,
-		},
-		ProcThreadAttributeList: attrs.List(),
 	}
 	args := cmd.Args
 	if len(args) == 0 {
 		args = []string{cmd.Path}
 	}
-	commandLine, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(args))
+	// conpty fills in the default environment when Env is nil and builds the
+	// deduplicated, sorted environment block itself.
+	pid, handle, err := cpty.Spawn(cmd.Path, args, &syscall.ProcAttr{
+		Dir: cmd.Dir,
+		Env: cmd.Env,
+		Sys: cmd.SysProcAttr,
+	})
 	if err != nil {
-		return fail(err)
+		_ = cpty.Close()
+		return nil, err
 	}
-	var appName *uint16
-	if cmd.Path != "" {
-		if appName, err = windows.UTF16PtrFromString(cmd.Path); err != nil {
-			return fail(err)
-		}
+	// conpty returns its own handle to the new process and never closes it; Process
+	// opens one of its own, so the first is released once that exists (the pid stays
+	// valid while any handle is open).
+	cmd.Process, err = os.FindProcess(pid)
+	_ = windows.CloseHandle(windows.Handle(handle))
+	if err != nil {
+		_ = cpty.Close()
+		return nil, err
 	}
-	env := cmd.Env
-	if env == nil {
-		env = os.Environ()
-	}
-	envBlock := windowsEnvBlock(env)
-	envPtr := &envBlock[0]
-	var dirPtr *uint16
-	if cmd.Dir != "" {
-		if dirPtr, err = windows.UTF16PtrFromString(cmd.Dir); err != nil {
-			return fail(err)
-		}
-	}
-	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
-	var pi windows.ProcessInformation
-	if err := windows.CreateProcess(appName, commandLine, nil, nil, true, flags,
-		envPtr, dirPtr, &si.StartupInfo, &pi); err != nil {
-		return fail(err)
-	}
-	return &windowsPTY{
-		in: inW, out: outR,
-		console: console,
-		process: pi.Process, thread: pi.Thread,
-	}, nil
+	return &windowsPTY{cpty: cpty, cmd: cmd}, nil
 }
 
-// windowsEnvBlock encodes env as the UTF-16 environment block CreateProcessW
-// wants: each "name=value" as a NUL-terminated string, sorted by name without case,
-// then one more NUL. A var with an empty name is dropped (Windows cannot represent
-// it). Names are case-insensitive on Windows, and the last value of a repeated name
-// wins, as os/exec does: the overlay and TERM come after the inherited environment.
-func windowsEnvBlock(env []string) []uint16 {
-	last := map[string]string{}
-	for _, kv := range env {
-		i := strings.IndexByte(kv, '=')
-		if i <= 0 {
-			continue
-		}
-		last[strings.ToUpper(kv[:i])] = kv
-	}
-	keys := slices.Sorted(maps.Keys(last))
-	var block []uint16
-	for _, key := range keys {
-		kv := last[key]
-		u, err := windows.UTF16FromString(kv)
-		if err != nil {
-			continue
-		}
-		block = append(block, u...)
-	}
-	block = append(block, 0)
-	if len(block) == 1 {
-		// An empty environment is still a block of two NULs.
-		block = append(block, 0)
-	}
-	return block
-}
-
-// windowsPTY is a ConPTY console and the child process.
+// windowsPTY is a ConPTY console and the child process behind it.
 type windowsPTY struct {
-	in      *os.File // parent -> pseudo console input
-	out     *os.File // pseudo console output -> parent
-	console windows.Handle
-	process windows.Handle
-	thread  windows.Handle
-	mu      sync.Mutex
-	closed  bool
-	waited  bool
+	cpty *conpty.ConPty
+	cmd  *exec.Cmd
 }
 
-func (p *windowsPTY) Read(b []byte) (int, error)  { return p.out.Read(b) }
-func (p *windowsPTY) Write(b []byte) (int, error) { return p.in.Write(b) }
+func (p *windowsPTY) Read(b []byte) (int, error)  { return p.cpty.Read(b) }
+func (p *windowsPTY) Write(b []byte) (int, error) { return p.cpty.Write(b) }
 
 // Resize changes the console size, which is what the child sees.
 func (p *windowsPTY) Resize(cols, rows int) error {
-	return windows.ResizePseudoConsole(p.console, windows.Coord{X: int16(cols), Y: int16(rows)})
+	return p.cpty.Resize(cols, rows)
 }
 
 // Kill terminates the child, if it is still running.
 func (p *windowsPTY) Kill() error {
-	// Wait closes the handle under mu once the child is reaped.
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.waited || p.process == 0 {
+	if p.cmd.Process == nil {
 		return nil
 	}
-	return windows.TerminateProcess(p.process, 1)
-}
-
-// Wait waits for the child and returns an exit-status error for a non-zero
-// code, mirroring os/exec's error.
-func (p *windowsPTY) Wait() error {
-	_, err := windows.WaitForSingleObject(p.process, windows.INFINITE)
-	var code uint32
-	if err == nil {
-		err = windows.GetExitCodeProcess(p.process, &code)
-	}
-	p.mu.Lock()
-	if !p.waited {
-		p.waited = true
-		if p.thread != 0 {
-			_ = windows.CloseHandle(p.thread)
-			p.thread = 0
-		}
-		if p.process != 0 {
-			_ = windows.CloseHandle(p.process)
-			p.process = 0
-		}
-	}
-	p.mu.Unlock()
-	if err != nil {
+	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
-	}
-	if code != 0 {
-		return &windowsExitError{code: code}
 	}
 	return nil
 }
 
-// Close releases the console and the pipes. It does not kill the child (the
-// session kills it first when it closes a live process).
-func (p *windowsPTY) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return nil
-	}
-	p.closed = true
-	// Closing the console flushes its buffers, so close it before the pipes;
-	// the session has already killed the child when it closes a live session.
-	windows.ClosePseudoConsole(p.console)
-	p.console = 0
-	err := p.in.Close()
-	if err2 := p.out.Close(); err == nil {
-		err = err2
+// Wait waits for the child. A non-zero exit comes back as *exec.ExitError,
+// the shape Session.ExitStatus decodes with errors.As.
+func (p *windowsPTY) Wait() error {
+	st, err := p.cmd.Process.Wait()
+	if err == nil && !st.Success() {
+		err = &exec.ExitError{ProcessState: st}
 	}
 	return err
 }
 
-// windowsExitError is the non-zero exit status of a ConPTY child.
-type windowsExitError struct{ code uint32 }
-
-func (e *windowsExitError) Error() string {
-	return fmt.Sprintf("exit status %d", e.code)
-}
-
-// ExitCode returns the process exit code.
-func (e *windowsExitError) ExitCode() int { return int(e.code) }
+// Close releases the console and the pipes. It does not kill the child (the
+// session kills it first when it closes a live session). ConPty.Close is
+// idempotent.
+func (p *windowsPTY) Close() error { return p.cpty.Close() }
 
 // supportsForegroundProcess reports false: ConPTY has no portable foreground
 // process group to read, so the dock keeps the recorded launch/OSC title.

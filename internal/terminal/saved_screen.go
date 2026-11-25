@@ -45,7 +45,7 @@ type SavedScreen struct {
 	// Rows are the visible screen rows, top to bottom; trailing blank cells trimmed.
 	Rows []SavedRow `json:"rows,omitempty"`
 	// Cursor is the saved cursor in the visible screen's coordinates.
-	Cursor SavedCursor `json:"cursor,omitempty"`
+	Cursor SavedCursor `json:"cursor"`
 	// Alt records that the saved visible screen was the alternate screen (a
 	// full-screen program's frame); it has no history.
 	Alt bool `json:"alt,omitempty"`
@@ -174,7 +174,7 @@ func SnapshotLines(lines []Line) *SavedScreen {
 	for i := range rows {
 		line := lines[len(lines)-rows+i]
 		cells := make([]SavedCell, 0, min(len(line.Cells), cols))
-		for c := 0; c < min(len(line.Cells), cols); c++ {
+		for c := range min(len(line.Cells), cols) {
 			cells = append(cells, savedCellOf(line.Cells[c]))
 		}
 		for len(cells) > 0 && blankSavedCell(cells[len(cells)-1]) {
@@ -387,7 +387,7 @@ func savedRowsOf(lines []Line, cols, keepRows int) []SavedRow {
 	out := make([]SavedRow, 0, keepRows)
 	for _, line := range lines[len(lines)-keepRows:] {
 		cells := make([]SavedCell, 0, min(len(line.Cells), cols))
-		for c := 0; c < min(len(line.Cells), cols); c++ {
+		for c := range min(len(line.Cells), cols) {
 			cells = append(cells, savedCellOf(line.Cells[c]))
 		}
 		for len(cells) > 0 && blankSavedCell(cells[len(cells)-1]) {
@@ -401,7 +401,7 @@ func savedRowsOf(lines []Line, cols, keepRows int) []SavedRow {
 // savedRowOf converts visible screen row r to a saved row.
 func savedRowOf(sc Screen, r, cols int) SavedRow {
 	cells := make([]SavedCell, 0, cols)
-	for c := 0; c < cols; c++ {
+	for c := range cols {
 		cells = append(cells, savedCellOf(sc.Cell(r, c)))
 	}
 	for len(cells) > 0 && blankSavedCell(cells[len(cells)-1]) {

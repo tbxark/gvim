@@ -9,7 +9,7 @@ keys, painting, scrollback, selection, mouse, links), `internal/tui/dock_glue.go
 `internal/uiadapter/terminal.go` (the shell starter and clipboard).
 
 `internal/terminal` runs the shell in a PTY on Unix (`creack/pty`) or in a ConPTY
-pseudo console on Windows (`x/sys/windows`), and models its screen with
+pseudo console on Windows (`charmbracelet/x/conpty`), and models its screen with
 `charmbracelet/x/vt`. The dock paints that screen into the bottom of the editor
 column: the explorer column runs beside it to the status row, and the panes stop
 above it. The shell's PTY is sized to the editor column, so showing or resizing the
@@ -165,16 +165,14 @@ owned by the dock; the session stays read-only and nothing is typed into it.
 ## ConPTY on Windows
 
 Windows has no Unix PTY: the Windows path is a **ConPTY** pseudo console
-(`internal/terminal/pty_windows.go`, `//go:build windows`, pure Go through
-`golang.org/x/sys/windows`). It creates two anonymous pipe pairs (child input,
-child output), calls `CreatePseudoConsole` with the child-side handles, puts the
-console handle in a `STARTUPINFOEX` attribute list (`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`),
-and starts the shell with `CreateProcess` (`EXTENDED_STARTUPINFO_PRESENT |
-CREATE_UNICODE_ENVIRONMENT`, a composed command line and a UTF-16 environment
-block). A resize calls `ResizePseudoConsole`; closing kills the child, closes the
-console and the pipes (`ClosePseudoConsole`). A failure to create the console is
-reported with the Windows requirement: Windows 10 version 1809 (build 17763) or
-later, or Windows Server 2019.
+(`internal/terminal/pty_windows.go`, `//go:build windows`) driven through
+`github.com/charmbracelet/x/conpty` (pure Go over `golang.org/x/sys/windows`):
+the library creates the anonymous pipes, the console and the
+`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` startup attribute and spawns the child
+with `CreateProcess`, including the UTF-16 environment block; gvim only wraps it
+in `ptyProc` (read/write/resize/kill/wait/close). A failure to create the
+console is reported with the Windows requirement: Windows 10 version 1809
+(build 17763) or later, or Windows Server 2019.
 
 **Verification gates** (all run by CI-style checks on any host):
 
@@ -182,8 +180,8 @@ later, or Windows Server 2019.
     GOOS=windows go vet ./internal/terminal
     GOOS=windows go test -c -o /tmp/terminal.windows.test.exe ./internal/terminal
 
-The Windows-tagged unit test covers the pure helpers (the environment block and
-the exit-status error); the console and process calls cannot run off Windows.
+The console and process calls cannot run off Windows, so the Windows build is
+checked by compile only.
 
 **Real-Windows acceptance checklist.** Parity is **unverified** until this pass is
 done on a Windows 10 1809+ / Windows 11 host:
@@ -931,7 +929,7 @@ uses:
 | `terminal.resume_agents` | bool, `true` | a restart of an exited agent terminal runs its recorded resume argv instead of its launch argv. Turn it off to re-run the launch command. It also gates the resume argv of a live-at-capture tab revived on a dive. |
 | `terminal.restore_live` | bool, `true` | **gvim extension**, Fresh's Live-restore behavior: a tab that was live when the session was saved revives with a fresh PTY on the user's first dive into it after a restore (switch/focus/show), keeping the saved transcript above it and using the same argv precedence as a restart. Exited-at-capture tabs and old records without the `live` flag never revive. `false` restores every tab read-only. User layer only. |
 | `terminal.agents` | `[{ "name", "command", "args", "resume_args" }]`, empty | **gvim extension**: the agent presets Run Agent... offers and the resume metadata a restart uses (see Agent sessions and Run Agent). User layer only. |
-| `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The bytes still go to the emulator, which ignores the sequence. |
+| `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The emulator parses the stream and the session's registered OSC 52 handler picks the sequence up; it does not affect the screen. |
 | `clipboard.osc52_paste` | bool, `false` | **gvim extension**: answer a child's OSC 52 *read* request (`ESC ] 52 ; c ; ? BEL`) with the system clipboard, sent back to the child as terminal input. Off by default (a child reading the host clipboard is host data pasted into untrusted output). When on and the workspace is trusted: only selector `c`/empty is answered; text is capped at 64 KiB (larger, empty or unreadable clipboard = no reply); the response is base64 in `ESC ] 52 ; c ; … BEL` queued through the session's input inbox; restored/read-only transcripts and untrusted workspaces install no handler. |
 
 The other Fresh `terminal` key is accepted and ignored, so a Fresh config file
@@ -1161,7 +1159,8 @@ These are known gaps, not bugs:
   live screen stays clipped or padded on a resize because x/vt has no reflow and adding it
   would mean owning the emulator's scrollback reflow (see Persistence and reflow).
 - **OSC 52 read (paste)** — **implemented (opt-in)**, unlike Fresh, which explicitly does
-  not answer reads. gvim's own OSC 52 parser now recognizes the read request
+  not answer reads. The session's OSC 52 handler (registered on the emulator)
+  recognizes the read request
   (`ESC ] 52 ; c ; ? BEL`) and the session's input inbox is a real app-to-terminal
   response channel: with `clipboard.osc52_paste` on and the workspace trusted, the dock
   reads the system clipboard through the existing timeout-bounded adapter and queues a
@@ -1169,9 +1168,10 @@ These are known gaps, not bugs:
   its stdin exactly as it would from a terminal. Limits: selector `c`/empty only
   (primary/select and cut-buffer queries are ignored); one response per request; text over
   64 KiB, an empty clipboard or a read failure sends nothing (the child times out rather
-  than hangs); the response is bounded under the parser's 128 KiB sequence cap; the outer
-  terminal and x/vt are not involved (x/vt ignores incoming OSC 52, gvim's parser owns
-  it); restored/read-only transcripts have no live PTY and no handler; an untrusted
+  than hangs); the response is bounded under the 128 KiB sequence cap; the outer
+  terminal is not involved (x/vt parses the stream and dispatches OSC 52 to the
+  session's handler, which owns the clipboard decision); restored/read-only
+  transcripts have no live PTY and no handler; an untrusted
   workspace installs no handler even when the config is on. There is no reply for a child
   that ignores its stdin or has no read path — the capability is "response can reach the
   child's PTY input", not a promise that a given program consumes it.
@@ -1179,8 +1179,8 @@ These are known gaps, not bugs:
   The emulator answers the child's `CSI ? u` query with the flags the child pushed, and
   tracks `CSI > flags u` (push), `CSI < n u` (pop) and `CSI = flags ; mode u`
   (set/add/remove) in a separate flags stack for the main and alternate screens, so a TUI that
-  switches screens keeps the right mode; stacks and partial sequences are bounded (64 entries,
-  128 bytes), an omitted push flags value defaults to zero, a full stack evicts its oldest entry,
+  switches screens keeps the right mode; the stacks are bounded (64 entries),
+  an omitted push flags value defaults to zero, a full stack evicts its oldest entry,
   and popping past the bottom resets the flags. While the flags are non-zero the dock encodes the
   keys it sends to that child in
   CSI-u form following the protocol reference: with disambiguation, Esc, modified printable keys,

@@ -87,8 +87,8 @@ func hasText(sub string) func(Screen) bool {
 // screenText renders the screen as newline-separated rows of runes.
 func screenText(sc Screen) string {
 	var b strings.Builder
-	for r := 0; r < sc.Rows; r++ {
-		for c := 0; c < sc.Cols; c++ {
+	for r := range sc.Rows {
+		for c := range sc.Cols {
 			ch := sc.Cell(r, c).Rune
 			if ch == 0 {
 				ch = ' '

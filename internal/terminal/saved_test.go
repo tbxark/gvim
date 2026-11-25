@@ -25,7 +25,7 @@ func TestMergeSearchHistory(t *testing.T) {
 	}
 	// Only the newest cap entries survive; the target's older entries fall off first.
 	emptyTarget := make([]string, 0, MaxSearchHistoryEntries+20)
-	for i := 0; i < MaxSearchHistoryEntries+20; i++ {
+	for i := range MaxSearchHistoryEntries + 20 {
 		emptyTarget = append(emptyTarget, "q"+strconv.Itoa(i))
 	}
 	merged := MergeSearchHistory(nil, emptyTarget)

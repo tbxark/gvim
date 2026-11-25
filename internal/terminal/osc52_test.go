@@ -5,26 +5,35 @@ import (
 	"testing"
 )
 
-func collectOSC52(t *testing.T, chunks ...string) []string {
+// collectOSC52 feeds the chunks as child output and returns the clipboard
+// writes the session's hook sees, as "selection=text".
+func collectOSC52(t *testing.T, s *Session, chunks ...string) []string {
 	t.Helper()
 	var got []string
-	p := osc52Parser{}
-	emit := func(selection, text string) { got = append(got, selection+"="+text) }
+	s.SetOSC52Handler(func(selection, text string) bool {
+		got = append(got, selection+"="+text)
+		return true
+	})
 	for _, c := range chunks {
-		p.scan([]byte(c), emit, nil)
+		s.feed([]byte(c))
 	}
 	return got
 }
 
-// collectOSC52Queries returns the read requests the parser sees, as selections.
-func collectOSC52Queries(t *testing.T, chunks ...string) []string {
+// collectOSC52Queries feeds the chunks and returns the clipboard writes and
+// read requests the session sees, as "WRITE:selection=text" / "QUERY:selection".
+func collectOSC52Queries(t *testing.T, s *Session, chunks ...string) []string {
 	t.Helper()
 	var got []string
-	p := osc52Parser{}
-	emit := func(selection, text string) { got = append(got, "WRITE:"+selection+"="+text) }
-	query := func(selection string) { got = append(got, "QUERY:"+selection) }
+	s.SetOSC52Handler(func(selection, text string) bool {
+		got = append(got, "WRITE:"+selection+"="+text)
+		return true
+	})
+	s.osc52.setQuery(func(selection string) {
+		got = append(got, "QUERY:"+selection)
+	})
 	for _, c := range chunks {
-		p.scan([]byte(c), emit, query)
+		s.feed([]byte(c))
 	}
 	return got
 }
@@ -50,11 +59,14 @@ func TestOSC52Parser(t *testing.T) {
 		{"combined selection pc", []string{esc + "]52;pc;aGVsbG8=\x07"}, []string{"pc=hello"}},
 		{"combined selection cp", []string{esc + "]52;cp;aGVsbG8=\x07"}, []string{"cp=hello"}},
 		{"split ST across reads", []string{esc + "]52;c;aGVsbG8=" + esc, "\\"}, []string{"c=hello"}},
-		{"truncated body aborted by CSI", []string{esc + "]52;c;aGVsbG8=" + esc + "[31m" + esc + "]52;c;d29ybGQ=\x07"}, []string{"c=world"}},
+		// x/vt's parser delivers the partial body of an OSC aborted by another
+		// escape; the old scanner dropped it. The aborted write still fires.
+		{"aborted body still delivered", []string{esc + "]52;c;aGVsbG8=" + esc + "[31m" + esc + "]52;c;d29ybGQ=\x07"}, []string{"c=hello", "c=world"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := collectOSC52(t, tt.chunks...)
+			s, _ := startFeedSession(t)
+			got := collectOSC52(t, s, tt.chunks...)
 			if strings.Join(got, "|") != strings.Join(tt.want, "|") {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
@@ -70,11 +82,13 @@ func TestOSC52ParserIsBounded(t *testing.T) {
 		b.WriteByte('A')
 	}
 	b.WriteString("\x07")
-	if got := collectOSC52(t, b.String()); len(got) != 0 {
+	s, _ := startFeedSession(t)
+	if got := collectOSC52(t, s, b.String()); len(got) != 0 {
 		t.Fatalf("an oversize sequence was emitted: %q", got)
 	}
 	// The parser recovers and a later sequence still works.
-	got := collectOSC52(t, b.String()+"\x1b]52;c;aGVsbG8=\x07")
+	s2, _ := startFeedSession(t)
+	got := collectOSC52(t, s2, b.String()+"\x1b]52;c;aGVsbG8=\x07")
 	if len(got) != 1 {
 		t.Fatalf("recovery got %q", got)
 	}
@@ -98,22 +112,36 @@ func TestOSC52QueryParser(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := collectOSC52Queries(t, tt.chunks...)
+			s, _ := startFeedSession(t)
+			got := collectOSC52Queries(t, s, tt.chunks...)
 			if strings.Join(got, "|") != strings.Join(tt.want, "|") {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
 	t.Run("query works when emit is nil", func(t *testing.T) {
+		s, _ := startFeedSession(t)
 		var queries []string
-		var p osc52Parser
-		p.scan([]byte(esc+"]52;c;?\x07"), nil, func(sel string) {
+		s.osc52.setQuery(func(sel string) {
 			queries = append(queries, sel)
 		})
+		s.feed([]byte(esc + "]52;c;?\x07"))
 		if len(queries) != 1 || queries[0] != "c" {
 			t.Fatalf("queries = %q, want [c]", queries)
 		}
 	})
+}
+
+// TestOSC52QueryResponseIsQueued checks that a query handler's text is sent
+// back to the child as a base64 OSC 52 response on its input.
+func TestOSC52QueryResponseIsQueued(t *testing.T) {
+	t.Parallel()
+	s, p := startFeedSession(t)
+	s.SetOSC52QueryHandler(func(selection string) (string, bool) {
+		return "hello", true
+	})
+	s.feed([]byte("\x1b]52;c;?\x07"))
+	waitWritten(t, p, "\x1b]52;c;aGVsbG8=\x07")
 }
 
 func TestOSC52ResponseFormat(t *testing.T) {
@@ -129,24 +157,5 @@ func TestOSC52ResponseFormat(t *testing.T) {
 	}
 	if got := len(osc52Response("", string(big))); got >= maxOSC52Sequence {
 		t.Fatalf("response %d bytes >= sequence bound %d", got, maxOSC52Sequence)
-	}
-}
-
-func TestOSC52ParserBodyCapacityReuseAndRelease(t *testing.T) {
-	t.Parallel()
-	var p osc52Parser
-	small := []byte("\x1b]52;c;aGVsbG8=\x07")
-	p.scan(small, func(_, _ string) {}, nil)
-	if p.body == nil || cap(p.body) == 0 || cap(p.body) > 4096 {
-		t.Fatalf("small sequence cap(body) = %d, want >0 and <=4096", cap(p.body))
-	}
-	if len(p.body) != 0 {
-		t.Fatalf("len(body) after finish = %d, want 0", len(p.body))
-	}
-	// Oversized sequence > 4096 bytes drops the backing buffer after finish.
-	bigPayload := strings.Repeat("QUFB", 1200) // 4800 bytes
-	p.scan([]byte("\x1b]52;c;"+bigPayload+"\x07"), func(_, _ string) {}, nil)
-	if p.body != nil || cap(p.body) != 0 {
-		t.Fatalf("oversized sequence left cap(body) = %d, want 0", cap(p.body))
 	}
 }

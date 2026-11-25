@@ -2,8 +2,8 @@ package terminal
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The Kitty keyboard protocol's progressive enhancement flags. The emulator
@@ -26,15 +26,15 @@ const (
 // the newest entries win.
 const kittyStackMax = 64
 
-// kittyPendingMax bounds an incomplete control sequence carried between two
-// reads. A real query, push or pop is a few bytes; anything longer is not a
-// sequence this parser needs to answer.
-const kittyPendingMax = 128
-
 // kittyKeyboard is the per-session Kitty keyboard protocol state: the flags stack
 // of each screen. Kitty keeps separate stacks for the main and alternate screens,
 // and the child's push/pop therefore follow the screen it is on when it sends
 // them. The zero value is a child that never enabled the protocol.
+//
+// The emulator parses the CSI-u controls itself: newSession registers the four
+// prefixed forms (query CSI ? u, push CSI > flags u, pop CSI < n u, set
+// CSI = flags ; mode u) as handlers that run inside emu.Write, in exact
+// byte-stream order with the AltScreen callback that switches the active stack.
 //
 // Only presses are sent to the child by the dock, as in Fresh (it never forwards
 // releases), so the report-event-types flag affects the child's own reporting from
@@ -46,9 +46,6 @@ type kittyKeyboard struct {
 	// zero when it has no entries.
 	screens [2][]uint8
 	screen  int
-	// pending is an incomplete CSI sequence (ESC [ ...) from the end of the last
-	// read.
-	pending []byte
 }
 
 // setAltScreen switches the active flags stack. The other screen's stack is kept,
@@ -70,130 +67,70 @@ func (k *kittyKeyboard) flags() uint8 {
 	return stack[len(stack)-1]
 }
 
-// scan consumes one read of child output and returns the replies to queue back
-// to the child. It tracks CSI u progressive-enhancement controls (query
-// CSI ? u, push CSI > flags u, pop CSI < n u, set CSI = flags ; mode u) as
-// well as DECSET/DECRST alternate-screen transitions (CSI ? 47/1047/1049 h/l)
-// inline in byte-stream order so push/pop operations always target the screen
-// active at that byte offset.
-func (k *kittyKeyboard) scan(p []byte) [][]byte {
-	data := p
-	if len(k.pending) > 0 {
-		joined := make([]byte, 0, len(k.pending)+len(p))
-		joined = append(joined, k.pending...)
-		joined = append(joined, p...)
-		k.pending = k.pending[:0]
-		data = joined
-	}
-	var replies [][]byte
-	for i := 0; i < len(data); {
-		if data[i] != 0x1b {
-			i++
-			continue
-		}
-		if i+1 >= len(data) {
-			k.keepPending(data[i:])
-			return replies
-		}
-		if data[i+1] != '[' {
-			i++
-			continue
-		}
-		// A CSI sequence ends at the first byte in 0x40..0x7e.
-		j := i + 2
-		aborted := false
-		for j < len(data) && (data[j] < 0x40 || data[j] > 0x7e) {
-			if data[j] == 0x1b {
-				aborted = true
-				break
-			}
-			j++
-		}
-		if aborted {
-			i = j
-			continue
-		}
-		if j >= len(data) {
-			k.keepPending(data[i:])
-			return replies
-		}
-		switch data[j] {
-		case 'u':
-			if reply := k.command(string(data[i+2 : j])); reply != nil {
-				replies = append(replies, reply)
-			}
-		case 'h', 'l':
-			if j > i+2 && data[i+2] == '?' {
-				k.applyPrivateMode(string(data[i+2:j]), data[j] == 'h')
-			}
-		}
-		i = j + 1
-	}
-	return replies
+// kittyQuery is the emulator's handler for CSI ? u: it queues the flags reply
+// for feed to send to the child. The parameters, if any, are ignored, as they
+// were by the scanner this replaces.
+func (s *Session) kittyQuery(ansi.Params) bool {
+	s.kittyReplies = append(s.kittyReplies, []byte(fmt.Sprintf("\x1b[?%du", s.kitty.flags())))
+	return true
 }
 
-// applyPrivateMode tracks inline DECSET/DECRST switches between the main and
-// alternate screen buffers (modes 47, 1047, 1049).
-func (k *kittyKeyboard) applyPrivateMode(body string, on bool) {
-	if !strings.HasPrefix(body, "?") {
-		return
-	}
-	for param := range strings.SplitSeq(body[1:], ";") {
-		switch param {
-		case "47", "1047", "1049":
-			k.setAltScreen(on)
+// kittyPush is the emulator's handler for CSI > flags u.
+func (s *Session) kittyPush(params ansi.Params) bool {
+	if len(params) <= 1 {
+		if flags, ok := kittyFlagsParam(params, 0); ok {
+			s.kitty.push(flags)
 		}
 	}
+	return true
 }
 
-// keepPending remembers an incomplete sequence for the next read, unless it is
-// too long to be one of the sequences this parser answers.
-func (k *kittyKeyboard) keepPending(rest []byte) {
-	if len(rest) > kittyPendingMax {
-		return
+// kittyPop is the emulator's handler for CSI < n u.
+func (s *Session) kittyPop(params ansi.Params) bool {
+	if len(params) <= 1 {
+		if n, ok := kittyCountParam(params, 0); ok {
+			s.kitty.pop(n)
+		}
 	}
-	k.pending = append(k.pending[:0], rest...)
+	return true
 }
 
-// command applies one CSI u body (the bytes between CSI and u) and returns the
-// reply bytes, or nil when the body asks nothing.
-func (k *kittyKeyboard) command(body string) []byte {
-	if body == "" {
-		return nil
+// kittySet is the emulator's handler for CSI = flags ; mode u.
+func (s *Session) kittySet(params ansi.Params) bool {
+	if len(params) > 2 {
+		return true
 	}
-	marker, rest := body[0], body[1:]
-	switch marker {
-	case '?':
-		return []byte(fmt.Sprintf("\x1b[?%du", k.flags()))
-	case '>':
-		flags, ok := kittyFlagsParam(rest)
-		if !ok {
-			return nil
-		}
-		k.push(flags)
-	case '<':
-		n, ok := kittyCountParam(rest)
-		if !ok {
-			return nil
-		}
-		k.pop(n)
-	case '=':
-		flagsText, modeText, _ := strings.Cut(rest, ";")
-		flags, ok := kittyFlagsParam(flagsText)
-		if !ok {
-			return nil
-		}
-		mode := 1
-		if modeText != "" {
-			m, ok := kittyCountParam(modeText)
-			if !ok || (m != 1 && m != 2 && m != 3) {
-				return nil
-			}
-			mode = m
-		}
-		k.set(flags, mode)
+	flags, ok := kittyFlagsParam(params, 0)
+	if !ok {
+		return true
 	}
-	return nil
+	mode, ok := kittyCountParam(params, 1)
+	if !ok || mode > 3 {
+		return true
+	}
+	s.kitty.set(flags, mode)
+	return true
+}
+
+// kittyFlagsParam reads the enhancement-flags parameter at index i: a missing
+// or empty parameter is zero flags, a value above 255 is ignored, and the known
+// bits are kept. Sub-parameters (a `:` separator) are not part of the protocol.
+func kittyFlagsParam(params ansi.Params, i int) (uint8, bool) {
+	v, more, _ := params.Param(i, 0)
+	if more || v > 255 {
+		return 0, false
+	}
+	return uint8(v) & kittyKnownFlags, true
+}
+
+// kittyCountParam reads a positive decimal count at index i (the pop count or
+// the set mode); a missing or empty parameter means one.
+func kittyCountParam(params ansi.Params, i int) (int, bool) {
+	v, more, _ := params.Param(i, 1)
+	if more || v < 1 {
+		return 0, false
+	}
+	return v, true
 }
 
 // push makes flags current on the active screen. A full stack drops its oldest
@@ -236,30 +173,4 @@ func (k *kittyKeyboard) set(flags uint8, mode int) {
 		stack[top] &^= flags
 	}
 	k.screens[k.screen] = stack
-}
-
-// kittyFlagsParam parses a decimal enhancement-flags parameter. An empty value is
-// zero flags; the known bits are kept and anything above them is ignored.
-func kittyFlagsParam(text string) (uint8, bool) {
-	if text == "" {
-		return 0, true
-	}
-	n, err := strconv.Atoi(text)
-	if err != nil || n < 0 || n > 255 {
-		return 0, false
-	}
-	return uint8(n) & kittyKnownFlags, true
-}
-
-// kittyCountParam parses a positive decimal count; an empty value means one, as
-// the protocol's pop parameter does.
-func kittyCountParam(text string) (int, bool) {
-	if text == "" {
-		return 1, true
-	}
-	n, err := strconv.Atoi(text)
-	if err != nil || n < 1 {
-		return 0, false
-	}
-	return n, true
 }

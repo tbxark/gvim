@@ -6,17 +6,17 @@ import (
 	"sync"
 )
 
-// OSC 52 is the clipboard escape: ESC ] 52 ; selection ; base64 [BEL | ESC ].
-// The terminal emulator ignores it (x/vt has no clipboard callback), so the
-// session re-parses the child stream for it and hands the decoded text to the
-// dock's clipboard hook. The bytes still go to the emulator unchanged.
+// OSC 52 is the clipboard escape: ESC ] 52 ; selection ; base64 [BEL | ESC \].
+// The emulator has no clipboard callback, so the session registers an OSC
+// handler for command 52 (see newSession) and hands the decoded text to the
+// dock's clipboard hook. The emulator's own parser buffers a sequence split
+// over reads and ends it at BEL or ST.
 //
-// The parser is bounded: a pending OSC sequence longer than maxOSC52Sequence is
-// dropped whole (including its terminator), and the decoded payload is capped by
-// the encoded bound. It is chunk-safe: it runs on every read, so a sequence split
-// over two reads is still found.
+// The handler stays bounded: a sequence whose raw payload is longer than
+// maxOSC52Sequence is dropped, and the decoded text is capped by
+// maxOSC52Decoded. The emulator itself buffers up to 4 MB per sequence.
 const (
-	maxOSC52Sequence = 128 << 10 // bytes of one OSC sequence we are willing to buffer
+	maxOSC52Sequence = 128 << 10 // bytes of one OSC 52 payload we are willing to parse
 	maxOSC52Decoded  = 96 << 10  // decoded text we hand to the clipboard hook
 	// maxOSC52ResponseText bounds the clipboard text sent back to a child that
 	// asked for a paste. The base64 response stays under maxOSC52Sequence so a
@@ -24,123 +24,62 @@ const (
 	maxOSC52ResponseText = 64 << 10
 )
 
-// osc52Parser is a streaming parser for OSC 52 sequences in child output.
-type osc52Parser struct {
-	state int // oscGround, oscStart, oscBody, oscEsc, oscDiscard
-	body  []byte
+// osc52Event is one decoded OSC 52 sequence waiting for feed to dispatch it: a
+// clipboard write (selection and text) or a read request (query).
+type osc52Event struct {
+	selection string
+	text      string
+	query     bool
 }
 
-const (
-	oscGround = iota
-	oscStart
-	oscBody
-	oscEsc
-	oscDiscard
-)
+// maxOSC52Events bounds the clipboard events one feed queues while it holds
+// s.mu; a child printing sequences in a loop cannot grow memory past it.
+const maxOSC52Events = 64
 
-// scan consumes child output and calls emit for every complete, valid OSC 52
-// clipboard write, and query for every clipboard read request ("?"). It never
-// panics on arbitrary bytes and never keeps more than maxOSC52Sequence bytes.
-func (p *osc52Parser) scan(data []byte, emit func(selection, text string), query func(selection string)) {
-	for _, b := range data {
-		switch p.state {
-		case oscGround:
-			if b == 0x1b {
-				p.state = oscStart
-			}
-		case oscStart:
-			if b == ']' {
-				p.state = oscBody
-				p.body = p.body[:0]
-				continue
-			}
-			// Not an OSC: the ESC ends whatever it was; a new ESC may start one.
-			p.state = oscGround
-			if b == 0x1b {
-				p.state = oscStart
-			}
-		case oscBody:
-			switch b {
-			case 0x07: // BEL terminates
-				p.finish(emit, query)
-			case 0x1b: // ESC might be the start of ST (ESC \)
-				p.state = oscEsc
-			default:
-				if len(p.body) >= maxOSC52Sequence {
-					p.state = oscDiscard
-					p.body = p.body[:0]
-					continue
-				}
-				p.body = append(p.body, b)
-			}
-		case oscEsc:
-			switch b {
-			case '\\': // ST (ESC \) completes the OSC sequence
-				p.finish(emit, query)
-			case 0x1b: // Interrupted by another ESC; discard truncated body
-				p.body = p.body[:0]
-				p.state = oscStart
-			case ']': // Interrupted by a new OSC introducer; discard truncated body
-				p.body = p.body[:0]
-				p.state = oscBody
-			default: // Any other sequence (e.g. ESC [) aborts the truncated OSC body
-				p.body = p.body[:0]
-				p.state = oscGround
-			}
-		case oscDiscard:
-			// Drop until the sequence's terminator; a BEL or ESC + \ ends it.
-			switch b {
-			case 0x07:
-				p.state = oscGround
-			case 0x1b:
-				p.state = oscStart
-			}
-		}
+// handleOSC52 is the emulator's OSC 52 handler. It decodes the payload and
+// queues an event for feed to dispatch after s.mu is released: the clipboard
+// hook may touch the system clipboard (IO) and must never run under the session
+// lock. data is the whole OSC payload, "52;selection;base64".
+func (s *Session) handleOSC52(data []byte) bool {
+	selection, text, query, ok := parseOSC52(data)
+	if !ok || len(s.osc52Events) >= maxOSC52Events {
+		return true
 	}
+	s.osc52Events = append(s.osc52Events, osc52Event{selection: selection, text: text, query: query})
+	return true
 }
 
-// finish parses and emits the collected OSC body.
-func (p *osc52Parser) finish(emit func(selection, text string), query func(selection string)) {
-	body := p.body
-	if cap(p.body) > 4096 {
-		p.body = nil
-	} else {
-		p.body = p.body[:0]
+// parseOSC52 parses the OSC 52 payload the emulator hands the handler. It
+// reports the selection and either the decoded clipboard text or a read
+// request ("?"), enforcing the sequence and decoded-size bounds.
+func parseOSC52(data []byte) (selection, text string, query, ok bool) {
+	if len(data) > maxOSC52Sequence {
+		return "", "", false, false
 	}
-	p.state = oscGround
-	if emit == nil && query == nil {
-		return
+	rest, isOSC52 := bytes.CutPrefix(data, []byte("52;"))
+	if !isOSC52 {
+		return "", "", false, false
 	}
-	rest, ok := bytes.CutPrefix(body, []byte("52;"))
-	if !ok {
-		return
+	sel, payload, hasData := bytes.Cut(rest, []byte(";"))
+	if !hasData {
+		return "", "", false, false
 	}
-	selection, data, ok := bytes.Cut(rest, []byte(";"))
-	if !ok {
-		return
-	}
-	sel := string(selection)
+	selection = string(sel)
 	// "c" (alone or combined, e.g. "pc"/"cp") and the empty selection name the
 	// clipboard; p/s alone and numbered cut buffers are not handled.
-	if len(selection) > 0 && !bytes.ContainsRune(selection, 'c') {
-		return
+	if len(sel) > 0 && !bytes.ContainsRune(sel, 'c') {
+		return "", "", false, false
 	}
 	// A "?" payload is a read request: the terminal is asked to put clipboard
 	// contents into the child's input. It is a query, never clipboard text.
-	if string(bytes.TrimSpace(data)) == "?" {
-		if query != nil {
-			query(sel)
-		}
-		return
+	if string(bytes.TrimSpace(payload)) == "?" {
+		return selection, "", true, true
 	}
-	if emit == nil {
-		return
+	text, err := decodeOSC52(payload)
+	if err != nil || len(text) > maxOSC52Decoded {
+		return "", "", false, false
 	}
-	text, decoder := decodeOSC52(data)
-	if decoder != nil || len(text) > maxOSC52Decoded {
-		return
-	}
-	emit(sel, text)
+	return selection, text, false, true
 }
 
 // decodeOSC52 decodes the base64 payload of an OSC 52 sequence.

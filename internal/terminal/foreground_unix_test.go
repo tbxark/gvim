@@ -3,9 +3,9 @@
 package terminal
 
 import (
-	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,8 +44,7 @@ func TestForegroundProcessNameOfALocalShell(t *testing.T) {
 // degrades safely: the capability is false and no name is fabricated, so the dock
 // keeps the recorded launch/OSC title and never polls.
 func TestForegroundProcessNameUnsupportedTransport(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	b := newFakeBackend()
 	s, err := StartWithBackend(ctx, Options{Cols: 80, Rows: 24}, b)
 	if err != nil {
@@ -132,13 +131,7 @@ func TestResolvePSPathUsesOnlyTrustedAbsolutePaths(t *testing.T) {
 		if !filepath.IsAbs(path) {
 			t.Fatalf("the resolver statted a non-absolute path %q", path)
 		}
-		allowed := false
-		for _, trust := range trustedPSCandidates {
-			if path == trust {
-				allowed = true
-				break
-			}
-		}
+		allowed := slices.Contains(trustedPSCandidates, path)
 		if !allowed {
 			t.Fatalf("the resolver statted %q outside the trusted list", path)
 		}
