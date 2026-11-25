@@ -277,7 +277,7 @@ func TestImageProbeReplyQueuesTheUpload(t *testing.T) {
 	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	doc := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	ed := newSplitImageEditor(doc)
 	m := New(Deps{Editor: ed, Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 	m.img = imageProtocolOf("auto")
@@ -311,7 +311,7 @@ func TestImageCloseReleasesAndReopenUploads(t *testing.T) {
 	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	doc := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	ed := newSplitImageEditor(doc)
 	m := New(Deps{Editor: ed, Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 	m.img = imageProtocolOf("kitty")
@@ -383,7 +383,7 @@ func TestImageProtocolOffReleasesAndOnUploadsAgain(t *testing.T) {
 	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	doc := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	m := New(Deps{Editor: newSplitImageEditor(doc), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 	m.img = imageProtocolOf("kitty")
 	_, openCmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -444,7 +444,7 @@ func TestImageProtocolSwitchRetriesAFailedRead(t *testing.T) {
 	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	doc := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	m := New(Deps{Editor: newSplitImageEditor(doc), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -480,7 +480,7 @@ func TestImageQueueUploadsEachPathOnce(t *testing.T) {
 	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	doc := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	m := New(Deps{Editor: newSplitImageEditor(doc), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 	m.img = imageProtocolOf("kitty")
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -510,7 +510,7 @@ func TestImageQueueUploadsAnImageInANonFocusedPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := &fakeDoc{lines: []string{"notes"}}
-	image := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	image := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	ed := newSplitImageEditor(text, image)
 	m := New(Deps{Editor: ed, Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 	m.img = imageProtocolOf("kitty")
@@ -545,7 +545,7 @@ func TestImageWatcherAndAutoRevertSkipAnImage(t *testing.T) {
 	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc := &imageTestDoc{fakeDoc: fakeDoc{lines: []string{"pic.png"}}, path: path}
+	doc := &imageTestDoc{lines: []string{"pic.png"}, path: path}
 	ed := newSplitImageEditor(doc)
 	dirs := &fakeWatchDirs{}
 	m := New(Deps{

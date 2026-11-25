@@ -3870,7 +3870,22 @@ func (m *Model) imageQueue() tea.Cmd {
 		return func() tea.Msg { return imageProbeArmMsg{} }
 	}
 	if !m.img.imageEnabled() {
-		return nil
+		if !m.img.mosaicEnabled() {
+			return nil
+		}
+		// No graphics support: decode the pictures for the half-block fallback
+		// instead. An entry whose stat is current is loaded, loading or failed;
+		// a missing or stale one is (re)read.
+		var cmds []tea.Cmd
+		for _, target := range targets {
+			size, mtime := m.imageStatOf(target.doc)
+			if e, ok := m.img.mosaic[target.path]; ok && e.size == size && e.mtime == mtime {
+				continue
+			}
+			m.img.mosaicPut(target.path, &mosaicEntry{size: size, mtime: mtime, pending: true})
+			cmds = append(cmds, mosaicLoadCmd(target.path, size, mtime))
+		}
+		return tea.Batch(cmds...)
 	}
 	if m.img.pending == nil {
 		m.img.pending = make(map[int]bool)

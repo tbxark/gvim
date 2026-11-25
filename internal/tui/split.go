@@ -626,27 +626,32 @@ func (m *Model) paintPanes(g *grid.Grid, l frame.Layout) (cx, cy int, ok, painte
 
 // imagePane returns the grid that draws doc's picture in pane p, and whether the
 // pane is an image pane at all. It is true for an image document when the terminal
-// can show pictures and the picture has reached it; otherwise the caller paints the
-// text pane, so the summary is shown while the upload is in flight and when the
-// terminal cannot draw images at all.
+// can show pictures and the picture has reached it, or when the probe found no
+// support and the half-block fallback has the decoded picture; otherwise the
+// caller paints the text pane, so the summary is shown while the upload or the
+// decode is in flight and when the file cannot be drawn at all.
 func (m *Model) imagePane(p split.Pane, doc Document, placement int) (*grid.Grid, bool) {
 	img, ok := doc.(imageDoc)
-	if !ok || !m.img.imageEnabled() {
+	if !ok {
 		return nil, false
 	}
 	info, ok := img.Image()
 	if !ok {
 		return nil, false
 	}
-	id, uploaded := m.imageIDFor(doc)
-	if !uploaded {
-		return nil, false
+	if m.img.imageEnabled() {
+		id, uploaded := m.imageIDFor(doc)
+		if !uploaded {
+			return nil, false
+		}
+		area := imageRegion{x: 0, y: 0, w: p.W, h: p.H}
+		cellW, cellH := m.img.cellSize()
+		pg := grid.New(area.w, area.h)
+		paintImage(pg, area, info, id, placement, cellW, cellH, style.Cell(m.styles.Editor))
+		return pg, true
 	}
-	area := imageRegion{x: 0, y: 0, w: p.W, h: p.H}
-	cellW, cellH := m.img.cellSize()
-	pg := grid.New(area.w, area.h)
-	paintImage(pg, area, info, id, placement, cellW, cellH, style.Cell(m.styles.Editor))
-	return pg, true
+	// No graphics support: the half-block fallback draws the picture itself.
+	return m.mosaicPane(p, doc, info)
 }
 
 // stickyScrollLine returns the enclosing scope's start line when pane p shows

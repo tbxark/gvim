@@ -209,6 +209,7 @@ still large internally, so a reader can find a feature without grepping by memor
 | editor body | `motion_mouse.go`, `motion_rows.go`, `viewrow.go`, `occurrence.go` | click/drag/wheel, row-mapped motion, top-row memo, occurrence highlight |
 | large-file mode | `large.go` | large-file UI: index progress, full-load prompt, streamed save/search, error dialogs |
 | clipboard / popup | `clip.go`, `context_menu.go`, `popup.go` | OSC 52/HTML clipboard flows, right-click menus, popup adapter |
+| images | `imagecap.go`, `imagemosaic.go` | terminal image-capability probe and id allocator, the `x/mosaic` half-block fallback and its caches; docs/images.md |
 
 **Overlay key routing.** `overlay_keys.go` holds the root's side of the overlay keymap contexts.
 An overlay that takes its keys in code declares one of the Fresh contexts the root resolves

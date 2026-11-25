@@ -65,6 +65,13 @@ type imageState struct {
 	// localOnly is set for a hosted (daemon) workspace: images are shown as the
 	// text summary because the daemon has no single terminal to draw them in.
 	localOnly bool
+	// mosaic maps an image path to the picture decoded for the half-block
+	// fallback, used only when the probe found no graphics support. The kitty
+	// path never reads it.
+	mosaic map[string]*mosaicEntry
+	// mosaicOrder is mosaic's paths in load order, so the cache drops the oldest
+	// entry past its bound.
+	mosaicOrder []string
 }
 
 // sentImage records one transmission: the id, the size and modification time it
@@ -234,6 +241,7 @@ func (m *Model) applyImageProtocol(value string) tea.Cmd {
 	wasEnabled := m.img.imageEnabled()
 	next.sent, next.nextID, next.pending = m.img.sent, m.img.nextID, m.img.pending
 	next.cellW, next.cellH, next.localOnly = m.img.cellW, m.img.cellH, m.img.localOnly
+	next.mosaic, next.mosaicOrder = m.img.mosaic, m.img.mosaicOrder
 	if !wasEnabled && next.imageEnabled() {
 		// A read that failed while images could not be drawn is not permanent:
 		// turning the protocol back on retries it. Uploaded pictures keep their
@@ -357,8 +365,10 @@ func (m *Model) imageMessage(msg tea.Msg) (tea.Cmd, bool) {
 		if m.img.probed {
 			return nil, true // the reply beat the timeout
 		}
+		// A silent terminal is "no support": the mosaic fallback can now start
+		// reading the open pictures.
 		m.img.probed = true
-		return nil, true
+		return m.imageQueue(), true
 	case imageSendMsg:
 		// The picture was read: hand the upload to the terminal. It goes through Raw,
 		// not the frame, so the pixel data is not repeated on every repaint. The entry
@@ -389,6 +399,21 @@ func (m *Model) imageMessage(msg tea.Msg) (tea.Cmd, bool) {
 		), true
 	case imageUploadedMsg:
 		m.img.markUploaded(msg.path, msg.id)
+		return nil, true
+	case mosaicLoadedMsg:
+		// A decode finished for the half-block fallback. Only the entry whose stat
+		// the read was for takes it; a stale or replaced entry drops the result.
+		e, ok := m.img.mosaic[msg.path]
+		if !ok || e.size != msg.size || e.mtime != msg.mtime {
+			return nil, true
+		}
+		e.pending = false
+		if msg.err != nil {
+			e.failed = true
+			e.img = nil
+			return nil, true
+		}
+		e.img = msg.img
 		return nil, true
 	}
 	if id, ok := kittyGraphicsReply(msg); ok {

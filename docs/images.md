@@ -2,9 +2,10 @@
 
 gvim shows a picture in the editor pane when you open an image file, using the
 [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
-through Unicode placeholders. A terminal that does not support the protocol shows
-a text summary instead, and nothing is ever printed to the screen as a stray
-escape sequence.
+through Unicode placeholders. A terminal that does not support the protocol —
+the query goes unanswered — gets a half-block approximation of the picture drawn
+from ordinary styled cells, and `image_protocol: "off"` keeps the text summary.
+Nothing is ever printed to the screen as a stray escape sequence.
 
 ## What opens as an image
 
@@ -71,13 +72,24 @@ The picture is fitted into the pane keeping its aspect ratio: it is scaled down 
 fit, never up, and centered. The cell pixel size comes from the `CSI 16 t` reply,
 or from a 16x32 default when the terminal does not answer.
 
+**Half-block fallback.** When the query goes unanswered (`auto` finds no
+support), the pane draws the picture itself as Unicode half blocks instead of
+the summary: a command decodes the file (the same size and pixel limits as the
+upload, with the decode downscaled to 1024 px on its long side), and the pane
+renders it with `charmbracelet/x/mosaic` into one `▀` cell per column — the
+cell's foreground carries the picture's top half-pixel and its background the
+bottom one — fitted and centered exactly like the placeholder path. The decode
+is cached per file stat (four pictures at most), and the rendered cells are
+cached per pane size, so a repaint does no file or image work. A failed decode
+keeps the summary and is not retried until the file changes.
+
 ## The setting
 
 `image_protocol` (Interface section, user and project layers, applied live):
 
 | Value | Meaning |
 |---|---|
-| `auto` (default) | Ask the terminal the first time an image tab opens. |
+| `auto` (default) | Ask the terminal the first time an image tab opens. No answer draws the half-block fallback. |
 | `kitty` | Trust the terminal without asking. Use it behind a multiplexer or a wrapper that swallows the reply. |
 | `off` | Never draw an image; the summary text is shown. |
 
@@ -98,7 +110,8 @@ protocol changes from unavailable to available.
   before the pixels are decoded, so an oversized picture cannot stall the update
   loop.
 - tmux needs `allow-passthrough on` to forward APC sequences. Without it the
-  picture does not show; the query goes unanswered, so `auto` falls back to text.
+  picture does not show; the query goes unanswered, so `auto` falls back to the
+  half-block picture.
   `image_protocol: "kitty"` does not help there, because the sequence never reaches
   the terminal.
 - Remote images and daemon-hosted workspaces keep the text summary: a remote
@@ -120,8 +133,9 @@ protocol changes from unavailable to available.
 | `document/large.go` | a large image stays an image, not a windowed binary |
 | `commands/binary_commands.go` | the **Toggle Hex View** palette row |
 | `internal/tui/hexview.go` | the read-only hex pane, its window cache and navigation |
-| `internal/tui/imagecap.go` | the capability state, the probe, the id allocator |
+| `internal/tui/imagecap.go` | the capability state, the probe, the id allocator, the mosaic cache |
 | `internal/tui/imageview.go` | fitting, placeholder cells, the upload and placement sequences |
+| `internal/tui/imagemosaic.go` | the half-block fallback: decode command, bounded cache, cell rendering |
 | `internal/tui/split.go` | `paintPanes` draws an image pane instead of the text pane |
 | `internal/tui/model.go` | `imageQueue` (probe and read), `Update` hooks, `ImageProtocol` in `ViewOptions` |
 | `internal/tui/root_watch.go`, `internal/tui/root_revert_fix.go` | image tabs are skipped by the watcher and auto-revert |
