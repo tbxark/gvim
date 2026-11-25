@@ -222,14 +222,24 @@ func rexConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "rex", "init.lua"), nil
 }
 
-// rexBinary is the rex of PATH, or the one beside the running Rex server.
+// rexBinary is the Rex terminal's rex: the one beside the running Rex server,
+// else the first rex on PATH that has a config command. Other tools install a
+// rex too (the Perl automation tool, in /usr/bin on many Linux hosts).
 func rexBinary() string {
-	if p, err := exec.LookPath("rex"); err == nil {
-		return p
-	}
+	var dirs []string
 	if dir := os.Getenv("REX_BIN_DIR"); dir != "" {
-		p := filepath.Join(dir, "rex")
-		if _, err := os.Stat(p); err == nil {
+		dirs = append(dirs, dir)
+	}
+	dirs = append(dirs, filepath.SplitList(os.Getenv("PATH"))...)
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		p, err := exec.LookPath(filepath.Join(dir, "rex"))
+		if err != nil {
+			continue
+		}
+		if exec.Command(p, "config", "--help").Run() == nil {
 			return p
 		}
 	}

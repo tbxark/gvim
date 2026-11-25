@@ -407,4 +407,14 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	if got := readCmd(2); !slices.Equal(got, wantDiff) {
 		t.Fatalf("gvim_diff cmd = %v, want %v", got, wantDiff)
 	}
+	// A remote pane must not run the local absolute path from bin.
+	if err := l.DoString(`
+		_TEST_ACTIONS.gvim_open.run({ server = "nvidia" }, { target = "-dash.txt" })
+	`); err != nil {
+		t.Fatal(err)
+	}
+	wantRemote := []string{"/bin/sh", "-c", "PATH=\"$PATH:$HOME/go/bin:$HOME/.local/bin\"; exec gvim \"$@\"", "gvim", "--", "-dash.txt"}
+	if got := readCmd(3); !slices.Equal(got, wantRemote) {
+		t.Fatalf("remote gvim_open cmd = %v, want %v", got, wantRemote)
+	}
 }

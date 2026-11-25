@@ -67,10 +67,17 @@ function M.setup(opts)
   end
 
   -- The command for a pane. A local pane gets an explicit PATH because
-  -- shell = "none" inherits the Rex server's minimal one; a remote pane
-  -- keeps the host's own environment.
+  -- shell = "none" inherits the Rex server's minimal one. A remote pane
+  -- runs on another machine, where the local path in bin does not exist: it
+  -- runs the gvim found there, on the host's own PATH plus the usual
+  -- user install directories.
   local function command(ctx, args)
-    if ctx.server ~= nil then return argv(args) end
+    if ctx.server ~= nil then
+      local out = { "/bin/sh", "-c",
+        'PATH="$PATH:$HOME/go/bin:$HOME/.local/bin"; exec gvim "$@"', "gvim" }
+      for _, part in ipairs(args) do out[#out + 1] = part end
+      return out
+    end
     local out = { "/usr/bin/env", "PATH=" .. path }
     for _, part in ipairs(argv(args)) do out[#out + 1] = part end
     return out
