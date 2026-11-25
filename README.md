@@ -87,11 +87,14 @@ The complete cheat sheet (LSP, Git, mouse, pager mode, Markdown modes) is in
 - [`docs/ui.md`](docs/ui.md): UI styling, geometry, overlays
 - [`docs/parity.md`](docs/parity.md): Fresh parity matrix and open gaps
 
-## Thanks
+## Acknowledgements
 
-- [Fresh](https://github.com/sinelaw/fresh): the terminal editor whose feature set and design
-  `gvim` measures itself against.
-  
+gvim is a Go reimplementation of [Fresh](https://github.com/sinelaw/fresh), a terminal editor
+created by sinelaw. gvim's feature set, keymaps, command catalogue and UI design are taken
+from Fresh, and [`docs/parity.md`](docs/parity.md) tracks how closely gvim follows it. Thanks
+to sinelaw and Fresh's contributors for the original work.
+
 ## License
 
-**gvim** is released under the MIT license. [See LICENSE](LICENSE) for details.
+**gvim** is released under the GNU General Public License v3.0, the same license as Fresh.
+[See LICENSE](LICENSE) for details.
