@@ -1,10 +1,10 @@
 package highlight
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -113,7 +113,7 @@ func (c *Cache) context() int {
 // same version, so scrolling inside the window and moving the caret lex nothing.
 // A line too long to be painted whole has none. It returns nil when no lexer matched
 // the document, or when the cache is nil.
-func (c *Cache) window(doc *editor.Document, i int) []syntax.Span {
+func (c *Cache) window(doc *document.Document, i int) []syntax.Span {
 	if c == nil {
 		return nil
 	}
@@ -161,7 +161,7 @@ func (c *Cache) window(doc *editor.Document, i int) []syntax.Span {
 // asynchronous window source that has not arrived is left blank (and gets no spans):
 // reading it would turn highlighting a line on screen into an extra remote window
 // load. The window-generation key above re-lexes after such a window arrives.
-func (c *Cache) lexWindow(doc *editor.Document, b *buffer.Buffer, ver uint64, i int, hot bool) spanWindow {
+func (c *Cache) lexWindow(doc *document.Document, b *buffer.Buffer, ver uint64, i int, hot bool) spanWindow {
 	back, ahead := windowBack, windowAhead
 	if hot {
 		back, ahead = hotBack, hotAhead
@@ -201,7 +201,7 @@ func (c *Cache) lexWindow(doc *editor.Document, b *buffer.Buffer, ver uint64, i 
 // when the document, maxContextLines, or an unloaded remote window ends first. An
 // unloaded line is not measured: lineSize would read its window and make highlighting
 // a context line perform remote I/O the paint did not ask for.
-func contextLines(doc *editor.Document, b *buffer.Buffer, from, bytes int) int {
+func contextLines(doc *document.Document, b *buffer.Buffer, from, bytes int) int {
 	n, sum := 0, 0
 	for j := from - 1; j >= 0 && n < maxContextLines && sum < bytes; j-- {
 		if !doc.LineLoaded(j) {
@@ -216,7 +216,7 @@ func contextLines(doc *editor.Document, b *buffer.Buffer, from, bytes int) int {
 // Windowed reports whether doc is highlighted through windows: a large document, and
 // a document of more than windowedBytes. The size is measured again only after the
 // text changed. A nil cache answers as for a large document alone.
-func (c *Cache) Windowed(doc *editor.Document) bool {
+func (c *Cache) Windowed(doc *document.Document) bool {
 	if doc.Large() {
 		return true
 	}

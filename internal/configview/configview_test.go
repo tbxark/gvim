@@ -1,6 +1,7 @@
 package configview
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,5 +46,86 @@ func TestLoadReportsKeybindingWarnings(t *testing.T) {
 	view, err = Load(t.TempDir(), Options{Config: clean})
 	if err != nil || len(view.Warnings) != 0 {
 		t.Fatalf("a clean config warns: %q, %v", view.Warnings, err)
+	}
+}
+
+func TestLoadOutputReloadsWithoutDiagnostics(t *testing.T) {
+	path := userConfigPath(t, `{
+  "theme": "gopher",
+  "editor": {"tab_size": 2, "use_tabs": true},
+  "file_explorer": {"show_hidden": false, "hide_gitignore": true}
+}`)
+	view, err := Load(t.TempDir(), Options{Config: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", view.Warnings)
+	}
+	roundTrip := userConfigPath(t, string(view.JSON))
+	view2, err := Load(t.TempDir(), Options{Config: roundTrip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view2.Warnings) != 0 {
+		t.Fatalf("round-trip config show output produced warnings: %v\nJSON:\n%s", view2.Warnings, view.JSON)
+	}
+}
+
+func TestLoadShowsNestedSchemaWithoutDottedKeys(t *testing.T) {
+	path := userConfigPath(t, `{"editor": {"tab_size": 2}, "file_explorer": {"hide_gitignore": true}, "lsp_enabled": false}`)
+	view, err := Load(t.TempDir(), Options{Config: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(view.JSON, &top); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, view.JSON)
+	}
+	for key := range top {
+		if strings.Contains(key, ".") {
+			t.Errorf("top-level key %q is dotted", key)
+		}
+	}
+	var sections struct {
+		Editor struct {
+			TabSize int `json:"tab_size"`
+		} `json:"editor"`
+		FileExplorer struct {
+			HideGitignore bool `json:"hide_gitignore"`
+		} `json:"file_explorer"`
+		LSPEnabled bool            `json:"lsp_enabled"`
+		Terminal   json.RawMessage `json:"terminal"`
+		Clipboard  json.RawMessage `json:"clipboard"`
+	}
+	if err := json.Unmarshal(view.JSON, &sections); err != nil {
+		t.Fatal(err)
+	}
+	if sections.Editor.TabSize != 2 || !sections.FileExplorer.HideGitignore || sections.LSPEnabled {
+		t.Errorf("effective values lost: %+v", sections)
+	}
+	if sections.Terminal == nil || sections.Clipboard == nil {
+		t.Errorf("terminal and clipboard sections missing from the output")
+	}
+}
+
+func TestKeymapNamesReturnsClone(t *testing.T) {
+	names := KeymapNames()
+	if len(names) == 0 {
+		t.Fatal("no keymap names")
+	}
+	first := names[0]
+	names[0] = "mutated"
+	if KeymapNames()[0] != first {
+		t.Errorf("KeymapNames shares its backing slice: got %q after mutation", KeymapNames()[0])
+	}
+	err := ValidateFlags("nope", "")
+	if err == nil {
+		t.Fatal("unknown keymap accepted")
+	}
+	for _, name := range KeymapNames() {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not list keymap %q", err, name)
+		}
 	}
 }

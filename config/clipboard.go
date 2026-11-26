@@ -5,9 +5,8 @@ import (
 	"errors"
 )
 
-// ClipboardConfig is the clipboard section of the config. Fresh's clipboard keys
-// tune the terminal's clipboard integration; gvim implements use_osc52 (child
-// writes) and the gvim extension osc52_paste (child reads, opt-in and bounded).
+// ClipboardConfig is the clipboard section of the config. It is user-layer
+// only: a project .gvim/config.json cannot enable terminal clipboard access.
 type ClipboardConfig struct {
 	// UseOSC52 lets a program inside the terminal dock write the system clipboard
 	// with OSC 52 (base64 text). It is off by default: output is untrusted data,
@@ -22,26 +21,16 @@ type ClipboardConfig struct {
 	OSC52Paste bool
 }
 
-// DefaultClipboard returns the clipboard defaults: OSC 52 writes and reads are
-// off. Fresh
-// defaults use_osc52 to true; gvim keeps it off because the program inside the
-// terminal is untrusted output, and the host additionally requires a trusted
-// workspace when it is turned on (docs/terminal.md).
+// DefaultClipboard returns the clipboard defaults: OSC 52 writes and reads are off.
 func DefaultClipboard() ClipboardConfig { return ClipboardConfig{} }
 
-// setClipboard applies one key of "clipboard". The other Fresh clipboard keys
-// (osc52_paste, ...) are accepted and ignored: gvim's clipboard writes go through
-// the editor's own copy path.
+// setClipboard applies one key of "clipboard".
 func (c *Config) setClipboard(key string, raw json.RawMessage) error {
 	switch key {
 	case "use_osc52":
 		return setClipboardBool(raw, &c.Clipboard.UseOSC52)
 	case "osc52_paste":
 		return setClipboardBool(raw, &c.Clipboard.OSC52Paste)
-	case "use_system_clipboard":
-		// gvim always writes through the system clipboard tools when a copy asks
-		// for it; there is no separate switch to turn that half off.
-		return nil
 	}
 	return errors.New("unknown setting")
 }

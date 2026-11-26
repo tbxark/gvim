@@ -39,13 +39,13 @@ func DefaultDaemonConfig() DaemonConfig {
 
 // setDaemon applies the object of the "daemon" section from the user layer. A project file
 // never comes here: applyObject refuses the section for the project layer with a diagnostic.
-func (c *Config) setDaemon(raw json.RawMessage) (diags []Diagnostic) {
+func (c *Config) setDaemon(raw json.RawMessage, path string) (diags []Diagnostic) {
 	diag := func(key, message string) {
-		diags = append(diags, Diagnostic{Key: "daemon." + key, Message: message})
+		diags = append(diags, Diagnostic{Path: path, Key: "daemon." + key, Message: message})
 	}
 	entries, err := decodeObject(raw)
 	if err != nil {
-		return []Diagnostic{{Key: "daemon", Message: err.Error()}}
+		return []Diagnostic{{Path: path, Key: "daemon", Message: err.Error()}}
 	}
 	for _, k := range sortedKeys(entries) {
 		v := entries[k]

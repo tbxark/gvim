@@ -37,7 +37,7 @@ func isolateHome(t *testing.T) string {
 
 func TestDefaults(t *testing.T) {
 	want := Config{
-		Theme:        "dark",
+		Theme:        DefaultTheme,
 		TabSize:      4,
 		InsertSpaces: true,
 		LineEnding:   "auto",
@@ -91,7 +91,7 @@ func TestLoadMissingFilesGivesDefaults(t *testing.T) {
 	if len(diags) != 0 {
 		t.Fatalf("missing files gave diagnostics: %v", diags)
 	}
-	if cfg.Theme != "dark" || cfg.TabSize != 4 {
+	if cfg.Theme != DefaultTheme || cfg.TabSize != 4 {
 		t.Fatalf("cfg = %+v, want defaults", cfg)
 	}
 }
@@ -102,7 +102,7 @@ func TestLoadEmptyRootSkipsProject(t *testing.T) {
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
 	}
-	if cfg.Theme != "dark" {
+	if cfg.Theme != DefaultTheme {
 		t.Fatalf("theme = %q", cfg.Theme)
 	}
 }
@@ -112,8 +112,8 @@ func TestLoadLayering(t *testing.T) {
 	userFile := filepath.Join(dir, "user", "config.json")
 	root := filepath.Join(dir, "proj")
 	projFile := filepath.Join(root, ".gvim", "config.json")
-	writeFile(t, userFile, `{"theme": "light", "tab_size": 8, "line_numbers": false}`)
-	writeFile(t, projFile, `{"tab_size": 2, "insert_spaces": false}`)
+	writeFile(t, userFile, `{"theme": "light", "editor": {"tab_size": 8, "line_numbers": false}}`)
+	writeFile(t, projFile, `{"editor": {"tab_size": 2}, "insert_spaces": false}`)
 
 	cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
 	if err != nil || len(diags) != 0 {
@@ -142,7 +142,7 @@ func TestLoadLayering(t *testing.T) {
 func TestLoadProjectOnlyLayer(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "proj")
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"line_ending": "crlf"}`)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"editor": {"default_line_ending": "crlf"}}`)
 	cfg, diags, err := Load(Options{Root: root, UserFile: filepath.Join(dir, "absent.json")})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
@@ -158,7 +158,7 @@ func TestLoadJSONCCommentsAndTrailingCommas(t *testing.T) {
 	writeFile(t, userFile, `// gvim settings
 {
   /* indentation */
-  "tab_size": 3, // three columns
+  "editor": {"tab_size": 3}, // three columns
   "insert_spaces": false,
   "theme": "solarized", /* trailing comma follows */
   "keybindings": {
@@ -203,8 +203,8 @@ func TestLoadMalformedFileKeepsDefaultsAndReports(t *testing.T) {
 	dir := t.TempDir()
 	userFile := filepath.Join(dir, "config.json")
 	root := filepath.Join(dir, "proj")
-	writeFile(t, userFile, `{"theme": "light", "tab_size": `)
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"line_numbers": false}`)
+	writeFile(t, userFile, `{"theme": "light", "editor": {"tab_size": `)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"editor": {"line_numbers": false}}`)
 
 	cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
 	if err != nil {
@@ -221,7 +221,7 @@ func TestLoadMalformedFileKeepsDefaultsAndReports(t *testing.T) {
 	}
 	// The malformed user layer is skipped, so its theme is not applied. The
 	// project layer still applies.
-	if cfg.Theme != "dark" {
+	if cfg.Theme != DefaultTheme {
 		t.Errorf("theme = %q, want default after malformed user layer", cfg.Theme)
 	}
 	if cfg.LineNumbers {
@@ -264,15 +264,15 @@ func TestLoadBadValuesAreDiagnosedPerKey(t *testing.T) {
 		key     string
 		wantMsg string
 	}{
-		{"tab size too large", `{"tab_size": 99}`, "tab_size", "between 1 and 16"},
-		{"tab size zero", `{"tab_size": 0}`, "tab_size", "between 1 and 16"},
-		{"tab size string", `{"tab_size": "4"}`, "tab_size", "must be an integer"},
-		{"line ending", `{"line_ending": "lf2"}`, "line_ending", "must be"},
-		{"bool as string", `{"auto_indent": "yes"}`, "auto_indent", "must be true or false"},
-		{"menu bar as string", `{"show_menu_bar": "yes"}`, "show_menu_bar", "must be true or false"},
+		{"tab size too large", `{"editor": {"tab_size": 99}}`, "editor.tab_size", "between 1 and 16"},
+		{"tab size zero", `{"editor": {"tab_size": 0}}`, "editor.tab_size", "between 1 and 16"},
+		{"tab size string", `{"editor": {"tab_size": "4"}}`, "editor.tab_size", "must be an integer"},
+		{"line ending", `{"editor": {"default_line_ending": "lf2"}}`, "editor.default_line_ending", "must be"},
+		{"bool as string", `{"editor": {"auto_indent": "yes"}}`, "editor.auto_indent", "must be true or false"},
+		{"menu bar as string", `{"editor": {"show_menu_bar": "yes"}}`, "editor.show_menu_bar", "must be true or false"},
 		{"empty theme", `{"theme": ""}`, "theme", "must not be empty"},
 		{"theme not a string", `{"theme": 1}`, "theme", "must be a string"},
-		{"null value", `{"line_numbers": null}`, "line_numbers", "null"},
+		{"null value", `{"editor": {"line_numbers": null}}`, "editor.line_numbers", "null"},
 		{"keybindings string", `{"keybindings": "ctrl+s"}`, "keybindings", "must be a list of bindings"},
 		{"unknown key", `{"tabsize": 2}`, "tabsize", "unknown setting"},
 		{"plugin timeout zero", `{"plugin_timeout_ms": 0}`, "plugin_timeout_ms", "between 1 and 60000"},
@@ -327,7 +327,7 @@ func TestLoadPluginTimeout(t *testing.T) {
 
 func TestLoadShowMenuBar(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	writeFile(t, path, `{"show_menu_bar": false}`)
+	writeFile(t, path, `{"editor": {"show_menu_bar": false}}`)
 	cfg, diags, err := Load(Options{UserFile: path})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
@@ -342,25 +342,25 @@ func TestSourceNamesTheFileThatSetKey(t *testing.T) {
 	userFile := filepath.Join(dir, "user.json")
 	root := filepath.Join(dir, "proj")
 	projFile := filepath.Join(root, ".gvim", "config.json")
-	writeFile(t, userFile, `{"keymap": "emacs", "theme": "light", "keybindings": {"bindings": []}, "tab_size": 99}`)
+	writeFile(t, userFile, `{"keymap": "emacs", "theme": "light", "keybindings": {"bindings": []}, "editor": {"tab_size": 99}}`)
 	writeFile(t, projFile, `{"theme": "mono", "keybindings": {"bindings": [{"key": "s", "modifiers": ["ctrl"], "action": "noop"}]}}`)
 	cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The bad tab_size, and the project file's keybindings, which a project cannot set.
-	if len(diags) != 2 || diags[0].Key != "tab_size" || diags[1].Key != "keybindings" {
-		t.Fatalf("diags = %+v, want the bad tab_size and the refused project keybindings", diags)
+	if len(diags) != 2 || diags[0].Key != "editor.tab_size" || diags[1].Key != "keybindings" {
+		t.Fatalf("diags = %+v, want the bad editor.tab_size and the refused project keybindings", diags)
 	}
 	tests := []struct {
 		key  string
 		want string
 	}{
 		{"keymap", userFile},
-		{"theme", projFile},       // the project layer replaces the user value
-		{"keybindings", userFile}, // the project layer cannot set it
-		{"tab_size", ""},          // rejected in the user file, so the default stands
-		{"line_numbers", ""},      // set by no file
+		{"theme", projFile},         // the project layer replaces the user value
+		{"keybindings", userFile},   // the project layer cannot set it
+		{"editor.tab_size", ""},     // rejected in the user file, so the default stands
+		{"editor.line_numbers", ""}, // set by no file
 	}
 	for _, tt := range tests {
 		if got := cfg.Source(tt.key); got != tt.want {
@@ -371,12 +371,12 @@ func TestSourceNamesTheFileThatSetKey(t *testing.T) {
 
 func TestLoadValidKeyAfterBadKeyStillApplies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	writeFile(t, path, `{"tab_size": 0, "theme": "mono"}`)
+	writeFile(t, path, `{"editor": {"tab_size": 0}, "theme": "mono"}`)
 	cfg, diags, err := Load(Options{UserFile: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(diags) != 1 || diags[0].Key != "tab_size" {
+	if len(diags) != 1 || diags[0].Key != "editor.tab_size" {
 		t.Fatalf("diags = %+v", diags)
 	}
 	if cfg.TabSize != 4 || cfg.Theme != "mono" {
@@ -386,15 +386,13 @@ func TestLoadValidKeyAfterBadKeyStillApplies(t *testing.T) {
 
 func TestLoadAcceptsDeclaredValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	writeFile(t, path, `{"tab_size": 16, "line_ending": "lf", "trim_trailing_whitespace": true,
-		"ensure_final_newline": true, "explorer_show_hidden": true, "explorer_show_ignored": false,
+	writeFile(t, path, `{"editor": {"tab_size": 16, "default_line_ending": "lf", "trim_trailing_whitespace_on_save": true,
+		"ensure_final_newline_on_save": true}, "file_explorer": {"show_hidden": true, "hide_gitignore": true},
 		"file_scan_exclusions": ["*.tmp"], "file_scan_inclusions": [".env*"]}`)
 	cfg, diags, err := Load(Options{UserFile: path})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
 	}
-	// explorer_show_ignored is the inverted legacy spelling of
-	// file_explorer.hide_gitignore: false here means "hide them".
 	if cfg.TabSize != 16 || cfg.LineEnding != "lf" || !cfg.TrimTrailingWhitespace ||
 		!cfg.EnsureFinalNewline || !cfg.ExplorerShowHidden || !cfg.FileExplorer.HideGitignore ||
 		!reflect.DeepEqual(cfg.FileScanExclusions, []string{"*.tmp"}) ||
@@ -407,9 +405,9 @@ func TestLoadDiagnosticsOrderUserBeforeProject(t *testing.T) {
 	dir := t.TempDir()
 	userFile := filepath.Join(dir, "user.json")
 	root := filepath.Join(dir, "proj")
-	writeFile(t, userFile, `{"tab_size": 0}`)
+	writeFile(t, userFile, `{"editor": {"tab_size": 0}}`)
 	projFile := filepath.Join(root, ".gvim", "config.json")
-	writeFile(t, projFile, `{"line_ending": "lf2"}`)
+	writeFile(t, projFile, `{"editor": {"default_line_ending": "lf2"}}`)
 	_, diags, err := Load(Options{Root: root, UserFile: userFile})
 	if err != nil {
 		t.Fatal(err)
@@ -474,7 +472,7 @@ func TestLoadReadsDefaultUserFileUnderHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, p.User, `{"tab_size": 2}`)
+	writeFile(t, p.User, `{"editor": {"tab_size": 2}}`)
 	cfg, diags, err := Load(Options{})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
@@ -595,7 +593,7 @@ func TestLoadLSPProjectLayerCannotRunAProgram(t *testing.T) {
 		{"args alone are refused too", `{"lsp": {"rust": {"args": ["-c", "x"], "enabled": true}}}`,
 			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}}, nil, 1},
 		{"a project can switch a language off", `{"lsp": {"go": {"enabled": false}}}`,
-			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}}, map[string]bool{"go": true}, 0},
+			map[string][]LSPServer{"rust": {{Command: "ra", Args: []string{"-x"}}}}, map[string]bool{"go": true}, 0},
 		{"a project can turn a built-in server on", `{"lsp": {"odin": {"enabled": true}}}`,
 			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}, "odin": {{}}}, nil, 0},
 	}

@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ func TestCacheKeepsSpansAcrossCursorMoves(t *testing.T) {
 	if len(first) == 0 {
 		t.Fatal("no spans")
 	}
-	for _, act := range []editor.Action{"move_down", "move_right", "move_end", "page_down", "move_doc_end"} {
+	for _, act := range []document.Action{"move_down", "move_right", "move_end", "page_down", "move_doc_end"} {
 		ed.Do(act, nil)
 		got := c.Lines(ed.Active())
 		if &got[0] != &first[0] {

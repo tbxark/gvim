@@ -7,10 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/go-git/go-billy/v5"
-	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // WalkOptions controls WalkFiles.
@@ -56,24 +52,17 @@ func WalkFiles(ctx context.Context, root string, opts WalkOptions, fn func(rel s
 	for _, s := range opts.SkipDirs {
 		skip[s] = true
 	}
-	var customRules []gitignore.Pattern
-	var initMatcher gitignore.Matcher
+	var customRules []IgnorePattern
+	var initMatcher *IgnoreMatcher
 	if !opts.ShowIgnored {
-		for _, pat := range opts.CustomIgnorePatterns {
-			pat = strings.TrimSpace(pat)
-			if pat == "" || strings.HasPrefix(pat, "#") {
-				continue
-			}
-			customRules = append(customRules, gitignore.ParsePattern(pat, nil))
-		}
+		customRules = ParsePatterns(opts.CustomIgnorePatterns)
 		if len(customRules) > 0 {
-			initMatcher = gitignore.NewMatcher(customRules)
+			initMatcher = NewIgnoreMatcher(customRules)
 		}
 	}
 	w := walker{
 		ctx:         ctx,
 		root:        abs,
-		fsys:        osfs.New(abs),
 		opts:        opts,
 		skip:        skip,
 		customRules: customRules,
@@ -89,10 +78,9 @@ func WalkFiles(ctx context.Context, root string, opts WalkOptions, fn func(rel s
 type walker struct {
 	ctx         context.Context
 	root        string
-	fsys        billy.Filesystem // rooted at root; reads .gitignore files
 	opts        WalkOptions
 	skip        map[string]bool // opts.SkipDirs as a set
-	customRules []gitignore.Pattern
+	customRules []IgnorePattern
 	scan        scanMatchers
 	fn          func(rel string) bool
 	stop        bool // fn returned false
@@ -103,7 +91,7 @@ type walker struct {
 // directory itself is ignored (the walk descends an ignored directory only to
 // reach files a scan inclusion names). It returns an error only for the top
 // directory, or for a done context.
-func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matcher, top, parentIgnored bool) error {
+func (w *walker) dir(rel []string, rules []IgnorePattern, m *IgnoreMatcher, top, parentIgnored bool) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
@@ -116,19 +104,19 @@ func (w *walker) dir(rel []string, rules []gitignore.Pattern, m gitignore.Matche
 		return nil
 	}
 	if !w.opts.ShowIgnored && w.opts.RespectGitignoreEnabled() && hasGitignoreEntry(entries) {
-		if local := readIgnore(w.fsys, rel); len(local) > 0 {
-			nextRules := make([]gitignore.Pattern, len(rules)+len(local))
+		if local := readIgnore(w.root, rel); len(local) > 0 {
+			nextRules := make([]IgnorePattern, len(rules)+len(local))
 			copy(nextRules, rules)
 			copy(nextRules[len(rules):], local)
 			rules = nextRules
 
 			if len(w.customRules) == 0 {
-				m = gitignore.NewMatcher(rules)
+				m = NewIgnoreMatcher(rules)
 			} else {
-				allRules := make([]gitignore.Pattern, len(rules)+len(w.customRules))
+				allRules := make([]IgnorePattern, len(rules)+len(w.customRules))
 				copy(allRules, rules)
 				copy(allRules[len(rules):], w.customRules)
-				m = gitignore.NewMatcher(allRules)
+				m = NewIgnoreMatcher(allRules)
 			}
 		}
 	}

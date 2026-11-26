@@ -161,8 +161,7 @@ func TestLanguagesSectionParsing(t *testing.T) {
       "formatter": {"command": "rustfmt", "args": ["--edition", "2021"]},
       "on_save": [{"command": "cargo", "args": ["check"]}],
       "indent": {"increase_indent_pattern": "\\{$", "self_close_pattern": null},
-      "extensions": ["rs"], "filenames": ["Cargo.lock"], "grammar": "rust",
-      "textmate_grammar": null, "highlighter": "auto"
+      "extensions": ["rs"], "filenames": ["Cargo.lock"]
     }
   }
 }`

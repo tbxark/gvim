@@ -9,12 +9,7 @@ import (
 	"testing"
 )
 
-// freshEditorDefaults is the "default" of the editor property in Fresh's
-// config-schema.json. It is copied here so that the tests do not read refs/.
-const freshEditorDefaults = `{
-  "animations": true,
-  "cursor_jump_animation": true,
-  "viewport_edge_fade": true,
+const gvimEditorDefaults = `{
   "line_numbers": true,
   "relative_line_numbers": false,
   "highlight_current_line": true,
@@ -27,8 +22,6 @@ const freshEditorDefaults = `{
   "page_width": 80,
   "syntax_highlighting": true,
   "show_menu_bar": true,
-  "screensaver_enabled": false,
-  "screensaver_idle_minutes": 5,
   "menu_bar_mnemonics": true,
   "show_tab_bar": true,
   "show_status_bar": true,
@@ -60,13 +53,11 @@ const freshEditorDefaults = `{
     "regex": false,
     "confirm_each": false
   },
-  "show_prompt_line": false,
   "show_vertical_scrollbar": true,
   "show_horizontal_scrollbar": false,
   "show_tilde": true,
   "nerd_font_icons": false,
   "set_window_title": true,
-  "terminal_auto_title": true,
   "cursor_style": "default",
   "rulers": [],
   "indentation_guide": "none",
@@ -102,7 +93,6 @@ const freshEditorDefaults = `{
   "enable_inlay_hints": true,
   "diagnostics_inline_text": false,
   "mouse_wheel_scroll_lines": 3,
-  "smooth_scroll": true,
   "mouse_hover_enabled": true,
   "mouse_hover_delay_ms": 500,
   "double_click_time_ms": 500,
@@ -120,21 +110,12 @@ const freshEditorDefaults = `{
   "recovery_enabled": true,
   "auto_recovery_save_interval_secs": 2,
   "auto_revert_poll_interval_ms": 2000,
-  "keyboard_disambiguate_escape_codes": true,
-  "keyboard_report_event_types": false,
-  "keyboard_report_alternate_keys": true,
-  "keyboard_report_all_keys_as_escape_codes": false,
-  "snapshot_interval": 100,
   "highlight_context_bytes": 10000,
   "large_file_threshold_bytes": 10485760,
-  "estimated_line_length": 80,
-  "read_concurrency": 64,
-  "file_tree_poll_interval_ms": 3000
+  "estimated_line_length": 80
 }`
 
-// freshExampleConfig is Fresh's config.example.json, cut down: every top-level key
-// is kept, and the languages, lsp and menu sections are shortened.
-const freshExampleConfig = `{
+const exampleConfig = `{
   "theme": "high-contrast",
   "check_for_updates": true,
   "editor": {
@@ -147,7 +128,6 @@ const freshExampleConfig = `{
     "syntax_highlighting": true,
     "highlight_current_line": true,
     "line_wrap": true,
-    "snapshot_interval": 100,
     "large_file_threshold_bytes": 1048576,
     "estimated_line_length": 80,
     "enable_inlay_hints": true,
@@ -159,86 +139,54 @@ const freshExampleConfig = `{
     "mouse_hover_enabled": true,
     "mouse_hover_delay_ms": 500,
     "double_click_time_ms": 500,
-    "auto_revert_poll_interval_ms": 2000,
-    "file_tree_poll_interval_ms": 3000
+    "auto_revert_poll_interval_ms": 2000
   },
   "file_explorer": {
     "respect_gitignore": true,
     "show_hidden": false,
-    "show_gitignored": false,
+    "hide_gitignore": true,
     "custom_ignore_patterns": [],
     "width": 0.3
   },
   "clipboard": {
-    "use_osc52": true,
-    "use_system_clipboard": true
+    "use_osc52": true
   },
   "terminal": {
     "jump_to_end_on_output": true
   },
   "keybindings": [],
-  "keybinding_maps": {},
-  "active_keybinding_map": "default",
+  "keymap": "default",
   "default_language": "bash",
   "languages": {
     "toml": {
-      "extensions": [
-        "toml"
-      ],
-      "filenames": [
-        "Cargo.lock"
-      ],
-      "grammar": "toml",
+      "extensions": ["toml"],
+      "filenames": ["Cargo.lock"],
       "comment_prefix": "#",
       "auto_indent": true,
-      "highlighter": "auto",
-      "textmate_grammar": null,
       "show_whitespace_tabs": true,
       "use_tabs": false
     },
     "go": {
-      "extensions": [
-        "go"
-      ],
+      "extensions": ["go"],
       "filenames": [],
-      "grammar": "go",
       "comment_prefix": "//",
       "auto_indent": true,
-      "highlighter": "auto",
-      "textmate_grammar": null,
       "show_whitespace_tabs": false,
       "use_tabs": true
     },
     "markdown": {
-      "extensions": [
-        "md",
-        "markdown"
-      ],
-      "filenames": [
-        "README"
-      ],
-      "grammar": "markdown",
+      "extensions": ["md", "markdown"],
+      "filenames": ["README"],
       "comment_prefix": null,
       "auto_indent": false,
-      "highlighter": "auto",
-      "textmate_grammar": null,
       "show_whitespace_tabs": true,
       "use_tabs": false
     },
     "makefile": {
-      "extensions": [
-        "mk"
-      ],
-      "filenames": [
-        "Makefile",
-        "makefile",
-        "GNUmakefile"
-      ],
-      "grammar": "make",
+      "extensions": ["mk"],
+      "filenames": ["Makefile", "makefile", "GNUmakefile"],
       "comment_prefix": "#",
       "auto_indent": false,
-      "highlighter": "auto",
-      "textmate_grammar": null,
       "show_whitespace_tabs": true,
       "use_tabs": true
     }
@@ -246,92 +194,24 @@ const freshExampleConfig = `{
   "lsp": {
     "rust": {
       "command": "rust-analyzer",
-      "args": [
-        "--log-file",
-        "/tmp/rust-analyzer-77535.log"
-      ],
+      "args": ["--log-file", "/tmp/rust-analyzer-77535.log"],
       "enabled": true,
       "auto_start": false,
-      "process_limits": {
-        "max_memory_percent": 50,
-        "max_cpu_percent": 90,
-        "enabled": true
-      },
-      "initialization_options": {
-        "checkOnSave": false,
-        "cachePriming": {
-          "enable": false
-        },
-        "procMacro": {
-          "enable": false
-        },
-        "cargo": {
-          "buildScripts": {
-            "enable": false
-          },
-          "autoreload": false
-        },
-        "diagnostics": {
-          "enable": true
-        },
-        "files": {
-          "watcher": "server"
-        }
-      }
+      "process_limits": {"max_memory_percent": 50, "max_cpu_percent": 90, "enabled": true},
+      "initialization_options": {"checkOnSave": false}
     },
     "gdscript": {
       "command": "nc",
-      "args": [
-        "127.0.0.1",
-        "6005"
-      ],
+      "args": ["127.0.0.1", "6005"],
       "enabled": false,
-      "auto_start": false,
-      "process_limits": {
-        "max_memory_percent": 50,
-        "max_cpu_percent": 90,
-        "enabled": true
-      },
-      "initialization_options": null
+      "auto_start": false
     },
     "go": {
       "command": "gopls",
       "args": [],
       "enabled": true,
-      "auto_start": false,
-      "process_limits": {
-        "max_memory_percent": 50,
-        "max_cpu_percent": 90,
-        "enabled": true
-      },
-      "initialization_options": null
+      "auto_start": false
     }
-  },
-  "menu": {
-    "menus": [
-      {
-        "label": "File",
-        "items": [
-          {
-            "label": "New File",
-            "action": "new",
-            "args": {},
-            "when": null,
-            "checkbox": null
-          },
-          {
-            "label": "Open File...",
-            "action": "open",
-            "args": {},
-            "when": null,
-            "checkbox": null
-          },
-          {
-            "separator": true
-          }
-        ]
-      }
-    ]
   }
 }`
 
@@ -347,27 +227,59 @@ func loadBody(t *testing.T, body string) (Config, []Diagnostic) {
 	return cfg, diags
 }
 
-func TestEditorDefaultsAreFreshs(t *testing.T) {
-	var fresh map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(freshEditorDefaults), &fresh); err != nil {
+// The settings that only existed for Fresh config compatibility are gone: a file that
+// still sets one gets an "unknown setting" diagnostic naming it.
+func TestRetiredFreshSettingsAreUnknown(t *testing.T) {
+	tests := []struct{ body, key string }{
+		{`{"sidebar": "files"}`, "sidebar"},
+		{`{"$schema": "x"}`, "$schema"},
+		{`{"active_keybinding_map": "default"}`, "active_keybinding_map"},
+		{`{"keybinding_maps": {}}`, "keybinding_maps"},
+		{`{"explorer_show_ignored": true}`, "explorer_show_ignored"},
+		{`{"explorer_show_hidden": true}`, "explorer_show_hidden"},
+		{`{"file_explorer": {"show_gitignored": true}}`, "file_explorer.show_gitignored"},
+		{`{"file_explorer": {"tree_indicator_expanded": "v"}}`, "file_explorer.tree_indicator_expanded"},
+		{`{"editor": {"smooth_scroll": true}}`, "editor.smooth_scroll"},
+		{`{"editor": {"animations": true}}`, "editor.animations"},
+		{`{"editor": {"snapshot_interval": 100}}`, "editor.snapshot_interval"},
+		{`{"editor": {"show_prompt_line": false}}`, "editor.show_prompt_line"},
+		{`{"editor": {"default_line_ending": "cr"}}`, "editor.default_line_ending"},
+		{`{"languages": {"go": {"grammar": "go"}}}`, "languages.go.grammar"},
+		{`{"languages": {"go": {"textmate_grammar": "x"}}}`, "languages.go.textmate_grammar"},
+		{`{"languages": {"go": {"highlighter": "x"}}}`, "languages.go.highlighter"},
+		{`{"clipboard": {"use_system_clipboard": true}}`, "clipboard.use_system_clipboard"},
+		{`{"terminal": {"skip_app_execution_alias": true}}`, "terminal.skip_app_execution_alias"},
+		{`{"plugins": {"p": {"path": "/x"}}}`, "plugins.p.path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			_, diags := loadBody(t, tt.body)
+			if len(diags) != 1 || diags[0].Key != tt.key {
+				t.Fatalf("diags = %+v, want one diagnostic for %s", diags, tt.key)
+			}
+		})
+	}
+}
+
+func TestEditorDefaultsRoundTrip(t *testing.T) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(gvimEditorDefaults), &raw); err != nil {
 		t.Fatal(err)
 	}
-	// Parsing Fresh's own default object must give exactly Defaults().EditorOptions.
-	cfg, diags := loadBody(t, `{"editor": `+freshEditorDefaults+`}`)
+	cfg, diags := loadBody(t, `{"editor": `+gvimEditorDefaults+`}`)
 	if len(diags) != 0 {
-		t.Fatalf("diagnostics for Fresh's defaults: %v", diags)
+		t.Fatalf("diagnostics for editor defaults: %v", diags)
 	}
 	if got, want := cfg.EditorOptions, Defaults().EditorOptions; !reflect.DeepEqual(got, want) {
-		t.Errorf("EditorOptions parsed from Fresh's defaults = %+v\nDefaults().EditorOptions = %+v", got, want)
+		t.Errorf("EditorOptions parsed from defaults = %+v\nDefaults().EditorOptions = %+v", got, want)
 	}
-	// Every Fresh editor key is known, and gvim knows no others.
-	keys := make([]string, 0, len(fresh))
-	for k := range fresh {
+	keys := make([]string, 0, len(raw))
+	for k := range raw {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
 	if got := EditorKeys(); !slices.Equal(got, keys) {
-		t.Errorf("EditorKeys() differs from the schema's editor keys\n got  %v\n want %v", got, keys)
+		t.Errorf("EditorKeys() differs from expected keys\n got  %v\n want %v", got, keys)
 	}
 }
 
@@ -408,7 +320,6 @@ func TestEditorDefaultValues(t *testing.T) {
 		{"skip_session_restore_when_files_passed", d.SkipSessionRestoreWhenFilesPassed, true},
 		{"ephemeral_file_patterns", d.EphemeralFilePatterns, []string{"**/.git/**"}},
 		{"auto_create_empty_buffer_on_last_buffer_close", d.AutoCreateEmptyBufferOnLastBufferClose, false},
-		{"snapshot_interval", d.SnapshotInterval, 100},
 		{"auto_revert_poll_interval_ms", d.AutoRevertPollIntervalMS, 2000},
 		{"search", d.Search, SearchDefaults{}},
 	}
@@ -454,7 +365,7 @@ func TestNestedEditorParsing(t *testing.T) {
 		}},
 		{"default_language", `{"default_language": "bash"}`, func(c Config) bool { return c.DefaultLanguage == "bash" }},
 		{"empty keybindings list", `{"keybindings": []}`, func(c Config) bool { return c.Keybindings == nil }},
-		{"ignored fresh keys", `{"check_for_updates": false, "clipboard": {"use_osc52": true}, "version": 1}`, func(c Config) bool { return true }},
+		{"check_for_updates and clipboard", `{"check_for_updates": false, "clipboard": {"use_osc52": true}}`, func(c Config) bool { return !c.Update.Check && c.Clipboard.UseOSC52 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -505,41 +416,104 @@ func TestNestedEditorBadValues(t *testing.T) {
 	}
 }
 
-func TestFlatAliasesAndPrecedence(t *testing.T) {
+// The editing and display options are set under "editor" only. Their old flat
+// top-level spellings are reported as unknown settings and change nothing.
+func TestFlatEditorKeysAreUnknownSettings(t *testing.T) {
 	tests := []struct {
-		name  string
-		body  string
-		check func(Config) bool
+		flat   string // the retired top-level key
+		nested string // its name under "editor"
+		value  string // a JSON value that differs from the default
+		get    func(Config) any
+		want   any // what get returns once the nested spelling is applied
 	}{
-		{"flat alone", `{"tab_size": 2, "insert_spaces": false, "show_whitespace": true, "line_ending": "crlf", "mouse_hover": true, "trim_trailing_whitespace": true, "ensure_final_newline": true}`,
-			func(c Config) bool {
-				return c.TabSize == 2 && !c.InsertSpaces && c.ShowWhitespace && c.LineEnding == LineEndingCRLF &&
-					c.MouseHover && c.TrimTrailingWhitespace && c.EnsureFinalNewline
-			}},
-		{"nested wins over flat, flat first", `{"tab_size": 8, "editor": {"tab_size": 2}}`, func(c Config) bool { return c.TabSize == 2 }},
-		{"nested use_tabs wins over flat insert_spaces", `{"insert_spaces": false, "editor": {"use_tabs": false}}`, func(c Config) bool { return c.InsertSpaces }},
-		{"nested alias name wins", `{"show_whitespace": true, "editor": {"whitespace_show": false}}`, func(c Config) bool { return !c.ShowWhitespace }},
-		{"file_explorer wins over flat", `{"explorer_show_hidden": true, "file_explorer": {"show_hidden": false}}`, func(c Config) bool { return !c.ExplorerShowHidden }},
+		{"line_numbers", "line_numbers", "false", func(c Config) any { return c.LineNumbers }, false},
+		{"highlight_current_line", "highlight_current_line", "false", func(c Config) any { return c.HighlightCurrentLine }, false},
+		{"highlight_occurrences", "highlight_occurrences", "true", func(c Config) any { return c.HighlightOccurrences }, true},
+		{"line_wrap", "line_wrap", "false", func(c Config) any { return c.LineWrap }, false},
+		{"show_menu_bar", "show_menu_bar", "false", func(c Config) any { return c.ShowMenuBar }, false},
+		{"show_tab_bar", "show_tab_bar", "false", func(c Config) any { return c.ShowTabBar }, false},
+		{"show_status_bar", "show_status_bar", "false", func(c Config) any { return c.ShowStatusBar }, false},
+		{"show_vertical_scrollbar", "show_vertical_scrollbar", "false", func(c Config) any { return c.ShowVerticalScrollbar }, false},
+		{"show_horizontal_scrollbar", "show_horizontal_scrollbar", "false", func(c Config) any { return c.ShowHorizontalScrollbar }, false},
+		{"cursor_style", "cursor_style", `"underline"`, func(c Config) any { return c.CursorStyle }, CursorStyleUnderline},
+		{"show_whitespace", "whitespace_show", "true", func(c Config) any { return c.ShowWhitespace }, true},
+		{"tab_size", "tab_size", "2", func(c Config) any { return c.TabSize }, 2},
+		{"auto_indent", "auto_indent", "false", func(c Config) any { return c.AutoIndent }, false},
+		{"line_ending", "default_line_ending", `"crlf"`, func(c Config) any { return c.LineEnding }, LineEndingCRLF},
+		{"trim_trailing_whitespace", "trim_trailing_whitespace_on_save", "true", func(c Config) any { return c.TrimTrailingWhitespace }, true},
+		{"ensure_final_newline", "ensure_final_newline_on_save", "true", func(c Config) any { return c.EnsureFinalNewline }, true},
+		{"mouse_hover", "mouse_hover_enabled", "true", func(c Config) any { return c.MouseHover }, true},
 	}
+	if len(tests) != 17 {
+		t.Fatalf("table has %d keys, want the 17 retired flat keys", len(tests))
+	}
+	def := Defaults()
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg, diags := loadBody(t, tt.body)
-			if len(diags) != 0 {
-				t.Fatalf("diagnostics: %v", diags)
+		t.Run(tt.flat, func(t *testing.T) {
+			if reflect.DeepEqual(tt.get(def), tt.want) {
+				t.Fatalf("%v is already the default, so this case proves nothing", tt.want)
 			}
-			if !tt.check(cfg) {
-				t.Errorf("config is wrong: %+v", cfg)
+
+			cfg, diags := loadBody(t, `{"`+tt.flat+`": `+tt.value+`}`)
+			if len(diags) != 1 || diags[0].Key != tt.flat || !strings.Contains(diags[0].Message, "unknown setting") {
+				t.Fatalf("diags = %+v, want one unknown setting for %q", diags, tt.flat)
+			}
+			if got := tt.get(cfg); !reflect.DeepEqual(got, tt.get(def)) {
+				t.Errorf("flat %s changed the field to %v, want the default %v", tt.flat, got, tt.get(def))
+			}
+			if !reflect.DeepEqual(cfg, def) {
+				t.Errorf("flat %s changed the config: %+v", tt.flat, cfg)
+			}
+
+			cfg, diags = loadBody(t, `{"editor": {"`+tt.nested+`": `+tt.value+`}}`)
+			if len(diags) != 0 {
+				t.Fatalf("editor.%s diagnostics: %v", tt.nested, diags)
+			}
+			if got := tt.get(cfg); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("editor.%s = %v, want %v", tt.nested, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestLaterLayerWinsWhateverTheSpelling(t *testing.T) {
+// insert_spaces, mouse_capture, scroll_sync and lsp_enabled are real top-level
+// settings, not aliases of an editor option, so they stay accepted.
+func TestTopLevelBoolKeysStayAccepted(t *testing.T) {
+	tests := []struct {
+		key   string
+		value string
+		get   func(Config) bool
+		want  bool
+	}{
+		{"insert_spaces", "false", func(c Config) bool { return c.InsertSpaces }, false},
+		{"mouse_capture", "false", func(c Config) bool { return c.MouseCapture }, false},
+		{"scroll_sync", "true", func(c Config) bool { return c.ScrollSync }, true},
+		{"lsp_enabled", "false", func(c Config) bool { return c.LSPEnabled }, false},
+	}
+	def := Defaults()
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if tt.get(def) == tt.want {
+				t.Fatalf("%v is already the default, so this case proves nothing", tt.want)
+			}
+			cfg, diags := loadBody(t, `{"`+tt.key+`": `+tt.value+`}`)
+			if len(diags) != 0 {
+				t.Fatalf("diagnostics: %v", diags)
+			}
+			if got := tt.get(cfg); got != tt.want {
+				t.Errorf("%s = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// The project layer is applied after the user layer, so its editor option wins.
+func TestLaterLayerWins(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
 	user := filepath.Join(t.TempDir(), "config.json")
 	writeFile(t, user, `{"editor": {"tab_size": 2}}`)
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"tab_size": 8}`)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"editor": {"tab_size": 8}}`)
 	cfg, diags, err := Load(Options{Root: root, UserFile: user})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load: %v %v", err, diags)
@@ -566,10 +540,10 @@ func TestSourceOfNestedKey(t *testing.T) {
 	}
 }
 
-func TestFreshExampleConfigLoads(t *testing.T) {
-	cfg, diags := loadBody(t, freshExampleConfig)
+func TestExampleConfigLoads(t *testing.T) {
+	cfg, diags := loadBody(t, exampleConfig)
 	if len(diags) != 0 {
-		t.Fatalf("diagnostics for Fresh's example config: %v", diags)
+		t.Fatalf("diagnostics for example config: %v", diags)
 	}
 	checks := []struct {
 		name string
@@ -626,22 +600,22 @@ func TestLSPFreshShapes(t *testing.T) {
 	}
 }
 
-func TestFreshSchemaDefaultsLoadCleanly(t *testing.T) {
-	body := `{"file_explorer": {"respect_gitignore": true, "show_hidden": false, "show_gitignored": false,
+func TestFileExplorerSchemaDefaultsLoadCleanly(t *testing.T) {
+	body := `{"file_explorer": {"respect_gitignore": true, "show_hidden": false, "hide_gitignore": true,
 		"custom_ignore_patterns": [], "width": 0.3, "preview_tabs": true, "side": "left",
 		"follow_active_buffer": false, "auto_open_on_last_buffer_close": true,
-		"compact_directories": true, "tree_indicator_collapsed": ">", "tree_indicator_expanded": "▼"}}`
+		"compact_directories": true}}`
 	if _, diags := loadBody(t, body); len(diags) != 0 {
 		t.Errorf("diagnostics: %v", diags)
 	}
 }
 
-func TestFreshOnlyValuesAreAccepted(t *testing.T) {
-	cfg, diags := loadBody(t, `{"editor": {"mouse_wheel_scroll_lines": 0, "default_line_ending": "cr"}}`)
+func TestZeroWheelLinesAccepted(t *testing.T) {
+	cfg, diags := loadBody(t, `{"editor": {"mouse_wheel_scroll_lines": 0, "default_line_ending": "lf"}}`)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics: %v", diags)
 	}
-	if cfg.MouseWheelScrollLines != 0 || cfg.LineEnding != LineEndingCR {
+	if cfg.MouseWheelScrollLines != 0 || cfg.LineEnding != LineEndingLF {
 		t.Errorf("wheel lines %d, line ending %q", cfg.MouseWheelScrollLines, cfg.LineEnding)
 	}
 }

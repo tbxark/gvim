@@ -36,7 +36,7 @@ type TerminalShell struct {
 
 // TerminalConfig is the terminal section of the config: Fresh's terminal keys
 // that gvim uses, gvim's scrollback_lines, and gvim's agents list (a gvim
-// extension). Fresh's skip_app_execution_alias is accepted and ignored.
+// extension).
 type TerminalConfig struct {
 	// Shell is the terminal.shell override. An empty Command keeps the behaviour
 	// of always starting $SHELL.
@@ -121,11 +121,6 @@ func DefaultTerminalOptions() TerminalConfig {
 		ResumeAgents:         true,
 		RestoreLive:          true,
 	}
-}
-
-// terminalKeysIgnored are Fresh's terminal keys that gvim accepts and ignores.
-var terminalKeysIgnored = []string{
-	"skip_app_execution_alias",
 }
 
 // setTerminal applies the terminal object of one config layer; path names the
@@ -238,9 +233,6 @@ func (c *Config) setTerminal(raw json.RawMessage, l layer, path string) (diags [
 			}
 			c.Terminal.Agents = agents
 		default:
-			if slices.Contains(terminalKeysIgnored, k) {
-				continue // a Fresh terminal key gvim accepts and ignores
-			}
 			diag(k, "unknown setting")
 		}
 	}

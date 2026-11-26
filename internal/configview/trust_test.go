@@ -45,8 +45,8 @@ func viewSettings(t *testing.T, view ConfigView) map[string]any {
 // never merges the project layer while the view says which file was skipped.
 func TestLoadGatesTheProjectLayerByTrust(t *testing.T) {
 	root := trustWorkspace(t)
-	projectConfig(t, root, `{"tab_size": 8, "show_menu_bar": false}`)
-	user := userConfigPath(t, `{"tab_size": 2}`)
+	projectConfig(t, root, `{"editor": {"tab_size": 8, "show_menu_bar": false}}`)
+	user := userConfigPath(t, `{"editor": {"tab_size": 2}}`)
 
 	tests := []struct {
 		name     string
@@ -65,12 +65,13 @@ func TestLoadGatesTheProjectLayerByTrust(t *testing.T) {
 				t.Fatal(err)
 			}
 			settings := viewSettings(t, view)
-			if got := settings["tab_size"]; got != tt.wantTab {
-				t.Fatalf("tab_size = %v, want %v", got, tt.wantTab)
+			edMap, _ := settings["editor"].(map[string]any)
+			if got := edMap["tab_size"]; got != tt.wantTab {
+				t.Fatalf("editor.tab_size = %v, want %v", got, tt.wantTab)
 			}
 			if tt.trusted != nil && *tt.trusted {
-				if got := settings["show_menu_bar"]; got != false {
-					t.Fatalf("trusted show_menu_bar = %v, want the project layer's false", got)
+				if got := edMap["show_menu_bar"]; got != false {
+					t.Fatalf("trusted editor.show_menu_bar = %v, want the project layer's false", got)
 				}
 			}
 			skip := "project config layer skipped: " + filepath.Join(root, ".gvim", "config.json")
@@ -91,13 +92,14 @@ func TestLoadGatesTheProjectLayerByTrust(t *testing.T) {
 // the gate actually skipped.
 func TestLoadWithoutAProjectFileHasNoSkipNote(t *testing.T) {
 	root := trustWorkspace(t)
-	user := userConfigPath(t, `{"tab_size": 3}`)
+	user := userConfigPath(t, `{"editor": {"tab_size": 3}}`)
 	view, err := Load(root, Options{Config: user})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := viewSettings(t, view)["tab_size"]; got != float64(3) {
-		t.Fatalf("tab_size = %v, want 3", got)
+	edMap, _ := viewSettings(t, view)["editor"].(map[string]any)
+	if got := edMap["tab_size"]; got != float64(3) {
+		t.Fatalf("editor.tab_size = %v, want 3", got)
 	}
 	for _, w := range view.Warnings {
 		if strings.Contains(w, "project config layer skipped") {

@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -9,7 +10,6 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -37,7 +37,7 @@ const stringMaxBytes = 64 << 10
 // and short enough to lex, within stringMaxBytes (largeStringWindow); any other
 // position is not in a string. The editor calls it on the UI goroutine only.
 type stringCache struct {
-	doc     *editor.Document
+	doc     *document.Document
 	version uint64
 	// gen is the remote window-arrival generation the window was lexed at, or zero
 	// for a local document. A window arrival changes no text version, so it must be
@@ -58,7 +58,7 @@ type stringCache struct {
 
 // NewContextPair returns paired StringContext and NonCodeContext hooks backed by
 // one shared window cache so queries on the same version and window reuse one lex.
-func NewContextPair() (editor.StringContext, editor.NonCodeContext) {
+func NewContextPair() (document.StringContext, document.NonCodeContext) {
 	c := &stringCache{}
 	return c.inString, c.nonCode
 }
@@ -83,7 +83,7 @@ func stringWindow(n, line int, blank func(int) bool) (start, end int) {
 // document, its language or a remote window arrival changed. It reports false when
 // the line cannot be read safely (an unloaded remote window, a line too big to lex,
 // or a window of a large document that cannot be built, see largeStringWindow).
-func (c *stringCache) refresh(doc *editor.Document, line int) bool {
+func (c *stringCache) refresh(doc *document.Document, line int) bool {
 	b := doc.Buffer
 	gen := b.WindowGeneration()
 	if c.doc != doc || c.lang != doc.Language() || c.path != doc.Path {
@@ -187,7 +187,7 @@ func (c *stringCache) localStringWindow(b *buffer.Buffer, line int) (start int, 
 // the same, and a line too big for the lexer bounds the window. The query line must be
 // readable and lexable. The budget is stringMaxBytes, so a burst of long lines cannot
 // make typing a quote lex megabytes on the UI goroutine.
-func (c *stringCache) largeStringWindow(doc *editor.Document, b *buffer.Buffer, line int) (start int, lines []string, ok bool) {
+func (c *stringCache) largeStringWindow(doc *document.Document, b *buffer.Buffer, line int) (start int, lines []string, ok bool) {
 	if line < 0 || line >= b.Lines() || !doc.LineLoaded(line) || lineTooBig(b, line) {
 		return 0, nil, false
 	}
@@ -248,7 +248,7 @@ func lineTooBig(b *buffer.Buffer, line int) bool {
 }
 
 // inString is the editor.StringContext: whether the rune at p is inside a string literal.
-func (c *stringCache) inString(doc *editor.Document, p buffer.Pos) bool {
+func (c *stringCache) inString(doc *document.Document, p buffer.Pos) bool {
 	if p.Line < 0 || p.Line >= doc.Buffer.Lines() {
 		return false
 	}
@@ -293,7 +293,7 @@ func runeByteOffset(s string, col int) (int, bool) {
 
 // nonCode is the editor.NonCodeContext: for each rune column of the line, whether the
 // character is in a comment or a string. It is nil when the line has none.
-func (c *stringCache) nonCode(doc *editor.Document, line int) []bool {
+func (c *stringCache) nonCode(doc *document.Document, line int) []bool {
 	if line < 0 || line >= doc.Buffer.Lines() {
 		return nil
 	}

@@ -19,7 +19,7 @@ import (
 func TestKeybindingStoreSavesTheDocumentedForm(t *testing.T) {
 	path := userConfigPath(t, `{
   // my settings
-  "tab_size": 2, // narrow
+  "editor": {"tab_size": 2}, // narrow
   "keybindings": [
     { "key": "u", "modifiers": ["alt"], "action": "to_upper_case", "when": "normal" },
   ],
@@ -132,12 +132,12 @@ func TestKeybindingStoreRefusesWhatWouldNotApply(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := userConfigPath(t, `{"tab_size": 3}`)
+			path := userConfigPath(t, `{"editor": {"tab_size": 3}}`)
 			store := NewStore(path, config.Config{})
 			if _, err := store.Save(tt.list, "default"); err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Save error = %v, want %q", err, tt.want)
 			}
-			if got := readTestFile(t, path); got != `{"tab_size": 3}` {
+			if got := readTestFile(t, path); got != `{"editor": {"tab_size": 3}}` {
 				t.Errorf("the file was changed: %q", got)
 			}
 		})
@@ -184,7 +184,7 @@ func TestKeybindingWarnings(t *testing.T) {
 
 // Preview gives the keymap of a pending list for the keybinding editor, and writes nothing.
 func TestKeybindingStorePreviewWritesNothing(t *testing.T) {
-	path := userConfigPath(t, `{"tab_size": 3}`)
+	path := userConfigPath(t, `{"editor": {"tab_size": 3}}`)
 	store := NewStore(path, config.Config{})
 	km, err := store.Preview([]tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default")
 	if err != nil {
@@ -193,7 +193,7 @@ func TestKeybindingStorePreviewWritesNothing(t *testing.T) {
 	if got := resolveWith(t, km, "ctrl+k"); got != "save" {
 		t.Errorf("ctrl+k in the preview = %q, want save", got)
 	}
-	if got := readTestFile(t, path); got != `{"tab_size": 3}` {
+	if got := readTestFile(t, path); got != `{"editor": {"tab_size": 3}}` {
 		t.Errorf("Preview wrote the file: %q", got)
 	}
 	if len(store.Custom()) != 0 {
@@ -258,7 +258,7 @@ func TestSaveKeepsTheShapeOfTheKeybindingsValue(t *testing.T) {
   "keybindings": { "bindings": [ { "key": "u", "modifiers": ["alt"], "action": "to_upper_case", "when": "normal" } ] }
 }`, `"keybindings": {`},
 		{"list form stays a list", `{"keybindings": [ { "key": "u", "modifiers": ["alt"], "action": "to_upper_case", "when": "normal" } ]}`, `"keybindings": [`},
-		{"no keybindings gets the list form", `{"tab_size": 2}`, `"keybindings": [`},
+		{"no keybindings gets the list form", `{"editor": {"tab_size": 2}}`, `"keybindings": [`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestSaveKeepsTheShapeOfTheKeybindingsValue(t *testing.T) {
 // plugins' bindings, so a plugin's key still works, and still shows, while the list changes. The
 // plain Preview has no plugin layer, which is why the editor asks for this one.
 func TestPreviewKeepsThePluginBindings(t *testing.T) {
-	path := userConfigPath(t, `{"tab_size": 2}`)
+	path := userConfigPath(t, `{"editor": {"tab_size": 2}}`)
 	store := NewStore(path, config.Config{})
 	plugins := []pluginapi.Binding{{Plugin: "jumper", Chord: "ctrl+j", Action: "jumper.jump"}}
 	pending := []tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}

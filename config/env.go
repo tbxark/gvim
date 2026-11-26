@@ -112,12 +112,12 @@ func DefaultEnvConfig() EnvConfig { return EnvConfig{Detectors: DefaultEnvDetect
 
 // setEnv applies the env object of a config file. It is only called for the user
 // layer (see applyObject).
-func (c *Config) setEnv(raw json.RawMessage) []Diagnostic {
+func (c *Config) setEnv(raw json.RawMessage, path string) []Diagnostic {
 	var object struct {
 		Detectors *[]EnvDetector `json:"detectors"`
 	}
 	if err := decodeStrict(raw, &object); err != nil {
-		return []Diagnostic{{Key: "env", Message: err.Error()}}
+		return []Diagnostic{{Path: path, Key: "env", Message: err.Error()}}
 	}
 	if object.Detectors == nil {
 		// No detectors key keeps the built-in list.
@@ -125,10 +125,10 @@ func (c *Config) setEnv(raw json.RawMessage) []Diagnostic {
 	}
 	detectors := *object.Detectors
 	if len(detectors) > MaxEnvDetectors {
-		return []Diagnostic{{Key: "env.detectors", Message: fmt.Sprintf("at most %d detectors, got %d", MaxEnvDetectors, len(detectors))}}
+		return []Diagnostic{{Path: path, Key: "env.detectors", Message: fmt.Sprintf("at most %d detectors, got %d", MaxEnvDetectors, len(detectors))}}
 	}
 	if errs := ValidateEnvDetectors(detectors); len(errs) > 0 {
-		return []Diagnostic{{Key: "env.detectors", Message: strings.Join(errs, "; ")}}
+		return []Diagnostic{{Path: path, Key: "env.detectors", Message: strings.Join(errs, "; ")}}
 	}
 	if detectors == nil {
 		detectors = []EnvDetector{}
@@ -195,16 +195,17 @@ func validateEnvPath(where, rawPath string) []string {
 		return []string{where + " must be relative to the workspace root"}
 	}
 	clean := pathpkg.Clean(strings.ReplaceAll(trimmed, "\\", "/"))
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+	if strings.HasPrefix(clean, "/") || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return []string{where + " must not leave the workspace root"}
 	}
 	return nil
 }
 
-// EnvDetectors returns the detectors the config resolved: the user list, or the
-// built-ins (also when Config.Env has no list, as the zero value does not).
+// EnvDetectors returns the detectors the config resolved: the user list (which
+// may be explicitly empty to disable all detectors), or the built-ins when
+// Config.Env.Detectors is nil.
 func (c Config) EnvDetectors() []EnvDetector {
-	if len(c.Env.Detectors) > 0 {
+	if c.Env.Detectors != nil {
 		return slices.Clone(c.Env.Detectors)
 	}
 	return DefaultEnvDetectors()

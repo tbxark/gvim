@@ -7,9 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // GitDirName is the repository metadata directory. No listing of the explorer
@@ -88,20 +85,14 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
 	}
-	var rules []gitignore.Pattern
+	var rules []IgnorePattern
 	if opts.RespectGitignoreEnabled() {
 		rules = ignoreRules(root, rel, opts.IgnoreCache)
 	}
-	for _, pat := range opts.CustomIgnorePatterns {
-		pat = strings.TrimSpace(pat)
-		if pat == "" || strings.HasPrefix(pat, "#") {
-			continue
-		}
-		rules = append(rules, gitignore.ParsePattern(pat, nil))
-	}
-	var m gitignore.Matcher
+	rules = append(rules, ParsePatterns(opts.CustomIgnorePatterns)...)
+	var m *IgnoreMatcher
 	if len(rules) > 0 {
-		m = gitignore.NewMatcher(rules)
+		m = NewIgnoreMatcher(rules)
 	}
 	scan := scanMatchersFor(opts.ScanExclusions, opts.ScanInclusions)
 
@@ -202,12 +193,11 @@ func relSegments(root, dir string) ([]string, error) {
 type ignoreCacheEntry struct {
 	modTime time.Time
 	exists  bool
-	pats    []gitignore.Pattern
+	pats    []IgnorePattern
 }
 
-func ignoreRules(root string, rel []string, cache map[string]ignoreCacheEntry) []gitignore.Pattern {
-	fsys := osfs.New(root)
-	var rules []gitignore.Pattern
+func ignoreRules(root string, rel []string, cache map[string]ignoreCacheEntry) []IgnorePattern {
+	var rules []IgnorePattern
 	for i := 0; i <= len(rel); i++ {
 		subDir := filepath.Join(append([]string{root}, rel[:i]...)...)
 		gitPath := filepath.Join(subDir, gitignoreFile)
@@ -223,7 +213,7 @@ func ignoreRules(root string, rel []string, cache map[string]ignoreCacheEntry) [
 				continue
 			}
 		}
-		pats := readIgnore(fsys, rel[:i])
+		pats := readIgnore(root, rel[:i])
 		if cache != nil {
 			cache[gitPath] = ignoreCacheEntry{
 				modTime: mtime,

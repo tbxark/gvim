@@ -3,6 +3,7 @@ package highlight
 import (
 	"context"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -52,7 +53,7 @@ func openRemoteQuoteDoc(t *testing.T) (*editor.Editor, *remoteHighlightAccess) {
 
 // loadRemoteLine simulates the paint reading line and the root loading the window it
 // missed.
-func loadRemoteLine(t *testing.T, doc *editor.Document, line int) {
+func loadRemoteLine(t *testing.T, doc *document.Document, line int) {
 	t.Helper()
 	_ = doc.Buffer.Line(line)
 	if w, ok := doc.TakePendingLargeWindow(); ok {

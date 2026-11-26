@@ -36,11 +36,6 @@ func TestUpdateCheckDefaultsAndParsing(t *testing.T) {
 			t.Fatalf("%s: diagnostics = %v, want one", body, diags)
 		}
 	}
-	// self_update is a distribution concern gvim does not implement: the key is
-	// accepted and ignored, like the other Fresh keys gvim has no use for.
-	if _, diags := loadBody(t, `{"self_update": false}`); len(diags) != 0 {
-		t.Fatalf("self_update diagnostics = %v, want none", diags)
-	}
 }
 
 func TestUpdateCheckProjectLayerRefused(t *testing.T) {

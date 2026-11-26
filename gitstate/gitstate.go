@@ -1,21 +1,16 @@
-// Package gitstate reads the state of a git work tree with go-git: the work tree
-// root, the checked-out branch, and the status of each changed file.
+// Package gitstate reads the state of a git work tree: the work tree root,
+// the checked-out branch, and the status of each changed file.
 package gitstate
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
-
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/format/index"
-	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // ErrNotRepo is returned when a directory is not inside a git repository.
@@ -35,10 +30,6 @@ const (
 )
 
 const shortHashLen = 7
-
-// emptyBlob is the blob every empty file shares. Identical empty files are not
-// paired as renames, because any empty file would match any other.
-var emptyBlob = plumbing.ComputeHash(plumbing.BlobObject, nil)
 
 func (s FileStatus) String() string {
 	switch s {
@@ -79,258 +70,214 @@ func FindRoot(dir string) (root string, ok bool) {
 }
 
 // Status returns the status of every changed path under root, keyed by its
-// slash-separated path relative to root. Clean paths are absent. Ignored
-// paths are absent too. root must be the work tree root, as returned by
-// FindRoot; any other directory returns ErrNotRepo.
+// slash-separated path relative to root. Clean paths and ignored paths are
+// absent. root must be the work tree root, as returned by FindRoot; any other
+// directory returns ErrNotRepo.
 //
-// A path with an unmerged index entry is Conflicted, whatever else it shows.
-// A staged deletion and a staged addition with identical content are reported
-// as one Renamed path, keyed by the new name. Renames whose content also
-// changed are reported as Deleted and Added.
+// A path with an unmerged index entry is Conflicted. A staged rename is
+// reported as Renamed under its new path. A path deleted in the work tree shows
+// as Deleted even when it was staged as Added.
 func Status(root string) (map[string]FileStatus, error) {
-	repo, err := open(root)
-	if err != nil {
+	if _, err := resolveGitDir(root); err != nil {
 		return nil, err
 	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return nil, fmt.Errorf("gitstate: worktree: %w", err)
-	}
-	st, err := wt.Status()
-	if err != nil {
+	cmd := exec.Command("git",
+		"--no-optional-locks",
+		"-c", "core.quotepath=false",
+		"-c", "core.fsmonitor=false",
+		"-c", "status.renames=true",
+		"status", "--porcelain=v1", "-z", "-uall",
+	)
+	cmd.Dir = root
+	cmd.Env = sanitizedGitEnv()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return nil, fmt.Errorf("gitstate: status: %w: %s", err, msg)
+		}
 		return nil, fmt.Errorf("gitstate: status: %w", err)
 	}
-	idx, err := repo.Storer.Index()
-	if err != nil {
-		return nil, fmt.Errorf("gitstate: index: %w", err)
-	}
+	return parsePorcelainZ(stdout.Bytes()), nil
+}
 
-	out := make(map[string]FileStatus, len(st))
-	for path, fs := range st {
-		if s, ok := classify(fs); ok {
+// parsePorcelainZ parses `git status --porcelain=v1 -z -uall` output.
+// Records have the form `XY <path>\0`; when X is 'R' or 'C', an extra
+// `<orig-path>\0` field follows and is consumed.
+func parsePorcelainZ(data []byte) map[string]FileStatus {
+	out := make(map[string]FileStatus)
+	for len(data) > 0 {
+		nul := bytes.IndexByte(data, 0)
+		var rec []byte
+		if nul < 0 {
+			rec = data
+			data = nil
+		} else {
+			rec = data[:nul]
+			data = data[nul+1:]
+		}
+		if len(rec) < 4 || rec[2] != ' ' {
+			continue
+		}
+		x, y := rec[0], rec[1]
+		path := string(rec[3:])
+		if x == 'R' || x == 'C' {
+			// Consume the trailing NUL-terminated original path.
+			if origEnd := bytes.IndexByte(data, 0); origEnd >= 0 {
+				data = data[origEnd+1:]
+			} else {
+				data = nil
+			}
+		}
+		if s, ok := classifyXY(x, y); ok {
 			out[path] = s
 		}
 	}
-	for _, e := range idx.Entries {
-		// Stage 0 is a merged entry. Stages 1 to 3 are the base, ours and
-		// theirs sides of an unmerged path. go-git's index.Merged constant is 1
-		// and must not be used for this comparison.
-		if e.Stage != 0 {
-			out[e.Name] = Conflicted
-		}
-	}
-	if hasRenameCandidate(st, out) {
-		if err := pairRenames(repo, idx, st, out); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return out
 }
 
-func hasRenameCandidate(st git.Status, out map[string]FileStatus) bool {
-	hasStagedDelete := false
-	hasAdded := false
-	for p, status := range out {
-		switch status {
-		case Deleted:
-			if !hasStagedDelete && st[p].Staging == git.Deleted {
-				hasStagedDelete = true
-			}
-		case Added:
-			hasAdded = true
-		}
-		if hasStagedDelete && hasAdded {
-			return true
-		}
+func classifyXY(x, y byte) (FileStatus, bool) {
+	// Unmerged states in porcelain v1.
+	if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
+		return Conflicted, true
 	}
-	return false
+	if x == '?' && y == '?' {
+		return Untracked, true
+	}
+	if x == '!' && y == '!' {
+		return 0, false
+	}
+	if x == ' ' && y == ' ' {
+		return 0, false
+	}
+	if x == 'D' || y == 'D' {
+		return Deleted, true
+	}
+	if x == 'R' {
+		return Renamed, true
+	}
+	if x == 'A' {
+		return Added, true
+	}
+	return Modified, true
 }
 
 // Branch returns the short name of the checked-out branch under root. An
 // unborn branch reports its name. A detached HEAD reports the first seven hex
 // digits of its commit. root must be the work tree root, as with Status.
 func Branch(root string) (string, error) {
-	if branch, ok := fastBranch(root); ok {
-		return branch, nil
-	}
-	repo, err := open(root)
+	gitDir, err := resolveGitDir(root)
 	if err != nil {
 		return "", err
 	}
-	head, err := repo.Reference(plumbing.HEAD, false)
+	branch, err := readHeadBranch(filepath.Join(gitDir, "HEAD"))
 	if err != nil {
-		return "", fmt.Errorf("gitstate: read HEAD: %w", err)
+		return "", err
 	}
-	if head.Type() == plumbing.SymbolicReference {
-		return head.Target().Short(), nil
-	}
-	return head.Hash().String()[:shortHashLen], nil
+	return branch, nil
 }
 
-func fastBranch(root string) (string, bool) {
-	if branch, ok := readHeadBranch(filepath.Join(root, ".git", "HEAD")); ok {
-		return branch, true
-	}
+// resolveGitDir checks that root holds a .git directory or valid .git pointer
+// file and returns the resolved git directory path.
+func resolveGitDir(root string) (string, error) {
 	dotGit := filepath.Join(root, ".git")
 	info, err := os.Stat(dotGit)
-	if err != nil || info.IsDir() || info.Size() > 4096 {
-		return "", false
+	if err != nil {
+		return "", ErrNotRepo
+	}
+	if info.IsDir() {
+		return dotGit, nil
+	}
+	if info.Size() > 4096 {
+		return "", ErrNotRepo
 	}
 	raw, err := os.ReadFile(dotGit)
 	if err != nil {
-		return "", false
+		return "", ErrNotRepo
 	}
 	line := strings.TrimSpace(string(raw))
 	target, ok := strings.CutPrefix(line, "gitdir:")
 	if !ok {
-		return "", false
+		return "", ErrNotRepo
 	}
 	target = strings.TrimSpace(target)
 	if target == "" || strings.ContainsAny(target, "\r\n") {
-		return "", false
+		return "", ErrNotRepo
 	}
 	gitDir := filepath.Clean(target)
 	if !filepath.IsAbs(gitDir) {
 		gitDir = filepath.Clean(filepath.Join(root, target))
 	}
-	return readHeadBranch(filepath.Join(gitDir, "HEAD"))
+	if st, err := os.Stat(gitDir); err != nil || !st.IsDir() {
+		return "", ErrNotRepo
+	}
+	return gitDir, nil
 }
 
-func readHeadBranch(headPath string) (string, bool) {
+func readHeadBranch(headPath string) (string, error) {
 	f, err := os.Open(headPath)
 	if err != nil {
-		return "", false
+		return "", fmt.Errorf("gitstate: read HEAD: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	var buf [256]byte
-	n, err := io.ReadFull(f, buf[:])
-	if err == nil {
-		return "", false
+	data, err := io.ReadAll(io.LimitReader(f, 4096))
+	if err != nil {
+		return "", fmt.Errorf("gitstate: read HEAD: %w", err)
 	}
-	if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return "", false
-	}
-	s := strings.TrimSpace(string(buf[:n]))
+	s := strings.TrimSpace(string(data))
 	if target, ok := strings.CutPrefix(s, "ref:"); ok {
 		target = strings.TrimSpace(target)
-		if !strings.HasPrefix(target, "refs/") || strings.ContainsAny(target, " \t\r\n") {
-			return "", false
+		if target == "" || strings.ContainsAny(target, " \t\r\n") {
+			return "", fmt.Errorf("gitstate: invalid HEAD ref %q", s)
 		}
-		short := plumbing.ReferenceName(target).Short()
-		if short == "" {
-			return "", false
-		}
-		return short, true
+		return shortRefName(target), nil
 	}
-	if isLowerHex40(s) {
-		return s[:shortHashLen], true
+	if isHexHash(s) {
+		return strings.ToLower(s[:shortHashLen]), nil
 	}
-	return "", false
+	return "", fmt.Errorf("gitstate: unrecognized HEAD %q", s)
 }
 
-func isLowerHex40(s string) bool {
-	if len(s) != 40 {
+func shortRefName(ref string) string {
+	for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/", "refs/notes/"} {
+		if short, ok := strings.CutPrefix(ref, prefix); ok && short != "" {
+			return short
+		}
+	}
+	return ref
+}
+
+func isHexHash(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
 		return false
 	}
-	for i := range 40 {
+	for i := range len(s) {
 		c := s[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+		isDigit := c >= '0' && c <= '9'
+		isHex := (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if !isDigit && !isHex {
 			return false
 		}
 	}
 	return true
 }
 
-// open opens the repository whose work tree is root. It does not search
-// parent directories.
-func open(root string) (*git.Repository, error) {
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
-	if errors.Is(err, git.ErrRepositoryNotExists) {
-		return nil, ErrNotRepo
-	}
-	if err != nil {
-		return nil, fmt.Errorf("gitstate: open %s: %w", root, err)
-	}
-	return repo, nil
-}
-
-// classify maps the go-git status of one path to a FileStatus. It reports
-// false for a clean path. A path that is deleted on disk shows as Deleted even
-// when it is also staged as added.
-func classify(fs *git.FileStatus) (FileStatus, bool) {
-	switch {
-	case fs.Staging == git.Unmodified && fs.Worktree == git.Unmodified:
-		return 0, false
-	case fs.Worktree == git.Untracked:
-		return Untracked, true
-	case fs.Staging == git.Deleted || fs.Worktree == git.Deleted:
-		return Deleted, true
-	case fs.Staging == git.Added:
-		return Added, true
-	default:
-		return Modified, true
-	}
-}
-
-// pairRenames turns each staged deletion whose HEAD blob equals the blob of a
-// staged addition into one Renamed entry at the new path. Each deletion pairs
-// at most once. Paths are visited in sorted order, so the pairing is stable.
-func pairRenames(repo *git.Repository, idx *index.Index, st git.Status, out map[string]FileStatus) error {
-	head, err := repo.Head()
-	if errors.Is(err, plumbing.ErrReferenceNotFound) {
-		return nil // no commit yet, so nothing can be a staged deletion
-	}
-	if err != nil {
-		return fmt.Errorf("gitstate: head: %w", err)
-	}
-	commit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return fmt.Errorf("gitstate: commit: %w", err)
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return fmt.Errorf("gitstate: tree: %w", err)
-	}
-
-	deleted := make(map[plumbing.Hash][]string)
-	for _, path := range slices.Sorted(maps.Keys(st)) {
-		if out[path] != Deleted || st[path].Staging != git.Deleted {
+func sanitizedGitEnv() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_DIR=") ||
+			strings.HasPrefix(kv, "GIT_WORK_TREE=") ||
+			strings.HasPrefix(kv, "GIT_INDEX_FILE=") ||
+			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY=") ||
+			strings.HasPrefix(kv, "GIT_ALTERNATE_OBJECT_DIRECTORIES=") ||
+			strings.HasPrefix(kv, "GIT_COMMON_DIR=") ||
+			strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") {
 			continue
 		}
-		entry, err := tree.FindEntry(path)
-		if errors.Is(err, object.ErrEntryNotFound) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("gitstate: tree entry %s: %w", path, err)
-		}
-		deleted[entry.Hash] = append(deleted[entry.Hash], path)
+		out = append(out, kv)
 	}
-	if len(deleted) == 0 {
-		return nil
-	}
-
-	blobs := make(map[string]plumbing.Hash, len(idx.Entries))
-	for _, e := range idx.Entries {
-		if e.Stage == 0 {
-			blobs[e.Name] = e.Hash
-		}
-	}
-	for _, path := range slices.Sorted(maps.Keys(st)) {
-		if out[path] != Added {
-			continue
-		}
-		hash, ok := blobs[path]
-		if !ok || hash == emptyBlob {
-			continue
-		}
-		olds := deleted[hash]
-		if len(olds) == 0 {
-			continue
-		}
-		out[path] = Renamed
-		delete(out, olds[0])
-		deleted[hash] = olds[1:]
-	}
-	return nil
+	return append(out, "GIT_TERMINAL_PROMPT=0")
 }

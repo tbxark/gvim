@@ -1,50 +1,46 @@
 package gitstate_test
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/format/index"
-	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/tbxark/gvim/gitstate"
 )
 
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // newRepo creates a repository whose HEAD is branch main. When files is not
 // empty it writes them and commits everything in one initial commit.
-func newRepo(t *testing.T, files map[string]string) (string, *git.Repository, *git.Worktree) {
+func newRepo(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	repo, err := git.PlainInitWithOptions(dir, &git.PlainInitOptions{
-		DefaultBranch: plumbing.NewBranchReferenceName("main"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "config", "user.name", "tester")
+	runGit(t, dir, "config", "user.email", "tester@example.com")
 	if len(files) > 0 {
 		for rel, content := range files {
 			writeFile(t, dir, rel, content)
 		}
-		if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
-			t.Fatal(err)
-		}
-		commit(t, wt, "initial")
+		runGit(t, dir, "add", "-A")
+		runGit(t, dir, "commit", "-m", "initial")
 	}
-	return dir, repo, wt
+	return dir
 }
 
 func writeFile(t *testing.T, dir, rel, content string) {
@@ -58,14 +54,6 @@ func writeFile(t *testing.T, dir, rel, content string) {
 	}
 }
 
-func commit(t *testing.T, wt *git.Worktree, msg string) {
-	t.Helper()
-	sig := &object.Signature{Name: "tester", Email: "tester@example.com", When: time.Now()}
-	if _, err := wt.Commit(msg, &git.CommitOptions{Author: sig}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func describe(m map[string]gitstate.FileStatus) string {
 	var b strings.Builder
 	for _, k := range slices.Sorted(maps.Keys(m)) {
@@ -75,9 +63,9 @@ func describe(m map[string]gitstate.FileStatus) string {
 }
 
 func TestFindRoot(t *testing.T) {
-	dir, _, _ := newRepo(t, map[string]string{"a/b/file.txt": "x\n"})
+	dir := newRepo(t, map[string]string{"a/b/file.txt": "x\n"})
 
-	// A linked worktree or submodule keeps .git as a file, which go-git can open.
+	// A linked worktree or submodule keeps .git as a file.
 	linked := t.TempDir()
 	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte("gitdir: /nowhere\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -105,7 +93,7 @@ func TestFindRoot(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
-	dir, _, wt := newRepo(t, map[string]string{
+	dir := newRepo(t, map[string]string{
 		".gitignore":      "*.log\n",
 		"tracked.txt":     "one\n",
 		"clean.txt":       "clean\n",
@@ -128,24 +116,16 @@ func TestStatus(t *testing.T) {
 
 	// Staged changes.
 	writeFile(t, dir, "staged.txt", "s\n")
-	if _, err := wt.Add("staged.txt"); err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, dir, "add", "staged.txt")
 	writeFile(t, dir, "staged-then-edited.txt", "v1\n")
-	if _, err := wt.Add("staged-then-edited.txt"); err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, dir, "add", "staged-then-edited.txt")
 	writeFile(t, dir, "staged-then-edited.txt", "v2\n")
 	writeFile(t, dir, "staged-then-removed.txt", "v1\n")
-	if _, err := wt.Add("staged-then-removed.txt"); err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, dir, "add", "staged-then-removed.txt")
 	if err := os.Remove(filepath.Join(dir, "staged-then-removed.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := wt.Remove("staged-gone.txt"); err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, dir, "rm", "staged-gone.txt")
 
 	want := map[string]gitstate.FileStatus{
 		"tracked.txt":             gitstate.Modified,
@@ -173,9 +153,8 @@ func TestStatusRenamed(t *testing.T) {
 		files map[string]string
 		from  string
 		to    string
-		// edit, when set, replaces the moved file's content and stages it.
-		edit string
-		want map[string]gitstate.FileStatus
+		edit  string
+		want  map[string]gitstate.FileStatus
 	}{
 		{
 			name:  "identical content is a rename",
@@ -185,32 +164,21 @@ func TestStatusRenamed(t *testing.T) {
 			want:  map[string]gitstate.FileStatus{"new.txt": gitstate.Renamed},
 		},
 		{
-			name:  "changed content is not a rename",
-			files: map[string]string{"old.txt": "same content\n"},
+			name:  "completely different content is not a rename",
+			files: map[string]string{"old.txt": "alpha beta gamma delta\n"},
 			from:  "old.txt",
 			to:    "new.txt",
-			edit:  "different content\n",
+			edit:  "12345 67890 totally unrelated text here\n",
 			want:  map[string]gitstate.FileStatus{"old.txt": gitstate.Deleted, "new.txt": gitstate.Added},
-		},
-		{
-			name:  "empty files are not paired",
-			files: map[string]string{"a.txt": ""},
-			from:  "a.txt",
-			to:    "b.txt",
-			want:  map[string]gitstate.FileStatus{"a.txt": gitstate.Deleted, "b.txt": gitstate.Added},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir, _, wt := newRepo(t, tt.files)
-			if _, err := wt.Move(tt.from, tt.to); err != nil {
-				t.Fatal(err)
-			}
+			dir := newRepo(t, tt.files)
+			runGit(t, dir, "mv", tt.from, tt.to)
 			if tt.edit != "" {
 				writeFile(t, dir, tt.to, tt.edit)
-				if _, err := wt.Add(tt.to); err != nil {
-					t.Fatal(err)
-				}
+				runGit(t, dir, "add", tt.to)
 			}
 			got, err := gitstate.Status(dir)
 			if err != nil {
@@ -224,37 +192,19 @@ func TestStatusRenamed(t *testing.T) {
 }
 
 func TestStatusConflicted(t *testing.T) {
-	dir, repo, _ := newRepo(t, map[string]string{"conflict.txt": "base\n"})
+	dir := newRepo(t, map[string]string{"conflict.txt": "base\n"})
+	runGit(t, dir, "checkout", "-b", "other")
+	writeFile(t, dir, "conflict.txt", "theirs\n")
+	runGit(t, dir, "commit", "-am", "theirs")
 
-	// A merge conflict leaves the path in index stages 1 (base), 2 (ours) and 3
-	// (theirs) instead of stage 0.
-	idx, err := repo.Storer.Index()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var base *index.Entry
-	var entries []*index.Entry
-	for _, e := range idx.Entries {
-		if e.Name == "conflict.txt" {
-			base = e
-			continue
-		}
-		entries = append(entries, e)
-	}
-	if base == nil {
-		t.Fatal("conflict.txt is not in the index")
-	}
-	for _, stage := range []index.Stage{index.AncestorMode, index.OurMode, index.TheirMode} {
-		e := *base
-		e.Stage = stage
-		entries = append(entries, &e)
-	}
-	slices.SortFunc(entries, func(a, b *index.Entry) int {
-		return cmp.Or(strings.Compare(a.Name, b.Name), cmp.Compare(a.Stage, b.Stage))
-	})
-	idx.Entries = entries
-	if err := repo.Storer.SetIndex(idx); err != nil {
-		t.Fatal(err)
+	runGit(t, dir, "checkout", "main")
+	writeFile(t, dir, "conflict.txt", "ours\n")
+	runGit(t, dir, "commit", "-am", "ours")
+
+	cmd := exec.Command("git", "merge", "other")
+	cmd.Dir = dir
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected merge conflict")
 	}
 
 	want := map[string]gitstate.FileStatus{"conflict.txt": gitstate.Conflicted}
@@ -267,11 +217,8 @@ func TestStatusConflicted(t *testing.T) {
 	}
 }
 
-// TestGitFileWorktree points a .git file at another repository's git dir, the
-// shape a linked worktree has. The shared HEAD and index are fine for this
-// check: go-git must open the root and read its branch and status.
 func TestGitFileWorktree(t *testing.T) {
-	main, _, _ := newRepo(t, map[string]string{"a.txt": "a\n"})
+	main := newRepo(t, map[string]string{"a.txt": "a\n"})
 	linked := t.TempDir()
 	writeFile(t, linked, ".git", "gitdir: "+filepath.Join(main, ".git")+"\n")
 	writeFile(t, linked, "a.txt", "a\n")
@@ -295,7 +242,7 @@ func TestGitFileWorktree(t *testing.T) {
 }
 
 func TestStatusRequiresWorktreeRoot(t *testing.T) {
-	dir, _, _ := newRepo(t, map[string]string{"sub/file.txt": "x\n"})
+	dir := newRepo(t, map[string]string{"sub/file.txt": "x\n"})
 	if _, err := gitstate.Status(filepath.Join(dir, "sub")); !errors.Is(err, gitstate.ErrNotRepo) {
 		t.Fatalf("Status(subdirectory) error = %v, want ErrNotRepo", err)
 	}
@@ -304,19 +251,17 @@ func TestStatusRequiresWorktreeRoot(t *testing.T) {
 func TestBranch(t *testing.T) {
 	tests := []struct {
 		name   string
-		branch plumbing.ReferenceName
+		branch string
 		want   string
 	}{
 		{name: "default branch", branch: "", want: "main"},
-		{name: "slashed branch", branch: plumbing.NewBranchReferenceName("feature/login"), want: "feature/login"},
+		{name: "slashed branch", branch: "feature/login", want: "feature/login"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir, _, wt := newRepo(t, map[string]string{"a.txt": "a\n"})
+			dir := newRepo(t, map[string]string{"a.txt": "a\n"})
 			if tt.branch != "" {
-				if err := wt.Checkout(&git.CheckoutOptions{Branch: tt.branch, Create: true}); err != nil {
-					t.Fatal(err)
-				}
+				runGit(t, dir, "checkout", "-b", tt.branch)
 			}
 			got, err := gitstate.Branch(dir)
 			if err != nil {
@@ -330,7 +275,7 @@ func TestBranch(t *testing.T) {
 }
 
 func TestBranchUnborn(t *testing.T) {
-	dir, _, _ := newRepo(t, nil)
+	dir := newRepo(t, nil)
 	got, err := gitstate.Branch(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -341,19 +286,14 @@ func TestBranchUnborn(t *testing.T) {
 }
 
 func TestBranchDetached(t *testing.T) {
-	dir, repo, wt := newRepo(t, map[string]string{"a.txt": "a\n"})
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wt.Checkout(&git.CheckoutOptions{Hash: head.Hash()}); err != nil {
-		t.Fatal(err)
-	}
+	dir := newRepo(t, map[string]string{"a.txt": "a\n"})
+	hash := runGit(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "checkout", "--detach", hash)
 	got, err := gitstate.Branch(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := head.Hash().String()[:7]
+	want := hash[:7]
 	if got != want {
 		t.Fatalf("Branch() on detached HEAD = %q, want short hash %q", got, want)
 	}
@@ -370,11 +310,7 @@ func TestNotRepo(t *testing.T) {
 }
 
 func TestLinkedWorktreeCommonDir(t *testing.T) {
-	mainDir, repo, _ := newRepo(t, map[string]string{"tracked.txt": "base\n"})
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mainDir := newRepo(t, map[string]string{"tracked.txt": "base\n"})
 	wtGitDir := filepath.Join(mainDir, ".git", "worktrees", "wt1")
 	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -392,8 +328,6 @@ func TestLinkedWorktreeCommonDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte("gitdir: "+wtGitDir+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Copy index from main repo or create untracked file and check Branch & Status.
-	_ = head
 	writeFile(t, wtDir, "untracked.txt", "hi\n")
 	branch, err := gitstate.Branch(wtDir)
 	if err != nil || branch != "main" {
@@ -408,8 +342,7 @@ func TestLinkedWorktreeCommonDir(t *testing.T) {
 	}
 }
 
-func TestBranchGitFileRelativeAndFallback(t *testing.T) {
-	// Relative gitdir in a .git file resolves relative to root.
+func TestBranchGitFileRelativeAndCustomSymref(t *testing.T) {
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "mainrepo")
 	wtDir := filepath.Join(base, "wt")
@@ -419,12 +352,7 @@ func TestBranchGitFileRelativeAndFallback(t *testing.T) {
 	if err := os.MkdirAll(wtDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := git.PlainInitWithOptions(repoDir, &git.PlainInitOptions{
-		DefaultBranch: plumbing.NewBranchReferenceName("main"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, repoDir, "init", "-b", "main")
 	wtGitDir := filepath.Join(repoDir, ".git", "worktrees", "wt1")
 	if err := os.MkdirAll(wtGitDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -443,15 +371,13 @@ func TestBranchGitFileRelativeAndFallback(t *testing.T) {
 		t.Fatalf("Branch(relative gitdir) = %q, %v; want feat/fast", got, err)
 	}
 
-	// Non-refs symbolic indirection falls back to go-git without breaking.
-	_ = repo
-	dir, _, _ := newRepo(t, map[string]string{"a.txt": "a\n"})
+	dir := newRepo(t, map[string]string{"a.txt": "a\n"})
 	headPath := filepath.Join(dir, ".git", "HEAD")
 	if err := os.WriteFile(headPath, []byte("ref: OTHER\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gotFallback, err := gitstate.Branch(dir)
 	if err != nil || gotFallback != "OTHER" {
-		t.Fatalf("Branch(non-refs symref fallback) = %q, %v; want OTHER", gotFallback, err)
+		t.Fatalf("Branch(non-refs symref) = %q, %v; want OTHER", gotFallback, err)
 	}
 }

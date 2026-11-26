@@ -97,7 +97,6 @@ const (
 	SectionEditing    = "Editing"
 	SectionCompletion = "Completion"
 	SectionSearch     = "Search"
-	SectionExplorer   = "Explorer"
 	SectionContents   = "Contents"
 	SectionSession    = "Session"
 	SectionMouse      = "Mouse"
@@ -203,9 +202,6 @@ var settingsTable = []Setting{
 	{Path: []string{"editor", "show_horizontal_scrollbar"}, Section: SectionDisplay, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ShowHorizontalScrollbar }), encode: encodeBool},
-	{Path: []string{"editor", "smooth_scroll"}, Section: SectionDisplay, Kind: SettingBool,
-		Layers: LayerUser | LayerProject, Apply: ApplyLive,
-		value: boolValue(func(c Config) bool { return c.SmoothScroll }), encode: encodeBool},
 
 	// Whitespace.
 	{Path: []string{"editor", "whitespace_show"}, Section: SectionWhitespace, Kind: SettingBool,
@@ -238,10 +234,10 @@ var settingsTable = []Setting{
 		Layers: LayerUser | LayerProject, Apply: ApplyRestart,
 		value: intValue(func(c Config) int { return c.ScrollOffset }), encode: encodeInt(0, 0)},
 	{Path: []string{"editor", "default_line_ending"}, Section: SectionEditing, Kind: SettingEnum,
-		Choices: []string{LineEndingAuto, LineEndingLF, LineEndingCRLF, LineEndingCR},
+		Choices: []string{LineEndingAuto, LineEndingLF, LineEndingCRLF},
 		Layers:  LayerUser | LayerProject, Apply: ApplyRestart,
 		value:  func(c Config) string { return c.LineEnding },
-		encode: encodeEnum([]string{LineEndingAuto, LineEndingLF, LineEndingCRLF, LineEndingCR})},
+		encode: encodeEnum([]string{LineEndingAuto, LineEndingLF, LineEndingCRLF})},
 	{Path: []string{"editor", "trim_trailing_whitespace_on_save"}, Section: SectionEditing, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyRestart,
 		value: boolValue(func(c Config) bool { return c.TrimTrailingWhitespace }), encode: encodeBool},
@@ -280,19 +276,10 @@ var settingsTable = []Setting{
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.Search.ConfirmEach }), encode: encodeBool},
 
-	// Explorer.
-	{Path: []string{"explorer_show_hidden"}, Section: SectionExplorer, Kind: SettingBool,
-		Layers: LayerUser | LayerProject, Apply: ApplyLive,
-		value: boolValue(func(c Config) bool { return c.ExplorerShowHidden }), encode: encodeBool},
-	{Path: []string{"file_scan_exclusions"}, Section: SectionExplorer, Kind: SettingPage,
-		Layers: LayerUser | LayerProject, Apply: ApplyLive,
-		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileScanExclusions)) }},
-	{Path: []string{"file_scan_inclusions"}, Section: SectionExplorer, Kind: SettingPage,
-		Layers: LayerUser | LayerProject, Apply: ApplyLive,
-		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileScanInclusions)) }},
-
-	// Contents (the Markdown outline sidebar section; the retired markdown_toc
-	// plugin's fold_buffer setting is the same behavior under Fresh's plugin path).
+	// Contents (the Markdown outline sidebar section).
+	{Path: []string{"contents", "enabled"}, Section: SectionContents, Kind: SettingBool,
+		Layers: LayerUser, Apply: ApplyRestart,
+		value: boolValue(func(c Config) bool { return c.ContentsEnabled() }), encode: encodeBool},
 	{Path: []string{"contents", "fold_buffer"}, Section: SectionContents, Kind: SettingBool,
 		Layers: LayerUser, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ContentsFoldBuffer() }), encode: encodeBool},
@@ -350,7 +337,7 @@ var settingsTable = []Setting{
 
 	// Formatters: a sub-page of the language/extension -> command map.
 	{Path: []string{"formatters"}, Section: SectionFormatters, Kind: SettingPage,
-		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		Layers: LayerUser, Apply: ApplyLive,
 		value: formattersSummary},
 
 	// Status Bar: the two element lists (dual-list sub-pages) and the separator.
@@ -365,6 +352,9 @@ var settingsTable = []Setting{
 		value: func(c Config) string { return c.StatusBar.Separator }, encode: encodeString(true)},
 
 	// File Explorer.
+	{Path: []string{"file_explorer", "show_hidden"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.ExplorerShowHidden }), encode: encodeBool},
 	{Path: []string{"file_explorer", "width"}, Section: SectionFileExplorer, Kind: SettingString,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: explorerWidthText, encode: encodeExplorerWidth},
@@ -393,6 +383,12 @@ var settingsTable = []Setting{
 	{Path: []string{"file_explorer", "preview_tabs"}, Section: SectionFileExplorer, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.FileExplorer.PreviewTabsEnabled() }), encode: encodeBool},
+	{Path: []string{"file_scan_exclusions"}, Section: SectionFileExplorer, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileScanExclusions)) }},
+	{Path: []string{"file_scan_inclusions"}, Section: SectionFileExplorer, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return fmt.Sprintf("%d patterns", len(c.FileScanInclusions)) }},
 
 	// Terminal. The terminal reads these while the dock is built, so they are
 	// restart settings. A project config cannot choose the shell program,

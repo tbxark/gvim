@@ -3,8 +3,6 @@ package explorer
 import (
 	"path/filepath"
 	"strings"
-
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // PatternMatcher reports whether rel matches any parsed wildcard pattern.
@@ -13,22 +11,21 @@ type PatternMatcher func(rel string, isDir bool) bool
 // ParsePatterns parses pats as gitignore-style patterns relative to the root:
 // blank lines and #-comments are skipped. A pattern without a slash matches at
 // any depth; one with a slash is anchored at the root.
-func ParsePatterns(pats []string) []gitignore.Pattern {
-	var rules []gitignore.Pattern
+func ParsePatterns(pats []string) []IgnorePattern {
+	var rules []IgnorePattern
 	for _, p := range pats {
 		p = strings.TrimSpace(p)
-		if p == "" || strings.HasPrefix(p, "#") {
-			continue
+		if pat := ParseIgnorePattern(p, nil); pat.valid {
+			rules = append(rules, pat)
 		}
-		rules = append(rules, gitignore.ParsePattern(p, nil))
 	}
 	return rules
 }
 
 // patternMatcherFor returns pats as a matcher, or nil when none parses.
-func patternMatcherFor(pats []string) gitignore.Matcher {
+func patternMatcherFor(pats []string) *IgnoreMatcher {
 	if rules := ParsePatterns(pats); len(rules) > 0 {
-		return gitignore.NewMatcher(rules)
+		return NewIgnoreMatcher(rules)
 	}
 	return nil
 }
@@ -36,13 +33,8 @@ func patternMatcherFor(pats []string) gitignore.Matcher {
 // matchPrefixes reports whether parts — the path segments below the root — match
 // m themselves or through a matching ancestor directory, so a directory-only
 // pattern such as "build/" excludes the whole subtree.
-func matchPrefixes(m gitignore.Matcher, parts []string, isDir bool) bool {
-	for i := 1; i <= len(parts); i++ {
-		if m.Match(parts[:i], i < len(parts) || isDir) {
-			return true
-		}
-	}
-	return false
+func matchPrefixes(m *IgnoreMatcher, parts []string, isDir bool) bool {
+	return m.Match(parts, isDir)
 }
 
 // NewPatternMatcher returns a PatternMatcher for pats. If pats is empty, returns nil.
@@ -64,8 +56,8 @@ func NewPatternMatcher(pats []string) PatternMatcher {
 // matchers: an exclusion match drops an entry everywhere, an inclusion match
 // clears a .gitignore match. Exclusions beat inclusions.
 type scanMatchers struct {
-	excl gitignore.Matcher
-	incl gitignore.Matcher
+	excl *IgnoreMatcher
+	incl *IgnoreMatcher
 }
 
 // scanMatchersFor builds the matchers for the file_scan_exclusions and

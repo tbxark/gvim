@@ -19,13 +19,11 @@ import (
 type LanguageSettings struct {
 	Extensions []string // file extensions without the dot, matched case-insensitively
 	Filenames  []string // base names; a name that starts with "*" matches a suffix
-	Grammar    string   // grammar name, kept as written
 
 	CommentPrefix      *string // comment_prefix
 	AutoIndent         *bool   // auto_indent
 	AutoClose          *bool   // auto_close; only turns it off when editor.auto_close is on
 	AutoSurround       *bool   // auto_surround; same rule as AutoClose
-	TextmateGrammar    *string // textmate_grammar: path of a custom grammar
 	ShowWhitespaceTabs *bool   // show_whitespace_tabs: false hides the tab marks
 	LineWrap           *bool   // line_wrap
 	WrapColumn         *int    // wrap_column; 0 in the file means no override
@@ -164,12 +162,10 @@ func LanguageID(name string) string {
 var languageFields = map[string]func(*LanguageSettings, json.RawMessage) error{
 	"extensions":           func(l *LanguageSettings, r json.RawMessage) error { return setStrings(&l.Extensions, r) },
 	"filenames":            func(l *LanguageSettings, r json.RawMessage) error { return setStrings(&l.Filenames, r) },
-	"grammar":              func(l *LanguageSettings, r json.RawMessage) error { return setString(&l.Grammar, r) },
 	"comment_prefix":       func(l *LanguageSettings, r json.RawMessage) error { return setOptString(&l.CommentPrefix, r) },
 	"auto_indent":          func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.AutoIndent, r) },
 	"auto_close":           func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.AutoClose, r) },
 	"auto_surround":        func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.AutoSurround, r) },
-	"textmate_grammar":     func(l *LanguageSettings, r json.RawMessage) error { return setOptString(&l.TextmateGrammar, r) },
 	"show_whitespace_tabs": func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.ShowWhitespaceTabs, r) },
 	"line_wrap":            func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.LineWrap, r) },
 	"wrap_column":          func(l *LanguageSettings, r json.RawMessage) error { return setOptInt(&l.WrapColumn, r, 0, 0, true) },
@@ -177,7 +173,6 @@ var languageFields = map[string]func(*LanguageSettings, json.RawMessage) error{
 	"page_width":           func(l *LanguageSettings, r json.RawMessage) error { return setOptInt(&l.PageWidth, r, 0, 0, false) },
 	"use_tabs":             func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.UseTabs, r) },
 	"tab_size": func(l *LanguageSettings, r json.RawMessage) error {
-		// 0 means "use editor.tab_size", as in Fresh.
 		return setOptInt(&l.TabSize, r, MinTabSize, MaxTabSize, true)
 	},
 	"formatter":         func(l *LanguageSettings, r json.RawMessage) error { return setFormatter(&l.Formatter, r) },
@@ -186,8 +181,6 @@ var languageFields = map[string]func(*LanguageSettings, json.RawMessage) error{
 	"word_characters":   func(l *LanguageSettings, r json.RawMessage) error { return setOptString(&l.WordCharacters, r) },
 	"indent":            func(l *LanguageSettings, r json.RawMessage) error { return setIndent(&l.Indent, r) },
 	"indentation_guide": func(l *LanguageSettings, r json.RawMessage) error { return setOptBool(&l.IndentationGuide, r) },
-	// highlighter is a field that older Fresh versions wrote. It is accepted and ignored.
-	"highlighter": func(*LanguageSettings, json.RawMessage) error { return nil },
 }
 
 func setStrings(dst *[]string, raw json.RawMessage) error {
@@ -199,18 +192,6 @@ func setStrings(dst *[]string, raw json.RawMessage) error {
 		return errors.New("must be a list of strings")
 	}
 	*dst = v
-	return nil
-}
-
-func setString(dst *string, raw json.RawMessage) error {
-	if isNull(raw) {
-		return errors.New("null is not a valid value")
-	}
-	s, err := decodeString(raw)
-	if err != nil {
-		return err
-	}
-	*dst = s
 	return nil
 }
 
@@ -343,8 +324,10 @@ func mapKeys[V any](m map[string]V) func(yield func(string) bool) {
 	}
 }
 
-// setLanguages applies the languages object entries. See setSection.
-func (c *Config) setLanguages(entries map[string]json.RawMessage) (applied []string, failed []sectionFailure) {
+// setLanguages applies the languages object entries. See setSection. The project
+// layer cannot set formatter or on_save: they name commands gvim runs, so a
+// repository must not choose them.
+func (c *Config) setLanguages(entries map[string]json.RawMessage, l layer) (applied []string, failed []sectionFailure) {
 	for _, name := range sortedKeys(entries) {
 		id := LanguageID(name)
 		prefix := "languages." + id
@@ -362,6 +345,10 @@ func (c *Config) setLanguages(entries map[string]json.RawMessage) (applied []str
 			apply, ok := languageFields[field]
 			if !ok {
 				failed = append(failed, sectionFailure{prefix + "." + field, errors.New("unknown setting")})
+				continue
+			}
+			if l == layerProject && (field == "formatter" || field == "on_save") {
+				failed = append(failed, sectionFailure{prefix + "." + field, errors.New("project config cannot set " + field + ": it names a command gvim runs, so set it in the user config")})
 				continue
 			}
 			// apply works on a copy of the entry, so a field that fails leaves it as it was.
@@ -389,14 +376,10 @@ func (base LanguageSettings) overlay(o LanguageSettings) LanguageSettings {
 	if o.Filenames != nil {
 		base.Filenames = o.Filenames
 	}
-	if o.Grammar != "" {
-		base.Grammar = o.Grammar
-	}
 	overlayPtr(&base.CommentPrefix, o.CommentPrefix)
 	overlayPtr(&base.AutoIndent, o.AutoIndent)
 	overlayPtr(&base.AutoClose, o.AutoClose)
 	overlayPtr(&base.AutoSurround, o.AutoSurround)
-	overlayPtr(&base.TextmateGrammar, o.TextmateGrammar)
 	overlayPtr(&base.ShowWhitespaceTabs, o.ShowWhitespaceTabs)
 	overlayPtr(&base.LineWrap, o.LineWrap)
 	overlayPtr(&base.WrapColumn, o.WrapColumn)
@@ -466,13 +449,12 @@ type EditorSettings struct {
 	IndentationGuide     bool
 	IndentationGuideMode string // editor.indentation_guide, global
 
-	CommentPrefix   string // "" when the language sets none
-	WordCharacters  string // extra word characters, "" for the standard set
-	Formatter       *Formatter
-	FormatOnSave    bool
-	OnSave          []OnSaveAction
-	Indent          *IndentRules
-	TextmateGrammar string
+	CommentPrefix  string // "" when the language sets none
+	WordCharacters string // extra word characters, "" for the standard set
+	Formatter      *Formatter
+	FormatOnSave   bool
+	OnSave         []OnSaveAction
+	Indent         *IndentRules
 }
 
 // Editor returns the settings for a language name, for instance the name that gvim's
@@ -568,9 +550,6 @@ func (c Config) EditorFor(language, path string) EditorSettings {
 	}
 	if v := entry.WordCharacters; v != nil {
 		s.WordCharacters = *v
-	}
-	if v := entry.TextmateGrammar; v != nil {
-		s.TextmateGrammar = *v
 	}
 	if v := entry.FormatOnSave; v != nil {
 		s.FormatOnSave = *v

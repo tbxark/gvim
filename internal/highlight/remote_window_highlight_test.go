@@ -84,7 +84,7 @@ func hasKeywordSpans(spans []syntax.Span) bool {
 
 // completeRemoteIndex finishes the line index the way the root's commands do:
 // scan batches, loading every window the scan misses.
-func completeRemoteIndex(t *testing.T, doc *editor.Document) {
+func completeRemoteIndex(t *testing.T, doc *document.Document) {
 	t.Helper()
 	ctx := context.Background()
 	for range 400 {

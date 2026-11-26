@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,7 +108,7 @@ func TestStringContextReusesTheWindowUntilTheTextChanges(t *testing.T) {
 func TestStringContextSeesReplacedVirtualText(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	t.Cleanup(ed.Close)
-	id := ed.NewVirtual(editor.VirtualOptions{Name: "v", Language: "go", Text: "x := \"a\""})
+	id := ed.NewVirtual(document.VirtualOptions{Name: "v", Language: "go", Text: "x := \"a\""})
 	doc, _, _ := ed.DocByID(id)
 	c := &stringCache{}
 	if !c.inString(doc, buffer.Pos{Col: 7}) {

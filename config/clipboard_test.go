@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestClipboardDefaults(t *testing.T) {
 	t.Parallel()
@@ -28,11 +31,18 @@ func TestClipboardSection(t *testing.T) {
 	if cfg, diags := loadBody(t, `{"clipboard": {"osc52_paste": true}}`); len(diags) != 0 || !cfg.Clipboard.OSC52Paste {
 		t.Fatalf("clipboard.osc52_paste = %v, %v", cfg.Clipboard.OSC52Paste, diags)
 	}
-	// Unknown keys are diagnosed, the known ignored ones are not.
-	if _, diags := loadBody(t, `{"clipboard": {"use_osc52": true, "use_system_clipboard": true}}`); len(diags) != 0 {
-		t.Fatalf("ignored key diagnosed: %v", diags)
-	}
 	if _, diags := loadBody(t, `{"clipboard": {"nonsense": true}}`); len(diags) == 0 {
 		t.Fatal("an unknown clipboard key was accepted")
+	}
+}
+
+func TestClipboardProjectLayerRefused(t *testing.T) {
+	t.Parallel()
+	cfg, diags := loadLayers(t, `{}`, `{"clipboard": {"use_osc52": true, "osc52_paste": true}}`)
+	if cfg.Clipboard.UseOSC52 || cfg.Clipboard.OSC52Paste {
+		t.Fatalf("project clipboard applied: %+v", cfg.Clipboard)
+	}
+	if len(diags) != 1 || diags[0].Key != "clipboard" || !strings.Contains(diags[0].Message, "project config cannot set clipboard") {
+		t.Fatalf("diags = %+v, want project clipboard refusal", diags)
 	}
 }

@@ -137,11 +137,6 @@ func TestPluginSettingsSplitByLayer(t *testing.T) {
 			want: map[string]PluginConfig{"zzz_unknown": {Enabled: &yes}},
 		},
 		{
-			name: "fresh path key is ignored",
-			user: `{"plugins": {"a": {"path": "/x/a.lua", "enabled": true}}}`,
-			want: map[string]PluginConfig{"a": {Enabled: &yes}},
-		},
-		{
 			name:      "plugins not an object",
 			user:      `{"plugins": []}`,
 			wantDiags: []string{"plugins: must be a JSON object"},

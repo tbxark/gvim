@@ -20,9 +20,6 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// BuiltinKeymaps are the embedded keymaps. keymap does not export the list.
-var BuiltinKeymaps = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
-
 // knownActions is every action a keybinding of the config can name: what the UI and the
 // editor run, and every action the built-in keymaps bind.
 var knownActions = sync.OnceValue(func() map[string]bool {
@@ -30,7 +27,7 @@ var knownActions = sync.OnceValue(func() map[string]bool {
 	for _, a := range tui.KnownActions() {
 		set[a] = true
 	}
-	for _, name := range BuiltinKeymaps {
+	for _, name := range keymap.BuiltinNames() {
 		if km, err := keymap.ByName(name); err == nil {
 			for _, b := range km.Bindings() {
 				set[b.Action] = true

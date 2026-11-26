@@ -126,7 +126,7 @@ func ValidateURL(raw string) (string, error) {
 		return u.String(), nil
 	case "http":
 		host := u.Hostname()
-		if host == "localhost" {
+		if strings.EqualFold(host, "localhost") {
 			return u.String(), nil
 		}
 		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
@@ -233,6 +233,9 @@ func (c *Checker) Check(ctx context.Context) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, _, err := parseVersion(latest); err != nil {
+		return nil, fmt.Errorf("update check: the feed version %q: %w", latest, err)
+	}
 	if Compare(latest, c.Current) <= 0 {
 		c.stamp("", "")
 		return nil, nil
@@ -276,8 +279,12 @@ func (c *Checker) fetch(ctx context.Context, feed string) ([]byte, error) {
 	return body, nil
 }
 
-// checkRedirect holds a redirect target to the transport policy of ValidateURL.
-func checkRedirect(req *http.Request, _ []*http.Request) error {
+// checkRedirect holds a redirect target to the transport policy of ValidateURL
+// and preserves net/http's default 10-redirect limit.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("update check: stopped after 10 redirects")
+	}
 	_, err := ValidateURL(req.URL.String())
 	return err
 }

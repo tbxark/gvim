@@ -13,10 +13,10 @@ func TestLoadUntrustedSkipsTheProjectLayer(t *testing.T) {
 	dir := t.TempDir()
 	userFile := filepath.Join(dir, "config.json")
 	root := filepath.Join(dir, "proj")
-	writeFile(t, userFile, `{"theme": "light", "tab_size": 2}`)
+	writeFile(t, userFile, `{"theme": "light", "editor": {"tab_size": 2}}`)
 	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{
 		"theme": "dark",
-		"line_numbers": false,
+		"editor": {"line_numbers": false},
 		"keybindings": {"a": "x"},
 		"plugins": {"demo": {"enabled": true}}
 	}`)
@@ -53,8 +53,8 @@ func TestLoadTrustedReadsTheProjectLayer(t *testing.T) {
 	dir := t.TempDir()
 	userFile := filepath.Join(dir, "config.json")
 	root := filepath.Join(dir, "proj")
-	writeFile(t, userFile, `{"theme": "light", "tab_size": 2}`)
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"theme": "dark", "line_numbers": false}`)
+	writeFile(t, userFile, `{"theme": "light", "editor": {"tab_size": 2}}`)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"theme": "dark", "editor": {"line_numbers": false}}`)
 
 	cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
 	if err != nil {

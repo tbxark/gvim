@@ -416,3 +416,74 @@ func TestWalkFilesNestedAndSiblingGitignoreIsolation(t *testing.T) {
 		t.Fatalf("WalkFiles = %v, want %v", got, want)
 	}
 }
+
+func TestIgnoreMatcherWildcardsAndEscapes(t *testing.T) {
+	rules := ParseIgnore([]byte(strings.Join([]string{
+		"# comment",
+		`\#hash.txt`,
+		`\!bang.txt`,
+		`trail\   `,
+		"**/gen/*.go",
+		"a/**/b.txt",
+		"logs/**",
+		"item[0-9].txt",
+		"keep[!0-9].txt",
+		"single?.txt",
+		"*",
+		"!docs/",
+		"!docs/keep.md",
+	}, "\n")), nil)
+	m := NewIgnoreMatcher(rules)
+	cases := []struct {
+		path  []string
+		isDir bool
+		want  bool
+	}{
+		{[]string{"#hash.txt"}, false, true},
+		{[]string{"!bang.txt"}, false, true},
+		{[]string{"trail "}, false, true},
+		{[]string{"docs"}, true, false},
+		{[]string{"docs", "keep.md"}, false, false},
+		{[]string{"docs", "drop.md"}, false, true},
+	}
+	for _, tc := range cases {
+		if got := m.Match(tc.path, tc.isDir); got != tc.want {
+			t.Errorf("Match(%v, %v) = %v, want %v", tc.path, tc.isDir, got, tc.want)
+		}
+	}
+
+	// Verify ** and character classes independently without catch-all '*'.
+	m2 := NewIgnoreMatcher(ParseIgnore([]byte(strings.Join([]string{
+		"**/gen/*.go",
+		"a/**/b.txt",
+		"logs/**",
+		"item[0-9].txt",
+		"keep[!0-9].txt",
+		"single?.txt",
+	}, "\n")), nil))
+	cases2 := []struct {
+		path  []string
+		isDir bool
+		want  bool
+	}{
+		{[]string{"gen", "x.go"}, false, true},
+		{[]string{"pkg", "sub", "gen", "x.go"}, false, true},
+		{[]string{"pkg", "gen", "x.txt"}, false, false},
+		{[]string{"a", "b.txt"}, false, true},
+		{[]string{"a", "x", "y", "b.txt"}, false, true},
+		{[]string{"logs"}, true, false},
+		{[]string{"logs", "app.log"}, false, true},
+		{[]string{"logs", "sub", "app.log"}, false, true},
+		{[]string{"item5.txt"}, false, true},
+		{[]string{"itema.txt"}, false, false},
+		{[]string{"keepa.txt"}, false, true},
+		{[]string{"keep5.txt"}, false, false},
+		{[]string{"single1.txt"}, false, true},
+		{[]string{"single12.txt"}, false, false},
+	}
+	for _, tc := range cases2 {
+		if got := m2.Match(tc.path, tc.isDir); got != tc.want {
+			t.Errorf("m2.Match(%v, %v) = %v, want %v", tc.path, tc.isDir, got, tc.want)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 
@@ -231,12 +232,14 @@ func (x *Index) SetOptions(root string, opts Options) {
 		return
 	}
 	x.lifecycle.Lock()
+	x.mu.Lock()
 	if x.parent == nil {
 		x.parent = context.Background()
 	}
 	x.enum = func(ctx context.Context, emit func(string) bool, _ func(string)) error {
 		return EnumerateWithOptions(ctx, root, opts, emit)
 	}
+	x.mu.Unlock()
 	x.lifecycle.Unlock()
 	x.setLocalProbeOptions(root, opts.ShowHidden)
 	x.Restart()
@@ -344,10 +347,11 @@ func (x *Index) startLocked() {
 	done := make(chan struct{})
 	x.done = done
 	x.notice = ""
+	enum := x.enum
 	x.mu.Unlock()
 	ctx, cancel := context.WithCancel(x.parent)
 	x.cancel = cancel
-	go x.run(ctx, gen, done)
+	go x.run(ctx, gen, done, enum)
 }
 
 const indexBatchSize = 64
@@ -355,10 +359,10 @@ const indexBatchSize = 64
 // run enumerates once. Its result is stored only when it is still the current run, so a
 // run superseded by Restart cannot overwrite the fresh state; its own done channel is
 // always closed.
-func (x *Index) run(ctx context.Context, gen uint64, done chan struct{}) {
+func (x *Index) run(ctx context.Context, gen uint64, done chan struct{}, enum func(context.Context, func(string) bool, func(string)) error) {
 	buf := make([]string, 0, indexBatchSize)
 	stopped := false
-	err := x.enum(ctx, func(rel string) bool {
+	err := enum(ctx, func(rel string) bool {
 		if stopped {
 			return false
 		}
@@ -401,6 +405,7 @@ func (x *Index) Restart() {
 	}
 	oldDone := x.done
 	old := x.cancel
+	enum := x.enum
 	x.idle = false
 	x.gen++
 	gen := x.gen
@@ -417,7 +422,7 @@ func (x *Index) Restart() {
 	<-oldDone
 	ctx, cancel := context.WithCancel(x.parent)
 	x.cancel = cancel
-	go x.run(ctx, gen, done)
+	go x.run(ctx, gen, done, enum)
 }
 
 // addBatchFor appends a batch of files of run gen. It returns false when the run was
@@ -452,7 +457,7 @@ func (x *Index) addBatchFor(gen uint64, rels []string) bool {
 func (x *Index) Snapshot() (files []string, loading bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	return x.files, !closedDone(x.done)
+	return slices.Clip(x.files), !closedDone(x.done)
 }
 
 // Generation reports the current enumeration run's generation. Restart (a manual
@@ -511,7 +516,7 @@ func (x *Index) IndexSnapshot() (files []string, loading, ready, idle, truncated
 	defer x.mu.Unlock()
 	loading = !closedDone(x.done)
 	ready = x.enum != nil && !loading && x.err == nil && !x.truncated && !x.idle && !x.closed
-	return x.files, loading, ready, x.idle, x.truncated, x.closed, x.notice, x.err
+	return slices.Clip(x.files), loading, ready, x.idle, x.truncated, x.closed, x.notice, x.err
 }
 
 // Err returns the enumeration error, or nil. It is nil while loading and after

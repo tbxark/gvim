@@ -19,17 +19,22 @@
 // has not been trusted must not configure the editor it is opened in. The user
 // file still applies. See package trust and docs/trust.md.
 //
-// Fresh compatibility. The files also accept the nested layout of Fresh's
-// config.json: an "editor" object holds the editing and display options under
-// Fresh's names, a "languages" object holds per-language overrides, and
-// "file_explorer" holds the explorer options. gvim's older flat top-level keys
-// (tab_size, insert_spaces, show_whitespace, ...) keep working as aliases of the
-// nested keys. When one file sets both spellings of an option, the nested one
-// wins. Across layers the later layer wins whichever spelling it uses. Fresh keys
-// that gvim has no use for (sidebar, packages, ...) are accepted and
-// ignored, so a Fresh config file loads without diagnostics. See editoropts.go
-// for the editor options and language.go for the per-language settings and the
-// resolver Config.EditorFor.
+// Layout. An "editor" object holds the editing and display options, a "languages"
+// object holds per-language overrides, "file_explorer" holds the explorer options
+// and "clipboard" the terminal clipboard options. An editing or display option such
+// as tab_size is set under "editor" only (editor.tab_size); at the top level it is
+// reported as an unknown setting, like any other key gvim does not know. The few
+// top-level settings that are not editor options (insert_spaces, mouse_capture,
+// scroll_sync, lsp_enabled, ...) stay at the top level. See editoropts.go for the
+// editor options and language.go for the per-language settings and the resolver
+// Config.EditorFor.
+//
+// Project layer. A repository must not choose a program gvim executes or weaken a
+// security setting, so the project file is refused, with a diagnostic, for
+// update_command, formatters, languages.<id>.formatter, languages.<id>.on_save, the
+// clipboard section (use_osc52, osc52_paste), env, universal_lsp, the lsp fields
+// that choose or shape a program, terminal.shell, terminal.agents,
+// terminal.restore_live, ssh, daemon and the keymap keys, and for a plugins.<name>.enabled that turns a plugin on.
 //
 // The plugins key, {"plugins": {"name": {"enabled": false, "settings": {...}}}}, is
 // read per layer into Config.Plugins (see PluginConfig). The project layer can only
@@ -37,9 +42,8 @@
 // user's value.
 //
 // The keymap and keybindings keys change what the user's keys do, so only the user file
-// sets them: the project layer is refused with a diagnostic (unlike Fresh, where a project's
-// keybindings replace the user's). keybindings is Fresh's list of {key, modifiers, action,
-// when} entries; an object {"bindings": [...]} is accepted too.
+// sets them: the project layer is refused with a diagnostic. keybindings is a list of
+// {key, modifiers, action, when} entries; an object {"bindings": [...]} is accepted too.
 //
 // The lsp key maps a language ID to one or more language servers, as Fresh's does:
 // {"lsp": {"go": {"command": "gopls", "args": []}}}. A language may also give a list
@@ -60,7 +64,7 @@
 // The formatters key maps a language name, or a file extension with its dot, to the
 // command that formats a buffer: {"formatters": {"go": "gofmt", ".go": "gofmt"}}. Keys
 // are matched without regard to case, and the language name is tried before the
-// extension. A later layer that sets formatters replaces the whole map.
+// extension. Only the user layer sets formatters.
 package config
 
 import (
@@ -80,21 +84,23 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// Line ending policies accepted by line_ending.
+// DefaultTheme is the bundled theme used when no config or flag selects one.
+const DefaultTheme = "gopher"
+
+// Line ending policies accepted by editor.default_line_ending.
 const (
 	LineEndingAuto = "auto"
 	LineEndingLF   = "lf"
 	LineEndingCRLF = "crlf"
-	LineEndingCR   = "cr" // accepted for Fresh configs; gvim has no CR documents, so it opens LF
 )
 
-// Tab width bounds accepted by tab_size.
+// Tab width bounds accepted by editor.tab_size and languages.<id>.tab_size.
 const (
 	MinTabSize = 1
 	MaxTabSize = 16
 )
 
-// Cursor shapes accepted by cursor_style.
+// Cursor shapes accepted by editor.cursor_style.
 const (
 	CursorStyleBlock     = "block"
 	CursorStyleBar       = "bar"
@@ -183,12 +189,12 @@ type ProcessLimits struct {
 
 // Config is the effective set of settings after all layers are merged.
 type Config struct {
-	Theme                  string // theme value: a bundled name, builtin://name, a user-dir relative path, or file://; default "dark"
+	Theme                  string // theme value: a bundled name, builtin://name, a user-dir relative path, or file://; default DefaultTheme ("gopher")
 	Keymap                 string // keymap name as written in a file; empty when no file sets one
 	Locale                 string // UI locale code ("zh-CN"); empty means automatic (LC_ALL/LC_MESSAGES/LANG, then en)
 	TabSize                int    // columns per tab stop, default 4
 	InsertSpaces           bool   // insert spaces for Tab, default true
-	LineEnding             string // "auto", "lf", "crlf" or "cr"; default "auto"
+	LineEnding             string // "auto", "lf" or "crlf"; default "auto"
 	TrimTrailingWhitespace bool   // strip trailing blanks on save
 	EnsureFinalNewline     bool   // end the file with a newline on save
 	AutoIndent             bool   // copy indentation to new lines, default true
@@ -221,8 +227,10 @@ type Config struct {
 	// check_for_updates and the gvim extension that names the feed.
 	Update UpdateConfig
 
-	// The view keys set the starting state of the display toggles. The
-	// defaults keep the layout gvim had before they existed.
+	// The view options set the starting state of the display toggles. All but
+	// MouseCapture and ScrollSync are editor.* options (editor.show_tab_bar,
+	// editor.whitespace_show, editor.mouse_hover_enabled, ...); those two are
+	// top-level keys. The defaults keep the layout gvim had before they existed.
 	ShowTabBar              bool   // show the tab strip row, default true
 	ShowStatusBar           bool   // show the status row, default true
 	ShowVerticalScrollbar   bool   // draw the vertical scrollbar, default true
@@ -269,19 +277,9 @@ type Config struct {
 	// no file sets any. Names are kept as written, known or not.
 	Plugins map[string]PluginConfig
 
-	// pluginUserEnabled remembers the plugins.<name>.enabled value from the USER
-	// layer only. Built-in surfaces that were once bundled plugins (the native
-	// Contents section) must ignore a project file's disabled flag, whose merged
-	// value in Plugins.Enabled cannot be attributed to a layer.
-	pluginUserEnabled map[string]bool
-
-	// The fields below are the Fresh "editor" options that gvim added with the
-	// nested config layout. Each default is Fresh's. The doc of the option and its
-	// consumer are in editoropts.go and in the contract. The existing fields above
-	// that have a Fresh name are aliases of editor.<name>: LineNumbers, LineWrap,
-	// AutoIndent, TabSize, HighlightCurrentLine, HighlightOccurrences,
-	// ShowMenuBar, ShowTabBar, ShowStatusBar and the scrollbars.
-	// InsertSpaces is the inverse of editor.use_tabs.
+	// The fields below are the "editor" options. Config embeds it, so the fields
+	// read as cfg.RelativeLineNumbers. A zero or negative integer is not a
+	// "disabled" value unless the field says so.
 	EditorOptions
 
 	// DefaultLanguage is default_language: the language whose settings apply to a
@@ -331,7 +329,7 @@ type Config struct {
 // Defaults returns the built-in settings, the lowest layer.
 func Defaults() Config {
 	return Config{
-		Theme:        "dark",
+		Theme:        DefaultTheme,
 		TabSize:      4,
 		InsertSpaces: true,
 		LineEnding:   LineEndingAuto,
@@ -623,8 +621,7 @@ func applyFile(cfg *Config, path string, l layer) []Diagnostic {
 // from, for the source notes and the diagnostics; it may be empty.
 func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l layer) []Diagnostic {
 	var diags []Diagnostic
-	// The flat keys are applied first and the nested sections after them, so that
-	// when a file sets both spellings of an option the nested one wins.
+	// The other top-level keys are applied first and the sections after them.
 	for _, key := range sortedKeys(keys) {
 		if isSection(key) {
 			continue
@@ -648,6 +645,10 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			// A repository must never choose a command the editor will run.
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set update_command: the update command is a user preference, so set it in the user config"})
 			continue
+		case key == "formatters" && l == layerProject:
+			// A formatter is a command gvim runs on save, so a repository must not choose one.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set formatters: they are commands gvim runs, so set them in the user config"})
+			continue
 		case key == "locale" && l == layerProject:
 			// The UI language is a user preference; a repository choosing it would be a
 			// surprise, so the project layer is refused like keymap.
@@ -663,18 +664,24 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 				diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
 				continue
 			}
-		case (key == "keybindings" || key == "keymap" || key == "active_keybinding_map" || key == "keybinding_maps") && l == layerProject:
+		case (key == "keybindings" || key == "keymap") && l == layerProject:
 			// A repository must not decide what the user's keys do, so the project layer
 			// can neither switch the keymap nor bind a key. Say so instead of ignoring it.
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set " + key + ": it changes what keys do, so set it in the user config"})
 			continue
 		case key == "terminal":
-			diags = append(diags, cfg.setTerminal(keys[key], l, path)...)
-			cfg.note(key, path)
+			ds := cfg.setTerminal(keys[key], l, path)
+			diags = append(diags, ds...)
+			if len(ds) == 0 {
+				cfg.note(key, path)
+			}
 			continue
 		case key == "contents":
-			diags = append(diags, cfg.setContents(keys[key], l, path)...)
-			cfg.note(key, path)
+			ds := cfg.setContents(keys[key], l, path)
+			diags = append(diags, ds...)
+			if len(ds) == 0 && l == layerUser {
+				cfg.note(key, path)
+			}
 			continue
 		case key == "auto_attach" && l == layerProject:
 			// Attaching to a running daemon is the user's choice; a repository cannot
@@ -704,8 +711,11 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set daemon: it bounds the daemon's memory, so set it in the user config"})
 			continue
 		case key == "daemon":
-			diags = append(diags, cfg.setDaemon(keys[key])...)
-			cfg.note(key, path)
+			ds := cfg.setDaemon(keys[key], path)
+			diags = append(diags, ds...)
+			if len(ds) == 0 {
+				cfg.note(key, path)
+			}
 			continue
 		case key == "env" && l == layerProject:
 			// A repository must not decide which activation command runs in it, so the
@@ -713,8 +723,11 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set env: it defines commands that run in the workspace, so set it in the user config"})
 			continue
 		case key == "env":
-			diags = append(diags, cfg.setEnv(keys[key])...)
-			cfg.note(key, path)
+			ds := cfg.setEnv(keys[key], path)
+			diags = append(diags, ds...)
+			if len(ds) == 0 {
+				cfg.note(key, path)
+			}
 			continue
 		case key == "universal_lsp" && l == layerProject:
 			// A universal server runs for every buffer, so a repository naming one would
@@ -736,16 +749,21 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			}
 		}
 		cfg.note(key, path)
-		if key == "active_keybinding_map" {
-			cfg.note("keymap", path)
-		}
 	}
 	for _, section := range sections {
 		raw, ok := keys[section]
 		if !ok {
 			continue
 		}
-		applied, failures := cfg.setSection(section, raw)
+		if section == "clipboard" && l == layerProject {
+			diags = append(diags, Diagnostic{
+				Path:    path,
+				Key:     "clipboard",
+				Message: "project config cannot set clipboard: terminal clipboard access is a user security preference, so set it in the user config",
+			})
+			continue
+		}
+		applied, failures := cfg.setSection(section, raw, l)
 		for _, key := range applied {
 			cfg.note(key, path)
 		}
@@ -811,20 +829,12 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return errors.New("must not be empty")
 		}
 		c.Theme = s
-	case "keymap", "active_keybinding_map":
-		// Fresh's documented name for the keymap is active_keybinding_map, so a Fresh
-		// config picks the same keymap here. keymap is processed after it, so it wins when
-		// a file has both.
+	case "keymap":
 		s, err := decodeString(raw)
 		if err != nil {
 			return err
 		}
 		c.Keymap = s
-	case "keybinding_maps":
-		// Fresh's custom keymap files. gvim has none: its own bindings go in keybindings.
-		if trimmed := bytes.TrimSpace(raw); string(trimmed) != "{}" {
-			return errors.New("custom keybinding maps are not supported; put the keys in keybindings")
-		}
 	case "plugin_timeout_ms":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil {
@@ -898,24 +908,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		return setFileExplorerStringList(raw, &c.FileScanExclusions)
 	case "file_scan_inclusions":
 		return setFileExplorerStringList(raw, &c.FileScanInclusions)
-	case "explorer_show_ignored":
-		{
-			// The old spelling of file_explorer.hide_gitignore, inverted: files that
-			// asked to show ignored entries now mean "don't hide them".
-			var v bool
-			if err := json.Unmarshal(raw, &v); err != nil {
-				return errors.New("must be true or false")
-			}
-			c.FileExplorer.HideGitignore = !v
-			return nil
-		}
 	default:
-		if slices.Contains(fileOnlyKeys, key) {
-			return nil // a Fresh key that gvim has no use for
-		}
-		if opt, ok := editorByFlat[key]; ok {
-			return opt.set(c, raw)
-		}
 		field, known := boolKeys[key]
 		if !known {
 			return errors.New("unknown setting")
@@ -929,14 +922,12 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 	return nil
 }
 
-// boolKeys maps each boolean setting that has no Fresh counterpart to the field it
-// sets. The settings that do have one are in editorOptions.
+// boolKeys maps each top-level boolean setting to the field it sets.
 var boolKeys = map[string]func(*Config) *bool{
-	"insert_spaces":        func(c *Config) *bool { return &c.InsertSpaces },
-	"explorer_show_hidden": func(c *Config) *bool { return &c.ExplorerShowHidden },
-	"mouse_capture":        func(c *Config) *bool { return &c.MouseCapture },
-	"scroll_sync":          func(c *Config) *bool { return &c.ScrollSync },
-	"lsp_enabled":          func(c *Config) *bool { return &c.LSPEnabled },
+	"insert_spaces": func(c *Config) *bool { return &c.InsertSpaces },
+	"mouse_capture": func(c *Config) *bool { return &c.MouseCapture },
+	"scroll_sync":   func(c *Config) *bool { return &c.ScrollSync },
+	"lsp_enabled":   func(c *Config) *bool { return &c.LSPEnabled },
 }
 
 // lspEntry is one language server entry, as Fresh writes it. gvim keeps every field:
@@ -1174,6 +1165,7 @@ func (c *Config) setProjectLSP(path string, raw json.RawMessage) (diags []Diagno
 			c.LSPDisabled = make(map[string]bool)
 		}
 		c.LSPDisabled[lang] = true
+		delete(c.LSP, lang)
 	}
 	return diags, true
 }

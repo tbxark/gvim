@@ -4,18 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
 // FileExplorerConfig is the file_explorer section of Fresh's config: the options
-// gvim's explorer honours. The flat explorer_show_hidden/explorer_show_ignored
-// keys stay on Config as their own older spellings.
+// gvim's explorer honours.
 //
 // Verified against refs/fresh/crates/fresh-editor-core/src/config.rs
 // (FileExplorerConfig): width defaults to 30% of the terminal, side to the left,
 // follow_active_buffer off, auto_open_on_last_buffer_close on and
-// compact_directories on. respect_gitignore, custom_ignore_patterns, preview_tabs
-// and the tree_indicator glyph keys are configured here.
+// compact_directories on. respect_gitignore, custom_ignore_patterns and preview_tabs
+// are configured here.
 type FileExplorerConfig struct {
 	// Width is file_explorer.width: a percentage of the terminal ("30%") or a
 	// column count ("24"); a plain number is a percentage. Default 30%.
@@ -32,9 +32,7 @@ type FileExplorerConfig struct {
 	// RespectGitignore is file_explorer.respect_gitignore, default true.
 	RespectGitignore *bool
 	// HideGitignore is file_explorer.hide_gitignore: hide .gitignore-matched
-	// entries instead of drawing them dimmed, default false. The older flat
-	// explorer_show_ignored and file_explorer.show_gitignored keys still load
-	// as its inverted spelling.
+	// entries instead of drawing them dimmed, default false.
 	HideGitignore bool
 	// CustomIgnorePatterns is file_explorer.custom_ignore_patterns.
 	CustomIgnorePatterns []string
@@ -106,8 +104,8 @@ func parseExplorerWidth(raw json.RawMessage) (ExplorerWidth, error) {
 			}
 			return ExplorerWidth{Percent: true, Value: n}, nil
 		}
-		var n int
-		if _, err := fmt.Sscanf(s, "%d", &n); err != nil || n < 0 {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
 			return ExplorerWidth{}, fmt.Errorf("invalid width %q: want a percent (\"30%%\") or a column count", s)
 		}
 		return ExplorerWidth{Value: n}, nil
@@ -129,8 +127,8 @@ func parseExplorerWidth(raw json.RawMessage) (ExplorerWidth, error) {
 
 // parseExplorerPercent parses the digits of a percentage. The result is 0..100.
 func parseExplorerPercent(s string) (int, error) {
-	var n int
-	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d", &n); err != nil || n < 0 || n > 100 {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 || n > 100 {
 		return 0, fmt.Errorf("a percent must be between 0 and 100, got %q", s)
 	}
 	return n, nil
@@ -166,17 +164,6 @@ func setFileExplorerBool(raw json.RawMessage, dst *bool) error {
 		return errors.New("must be true or false")
 	}
 	*dst = v
-	return nil
-}
-
-// setFileExplorerBoolInv applies one boolean file_explorer key inverted: the
-// stored value becomes !raw. Used by the legacy show_ignored-style keys.
-func setFileExplorerBoolInv(raw json.RawMessage, dst *bool) error {
-	var v bool
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return errors.New("must be true or false")
-	}
-	*dst = !v
 	return nil
 }
 

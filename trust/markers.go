@@ -59,6 +59,10 @@ func ExecutableContentMarkers(root string) []string {
 		isRegularFile(filepath.Join(root, ".devcontainer.json")) {
 		add("devcontainer.json")
 	}
+	// Workspace-local gvim config can declare external formatters and save commands.
+	if isRegularFile(filepath.Join(root, ".gvim", "config.json")) {
+		add(".gvim/config.json")
+	}
 	// C# / .NET: loading a solution or project file runs restore/build and
 	// design-time analyzers, so report the files themselves.
 	entries, err := os.ReadDir(root)

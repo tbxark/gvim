@@ -1,10 +1,13 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tailscale/hujson"
 )
 
 // patched applies edits to body and returns the new file text.
@@ -193,6 +196,62 @@ func TestValidateEdits(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The Settings UI writes the editor options under "editor" and never at the top
+// level: patching every scalar setting into an empty file leaves none of the
+// retired flat keys behind and the file loads with no diagnostics.
+func TestSettingsWriteNestedPathsOnly(t *testing.T) {
+	t.Parallel()
+	var edits []Edit
+	for _, s := range Settings() {
+		if s.Kind == SettingPage || s.Value(Defaults()) == "" {
+			continue
+		}
+		raw, err := s.Encode(s.Value(Defaults()))
+		if err != nil {
+			t.Fatalf("%s: %v", s.Key(), err)
+		}
+		edits = append(edits, Edit{Path: s.Path, Raw: raw})
+	}
+	data, err := PatchBytes(nil, edits)
+	if err != nil {
+		t.Fatalf("PatchBytes: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(mustStandardize(t, data), &top); err != nil {
+		t.Fatalf("patched file is not JSON: %v\n%s", err, data)
+	}
+	for _, flat := range []string{
+		"line_numbers", "highlight_current_line", "highlight_occurrences", "line_wrap",
+		"show_menu_bar", "show_tab_bar", "show_status_bar", "show_vertical_scrollbar",
+		"show_horizontal_scrollbar", "cursor_style", "show_whitespace", "tab_size",
+		"auto_indent", "line_ending", "trim_trailing_whitespace", "ensure_final_newline",
+		"mouse_hover",
+	} {
+		if _, ok := top[flat]; ok {
+			t.Errorf("the Settings write put the retired flat key %q at the top level", flat)
+		}
+	}
+	if _, ok := top["editor"]; !ok {
+		t.Errorf("the editor options were not written under \"editor\":\n%s", data)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, diags, err := Load(Options{UserFile: path}); err != nil || len(diags) != 0 {
+		t.Fatalf("Load after patching every setting = %v, %v", diags, err)
+	}
+}
+
+func mustStandardize(t *testing.T, data []byte) []byte {
+	t.Helper()
+	v, err := hujson.Standardize(data)
+	if err != nil {
+		t.Fatalf("standardize: %v", err)
+	}
+	return v
 }
 
 func TestSettingsTableIsCoherent(t *testing.T) {

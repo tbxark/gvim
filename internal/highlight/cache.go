@@ -3,8 +3,8 @@ package highlight
 import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/tbxark/gvim/document"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -17,9 +17,9 @@ import (
 // switch, or a change of its language, starts a new lexer. The cache is used on the
 // UI goroutine only.
 type Cache struct {
-	doc   *editor.Document // the document the lexer belongs to
-	lang  string           // the language the lexer was chosen for, as set with Set Language
-	plain bool             // no lexer matched the document: no spans
+	doc   *document.Document // the document the lexer belongs to
+	lang  string             // the language the lexer was chosen for, as set with Set Language
+	plain bool               // no lexer matched the document: no spans
 	// headDetected says the lexer was chosen with the head of the document. A
 	// windowed remote large document whose first window has not arrived is detected
 	// from its path alone, and detected again after the paint loads the head, so the
@@ -27,13 +27,13 @@ type Cache struct {
 	headDetected bool
 	hl           *syntax.Highlighter
 	spans        [][]syntax.Span
-	valid        bool           // spans were lexed
-	lexedV       editor.Version // the text version the spans were lexed at
-	lexes        int            // how many times the whole text was lexed, the version Highlighter sees
+	valid        bool             // spans were lexed
+	lexedV       document.Version // the text version the spans were lexed at
+	lexes        int              // how many times the whole text was lexed, the version Highlighter sees
 
 	// sized is the text version size was measured at, and big whether the text was
 	// then over windowedBytes.
-	sized   editor.Version
+	sized   document.Version
 	sizedOK bool
 	big     bool
 
@@ -53,7 +53,7 @@ func New() *Cache {
 // Lines returns the spans of every line of doc, lexing again only after an
 // edit. It returns nil when no lexer matched the document, or when the cache is
 // nil.
-func (c *Cache) Lines(doc *editor.Document) [][]syntax.Span {
+func (c *Cache) Lines(doc *document.Document) [][]syntax.Span {
 	if c == nil {
 		return nil
 	}
@@ -81,7 +81,7 @@ func (c *Cache) Lines(doc *editor.Document) [][]syntax.Span {
 // LineSpans returns the syntax spans of line i of doc, or nil when no lexer
 // matched the document or i is out of range. It is the view the text pane
 // paints: a line of a large or windowed document comes from its window.
-func (c *Cache) LineSpans(doc *editor.Document, i int) []syntax.Span {
+func (c *Cache) LineSpans(doc *document.Document, i int) []syntax.Span {
 	if c.Windowed(doc) {
 		// The lexer runs over a window of the lines on screen, not over the text.
 		return c.window(doc, i)
@@ -95,7 +95,7 @@ func (c *Cache) LineSpans(doc *editor.Document, i int) []syntax.Span {
 
 // useLexer starts a new lexer when the cache is used for another document, or when
 // the language of the document changed.
-func (c *Cache) useLexer(doc *editor.Document) {
+func (c *Cache) useLexer(doc *document.Document) {
 	headLoaded := doc.LineLoaded(0)
 	if c.doc == doc && c.lang == doc.Language() && (c.headDetected || !headLoaded) {
 		return
@@ -117,7 +117,7 @@ func (c *Cache) useLexer(doc *editor.Document) {
 // remote large document whose first window has not arrived is detected from its path
 // alone: reading the head would turn filling a syntax cache into an extra remote
 // window load. Once the paint has loaded the head, useLexer detects again.
-func documentLexer(doc *editor.Document) (chroma.Lexer, bool) {
+func documentLexer(doc *document.Document) (chroma.Lexer, bool) {
 	if name := doc.Language(); name != "" {
 		if lexer := lexers.Get(name); lexer != nil {
 			return lexer, true

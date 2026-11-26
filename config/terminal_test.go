@@ -96,22 +96,6 @@ func withTerminal(change func(*TerminalConfig)) TerminalConfig {
 	return c
 }
 
-// TestTerminalFreshKeysAccepted checks that the Fresh terminal keys gvim does not
-// implement load without diagnostics: a Fresh config file opens clean.
-func TestTerminalFreshKeysAccepted(t *testing.T) {
-	t.Parallel()
-	body := `{"terminal": {
-  "skip_app_execution_alias": false
-}}`
-	cfg, diags := loadBody(t, body)
-	if len(diags) != 0 {
-		t.Fatalf("diagnostics for Fresh's terminal keys = %v", diags)
-	}
-	if !reflect.DeepEqual(cfg.Terminal, DefaultTerminalOptions()) {
-		t.Fatalf("Terminal = %+v, want the defaults", cfg.Terminal)
-	}
-}
-
 // TestTerminalPassCtrlVWithoutText checks the Ctrl+V setting Fresh defaults on.
 func TestTerminalPassCtrlVWithoutText(t *testing.T) {
 	t.Parallel()

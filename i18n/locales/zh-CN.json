@@ -86,8 +86,6 @@
   "cmd.explorer_refresh_desc": "刷新文件资源管理器",
   "cmd.explorer_rename": "文件资源管理器：重命名",
   "cmd.explorer_rename_desc": "重命名选中的文件或目录",
-  "cmd.extract_tab_to_new_workspace": "将标签页提取到新工作区",
-  "cmd.extract_tab_to_new_workspace_desc": "将当前标签页的缓冲区移动到以其父目录为根的新编排器工作区",
   "cmd.find_in_selection": "在选区内查找",
   "cmd.find_in_selection_desc": "仅在当前选区内搜索",
   "cmd.find_next": "查找下一个",

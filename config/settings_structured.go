@@ -54,8 +54,6 @@ var languageOverrideFields = []LanguageOverrideField{
 	{Key: "format_on_save", Kind: SettingBool},
 	{Key: "comment_prefix", Kind: SettingString},
 	{Key: "word_characters", Kind: SettingString},
-	{Key: "grammar", Kind: SettingString},
-	{Key: "textmate_grammar", Kind: SettingString},
 	{Key: "indentation_guide", Kind: SettingBool},
 }
 
@@ -117,8 +115,6 @@ func (c Config) LanguageInheritedValue(language, field string) (string, bool) {
 		return eff.WordCharacters, true
 	case "indentation_guide":
 		return onOff(eff.IndentationGuide), true
-	case "textmate_grammar":
-		return eff.TextmateGrammar, true
 	}
 	return "", false
 }
@@ -198,7 +194,7 @@ func languagesSummary(c Config) string {
 	if len(c.Languages) == 0 {
 		return "none"
 	}
-	return countText(len(c.Languages), "entry")
+	return countText(len(c.Languages), "entry", "entries")
 }
 
 // formattersSummary is the Formatters page row's value: how many commands the
@@ -207,7 +203,7 @@ func formattersSummary(c Config) string {
 	if len(c.Formatters) == 0 {
 		return "none"
 	}
-	return countText(len(c.Formatters), "command")
+	return countText(len(c.Formatters), "command", "commands")
 }
 
 // statusBarSummary is the summary of one editor.status_bar list: "default" when
@@ -219,7 +215,7 @@ func statusBarSummary(elements []string) string {
 	if len(elements) == 0 {
 		return "empty"
 	}
-	return countText(len(elements), "element")
+	return countText(len(elements), "element", "elements")
 }
 
 // shellArgsSummary is the terminal.shell.args page row's value.
@@ -227,15 +223,15 @@ func shellArgsSummary(c Config) string {
 	if len(c.Terminal.Shell.Args) == 0 {
 		return "none"
 	}
-	return countText(len(c.Terminal.Shell.Args), "argument")
+	return countText(len(c.Terminal.Shell.Args), "argument", "arguments")
 }
 
-// countText is n and its noun, pluralized with a trailing s.
-func countText(n int, noun string) string {
+// countText formats n with its singular or plural noun.
+func countText(n int, singular, plural string) string {
 	if n == 1 {
-		return "1 " + noun
+		return "1 " + singular
 	}
-	return strconv.Itoa(n) + " " + noun + "s"
+	return strconv.Itoa(n) + " " + plural
 }
 
 // explorerWidthText is file_explorer.width as the page shows it: "30%" for a

@@ -57,6 +57,13 @@ func TestExecutableContentMarkers(t *testing.T) {
 			want: []string{"devcontainer.json"},
 		},
 		{
+			name: "a workspace-local gvim config",
+			setup: func(t *testing.T, dir string) {
+				mkFile(t, dir, filepath.Join(".gvim", "config.json"))
+			},
+			want: []string{".gvim/config.json"},
+		},
+		{
 			name:  "a .NET project file",
 			setup: func(t *testing.T, dir string) { mkFile(t, dir, "App.csproj") },
 			want:  []string{"App.csproj"},

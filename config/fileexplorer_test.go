@@ -48,6 +48,8 @@ func TestExplorerWidthRejects(t *testing.T) {
 		"{\"file_explorer\": {\"width\": null}}",
 		"{\"file_explorer\": {\"width\": true}}",
 		"{\"file_explorer\": {\"width\": \"-4\"}}",
+		"{\"file_explorer\": {\"width\": \"30px\"}}",
+		"{\"file_explorer\": {\"width\": \"24foo%\"}}",
 	} {
 		cfg, diags := loadBody(t, body)
 		if len(diags) != 1 || diags[0].Key != "file_explorer.width" {
@@ -76,8 +78,7 @@ func TestFileExplorerBehaviourKeys(t *testing.T) {
 		"\"side\": \"right\", \"follow_active_buffer\": true," +
 		"\"auto_open_on_last_buffer_close\": false, \"compact_directories\": false," +
 		"\"respect_gitignore\": false, \"preview_tabs\": false," +
-		"\"custom_ignore_patterns\": [\"build/\"]," +
-		"\"tree_indicator_collapsed\": \">\", \"tree_indicator_expanded\": \"v\"}}"
+		"\"custom_ignore_patterns\": [\"build/\"]}}"
 	cfg, diags := loadBody(t, body)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics: %v", diags)

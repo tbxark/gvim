@@ -15,38 +15,38 @@ type viewCase struct {
 
 func TestLoadViewKeysSetTheirFields(t *testing.T) {
 	tests := []viewCase{
-		{"tab bar off", `{"show_tab_bar": false}`,
+		{"tab bar off", `{"editor": {"show_tab_bar": false}}`,
 			func(c Config) bool { return !c.ShowTabBar }, ""},
-		{"status bar off", `{"show_status_bar": false}`,
+		{"status bar off", `{"editor": {"show_status_bar": false}}`,
 			func(c Config) bool { return !c.ShowStatusBar }, ""},
-		{"vertical scrollbar off", `{"show_vertical_scrollbar": false}`,
+		{"vertical scrollbar off", `{"editor": {"show_vertical_scrollbar": false}}`,
 			func(c Config) bool { return !c.ShowVerticalScrollbar }, ""},
-		{"horizontal scrollbar off", `{"show_horizontal_scrollbar": false}`,
+		{"horizontal scrollbar off", `{"editor": {"show_horizontal_scrollbar": false}}`,
 			func(c Config) bool { return !c.ShowHorizontalScrollbar }, ""},
-		{"line wrap off", `{"line_wrap": false}`,
+		{"line wrap off", `{"editor": {"line_wrap": false}}`,
 			func(c Config) bool { return !c.LineWrap }, ""},
-		{"current line off", `{"highlight_current_line": false}`,
+		{"current line off", `{"editor": {"highlight_current_line": false}}`,
 			func(c Config) bool { return !c.HighlightCurrentLine }, ""},
-		{"occurrences on", `{"highlight_occurrences": true}`,
+		{"occurrences on", `{"editor": {"highlight_occurrences": true}}`,
 			func(c Config) bool { return c.HighlightOccurrences }, ""},
-		{"whitespace on", `{"show_whitespace": true}`,
+		{"whitespace on", `{"editor": {"whitespace_show": true}}`,
 			func(c Config) bool { return c.ShowWhitespace }, ""},
 		{"mouse capture off", `{"mouse_capture": false}`,
 			func(c Config) bool { return !c.MouseCapture }, ""},
-		{"mouse hover on", `{"mouse_hover": true}`,
+		{"mouse hover on", `{"editor": {"mouse_hover_enabled": true}}`,
 			func(c Config) bool { return c.MouseHover }, ""},
 		{"scroll sync on", `{"scroll_sync": true}`,
 			func(c Config) bool { return c.ScrollSync }, ""},
-		{"cursor bar", `{"cursor_style": "bar"}`,
+		{"cursor bar", `{"editor": {"cursor_style": "bar"}}`,
 			func(c Config) bool { return c.CursorStyle == CursorStyleBar }, ""},
-		{"cursor underline", `{"cursor_style": "underline"}`,
+		{"cursor underline", `{"editor": {"cursor_style": "underline"}}`,
 			func(c Config) bool { return c.CursorStyle == CursorStyleUnderline }, ""},
-		{"cursor block", `{"cursor_style": "block"}`,
+		{"cursor block", `{"editor": {"cursor_style": "block"}}`,
 			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, ""},
-		{"cursor unknown", `{"cursor_style": "beam"}`,
-			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, "cursor_style"},
-		{"cursor not a string", `{"cursor_style": 1}`,
-			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, "cursor_style"},
+		{"cursor unknown", `{"editor": {"cursor_style": "beam"}}`,
+			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, "editor.cursor_style"},
+		{"cursor not a string", `{"editor": {"cursor_style": 1}}`,
+			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, "editor.cursor_style"},
 		{"icons nerd", `{"ui_icons": "nerd"}`,
 			func(c Config) bool { return c.UIIcons == UIIconsNerd }, ""},
 		{"icons plain", `{"ui_icons": "plain"}`,
@@ -63,8 +63,8 @@ func TestLoadViewKeysSetTheirFields(t *testing.T) {
 			func(c Config) bool { return c.UIIconsFont == "JetBrainsMono Nerd Font Mono" }, ""},
 		{"icons font not a string", `{"ui_icons_font": 12}`,
 			func(c Config) bool { return c.UIIconsFont == "" }, "ui_icons_font"},
-		{"line wrap not a bool", `{"line_wrap": "yes"}`,
-			func(c Config) bool { return c.LineWrap }, "line_wrap"},
+		{"line wrap not a bool", `{"editor": {"line_wrap": "yes"}}`,
+			func(c Config) bool { return c.LineWrap }, "editor.line_wrap"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,7 +132,7 @@ func TestUIIconsLayers(t *testing.T) {
 	}{
 		{"project over user", `{"ui_icons": "nerd"}`, `{"ui_icons": "plain"}`, UIIconsPlain, ""},
 		{"project sets user default", `{}`, `{"ui_icons": "nerd"}`, UIIconsNerd, ""},
-		{"user kept when project is silent", `{"ui_icons": "nerd"}`, `{"tab_size": 2}`, UIIconsNerd, ""},
+		{"user kept when project is silent", `{"ui_icons": "nerd"}`, `{"editor": {"tab_size": 2}}`, UIIconsNerd, ""},
 		{"invalid project value keeps the user value", `{"ui_icons": "nerd"}`, `{"ui_icons": "bogus"}`, UIIconsNerd, "ui_icons"},
 		{"invalid user value keeps the default", `{"ui_icons": "bogus"}`, `{}`, UIIconsAuto, "ui_icons"},
 	}
@@ -157,21 +157,5 @@ func TestUIIconsLayers(t *testing.T) {
 				t.Errorf("diagnostics %v, want one for %s", diags, tt.diagKey)
 			}
 		})
-	}
-}
-
-// TestRetiredShowPromptLineIsIgnored checks a config written before the prompts
-// became centred cards still loads: the retired show_prompt_line key is accepted
-// and ignored, nested and flat, without a diagnostic.
-func TestRetiredShowPromptLineIsIgnored(t *testing.T) {
-	for _, body := range []string{
-		`{"show_prompt_line": true}`,
-		`{"editor": {"show_prompt_line": false}}`,
-	} {
-		path := filepath.Join(t.TempDir(), "config.json")
-		writeFile(t, path, body)
-		if _, diags, err := Load(Options{UserFile: path}); err != nil || len(diags) != 0 {
-			t.Fatalf("%s: err %v diagnostics %v", body, err, diags)
-		}
 	}
 }

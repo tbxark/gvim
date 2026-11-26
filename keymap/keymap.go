@@ -45,6 +45,14 @@ var emacsData []byte
 //go:embed vscode.json
 var vscodeData []byte
 
+// builtinNames lists the names presetFile accepts. TestBuiltinNamesMatchPresets keeps
+// the two in step.
+var builtinNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
+
+// BuiltinNames returns the names of the built-in keymaps ByName accepts, in a
+// fresh slice the caller may modify.
+func BuiltinNames() []string { return slices.Clone(builtinNames) }
+
 // presetFile returns the embedded keymap file for a built-in name.
 func presetFile(name string) ([]byte, bool) {
 	switch name {

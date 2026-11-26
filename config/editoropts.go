@@ -43,7 +43,7 @@ type SearchDefaults struct {
 }
 
 // EditorOptions are the editor.* options of Fresh's config that gvim parses in
-// addition to its older flat settings. Config embeds it, so the fields read as
+// addition to the top-level settings. Config embeds it, so the fields read as
 // cfg.RelativeLineNumbers. Every default is Fresh's. A zero or negative integer is
 // not a "disabled" value unless the field says so.
 //
@@ -53,14 +53,6 @@ type SearchDefaults struct {
 type EditorOptions struct {
 	// Display.
 
-	// Animations, CursorJumpAnimation and ViewportEdgeFade are parsed for Fresh
-	// config compatibility and accepted without a diagnostic. gvim's cell-grid
-	// TUI draws no animations and no fading edges (the component style differs, as
-	// docs/ui.md records), so no consumer reads them; the decision is recorded in
-	// docs/parity.md.
-	Animations                 bool // animations, default true
-	CursorJumpAnimation        bool // cursor_jump_animation, default true
-	ViewportEdgeFade           bool // viewport_edge_fade, default true
 	RelativeLineNumbers        bool // relative_line_numbers, default false
 	HideCurrentLineOnSelection bool // hide_current_line_on_selection, default false
 	HighlightCurrentColumn     bool // highlight_current_column, default false
@@ -71,20 +63,13 @@ type EditorOptions struct {
 	// PageWidth is page_width: the width of the page view in columns. Zero (or null)
 	// means the viewport width. Default 80. A language can override it.
 	PageWidth          int
-	SyntaxHighlighting bool // syntax_highlighting, default true
-	// ScreensaverEnabled and ScreensaverIdleMinutes are screensaver_enabled (false)
-	// and screensaver_idle_minutes (5). Parsed for Fresh config compatibility and
-	// accepted without a diagnostic; a terminal session has no screensaver to
-	// drive, so no consumer reads them.
-	ScreensaverEnabled     bool
-	ScreensaverIdleMinutes int
-	MenuBarMnemonics       bool            // menu_bar_mnemonics, default true
-	StatusBar              StatusBarConfig // status_bar
-	Search                 SearchDefaults  // search
-	ShowTilde              bool            // show_tilde: "~" on rows past the end of the file, default true
-	NerdFontIcons          bool            // nerd_font_icons, default false
-	SetWindowTitle         bool            // set_window_title, default true
-	TerminalAutoTitle      bool            // terminal_auto_title, default true
+	SyntaxHighlighting bool            // syntax_highlighting, default true
+	MenuBarMnemonics   bool            // menu_bar_mnemonics, default true
+	StatusBar          StatusBarConfig // status_bar
+	Search             SearchDefaults  // search
+	ShowTilde          bool            // show_tilde: "~" on rows past the end of the file, default true
+	NerdFontIcons      bool            // nerd_font_icons, default false
+	SetWindowTitle     bool            // set_window_title, default true
 	// Rulers is rulers: 1-based columns that carry a vertical ruler. Default none (nil).
 	Rulers []int
 	// IndentationGuide is indentation_guide: "none", "all" or "active". Default
@@ -94,8 +79,7 @@ type EditorOptions struct {
 	RainbowIndentation    bool   // rainbow_indentation, default false
 
 	// Whitespace. ShowWhitespace (whitespace_show) is the master switch; the other
-	// flags choose which marks show once it is on. Fresh's default shows tabs and no
-	// spaces. See the contract for the default of ShowWhitespace itself.
+	// flags choose which marks show once it is on.
 
 	WhitespaceSpacesLeading   bool // whitespace_spaces_leading, default false
 	WhitespaceSpacesInner     bool // whitespace_spaces_inner, default false
@@ -134,10 +118,9 @@ type EditorOptions struct {
 
 	// Mouse.
 
-	MouseWheelScrollLines int  // mouse_wheel_scroll_lines, default 3; 0 reads as 3
-	SmoothScroll          bool // smooth_scroll, default true
-	MouseHoverDelayMS     int  // mouse_hover_delay_ms, default 500
-	DoubleClickTimeMS     int  // double_click_time_ms, default 500
+	MouseWheelScrollLines int // mouse_wheel_scroll_lines, default 3; 0 reads as 3
+	MouseHoverDelayMS     int // mouse_hover_delay_ms, default 500
+	DoubleClickTimeMS     int // double_click_time_ms, default 500
 
 	// Recovery.
 
@@ -159,43 +142,28 @@ type EditorOptions struct {
 	EphemeralFilePatterns                  []string
 	AutoCreateEmptyBufferOnLastBufferClose bool // auto_create_empty_buffer_on_last_buffer_close, default false
 
-	// Keyboard protocol.
-
-	KeyboardDisambiguateEscapeCodes    bool // keyboard_disambiguate_escape_codes, default true
-	KeyboardReportEventTypes           bool // keyboard_report_event_types, default false
-	KeyboardReportAlternateKeys        bool // keyboard_report_alternate_keys, default true
-	KeyboardReportAllKeysAsEscapeCodes bool // keyboard_report_all_keys_as_escape_codes, default false
-
 	// Performance.
 
-	SnapshotInterval        int // snapshot_interval: edits between undo snapshots, default 100
 	HighlightContextBytes   int // highlight_context_bytes, default 10000
 	LargeFileThresholdBytes int // large_file_threshold_bytes, default 10485760: files of >= this size open in large file mode, 0 = off
 	EstimatedLineLength     int // estimated_line_length, default 80
-	ReadConcurrency         int // read_concurrency, default 64
-	FileTreePollIntervalMS  int // file_tree_poll_interval_ms, default 3000
 }
 
-// defaultEditorOptions returns Fresh's defaults for EditorOptions. It builds new
+// defaultEditorOptions returns the defaults for EditorOptions. It builds new
 // slices on each call.
 func defaultEditorOptions() EditorOptions {
 	return EditorOptions{
-		Animations:          true,
-		CursorJumpAnimation: true,
-		ViewportEdgeFade:    true,
-		WrapIndent:          true,
-		PageWidth:           80,
-		SyntaxHighlighting:  true,
+		WrapIndent:         true,
+		PageWidth:          80,
+		SyntaxHighlighting: true,
 
-		ScreensaverIdleMinutes: 5,
-		MenuBarMnemonics:       true,
+		MenuBarMnemonics: true,
 		StatusBar: StatusBarConfig{
 			Left:  []string{"{trust}", "{remote}", "{terminal_restart}", "{cursor}", "{diagnostics}", "{cursor_count}", "{messages}"},
 			Right: []string{"{read_only}", "{line_ending}", "{encoding}", "{language}", "{lsp}", "{warnings}", "{update}", "{palette}"},
 		},
 		ShowTilde:             true,
 		SetWindowTitle:        true,
-		TerminalAutoTitle:     true,
 		IndentationGuide:      IndentationGuideNone,
 		IndentationGuideGlyph: DefaultIndentationGuideGlyph,
 
@@ -219,7 +187,6 @@ func defaultEditorOptions() EditorOptions {
 		EnableInlayHints:           true,
 
 		MouseWheelScrollLines: 3,
-		SmoothScroll:          true,
 		MouseHoverDelayMS:     500,
 		DoubleClickTimeMS:     500,
 
@@ -233,22 +200,15 @@ func defaultEditorOptions() EditorOptions {
 		SkipSessionRestoreWhenFilesPassed: true,
 		EphemeralFilePatterns:             []string{"**/.git/**"},
 
-		KeyboardDisambiguateEscapeCodes: true,
-		KeyboardReportAlternateKeys:     true,
-
-		SnapshotInterval:        100,
 		HighlightContextBytes:   10000,
 		LargeFileThresholdBytes: 10485760,
 		EstimatedLineLength:     80,
-		ReadConcurrency:         64,
-		FileTreePollIntervalMS:  3000,
 	}
 }
 
 // option is one key of the "editor" object.
 type option struct {
 	key      string // Fresh's name, the key under "editor"
-	flat     string // gvim's older top-level spelling, or "" when there is none
 	nullable bool   // null is a valid value
 	apply    func(c *Config, raw json.RawMessage) error
 }
@@ -261,8 +221,8 @@ func (o option) set(c *Config, raw json.RawMessage) error {
 	return o.apply(c, raw)
 }
 
-func boolOpt(key, flat string, field func(*Config) *bool) option {
-	return option{key: key, flat: flat, apply: func(c *Config, raw json.RawMessage) error {
+func boolOpt(key string, field func(*Config) *bool) option {
+	return option{key: key, apply: func(c *Config, raw json.RawMessage) error {
 		var v bool
 		if err := json.Unmarshal(raw, &v); err != nil {
 			return errors.New("must be true or false")
@@ -273,8 +233,8 @@ func boolOpt(key, flat string, field func(*Config) *bool) option {
 }
 
 // intOpt is an integer option in [lo, hi]. hi 0 means no upper bound.
-func intOpt(key, flat string, lo, hi int, field func(*Config) *int) option {
-	return option{key: key, flat: flat, apply: func(c *Config, raw json.RawMessage) error {
+func intOpt(key string, lo, hi int, field func(*Config) *int) option {
+	return option{key: key, apply: func(c *Config, raw json.RawMessage) error {
 		n, err := decodeInt(raw, lo, hi)
 		if err != nil {
 			return err
@@ -286,7 +246,7 @@ func intOpt(key, flat string, lo, hi int, field func(*Config) *int) option {
 
 // nullableIntOpt is intOpt that also accepts null, which stores 0.
 func nullableIntOpt(key string, field func(*Config) *int) option {
-	o := intOpt(key, "", 0, 0, field)
+	o := intOpt(key, 0, 0, field)
 	o.nullable = true
 	inner := o.apply
 	o.apply = func(c *Config, raw json.RawMessage) error {
@@ -301,8 +261,8 @@ func nullableIntOpt(key string, field func(*Config) *int) option {
 
 // enumOpt is a string option that must be one of values. normalize maps a
 // recognised spelling to the stored value; nil means the value is stored as written.
-func enumOpt(key, flat string, values []string, normalize func(string) (string, bool), field func(*Config) *string) option {
-	return option{key: key, flat: flat, apply: func(c *Config, raw json.RawMessage) error {
+func enumOpt(key string, values []string, normalize func(string) (string, bool), field func(*Config) *string) option {
+	return option{key: key, apply: func(c *Config, raw json.RawMessage) error {
 		s, err := decodeString(raw)
 		if err != nil {
 			return err
@@ -346,7 +306,7 @@ func decodeInt(raw json.RawMessage, lo, hi int) (int, error) {
 	return n, nil
 }
 
-// cursorShapes maps each cursor_style spelling to gvim's shape. The Fresh names
+// cursorShapes maps each editor.cursor_style spelling to gvim's shape. The Fresh names
 // carry a blink choice that gvim does not keep, and "default" is the terminal's
 // own shape, which gvim draws as its default block.
 var cursorShapes = map[string]string{
@@ -362,64 +322,53 @@ var cursorShapes = map[string]string{
 	"steady_underline":   CursorStyleUnderline,
 }
 
-// editorOptions lists every key of the "editor" object that gvim knows. Keys with a
-// flat spelling are also settable at the top level of the file under that name.
+// editorOptions lists every key of the "editor" object that gvim knows.
 var editorOptions = []option{
 	// Display.
-	boolOpt("animations", "", func(c *Config) *bool { return &c.Animations }),
-	boolOpt("cursor_jump_animation", "", func(c *Config) *bool { return &c.CursorJumpAnimation }),
-	boolOpt("viewport_edge_fade", "", func(c *Config) *bool { return &c.ViewportEdgeFade }),
-	boolOpt("line_numbers", "line_numbers", func(c *Config) *bool { return &c.LineNumbers }),
-	boolOpt("relative_line_numbers", "", func(c *Config) *bool { return &c.RelativeLineNumbers }),
-	boolOpt("highlight_current_line", "highlight_current_line", func(c *Config) *bool { return &c.HighlightCurrentLine }),
-	boolOpt("highlight_occurrences", "highlight_occurrences", func(c *Config) *bool { return &c.HighlightOccurrences }),
-	boolOpt("hide_current_line_on_selection", "", func(c *Config) *bool { return &c.HideCurrentLineOnSelection }),
-	boolOpt("highlight_current_column", "", func(c *Config) *bool { return &c.HighlightCurrentColumn }),
-	boolOpt("line_wrap", "line_wrap", func(c *Config) *bool { return &c.LineWrap }),
-	boolOpt("wrap_indent", "", func(c *Config) *bool { return &c.WrapIndent }),
+	boolOpt("line_numbers", func(c *Config) *bool { return &c.LineNumbers }),
+	boolOpt("relative_line_numbers", func(c *Config) *bool { return &c.RelativeLineNumbers }),
+	boolOpt("highlight_current_line", func(c *Config) *bool { return &c.HighlightCurrentLine }),
+	boolOpt("highlight_occurrences", func(c *Config) *bool { return &c.HighlightOccurrences }),
+	boolOpt("hide_current_line_on_selection", func(c *Config) *bool { return &c.HideCurrentLineOnSelection }),
+	boolOpt("highlight_current_column", func(c *Config) *bool { return &c.HighlightCurrentColumn }),
+	boolOpt("line_wrap", func(c *Config) *bool { return &c.LineWrap }),
+	boolOpt("wrap_indent", func(c *Config) *bool { return &c.WrapIndent }),
 	nullableIntOpt("wrap_column", func(c *Config) *int { return &c.WrapColumn }),
 	nullableIntOpt("page_width", func(c *Config) *int { return &c.PageWidth }),
-	boolOpt("syntax_highlighting", "", func(c *Config) *bool { return &c.SyntaxHighlighting }),
-	boolOpt("show_menu_bar", "show_menu_bar", func(c *Config) *bool { return &c.ShowMenuBar }),
-	boolOpt("screensaver_enabled", "", func(c *Config) *bool { return &c.ScreensaverEnabled }),
-	intOpt("screensaver_idle_minutes", "", 0, 0, func(c *Config) *int { return &c.ScreensaverIdleMinutes }),
-	boolOpt("menu_bar_mnemonics", "", func(c *Config) *bool { return &c.MenuBarMnemonics }),
-	boolOpt("show_tab_bar", "show_tab_bar", func(c *Config) *bool { return &c.ShowTabBar }),
-	boolOpt("show_status_bar", "show_status_bar", func(c *Config) *bool { return &c.ShowStatusBar }),
+	boolOpt("syntax_highlighting", func(c *Config) *bool { return &c.SyntaxHighlighting }),
+	boolOpt("show_menu_bar", func(c *Config) *bool { return &c.ShowMenuBar }),
+	boolOpt("menu_bar_mnemonics", func(c *Config) *bool { return &c.MenuBarMnemonics }),
+	boolOpt("show_tab_bar", func(c *Config) *bool { return &c.ShowTabBar }),
+	boolOpt("show_status_bar", func(c *Config) *bool { return &c.ShowStatusBar }),
 	{key: "status_bar", apply: applyStatusBar},
 	{key: "search", apply: applySearch},
-	// show_prompt_line is retired: prompts are centred cards, so the key is accepted
-	// and ignored like fileOnlyKeys, in both its nested and its flat spelling.
-	{key: "show_prompt_line", flat: "show_prompt_line", nullable: true,
-		apply: func(*Config, json.RawMessage) error { return nil }},
-	boolOpt("show_vertical_scrollbar", "show_vertical_scrollbar", func(c *Config) *bool { return &c.ShowVerticalScrollbar }),
-	boolOpt("show_horizontal_scrollbar", "show_horizontal_scrollbar", func(c *Config) *bool { return &c.ShowHorizontalScrollbar }),
-	boolOpt("show_tilde", "", func(c *Config) *bool { return &c.ShowTilde }),
-	boolOpt("nerd_font_icons", "", func(c *Config) *bool { return &c.NerdFontIcons }),
-	boolOpt("set_window_title", "", func(c *Config) *bool { return &c.SetWindowTitle }),
-	boolOpt("terminal_auto_title", "", func(c *Config) *bool { return &c.TerminalAutoTitle }),
-	enumOpt("cursor_style", "cursor_style",
+	boolOpt("show_vertical_scrollbar", func(c *Config) *bool { return &c.ShowVerticalScrollbar }),
+	boolOpt("show_horizontal_scrollbar", func(c *Config) *bool { return &c.ShowHorizontalScrollbar }),
+	boolOpt("show_tilde", func(c *Config) *bool { return &c.ShowTilde }),
+	boolOpt("nerd_font_icons", func(c *Config) *bool { return &c.NerdFontIcons }),
+	boolOpt("set_window_title", func(c *Config) *bool { return &c.SetWindowTitle }),
+	enumOpt("cursor_style",
 		[]string{CursorStyleBlock, CursorStyleBar, CursorStyleUnderline},
 		func(s string) (string, bool) { v, ok := cursorShapes[s]; return v, ok },
 		func(c *Config) *string { return &c.CursorStyle }),
 	{key: "rulers", apply: applyRulers},
-	enumOpt("indentation_guide", "",
+	enumOpt("indentation_guide",
 		[]string{IndentationGuideNone, IndentationGuideAll, IndentationGuideActive}, nil,
 		func(c *Config) *string { return &c.IndentationGuide }),
 	{key: "indentation_guide_glyph", apply: applyGlyph},
-	boolOpt("rainbow_indentation", "", func(c *Config) *bool { return &c.RainbowIndentation }),
+	boolOpt("rainbow_indentation", func(c *Config) *bool { return &c.RainbowIndentation }),
 
 	// Whitespace.
-	boolOpt("whitespace_show", "show_whitespace", func(c *Config) *bool { return &c.ShowWhitespace }),
-	boolOpt("whitespace_spaces_leading", "", func(c *Config) *bool { return &c.WhitespaceSpacesLeading }),
-	boolOpt("whitespace_spaces_inner", "", func(c *Config) *bool { return &c.WhitespaceSpacesInner }),
-	boolOpt("whitespace_spaces_trailing", "", func(c *Config) *bool { return &c.WhitespaceSpacesTrailing }),
-	boolOpt("whitespace_tabs_leading", "", func(c *Config) *bool { return &c.WhitespaceTabsLeading }),
-	boolOpt("whitespace_tabs_inner", "", func(c *Config) *bool { return &c.WhitespaceTabsInner }),
-	boolOpt("whitespace_tabs_trailing", "", func(c *Config) *bool { return &c.WhitespaceTabsTrailing }),
-	boolOpt("whitespace_newlines", "", func(c *Config) *bool { return &c.WhitespaceNewlines }),
-	boolOpt("whitespace_carriage_returns", "", func(c *Config) *bool { return &c.WhitespaceCarriageReturns }),
-	boolOpt("whitespace_in_selection", "", func(c *Config) *bool { return &c.WhitespaceInSelection }),
+	boolOpt("whitespace_show", func(c *Config) *bool { return &c.ShowWhitespace }),
+	boolOpt("whitespace_spaces_leading", func(c *Config) *bool { return &c.WhitespaceSpacesLeading }),
+	boolOpt("whitespace_spaces_inner", func(c *Config) *bool { return &c.WhitespaceSpacesInner }),
+	boolOpt("whitespace_spaces_trailing", func(c *Config) *bool { return &c.WhitespaceSpacesTrailing }),
+	boolOpt("whitespace_tabs_leading", func(c *Config) *bool { return &c.WhitespaceTabsLeading }),
+	boolOpt("whitespace_tabs_inner", func(c *Config) *bool { return &c.WhitespaceTabsInner }),
+	boolOpt("whitespace_tabs_trailing", func(c *Config) *bool { return &c.WhitespaceTabsTrailing }),
+	boolOpt("whitespace_newlines", func(c *Config) *bool { return &c.WhitespaceNewlines }),
+	boolOpt("whitespace_carriage_returns", func(c *Config) *bool { return &c.WhitespaceCarriageReturns }),
+	boolOpt("whitespace_in_selection", func(c *Config) *bool { return &c.WhitespaceInSelection }),
 
 	// Editing.
 	{key: "use_tabs", apply: func(c *Config, raw json.RawMessage) error {
@@ -430,83 +379,68 @@ var editorOptions = []option{
 		c.InsertSpaces = !v
 		return nil
 	}},
-	intOpt("tab_size", "tab_size", MinTabSize, MaxTabSize, func(c *Config) *int { return &c.TabSize }),
-	boolOpt("auto_indent", "auto_indent", func(c *Config) *bool { return &c.AutoIndent }),
-	boolOpt("auto_close", "", func(c *Config) *bool { return &c.AutoClose }),
-	boolOpt("auto_surround", "", func(c *Config) *bool { return &c.AutoSurround }),
-	enumOpt("virtual_space", "",
+	intOpt("tab_size", MinTabSize, MaxTabSize, func(c *Config) *int { return &c.TabSize }),
+	boolOpt("auto_indent", func(c *Config) *bool { return &c.AutoIndent }),
+	boolOpt("auto_close", func(c *Config) *bool { return &c.AutoClose }),
+	boolOpt("auto_surround", func(c *Config) *bool { return &c.AutoSurround }),
+	enumOpt("virtual_space",
 		[]string{VirtualSpaceOff, VirtualSpaceBlock, VirtualSpaceOn}, nil,
 		func(c *Config) *string { return &c.VirtualSpace }),
-	intOpt("scroll_offset", "", 0, 0, func(c *Config) *int { return &c.ScrollOffset }),
-	enumOpt("default_line_ending", "line_ending",
-		[]string{LineEndingAuto, LineEndingLF, LineEndingCRLF, LineEndingCR}, nil,
+	intOpt("scroll_offset", 0, 0, func(c *Config) *int { return &c.ScrollOffset }),
+	enumOpt("default_line_ending",
+		[]string{LineEndingAuto, LineEndingLF, LineEndingCRLF}, nil,
 		func(c *Config) *string { return &c.LineEnding }),
-	boolOpt("trim_trailing_whitespace_on_save", "trim_trailing_whitespace", func(c *Config) *bool { return &c.TrimTrailingWhitespace }),
-	boolOpt("ensure_final_newline_on_save", "ensure_final_newline", func(c *Config) *bool { return &c.EnsureFinalNewline }),
-	boolOpt("auto_read_only", "", func(c *Config) *bool { return &c.AutoReadOnly }),
+	boolOpt("trim_trailing_whitespace_on_save", func(c *Config) *bool { return &c.TrimTrailingWhitespace }),
+	boolOpt("ensure_final_newline_on_save", func(c *Config) *bool { return &c.EnsureFinalNewline }),
+	boolOpt("auto_read_only", func(c *Config) *bool { return &c.AutoReadOnly }),
 
 	// Bracket matching.
-	boolOpt("highlight_matching_brackets", "", func(c *Config) *bool { return &c.HighlightMatchingBrackets }),
-	boolOpt("rainbow_brackets", "", func(c *Config) *bool { return &c.RainbowBrackets }),
+	boolOpt("highlight_matching_brackets", func(c *Config) *bool { return &c.HighlightMatchingBrackets }),
+	boolOpt("rainbow_brackets", func(c *Config) *bool { return &c.RainbowBrackets }),
 
 	// Completion, LSP, diagnostics.
-	boolOpt("completion_popup_auto_show", "", func(c *Config) *bool { return &c.CompletionPopupAutoShow }),
-	boolOpt("quick_suggestions", "", func(c *Config) *bool { return &c.QuickSuggestions }),
-	intOpt("quick_suggestions_delay_ms", "", 0, 0, func(c *Config) *int { return &c.QuickSuggestionsDelayMS }),
-	boolOpt("suggest_on_trigger_characters", "", func(c *Config) *bool { return &c.SuggestOnTriggerCharacters }),
-	boolOpt("enable_inlay_hints", "", func(c *Config) *bool { return &c.EnableInlayHints }),
-	boolOpt("diagnostics_inline_text", "", func(c *Config) *bool { return &c.DiagnosticsInlineText }),
+	boolOpt("completion_popup_auto_show", func(c *Config) *bool { return &c.CompletionPopupAutoShow }),
+	boolOpt("quick_suggestions", func(c *Config) *bool { return &c.QuickSuggestions }),
+	intOpt("quick_suggestions_delay_ms", 0, 0, func(c *Config) *int { return &c.QuickSuggestionsDelayMS }),
+	boolOpt("suggest_on_trigger_characters", func(c *Config) *bool { return &c.SuggestOnTriggerCharacters }),
+	boolOpt("enable_inlay_hints", func(c *Config) *bool { return &c.EnableInlayHints }),
+	boolOpt("diagnostics_inline_text", func(c *Config) *bool { return &c.DiagnosticsInlineText }),
 
 	// Mouse.
-	intOpt("mouse_wheel_scroll_lines", "", 0, 0, func(c *Config) *int { return &c.MouseWheelScrollLines }),
-	boolOpt("smooth_scroll", "", func(c *Config) *bool { return &c.SmoothScroll }),
-	boolOpt("mouse_hover_enabled", "mouse_hover", func(c *Config) *bool { return &c.MouseHover }),
-	intOpt("mouse_hover_delay_ms", "", 0, 0, func(c *Config) *int { return &c.MouseHoverDelayMS }),
-	intOpt("double_click_time_ms", "", 0, 0, func(c *Config) *int { return &c.DoubleClickTimeMS }),
+	intOpt("mouse_wheel_scroll_lines", 0, 0, func(c *Config) *int { return &c.MouseWheelScrollLines }),
+	boolOpt("mouse_hover_enabled", func(c *Config) *bool { return &c.MouseHover }),
+	intOpt("mouse_hover_delay_ms", 0, 0, func(c *Config) *int { return &c.MouseHoverDelayMS }),
+	intOpt("double_click_time_ms", 0, 0, func(c *Config) *int { return &c.DoubleClickTimeMS }),
 
 	// Recovery.
-	boolOpt("auto_save_enabled", "", func(c *Config) *bool { return &c.AutoSaveEnabled }),
-	intOpt("auto_save_interval_secs", "", 0, 0, func(c *Config) *int { return &c.AutoSaveIntervalSecs }),
-	boolOpt("hot_exit", "", func(c *Config) *bool { return &c.HotExit }),
-	boolOpt("recovery_enabled", "", func(c *Config) *bool { return &c.RecoveryEnabled }),
-	intOpt("auto_recovery_save_interval_secs", "", 0, 0, func(c *Config) *int { return &c.AutoRecoverySaveIntervalSecs }),
-	intOpt("auto_revert_poll_interval_ms", "", 0, 0, func(c *Config) *int { return &c.AutoRevertPollIntervalMS }),
+	boolOpt("auto_save_enabled", func(c *Config) *bool { return &c.AutoSaveEnabled }),
+	intOpt("auto_save_interval_secs", 0, 0, func(c *Config) *int { return &c.AutoSaveIntervalSecs }),
+	boolOpt("hot_exit", func(c *Config) *bool { return &c.HotExit }),
+	boolOpt("recovery_enabled", func(c *Config) *bool { return &c.RecoveryEnabled }),
+	intOpt("auto_recovery_save_interval_secs", 0, 0, func(c *Config) *int { return &c.AutoRecoverySaveIntervalSecs }),
+	intOpt("auto_revert_poll_interval_ms", 0, 0, func(c *Config) *int { return &c.AutoRevertPollIntervalMS }),
 
 	// Startup and quit.
-	boolOpt("confirm_quit", "", func(c *Config) *bool { return &c.ConfirmQuit }),
-	boolOpt("save_session", "", func(c *Config) *bool { return &c.SaveSession }),
-	boolOpt("restore_previous_session", "", func(c *Config) *bool { return &c.RestorePreviousSession }),
-	boolOpt("skip_session_restore_when_files_passed", "", func(c *Config) *bool { return &c.SkipSessionRestoreWhenFilesPassed }),
+	boolOpt("confirm_quit", func(c *Config) *bool { return &c.ConfirmQuit }),
+	boolOpt("save_session", func(c *Config) *bool { return &c.SaveSession }),
+	boolOpt("restore_previous_session", func(c *Config) *bool { return &c.RestorePreviousSession }),
+	boolOpt("skip_session_restore_when_files_passed", func(c *Config) *bool { return &c.SkipSessionRestoreWhenFilesPassed }),
 	{key: "ephemeral_file_patterns", apply: applyEphemeral},
-	boolOpt("auto_create_empty_buffer_on_last_buffer_close", "", func(c *Config) *bool { return &c.AutoCreateEmptyBufferOnLastBufferClose }),
-
-	// Keyboard protocol.
-	boolOpt("keyboard_disambiguate_escape_codes", "", func(c *Config) *bool { return &c.KeyboardDisambiguateEscapeCodes }),
-	boolOpt("keyboard_report_event_types", "", func(c *Config) *bool { return &c.KeyboardReportEventTypes }),
-	boolOpt("keyboard_report_alternate_keys", "", func(c *Config) *bool { return &c.KeyboardReportAlternateKeys }),
-	boolOpt("keyboard_report_all_keys_as_escape_codes", "", func(c *Config) *bool { return &c.KeyboardReportAllKeysAsEscapeCodes }),
+	boolOpt("auto_create_empty_buffer_on_last_buffer_close", func(c *Config) *bool { return &c.AutoCreateEmptyBufferOnLastBufferClose }),
 
 	// Performance.
-	intOpt("snapshot_interval", "", 0, 0, func(c *Config) *int { return &c.SnapshotInterval }),
-	intOpt("highlight_context_bytes", "", 0, 0, func(c *Config) *int { return &c.HighlightContextBytes }),
-	intOpt("large_file_threshold_bytes", "", 0, 0, func(c *Config) *int { return &c.LargeFileThresholdBytes }),
-	intOpt("estimated_line_length", "", 0, 0, func(c *Config) *int { return &c.EstimatedLineLength }),
-	intOpt("read_concurrency", "", 0, 0, func(c *Config) *int { return &c.ReadConcurrency }),
-	intOpt("file_tree_poll_interval_ms", "", 0, 0, func(c *Config) *int { return &c.FileTreePollIntervalMS }),
+	intOpt("highlight_context_bytes", 0, 0, func(c *Config) *int { return &c.HighlightContextBytes }),
+	intOpt("large_file_threshold_bytes", 0, 0, func(c *Config) *int { return &c.LargeFileThresholdBytes }),
+	intOpt("estimated_line_length", 0, 0, func(c *Config) *int { return &c.EstimatedLineLength }),
 }
 
-// editorByKey and editorByFlat index editorOptions by nested key and by flat spelling.
-var (
-	editorByKey  = indexOptions(func(o option) string { return o.key })
-	editorByFlat = indexOptions(func(o option) string { return o.flat })
-)
+// editorByKey indexes editorOptions by key.
+var editorByKey = indexOptions()
 
-func indexOptions(name func(option) string) map[string]option {
+func indexOptions() map[string]option {
 	m := make(map[string]option, len(editorOptions))
 	for _, o := range editorOptions {
-		if n := name(o); n != "" {
-			m[n] = o
-		}
+		m[o.key] = o
 	}
 	return m
 }
@@ -647,19 +581,10 @@ func decodeStrict(raw json.RawMessage, dst any) error {
 }
 
 // sections are the top-level keys whose value is an object of settings. They are
-// applied after the flat keys, in this order.
+// applied after the other top-level keys, in this order.
 var sections = []string{"file_explorer", "editor", "languages", "clipboard"}
 
 func isSection(key string) bool { return slices.Contains(sections, key) }
-
-// fileOnlyKeys are top-level keys of Fresh's config that gvim has no use for. They
-// are accepted and ignored, so that a Fresh config file loads without diagnostics.
-// None of them is stored.
-var fileOnlyKeys = []string{
-	"$schema", "version", "self_update",
-	"open_last_workspace", "sidebar", "file_browser",
-	"warnings", "packages", "menu",
-}
 
 // sectionFailure is one rejected key inside a section, with its full dotted name.
 type sectionFailure struct {
@@ -670,13 +595,13 @@ type sectionFailure struct {
 // setSection applies the object raw of the section ("editor", "file_explorer" or
 // "languages"). It returns the dotted names of the keys that were applied and the
 // ones that were rejected, in key order. A key that fails leaves its field unchanged.
-func (c *Config) setSection(section string, raw json.RawMessage) (applied []string, failed []sectionFailure) {
+func (c *Config) setSection(section string, raw json.RawMessage, l layer) (applied []string, failed []sectionFailure) {
 	entries, err := decodeObject(raw)
 	if err != nil {
 		return nil, []sectionFailure{{section, err}}
 	}
 	if section == "languages" {
-		return c.setLanguages(entries)
+		return c.setLanguages(entries, l)
 	}
 	for _, k := range sortedKeys(entries) {
 		full := section + "." + k
@@ -703,17 +628,13 @@ func (c *Config) setSectionKey(section, key string, raw json.RawMessage) error {
 	return opt.set(c, raw)
 }
 
-// setFileExplorer applies one key of "file_explorer". show_hidden and show_gitignored
-// are the explorer_show_* settings. The other Fresh keys are accepted and ignored.
+// setFileExplorer applies one key of "file_explorer".
 func (c *Config) setFileExplorer(key string, raw json.RawMessage) error {
 	switch key {
 	case "show_hidden":
-		return boolOpt(key, "", func(c *Config) *bool { return &c.ExplorerShowHidden }).set(c, raw)
+		return boolOpt(key, func(c *Config) *bool { return &c.ExplorerShowHidden }).set(c, raw)
 	case "hide_gitignore":
 		return setFileExplorerBool(raw, &c.FileExplorer.HideGitignore)
-	case "show_gitignored":
-		// The old spelling of hide_gitignore, inverted.
-		return setFileExplorerBoolInv(raw, &c.FileExplorer.HideGitignore)
 	case "width":
 		return c.setFileExplorerWidth(raw)
 	case "side":
@@ -730,8 +651,6 @@ func (c *Config) setFileExplorer(key string, raw json.RawMessage) error {
 		return setFileExplorerStringList(raw, &c.FileExplorer.CustomIgnorePatterns)
 	case "preview_tabs":
 		return setFileExplorerBoolPtr(raw, &c.FileExplorer.PreviewTabs)
-	case "tree_indicator_collapsed", "tree_indicator_expanded":
-		return nil
 	}
 	return errors.New("unknown setting")
 }
@@ -791,8 +710,7 @@ func (c *Config) setPlugins(raw json.RawMessage, l layer) (applied []string, fai
 	return applied, failed
 }
 
-// setPluginField applies one key of plugins.<name>. "path" is Fresh's key for a plugin
-// location; gvim finds plugins by directory, so it is accepted and ignored.
+// setPluginField applies one key of plugins.<name>.
 func (c *Config) setPluginField(name, key string, raw json.RawMessage, l layer) error {
 	if isNull(raw) {
 		return errors.New("null is not a valid value")
@@ -805,12 +723,6 @@ func (c *Config) setPluginField(name, key string, raw json.RawMessage, l layer) 
 		}
 		if l == layerProject && v {
 			return errors.New("project config cannot enable a plugin")
-		}
-		if l == layerUser {
-			if c.pluginUserEnabled == nil {
-				c.pluginUserEnabled = make(map[string]bool)
-			}
-			c.pluginUserEnabled[name] = v
 		}
 		pc := c.Plugins[name]
 		pc.Enabled = &v
@@ -827,7 +739,6 @@ func (c *Config) setPluginField(name, key string, raw json.RawMessage, l layer) 
 			pc.Settings = v
 		}
 		c.putPlugin(name, pc)
-	case "path":
 	default:
 		return errors.New("unknown setting")
 	}

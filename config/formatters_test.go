@@ -95,22 +95,40 @@ func TestLoadFormattersAreEmptyByDefault(t *testing.T) {
 	}
 }
 
-func TestLoadFormattersProjectLayerReplacesUser(t *testing.T) {
-	dir := t.TempDir()
-	user := filepath.Join(dir, "user.json")
-	writeFile(t, user, `{"formatters": {"go": "gofmt", "rust": "rustfmt"}}`)
-	root := filepath.Join(dir, "proj")
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"formatters": {"python": "black -q -"}}`)
+func TestProjectLayerCannotChooseCommands(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+		wantKey string
+	}{
+		{"formatters", `{"formatters": {"python": "black -q -"}}`, "formatters"},
+		{"language formatter", `{"languages": {"go": {"formatter": {"command": "evil"}, "format_on_save": true}}}`, "languages.go.formatter"},
+		{"language on_save", `{"languages": {"go": {"on_save": [{"command": "evil"}]}}}`, "languages.go.on_save"},
+	}
+	const user = `{"formatters": {"go": "gofmt"}, "languages": {"go": {"on_save": [{"command": "good"}]}}}`
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, diags := loadLayers(t, user, tt.project)
+			if len(diags) != 1 || diags[0].Key != tt.wantKey || !strings.Contains(diags[0].Message, "project config cannot set") {
+				t.Fatalf("diags = %+v, want one refusal for %s", diags, tt.wantKey)
+			}
+			if want := map[string]string{"go": "gofmt"}; !reflect.DeepEqual(cfg.Formatters, want) {
+				t.Errorf("Formatters = %+v, want the user map %+v", cfg.Formatters, want)
+			}
+			s := cfg.Editor("Go")
+			if s.Formatter != nil || len(s.OnSave) != 1 || s.OnSave[0].Command != "good" {
+				t.Errorf("Go settings = %+v, want the user on_save only", s)
+			}
+		})
+	}
+}
 
-	cfg, diags, err := Load(Options{Root: root, UserFile: user})
-	if err != nil {
-		t.Fatal(err)
+func TestProjectLayerKeepsFormatOnSaveFlag(t *testing.T) {
+	cfg, diags := loadLayers(t, `{}`, `{"languages": {"go": {"format_on_save": true, "formatter": {"command": "evil"}}}}`)
+	if len(diags) != 1 || diags[0].Key != "languages.go.formatter" {
+		t.Fatalf("diags = %+v", diags)
 	}
-	if len(diags) != 0 {
-		t.Fatalf("diags = %v, want none", diags)
-	}
-	want := map[string]string{"python": "black -q -"}
-	if !reflect.DeepEqual(cfg.Formatters, want) {
-		t.Fatalf("Formatters = %+v, want %+v (the project map replaces the user map)", cfg.Formatters, want)
+	if s := cfg.Editor("Go"); !s.FormatOnSave || s.Formatter != nil {
+		t.Errorf("Go settings = %+v, want format_on_save kept and the formatter dropped", s)
 	}
 }

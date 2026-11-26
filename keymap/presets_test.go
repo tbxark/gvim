@@ -1,6 +1,7 @@
 package keymap_test
 
 import (
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -28,6 +29,26 @@ func TestByNameLoadsEveryPreset(t *testing.T) {
 	if n("macos") <= n("default") || n("macos-gui") <= n("macos") || n("emacs") <= n("default") || n("vscode") <= n("default") {
 		t.Errorf("a child preset must hold more bindings than its parent: default %d, macos %d, macos-gui %d, emacs %d, vscode %d",
 			n("default"), n("macos"), n("macos-gui"), n("emacs"), n("vscode"))
+	}
+}
+
+func TestBuiltinNamesMatchPresets(t *testing.T) {
+	names := keymap.BuiltinNames()
+	for _, name := range names {
+		if _, err := keymap.ByName(name); err != nil {
+			t.Errorf("BuiltinNames lists %q but ByName fails: %v", name, err)
+		}
+	}
+	files, err := filepath.Glob("*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != len(names) {
+		t.Errorf("%d preset files %v, BuiltinNames has %d: %v", len(files), files, len(names), names)
+	}
+	names[0] = "mutated"
+	if keymap.BuiltinNames()[0] == "mutated" {
+		t.Error("BuiltinNames returned the shared slice, want a clone")
 	}
 }
 

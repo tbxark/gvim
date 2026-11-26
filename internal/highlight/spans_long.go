@@ -1,7 +1,7 @@
 package highlight
 
 import (
-	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -34,7 +34,7 @@ type segSpans struct {
 // Segment returns the syntax spans of text, which is runes [col, ...) of line i of doc, as
 // byte offsets into text. It returns nil when no lexer matched the document, or when the cache
 // is nil.
-func (c *Cache) Segment(doc *editor.Document, i, col int, text string) []syntax.Span {
+func (c *Cache) Segment(doc *document.Document, i, col int, text string) []syntax.Span {
 	if c == nil || text == "" {
 		return nil
 	}

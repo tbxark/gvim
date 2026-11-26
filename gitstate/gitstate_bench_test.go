@@ -3,30 +3,28 @@ package gitstate_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
-
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/tbxark/gvim/gitstate"
 )
 
+func runGitBench(b *testing.B, dir string, args ...string) {
+	b.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		b.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
 func setupBenchRepo(b *testing.B, files int) string {
 	b.Helper()
 	dir := b.TempDir()
-	repo, err := git.PlainInitWithOptions(dir, &git.PlainInitOptions{
-		DefaultBranch: plumbing.NewBranchReferenceName("main"),
-	})
-	if err != nil {
-		b.Fatal(err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		b.Fatal(err)
-	}
+	runGitBench(b, dir, "init", "-b", "main")
+	runGitBench(b, dir, "config", "user.name", "bench")
+	runGitBench(b, dir, "config", "user.email", "bench@example.com")
 	for i := range files {
 		p := filepath.Join(dir, fmt.Sprintf("pkg/file_%03d.go", i))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -36,13 +34,8 @@ func setupBenchRepo(b *testing.B, files int) string {
 			b.Fatal(err)
 		}
 	}
-	if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
-		b.Fatal(err)
-	}
-	sig := &object.Signature{Name: "bench", Email: "bench@example.com", When: time.Now()}
-	if _, err := wt.Commit("initial", &git.CommitOptions{Author: sig}); err != nil {
-		b.Fatal(err)
-	}
+	runGitBench(b, dir, "add", "-A")
+	runGitBench(b, dir, "commit", "-m", "initial")
 	return dir
 }
 
