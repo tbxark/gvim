@@ -47,7 +47,7 @@ type Match struct {
 }
 
 // Find returns every match of q in b, in document order. It reads the whole
-// buffer, so a large buffer is refused with ErrLargeBuffer; use FindNext,
+// buffer, so a large buffer is refused with ErrLargeBuffer; use FindNextAt,
 // FindVisible or Scan there. Matches do not overlap. A regex can give empty matches, such as ^ or x*, except right where
 // the previous match ended. An empty query returns no matches
 // and no error. A regex that does not compile returns an error.
@@ -166,19 +166,6 @@ func (cq *CompiledQuery) FindStringLimit(text string, limit int) []Match {
 		out[i] = Match{Start: cur.pos(loc[0]), End: cur.pos(loc[1])}
 	}
 	return out
-}
-
-// FindString compiles q and searches text directly without constructing a
-// buffer.Buffer. Empty queries return no matches and no error.
-func FindString(text string, q Query) ([]Match, error) {
-	if q.Text == "" {
-		return nil, nil
-	}
-	cq, err := CompileQuery(q)
-	if err != nil {
-		return nil, err
-	}
-	return cq.FindString(text), nil
 }
 
 // hit is a match together with what replacement needs: its byte offsets in

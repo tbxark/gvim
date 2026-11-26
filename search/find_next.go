@@ -8,7 +8,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 )
 
-// Dir is the direction of a FindNext search.
+// Dir is the direction of a FindNextAt search.
 type Dir int
 
 const (
@@ -19,15 +19,29 @@ const (
 )
 
 const (
-	// DefaultNextBudget is the number of bytes of text one FindNext call reads
+	// DefaultNextBudget is the number of bytes of text one FindNextAt call reads
 	// when its maxBytes is not positive.
 	DefaultNextBudget int64 = 64 << 20
-	// nextWindow is the size of one window of whole lines that FindNext
+	// nextWindow is the size of one window of whole lines that FindNextAt
 	// searches at a time.
 	nextWindow = 1 << 20
 )
 
-// FindNext finds the match of q to go to from the position from in snapshot s,
+// Cursor is how far a FindNextAt that ran out of its budget got. Pass it back to
+// FindNextAt, with the same snapshot, query, position and direction, and the
+// search goes on from there, so a document longer than one budget is searched in
+// several calls. The zero Cursor starts at the beginning.
+type Cursor struct {
+	started bool
+	phase   int // 0 for the far side of from, 1 after the wrap
+	pos     int // the first line (forward) or the end line (backward) left to search
+	// col is where a huge line stopped: the first column left to search of line pos
+	// (forward), or the column the line is searched up to (backward). Zero when the
+	// search stopped between lines.
+	col int
+}
+
+// FindNextAt finds the match of q to go to from the position from in snapshot s,
 // without building a list of all matches. This is what F3 and Shift+F3 do on a
 // large buffer.
 //
@@ -49,27 +63,10 @@ const (
 // true when found is true, and when the whole document was searched. An empty
 // query finds nothing. A pattern that does not compile, or a failed read of the
 // snapshot, returns an error.
-func FindNext(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64) (m Match, found bool, scanned bool, err error) {
-	m, found, scanned, _, err = FindNextAt(s, q, from, dir, maxBytes, Cursor{})
-	return m, found, scanned, err
-}
-
-// Cursor is how far a FindNext that ran out of its budget got. Pass it back to
-// FindNextAt, with the same snapshot, query, position and direction, and the
-// search goes on from there, so a document longer than one budget is searched in
-// several calls. The zero Cursor starts at the beginning.
-type Cursor struct {
-	started bool
-	phase   int // 0 for the far side of from, 1 after the wrap
-	pos     int // the first line (forward) or the end line (backward) left to search
-	// col is where a huge line stopped: the first column left to search of line pos
-	// (forward), or the column the line is searched up to (backward). Zero when the
-	// search stopped between lines.
-	col int
-}
-
-// FindNextAt is FindNext that starts at the cursor at. next is where a search
-// that ended with scanned == false stopped; it is the zero Cursor otherwise.
+//
+// at is where a search that ended with scanned == false stopped: pass the next Cursor
+// back, with the same snapshot, query, position and direction, to go on from there. next
+// is the zero Cursor when scanned is true.
 func FindNextAt(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, at Cursor) (m Match, found bool, scanned bool, next Cursor, err error) {
 	return findNextSpan(s, q, from, dir, maxBytes, nextWindow, defaultHuge, at)
 }
@@ -112,7 +109,7 @@ func findNextSpan(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxByte
 		n.forward)
 }
 
-// nextSearch is the state of one FindNext call.
+// nextSearch is the state of one FindNextAt call.
 type nextSearch struct {
 	s      *buffer.Snapshot
 	re     *regexp.Regexp

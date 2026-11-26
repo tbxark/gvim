@@ -77,7 +77,7 @@ func Replace(b *buffer.Buffer, q Query, repl string, m Match) (string, error) {
 // replaces the match m of q in b with repl, as one undo group, and returns the
 // text that was inserted. It reads only the lines that m covers, so it does not
 // need the match list that Replace builds from the whole buffer; m is usually
-// one of the matches of a Scan or the result of FindNext.
+// one of the matches of a Scan or the result of FindNextAt.
 //
 // m must be a match of q in the text of its own lines, as Find sees them. The
 // text outside those lines can change which matches Find would list (a match

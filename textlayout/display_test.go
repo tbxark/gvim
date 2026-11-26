@@ -5,35 +5,6 @@ import (
 	"testing"
 )
 
-func TestIndentWidth(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		line     string
-		tabWidth int
-		want     int
-	}{
-		{"empty line", "", 4, 0},
-		{"no indent", "x", 4, 0},
-		{"spaces", "   x", 4, 3},
-		{"tab", "\tx", 4, 4},
-		{"two tabs", "\t\tx", 4, 8},
-		{"tab after spaces stops at next tab stop", "  \tx", 4, 4},
-		{"wide tab stop", "\tx", 8, 8},
-		{"width stops at first non-indent rune", "  日本  ", 4, 2},
-		{"whitespace-only line", "  \t", 4, 4},
-		{"tab width below one is treated as one", "\tx", 0, 1},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := IndentWidth(tc.line, tc.tabWidth); got != tc.want {
-				t.Errorf("IndentWidth(%q, %d) = %d, want %d", tc.line, tc.tabWidth, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestOccurrences(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -256,7 +256,7 @@ func TestFindManyMatchesOnOneLine(t *testing.T) {
 	}
 }
 
-func TestFindStringMatchesFind(t *testing.T) {
+func TestCompiledQueryFindStringMatchesFind(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
@@ -277,10 +277,11 @@ func TestFindStringMatchesFind(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := FindString(tc.text, tc.q)
+			cq, err := CompileQuery(tc.q)
 			if err != nil {
 				t.Fatal(err)
 			}
+			got := cq.FindString(tc.text)
 			if !slices.Equal(got, want) {
 				t.Fatalf("FindString = %v, want %v", got, want)
 			}

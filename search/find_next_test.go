@@ -12,6 +12,13 @@ import (
 	"github.com/tbxark/gvim/buffer/buffertest"
 )
 
+// findNextFromStart is FindNextAt from the start of the search, for tests that do not
+// resume it.
+func findNextFromStart(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64) (m Match, found, scanned bool, err error) {
+	m, found, scanned, _, err = FindNextAt(s, q, from, dir, maxBytes, Cursor{})
+	return m, found, scanned, err
+}
+
 // findNext is FindNext with the window size as a parameter, so tests can make
 // every window boundary matter.
 func findNext(s *buffer.Snapshot, q Query, from buffer.Pos, dir Dir, maxBytes int64, window int) (Match, bool, bool, error) {
@@ -213,7 +220,7 @@ func TestFindNextDefaultBudgetIsUsed(t *testing.T) {
 	snap := b.Snapshot()
 	defer snap.Release()
 	for _, budget := range []int64{0, -5} {
-		if _, found, scanned, err := FindNext(snap, Query{Text: "needle"}, buffer.Pos{}, Forward, budget); err != nil || !found || !scanned {
+		if _, found, scanned, err := findNextFromStart(snap, Query{Text: "needle"}, buffer.Pos{}, Forward, budget); err != nil || !found || !scanned {
 			t.Errorf("budget %d: found %v, scanned %v, err %v", budget, found, scanned, err)
 		}
 	}
@@ -226,10 +233,10 @@ func TestFindNextEmptyAndInvalidQuery(t *testing.T) {
 	defer snap.Release()
 	before := src.BytesRead()
 
-	if _, found, scanned, err := FindNext(snap, Query{}, buffer.Pos{}, Forward, 0); err != nil || found || !scanned {
+	if _, found, scanned, err := findNextFromStart(snap, Query{}, buffer.Pos{}, Forward, 0); err != nil || found || !scanned {
 		t.Errorf("empty query: found %v, scanned %v, err %v; want false, true, nil", found, scanned, err)
 	}
-	if _, found, scanned, err := FindNext(snap, Query{Text: "(", Regex: true}, buffer.Pos{}, Backward, 0); err == nil || found || scanned {
+	if _, found, scanned, err := findNextFromStart(snap, Query{Text: "(", Regex: true}, buffer.Pos{}, Backward, 0); err == nil || found || scanned {
 		t.Errorf("invalid regex: found %v, scanned %v, err %v; want an error", found, scanned, err)
 	}
 	if got := src.BytesRead(); got != before {

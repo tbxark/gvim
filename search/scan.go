@@ -37,7 +37,7 @@ type ScanStats struct {
 // The scan starts at a line (the caret) and goes to the end of the document, then
 // wraps to the start and stops at that line, so the matches nearest the caret
 // are found first. The text is read in windows of about 1 MiB of whole lines. As
-// in FindNext, a multi-line match that crosses a window boundary is not found, and
+// in FindNextAt, a multi-line match that crosses a window boundary is not found, and
 // the lines on either side of the starting line are searched in different
 // windows. A huge line, which is longer than the line cap of a large buffer, is
 // searched in windows of runes of its own (see hugeSpan), so every match in it is found.

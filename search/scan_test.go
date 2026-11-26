@@ -285,7 +285,7 @@ func TestScanEmptyAndInvalidQuery(t *testing.T) {
 	if snap.Line(0) != "a" || snap.Err() != nil {
 		t.Errorf("snapshot unusable after a failed NewScan: %q, %v", snap.Line(0), snap.Err())
 	}
-	if _, found, _, err := FindNext(snap, Query{Text: "c"}, buffer.Pos{}, Forward, 0); err != nil || !found {
+	if _, found, _, err := findNextFromStart(snap, Query{Text: "c"}, buffer.Pos{}, Forward, 0); err != nil || !found {
 		t.Errorf("the snapshot cannot be searched after a failed NewScan: %v, %v", found, err)
 	}
 }

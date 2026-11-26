@@ -11,14 +11,6 @@ type Span struct {
 	Line, Start, End int
 }
 
-// IndentWidth returns the display width of the spaces and tabs at the start of
-// line, as LineIndent measures it. A tab advances to the next multiple of tabWidth.
-// A tabWidth below one is treated as one.
-func IndentWidth(line string, tabWidth int) int {
-	width, _ := LineIndent(line, tabWidth)
-	return width
-}
-
 // Occurrences returns the whole-word matches of word in lines. A match must not
 // touch a word character on either side. Columns are rune columns. An empty
 // word matches nothing.
@@ -42,6 +34,8 @@ func Occurrences(lines []string, word string) []Span {
 func wordColumns(line, word string) []int {
 	var cols []int
 	from := 0
+	prevByte := 0
+	runeCol := 0
 	for {
 		i := strings.Index(line[from:], word)
 		if i < 0 {
@@ -50,7 +44,9 @@ func wordColumns(line, word string) []int {
 		start := from + i
 		end := start + len(word)
 		if !wordBefore(line, start) && !wordAt(line, end) {
-			cols = append(cols, utf8.RuneCountInString(line[:start]))
+			runeCol += utf8.RuneCountInString(line[prevByte:start])
+			prevByte = start
+			cols = append(cols, runeCol)
 			from = end
 			continue
 		}

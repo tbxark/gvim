@@ -8,7 +8,7 @@ import (
 // ErrLargeBuffer is returned by Find, Replace, ReplaceAll and QueryReplace when
 // the buffer is in large file mode. They read every line of the buffer and
 // build a list of all matches, which a large file cannot afford. The bounded
-// replacements are FindNext (go to the next or previous match) and FindVisible
+// replacements are FindNextAt (go to the next or previous match) and FindVisible
 // (highlights for the rows on screen).
 var ErrLargeBuffer = errors.New("search: not available on large buffers")
 

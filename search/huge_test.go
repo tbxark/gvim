@@ -95,7 +95,7 @@ func TestFindNextOverAHugeLineResumesToTheSameMatch(t *testing.T) {
 	}
 	for _, from := range froms {
 		for _, dir := range []Dir{Forward, Backward} {
-			wantM, wantFound, _, err := FindNext(mem, q, from, dir, 0)
+			wantM, wantFound, _, err := findNextFromStart(mem, q, from, dir, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestFindNextOverAHugeLineAgreesFromEveryColumn(t *testing.T) {
 	for col := 0; col <= 460; col += 5 {
 		from := buffer.Pos{Line: 1, Col: col}
 		for _, dir := range []Dir{Forward, Backward} {
-			wantM, wantFound, _, err := FindNext(mem, q, from, dir, 0)
+			wantM, wantFound, _, err := findNextFromStart(mem, q, from, dir, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

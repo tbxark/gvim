@@ -2,10 +2,25 @@ package fold
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/tbxark/gvim/textlayout"
 )
 
-func TestRanges(t *testing.T) {
+// rangesOf is RangesFunc over lines held as strings, with textlayout.LineIndent as the
+// indentation measure, as the document reads them.
+func rangesOf(lines []string, tabWidth int) []Range {
+	return RangesFunc(len(lines), func(i int) (int, bool) {
+		if strings.TrimSpace(lines[i]) == "" {
+			return 0, true
+		}
+		w, _ := textlayout.LineIndent(lines[i], tabWidth)
+		return w, false
+	})
+}
+
+func TestRangesFunc(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
@@ -34,9 +49,9 @@ func TestRanges(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := Ranges(tc.lines, tc.tabWidth)
+			got := rangesOf(tc.lines, tc.tabWidth)
 			if !slices.Equal(got, tc.want) {
-				t.Errorf("Ranges(%q, %d) = %v, want %v", tc.lines, tc.tabWidth, got, tc.want)
+				t.Errorf("RangesFunc(%q, %d) = %v, want %v", tc.lines, tc.tabWidth, got, tc.want)
 			}
 		})
 	}

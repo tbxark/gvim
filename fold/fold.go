@@ -1,35 +1,17 @@
 package fold
 
-import (
-	"strings"
-
-	"github.com/tbxark/gvim/textlayout"
-)
-
 // Range is a fold range over zero-based line indexes. Start is the line that
 // opens the range and End is the last line in it, both inclusive.
 type Range struct {
 	Start, End int
 }
 
-// Ranges returns the indentation fold ranges of lines, ordered by Start. A
-// non-blank line opens a range when the next non-blank line is indented more
-// than it. The range runs to the last non-blank line before the first later
-// non-blank line that is not indented more than the opener. Blank lines inside
-// a range belong to it, and blank lines never open one. Indentation is measured
-// with textlayout.IndentWidth.
-func Ranges(lines []string, tabWidth int) []Range {
-	return RangesFunc(len(lines), func(i int) (int, bool) {
-		if strings.TrimSpace(lines[i]) == "" {
-			return 0, true
-		}
-		return textlayout.IndentWidth(lines[i], tabWidth), false
-	})
-}
-
-// RangesFunc is Ranges over n lines that are not held as strings: indent returns the
-// display width of the indentation of line i and whether the line is blank. A blank
-// line is one that has only white space, as strings.TrimSpace sees it.
+// RangesFunc returns the indentation fold ranges of n lines, ordered by Start. indentOf
+// returns the display width of the indentation of line i and whether the line is blank
+// (only white space, as strings.TrimSpace sees it). A non-blank line opens a range when
+// the next non-blank line is indented more than it. The range runs to the last non-blank
+// line before the first later non-blank line that is not indented more than the opener.
+// Blank lines inside a range belong to it, and blank lines never open one.
 func RangesFunc(n int, indentOf func(i int) (width int, blank bool)) []Range {
 	indent := make([]int, n)
 	var nonBlank []int
