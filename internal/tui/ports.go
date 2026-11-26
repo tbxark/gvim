@@ -669,6 +669,8 @@ type Deps struct {
 	// ShowExplorer shows the explorer at startup, with the root expanded. The app
 	// sets it when a folder argument is given. It has no effect without Explorer.
 	ShowExplorer bool
+	// StartReview opens the editor directly in Review Diff Mode (gvim --review).
+	StartReview bool
 	// Sidebar is the restored session's sidebar UI state (sections open/collapsed,
 	// rows, width form/side, scroll). The app sets it only when it restores the
 	// saved layout (not for a hot-exit restore or a file launch); nil keeps the

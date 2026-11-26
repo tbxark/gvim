@@ -52,6 +52,7 @@ var gvimCommandKeys = map[string]string{
 	"terminal_tab_rename":        "gvim.command.terminal_tab_rename",
 	"toggle_diagnostics_panel":   "gvim.command.toggle_diagnostics_panel",
 	"toggle_hex_view":            "gvim.command.toggle_hex_view",
+	"toggle_review_diff_mode":    "gvim.command.toggle_review_diff_mode",
 	"toggle_sticky_scroll":       "gvim.command.toggle_sticky_scroll",
 	"update_fresh":               "gvim.command.update_gvim",
 }
@@ -100,6 +101,7 @@ var gvimCommandDescKeys = map[string]string{
 	"terminal_tab_rename":        "gvim.command.terminal_tab_rename_desc",
 	"toggle_diagnostics_panel":   "gvim.command.toggle_diagnostics_panel_desc",
 	"toggle_hex_view":            "gvim.command.toggle_hex_view_desc",
+	"toggle_review_diff_mode":    "gvim.command.toggle_review_diff_mode_desc",
 	"toggle_sticky_scroll":       "gvim.command.toggle_sticky_scroll_desc",
 	"update_fresh":               "gvim.command.update_gvim_desc",
 }

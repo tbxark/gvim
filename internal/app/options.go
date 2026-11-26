@@ -128,6 +128,8 @@ type Options struct {
 	// Diff opens the two files, in tabs 0 and 1, in the compare view. It needs exactly
 	// two files and no folder.
 	Diff bool
+	// Review opens the workspace directly in Review Diff Mode (--review).
+	Review bool
 	// NoPlugins skips plugin discovery and loading, including the user's init.lua.
 	// Plugins named by PluginPaths still load.
 	NoPlugins bool
@@ -218,6 +220,15 @@ func (o Options) Validate() error {
 	}
 	// A compare launch is a file launch by definition, so --restore would be a
 	// no-op there; refuse it rather than silently ignoring it.
+	if o.Diff && o.Review {
+		return errors.New("--review cannot be combined with --diff")
+	}
+	if o.Restore && o.Review {
+		return errors.New("--restore cannot be combined with --review")
+	}
+	if o.StdinLaunch() && o.Review {
+		return errors.New("--stdin cannot be combined with --review")
+	}
 	if o.Restore && o.Diff {
 		return errors.New("--restore cannot be combined with --diff")
 	}
@@ -243,6 +254,9 @@ func (o Options) Validate() error {
 		}
 		if o.Diff {
 			return errors.New("--daemon cannot be combined with --diff")
+		}
+		if o.Review {
+			return errors.New("--daemon cannot be combined with --review")
 		}
 		if o.Restore || o.NoRestore {
 			return errors.New("--daemon cannot be combined with --restore/--no-restore")

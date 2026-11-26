@@ -12,6 +12,12 @@ func init() {
 			Contexts:    []string{"Normal"},
 		},
 		{
+			Name:        "Review Diff Mode",
+			Description: "Switch between Edit Mode and built-in Review Diff Mode (changed files sidebar + diff viewer)",
+			Action:      "toggle_review_diff_mode",
+			Contexts:    []string{"Normal", "FileExplorer", "Terminal"},
+		},
+		{
 			Name:        "Help: About gvim",
 			Description: "Show gvim version, Go runtime, platform, and architecture details",
 			Action:      "about_gvim",

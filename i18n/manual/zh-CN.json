@@ -1,4 +1,11 @@
 {
+  "gvim.command.review_diff_mode_change_base": "审阅差异模式：切换对比基准...",
+  "gvim.command.review_diff_mode_change_base_desc": "在审阅差异模式中选择用于对比工作区的 Git 分支、标签或提交",
+  "gvim.command.review_diff_mode_refresh": "审阅差异模式：刷新",
+  "gvim.command.review_diff_mode_refresh_desc": "重新加载审阅差异模式中的变更文件列表与当前差异",
+  "gvim.command.toggle_review_diff_mode": "审阅差异模式",
+  "gvim.command.toggle_review_diff_mode_desc": "在编辑模式与内置审阅差异模式（左侧变更文件列表 + 右侧差异视图）间切换",
+  "gvim.menu.review_diff_mode": "审阅差异模式",
   "gvim.prompt.title.choose": "选择",
   "gvim.prompt.title.close_workspace": "关闭工作区",
   "gvim.prompt.title.delete_theme": "删除主题",
@@ -29,5 +36,8 @@
   "gvim.prompt.title.ssh_authentication": "SSH 认证",
   "gvim.prompt.title.ssh_passphrase": "SSH 私钥密码",
   "gvim.prompt.title.ssh_password": "SSH 密码",
-  "gvim.prompt.title.tab_size": "制表符宽度"
+  "gvim.prompt.title.tab_size": "制表符宽度",
+  "gvim.review.base_prompt_title": "输入对比的 Git 引用",
+  "gvim.review.custom_ref": "输入自定义分支 / 提交…",
+  "gvim.review.select_base": "审阅差异：选择对比基准"
 }

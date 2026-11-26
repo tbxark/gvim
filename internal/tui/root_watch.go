@@ -36,7 +36,7 @@ func (m *Model) watchWait() tea.Cmd {
 // status again. It returns the command that waits for the next change.
 func (m *Model) watchChanged() tea.Cmd {
 	reload := m.reloadTreeAsync()
-	return tea.Batch(reload, m.gitCmd(), m.watchWait())
+	return tea.Batch(reload, m.gitCmd(), m.watchWait(), m.scheduleReviewAutoRefresh())
 }
 
 // watchSync returns the command that adds the folders of the open documents to the file

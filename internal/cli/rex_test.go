@@ -24,7 +24,7 @@ func TestRexInstallCommand(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("rex install: %v", err)
 	}
-	for _, want := range []string{"Installed gvim's Rex integration.", "Rex plugin", "Rex config", "reloaded", "Gvim: Open File…"} {
+	for _, want := range []string{"Installed gvim's Rex integration.", "Rex plugin", "Rex config", "reloaded", "Gvim: Open File…", "Gvim: Review Diff", "cmd+shift+r"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}

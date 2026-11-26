@@ -79,6 +79,7 @@ func TestInstallWritesThePluginAndTheLoader(t *testing.T) {
 		endMarker,
 		`dofile("` + rep.RexPlugin + `").setup({`,
 		`bin = { "/opt/gvim/bin/gvim" }`,
+		`keys = { open = "cmd+shift+e", review = "cmd+shift+r" }`,
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("init.lua lacks %q:\n%s", want, config)
@@ -358,6 +359,7 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	if err := l.DoString(`
 		local actions = {}
 		local spawned = {}
+		local bound = {}
 		rex = {
 			block = { call = function() return nil end },
 			layout = { block = function(o) return o end },
@@ -366,10 +368,11 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 				return true, nil
 			end },
 			action = function(a) actions[a.name] = a end,
-			bind = function() end,
+			bind = function(key, name) bound[key] = name end,
 		}
 		_TEST_ACTIONS = actions
 		_TEST_SPAWNED = spawned
+		_TEST_BOUND = bound
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -383,11 +386,24 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	mod := l.Get(-1)
 	l.SetGlobal("gvim_mod", mod)
 	if err := l.DoString(`
-		gvim_mod.setup({ bin = { "/opt/bin/gvim" } })
+		gvim_mod.setup({
+			bin = { "/opt/bin/gvim" },
+			keys = { open = "cmd+shift+e", review = "cmd+shift+r" },
+		})
 		_TEST_ACTIONS.gvim_open.run({}, { target = "-dash.txt" })
 		_TEST_ACTIONS.gvim_diff.run({}, { left = "-a.txt", right = "-b.txt" })
+		_TEST_ACTIONS.gvim_review.run({})
 	`); err != nil {
 		t.Fatal(err)
+	}
+	bound := l.GetGlobal("_TEST_BOUND").(*lua.LTable)
+	for key, want := range map[string]string{
+		"cmd+shift+e": "gvim_open",
+		"cmd+shift+r": "gvim_review",
+	} {
+		if got := bound.RawGetString(key).String(); got != want {
+			t.Fatalf("bound[%q] = %q, want %q", key, got, want)
+		}
 	}
 	spawned := l.GetGlobal("_TEST_SPAWNED").(*lua.LTable)
 	readCmd := func(idx int) []string {
@@ -407,14 +423,23 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	if got := readCmd(2); !slices.Equal(got, wantDiff) {
 		t.Fatalf("gvim_diff cmd = %v, want %v", got, wantDiff)
 	}
+	wantReview := []string{"/usr/bin/env", wantPath, "/opt/bin/gvim", "--review", "."}
+	if got := readCmd(3); !slices.Equal(got, wantReview) {
+		t.Fatalf("gvim_review cmd = %v, want %v", got, wantReview)
+	}
 	// A remote pane must not run the local absolute path from bin.
 	if err := l.DoString(`
 		_TEST_ACTIONS.gvim_open.run({ server = "nvidia" }, { target = "-dash.txt" })
+		_TEST_ACTIONS.gvim_review.run({ server = "nvidia" })
 	`); err != nil {
 		t.Fatal(err)
 	}
 	wantRemote := []string{"/bin/sh", "-c", "PATH=\"$PATH:$HOME/go/bin:$HOME/.local/bin\"; exec gvim \"$@\"", "gvim", "--", "-dash.txt"}
-	if got := readCmd(3); !slices.Equal(got, wantRemote) {
+	if got := readCmd(4); !slices.Equal(got, wantRemote) {
 		t.Fatalf("remote gvim_open cmd = %v, want %v", got, wantRemote)
+	}
+	wantRemoteReview := []string{"/bin/sh", "-c", "PATH=\"$PATH:$HOME/go/bin:$HOME/.local/bin\"; exec gvim \"$@\"", "gvim", "--review", "."}
+	if got := readCmd(5); !slices.Equal(got, wantRemoteReview) {
+		t.Fatalf("remote gvim_review cmd = %v, want %v", got, wantRemoteReview)
 	}
 }

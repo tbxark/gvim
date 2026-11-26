@@ -43,6 +43,7 @@ func NewRootCommand(run Runner) *cobra.Command {
 		themeName  string
 		logFile    string
 		diff       bool
+		review     bool
 		readOnly   bool
 		noPlugins  bool
 		pluginPath []string
@@ -111,6 +112,7 @@ command drops this client and leaves the editor running.`,
   gvim ~/project main.go:42:7 README.md
   gvim -R file.go
   gvim --diff old.go new.go
+  gvim --review
   gvim --no-restore
   gvim --simple
   git show HEAD | gvim -
@@ -155,6 +157,7 @@ command drops this client and leaves the editor running.`,
 				Theme:    themeName,
 				LogFile:  logFile,
 				Diff:     diff,
+				Review:   review,
 				ReadOnly: readOnly,
 
 				NoPlugins:   noPlugins,
@@ -205,6 +208,7 @@ command drops this client and leaves the editor running.`,
 	flags := root.Flags()
 	flags.StringVar(&logFile, "log-file", "", "append the status-row notices and the plugin log to `PATH`")
 	flags.BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
+	flags.BoolVar(&review, "review", false, "open directly in Review Diff Mode to inspect git changes")
 	flags.BoolVarP(&readOnly, "read-only", "R", false, "open in read-only / code-viewer mode (protect files from edits)")
 	flags.BoolVar(&readOnly, "view", false, "alias for -R / --read-only")
 	flags.BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")

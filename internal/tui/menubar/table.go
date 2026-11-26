@@ -95,13 +95,27 @@ func dropdownRows(title string, holds func(string) bool, keyOf func(string) (str
 					keys, _ = keyOf("toggle_sticky_scroll")
 				}
 				checked := holds != nil && holds("sticky_scroll")
-				rows = append(rows, Row{
-					Label:    i18n.TOr("", "gvim.menu.sticky_scroll", "Sticky Scroll", nil),
-					Keys:     keys,
-					Action:   "toggle_sticky_scroll",
-					Checkbox: true,
-					Checked:  checked,
-				})
+				var reviewKeys string
+				if keyOf != nil {
+					reviewKeys, _ = keyOf("toggle_review_diff_mode")
+				}
+				reviewChecked := holds != nil && holds("review_diff_mode")
+				rows = append(rows,
+					Row{
+						Label:    i18n.TOr("", "gvim.menu.sticky_scroll", "Sticky Scroll", nil),
+						Keys:     keys,
+						Action:   "toggle_sticky_scroll",
+						Checkbox: true,
+						Checked:  checked,
+					},
+					Row{
+						Label:    i18n.TOr("", "gvim.menu.review_diff_mode", "Review Diff Mode", nil),
+						Keys:     reviewKeys,
+						Action:   "toggle_review_diff_mode",
+						Checkbox: true,
+						Checked:  reviewChecked,
+					},
+				)
 			case "Help":
 				rows = append(rows,
 					Row{Separator: true},

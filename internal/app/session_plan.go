@@ -61,7 +61,7 @@ func planSession(opts Options, cfg config.Config) sessionPlan {
 	// launch whatever is named. A compare launch is always a file launch: the
 	// compare view is its two named files.
 	fileLaunch := files && cfg.SkipSessionRestoreWhenFilesPassed && !opts.Restore
-	if opts.Simple || opts.Diff {
+	if opts.Simple || opts.Diff || opts.Review {
 		fileLaunch = true
 	}
 	// The session side is broader than Fresh's plugin-visible fileLaunch: gvim keeps a

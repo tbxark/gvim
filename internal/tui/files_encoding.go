@@ -135,6 +135,8 @@ func (m *Model) statusSegmentClick(i int) tea.Cmd {
 		return m.dispatch(Command{Action: "show_update_output"})
 	case frame.StatusSegmentHexView:
 		return m.toggleHexView()
+	case frame.StatusSegmentReviewMode:
+		return m.toggleReviewMode()
 	}
 	return nil
 }

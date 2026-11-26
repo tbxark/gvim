@@ -196,7 +196,7 @@ type keyLabeler interface {
 // listed, and neither is one whose when-clause fails now.
 func (m *Model) allCommands() []commands.Entry {
 	p := &m.plug
-	base := slices.Concat(m.commands, m.compareCommands())
+	base := slices.Concat(m.commands, m.compareCommands(), m.reviewCommands())
 	if len(m.updates.Command) > 0 && len(m.updateCommands) > 0 {
 		// The updater rows exist only while an update command is configured: a bare
 		// gvim has no command that would do nothing.

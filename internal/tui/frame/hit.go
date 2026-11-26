@@ -65,6 +65,7 @@ const (
 	StatusSegmentTerminalRestart // the dock's shell has exited: restarts the terminal
 	StatusSegmentUpdate          // a newer release is known: shows the update details
 	StatusSegmentHexView         // a binary document: switches summary and hex view
+	StatusSegmentReviewMode      // Review Diff Mode pill: exits back to Edit Mode
 )
 
 // HitTarget is the result of a hit test. Index depends on Kind. Menu labels,

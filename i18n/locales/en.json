@@ -1259,6 +1259,16 @@
   "gvim.command.about_gvim_desc": "Show gvim version, Go runtime, platform, and architecture details",
   "gvim.command.toggle_sticky_scroll": "View: Toggle Sticky Scroll",
   "gvim.command.toggle_sticky_scroll_desc": "Pin the enclosing function or block header at the top of the editor while scrolling",
+  "gvim.command.toggle_review_diff_mode": "Review Diff Mode",
+  "gvim.command.toggle_review_diff_mode_desc": "Switch between Edit Mode and built-in Review Diff Mode (changed files sidebar + diff viewer)",
+  "gvim.command.review_diff_mode_refresh": "Review Diff Mode: Refresh",
+  "gvim.command.review_diff_mode_refresh_desc": "Reload changed files and the active diff in Review Diff Mode",
+  "gvim.command.review_diff_mode_change_base": "Review Diff Mode: Compare Against...",
+  "gvim.command.review_diff_mode_change_base_desc": "Choose a git branch, tag, or commit to compare the working tree against in Review Diff Mode",
   "gvim.menu.about_gvim": "About gvim",
-  "gvim.menu.sticky_scroll": "Sticky Scroll"
+  "gvim.menu.sticky_scroll": "Sticky Scroll",
+  "gvim.menu.review_diff_mode": "Review Diff Mode",
+  "gvim.review.select_base": "Review Diff: Compare Against",
+  "gvim.review.custom_ref": "Enter custom ref / commit…",
+  "gvim.review.base_prompt_title": "Compare Against Git Ref"
 }

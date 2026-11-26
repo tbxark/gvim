@@ -253,7 +253,7 @@ func loader(pluginPath, bin string) string {
 		"-- Managed by `gvim rex install`; `gvim rex uninstall` removes it.",
 		"dofile(" + luaString(pluginPath) + ").setup({",
 		"  bin = { " + luaString(bin) + " },",
-		`  keys = { open = "cmd+shift+e" },`,
+		`  keys = { open = "cmd+shift+e", review = "cmd+shift+r" },`,
 		"})",
 		endMarker,
 	}, "\n") + "\n"

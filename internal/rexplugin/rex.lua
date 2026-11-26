@@ -1,7 +1,7 @@
 -- Installed by `gvim rex install`; `gvim rex uninstall` removes it.
 --
--- gvim in a Rex pane: open a file, a directory, or a two-file diff in a
--- floating window over the session.
+-- gvim in a Rex pane: open a file or directory, open Review Diff Mode, or
+-- compare two files in a floating window over the session.
 --
 -- `gvim rex install` puts this file under Rex's config directory and adds the
 -- managed block that loads it to init.lua. A copy loaded by hand takes the same
@@ -134,8 +134,20 @@ function M.setup(opts)
   }
 
   rex.action{
-    name = "gvim_diff",
+    name = "gvim_review",
     title = "Gvim: Review Diff",
+    description = "Open gvim in Review Diff Mode in a floating window over this session,"
+      .. " in the pane's directory.",
+    category = "Gvim",
+    keywords = "gvim review diff git changes",
+    run = function(ctx)
+      open(ctx, "review", { "--review", "." })
+    end,
+  }
+
+  rex.action{
+    name = "gvim_diff",
+    title = "Gvim: Compare Files…",
     description = "Compare two files side by side in gvim, in this pane's directory.",
     category = "Gvim",
     keywords = "gvim diff compare review",

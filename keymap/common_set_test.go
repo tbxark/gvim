@@ -44,11 +44,11 @@ var presetCounts = []struct {
 	dock         int
 	file         int
 }{
-	{"default", 270, 267, 15, 155, 34, 7, 6, 6, 5, 30, 6, 3, 270},
-	{"macos", 331, 290, 15, 170, 38, 9, 6, 6, 5, 30, 8, 3, 61},
-	{"macos-gui", 383, 341, 17, 214, 38, 11, 6, 6, 5, 32, 9, 3, 52},
-	{"emacs", 368, 332, 15, 200, 42, 9, 9, 11, 5, 32, 6, 3, 98},
-	{"vscode", 281, 274, 15, 162, 34, 7, 6, 6, 5, 30, 6, 3, 11},
+	{"default", 272, 269, 15, 156, 34, 7, 6, 6, 5, 31, 6, 3, 272},
+	{"macos", 333, 292, 15, 171, 38, 9, 6, 6, 5, 31, 8, 3, 61},
+	{"macos-gui", 385, 343, 17, 215, 38, 11, 6, 6, 5, 33, 9, 3, 52},
+	{"emacs", 370, 334, 15, 201, 42, 9, 9, 11, 5, 33, 6, 3, 98},
+	{"vscode", 283, 276, 15, 163, 34, 7, 6, 6, 5, 31, 6, 3, 11},
 }
 
 func TestPresetBindingCounts(t *testing.T) {
@@ -269,6 +269,7 @@ func TestRepresentativeFreshBindings(t *testing.T) {
 		{"default", keymap.ContextNormal, []string{"alt+o"}, "toggle_dock_focus", nil},
 		{"default", keymap.ContextNormal, []string{"alt+shift+n"}, "focus_next_sidebar_section", nil},
 		{"default", keymap.ContextNormal, []string{"alt+shift+p"}, "focus_prev_sidebar_section", nil},
+		{"default", keymap.ContextNormal, []string{"alt+shift+r"}, "toggle_review_diff_mode", nil},
 		{"default", keymap.ContextNormal, []string{"alt+/"}, "open_live_grep", nil},
 		{"default", keymap.ContextNormal, []string{"alt+r"}, "resume_live_grep", nil},
 		{"default", keymap.ContextNormal, []string{"ctrl+b"}, "toggle_file_explorer", nil},
@@ -295,6 +296,7 @@ func TestRepresentativeFreshBindings(t *testing.T) {
 		{"default", keymap.ContextFileExplorer, []string{"space"}, "file_explorer_toggle_select", nil},
 		{"default", keymap.ContextFileExplorer, []string{"alt+t"}, "popup_focus", nil},
 		{"default", keymap.ContextFileExplorer, []string{"alt+shift+n"}, "focus_next_sidebar_section", nil},
+		{"default", keymap.ContextFileExplorer, []string{"alt+shift+r"}, "toggle_review_diff_mode", nil},
 		{"default", keymap.ContextFileExplorer, []string{"backspace"}, "file_explorer_search_backspace", nil},
 		// terminal
 		{"default", keymap.ContextTerminal, []string{"ctrl+]"}, "terminal_escape", nil},

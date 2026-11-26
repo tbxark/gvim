@@ -297,6 +297,8 @@ type Model struct {
 	// workspaceOwner identifies this model generation for palette async/open messages.
 	// The app sets it per built daemon workspace; the zero value is a direct launch.
 	workspaceOwner palette.Owner
+	// review is the built-in Review Diff Mode state (see review_mode.go).
+	review reviewModeState
 }
 
 // drag is the pointer gesture in progress: a text selection, or a grab of the
@@ -407,6 +409,7 @@ func New(deps Deps) *Model {
 		m.explorerPanel = expanel.New(deps.Explorer, st, now).WithOptions(m.view.opts.Explorer)
 	}
 	m.initContents(deps)
+	m.initReviewMode(deps.StartReview)
 	m.dialogs = deps.Dialogs
 	if deps.ShowExplorer && deps.Explorer != nil {
 		m.explorerOpen = true
@@ -551,7 +554,7 @@ func (m *Model) MarkClosed() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd(), m.startupOpenCmd(), m.updateCheckCmd())
+	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd(), m.startupOpenCmd(), m.updateCheckCmd(), m.reviewInitCmd())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -594,7 +597,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dock.SetHostFocused(true)
 		cmd := m.beginAuthorityReconnect()
 		if changed {
-			cmd = tea.Batch(cmd, m.emitHostFocusEvent("window_focused"))
+			cmd = tea.Batch(cmd, m.emitHostFocusEvent("window_focused"), m.scheduleReviewAutoRefresh())
 		}
 		return m, cmd
 	}
@@ -654,6 +657,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The git marks are re-read with the same reconnect (a remote read through the
 		// authority; a local read stays the ordinary one).
 		cmds := []tea.Cmd{m.startupOpenCmd(), m.gitCmd()}
+		if m.review.active {
+			cmds = append(cmds, m.reviewRefreshCmd())
+		}
 		if explorer := m.remoteExplorerReloadCmd(); explorer != nil {
 			cmds = append(cmds, explorer)
 		}
@@ -787,6 +793,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) canSkipMotionView(mo tea.MouseMotionMsg, prevStrip, prevStatus frame.HitTarget, prevGrip bool, prevBorderHover int, prevDockHover, prevExDrag bool, prevNotice, prevStatusText string, cmd tea.Cmd) bool {
+	if m.review.active {
+		return false
+	}
 	if cmd != nil || tea.Mouse(mo).Button != tea.MouseNone || m.drag.active || m.divider.active || m.drag.tab != nil ||
 		prevExDrag || m.explorerPanel.Dragging() || m.dock.MouseDragging() || m.dock.Hovered() != prevDockHover ||
 		m.notice != prevNotice || m.ed.Status() != prevStatusText {
@@ -908,6 +917,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.largeMessage(msg); ok {
 		return m, tea.Batch(overlayCmd, cmd)
 	}
+	if cmd, ok := m.reviewMessage(msg); ok {
+		return m, tea.Batch(overlayCmd, cmd)
+	}
 	if cmd, ok := m.rootMessage(msg); ok {
 		return m, tea.Batch(overlayCmd, cmd)
 	}
@@ -956,9 +968,21 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = panelCmd
 			break
 		}
+		if m.review.active {
+			cmd = m.handleReviewClick(msg)
+			break
+		}
 		cmd = m.handleClick(msg)
 		m.rebaseFind()
 	case tea.MouseMotionMsg:
+		if m.review.active {
+			if dockCmd, taken := m.dockMouse(msg, msg.X, msg.Y, 1); taken {
+				cmd = dockCmd
+			} else {
+				m.handleReviewMotion(msg.Mouse())
+			}
+			break
+		}
 		if m.divider.active {
 			// An in-flight Contents divider drag owns the pointer: a floating plugin
 			// panel under the pointer must not swallow the motion (leaving divider.active
@@ -980,6 +1004,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
+		if m.review.active {
+			m.handleReviewRelease()
+			if dockCmd, taken := m.dockMouse(msg, msg.X, msg.Y, 1); taken {
+				cmd = dockCmd
+			}
+			break
+		}
 		if m.divider.active {
 			// The divider's release ends the drag first, exactly like the motion guard:
 			// no plugin panel, dock or explorer action may consume it.
@@ -1005,6 +1036,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		// Scrolling is navigation, so a message ends with it as it does with a key or a click.
 		m.expireStatus()
+		if m.review.active {
+			cmd = m.handleReviewWheel(msg)
+			break
+		}
 		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
 			cmd = panelCmd
 		} else {
@@ -1338,6 +1373,8 @@ func (m *Model) Holds(name string) bool {
 		return m.tree != nil && m.tree.ShowHidden()
 	case "file_explorer_show_gitignored":
 		return m.tree != nil && m.tree.ShowIgnored()
+	case "review_diff_mode":
+		return m.review.active
 	}
 	if lang, ok := strings.CutPrefix(name, "language:"); ok {
 		return doc != nil && m.lspLanguage(doc) == strings.ToLower(lang)
@@ -1556,6 +1593,9 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 	if m.dockKeyboard() {
 		return m.dockKey(k, kp)
 	}
+	if m.review.active {
+		return m.handleReviewKey(k, kp, text)
+	}
 	// While the tab strip has focus it takes every key that types text, shifted
 	// letters included, so no text reaches the editor.
 	if m.tabFocus && (len(kp.Mods) == 0 || text != "") {
@@ -1690,6 +1730,8 @@ var explorerFallthrough = map[string]bool{
 	"open_terminal": true, "open_terminal_below": true, "open_terminal_right": true,
 	// The explorer's own toggle.
 	"toggle_file_explorer": true,
+	// Review Diff Mode toggle.
+	"toggle_review_diff_mode": true,
 }
 
 // clipboardActions are the editor actions the explorer takes over while it has
@@ -1805,6 +1847,18 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		} else {
 			m.notice = "Sticky scroll disabled"
 		}
+	case "toggle_review_diff_mode":
+		return m.toggleReviewMode(), true
+	case "review_diff_mode_refresh":
+		if m.review.active {
+			return m.reviewRefreshCmd(), true
+		}
+		return m.enterReviewMode(false), true
+	case "review_diff_mode_change_base":
+		if !m.review.active {
+			return tea.Batch(m.enterReviewMode(false), m.reviewOpenBasePickerCmd()), true
+		}
+		return m.reviewOpenBasePickerCmd(), true
 	case "scroll_tabs_left":
 		m.scrollTabs(-1)
 	case "scroll_tabs_right":
@@ -2225,6 +2279,16 @@ func (m *Model) layoutInput() frame.Input {
 		in.Sidebar = m.sidebarSpecs()
 	}
 	m.viewLayout(&in)
+	if m.review.active {
+		in.ExplorerOpen = m.review.sidebarOpen
+		if in.ExplorerOpen {
+			in.Sidebar = []sidebar.Spec{{Kind: sidebar.KindExplorer}}
+		} else {
+			in.Sidebar = nil
+		}
+		in.HideTabBar = false
+		in.Welcome = false
+	}
 	return in
 }
 
@@ -2300,6 +2364,9 @@ func (m *Model) statusView() frame.StatusView {
 	s.Clock = m.now().Format(clockFormat)
 	s.Chord = m.statusChord()
 	s.Extra = m.statusExtraItems()
+	if m.review.active {
+		m.reviewStatusInfo(&s)
+	}
 	return s
 }
 
@@ -2557,14 +2624,18 @@ func (m *Model) paintIntoWithCaret(g *grid.Grid) (cx, cy int, ok, paintedFocus b
 	}
 	body := style.TaggedCell(m.styles.Editor, "editor", "fg", "editor", "bg")
 	g.Clear(body)
-	cx, cy, ok, paintedFocus = m.paintEditor(g, l)
-	m.paintDropZone(g)
-	m.dock.Draw(g, l, m.styles)
-	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip, m.stripHover)
-	if l.ExplorerOpen {
-		m.paintSidebar(g, l)
-		if m.gripHover {
-			m.paintGripHover(g, l)
+	if m.review.active {
+		m.paintReviewMode(g, l)
+	} else {
+		cx, cy, ok, paintedFocus = m.paintEditor(g, l)
+		m.paintDropZone(g)
+		m.dock.Draw(g, l, m.styles)
+		tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip, m.stripHover)
+		if l.ExplorerOpen {
+			m.paintSidebar(g, l)
+			if m.gripHover {
+				m.paintGripHover(g, l)
+			}
 		}
 	}
 	if l.FrameOn {
@@ -2650,7 +2721,7 @@ func (m *Model) paintEditor(g *grid.Grid, l frame.Layout) (cx, cy int, ok, paint
 
 // editorOwnsCaret reports whether the focused editor pane owns the terminal caret.
 func (m *Model) editorOwnsCaret(l frame.Layout) bool {
-	if l.Gated || len(m.overlays) > 0 {
+	if l.Gated || len(m.overlays) > 0 || m.review.active {
 		return false
 	}
 	if m.explorerFocus || m.contentsFocus || m.diag.focus || m.menu.IsOpen() {
@@ -2692,6 +2763,9 @@ func (m *Model) caret() (x, y int, ok bool) {
 	}
 	if m.dockKeyboard() {
 		return m.dock.Caret(m.layout())
+	}
+	if m.review.active {
+		return 0, 0, false
 	}
 	doc := m.ed.Active()
 	if doc == nil || m.tabFocus {

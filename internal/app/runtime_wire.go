@@ -252,6 +252,7 @@ func (b *runtimeBuild) wireRootDeps() {
 	// stays hidden until Ctrl+B, unless the session had it open. --simple opens
 	// neither.
 	deps.ShowExplorer = b.plan.explorer && (opts.Root != "" || (b.plan.tabs && b.restored && b.sess.Explorer))
+	deps.StartReview = opts.Review
 	deps.Sidebar = b.sidebarState
 	deps.HideLineNumbers = !cfg.LineNumbers
 	deps.HideMenuBar = !cfg.ShowMenuBar
@@ -392,6 +393,7 @@ func (b *runtimeBuild) wirePluginPorts() {
 	if b.opts.Remote == nil {
 		deps.Root.GitGrep = gitGrep{spawnEnv: b.envProvider.Overlay, oneShot: b.authSlot.OneShot()}
 	}
+	deps.Root.ReviewGit = uiadapter.ReviewGit{Slot: b.authSlot, Remote: b.opts.Remote != nil}
 	deps.Root.Plugins = pw.Runtime
 	deps.Root.PluginEditor = pw.Editor
 	if b.pluginWS != nil {

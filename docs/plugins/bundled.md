@@ -1,11 +1,11 @@
 # Bundled plugins
 
-gvim ships twenty-seven plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-six plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `diff_nav`,
-`slang_lsp` and `audit_mode` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `diff_nav`
+and `slang_lsp` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -39,7 +39,6 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `dashboard` | **off** | Show Dashboard | `show_on_empty` (true), `refresh_seconds` (5, 1 to 60), `github_prs` (false), `github_checks` (false), `weather` (false), `weather_location` (empty), `weather_units` (metric), `network` (false) |
 | `code_tour` | **off** | Tour: Load Definition..., Tour: Open Workspace Tour..., Tour: Next Step, Tour: Previous Step, Tour: Exit, Tour: Create from Current Location... | none |
 | `live_diff` | **off** | Live Diff: Toggle (Global), Live Diff: Toggle (Buffer), Live Diff: vs HEAD, Live Diff: vs Disk (unsaved changes), Live Diff: vs Branch..., Live Diff: vs Default Branch, Live Diff: Refresh, Live Diff: Set Default Mode... | `default_mode` (head), `default_branch` (main), `debounce_ms` (75, 10 to 5000, project), `max_virtual_lines` (2000), `max_overlay_lines` (20000) |
-| `audit_mode` | **off** | Review Diff, Review Diff: Next Hunk, Review Diff: Previous Hunk, Review Diff: Refresh, Review Diff: Close | none |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -196,50 +195,6 @@ as tier-1c virtual rows above the seam, with the `-` gutter glyph and bold+under
 Fresh's priority order and capped at the host's 64 virtual rows per anchor plus an "… N more deleted
 lines" summary row (the capability is live on the shipped host; an older host falls back to the line
 backgrounds and new-side emphasis). It is opt-in like Fresh's live_diff.
-
-**audit_mode** (reduced, read-only Fresh port): **Review Diff** reads `git status --porcelain -z
--uall` plus staged/unstaged `git diff --numstat` and lists staged, unstaged and untracked files
-with their status and additions/deletions in a picker; **Review Diff: Refresh** re-reads that list
-and **Review Diff: Close** drops the picker and any diff view. Choosing a file opens a read-only
-`*Review Diff: <path>*` virtual buffer with git's unified diff (or, for an untracked file, the file
-shown as a new file). Every new-side diff row is a line target that opens the working file at that
-line; old-side-only and deleted rows have no working-tree target. **Review Diff: Next Hunk** and
-**Review Diff: Previous Hunk** move the open diff view's cursor to the next/previous `@@` header
-(the equivalents of Fresh's `n`/`p`); at a file boundary they load the next/previous file with a
-hunk in the review's ordered file list and land on its first/last hunk. They say when the whole
-review is at its first/last hunk or no diff is open. They only navigate when the review diff is the
-active buffer; running them from another tab reports that the user must switch back first instead of
-moving a hidden buffer. Each navigation is a new operation with a fresh diff generation and records
-its source diff buffer/file; only the latest operation may present, so two overlapping next/prev
-commands cannot let an older answer replace a newer one. Cross-file loads are bounded and also check
-the active buffer, so close/reopen, file selection, tab switch, picker Esc or a Review Diff refresh
-(which starts a new review-data epoch and invalidates in-flight navigation) discards a stale
-navigation instead of opening a background diff. Overlapping refreshes are independent operations:
-only the newest refresh may replace the file/repo state or show a notice, so an older success cannot
-overwrite newer rows and an older error cannot appear after the newer result. It also follows the editor's own
-`after_file_save`/`after_file_revert` events, the save/revert half of Fresh's review watch: with
-the picker open it re-reads the list, and with a matching unstaged/untracked diff open it reloads
-that read-only diff in place, preserving the current hunk/cursor and line targets without focusing
-the buffer. When the review picker and a diff are open together, the list refresh and the matching
-diff reload run as independent tasks: an unrelated save's winning list refresh cannot cancel the
-open file's reload, and closing the picker mid-refresh does not cancel it either. Only a newer
-matching reload, a closed/replaced diff or a different selection discards the reload. A failed
-in-place reload reports a visible error. A staged diff is not reloaded by a working-tree save. Reload completions carry their own
-operation sequence and diff generation, so a newer save, close/reopen, file selection or refresh
-discards a stale reload. This is not Fresh's full watch: there is no background poll or `W` toggle,
-so changes made outside gvim wait for the explicit **Review Diff: Refresh**. A truncated candidate still opens with an explicit
-truncation notice; hitting the 200-candidate bound or failing to read a candidate is reported as
-that reason, not as a global first/last hunk. All git calls go through the hardened `gvim.git` reader with bounded output; scans/diffs are async plugin tasks, no Update work,
-and a closed picker/diff invalidates an in-flight answer by generation (an already-issued git
-process is not killed, only its result discarded; this includes an untracked file's bounded
-working-tree read, which is generation-checked after the read returns). The truncation footer is
-reset on every refresh, including a clean or error result, and a path changed on both sides keeps
-its staged and unstaged diffstats separate (totals add each category once). The port is read-only:
-it does **not** stage,
-unstage, discard, add comments or notes, export, review a commit range/stash, show side-by-side or
-provide Fresh's background poll/`W` watch for changes made outside the editor; those need index writes, comment persistence or the orchestrator/range
-machinery and are OPEN. Binary changes show git's message without line targets; very large output is
-truncated and footered as such. No default keys; opt-in.
 
 **path_complete** (reduced; Fresh's passive prompt hook has no gvim seam): Fresh's plugin answers the
 editor's built-in Open File / Save File As prompts with directory suggestions. gvim's Open File and

@@ -20,10 +20,11 @@ func newRexCommandWith(installer rexplugin.Installer) *cobra.Command {
 		Short: "Install gvim's Rex integration",
 		Long: `Install gvim's Rex integration.
 
-The plugin goes in Rex's config directory and adds "Gvim: Open File…" and
-"Gvim: Review Diff" to Rex's command palette: gvim opens in a floating window
-over the session, at the working directory of the pane the action was called
-from, or on a file of it. A managed block in Rex's init.lua loads it.
+The plugin goes in Rex's config directory and adds "Gvim: Open File…",
+"Gvim: Review Diff", and "Gvim: Compare Files…" to Rex's command palette: gvim
+opens in a floating window over the session, at the working directory of the
+pane the action was called from, or on a file of it. A managed block in Rex's
+init.lua loads it.
 
 "rex install" writes the plugin and reloads Rex's config; "rex uninstall" takes
 it away again. A file the command did not write is never replaced or removed.`,
@@ -57,7 +58,7 @@ func newRexInstallCommand(installer rexplugin.Installer) *cobra.Command {
 			if err := writeLine(w, ""); err != nil {
 				return err
 			}
-			return writeLine(w, "In Rex: cmd+shift+p, then \"Gvim: Open File…\" (cmd+shift+e).")
+			return writeLine(w, "In Rex: cmd+shift+p, \"Gvim: Open File…\" (cmd+shift+e), or \"Gvim: Review Diff\" (cmd+shift+r).")
 		},
 	}
 }

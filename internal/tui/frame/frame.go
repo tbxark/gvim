@@ -133,6 +133,13 @@ type StatusView struct {
 	// "Summary" while the hex dump is shown. Empty for text and image documents.
 	HexView string
 
+	// ReviewMode replaces the normal document status elements with the Review Diff
+	// Mode indicator pill (clickable to return to Edit Mode), progress summary,
+	// and concise key hints.
+	ReviewMode  bool
+	ReviewText  string
+	ReviewHints string
+
 	Extra []StatusItem // the items of plugins (plugin_status.go)
 
 	PaletteHint string // the palette hint; empty for PaletteHelp
@@ -1028,6 +1035,9 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 // statusRunsCut is StatusRuns, and it also reports whether the status message was cut
 // or dropped to fit the row (which wraps it onto the notice band above).
 func statusRunsCut(w int, s StatusView) ([]Run, bool) {
+	if s.ReviewMode {
+		return reviewStatusRunsCut(w, s)
+	}
 	if s.Row.Left == nil && s.Row.Right == nil {
 		s.Row = StatusRow{Left: DefaultStatusLeft(), Right: DefaultStatusRight()}
 	}
@@ -1173,6 +1183,96 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 		r.Style = seg.style
 		runs = append(runs, r)
 		x += ansi.StringWidth(seg.text)
+	}
+	return runs, cut
+}
+
+// reviewStatusRunsCut lays out the status bar while Review Diff Mode is active:
+// a clickable [REVIEW] pill + progress/notice on the left, and concise key hints
+// + palette chip on the right.
+func reviewStatusRunsCut(w int, s StatusView) ([]Run, bool) {
+	pad := space.Pad
+	var left []statusSeg
+	left = append(left, statusSeg{
+		text:  pad("[REVIEW]"),
+		kind:  HitStatusSegment,
+		id:    StatusSegmentReviewMode,
+		style: StyleWarning,
+	})
+	if s.ReviewText != "" {
+		left = append(left, statusSeg{text: pad(s.ReviewText)})
+	}
+	if s.Message != "" {
+		left = append(left, statusSeg{
+			text:     pad(s.Message),
+			kind:     HitStatusSegment,
+			id:       StatusSegmentMessages,
+			messages: true,
+		})
+	}
+
+	var right []statusSeg
+	if s.ReviewHints != "" {
+		right = append(right, statusSeg{text: pad(s.ReviewHints), style: StyleMuted})
+	}
+	hint := PaletteHelp
+	if s.PaletteHint != "" {
+		hint = s.PaletteHint
+	}
+	right = append(right, statusSeg{text: pad(hint), kind: HitStatusPalette})
+
+	rightW := func(segs []statusSeg) int {
+		total := 0
+		for _, seg := range segs {
+			total += ansi.StringWidth(seg.text)
+		}
+		return total
+	}
+	minLeft := min(2*w/5, 36)
+	for len(right) > 0 && rightW(right) > w-minLeft {
+		// Drop hints before palette, then palette if very narrow.
+		right = right[1:]
+	}
+
+	var runs []Run
+	x := 0
+	room := w - rightW(right)
+	cut := false
+	sawMsg := false
+	for _, seg := range left {
+		if room <= 0 {
+			break
+		}
+		tw := ansi.StringWidth(seg.text)
+		if tw > room {
+			r := newRun(x, space.End(seg.text, room), seg.kind, seg.id)
+			r.Style = seg.style
+			runs = append(runs, r)
+			if seg.messages {
+				cut = true
+			}
+			break
+		}
+		r := newRun(x, seg.text, seg.kind, seg.id)
+		r.Style = seg.style
+		runs = append(runs, r)
+		if seg.messages {
+			sawMsg = true
+			cut = strings.Contains(s.Message, "\n")
+		}
+		x += tw
+		room -= tw
+	}
+	if s.Message != "" && !sawMsg {
+		cut = true
+	}
+
+	rx := w - rightW(right)
+	for _, seg := range right {
+		r := newRun(rx, seg.text, seg.kind, seg.id)
+		r.Style = seg.style
+		runs = append(runs, r)
+		rx += ansi.StringWidth(seg.text)
 	}
 	return runs, cut
 }

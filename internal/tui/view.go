@@ -19,6 +19,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/reviewdiff"
 	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/syntax"
@@ -599,6 +600,7 @@ func (m *Model) rebuildStyles() {
 	st := style.New(effective)
 	m.styles = st
 	m.panes = editorpane.NewStyles(effective)
+	m.review.styles = reviewdiff.NewStyles(effective)
 	m.themeGen++
 	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics).WithThemeChoices(m.themeChoices())
 	if m.tree != nil {

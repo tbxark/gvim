@@ -31,9 +31,9 @@ func TestCommandsFromBuiltinTable(t *testing.T) {
 	// 4 Plugin: rows of plugin_commands.go, the Run Agent and Discover Agent Sessions
 	// rows of terminal_commands.go and agent_discover_commands.go, and the 7 terminal-tab
 	// rows of terminal_commands.go, the Toggle Hex View row of binary_commands.go,
-	// and the Sticky Scroll and About gvim rows of gvim_commands.go.
-	if len(entries) != 244 {
-		t.Fatalf("Commands() = %d entries, want 244", len(entries))
+	// and the Sticky Scroll, Review Diff Mode and About gvim rows of gvim_commands.go.
+	if len(entries) != 245 {
+		t.Fatalf("Commands() = %d entries, want 245", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)
@@ -59,7 +59,8 @@ func TestKeybindingColumnFromKeymap(t *testing.T) {
 		"Add Cursor Below": "Ctrl+Alt+Down",
 		// Fresh's default keymap has no Duplicate Line key; gvim keeps one on Ctrl+Shift+D
 		// (Fresh uses Alt+Shift+Down for block selection).
-		"Duplicate Line": "Ctrl+Shift+D",
+		"Duplicate Line":   "Ctrl+Shift+D",
+		"Review Diff Mode": "Alt+Shift+R",
 	}
 	for name, want := range tests {
 		if got := find(t, entries, name).Keybinding; got != want {

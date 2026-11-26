@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"time"
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/reviewdiff"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -47,6 +49,24 @@ type GitStatus interface {
 	Marks(dir string) (map[string]rune, error)
 }
 
+// ReviewChangesResult is the changed-file list returned by ReviewGitPort.Changes.
+type ReviewChangesResult struct {
+	RepoRoot string
+	Branch   string
+	BaseRef  string
+	Files    []reviewdiff.FileEntry
+	NotRepo  bool
+}
+
+// ReviewGitPort reads git repository changes, per-file old/new contents, and
+// available refs for Review Diff Mode. All methods run off the update loop in
+// tea.Cmds and work against both local and remote authorities.
+type ReviewGitPort interface {
+	Changes(ctx context.Context, dir, baseRef string) (ReviewChangesResult, error)
+	FileDiff(ctx context.Context, repoRoot, baseRef string, entry reviewdiff.FileEntry) (*reviewdiff.FileDiff, error)
+	Refs(ctx context.Context, dir string) ([]string, error)
+}
+
 // RootPorts are the optional ports of the root features. A nil field disables
 // its feature, and the zero value disables all of them.
 type RootPorts struct {
@@ -69,6 +89,9 @@ type RootPorts struct {
 	GitGrep searchpanel.GitGrepper
 	// Git gives the explorer its status letters. Nil shows none.
 	Git GitStatus
+	// ReviewGit backs Review Diff Mode's async git diff and ref queries. Nil
+	// disables git loading in Review Diff Mode.
+	ReviewGit ReviewGitPort
 	// Watch delivers the changes of the tree root. Nil means no watcher, and the
 	// tree reloads only on Ctrl+R.
 	Watch <-chan filewatch.Changed
