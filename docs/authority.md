@@ -176,8 +176,8 @@ deliberately does not take.
   answers kind/size/mtime/mode, follows a live symbolic link and reports a broken link as a
   symlink (the port's fallback); `ReadDir` returns a name-sorted listing with the port's
   hidden filter and a symlink's target kind; `WriteFile` supports truncate/append, `Parents`
-  (`mkdir -p`) and `Atomic`; `Watch` polls (500 ms) because a remote host has no fsnotify
-  channel.
+  (`mkdir -p`) and `Atomic`; `Watch` polls (500 ms, backing off to 5 s when idle and to 10 s while disconnected, where it
+  sends nothing) because a remote host has no fsnotify channel.
 - Server-side bounded directory listing (evaluated, NOT enabled): the remote finder fallback
   cannot get a provable hard server-side bound from the portable tools. A `find -print0 |
   head -c` pass limits output/memory bytes and avoids shell-glob materialisation, but a
@@ -321,7 +321,7 @@ deliberately does not take.
   bridge is wired) the tree gets one 'remote directory watching is not supported;
   refresh manually (Ctrl+R)' notice and continues without watching, so a manual refresh
   always works. The same loader filters remote directories through the remote
-  `.gitignore` files read via `authority.Files().ReadFile` (root/nested, go-git parser
+  `.gitignore` files read via `authority.Files().ReadFile` (root/nested, `explorer` parser
   shared with the local explorer, at most 64 levels / 64 KiB per file / 4096 rules); an
   oversized or unreadable ignore file, or a depth/rule overflow, keeps the listing working
   with filtering incomplete and one notice. The remote finder index uses the same reader
@@ -462,7 +462,7 @@ Residuals of this slice (documented, not bugs):
 - Remote residuals of the landed routing: remote
   external-change watching covers the directories of open documents and of the explorer's
   listed directories, and the authority
-  watch is polled at ~500 ms plus the 150 ms coalescing window, with a rename reported as
+  watch is polled at ~500 ms (adaptive: slower when idle or disconnected) plus the 150 ms coalescing window, with a rename reported as
   remove+create; manual Revert/Reopen and the periodic disk check remain the fallback), remote
   large-file saves (remote large files edit as an overlay and save by streaming the merged
   file through the authority's atomic write stream: chunks into a remote temporary file,

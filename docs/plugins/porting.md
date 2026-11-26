@@ -33,7 +33,7 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 | `on("after_file_save", handler)` | `gvim.on("after_file_save", fn)`: the names are Fresh's; `buffer_id` becomes `ev.buf`, offsets become `Pos` |
 | `setStatus`, `info`, `warn`, `error`, `debug` | `gvim.notify`, `gvim.log.*` |
 | `prompt`, `startPrompt` with `setPromptSuggestions` | `gvim.ui.input` and `gvim.ui.set_prompt_suggestions` in its `on_change`, or `gvim.ui.picker` |
-| `import { Finder, defaultFuzzyFilter, getRelativePath } from "./lib/finder.ts"` | `require "gvim.finder"`: `Finder.new`/`open`/`close`, `filter`/`score`, `tree`, `open_locations`, `read_snippets`, `relative_path` (see [The shared Finder](#the-shared-finder-port-residual)) |
+| `import { Finder, defaultFuzzyFilter, getRelativePath } from "./lib/finder.ts"` | `require "gvim.finder"`: `Finder.new`/`open`/`close`, `filter`/`score`, `open_locations`, `read_snippets`, `relative_path` (see [The shared Finder](#the-shared-finder-port-residual)) |
 | `showActionPopup` | `gvim.ui.action_popup` (returns chosen action id; also raises `action_popup_result`) |
 | `addMenuItem` | `gvim.menu.add_item` / `remove_item` / `clear` |
 | `t(...)`, plugin i18n files | `gvim.i18n.t` (`t` alias) + `<name>.i18n.json`; %-prefixed command titles are translated |
@@ -179,17 +179,6 @@ driven. The procedure (and why it matters):
    each have such a smoke test; `internal/app/plugins_ports_palette_test.go` covers the
    config-locked enable → palette → command-run chain end to end).
 
-### Path completion needs a built-in-prompt seam (port residual)
-
-Fresh's `path_complete` is passive: it answers the editor's `prompt_changed` event for the
-built-in Open File and Save File As prompts with directory suggestions. gvim has neither a
-`prompt_changed`-style event nor a way to attach `gvim.ui.set_prompt_suggestions` to a prompt the
-plugin did not open: Open File/Switch Project use the native file-browser overlay and Save As uses
-the Save-As dialog. The bundled port keeps the completion engine (the exported `complete(input)`
-plus a Path Completion prompt command that exercises it) and documents the gap; a future host seam
-would emit a prompt-changed event for the browser/dialog inputs, and route the plugin's suggestion
-list into those overlays, after which the port can drop its command and match Fresh exactly.
-
 ### Audit mode: replaced by native Review Diff Mode
 
 Fresh's `audit_mode.ts` review workflow is served natively in gvim by the built-in **Review Diff Mode**
@@ -206,33 +195,23 @@ Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `g
 (`plugin/bundled/lib/finder.lua`): Fresh's fuzzy ranking with hard caps; a prompt frontend over
 `gvim.ui.picker` (`filter = "none"`, the library ranks in Lua so custom orderings such as symbols by
 source line survive, and `on_close` runs exactly once with `selected` / `cancelled` / `programmatic`);
-and a panel backend (`tree`) plus a locations finder (`open_locations`: relative `path:line` rows,
+and a locations finder (`open_locations`: relative `path:line` rows,
 snippet descriptions from open buffers or one bounded read, preview tabs on move, commit on Enter,
 cancel closes the preview). The filter source loads once and is ranked per query; a **search
 source** (`opts.search`, Fresh's `mode = "search"`) is called from the picker's `on_query` callback
 task with the debounced query (so it may wait on a process, as `git_grep` does) and its rows are
 capped, with `min_query`, an `on_rows(shown, total)` status hook and `set_footer`/`set_status`/
-`refresh` helpers. `diagnostics_panel` uses the tree backend and requires the library lazily on its
-first build, so the idle default bundle does not pay for it (the 8 MiB gate).
+`refresh` helpers. The library is required lazily by the plugins that use it, so the idle default
+bundle does not pay for it (the 8 MiB gate).
 
 Reduced or omitted from Fresh's Finder: search sources have no cancellation handle (a superseded
 query's `set_items` is discarded by the picker generation guard instead of killing the process), no
 per-query process spawn management, the embedded preview pane and utility-dock routing,
-`navigateOnCursorMove`, `panelKeys` and the panel-mode prompt-type events; the panel backend covers
-the grouped/deduped tree use only. `diagnostics_panel` implements Fresh's `syncWithEditor` itself
-from the existing cursor_moved event: the exact active-file/line diagnostic is selected/revealed
-through a widget mutation (no preview, no focus change). It also implements
-`navigateOnCursorMove`: a 90 ms debounce (Fresh's Finder.PREVIEW_DEBOUNCE_MS) opens the latest
-selected location with `gvim.buf.open(..., preview=true, background=true, focus=false)`,
-leaving the panel focused and the host's single preview tab replacing the previous one; closing
-the panel, activating a row, or refreshing the rows cancels the pending timer. The tick also
-checks that its captured row is still the row at the current selection index in the rebuilt node
-map, so a refresh that removes/moves the diagnostic cannot open its stale location. As with any
-plugin `buf.open`, an open request already issued to the host is not cancellable. `lsp_navigation` and `find_references` add the LSP edges:
-`gvim.finder.lsp_locations` normalizes `Location`/`Location[]`/`LocationLink[]` and converts UTF-16
-columns to bytes when the target line is open. Both are command ports because gvim has no
+`navigateOnCursorMove`, `panelKeys` and the panel-mode prompt-type events.
+`lsp_navigation` adds the LSP edges: `gvim.finder.lsp_locations` normalizes `Location`/`Location[]`/`LocationLink[]` and converts UTF-16
+columns to bytes when the target line is open. It is a command port because gvim has no
 `lsp_references`/`lsp_implementation` plugin events (the native Find References action has its own
-UI); `lsp_navigation` also offers definition/implementation/type-definition list commands that are
+UI); it also offers definition/implementation/type-definition list commands that are
 gvim additions over Fresh's core direct-jump actions. Fresh's enclosing-symbol preselection is
 approximated: the smallest containing symbol (same span/start/character tie-break) is placed first
 for the empty query and previewed immediately. gvim's picker API has no initialSelectedIndex, so
@@ -344,48 +323,6 @@ Four port decisions follow (rounds 11 and 22):
   working-tree file, which is wrong for any commit that is not HEAD. The Enter mapping and hunk
   navigation stay local.
 
-### diff_nav / R13-9: the standalone plugin and the git_gutter surface
-
-Fresh's `diff_nav.ts` is the unified Next/Previous Change plugin over three sources: the hunks
-`git_gutter` publishes, the `live_diff` hunks, and the saved-text diff. gvim first implemented that
-merged navigation inside `git_gutter` (round 14/15) while the standalone plugin/i18n namespace stayed
-open (R13-9 residual c). `plugin/bundled/plugins/diff_nav/` is now the standalone, opt-in port
-with Fresh's command ids and i18n messages; Fresh ships the plugin default-enabled, gvim does not
-because adding it to the default set measured 8.12 MiB against the 8 MiB idle-heap gate (the nine
-pre-existing defaults stay unchanged, and git_gutter's own merged navigation remains default-on):
-
-* **Next Change**/**Previous Change** (`diff_nav.next_change`/`diff_nav.prev_change`) collect
-  `gvim.plugins.get("git_gutter").hunks(buf)` when git_gutter is loaded and exports it, the same
-  export from `live_diff`, and `buf:diff_saved()`; each source is optional and a missing/older/
-  erroring export, an absent git binary or an unloaded plugin contributes nothing (navigation still
-  works from the remaining sources, including saved diff + live_diff with git_gutter disabled);
-* the provider data shapes are the real exports, not test adapters: git_gutter
-  `{type, line, count}` (0-based line; its deleted-run line is the line before the seam) and
-  live_diff `{kind, newStart, newCount}` (0-based); `buf:diff_saved()` yields the host's
-  `{kind, new_start, new_count}` hunks, and when `new_count == 0` (deletion) the jump line is
-  `max(new_start - 1, 0)`, matching git_gutter's merged navigation;
-* targets are sorted by byte position, deduplicated by line, and wrapped; the jump calls
-  `buf:set_cursor(..., { center = true })`, and the status row uses Fresh's exact
-  `Change n/total` / `Change n/total [wrapped]` / `No changes` i18n strings; malformed hunk entries
-  and a line outside the buffer are clipped or skipped;
-* it is `default_enabled: false` (Fresh's is default-enabled; recorded difference for the idle-heap
-  gate), registers no keys/settings, and runs all host calls as plugin-task awaits (no blocking IO in
-  Update).
-
-`git_gutter` keeps its own merged Next/Previous Change commands and `hunks` export: they predate this
-plugin, remain the default navigation while diff_nav is opt-in, and when both are enabled cause two
-palette command sets over the same targets (documented residual). Remaining gaps: the side-by-side Compare view (`--diff`)
-keeps its own Next/Previous Difference rather than feeding the cross-context navigation; large-file
-buffers can still only navigate sources that export something (a host that cannot answer offset_of
-falls back to line ordering; git_gutter keeps its own large-file notice); live_diff must be loaded to
-contribute its active-diff hunks.
-
-Tests: `plugin/bundled/diff_nav_test.go` covers the manifest/default, the exact en i18n table,
-the Fresh command ids/titles, merged git+live sorting and wrapping (next/prev, status strings), line
-deduplication, saved-diff-only navigation with no providers, live_diff-only and no-change cases, a
-raising provider degrading, prev from the end, and real interoperability with the actual git_gutter and
-live_diff plugins (including the real three-source merge, a deleted HEAD hunk, and the saved deletion
-seam).
 ### Assembly LSP: project config offer (port residual)
 
 Fresh's `asm-lsp.ts` helper has three parts: the install-help popup for a missing server, the
@@ -517,122 +454,6 @@ page focus-follows-cursor/scroll-to-widget composition, the Contents sidebar and
 orchestrator/agent cards. Tests: `internal/tui/welcome_test.go` and
 `internal/app/welcome_session_test.go` cover placement, the doors/keys, recents, and the
 show-on-empty/close-last-tab rules.
-
-### Deno LSP: native auto-selection (port landed)
-
-Fresh's `deno_lsp.ts` selects `deno lsp` for TypeScript and JavaScript when the active window's
-root holds `deno.json` or `deno.jsonc` and the Deno runtime is available; it remembers the
-configured entries as a baseline and restores them when the active window is not a Deno project,
-leaving a disabled language alone. That selection is now ported in **gvim's native core**
-(`internal/app/deno_lsp.go`, documented in `docs/lsp.md`), not in a plugin. The core
-rules: it probes the workspace root gvim opened/switched to (not every nested per-file root); when
-that root has `deno.json`/`deno.jsonc`, one bounded authority check confirms the runtime
-(`sh -c 'command -v deno'` through `authority.OneShot()` under the workspace trust gate; remote
-never uses local disk/PATH), `lsp_enabled` is true, and the language is `typescript` or
-`javascript`, core registers `deno lsp` for a manager created for that exact root. Nested/per-file
-TS/JS roots and other languages keep their configured servers, and `tsx` is untouched. An explicit
-`lsp` entry for typescript/javascript always wins and opts out, as does a disabled language or
-`lsp_enabled: false`. The provider registers `deno lsp` with `auto_start: false` (nothing is spawned silently).
-Installing/clearing the selection never stops a running server. An explicit Start/Restart LSP Server
-for typescript/javascript applies the completed current-root selection to an existing manager: if
-its config differs (Deno confirmed, or a config reload/explicit/disabled change cleared it), gvim
-replaces the whole language server list and restarts only that language's servers; other languages
-and universal servers are untouched. If the selection was cleared, the same explicit action restores
-the configured baseline. When a whole-language replacement is needed, Restart Server on any row of
-that language replaces the entire server list with the current selection — the clicked row's name is
-not used in that branch; otherwise Restart Server keeps its normal meaning and restarts only the
-named server. A root-wide LSP Restart rebuilds managers, so the selection applies when the root
-creates the next manager. A Settings Save/Reload pushes the reloaded config's server baseline into the LSP port
-(`SetConfig`): future managers and the next explicit Start/Restart use that baseline, including a
-newly added explicit typescript/javascript server, but the reload itself does not rebuild or restart
-an existing manager — it keeps its old config until the explicit action. Deno auto-selection is not
-applied while an explicit/disabled entry is present. Settings reload and a live trust revoke/restore
-pass the reloaded config through the LSP config gate before it reaches the port (the Deno probe
-evaluates the same gated config): Restricted/Blocked cannot gain auto-starting servers via reload or
-trust change, a manager created after a revoke does not auto-start, and after a revoke an
-already-created manager's old AutoStart configs no longer start new servers on Open without stopping
-running processes; manual Start/Restart remains available. Auto-start and launch spawn are two live checks, not atomic: a revoke between them refuses only when
-the spawn gate denies (Blocked, remote workspace not Trusted, or a project-contained executable);
-under Restricted a system-installed binary outside the project may still start. A revoke after the
-spawn gate passes can likewise let that in-flight start proceed. Neither check nor a revoke stops
-existing processes; later Opens do not auto-start after the revoke. Both replacing and same-config
-Restart preflight the spawn gate before stopping, so a denial preserves running servers and old
-config; preflight→launch is non-transactional (old servers may already be stopped and the new start
-refused when the spawn gate denies, though under Restricted a system-installed binary outside the
-project may still start); a repeated Start of an already-running server returns the live handle
-without spawning or consulting the gate, even when Blocked. Other start failures (missing binary,
-initialize failure) are still not transactional. The authority probe returns false while the authority is disconnected (a reconnect
-re-probes), requires a strictly clean exit 0 (timeout/signal/start-error/cancel results are
-rejected), and provider updates are serialized with explicit Start/Restart (in-flight old-language
-starts are waited out before replacement). Probe failures/timeouts/disconnects/trust denials select
-nothing.
-
-### Slang: native slang-synth external locations + helper plugin (native flow landed)
-
-Fresh's `slang-lsp.ts` is an LSP URI-scheme provider: it claims the `slang-synth://` scheme so
-the core routes builtin go-to-definition targets to it, then answers
-`lsp_open_external_uri` by running `slangd --print-builtin-module <module>` and opening the
-dumped `.slang` source read-only (cache keyed by `slangc -v`). gvim now implements that
-builtin external-location flow in **native core** (`internal/app/slang_synth.go`, the
-`internal/lsphost` external-location opener and the read-only TUI goto), not through a plugin
-URI hook:
-
-* only the `slang-synth` scheme is accepted, with one bounded module authority
-  (`[A-Za-z0-9._-]`, at most 64 bytes, no leading `.`/`-`); userinfo, port, query, fragment
-  and `.`/`..`/backslash path segments are refused, and the path is never a filesystem path;
-* it is **local authority only**: a remote/SSH workspace refuses explicitly instead of writing or
-  opening on the other side or falling back to a local command; `<Program>
-  --print-builtin-module <module>` runs through `authority.OneShot()` under the workspace trust
-  gate, with no `os/exec` path, where `Program`/`env`/cwd come from the answering LSP server (a bare
-  configured command falls back to that spelling resolved by the authority one-shot);
-* bounds are 5 s / 4 MiB stdout; timeout, signal, start/cancel failure, truncation and non-zero
-  exit are LSP location errors; invalid URIs and untrusted workspaces execute nothing;
-* the dump is written atomically under a **content-addressed** user cache file
-  (`gvim/slang-builtin/<module>-<sha256>.slang`, 0444 in a 0700 directory), so concurrent
-  resolutions of the same module never overwrite a path another goto is about to read and an
-  already-open document is reused only for identical bytes; a throttled non-blocking sweep drops
-  entries older than seven days and keeps at most 128 older-than-an-hour files. The path is opened
-  with the editor's generated/read-only marker at the LSP position. The editor still has no generic
-  plugin URI-scheme/external-URI API.
-
-The bundled port (`plugin/bundled/plugins/slang_lsp/`, opt-in) keeps only the user-facing
-install/check/help half; it does not handle synth URIs:
-
-* `Slang: Check slangd / slangc` runs `slangd --version` and `slangc -v` with
-  `gvim.proc.run` (through the workspace authority, 5 s / 64 KiB bounds), decides with
-  `result.ok`, and reports each tool's first version line; a non-ok result carries exit code +
-  first stderr/stdout line, and a start failure carries the actual error (remote-authority/sandbox/
-  broken-executable errors are never rewritten as "not found"); one tool failing does not hide the
-  other's answer;
-* `Slang: Copy Install Command` copies the official release instruction. Slang has no single
-  official package-manager command (the upstream install page points at binary releases), so the
-  clipboard text names the GitHub releases page and putting `slangc`/`slangd` on PATH rather than
-  inventing a manager command;
-* `Slang: Language Server Help` explains adding `lsp.slang` (and a user `languages.slang` entry
-  for `.slang`/`.slangh` when needed), the native local-only `slang-synth://` flow, the
-  missing generic plugin URI API, verification/restart steps, the releases/docs links, and offers
-  copy/check plus the native Start/Restart LSP Server and Show LSP Status actions. For an active
-  `.slang`/`.slangh` buffer with `gvim.has("lsp")`, it also offers **Disable Slang LSP** with the
-  same post-popup target re-check and controlled `lsp_disable_language_target` path/language
-  dispatch; the language must be exactly `slang`. Fresh has no default `.slangh` mapping and gvim
-  detects it as text/empty unless a user `languages.slang` entry (or Set Language) applies, so a
-  default `.slangh` is refused with `status.not_slang` and never sends `text`; tab switch/non-Slang/
-  missing LSP is a notice with no dispatch and no async-success claim.
-
-Not ported: a generic plugin-provided URI-scheme claim or `lsp_open_external_uri` hook (still no
-plugin API), arbitrary external-URI providers, remote/SSH generation (the native flow refuses
-explicitly), Fresh's version-keyed persistent cache (gvim keys the cache by content instead), custom
-server argv/wrapper arguments (only the resolved program is reused) and an exact-binary guarantee when
-the configured command is left bare for the child to resolve. The plugin is `default_enabled: false`,
-registers no keys/settings, and the native Slang LSP entry (if the user configures one) is untouched.
-
-Tests: `plugin/bundled/slang_lsp_test.go` covers the manifest/visible commands/no bindings, the
-copy instruction (clipboard/status), both tools OK (version lines, argv order), one tool failing
-(non-zero exit named), a start failure preserved verbatim and not rewritten as missing, and the help
-popup's message/actions plus copy/check/native-restart dispatch, and the controlled Disable action
-(both extensions, strict `slang` language, target args, real default-config detection of unmapped
-`.slangh`, text-language/no-LSP refusals, no false success). The native flow is
-covered by `internal/app/slang_synth_test.go` and `internal/lsphost/external_uri_test.go`.
 
 ### Notes for porters (learned from the bundled ports)
 

@@ -48,7 +48,6 @@ The workspace directory can be moved with `GVIM_WORKSPACE_DIR` (the tests use it
 | Path | Written when | Notes |
 |---|---|---|
 | `theme-cache/<sha256>.json` | a URL theme is fetched | the key is the sha256 of the trimmed URL |
-| `slang-builtin/<module>-<sha256>.slang` | a slang LSP goto needs a synthetic source | content-addressed |
 | `remote-sessions/<hash>/session/` | a remote workspace stages unsaved documents | only with `editor.save_session`; `GVIM_REMOTE_SESSION_DIR` overrides |
 | `daemon/*.sock` | a daemon starts | the listening sockets |
 

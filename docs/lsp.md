@@ -219,109 +219,46 @@ changes. A disconnected, unsupported, timed-out or over-depth probe degrades to 
 workspace root and reports a status-row notice; a concurrent workspace change abandons the
 old scan.
 
-### External locations: slang-synth builtin modules
+### Live trust gate and manual starts
 
-Slang's `slangd` answers go-to-definition on builtins with synthetic
-`slang-synth://core/core.builtin` (and similar) URIs, which have no file on disk. gvim's
-native flow (no plugin hook required) opens them safely:
-
-- **URI validation**: only the `slang-synth` scheme is accepted. The authority is one bounded
-  module name (`[A-Za-z0-9._-]`, at most 64 bytes, no leading `.`/`-`); userinfo, port, query,
-  fragment and `.`/`..`/backslash path segments are refused. The path is never used as a
-  filesystem path.
-- **trust and authority**: this native flow is **local authority only**. On a remote/SSH
-  workspace it refuses explicitly instead of writing/opening on the other side or falling back
-  to a local command. The resolver runs the command through the workspace authority's
-  one-shot under the trust gate; the app never uses a local exec for it.
-- **same server context**: the command is the answering server's actual launch program
-  (`Handle.Program`, the absolute executable the manager passed to `lsp.Start`) plus
-  `--print-builtin-module <module>`, with its delivered launch env (`Handle.LaunchEnv`) and the
-  server root as cwd. It is not hard-coded to a PATH `slangd`. If the manager left a bare
-  command unresolved, the configured command spelling is used and the authority one-shot
-  resolves it with the workspace root/env; exact-binary identity is then not guaranteed. A
-  custom server **argv/wrapper is not inherited** (only the program is reused), so a wrapper
-  that needs its own arguments may fail; that failure is reported, never replaced by a PATH
-  fallback. This is the recorded residual for custom LSP server commands.
-- **bounds**: 5 s timeout, 4 MiB stdout cap, bounded stderr; timeout, signal, start/cancel
-  failure, truncation and non-zero exit are errors. Nothing is executed for an invalid URI or
-  an untrusted workspace.
-- **read-only position and safe cache**: the dump is written under
-  `<UserCacheDir>/gvim/slang-builtin/`, whose components are checked with `Lstat` and must not
-  be symlinks (a symlinked cache directory is refused, so a write cannot be redirected);
-  existing and newly created directories are chmod-ed 0700, repairing an old permissive
-  cache. The file name is content-addressed: `<module>-<sha256>.slang`; an existing regular
-  target is reused only for identical bytes, while concurrent resolutions with different
-  source get distinct paths. That prevents same-module overwrites from shifting the position
-  a goto reads, and an already-open `Document` is reused only when the path (and therefore
-  content) is identical. The file is 0444 and the TUI opens it with the generated/read-only
-  marker at the LSP position; if the editor cannot open read-only, gvim refuses instead of
-  opening an editable tab. Cache maintenance is bounded but best-effort: on a write/read a
-  throttled background goroutine (no resolver-blocking work) removes files older than 7 days
-  and prunes the oldest entries above 128, while never deleting a file younger than a 1-hour
-  grace window (so a goto that just received its path can still open it). Under heavy
-  same-hour churn the entry count can temporarily exceed the cap until the grace window
-  passes; this is recorded as a bounded, not hard, capacity limit.
-
-This is deliberately one usable native flow: arbitrary external URI providers, non-local
-slang-synth generation, version-keyed caches, and plugin-provided URI schemes remain out of
-scope. A resolution failure is reported as the LSP location error (it does not silently become
-an empty buffer).
-
-### Deno projects
-
-A project root with `deno.json`/`deno.jsonc` gets `deno lsp` for **typescript/javascript**
-once the Deno runtime is confirmed, mirroring Fresh's `deno_lsp` plugin: it replaces the
-configured TS/JS server but keeps it as the baseline. Two safety rules are deliberate:
-
-- **Authority only**: the config file is checked with the workspace authority's `Stat`, and
-  `deno` is confirmed by one bounded `sh -c 'command -v deno'` through `authority.OneShot()`
-  under the workspace trust gate; only a clean exit-0 result counts (a Code-0 timeout, signal,
-  start failure or cancellation is rejected). A remote workspace never checks the local disk
-  or local PATH. The probe is asynchronous (startup and after a reconnect), bounded to 5 s and
-  cancellable; a failed/timed-out/disconnected probe selects nothing.
-- **User decisions win**: auto-selection is disabled when `lsp_enabled` is false, when the
-  language is disabled (`enabled: false`/`LSPDisabled`), or when an explicit `lsp` entry
-  exists for typescript or javascript. It never touches `tsx`, other languages, or an
-  explicit/disabled configuration.
-- **Live trust gate**: the Settings reload path passes the reloaded config through
-  `lspConfig` with the current live trust state before it reaches `SetConfig`, and the Deno
-  probe evaluates the same gated config. A live trust revoke/restore likewise re-gates the
-  baseline immediately (outside a Settings reload). A Restricted/Blocked workspace therefore
-  cannot gain *new* auto-starting servers through a reload or a trust change (the initial
-  build has the same gate, and an already-in-flight start has the window described below);
-  manual Start/Restart remains available. This live gate is also consulted by
-  every automatic start of an already-created manager: after a revoke its old `AutoStart`
-  configs no longer start new servers, and the gate never stops an existing process. A live
-  trust change also clears the manual-start **forced** state in the port and in every
-  existing manager (`ClearForced`), without stopping anything: a language manually started
-  while Trusted does not keep an `automatic=false` bypass after a revoke, so later Opens and
-  newly created root managers do not start it automatically; the user can still start it
-  explicitly again. A manual start performed while the workspace is *not* Trusted is
-  one-shot: it may start the server now as an explicit action, but it does not persist
-  `forced`, so it cannot turn later Opens into automatic starts behind the live gate. Manual
-  actions are versioned per language by `actionSeq[language]`/`trustSeq`: an in-flight
-  Start/Restart whose trust changed while it ran clears the forced state it may have
-  installed for its own language, and a newer action for *another* language (or a root-wide
-  Restart, which bumps no language token) cannot suppress that cleanup. The cleanup is
-  per-language, so it cannot clear a newer action for another language. As a second defense,
-  the manager never lets `forced` bypass the live auto-start gate for an automatic Open: it
-  only overrides `auto_start`/disabled server selection, while explicit Start/Restart remains
-  a manual, spawn-gated start. A root-wide LSP Restart (`Restart("")`) clears the port-level
-  forced entries for all languages but bumps no per-language action token and does not change
-  `trustSeq`, so an in-flight per-language Start's finishManual still clears its own language;
-  managers created for the rebuilt roots therefore inherit no stale forced state. Under
-  non-Trusted trust subsequent Opens stay gated, and an explicit per-language Start remains
-  the way to run one now. Settings reload and live trust changes feed one serialized baseline
-  updater: it applies the newest
-  config+trust snapshot in sequence, so a trust callback that read an older settings snapshot
-  cannot overwrite a newer reloaded baseline, and the apply happens off the UI goroutine so a
-  blocked baseline update never freezes the trust dialog. An explicit Start/Restart that
-  would replace a language's servers first preflights the spawn
-  gate: a trust refusal leaves the old running servers and the old config in place instead
-  of stopping them and then failing; the same-config **Restart Server** path preflights
-  before stopping too. A repeated Start of an already-running server returns the live handle
-  without spawning again or consulting the gate. Other start failures (missing binary,
-  initialize failure) are not transactional (recorded residual).
+The Settings reload path passes the reloaded config through
+`lspConfig` with the current live trust state before it reaches `SetConfig`. A live trust revoke/restore likewise re-gates the
+baseline immediately (outside a Settings reload). A Restricted/Blocked workspace therefore
+cannot gain *new* auto-starting servers through a reload or a trust change (the initial
+build has the same gate, and an already-in-flight start has the window described below);
+manual Start/Restart remains available. This live gate is also consulted by
+every automatic start of an already-created manager: after a revoke its old `AutoStart`
+configs no longer start new servers, and the gate never stops an existing process. A live
+trust change also clears the manual-start **forced** state in the port and in every
+existing manager (`ClearForced`), without stopping anything: a language manually started
+while Trusted does not keep an `automatic=false` bypass after a revoke, so later Opens and
+newly created root managers do not start it automatically; the user can still start it
+explicitly again. A manual start performed while the workspace is *not* Trusted is
+one-shot: it may start the server now as an explicit action, but it does not persist
+`forced`, so it cannot turn later Opens into automatic starts behind the live gate. Manual
+actions are versioned per language by `actionSeq[language]`/`trustSeq`: an in-flight
+Start/Restart whose trust changed while it ran clears the forced state it may have
+installed for its own language, and a newer action for *another* language (or a root-wide
+Restart, which bumps no language token) cannot suppress that cleanup. The cleanup is
+per-language, so it cannot clear a newer action for another language. As a second defense,
+the manager never lets `forced` bypass the live auto-start gate for an automatic Open: it
+only overrides `auto_start`/disabled server selection, while explicit Start/Restart remains
+a manual, spawn-gated start. A root-wide LSP Restart (`Restart("")`) clears the port-level
+forced entries for all languages but bumps no per-language action token and does not change
+`trustSeq`, so an in-flight per-language Start's finishManual still clears its own language;
+managers created for the rebuilt roots therefore inherit no stale forced state. Under
+non-Trusted trust subsequent Opens stay gated, and an explicit per-language Start remains
+the way to run one now. Settings reload and live trust changes feed one serialized baseline
+updater: it applies the newest
+config+trust snapshot in sequence, so a trust callback that read an older settings snapshot
+cannot overwrite a newer reloaded baseline, and the apply happens off the UI goroutine so a
+blocked baseline update never freezes the trust dialog. An explicit Start/Restart that
+would replace a language's servers first preflights the spawn
+gate: a trust refusal leaves the old running servers and the old config in place instead
+of stopping them and then failing; the same-config **Restart Server** path preflights
+before stopping too. A repeated Start of an already-running server returns the live handle
+without spawning again or consulting the gate. Other start failures (missing binary,
+initialize failure) are not transactional (recorded residual).
 
 **Trust-check windows (precise, no strong atomicity).** An automatic start has the early
 `ensureServers` auto-start-gate check, and then `launch` re-checks the same live gate
@@ -343,33 +280,6 @@ contained), the old servers are stopped and the new start refused. There is no a
 preflight→stop→launch guarantee, and the same final-check→OS-exec window applies after the
 spawn gate passes. A repeated Start of an already-running server returns the live handle
 without spawning or consulting either gate — even at Blocked.
-
-The selection is installed as a per-root server provider: it applies automatically only to a
-manager created for the exact probed workspace root (other/nested roots keep the configured
-server), and clearing it restores the baseline. Installing/clearing the provider never stops
-a running server. `deno lsp` is registered with `auto_start: false`, as Fresh does, so it is
-never silently spawned. An explicit **Start/Restart LSP Server** for typescript/javascript
-applies the completed current-root selection to an existing manager: the port compares the
-manager's config with the current selection and, when they differ, stops only that
-language's servers and starts the selected config (manual start). The same explicit action
-restores the baseline when the selection was cleared (explicit/disabled config reload or a
-failed/no longer current probe); other languages are not stopped or restarted. When this
-whole-language replacement happens, **Restart Server** on any row of that language replaces
-the language's entire configured server list (for a multi-server array too) with the current
-selection — the clicked row's `name` is not used in that branch. When no replacement is
-needed, Restart Server keeps its normal meaning and restarts only the named server. A
-root-wide LSP Restart rebuilds managers, so the selection applies when the root creates the
-next manager; installing the provider never stops a running server by itself. The provider re-reads the live config when it is evaluated, so a config change
-made after the probe cannot let a stale decision override a new explicit/disabled entry. A
-Settings Save/Reload also pushes the reloaded config's server baseline into the port
-(`SetConfig`): future managers and the next explicit Start/Restart use the new baseline,
-including a newly added explicit server; an existing manager is not rebuilt by the reload
-and keeps its old config until that explicit action. A newer reconnect probe supersedes an
-older one and the older answer is dropped. The probe is re-run on a remote reconnect and when the editor switches project
-root (`SetRoot`): the old root's provider is cleared so future managers there restore the
-baseline, the new root is probed, and any still-running probe for the old root is cancelled.
-It is not repeated on every settings change, and Deno disappearing after a successful probe
-is not re-confirmed (residual).
 
 ## Changing or turning servers off
 

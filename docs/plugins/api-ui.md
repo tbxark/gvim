@@ -379,8 +379,6 @@ gvim.decor.add_soft_break(buf, pos, opts?)                -- Force a display row
 gvim.decor.set_cursor_line_overlay(buf, style, opts?)     -- Tint the caret's row.
 gvim.decor.set_scrollbar_markers_in_range(buf, range, color, opts?) -- A ranged scrollbar mark.
 gvim.decor.clear_decorations(buf?, range?, opts?)         -- Clear a namespace, or its items in a line range.
-gvim.decor.refresh_lines(buf?)                            -- Kept for Fresh's shape; painting is per frame.
-gvim.decor.add_fold(buf, start_line, end_line, opts?)     -- One namespace-scoped folding range; opts {collapsed, placeholder, kind, namespace, version}.
 gvim.decor.set_folding_ranges(buf, ranges, opts?)         -- Replace the namespace's folding ranges.
 gvim.decor.clear_folds(buf?, opts?)                       -- Remove them.
 ```

@@ -151,7 +151,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 |---|---|---|
 | `buffer` | The text model: lines of runes, positions, edits, undo/redo, observer, large-file mode. | Two storage modes in one package: in-memory lines, and a disk-backed `bigStore` for large files (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`). A split was considered and rejected: the mode is part of `Buffer`, not a layer on it (see `buffer/doc.go`). The source can be an optional asynchronous `WindowSource` (remote large files): `ReadAt` is cache-only and a miss returns `ErrSourcePending` at once while recording the window (`TakePendingWindow`), so the paint path does not block; the root loads the window in a command (`LoadWindow`) and repaints. Local `fileSource` behavior is unchanged. |
 | `document` | One open file: text, cursor/carets, selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data. Remote large files load through `remote_large.go`: a 1 MiB-aligned, 8-window LRU `buffer.WindowSource` over the authority's `RangeAccess`, read-only, with `TakePendingLargeWindow`/`LoadLargeWindow` for the root. | The model half of the old `editor` god package; imports `buffer`/`search`/`syntax`/`textlayout`/`fold`/`diff`/`encoding`/`atomicfile`, never `editor`, `session` or `internal/`. |
-| `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document`, `atomicfile`, `shellcmd` and the engine leaves; no UI. `editor/bridge.go` still aliases the moved names for consumers. |
+| `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document`, `atomicfile`, `shellcmd` and the engine leaves; no UI. |
 | `search` | Find, scan, replace and range search over `buffer` lines. | `visible.go` is the visible-window search (renamed from a misleading name). |
 | `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, and the mapping of token kinds to the theme's syntax keys (`kind.go`). | |
 | `fold` | Indentation fold ranges. | Small leaf used by `editor`. |
@@ -170,7 +170,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `finder` | Project file index (`git ls-files`/walk) and usage ranking. | |
 | `fuzzy` | fzf-style scorer shared by the finder, the palette and the pickers. | |
 | `fsops` | Create, mkdir, rename, move, copy, trash with conflict policy. | |
-| `gitstate` | Git work-tree root, branch and per-file status with go-git. | |
+| `gitstate` | Git work-tree root, branch and per-file status. | |
 | `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins, and the top-level `locale`. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md); a project `locale` is refused (a user preference). |
 | `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; embedded locale JSON in `i18n/locales/` (English source of truth, Fresh import); see `docs/i18n.md`. |
 | `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy, executable-content marker scan and the spawn gate (`DecideSpawn`, docs/trust.md §3.1). | TUI-free; store at `config.StateDir()/trust.json` through `atomicfile` (never inside a workspace; see [files.md](files.md)); the app gates the config project layer on the level and wires the same live level into the authority, plugin OS and LSP manager spawn paths. |
@@ -248,9 +248,8 @@ docs/plugins/api-ui.md).
 
 `document` is the model; `editor` is the session around it. The `Document` type, its
 fields and every method on it live in `document`; `editor` holds `Editor`, the action
-registry and the job/polling orchestration. A temporary `editor/bridge.go` aliases the
-moved names (`Document`, `Caret`, `ViewSettings`, ...) so the rest of the module keeps
-compiling until consumers are retargeted.
+registry and the job/polling orchestration. Consumers import `document` directly for
+document-level types, errors, and helpers.
 
 `document` clusters:
 
@@ -333,9 +332,10 @@ Done:
    then `split` (tree + geometry), `frame` (layout + hit map) and `tabstrip` (strip paint),
    taking the root from ~23.9k to ~21.7k source lines with all tests green.
 6. Engine leaves: `atomicfile`, `shellcmd`, the `buffer` two-mode doc, and file renames.
-7. `editor` split into top-level `document/` (per-file model, 61 files/7.0k LOC) and a
-   slimmed `editor/` (session, 65 files/6.6k LOC), with a temporary alias bridge so no
-   consumer package changed; the import gate gained the `document` direction (R4/R11).
+7. `editor` split into top-level `document/` (per-file model) and a slimmed `editor/`
+   (session), with all consumers migrated directly to `document` and the temporary
+   `editor/bridge.go` / `document/export.go` shims deleted; the import gate enforces
+   the `document` direction (R4/R11).
 8. Terminal dock extracted to `internal/tui/dock` (panel + tests), root keeps the glue;
    the zero-importer `internal/tui/statusbar` package (status row primitives duplicated by
    `tui/frame.StatusView`) was deleted.
@@ -347,10 +347,7 @@ Next (tracked as follow-up work; each keeps build + tests green):
 1. Remaining TUI extraction: the keybinding editor (`tui/keybindeditor`); its tests are
    model-driven (`keybind_editor_test.go`) and need a harness rewrite against the new
    types. The plugin host and LSP UI remain last.
-2. Finish the editor split tail: move the `editor` model tests into `document`, then delete
-   the alias bridge (`editor/bridge.go` + `document/export.go`, ~385 lines) by retargeting
-   the ~165 consumer references; tighten `document`'s exported surface to accessors.
-3. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction.
+2. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction.
 
 The analysis these steps build on (file clusters, symbol-level boundaries, risk
 ordering) is in the session's analysis notes; the durable conclusions are kept in this
@@ -362,9 +359,6 @@ file when each step lands.
 - `tools/import_rules_check.sh`: R1-R16, run in every gate.
 - `tools/purity_check.sh`: the shipped binary stays pure Go (no cgo).
 - `go vet ./...`, `golangci-lint run ./...`, `go test ./...`.
-- Generated code stays generated: `commands/commands_gen.go`
-  (`python3 commands/gen/generate.py refs/fresh`) and
-  `internal/tui/menubar/menu_table_gen.go` (`python3 tools/gen_menus.py --check`).
 
 ## 8. Daemon mode
 
@@ -929,7 +923,7 @@ of any other version is skipped with a diagnostic and never modified.
   cached and has no row (the local tree's `explorer.ListDir` drops it the same way), ordering
   matches the local tree (directories first, natural, case-insensitive), and a trailing
   slash-free remote root is shown as given.
-  Remote .gitignore filtering uses the same parser and go-git matcher as the local
+  Remote .gitignore filtering uses the same pure-Go parser and matcher as the local
   explorer: the workspace root's and every ancestor/nested .gitignore are read through
   `authority.Files()` (never the local disk), bounded to 64 directory levels, 64 KiB per
   file and 4096 accumulated rules; a missing file is normal, while an oversized or
@@ -1268,7 +1262,7 @@ of any other version is skipped with a diagnostic and never modified.
 - **Extract tab to a co-tenant workspace.** The tab context
   menu's "Extract to New Workspace" (and the palette row "Extract tab to new workspace")
   moves the active file tab into a NEW workspace over the SAME project root, matching
-  Fresh's `extract_tab_to_new_workspace`: the registry's `CreateCoTenant` mints a fresh stable id
+  Fresh's workspace extraction: the registry's `CreateCoTenant` mints a fresh stable id
   and Fresh's numbered label (`proj`, `proj (2)`, ...), so the source and the extracted
   workspace are independent runtimes and session directories over one root. The UI
   goroutine captures the tab (path, cursor/top, page-view flags, virtual column, unsaved
@@ -1356,7 +1350,7 @@ of any other version is skipped with a diagnostic and never modified.
   (the dock's `RunningTabs` snapshot), and the close report and protocol close answer say
   exactly what was stopped; a dormant close reports that nothing was stopped. Rename
   reports the new label on the status row (the protocol answer stays the list only).
-  Fresh's separate diff_nav plugin is unrelated; the per-tab "Extract to New Workspace"
+  The per-tab "Extract to New Workspace"
   item also appears in Fresh's tab context menu.
 - **Remainder (not shipped).** Sharing the plugin runtime with remote/authority workspaces, byte-budget
   and per-runtime instance-state bounds beyond the workspace count for

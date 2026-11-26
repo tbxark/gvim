@@ -101,7 +101,7 @@ watcher:stop()  watcher:active() -> boolean
   entry: a directory over 512 entries fails with `limit` delivered to the callback, also when it
   grows past 512 entries later (the watch then ends after the `limit` event). A normal `.git`
   directory is far below.
-* Paths are used as given; relative paths are relative to the editor's current directory.
+* Paths are used as given; relative paths resolve against the workspace root (falling back to the editor's current directory when no workspace root is open).
 
 ### Remote workspaces
 
@@ -412,9 +412,13 @@ A Lua module over `gvim.proc.run`; `require "gvim.git"` or `gvim.git`.
 
 ```text
 gvim.git.available() -> boolean
-gvim.git.run(args, opts?) ⏳ -> Result | nil, err      -- args = {"rev-parse", "HEAD"} (without "git")
+gvim.git.run(args, opts?) ⏳ -> Result | nil, err      -- args = {"rev-parse", "HEAD"} (without "git"); opts as gvim.proc.run, plus pinned_diff
+gvim.git.spawn(args, opts?) -> Process | nil, err      -- the same command line, streamed (on_stdout, on_stderr, on_exit)
 gvim.git.repo(path) ⏳ -> { root, head } | nil | nil, err
 gvim.git.root(path) ⏳ -> root | nil
+gvim.git.active_dir() -> dir                            -- the active file's directory, else the workspace root
+gvim.git.repo_or_workspace(path) ⏳ -> { root, head } | nil | nil, err   -- repo(path), else the workspace's
+gvim.git.active_repo(dir?) ⏳ -> { root, head }, dir | nil | nil, err    -- repo of dir (default active_dir()), else the workspace's
 gvim.git.branch(root?) ⏳ -> name, detached | nil | nil, err
 gvim.git.show(path, opts?) ⏳ -> text | nil, err       -- opts {rev = "HEAD", for_buffer = Buffer}
 gvim.git.ls_files(root?) ⏳ -> files, truncated | nil, err
@@ -428,7 +432,10 @@ core.attributesFile=<null device> -c protocol.ext.allow=never <args>`, adds `--n
 `GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1`: reading a repository never runs
 a program the repository names. Without a `git` binary `root` and `branch` answer through
 `gvim.workspace`, and `run`, `show`, `ls_files`, `blame` and `commit` return
-`nil, "unsupported: git binary not found"`; `gvim.has("git")` tells which case you are in.
+`nil, "unsupported: git binary not found"`; `gvim.has("git")` tells which case you are in. With
+`pinned_diff = true` (`run`, `spawn`) the calls whose output a parser reads also pin the patch-format
+settings (`diff.noprefix`, `diff.mnemonicPrefix`, `core.quotepath`, ...) back to git's defaults and add
+`--no-color`.
 
 `blame` options: `from`, `to` (0-based, `to` exclusive: blame only those lines), `contents` (blame this
 text instead of the file, for an edited buffer), `rev`. `show` with `for_buffer` decodes the blob with
@@ -580,8 +587,6 @@ gvim.finder.relative_path(path) -> string
 gvim.finder.score(text, pattern) -> number | nil
 gvim.finder.filter(items, query, get_text?, max_results?) -> items
 gvim.finder.new(opts) -> Finder
-gvim.finder.tree(items, opts) -> { nodes, node_map, count }
-gvim.finder.first_leaf(tree) -> integer
 gvim.finder.utf16_to_byte(line, units) -> integer
 gvim.finder.byte_to_utf16(line, byte_col) -> integer
 gvim.finder.open_locations(opts) -> Finder | nil, err
@@ -596,8 +601,6 @@ gvim.finder.lsp_locations(result) -> locations
 * `open_locations(opts)` presents `{ path, line, col, text }` items with preview tabs on move,
   commit on Enter and preview cleanup on cancel. `read_snippets(items)` populates missing `.text`
   snippets from open buffers or one bounded disk read per file.
-* `tree(items, opts)` builds deduped, optionally grouped nodes for a widget panel `tree`; `first_leaf`
-  returns the 1-based index of the first non-header row.
 
 ## gvim.textsafe
 

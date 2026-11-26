@@ -34,9 +34,8 @@ A status is backed by a package or file read, a test, or a doc that states the b
   file; tests are named after the feature, so `go test ./<pkg> -run <Name>` finds the contract.
 - **Dispatch gaps:** a handler that only assigns `m.notice` is a stub. The dispatch floor is
   `unhandledActions` in `internal/uiadapter/dead_bindings_test.go` (today one bound action,
-  `file_explorer_search_backspace`) and `notApplicable` in `internal/tui/notice_na.go`.
-- **Generated tables:** `python3 commands/gen/generate.py refs/fresh` and
-  `python3 tools/gen_menus.py --check`; keymap presets are plain JSON under `keymap/`.
+  `file_explorer_search_backspace`).
+- **Tables:** the command table (`commands/builtin.go`) and the menus (`internal/tui/menubar/menus.go`) are hand-maintained; keymap presets are plain JSON under `keymap/`.
 - **Config claims:** grep the option name inside and outside `config/`; an option that is parsed
   but never consumed is listed in section 4.
 - **Fresh side:** `refs/fresh/docs/features/<name>.md` for intent, the matching
@@ -52,11 +51,11 @@ A status is backed by a package or file read, a test, or a doc that states the b
 | Measure | Fresh | gvim | Where to re-measure |
 |---|---|---|---|
 | Palette commands | 206 `CommandDef` rows | 245: the 206 generated rows plus 39 gvim rows (menu bar, live grep, project search, theme editor, compare, Contents, diagnostics, sticky scroll, about gvim, plugin management, agents, terminal tabs, hex view, update) | `commands/palette_test.go` (`TestCommandsFromBuiltinTable`) |
-| Menus | 8 menus, 103 static actions, 31 separators, 2 static submenus + 1 dynamic | identical static table + View `Sticky Scroll` & Help `About gvim`; the dynamic "Copy with Formatting" submenu lists the built-in themes; plugins add up to 32 rows | `internal/tui/menubar/menu_table_gen.go`, `python3 tools/gen_menus.py --check` |
+| Menus | 8 menus, 103 static actions, 31 separators, 2 static submenus + 1 dynamic | identical static table + View `Sticky Scroll` & Help `About gvim`; the dynamic "Copy with Formatting" submenu lists the built-in themes; plugins add up to 32 rows | `internal/tui/menubar/menus.go` |
 | Keymap presets | 5 | 5 (default, macos, macos-gui, emacs, vscode) with Fresh's inheritance graph; own/in-effect bindings default 269/266, macos 61/289, macos-gui 52/340, emacs 98/331, vscode 11/273 | `keymap/common_set_test.go` |
 | Themes | 10 built-in, files by name/path/URL | 11 built-in (Fresh's 10 plus `gopher`) + user themes, plugin theme files, URL themes, and `NO_COLOR`; no packaged repository | `theme/data/*.json`, `docs/themes.md` |
 | LSP server entries | built-in list plus universal servers | 62 built-in entries; `universal_lsp` is config only | `lsp/manager/defaults.go` |
-| Bundled plugins | 50 | 37, of which 9 are on by default (`git_blame`, `diagnostics_panel`, `git_gutter`, `git_find_file`, `goto_with_selection`, `git_statusbar`, `lsp_help`, `path_complete`, `tab_actions`) | `plugin/bundled/plugins/*/plugin.json` (`default_enabled`), `docs/plugins/bundled.md` |
+| Bundled plugins | 50 | 21, of which 7 are on by default (`git_blame`, `git_gutter`, `git_find_file`, `goto_with_selection`, `git_statusbar`, `lsp_help`, `tab_actions`) | `plugin/bundled/plugins/*/plugin.json` (`default_enabled`), `docs/plugins/bundled.md` |
 | Plugin API | about 372 methods (TypeScript) | about 250 Lua functions, API level 2 | `docs/plugins/gvim.d.lua` (checked against the runtime by `plugin/docs_test.go`) |
 | Settings page | schema-driven page over every setting | 82 rows in 15 sections plus injected Languages, Language Servers, Plugins, Keybindings, Environment and Detectors pages | `config/settings_schema.go`, `docs/settings.md` |
 | i18n catalogues | 15 locales | en (1214 keys) and zh-CN (581 keys); other locales are out of scope | `i18n/locales/*.json`, `docs/i18n.md` |
@@ -89,7 +88,7 @@ A status is backed by a package or file read, a test, or a doc that states the b
 | File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git marks, plugin decorations and slots, width/side/follow/compact options, sticky parents, sidebar sections with session state, remote tree | **partial** | `explorer/`, `internal/tui/explorer/`, `internal/tui/sidebar/`, `internal/tui/remote_tree.go`, `internal/app/remote_explorer*.go`, `docs/sidebar.md` | `respect_gitignore`, `custom_ignore_patterns`, `preview_tabs` and the indicator glyph keys are accepted and ignored; the side toggle is session-only; Fresh's rows-or-percent section sizing (gvim stores rows); explorer drag/move, undo, whole-subtree transactions, and mode/mtime/hardlink/xattr preservation on copy are not implemented (details in section 5) |
 | Finder, quick open, live grep | Ctrl+P modes, fuzzy ranking, streaming enumeration (local and remote), file preview, live grep with provider toggles, quickfix export, resume | **partial** | `finder/`, `internal/tui/palette/`, `internal/app/live_grep.go`, `internal/app/remote_finder.go`, `docs/ui.md` | no workspaces provider; Resume re-runs the search with the saved controls instead of restoring cached matches; palette rows carry no git letters |
 | Project search, replace, Git Grep | Search & Replace panel (match tree, scoped replace, globs, quickfix, preview, streaming), git grep finder | **implemented** core, **partial** against the plugins | `search/plan.go`, `internal/app/projectsearch.go`, `internal/app/gitgrep.go`, `internal/tui/searchpanel/`, `internal/tui/project_search.go`, `docs/ui.md`, `docs/keybindings.md` | replacing a closed file above the search read cap has no streamed writer; no recent-files, diagnostics or terminal provider; the quickfix list is a transient overlay, not a stack |
-| Command palette | 206 core commands plus plugin commands, prefix modes, key hints | **implemented** core, **partial** plugin commands | `commands/`, `internal/tui/palette/` | `update_fresh`, `open_update_log` and `trigger_wave_animation` answer "not available in gvim" (`internal/tui/notice_na.go`) |
+| Command palette | 206 core commands plus plugin commands, prefix modes, key hints | **implemented** core, **partial** plugin commands | `commands/`, `internal/tui/palette/` |  |
 | Menu bar, context menus, help, welcome | 8 menus, mnemonics, context menus, help overlay, welcome screen, dashboard | **implemented**; the dashboard is a partial plugin equivalent | `internal/tui/menubar/`, `keymap/menu.go`, `internal/tui/context_menu.go`, `internal/tui/help.go`, `internal/tui/welcome.go`, `plugin/bundled/plugins/dashboard/`, `docs/ui.md` | Help's label row says "gvim" where Fresh writes its version; dashboard gaps are under "Plugin ports" in section 5 |
 | Status bar | configurable element lists, separator, click actions, squeeze rule, `{filename}`/`{chord}`/`{clock}`/`{update}` | **implemented** | `internal/tui/frame/frame.go`, `internal/tui/status_elements.go`, `internal/tui/update_status.go`, `docs/ui.md` | `{warnings}` and `{plugin:token}` elements are parsed but not painted (plugin status items cover the use case) |
 | Config layers and Settings UI | user and project layers, config write from toggles, Settings page, config reload, LSP/plugin/keybinding/env/locale pages | **partial** | `config/settings_schema.go`, `config/settings_structured.go`, `config/patch.go`, `internal/app/settingssvc.go`, `internal/app/settings_*.go`, `internal/tui/settings.go`, `docs/settings.md` | declared plugin settings are read-only on the page; LSP fields are edited as whole-array JSON; no in-page key capture; no per-field reset-vs-inherit display or full undo; Reload is a palette row only; Fresh's generic widget runtime is not ported |
@@ -232,7 +231,6 @@ was built. Where a reference doc has the detail it is named.
   cap; editor-scoped overlays are model-local; editor-scoped widget state is rebuilt, not cloned;
   a buffer-bearing mount cannot be editor-scoped; remote workspaces own their runtime.
 - Plugin ports (`docs/plugins/porting.md`, `docs/plugins/bundled.md`):
-  - `path_complete`: no `prompt_changed` seam (exported engine plus one command).
   - `lsp_help`: payload carries no language, type or command; 16 install hints.
   - `live_diff`: plugin-side baselines, Myers diff with caps, large files refused.
   - `git_grep`: no prompt toolbar (state is in the picker footer), no preview band, superseded
@@ -244,12 +242,12 @@ was built. Where a reference doc has the detail it is named.
     mouse beyond clickable rows, no sessions section; GitHub, weather and network sections are
     opt-in and bounded.
   - `code_tour`: no dock placement, no per-step buffer modes, one tour at a time.
-  - `lsp_navigation`: no initial selected index; `find_references` is command-driven (gvim has no
+  - `lsp_navigation`: no initial selected index; it is command-driven (gvim has no
     reference events); the Finder library's search sources have no process-cancellation handle,
     embedded preview or utility-dock routing.
-  - `diff_nav` (standalone, opt-in) and `git_gutter`'s merged navigation: targets are line-based
-    (Fresh sorts by byte position); no real-terminal verification.
-  - Language helpers `asm_lsp`, `csharp_support`, `clangd_support`, `slang_lsp` are reduced
+  - `git_gutter`'s merged navigation: targets are line-based (Fresh sorts by byte position); no
+    real-terminal verification.
+  - Language helpers `asm_lsp`, `csharp_support`, `clangd_support` are reduced
     opt-in ports (no server-specific notifications, floating panels, or `--version` prechecks
     where Fresh has them); `audit_mode` is replaced by the native read-only Review Diff Mode.
   - Not ported: `orchestrator`, the `agent_*` family, and Fresh's remaining language helpers.
@@ -316,7 +314,7 @@ was built. Where a reference doc has the detail it is named.
 
 **Product definition.** gvim's objective is a fast, keyboard-driven terminal code viewer:
 viewing, navigation, search, syntax highlighting, diff and compare review, and view protection
-(`-R` / `--view`). Outside that objective, by decision:
+(`-R`). Outside that objective, by decision:
 
 1. Plugin package management (git clone, install, update, remove, lockfile, registry sync).
 2. Container and cluster lifecycle management (devcontainer and k8s workspace CLI attach).
@@ -332,13 +330,12 @@ Daemon mode itself is in scope.
 delivers the user-facing behaviour; its residual gaps stay in section 5. Accepted today: native
 Compare (in place of Fresh's `compare_files` plugin), the native theme editor, the native
 project-search panel, the native welcome page, and the native Markdown page view and dual view.
-`dashboard` and `live_grep` are partial equivalents at best, and `git_gutter`'s merged navigation
-is not the standalone `diff_nav` plugin.
+`dashboard` and `live_grep` are partial equivalents at best.
 
 **gvim-only additions** (not parity requirements, but the fastest way to verify new work; keep
 them working): `gvim config show` and `config paths` (show is trust-gated), `gvim grammar`,
 `gvim rex install` / `uninstall`, the `--stdin-name` flag and bounded-snapshot stdin, the hex
-and image viewers, read-only / pager mode (`-R`, `--view`), the in-process `internal/uitest`
+and image viewers, read-only / pager mode (`-R`), the in-process `internal/uitest`
 harness, `cmd/gvimdebug`, the `GVIM_SHOTS` screenshot sweep, the gvim-only config keys
 (`update_check_url`, `update_command`, `terminal.agents`, `terminal.scrollback_lines`, `ssh.*`,
 `daemon.materialized_workspaces`, `auto_attach`), tmux and transcript session discovery, and the

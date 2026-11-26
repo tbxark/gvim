@@ -614,12 +614,6 @@ function gvim.buf.set_window_state(buf, key, value) end
 ---@param opts? {direction?: "right"|"below", focus?: boolean, preview?: boolean, background?: boolean, pos?: Pos}
 ---@return Buffer|nil, string?
 function gvim.buf.open_file_in_split(path, opts) end
----@param win Window
----@return true|nil, string?
-function gvim.buf.focus_split(win) end
----@param win Window
----@return true|nil, string?
-function gvim.buf.close_split(win) end
 ---@param buf Buffer
 ---@param targets {line: integer, path?: string, target?: integer, into?: string, action?: string}[]
 ---@return true|nil, string?
@@ -627,9 +621,6 @@ function gvim.buf.set_line_targets(buf, targets) end
 ---@param buf Buffer
 ---@return true
 function gvim.buf.clear_line_targets(buf) end
----@param buf? Buffer the buffer whose primary caret's properties are read (default: current)
----@return table|nil the properties of the entry under the caret, string?
-function gvim.buf.text_properties_at_cursor(buf) end
 
 
 
@@ -931,15 +922,6 @@ function gvim.decor.set_scrollbar_markers_in_range(buf, range, color, opts) end
 ---@param opts? {namespace?: string}
 ---@return true
 function gvim.decor.clear_decorations(buf, range, opts) end
----@param buf? Buffer
----@return true
-function gvim.decor.refresh_lines(buf) end
----@param buf Buffer
----@param start_line integer
----@param end_line integer
----@param opts? {placeholder?: string, collapsed?: boolean, kind?: string, namespace?: string, version?: string}
----@return true|nil, string?
-function gvim.decor.add_fold(buf, start_line, end_line, opts) end
 ---@param buf Buffer
 ---@param ranges {start_line: integer, end_line: integer, kind?: string, collapsed?: boolean, placeholder?: string}[]
 ---@param opts? {namespace?: string, version?: string}
@@ -1165,15 +1147,27 @@ gvim.git = {}
 ---@return boolean
 function gvim.git.available() end
 ---@param args string[] arguments after "git"
----@param opts? {cwd?: string, stdin?: string, timeout_ms?: integer, max_output?: integer, env?: table<string, string>}
+---@param opts? {cwd?: string, stdin?: string, timeout_ms?: integer, max_output?: integer, env?: table<string, string>, pinned_diff?: boolean}
 ---@return ProcResult|nil, string?
 function gvim.git.run(args, opts) end
+---@param args string[] arguments after "git"
+---@param opts? {cwd?: string, timeout_ms?: integer, env?: table<string, string>, pinned_diff?: boolean, on_stdout?: fun(chunk: string), on_stderr?: fun(chunk: string), on_exit?: fun(result: ProcResult)}
+---@return Process|nil, string?
+function gvim.git.spawn(args, opts) end
 ---@param path string
 ---@return {root: string, head: string}|nil, string?
 function gvim.git.repo(path) end
 ---@param path string
 ---@return string|nil, string?
 function gvim.git.root(path) end
+---@return string the active file's directory, else the workspace root
+function gvim.git.active_dir() end
+---@param path string
+---@return {root: string, head: string}|nil, string?
+function gvim.git.repo_or_workspace(path) end
+---@param dir? string
+---@return {root: string, head: string}|nil, string?
+function gvim.git.active_repo(dir) end
 ---@param root? string
 ---@return string|nil, boolean|string?
 function gvim.git.branch(root) end
@@ -1586,13 +1580,6 @@ function gvim.finder.filter(items, query, get_text, max_results) end
 ---@param opts {load?: (fun(): any[]), search?: (fun(query: string): any[]), min_query?: integer, format: (fun(item: any, index?: integer): FinderItem), rank_text?: (fun(item: any): string), filter?: (fun(items: any[], query: string): any[]), title?: string, placeholder?: string, footer?: string, initial_query?: string, max_results?: integer, on_select?: (fun(item: any, index?: integer)), on_move?: (fun(item: any)), on_close?: (fun(reason: string)), on_rows?: (fun(shown: integer, total: integer))}
 ---@return Finder
 function gvim.finder.new(opts) end
----@param items any[]
----@param opts {key?: (fun(item: any): string|nil), dedupe?: boolean, group?: (fun(item: any): {key: string, text?: string, detail?: string}|nil), row: (fun(item: any): {text: string, detail?: string, key?: string}), max_rows?: integer}
----@return {nodes: WidgetNode[], node_map: table<integer, any>, count: integer}
-function gvim.finder.tree(items, opts) end
----@param tree {nodes: WidgetNode[], node_map: table<integer, any>, count: integer}
----@return integer 1-based index of the first non-header leaf node
-function gvim.finder.first_leaf(tree) end
 ---@param line string
 ---@param units integer UTF-16 code units
 ---@return integer 0-based byte column

@@ -229,16 +229,6 @@ w:scroll_to(line, opts?) -> true | nil, err  -- opts {center = false}
 * A window that shows a compare view refuses `set_buffer` with `conflict`. The user's own windows
   are listed too.
 
-```text
-gvim.buf.text_properties_at_cursor(buf?) -> table | nil
-```
-
-The properties of the virtual-buffer content entry under the buffer's primary caret (the
-current buffer by default), the equivalent of Fresh's `getTextPropertiesAtCursor`: the entry
-that covers the caret position, or `nil` when none does. The same map a buffer's `props_at(pos)`
-returns; read it to follow a click or Enter on a rendered row (a file path, a line number, a
-search result).
-
 ## Buffer groups (group-lite)
 
 ```text
@@ -259,8 +249,7 @@ re-applies it on every layout change, so a resize keeps it), and a split is
 `{"type":"split","direction":"h"|"v","ratio":0.5,"first":...,"second":...}`. A leaf may take
 `"bufferId"` to show an existing buffer; otherwise the host makes a read-only panel buffer the
 group owns and `set_panel_content` fills it with styled `entries` (the virtual-buffer content
-shape: `{text, style?, segments?, props?}`; read the props back with `b:props_at` or
-`gvim.buf.text_properties_at_cursor`). `set_panel_visible` hides a panel (closing its window and
+shape: `{text, style?, segments?, props?}`; read the props back with `b:props_at`). `set_panel_visible` hides a panel (closing its window and
 keeping its buffer and content) and shows it again by splitting a visible panel.
 `set_group_title` stores Fresh's title segments (a segment may name a panel); gvim keeps them
 for the port APIs and does not paint a group tab. Closing the group closes the split windows it
@@ -287,7 +276,7 @@ and moves the other, so a plugin only sets the anchors — for a side-by-side di
 line pairs. A group is removed automatically when the plugin unloads; windows that close stop
 syncing. `id` is the plugin's own positive id (per plugin namespace).
 
-## Split labels, window state and split wrappers (tier 1c-C)
+## Split labels and window state (tier 1c-C)
 
 ```text
 gvim.win.set_split_label(win, label) -> true | nil, err   -- label a split; "" clears
@@ -296,8 +285,6 @@ gvim.win.clear_split_label(win) -> true | nil, err
 gvim.buf.get_window_state(buf, key[, default]) -> value | default
 gvim.buf.set_window_state(buf, key, value) -> true | nil, err   -- nil clears
 gvim.buf.open_file_in_split(path, opts?) ⏳ -> Buffer | nil, err
-gvim.buf.focus_split(win) -> true | nil, err
-gvim.buf.close_split(win) -> true | nil, err
 ```
 
 A split label names a window so a plugin can find it again after focus moves or splits; it
@@ -306,8 +293,8 @@ returns the window handle. Window state is a small JSON-scalar map per plugin an
 (`string`, `number`, `boolean`): it survives a plugin reload in-session, is cleared when the
 buffer closes, and a `nil` value removes one key. `gvim.buf.open_file_in_split` splits the
 focused window (`direction = "right"` by default, or `"below"`) and opens the file there,
-completing asynchronously like `gvim.buf.open`; `focus_split`/`close_split` are the plain
-wrappers over the window operations. Limits: a split label is at most 64 bytes; window state
+completing asynchronously like `gvim.buf.open`; use `win:focus()` / `win:close()` for window
+focus and closing. Limits: a split label is at most 64 bytes; window state
 keeps at most 256 keys per plugin and buffer, keys up to 128 bytes and strings up to 4 KiB.
 
 ## Line targets (tier 1c-B)

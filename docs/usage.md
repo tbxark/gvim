@@ -10,6 +10,7 @@ gvim .                          # Open current directory
 gvim -R .                       # Open in read-only code-viewer mode (edits & saves disabled)
 gvim -R main.go:42:10           # Open file at line 42, column 10 in viewer mode
 gvim --diff fileA.go fileB.go   # Compare two files side by side
+gvim --review                   # Open directly in built-in Review Diff Mode
 gvim --simple                   # Open a clean session without restoring previous tabs
 git show HEAD | gvim -          # View piped stdin in a scratch buffer
 ```
@@ -17,6 +18,7 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | Flag | Description |
 |---|---|
 | `-R`, `--read-only` | Open in read-only / code-viewer mode (edits and writes disabled) |
+| `--review` | Open directly in built-in Review Diff Mode (changed files sidebar + diff viewer) |
 | `--diff` | Compare two files side by side |
 | `--keymap NAME` | Keymap profile: `default`, `vscode`, `emacs`, `macos`, `macos-gui` |
 | `--theme NAME` | Theme name (default `gopher`; also `dark`, `light`, `terminal`, etc.; `NO_COLOR=1` strips colors when `--theme` is unset) |
@@ -96,10 +98,10 @@ The symbol, call-hierarchy, outline and breadcrumb rows (`Go to LSP Symbol` thro
 | `Git: Toggle Blame` | Show/hide inline blame on the cursor line |
 | `Git: Show Commit` | Show commit details popup for cursor line |
 | `Git: Copy Commit Hash` | Copy commit SHA of current line to clipboard |
-| `Review Diff: Next/Prev Hunk` | Jump between hunks across modified files |
+| `Review Diff Mode` | Toggle built-in Review Diff Mode (`Alt+Shift+R` or `gvim --review`) |
 | `Merge: Start Resolution`, `Merge: Next Conflict`, `Merge: Previous Conflict`, ... | Resolve conflict markers (`Alt+M` mode or `Ctrl+Alt+C`; needs the `merge_conflict` plugin) |
 
-Git Log, Review Diff, Merge conflict resolution and Flash Jump are bundled plugins that are
+Git Log, Merge conflict resolution and Flash Jump are bundled plugins that are
 **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in
 `config.json` (see [`plugins/bundled.md`](plugins/bundled.md)). Git Gutter and Git Blame are on.
 

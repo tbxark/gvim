@@ -932,8 +932,7 @@ uses:
 | `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The emulator parses the stream and the session's registered OSC 52 handler picks the sequence up; it does not affect the screen. |
 | `clipboard.osc52_paste` | bool, `false` | **gvim extension**: answer a child's OSC 52 *read* request (`ESC ] 52 ; c ; ? BEL`) with the system clipboard, sent back to the child as terminal input. Off by default (a child reading the host clipboard is host data pasted into untrusted output). When on and the workspace is trusted: only selector `c`/empty is answered; text is capped at 64 KiB (larger, empty or unreadable clipboard = no reply); the response is base64 in `ESC ] 52 ; c ; … BEL` queued through the session's input inbox; restored/read-only transcripts and untrusted workspaces install no handler. |
 
-The other Fresh `terminal` key is accepted and ignored, so a Fresh config file
-loads without diagnostics: `skip_app_execution_alias`. `terminal.shell`,
+`terminal.shell`,
 `terminal.close_on_exit`, `terminal.pass_ctrl_v_without_text`,
 `terminal.resume_agents`, `terminal.mouse_forwarding`,
 `terminal.jump_to_end_on_output` and `terminal.mouse_drag_selects` are Fresh's keys

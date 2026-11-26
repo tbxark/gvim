@@ -195,34 +195,21 @@ grow their section when dragged up, the direction the Contents divider always ha
 
 ## 4. Settings
 
-The config keys are Fresh's, under the bundled plugin's old name, so a Fresh
-config and the previous gvim plugin config keep working. Only the user layer is
-read (the project layer of a plugin's settings applies only to keys a plugin
-declared as project-level, and markdown_toc declared none):
+The config keys are the native `contents` object. Only the user layer is read:
+a project file's `contents` object is accepted and ignored.
 
 ```jsonc
 {
-  // Native Contents keys: user layer only, applied live. A project file's
-  // contents object (and plugins.markdown_toc.enabled=false) is accepted and
-  // ignored: a repository cannot decide how the user reads an outline.
+  // Contents keys: user layer only, applied live. A project file's
+  // contents object is accepted and ignored: a repository cannot decide how
+  // the user reads an outline.
   "contents": {
+    "enabled": true,                         // the section's master switch
+    "max_depth": 6,                          // integer 1-6: deepest heading level listed
     "fold_buffer": false,                    // also fold the buffer section on a fold
     "follow": "cursor",                      // "cursor" | "scroll": what the selection follows
     "auto_open": true,                       // show for Markdown buffers, hide otherwise
     "rows": 10                               // integer 1-200: body rows the section asks for
-  },
-  // Fresh's retired plugin path is still read as the fallback (user layer only).
-  "plugins": {
-    "markdown_toc": {
-      "enabled": true,                       // the section's master switch (user layer only)
-      "settings": {
-        "max_depth": 6,                      // integer 1-6: deepest heading level listed
-        "follow": "cursor",
-        "foldBuffer": false,                 // Fresh names; fold_buffer also accepted
-        "rows": 10,
-        "autoOpen": true                     // auto_open also accepted
-      }
-    }
   }
 }
 ```
@@ -231,10 +218,10 @@ declared as project-level, and markdown_toc declared none):
 |---|---|---|---|
 | `enabled` | boolean | `true` | the section exists at all; off means no rows and the palette command says it is disabled |
 | `max_depth` | integer 1-6 | `6` | headings deeper than this are not rows of the tree |
-| `follow` | `"cursor"`/`"scroll"` | `"cursor"` | which heading the selected row follows; gvim's native key is `contents.follow` (user layer, applies live; the plugin path is the fallback and the native key wins) |
-| `fold_buffer` | boolean | `false` | folding a heading also folds its section in the buffer, and unfolding opens it (see §6). gvim's native key is `contents.fold_buffer` (user layer, applies live); the Fresh-compatible `plugins.markdown_toc.settings.fold_buffer` still works, and the native key wins when both are set |
-| `rows` | integer 1-200 | `10` | body rows the section asks for; a divider drag overrides it for the session, and a later live `contents.rows` edit resets the drag (the newer instruction). Native `contents.rows`, user layer, applies live |
-| `auto_open` | boolean | `true` | show the section when a Markdown buffer becomes active, hide it when the buffer is not Markdown; native `contents.auto_open`, user layer, applies live (turning it on opens for the active Markdown buffer at once; off hides an auto-opened section but leaves a command-opened one) |
+| `follow` | `"cursor"`/`"scroll"` | `"cursor"` | which heading the selected row follows; `contents.follow`, user layer, applies live |
+| `fold_buffer` | boolean | `false` | folding a heading also folds its section in the buffer, and unfolding opens it (see §6). `contents.fold_buffer`, user layer, applies live |
+| `rows` | integer 1-200 | `10` | body rows the section asks for; a divider drag overrides it for the session, and a later live `contents.rows` edit resets the drag (the newer instruction). `contents.rows`, user layer, applies live |
+| `auto_open` | boolean | `true` | show the section when a Markdown buffer becomes active, hide it when the buffer is not Markdown; `contents.auto_open`, user layer, applies live (turning it on opens for the active Markdown buffer at once; off hides an auto-opened section but leaves a command-opened one) |
 
 `rows`, the divider drag's value, the section's open/folded state and its window
 scroll are saved in the session file (see §4b); without a saved session the
@@ -472,7 +459,7 @@ comes from the config rather than from a restored session.
 | `file_explorer.auto_open_on_last_buffer_close` | true | close the last tab and the explorer opens and takes the keyboard; opening a buffer then gives the keyboard back to the editor (the panel stays visible). Fresh's behaviour: it does not close the panel when a buffer opens. |
 | `file_explorer.compact_directories` | true | a folder that is expanded and whose only visible child is a folder has no row: the chain shares the deepest folder's row, drawn as `src/main/java` at the folded ancestors' depth. Expanding a folder also expands the single-child chain below it, so the chain stays one row; collapsing closes that row's own folder only. |
 | sticky parents | always on | the run's first row's ancestors are pinned above it, up to 7 of them, never taking the whole body. The band is drawn on the gutter ground (faint when the theme has none), so it reads as pinned above the tree; a press on a pinned row selects that row. |
-| `file_explorer.hide_gitignore` | false | `.gitignore`-matched entries are listed dimmed (the muted row style); `true` hides them instead, and the **toggle gitignored** command and the `file_explorer_show_gitignored` menu checkbox flip the same state. The flat `explorer_show_ignored` key and `file_explorer.show_gitignored` still load as its inverted aliases. |
+| `file_explorer.hide_gitignore` | false | `.gitignore`-matched entries are listed dimmed (the muted row style); `true` hides them instead, and the **toggle gitignored** command and the `file_explorer_show_gitignored` menu checkbox flip the same state. |
 | `file_explorer.respect_gitignore` | true | off marks nothing ignored: every entry draws in the normal colour and `hide_gitignore` has nothing to hide. |
 | `file_explorer.custom_ignore_patterns` | `[]` | extra gitignore-style patterns (e.g. `*.log`, `build/`); a match marks the entry ignored like a `.gitignore` hit — dimmed, hidden under `hide_gitignore`, skipped by the quick-open finder — it is not a hard exclusion. |
 | `file_scan_exclusions` | `.git .svn .hg .jj .sl .repo CVS .DS_Store Thumbs.db .classpath .settings` | gitignore-style root-relative patterns that hard-drop entries from the tree, the finder and live grep at any depth. Exclusions beat inclusions. |

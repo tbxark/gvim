@@ -102,12 +102,12 @@ config keys):
   the existing validated Keybinding Editor, which writes the keybindings file
   through the loader. That split is deliberate (docs §6).
 
-`config/settings_structured.go` owns the structured knowledge: the 16 scalar
+`config/settings_structured.go` owns the structured knowledge: the 14 scalar
 per-language override fields (`LanguageOverrideFields`: `tab_size`,
 `use_tabs`, `auto_indent`, `auto_close`, `auto_surround`, `line_wrap`,
 `wrap_column`, `page_view`, `page_width`, `show_whitespace_tabs`,
-`format_on_save`, `comment_prefix`, `word_characters`, `grammar`,
-`textmate_grammar`, `indentation_guide`, with their kinds and bounds), the
+`format_on_save`, `comment_prefix`, `word_characters`,
+`indentation_guide`, with their kinds and bounds), the
 known language ids (`KnownLanguageIDs`), the status-bar element names
 (`StatusBarElementNames`), the list of paths the page may reset
 (`RemovablePath`: the schema keys plus `formatters.<key>`,
@@ -126,7 +126,7 @@ config through the existing option tables and returns the diagnostics, using the
 same `applyObject` path a real config file goes through, so a value the editor
 could not read is refused before it reaches the file and the project-layer rules
 (the C11 rules: no keymap, no locale, no plugin enablement, no LSP command, no
-terminal shell) still hold. A structured set edit (an entry of `formatters`, a
+terminal shell, no formatters, no language formatter or on_save, no clipboard options) still hold. A structured set edit (an entry of `formatters`, a
 `languages` field, a status-bar list, `terminal.shell.args`) is validated the
 same way; a reset needs no validation.
 
@@ -175,7 +175,10 @@ Saving is one patch of the chosen layer's file:
    touched, and the root stays). Comments, layout, indentation, the
    trailing-comma style and every key the patch does not name are kept; an
    absent key on a reset is a no-op; a file that is not valid JSONC is refused
-   and left alone;
+   and left alone. The editor options are always written under `editor`. A
+   top-level key the file still holds that gvim no longer reads (the retired flat
+   `tab_size`, `line_numbers`, ...) is kept as the user wrote it, and the reload
+   reports it as an unknown setting;
 4. `patchConfigFile` (in the app, because `config` is a leaf package and may
    not import `atomicfile`) replaces the file atomically, creating its
    directory and the file when missing; a failed write leaves the old file;
@@ -336,7 +339,8 @@ through `SettingsPort.Act` from a command, not from a Save: they start or stop
 servers at once and then refresh the page, so the notice reports the outcome.
 They are not config edits. The Plugins page splits differently: Act writes and
 reloads the user config in its command (with rollback to the previous bytes on a
-failed write or reload), and the root runs the runtime's `Control` from the
+failed write, a failed reload, or a diagnostic the write introduced; one the file
+already had, such as a retired flat key, does not count), and the root runs the runtime's `Control` from the
 update goroutine when the Act result arrives, because the plugin runtime is
 documented single-goroutine. The Environment rows are facts, not settings.
 
@@ -389,8 +393,8 @@ short list of deliberate decisions rather than unfinished paths:
 - **The release check is config-only** (`check_for_updates`, and the gvim extension
   `update_check_url`), with no Settings-page row: it is a network preference, not a display or
   editing option. It is user-layer only (the project layer is refused with a diagnostic) and it
-  gates Fresh's `{update}` status element (see `docs/ui.md`). `self_update` is accepted and
-  ignored: gvim does not download or install releases, so the element only reports the version.
+  gates the `{update}` status element (see `docs/ui.md`). gvim does not download or install
+  releases, so the element only reports the version.
 
 ### The release check
 
@@ -446,7 +450,7 @@ opens the config file on Enter (the ui_icons row opens the icon preview).
 | `config/patch.go` | `Edit` (set or remove), `PatchBytes` (surgical hujson patch with the reset cascade), `ValidateEdits` |
 | `config/config.go` | `applyObject`, the shared key-application path |
 | `i18n/i18n.go`, `i18n/locales/*.json` | the translation package and its embedded catalogues: locale resolution, `T`/`TN`, plurals, the Fresh import mapping and catalogue validation for the `locale` row (see [i18n.md](i18n.md)) |
-| `config/contents.go` | the native `contents.fold_buffer`/`follow`/`auto_open`/`rows` keys, their project-layer rule (accepted and ignored: the retired markdown_toc plugin's settings are the user's) and the effective getters with the plugin-key fallback (`ContentsEnabled` reads the USER plugin enabled only, so a project `enabled=false` cannot disable the built-in Contents) |
+| `config/contents.go` | the native `contents.*` keys, their project-layer rule (a project file's `contents` object is accepted and ignored: the user decides how the outline behaves) and the effective getters |
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |
 | `internal/tui/settings_structure.go` | the generic structured sub-page (map, list, fields, languages, dual) |

@@ -1,11 +1,11 @@
 # Bundled plugins
 
-gvim ships twenty-six plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-one plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
-`config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
-`merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `diff_nav`
-and `slang_lsp` are off until you turn them on:
+`config.json` can override them). Seven are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
+`merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`,
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support` and `clangd_support`
+are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -18,21 +18,16 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `goto_with_selection` | on | Go to Line with Selection | none |
 | `tab_actions` | on | Close Other Tabs, Close All Tabs, Close Tabs To Right, Close Tabs To Left, Move Tab To Left, Move Tab To Right | none |
 | `git_gutter` | on | Git Gutter: Refresh, Next Change, Previous Change | `debounce_ms` (300, 50 to 5000, project) |
-| `diff_nav` | **off** | Next Change, Previous Change | none |
 | `git_statusbar` | on | none (a status bar item) | none |
 | `git_find_file` | on | Git Find File, Git Find File: Reload | none |
 | `git_log` | **off** | Git Log, Git Log: Current File, Git Log: Close, Git Log: Refresh | none |
 | `git_blame` | on (idle until toggled) | Git: Toggle Blame, Git: Show Commit, Git: Copy Commit Hash, Git: Blame Previous Revision, Git: Blame HEAD | `debounce_ms` (150, 50 to 2000, project), `summary_width` (60, 10 to 200, project) |
 | `merge_conflict` | **off** | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
-| `diagnostics_panel` | on | Show Diagnostics Panel, Toggle Diagnostics Panel | none |
-| `path_complete` | on | Path Completion: Complete Path | none |
 | `lsp_help` | on | none (event driven: an LSP server error puts an install hint on the status row, and the LSP status click opens the help popup) | none |
 | `asm_lsp` | **off** | Assembly: Create .asm-lsp.toml, Assembly: Show LSP Help | none |
 | `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
 | `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
-| `slang_lsp` | **off** | Slang: Check slangd / slangc, Slang: Copy Install Command, Slang: Language Server Help | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions, LSP: Workspace Symbols, LSP: Incoming Calls, LSP: Outgoing Calls, LSP: Document Outline, LSP: Show Breadcrumbs, LSP: Breadcrumbs Outline | none |
-| `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
 | `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
 | `git_explorer` | **off** | none (decorates the file explorer in place) | `color_names` (false) |
 | `env_manager` | **off** | Env: Activate Detected Environment (venv / direnv / mise), Env: Reload Environment (re-capture after .envrc/mise.toml change), Env: Use System (Deactivate Environment), Env: Show Environment Status | none (detection is the user config `env.detectors`) |
@@ -61,42 +56,21 @@ caret and the line is selected.
 **tab_actions**: closes the other tabs, the tabs to the right or left, or all tabs; modified tabs are
 skipped and counted in the status message. Moves the active tab left or right.
 
-**git_gutter** (with its own merged Next/Previous Change; the standalone `diff_nav` plugin is separate): compares the open buffer with the file at
+**git_gutter** (with its own merged Next/Previous Change): compares the open buffer with the file at
 `HEAD` and draws a bar in the gutter for added and modified lines, a triangle where lines were deleted,
-and marks on the scrollbar. **Next Change** and **Previous Change** are Fresh's merged diff navigation:
+and marks on the scrollbar. **Next Change** and **Previous Change** are a merged diff navigation:
 they collect the buffer's `HEAD` changed regions, the active hunks published by **live_diff** when that
 plugin is loaded, and the buffer's saved-diff lines
-of unsaved changes, then deduplicate by line, sort ascending, and jump with Fresh's `Change n/total
-[wrapped]` status. Unlike Fresh it compares the *buffer*,
+of unsaved changes, then deduplicate by line, sort ascending, and jump with a `Change n/total
+[wrapped]` status. It compares the *buffer*,
 so the marks follow unsaved typing after a short pause. The HEAD text is read once per file with
 `git show` and compared in the host (no line arrays in Lua); a file outside a repository or untracked
 still navigates its saved-diff/live_diff changes. In large-file mode it skips only the git HEAD
 regions (the plugin never scans such a buffer) but still navigates saved-diff/live_diff targets;
 when none exist it says `No changes`, without a special large-file refusal. Exports `hunks(buf_id)`
 for other plugins (`{type = "added"|"modified"|"deleted", line, count}`; `line` is 0-based and a
-deleted run points at the line before the seam). Its own **Next
-Change**/**Previous Change** stay in the default set; the standalone `diff_nav` plugin adds Fresh's
-`diff_nav.*` command namespace and i18n keys over the same sources, so both sets of rows are in the
-palette. The side-by-side Compare view keeps its own **Compare: Next/Previous
+deleted run points at the line before the seam). The side-by-side Compare view keeps its own **Compare: Next/Previous
 Difference**.
-
-**diff_nav** (port of Fresh's `plugins/diff_nav.ts`): the unified **Next Change** and **Previous Change**
-commands with Fresh's `diff_nav.next_change`/`diff_nav.prev_change` ids and translated
-`cmd.next_change`/`cmd.prev_change`/`status.*` keys. Each invocation collects the change sources
-Fresh merges: the hunks exported by **git_gutter** (`gvim.plugins.get("git_gutter").hunks(buf)`), the
-hunks exported by **live_diff**, and `buf:diff_saved()` for unsaved changes (for a deletion, the saved
-diff targets the line before the seam, matching git_gutter's merged navigation). A source that is
-unloaded, does not export `hunks`, raises or has no git (git_gutter idle) contributes
-nothing; navigation still works from the remaining sources alone. Targets are sorted by byte position (line fallback when a
-large/no-offset host cannot answer), deduplicated by line, and wrapped; the jump centers the target line
-and the status row says `Change n/total` or `Change n/total [wrapped]` (Fresh's messages). Fresh ships
-this plugin default-enabled; gvim keeps it opt-in (`default_enabled: false`) because adding it to
-the ten-plugin default set measured 8.12 MiB against the 8 MiB idle-heap gate, and the nine
-pre-existing default plugins stay unchanged. The original **git_gutter** Next/Previous Change rows
-remain available in the default set, so default navigation is not lost; enabling this plugin adds
-Fresh's `diff_nav.*` ids and i18n on top. It registers no keys or settings and runs everything in
-plugin tasks/awaits (no blocking IO in Update). Both command sets then appear in the palette
-(documented residual).
 
 **git_statusbar**: the current branch (the first seven digits of the commit for a detached HEAD) on
 the right of the status row. It refreshes when a file opens, a tab is activated, a file is saved,
@@ -132,32 +106,6 @@ one under the caret as ours, theirs or both in one undo step. **Start Resolution
 (`n`/`p` next and previous, `u` ours, `t` theirs, `b` both, `q` leaves). It never reads a whole buffer:
 it asks the host for the marker lines and rescans only what an edit touched. It binds `alt+m` to **Start Resolution** and `ctrl+alt+c` to **Next Conflict**.
 
-**diagnostics_panel** (the first Fresh plugin port; reduced): lists every diagnostic the language
-servers have published, grouped by file the way Fresh's panel groups them (a file header, then
-`[E] line:col message` rows with the source in the right column; `E`/`W`/`I`/`H` are error, warning,
-info and hint). **Show Diagnostics Panel** opens it filtered to the current file, **Toggle
-Diagnostics Panel** opens or closes it, and the **All files** toggle inside the panel switches the
-filter to every open document (Fresh's `a` key). Enter jumps to the diagnostic and closes the panel
-so the keyboard goes back to the editor (a v1 widget panel holds it while it is focused; Fresh's dock
-panel stays open), Esc closes it, `diagnostics_updated` rebuilds the rows live, and activating
-another file re-filters them. Fresh's `syncWithEditor` is ported: moving the editor cursor onto a
-diagnostic's exact file+line selects/reveals that row in the panel without changing focus or
-opening a preview. Fresh's `navigateOnCursorMove` is ported too: moving the panel selection
-previews the selected location after Fresh's 90 ms debounce, as a background preview tab
-(`preview = true, background = true`, no focus change), so rapid browsing opens only the final
-location; the debounce timer is cancelled when the panel closes, a row is activated, or the
-rows are refreshed, and a tick additionally checks that its row is still the current selection
-of the rebuilt node map before opening it. At most 500 diagnostics are listed (the API can return
-50 000); a message is cut to its first line and 120 cells, and paths and sources are bounded too. Ported from
-`refs/fresh/crates/fresh-editor/plugins/diagnostics_panel.ts` (275 lines) on the live-panel part of
-its `plugins/lib/finder.ts` (1862 lines). Not ported from the Finder library: prompt mode and search
-sources, the embedded preview pane, the utility-dock placement, the
-`q`/`a`/`r` panel keys (the filter is a widget toggle, refresh is automatic, Esc closes) and Fresh's
-severity colours. The diagnostic *code* is not shown because gvim's LSP API carries the source but
-no code. It binds no key; bind `diagnostics_panel.toggle_diagnostics_panel` yourself. While the
-panel is closed the plugin holds no hot-event subscription: the editor-cursor follow (`cursor_moved`)
-is subscribed when the panel opens and dropped when it closes.
-
 **git_log** (reduced to group-lite; Fresh's synthetic single-tab group is not ported): a magit-style
 history view built as a layout of three split panels -- a one-line hint strip, the commit log, and the
 selected commit's `git show --stat --patch`. The log rows carry Fresh's columns (short hash, relative
@@ -182,7 +130,7 @@ virtual buffer, as Fresh does, so the detail rows are not line targets: a target
 working-tree file at a line, which is wrong for any commit that is not HEAD and cannot point at a
 virtual buffer (see porting.md). It is **off by default** for the idle-heap gate (see Memory).
 
-**live_diff** (feeds the merged navigation of git_gutter and the standalone diff_nav plugin): shows the open buffer against a baseline -- the
+**live_diff** (feeds the merged navigation of git_gutter): shows the open buffer against a baseline -- the
 file at git HEAD (default), the file currently on disk, or a chosen git branch/ref -- with per-buffer
 mode toggles and Fresh's eight Live Diff commands (no default keys). Added/modified new-side lines get
 a background in the theme's `editor.diff_*_bg` colours and + / ~ gutter glyphs, word-level changes are
@@ -196,18 +144,6 @@ Fresh's priority order and capped at the host's 64 virtual rows per anchor plus 
 lines" summary row (the capability is live on the shipped host; an older host falls back to the line
 backgrounds and new-side emphasis). It is opt-in like Fresh's live_diff.
 
-**path_complete** (reduced; Fresh's passive prompt hook has no gvim seam): Fresh's plugin answers the
-editor's built-in Open File / Save File As prompts with directory suggestions. gvim's Open File and
-Switch Project are the native file browser and Save As is the Save-As dialog, and
-`gvim.ui.set_prompt_suggestions` only fills a prompt a plugin opened, so there is no built-in prompt
-event to answer; the completion engine is ported faithfully (directory/pattern parsing, hidden-file
-rule, case-insensitive prefix, directories first then alphabetical, 100-row cap, and the *new file*
-row for a path that does not exist yet) and exposed two ways: a `complete(input)` export for other
-plugins, and one command, **Path Completion: Complete Path**, that opens a path prompt with live
-suggestions (Enter on a directory descends, Enter on a file opens it, Esc cancels). Fresh's plugin
-registers no command and no key; the gained command is the documented deviation, and binding it is
-left to the user (no default key is added).
-
 **lsp_help** (reduced): Fresh's per-language install hints for when a language server is missing or
 fails. On `lsp_server_error` the plugin puts a Fresh-style line on the status row (*<Language> LSP
 server not found — click the LSP status for install help*) and remembers the failure per language;
@@ -215,7 +151,7 @@ the next LSP-status click opens an action popup with the entry's explanation, co
 commands and gvim-native quick actions (Start/Restart LSP Server, Stop LSP Server, Toggle LSP for
 This Buffer, Disable <Language> LSP, Go to Definition, Find References, Dismiss). Install hints are
 carried for the languages a gvim user is likely to configure (Go, Rust, Python, TypeScript/TSX/
-JavaScript/JSX/React, C/C++, Java, JSON, YAML, TOML, Markdown, Ruby, Bash, Lua, HTML, CSS, SQL). Reductions:
+JavaScript/JSX/React, C/C++, Java, JSON, YAML, TOML, Markdown, Ruby, Bash, Lua, HTML, CSS, SQL, Slang). Reductions:
 gvim's `lsp_server_error` payload carries only the error text (no language, error type or server
 command), so the language is the active buffer's, the server command in the message is the entry's
 documented default and *not found* is inferred from the error text; gvim's LSP status click also
@@ -312,43 +248,6 @@ the heuristic does not follow `compile_commands.json` include paths or rename-ca
 not expose server custom notifications), and the project setup is a virtual buffer rather than Fresh's
 floating panel.
 
-**slang_lsp** (reduced Fresh port): the Slang shader language-server helper. Fresh's `slang-lsp.ts`
-is an LSP URI-scheme provider: it claims `slang-synth://` and, when go-to-definition lands on a
-builtin (float3, normalize, ...), dumps the builtin module with `slangd --print-builtin-module` to a
-version-keyed cache and opens it read-only. gvim now handles those builtin external locations
-**natively** (no plugin API): only the `slang-synth` scheme and a bounded module authority are
-accepted; the fixed `slangd --print-builtin-module <module>` runs through the workspace authority
-under the trust gate with a 5 s / 4 MiB bound; timeout, signal, truncation and a non-zero exit are
-errors; the generated cache file is opened read-only at the LSP position. It is **local-authority
-only** — a remote/SSH workspace refuses explicitly with no local fallback. There is still no generic
-plugin URI-scheme/external-URI API. The opt-in helper keeps the install/verification/help surface as
-three commands. **Slang: Check slangd /
-slangc** runs `slangd --version` and `slangc -v` through `gvim.proc` (authority-following), uses
-`result.ok` for the verdict, and reports each tool's first version line — a non-ok result includes
-its exit code and first output line, and a start failure reports the actual error verbatim (a remote
-authority error, sandbox refusal or broken executable is never rewritten as a missing binary).
-**Slang: Copy Install Command** copies the official release instruction (Slang has no single
-official package-manager command; the upstream install page points at binary releases from
-https://github.com/shader-slang/slang/releases, with `slangc`/`slangd` to put on PATH). **Slang:
-Language Server Help** opens a popup covering the `lsp.slang` configuration (and a user
-`languages.slang` entry for `.slang`/`.slangh` when gvim does not detect them), the native
-`slang-synth://` builtin-module flow (local-only, bounded, read-only cache), verification/restart
-notes, the release link and https://shader-slang.org/docs/, with copy/check and the native
-Start/Restart LSP Server and Show LSP Status actions. When the active buffer is `.slang`/`.slangh`
-and `gvim.has("lsp")` is true, the popup also offers **Disable Slang LSP**: it re-checks the active
-Slang buffer and LSP feature, captures that buffer's path/language and dispatches the controlled
-native `lsp_disable_language_target` action; the TUI validates the target before the root-level
-LSP-port mute. The gate requires `buf:language() == "slang"` exactly: Fresh has no default
-`.slangh` language mapping, and gvim's default detection leaves it text/empty, so `.slangh` needs a
-user `languages.slang` entry (or Set Language) before this action is available. A `.slang`/`.slangh`
-buffer detected as text is not a Slang buffer, shows `status.not_slang`, offers no disable row and
-never passes `text` to the native mute. A tab switch, non-Slang buffer or missing LSP gives the
-matching notice and does not dispatch; no async success is claimed. No keys/settings; opt-in
-(`default_enabled: false`). Reductions (also in porting.md): no generic plugin URI-scheme/external-URI API and no
-plugin-provided schemes; the native flow is local-only with no remote generation; no version-keyed
-persistent cache (each request regenerates); the helper itself does not handle synth URIs. The
-install command is release guidance rather than a package-manager one-liner.
-
 **lsp_navigation** (with the shared finder): a port of Fresh's plugin on the shared `gvim.finder`
 library. **Go to LSP Symbol** asks the server for `textDocument/documentSymbol`, lists the symbols as
 `[kind] name` rows with the source line as the detail, filters them with Fresh's fuzzy algorithm
@@ -371,19 +270,6 @@ row for the empty query and previewed immediately (cursor + search-match highlig
 has no initial-selected-index option, so typed queries return to the normal line order and the
 selected row is no longer forced. The highlight is a decoration, not an overlay namespace. No
 default key binding (Fresh's plugin registers none).
-
-**find_references** (reduced; command driven): Fresh's plugin answers the host's `lsp_references` /
-`lsp_implementation` events with a finder list; gvim has no such plugin events (its native Find
-References action opens its own UI), so the port exposes Fresh's own command keys — **Show References
-Panel** asks the server for `textDocument/references` for the symbol under the cursor (UTF-16 column,
-`includeDeclaration = true`, results capped at 100 rows) and shows a filterable location list:
-`relative path:line` rows, the source line as the detail (open buffers read in place, other files via
-one bounded read), a preview tab as the selection moves, Enter commits the jump and the hidden **Hide
-References Panel** command closes the list. Empty results, a missing symbol/language and server errors
-keep the Fresh status-line messages. Reductions: no reference/implementation events (commands
-instead), no implementation listener (that list lives in lsp_navigation), and no source-split reuse
-(preview tabs do). No default key binding (Fresh's core action has its own chord; the plugin
-registers none).
 
 **dashboard** (reduced Fresh port): a read-only start-screen tab shown when the editor has no file
 open — a centred frame with the repository state (branch, upstream tracking `↑ahead ↓behind` or
@@ -550,8 +436,7 @@ through the user config `env.detectors`.
 plugin `markdown_toc.ts`; gvim builds it into the TUI as the sidebar section under the File Explorer
 (`docs/sidebar.md`), so there is no Lua plugin to load, and the palette rows **Markdown: Show
 Outline**, **Markdown: Close Outline** and **Markdown: Contents — Follow Cursor/Scroll** are built-in
-commands like the compare rows. The config keys stay under the plugin's old name, so a Fresh config
-keeps working: `plugins.markdown_toc.enabled` and `plugins.markdown_toc.settings` with
+commands like the compare rows. Its settings are the native `contents` object (user layer): `enabled` (true),
 `max_depth` (6, 1 to 6), `follow` (`cursor` or `scroll`), `fold_buffer` (false), `rows` (10,
 1 to 200) and `auto_open` (true). The one residual gap against Fresh is `fold_buffer`: gvim's editor
 folds are indentation folds, so a heading usually opens none to fold.
@@ -612,23 +497,23 @@ Measured with the plugin set of this release (macOS arm64, Go 1.27, pure heap in
 
 | | Heap |
 |---|---|
-| the editor session without plugins | 2.4 MiB |
-| the same session with the 9 default-enabled plugins loaded and idle | about 5.4 MiB |
-| **cost of the default set** | **about 3.0 MiB** (gate: 8 MiB) |
+| the editor session without plugins | 2.3 MiB |
+| the same session with the 7 default-enabled plugins loaded and idle | about 4.7 MiB |
+| **cost of the default set** | **about 2.4 MiB** (gate: 8 MiB) |
 
 The cost used to be about 5.8 MiB (7.25 MiB in an earlier release). The compiler leaves every function
 prototype's code, constant and debug slices in oversized append-grown arrays, and gopher-lua kept them
 for the life of the plugin (about 17 KiB per Lua function); `plugin.CompileSource` now copies them at
 their exact length, which took the default set from 5.78 to 2.97 MiB. The gate passes with a wide
-margin (about 5 MiB of headroom), but the opt-in plugins below stay off by default: they were
+margin (about 5.6 MiB of headroom), but the opt-in plugins below stay off by default: they were
 switched off when the cost was higher, and enabling one is the user's choice (`plugins.<name>.enabled`).
-The shared Finder library is not part of the idle cost: `diagnostics_panel` requires
-`gvim.finder` lazily on its first build. `live_diff` is opt-in like Fresh's.
+The shared Finder library is not part of the idle cost: the plugins that use it require
+`gvim.finder` lazily on their first build. `live_diff` is opt-in like Fresh's.
 
 Per plugin, the heap one plugin adds to an otherwise empty runtime (measured in the plugin test harness
-over a fake host, so the real host adapters add to these figures; the nine default plugins sum to
-about 2.2 MiB here against 3.0 MiB in the real editor): `goto_with_selection` 0.23 MiB,
-`tab_actions` 0.22, `path_complete` 0.23, `lsp_help` 0.23, `git_statusbar` 0.24, `flash` 0.26,
-`git_find_file` 0.27, `git_blame` 0.27, `diagnostics_panel` 0.27, `git_gutter` 0.28,
+over a fake host, so the real host adapters add to these figures; the seven default plugins together
+cost about 2.4 MiB in the real editor): `goto_with_selection` 0.23 MiB,
+`tab_actions` 0.22, `lsp_help` 0.23, `git_statusbar` 0.24, `flash` 0.26,
+`git_find_file` 0.27, `git_blame` 0.27, `git_gutter` 0.28,
 `merge_conflict` 0.31, `git_log` 0.49 and **`vi_mode` 1.45 MiB**, the largest by far (it is off by
 default for that reason, like `flash`). Switching off the git plugins you do not use saves about 1 MiB.

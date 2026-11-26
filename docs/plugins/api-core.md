@@ -104,7 +104,11 @@ A read-only snapshot of some effective editor settings. With a key, its value (o
 a table of all of them. The keys are: `theme`, `tab_size`, `insert_spaces`, `line_ending`,
 `trim_trailing_whitespace`, `ensure_final_newline`, `auto_indent`, `line_numbers`, `line_wrap`,
 `highlight_current_line`, `show_whitespace`, `cursor_style`, `auto_save_enabled`,
-`auto_save_interval_secs` (the names are those of the config file). Other keys are not readable. The values are what the editor
+`auto_save_interval_secs`. These are the plugin API's own names, not config file keys: in the config file the
+`editor` object holds them, and four are spelled differently there (`line_ending` is `editor.default_line_ending`,
+`trim_trailing_whitespace` is `editor.trim_trailing_whitespace_on_save`, `ensure_final_newline` is
+`editor.ensure_final_newline_on_save`, `show_whitespace` is `editor.whitespace_show`); `insert_spaces` is the inverse of
+`editor.use_tabs`. Other keys are not readable. The values are what the editor
 uses now: `line_wrap`, `highlight_current_line`, `show_whitespace` and `cursor_style` follow the view toggles,
 and `auto_save_enabled` is `false` with `auto_save_interval_secs` `0` while auto-save is off.
 
