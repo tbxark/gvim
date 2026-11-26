@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/filewatch"
 )
@@ -109,5 +111,52 @@ func TestProjectCloseStopsTheIndex(t *testing.T) {
 	case <-b.Files.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("the index was still running after close")
+	}
+}
+
+// TestProjectOpenKeepsTheLiveExplorerAndFinderOptions checks that a switched-to folder
+// is scanned with the explorer and finder options the session runs with now (here a
+// custom ignore pattern), not with the defaults.
+func TestProjectOpenKeepsTheLiveExplorerAndFinderOptions(t *testing.T) {
+	apptest.IsolateConfig(t)
+	tests := []struct {
+		name   string
+		set    bool
+		hidden bool // whether noise.log must be listed
+	}{
+		{"no providers: defaults", false, true},
+		{"providers: custom ignore applies", true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTree(t, dir, map[string]string{"noise.log": "x", "keep.txt": "x"})
+			p := &Projects{ctx: t.Context()}
+			if tt.set {
+				p.SetOptions(
+					func() explorer.Options {
+						return explorer.Options{CustomIgnorePatterns: []string{"*.log"}, HideGitignore: true}
+					},
+					func() finder.Options { return finder.Options{CustomIgnorePatterns: []string{"*.log"}} },
+				)
+			}
+			b, err := p.Open(dir)
+			apptest.Must(t, err)
+			<-b.Files.Done()
+			files, _ := b.Files.Snapshot()
+			inIndex := slices.Contains(files, "noise.log")
+			inTree := false
+			for _, row := range b.Tree.Rows() {
+				if row.Name == "noise.log" {
+					inTree = true
+				}
+			}
+			if inIndex != tt.hidden || inTree != tt.hidden {
+				t.Fatalf("noise.log in index = %v, in tree = %v, want both %v", inIndex, inTree, tt.hidden)
+			}
+			if !slices.Contains(files, "keep.txt") {
+				t.Fatalf("index = %v, want keep.txt", files)
+			}
+		})
 	}
 }

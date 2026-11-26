@@ -55,7 +55,7 @@ func waitDaemonProcessed(t *testing.T, conn net.Conn) {
 // client receives ANSI diffs, so a reused screen updates only changed cells.
 func requestOpen(t *testing.T, conn net.Conn, req daemon.OpenFile) {
 	t.Helper()
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, req); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeOpenFile, req); err != nil {
 		t.Fatal(err)
 	}
 	waitDaemonProcessed(t, conn)
@@ -64,7 +64,7 @@ func requestOpen(t *testing.T, conn net.Conn, req daemon.OpenFile) {
 // sendResize forces the program to repaint the whole frame for the attached client.
 func sendResize(t *testing.T, conn net.Conn) {
 	t.Helper()
-	if err := daemon.WriteJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -5,7 +5,6 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/document"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/highlight"
 	"github.com/tbxark/gvim/pluginapi"
@@ -14,7 +13,7 @@ import (
 
 // documentAdapter is the read-only tui.Document view of one *editor.Document.
 type documentAdapter struct {
-	doc   *editor.Document
+	doc   *document.Document
 	spans *highlight.Cache
 }
 
@@ -165,7 +164,7 @@ func (d documentAdapter) LineSpansIn(i, col int, text string) []syntax.Span {
 
 // Cursors returns the extra carets of the document, which the pane paints in the
 // secondary caret style.
-func (d documentAdapter) Cursors() []editor.Caret { return d.doc.Cursors() }
+func (d documentAdapter) Cursors() []document.Caret { return d.doc.Cursors() }
 
 // VirtualColumns is how many display columns the caret sits past the end of its
 // line (virtual space), which the pane draws the caret at.
@@ -173,7 +172,7 @@ func (d documentAdapter) VirtualColumns() int { return d.doc.VirtualColumns() }
 
 // BlockSelection is the active block selection's rectangle, which the pane paints
 // as a rectangle, including its virtual columns past the end of short lines.
-func (d documentAdapter) BlockSelection() (editor.BlockRect, bool) { return d.doc.BlockSelection() }
+func (d documentAdapter) BlockSelection() (document.BlockRect, bool) { return d.doc.BlockSelection() }
 
 // VirtualLines is how many empty rows below the last line the caret sits on, and
 // VirtualLineColumn its display column there (vertical virtual space).
@@ -189,7 +188,7 @@ func (d documentAdapter) Folds(tabWidth int) []fold.Range { return d.doc.Folds(t
 func (d documentAdapter) Folded(line int) bool { return d.doc.Folded(line) }
 
 // ViewSettings is the document's display settings, read by the view commands and the pane.
-func (d documentAdapter) ViewSettings() editor.ViewSettings { return d.doc.ViewSettings() }
+func (d documentAdapter) ViewSettings() document.ViewSettings { return d.doc.ViewSettings() }
 
 // Version is the version of the document's text, which changes with every edit.
 func (d documentAdapter) Version() uint64 { return d.doc.Buffer.Version() }

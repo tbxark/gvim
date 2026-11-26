@@ -55,7 +55,7 @@ func makeTrustedLive(levelOf func() trust.Level) func() bool {
 	return func() bool { return levelOf() == trust.Trusted }
 }
 
-func makeSpawnGate(remote bool, root string, levelOf func() trust.Level) func(context.Context, []string, string, map[string]string) error {
+func makeSpawnGate(remote bool, rootOf func() string, levelOf func() trust.Level) func(context.Context, []string, string, map[string]string) error {
 	return func(_ context.Context, argv []string, cwd string, childEnv map[string]string) error {
 		if remote {
 			if levelOf() != trust.Trusted {
@@ -67,11 +67,11 @@ func makeSpawnGate(remote bool, root string, levelOf func() trust.Level) func(co
 		if pathValue == "" {
 			pathValue = os.Getenv("PATH")
 		}
-		return trust.DecideSpawn(levelOf(), root, cwd, argv, pathValue)
+		return trust.DecideSpawn(levelOf(), rootOf(), cwd, argv, pathValue)
 	}
 }
 
-func makeLSPGate(remote bool, root string, levelOf func() trust.Level) func(context.Context, []string, string, string) error {
+func makeLSPGate(remote bool, rootOf func() string, levelOf func() trust.Level) func(context.Context, []string, string, string) error {
 	return func(_ context.Context, argv []string, cwd, pathValue string) error {
 		if remote {
 			if levelOf() != trust.Trusted {
@@ -79,7 +79,7 @@ func makeLSPGate(remote bool, root string, levelOf func() trust.Level) func(cont
 			}
 			return nil
 		}
-		return trust.DecideSpawn(levelOf(), root, cwd, argv, pathValue)
+		return trust.DecideSpawn(levelOf(), rootOf(), cwd, argv, pathValue)
 	}
 }
 
@@ -90,9 +90,20 @@ func makeTrustedForSettings(ctl *trustController) func() bool {
 	return func() bool { return ctl.State().AllowsProjectConfig() }
 }
 
+// rootNow is the workspace root as it is now: Switch Project moves it, so the trust gates
+// and the settings service read it live instead of the root the session started in.
+func (b *runtimeBuild) rootNow() string {
+	if b.proj != nil {
+		if root := b.proj.RootDir(); root != "" {
+			return root
+		}
+	}
+	return b.root
+}
+
 // spawnGate is the workspace spawn gate (docs/trust.md).
 func (b *runtimeBuild) spawnGate(ctx context.Context, argv []string, cwd string, childEnv map[string]string) error {
-	return makeSpawnGate(b.opts.Remote != nil, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))(ctx, argv, cwd, childEnv)
+	return makeSpawnGate(b.opts.Remote != nil, b.rootNow, makeLevelOf(b.trustCtl, b.trustState.Level))(ctx, argv, cwd, childEnv)
 }
 
 // authGate is the authority's plain Gate (no environment): the remote/fallback check;
@@ -169,7 +180,7 @@ func (b *runtimeBuild) wireEnvironment() {
 // (connectAuthority).
 func (b *runtimeBuild) mountRemoteAuthority() {
 	if b.opts.Remote != nil {
-		spawnGate := makeSpawnGate(true, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))
+		spawnGate := makeSpawnGate(true, b.rootNow, makeLevelOf(b.trustCtl, b.trustState.Level))
 		authGate := func(ctx context.Context, argv []string, cwd string) error {
 			return spawnGate(ctx, argv, cwd, nil)
 		}
@@ -217,7 +228,7 @@ func (b *runtimeBuild) wireLSP() {
 	cfg, deps := b.cfg, &b.deps
 	levelOf := makeLevelOf(b.trustCtl, b.trustState.Level)
 	trustedLive := makeTrustedLive(levelOf)
-	lspGate := makeLSPGate(b.opts.Remote != nil, b.root, levelOf)
+	lspGate := makeLSPGate(b.opts.Remote != nil, b.rootNow, levelOf)
 	deps.LSP = newLSP(lspConfig(cfg, b.trustState))
 	if setter, ok := deps.LSP.(interface{ SetSpawnEnv(func() []string) }); ok {
 		setter.SetSpawnEnv(b.envProvider.Overlay)
@@ -308,7 +319,7 @@ func (b *runtimeBuild) buildPlugins() {
 		Paths:              opts.PluginPaths,
 		Disabled:           opts.NoPlugins,
 		LogSink:            opts.pluginLog,
-		Version:            gvimVersion(),
+		Version:            Version(),
 		Preset:             presetKeymap(opts.Keymap, cfg),
 		Root:               b.proj.RootDir,
 		SpawnEnv:           localEnvOverlay(b.envProvider, opts.Remote != nil),
@@ -325,7 +336,7 @@ func (b *runtimeBuild) buildPlugins() {
 	// its unsupported state in the other cases.
 	if opts.Remote == nil && (opts.Daemon == nil || opts.PluginDaemon == nil) {
 		proj := b.proj
-		spawnGate := makeSpawnGate(false, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))
+		spawnGate := makeSpawnGate(false, b.rootNow, makeLevelOf(b.trustCtl, b.trustState.Level))
 		discoverer := newAgentDiscoverer(func() string { return proj.RootDir() }, spawnGate, cfg.Terminal.Agents)
 		po.AgentDiscover = func(ctx context.Context) (pluginapi.AgentReport, error) {
 			return pluginAgentReport(discoverer.Discover(ctx)), nil
@@ -337,7 +348,7 @@ func (b *runtimeBuild) buildPlugins() {
 		// and environment), while the documented local-only APIs stay local. A local
 		// launch leaves this nil.
 		authSlot := b.authSlot
-		spawnGate := makeSpawnGate(true, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))
+		spawnGate := makeSpawnGate(true, b.rootNow, makeLevelOf(b.trustCtl, b.trustState.Level))
 		po.WrapOS = func(local hostos.OS) hostos.OS { return pluginhost.NewAuthorityOS(authSlot, local, spawnGate) }
 	}
 	if opts.Daemon != nil && opts.PluginDaemon != nil && opts.Remote == nil {
@@ -364,13 +375,21 @@ func (b *runtimeBuild) buildPlugins() {
 func (b *runtimeBuild) connectAuthority() {
 	opts := &b.opts
 	if b.authSlot == nil {
-		spawnGate := makeSpawnGate(opts.Remote != nil, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))
+		spawnGate := makeSpawnGate(opts.Remote != nil, b.rootNow, makeLevelOf(b.trustCtl, b.trustState.Level))
 		authGate := func(ctx context.Context, argv []string, cwd string) error {
 			return spawnGate(ctx, argv, cwd, nil)
 		}
 		b.authSlot = mountAuthority(*opts, b.pw, authGate, spawnGate, localEnvOverlay(b.envProvider, opts.Remote != nil))
 	}
-	if connectNotice, _ := attemptAuthorityConnect(b.ctx, b.authSlot); connectNotice != "" {
+	if hook := opts.connectHook; hook != nil && b.authSlot.State().Kind != "local" {
+		// The interactive dial of a jump-box daemon: it answers the prompts on the daemon
+		// terminal, so the wiring and session restore below see a connected slot.
+		if err := hook(b.ctx, b.authSlot); err != nil {
+			b.openNotices = append(b.openNotices, fmt.Sprintf("SSH %s: %v", b.authSlot.Label(), err))
+		} else if notice := drainAuthorityNotices(b.authSlot); notice != "" {
+			b.openNotices = append(b.openNotices, notice)
+		}
+	} else if connectNotice, _ := attemptAuthorityConnect(b.ctx, b.authSlot); connectNotice != "" {
 		b.openNotices = append(b.openNotices, connectNotice)
 	}
 	if opts.Remote != nil && !opts.NoPlugins {
@@ -394,7 +413,11 @@ func (b *runtimeBuild) wirePluginPorts() {
 		deps.Root.GitGrep = gitGrep{spawnEnv: b.envProvider.Overlay, oneShot: b.authSlot.OneShot()}
 	}
 	deps.Root.ReviewGit = uiadapter.ReviewGit{Slot: b.authSlot, Remote: b.opts.Remote != nil}
-	deps.Root.Plugins = pw.Runtime
+	// The model drives the runtime through a mirror that keeps the Settings page's copy of
+	// the inventory current, so the page never reads the single-goroutine runtime itself.
+	mirror, inv := newPluginMirror(pw.Runtime)
+	deps.Root.Plugins = mirror
+	b.pluginInv = inv
 	deps.Root.PluginEditor = pw.Editor
 	if b.pluginWS != nil {
 		// The daemon-wide host mux: the model's host calls route to whichever workspace is

@@ -2,9 +2,8 @@ package uiadapter
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"time"
-
-	"github.com/tbxark/gvim/editor"
 )
 
 // errAutoSaveWriting is what an explicit save returns while a planned auto-save is
@@ -29,7 +28,7 @@ func (a *Editor) AutoSaveDue(now time.Time) bool {
 // PlanAutoSave prepares the auto-save at now, as editor.PlanAutoSave does, and marks
 // the gate as writing when there is a save to run. While a plan is writing, it plans
 // nothing and records no time, so the next tick plans again.
-func (a *Editor) PlanAutoSave(now time.Time) []editor.SaveJob {
+func (a *Editor) PlanAutoSave(now time.Time) []document.SaveJob {
 	if a.writePending() {
 		return nil
 	}
@@ -42,7 +41,7 @@ func (a *Editor) PlanAutoSave(now time.Time) []editor.SaveJob {
 
 // ApplyAutoSave records the results of a planned auto-save on the editor's goroutine,
 // and opens the gate again. The results come from the command that ran the jobs.
-func (a *Editor) ApplyAutoSave(results []editor.SaveResult) error {
+func (a *Editor) ApplyAutoSave(results []document.SaveResult) error {
 	if a.saves != nil {
 		a.saves.writing = false
 	}

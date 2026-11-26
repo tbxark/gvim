@@ -2,10 +2,21 @@ package daemon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
 )
+
+// WriteJSON writes a frame whose payload is the JSON of v: the tests' way to send a typed
+// request. The daemon's own writers use FrameWriter.WriteJSON.
+func WriteJSON(w io.Writer, typ byte, v any) error {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return WriteFrame(w, typ, payload)
+}
 
 // TestFrameTypesAreDistinct checks no two frame types share a byte: a client must never
 // read one reply as another.

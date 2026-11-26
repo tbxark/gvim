@@ -294,3 +294,24 @@ func stashedText(t *testing.T, dir string) string {
 	}
 	return ""
 }
+
+// TestDaemonExitDoesNotSaveTheSessionAgainAfterTheCapture checks the exit writes each
+// workspace's session once: the capture is the final write, and the runtime's own exit does
+// not repeat the session, terminal and search writes behind it. The capture hook removes
+// the session file once it is written, so a second save shows as the file coming back.
+func TestDaemonExitDoesNotSaveTheSessionAgainAfterTheCapture(t *testing.T) {
+	m, foregroundID := newWorkspaceManagerTest(t)
+	dir := addUnsavedForeground(t, m, foregroundID)
+	m.writeSnapshotFn = func(s *workspaceSession, snap *captureSnapshot) error {
+		if err := m.writeSnapshot(s, snap); err != nil {
+			return err
+		}
+		return os.Remove(filepath.Join(dir, "session.json"))
+	}
+	if err := m.closeAllChecked(5 * time.Second); err != nil {
+		t.Fatalf("clean exit returned an error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "session.json")); err == nil {
+		t.Fatal("the exit saved the session a second time after the capture wrote it")
+	}
+}

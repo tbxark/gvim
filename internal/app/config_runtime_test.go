@@ -14,7 +14,25 @@ import (
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/trust"
 )
+
+var testTrustStores = map[*testing.T]*trust.Store{}
+
+// trustProject records root as Trusted in a per-test isolated trust store for
+// tests exercising project-layer .gvim/config.json behavior.
+func trustProject(t *testing.T, root string) {
+	t.Helper()
+	store := testTrustStores[t]
+	if store == nil {
+		store = useTrustStore(t)
+		testTrustStores[t] = store
+		t.Cleanup(func() { delete(testTrustStores, t) })
+	}
+	if err := store.Set(root, trust.Trusted); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // writeTestFile writes content to path, creating the parent folders.
 func writeTestFile(t *testing.T, path, content string) {
@@ -36,6 +54,7 @@ func projectRoot(t *testing.T, body string) Options {
 	writeTestFile(t, file, "hello\n")
 	if body != "" {
 		writeTestFile(t, filepath.Join(root, ".gvim", "config.json"), body)
+		trustProject(t, root)
 	}
 	return Options{Root: root, Files: []FileTarget{{Path: file}}}
 }
@@ -144,7 +163,6 @@ var defaultEditorOptions = editor.Options{
 	VirtualSpace:                 "off",
 	ScrollOffset:                 3,
 	AutoReadOnly:                 true,
-	SnapshotInterval:             100,
 	RecoveryEnabled:              true,
 	AutoRecoverySaveIntervalSecs: 2,
 	AutoRevertPollIntervalMS:     2000,
@@ -173,14 +191,14 @@ func TestConfigEditorSettingsReachEditor(t *testing.T) {
 		want editor.Options
 	}{
 		{"no config file", ``, defaultEditorOptions},
-		{"tab_size", `{"tab_size": 2}`, with(func(o *editor.Options) { o.TabSize = 2 })},
+		{"tab_size", `{"editor": {"tab_size": 2}}`, with(func(o *editor.Options) { o.TabSize = 2 })},
 		{"insert_spaces false", `{"insert_spaces": false}`, with(func(o *editor.Options) { o.UseTabs = true })},
-		{"auto_indent false", `{"auto_indent": false}`, with(func(o *editor.Options) { o.AutoIndent = false })},
-		{"trim_trailing_whitespace", `{"trim_trailing_whitespace": true}`, with(func(o *editor.Options) { o.TrimTrailingWhitespace = true })},
-		{"ensure_final_newline", `{"ensure_final_newline": true}`, with(func(o *editor.Options) { o.EnsureFinalNewline = true })},
-		{"line_ending crlf", `{"line_ending": "crlf"}`, with(func(o *editor.Options) { o.DefaultLineEnding = "CRLF" })},
-		{"line_ending auto", `{"line_ending": "auto"}`, defaultEditorOptions},
-		{"line_ending lf", `{"line_ending": "lf"}`, defaultEditorOptions},
+		{"auto_indent false", `{"editor": {"auto_indent": false}}`, with(func(o *editor.Options) { o.AutoIndent = false })},
+		{"trim_trailing_whitespace", `{"editor": {"trim_trailing_whitespace_on_save": true}}`, with(func(o *editor.Options) { o.TrimTrailingWhitespace = true })},
+		{"ensure_final_newline", `{"editor": {"ensure_final_newline_on_save": true}}`, with(func(o *editor.Options) { o.EnsureFinalNewline = true })},
+		{"line_ending crlf", `{"editor": {"default_line_ending": "crlf"}}`, with(func(o *editor.Options) { o.DefaultLineEnding = "CRLF" })},
+		{"line_ending auto", `{"editor": {"default_line_ending": "auto"}}`, defaultEditorOptions},
+		{"line_ending lf", `{"editor": {"default_line_ending": "lf"}}`, defaultEditorOptions},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -207,8 +225,8 @@ func TestConfigViewSettingsReachUI(t *testing.T) {
 		hideMenuBar     bool
 	}{
 		{"defaults", ``, false, false},
-		{"line_numbers false", `{"line_numbers": false}`, true, false},
-		{"show_menu_bar false", `{"show_menu_bar": false}`, false, true},
+		{"line_numbers false", `{"editor": {"line_numbers": false}}`, true, false},
+		{"show_menu_bar false", `{"editor": {"show_menu_bar": false}}`, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,7 +251,7 @@ func TestConfigThemeIsUsedWithoutFlag(t *testing.T) {
 		themeFlag string
 		want      string
 	}{
-		{"default theme", ``, "", "dark"},
+		{"default theme", ``, "", "gopher"},
 		{"config theme", `{"theme": "nord"}`, "", "nord"},
 		{"flag beats config", `{"theme": "nord"}`, "light", "light"},
 	}
@@ -356,8 +374,7 @@ func TestConfigExplorerSettingsReachTree(t *testing.T) {
 		wantIgnored bool // build.log is listed
 	}{
 		{"defaults", ``, "", true, true},
-		{"explorer_show_hidden", `{"explorer_show_hidden": false}`, "", false, true},
-		{"explorer_show_ignored alias hides", `{"explorer_show_ignored": false}`, "", true, false},
+		{"file_explorer.show_hidden", `{"file_explorer": {"show_hidden": false}}`, "", false, true},
 		{"hide_gitignore", `{"file_explorer": {"hide_gitignore": true}}`, "", true, false},
 		{"file_scan_exclusions", `{"file_scan_exclusions": ["*.log"]}`, "", true, false},
 		{"file_scan_inclusions un-ignore", `{"file_explorer": {"hide_gitignore": true}}`, "*.log\n.env\n", true, false},
@@ -547,7 +564,7 @@ func TestPrintDiagnosticsWritesEachWarning(t *testing.T) {
 }
 
 func TestBuildModelPrintsConfigDiagnosticsToStderr(t *testing.T) {
-	opts := projectRoot(t, `{"tab_size": 99}`)
+	opts := projectRoot(t, `{"editor": {"tab_size": 99}}`)
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -574,7 +591,7 @@ func TestBuildModelPrintsConfigDiagnosticsToStderr(t *testing.T) {
 func TestConfigFlagFileIsReadWithoutProjectOrUserFile(t *testing.T) {
 	opts := projectRoot(t, "")
 	alt := filepath.Join(t.TempDir(), "alt.json")
-	writeTestFile(t, alt, `{"tab_size": 2}`)
+	writeTestFile(t, alt, `{"editor": {"tab_size": 2}}`)
 	opts.Config = alt
 	got, err := buildCaptured(t, opts)
 	if err != nil {
@@ -595,7 +612,7 @@ func TestBuildModelRejectsMissingConfigFlagFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeTestFile(t, files.User, `{"tab_size": 3}`)
+	writeTestFile(t, files.User, `{"editor": {"tab_size": 3}}`)
 	opts := projectRoot(t, ``)
 	missing := filepath.Join(t.TempDir(), "absent.json")
 	opts.Config = missing
@@ -616,16 +633,16 @@ func TestConfigFlagReplacesUserFileAndProjectStillApplies(t *testing.T) {
 	}
 	// The default user file would set tab_size 3 and auto_indent false. The
 	// flag file replaces it, so neither value may reach the editor.
-	writeTestFile(t, files.User, `{"tab_size": 3, "auto_indent": false}`)
+	writeTestFile(t, files.User, `{"editor": {"tab_size": 3, "auto_indent": false}}`)
 	alt := filepath.Join(t.TempDir(), "alt.json")
-	writeTestFile(t, alt, `{"line_ending": "crlf"}`)
+	writeTestFile(t, alt, `{"editor": {"default_line_ending": "crlf"}}`)
 	tests := []struct {
 		name    string
 		project string
 		want    editor.Options
 	}{
 		{"no project file", ``, withEditorDefaults(4, "CRLF")},
-		{"project file applies over the flag file", `{"tab_size": 2}`, withEditorDefaults(2, "CRLF")},
+		{"project file applies over the flag file", `{"editor": {"tab_size": 2}}`, withEditorDefaults(2, "CRLF")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -643,7 +660,7 @@ func TestConfigFlagReplacesUserFileAndProjectStillApplies(t *testing.T) {
 }
 
 func TestBuildModelNoticesFirstConfigDiagnostic(t *testing.T) {
-	opts := projectRoot(t, `{"tab_size": 99}`)
+	opts := projectRoot(t, `{"editor": {"tab_size": 99}}`)
 	got, err := buildCaptured(t, opts)
 	if err != nil {
 		t.Fatalf("buildModel() error = %v", err)
@@ -654,11 +671,11 @@ func TestBuildModelNoticesFirstConfigDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The status row prefixes every config problem with "config:", as it does the keybinding ones.
-	want := "config: " + filepath.Join(root, ".gvim", "config.json") + ": tab_size: must be between 1 and 16, got 99"
+	want := "config: " + filepath.Join(root, ".gvim", "config.json") + ": editor.tab_size: must be between 1 and 16, got 99"
 	if got.deps.Notice != want {
 		t.Fatalf("Notice = %q, want %q", got.deps.Notice, want)
 	}
-	clean, err := buildCaptured(t, projectRoot(t, `{"tab_size": 2}`))
+	clean, err := buildCaptured(t, projectRoot(t, `{"editor": {"tab_size": 2}}`))
 	if err != nil {
 		t.Fatalf("buildModel() error = %v", err)
 	}

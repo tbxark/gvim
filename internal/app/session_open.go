@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 
 	"github.com/tbxark/gvim/editor"
@@ -16,7 +17,7 @@ import (
 // It returns the large files that the UI must ask about before they are loaded
 // whole, and the files that could not be transcoded and were left out with a
 // notice. Any other failure to open a file is returned.
-func openTargets(ed *editor.Editor, targets []FileTarget, reuseOpen bool) (notices []string, fullLoads []editor.ErrLargeNeedsFullLoad, err error) {
+func openTargets(ed *editor.Editor, targets []FileTarget, reuseOpen bool) (notices []string, fullLoads []document.ErrLargeNeedsFullLoad, err error) {
 	for _, f := range targets {
 		if reuseOpen {
 			if i, ok := tabForPath(ed, f.Path); ok {
@@ -30,12 +31,12 @@ func openTargets(ed *editor.Editor, targets []FileTarget, reuseOpen bool) (notic
 			}
 		}
 		if err := ed.OpenFile(f.Path); err != nil {
-			if need, ok := errors.AsType[editor.ErrLargeNeedsFullLoad](err); ok {
+			if need, ok := errors.AsType[document.ErrLargeNeedsFullLoad](err); ok {
 				// Decoding it whole would hold the first frame back. The UI asks.
 				fullLoads = append(fullLoads, need)
 				continue
 			}
-			if errors.Is(err, editor.ErrTooLargeToTranscode) {
+			if errors.Is(err, document.ErrTooLargeToTranscode) {
 				// Only this file is lost: the others open, and the status row says why.
 				notices = append(notices, err.Error())
 				continue

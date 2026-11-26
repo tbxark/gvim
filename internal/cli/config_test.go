@@ -285,9 +285,9 @@ func TestConfigShowReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "tab_size": 2}`)
+	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "editor": {"tab_size": 2}}`)
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"tab_size": 8, "bogus": true}`)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"editor": {"tab_size": 8}, "bogus": true}`)
 	t.Chdir(root)
 	// The viewer follows the editor's trust gate, so the workspace has to be trusted for
 	// its project layer to merge.
@@ -304,23 +304,21 @@ func TestConfigShowReal(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
 	}
-	want := `{
-  "theme": "light",
-  "keymap": "` + keymap.DefaultName() + `",
-  "tab_size": 8,
-  "insert_spaces": true,
-  "line_ending": "auto",
-  "trim_trailing_whitespace": false,
-  "ensure_final_newline": false,
-  "auto_indent": true,
-  "line_numbers": true,
-  "show_menu_bar": true,
-  "explorer_show_hidden": true,
-  "file_explorer.hide_gitignore": false
-}
-`
-	if got := stdout.String(); got != want {
-		t.Fatalf("stdout =\n%s\nwant\n%s", got, want)
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	edMap, _ := got["editor"].(map[string]any)
+	feMap, _ := got["file_explorer"].(map[string]any)
+	if got["theme"] != "light" || got["keymap"] != keymap.DefaultName() ||
+		edMap["tab_size"] != float64(8) || edMap["use_tabs"] != false ||
+		edMap["default_line_ending"] != "auto" || edMap["line_numbers"] != true ||
+		edMap["show_menu_bar"] != true || feMap["show_hidden"] != true ||
+		feMap["hide_gitignore"] != false {
+		t.Fatalf("unexpected effective config:\n%s", stdout.String())
+	}
+	if _, bad := got["file_explorer.hide_gitignore"]; bad {
+		t.Fatalf("config show emitted invalid dotted key file_explorer.hide_gitignore:\n%s", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "gvim: warning: ") || !strings.Contains(stderr.String(), "bogus: unknown setting") {
 		t.Fatalf("stderr = %q, want a warning about the bogus key", stderr.String())
@@ -446,7 +444,7 @@ func TestConfigShowEffectiveSettingsPrecedence(t *testing.T) {
 		},
 		{
 			name:       "no flags and no config use the defaults",
-			wantTheme:  "dark",
+			wantTheme:  "gopher",
 			wantKeymap: keymap.DefaultName(),
 		},
 	}
@@ -528,10 +526,10 @@ func TestConfigShowRealUntrustedGatesProjectLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "tab_size": 2}`)
+	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "editor": {"tab_size": 2}}`)
 	root := t.TempDir()
 	project := filepath.Join(root, ".gvim", "config.json")
-	writeFile(t, project, `{"tab_size": 8}`)
+	writeFile(t, project, `{"editor": {"tab_size": 8}}`)
 	t.Chdir(root)
 
 	var stdout, stderr bytes.Buffer

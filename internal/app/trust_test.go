@@ -141,11 +141,11 @@ func TestBuildRuntimeGatesTheProjectConfigOnTrust(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := projectRoot(t, `{"tab_size": 8}`)
+			opts := projectRoot(t, `{"editor": {"tab_size": 8}}`)
 			// The user layer applies at every level, so the skip is visible: it
 			// sets 2 and the project sets 8 over it.
 			opts.Config = filepath.Join(t.TempDir(), "config.json")
-			writeTestFile(t, opts.Config, `{"tab_size": 2}`)
+			writeTestFile(t, opts.Config, `{"editor": {"tab_size": 2}}`)
 			// A marker makes the folder executable content, so an undecided
 			// workspace would ask; the decision is recorded explicitly here.
 			writeTestFile(t, filepath.Join(opts.Root, "Cargo.toml"), "[package]\n")
@@ -184,9 +184,9 @@ func TestBuildRuntimeGatesLanguageServerAutoStartOnTrust(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := projectRoot(t, `{"tab_size": 8}`)
+			opts := projectRoot(t, `{"editor": {"tab_size": 8}}`)
 			opts.Config = filepath.Join(t.TempDir(), "config.json")
-			writeTestFile(t, opts.Config, `{"tab_size": 2, "lsp_enabled": true}`)
+			writeTestFile(t, opts.Config, `{"editor": {"tab_size": 2}, "lsp_enabled": true}`)
 			writeTestFile(t, filepath.Join(opts.Root, "go.mod"), "module x\n")
 			store := useTrustStore(t)
 			if err := store.Set(opts.Root, tt.level); err != nil {
@@ -343,4 +343,32 @@ func TestTrustControllerKeepsTheDecisionWhenTheWriteFails(t *testing.T) {
 	if _, err := c.Decide(trust.Undecided); err == nil {
 		t.Fatal("Decide accepted an invalid level")
 	}
+}
+
+// TestSpawnGatesFollowTheLiveRoot checks that the spawn and LSP gates judge an executable
+// against the workspace root as it is now: after Switch Project a program inside the new
+// (restricted) root is refused, and one inside the folder that was left is not.
+func TestSpawnGatesFollowTheLiveRoot(t *testing.T) {
+	oldRoot, newRoot := t.TempDir(), t.TempDir()
+	root := oldRoot
+	rootOf := func() string { return root }
+	level := func() trust.Level { return trust.Restricted }
+	spawn := makeSpawnGate(false, rootOf, level)
+	lspGate := makeLSPGate(false, rootOf, level)
+	inOld := filepath.Join(oldRoot, "bin", "tool")
+	inNew := filepath.Join(newRoot, "bin", "tool")
+	check := func(step string, argv []string, wantRefused bool) {
+		t.Helper()
+		if got := spawn(t.Context(), argv, "", nil) != nil; got != wantRefused {
+			t.Errorf("%s: spawn gate refused = %v, want %v", step, got, wantRefused)
+		}
+		if got := lspGate(t.Context(), argv, "", "") != nil; got != wantRefused {
+			t.Errorf("%s: LSP gate refused = %v, want %v", step, got, wantRefused)
+		}
+	}
+	check("before the switch, old root program", []string{inOld}, true)
+	check("before the switch, new root program", []string{inNew}, false)
+	root = newRoot
+	check("after the switch, old root program", []string{inOld}, false)
+	check("after the switch, new root program", []string{inNew}, true)
 }

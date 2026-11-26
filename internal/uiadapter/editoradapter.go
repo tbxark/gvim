@@ -2,6 +2,7 @@ package uiadapter
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/buffer"
@@ -18,7 +19,7 @@ type Editor struct {
 	// others holds the span cache of each tab that is not active, so that a split
 	// pane showing such a tab lexes it once per edit. It is nil in a zero adapter,
 	// and the other tabs then have no spans.
-	others map[*editor.Document]*highlight.Cache
+	others map[*document.Document]*highlight.Cache
 	// saves records whether a planned auto-save is writing. See autosave.go. It is
 	// nil in a zero adapter, and then nothing is refused.
 	saves *autoSaveGate
@@ -47,7 +48,7 @@ func (a *Editor) SetViewport(rows, cols int) {
 // ErrUnknownAction without reaching the editor, so the status row keeps the
 // editor's own message. A save is refused while a planned write is pending,
 // because its result is not yet recorded.
-func (a *Editor) Do(act editor.Action, args map[string]any) editor.Result {
+func (a *Editor) Do(act document.Action, args map[string]any) editor.Result {
 	if !editor.IsAction(act) {
 		return editor.Result{Err: fmt.Errorf("%w: %s", editor.ErrUnknownAction, act)}
 	}
@@ -93,13 +94,13 @@ func (a *Editor) PlanSaveAll() (editor.SavePlan, error) {
 
 // WriteSave runs the writes of a plan. It reads only the plan, so the root calls it from
 // a command, off the update loop.
-func (a *Editor) WriteSave(p editor.SavePlan) []editor.SaveResult {
+func (a *Editor) WriteSave(p editor.SavePlan) []document.SaveResult {
 	return p.Run()
 }
 
 // ApplySavePlan records the results of a planned save on the editor's goroutine, and
 // opens the gate again.
-func (a *Editor) ApplySavePlan(p editor.SavePlan, results []editor.SaveResult) error {
+func (a *Editor) ApplySavePlan(p editor.SavePlan, results []document.SaveResult) error {
 	if a.saves != nil {
 		a.saves.writing = false
 	}
@@ -181,7 +182,7 @@ func (a *Editor) DocAt(i int) tui.Document {
 // otherSpans returns the span cache of a tab that is not active, and makes it on
 // first use. When there are more caches than tabs, the caches of closed tabs are
 // dropped here, so a closed document is not kept alive.
-func (a *Editor) otherSpans(doc *editor.Document) *highlight.Cache {
+func (a *Editor) otherSpans(doc *document.Document) *highlight.Cache {
 	if a.others == nil {
 		return nil
 	}
@@ -191,7 +192,7 @@ func (a *Editor) otherSpans(doc *editor.Document) *highlight.Cache {
 		a.others[doc] = c
 	}
 	if n := len(a.ed.Tabs()); len(a.others) > n {
-		open := make(map[*editor.Document]bool, n)
+		open := make(map[*document.Document]bool, n)
 		for j := range n {
 			open[a.ed.DocAt(j)] = true
 		}
@@ -206,7 +207,7 @@ func (a *Editor) otherSpans(doc *editor.Document) *highlight.Cache {
 
 // BeginShell prepares a shell command for the root, which runs it off the update
 // loop. See editor.BeginShell.
-func (a *Editor) BeginShell(act editor.Action, args map[string]any) (editor.ShellJob, error) {
+func (a *Editor) BeginShell(act document.Action, args map[string]any) (editor.ShellJob, error) {
 	return a.ed.BeginShell(act, args)
 }
 
@@ -244,14 +245,14 @@ func (a *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 // ApplyCompletionAtCarets accepts one completion at every caret of the document at path
 // as one atomic edit. See editor.Editor.ApplyCompletionAtCarets; the TUI's multi-cursor
 // completion accept path uses it.
-func (a *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error) {
+func (a *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *document.Version) (int, error) {
 	return a.ed.ApplyCompletionAtCarets(path, text, wordChars, expect)
 }
 
 // ApplyCompletionItemAtCarets accepts a snippet/auto-import completion at every caret
 // as one atomic, version-guarded edit. See editor.Editor.ApplyCompletionItemAtCarets;
 // the TUI's multi-cursor snippet/import accept path uses it.
-func (a *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []editor.LSPEdit, wordChars string, expect *editor.Version) (int, error) {
+func (a *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []document.LSPEdit, wordChars string, expect *document.Version) (int, error) {
 	return a.ed.ApplyCompletionItemAtCarets(path, text, cursorOffset, additional, wordChars, expect)
 }
 
@@ -398,7 +399,7 @@ func (a *Editor) OpenPreview(path string) error {
 
 // LoadFunc returns the read of path that runs off the UI goroutine. See
 // editor.Editor.LoadFunc.
-func (a *Editor) LoadFunc(path string) func() (*editor.Document, error) {
+func (a *Editor) LoadFunc(path string) func() (*document.Document, error) {
 	return a.ed.LoadFunc(path)
 }
 
@@ -409,14 +410,14 @@ func (a *Editor) IsLargePath(path string) bool {
 }
 
 // OpenLoaded opens a document read by LoadFunc in a permanent tab.
-func (a *Editor) OpenLoaded(d *editor.Document) {
+func (a *Editor) OpenLoaded(d *document.Document) {
 	a.ed.OpenLoaded(d)
 }
 
 // OpenLoadedReadOnly opens generated content in a permanent tab and marks the active
 // document read-only, so a builtin-module dump cannot be edited by accident. The active
 // document is used because OpenLoaded may adopt an already-open path instead of d.
-func (a *Editor) OpenLoadedReadOnly(d *editor.Document) {
+func (a *Editor) OpenLoadedReadOnly(d *document.Document) {
 	a.ed.OpenLoaded(d)
 	if active := a.ed.Active(); active != nil {
 		active.SetReadOnly(true)

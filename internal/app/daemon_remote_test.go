@@ -16,6 +16,7 @@ import (
 	"github.com/tbxark/gvim/internal/daemon"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/session"
 )
 
 // daemonRemoteFS is the in-memory remote file system of the jump-box tests: the map is the
@@ -257,7 +258,7 @@ func TestDaemonRemoteInvalidSpecFailsSafely(t *testing.T) {
 	before := daemonWorkspaceCall(t, conn, daemon.TypeWorkspaceList, nil)
 	// Selecting the broken workspace must fail with a notice and leave the active
 	// workspace unchanged; read the raw answer because a notice is expected.
-	if err := daemon.WriteJSON(conn, daemon.TypeWorkspaceSelect, daemon.WorkspaceSelect{ID: bad.File.StableID}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeWorkspaceSelect, daemon.WorkspaceSelect{ID: bad.File.StableID}); err != nil {
 		t.Fatal(err)
 	}
 	var notice string
@@ -317,5 +318,67 @@ func TestAuthoritySpecText(t *testing.T) {
 	}
 	if spec, err := parseAuthoritySpec(""); err != nil || spec != nil {
 		t.Fatalf("empty spec = %+v, %v", spec, err)
+	}
+}
+
+// TestDaemonRemoteJumpBoxPromptsBeforeRestoringTheSession runs a daemon whose remote
+// authority needs a password. The prompt is answered on the daemon terminal during
+// startup, so the saved remote session is restored and saved back at exit: a connection
+// that came up only after the runtime was built used to leave the session unrestored and
+// permanently unsaved.
+func TestDaemonRemoteJumpBoxPromptsBeforeRestoringTheSession(t *testing.T) {
+	isolateConfig(t)
+	name := daemonTestHome(t, "app-test-remote-prompt")
+	workspaces := t.TempDir()
+	t.Setenv("GVIM_WORKSPACE_DIR", workspaces)
+	spec := &authority.RemoteSpec{User: "u", Host: "h", Path: "/srv/proj/main.go", Raw: "u@h:/srv/proj/main.go"}
+	reg, err := daemon.OpenRegistry(workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _, err := reg.CreateWithAuthority(spec.Workspace(), "", spec.Raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := reg.SessionDir(ws.File.StableID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := seedRemoteSession(t, "/srv/proj")
+	// A stale root: the exit save of a restored session rewrites it, a kept (unrestored)
+	// session file is left exactly as it was.
+	must(t, session.Save(dir, session.Session{
+		Root:  "/stale/root",
+		Files: []session.FileState{{Path: a}, {Path: b}},
+	}))
+
+	slot := promptSlot(t, "password")
+	slot.wantSecret = "secret"
+	slot.FileSystem = remoteSessionFS()
+	slot.OneShotter = daemonNoopOneShot{}
+	stubMountAuthority(t, slot)
+	prompter := &fakePrompter{secret: "secret"}
+	prev := daemonPrompterFactory
+	daemonPrompterFactory = func() (daemonAuthorityPrompter, error) { return prompter, nil }
+	t.Cleanup(func() { daemonPrompterFactory = prev })
+
+	opts := remoteJumpBoxOptions(t, name, spec)
+	done := startDaemonTest(t, opts, name)
+	conn := attachDaemonTest(t, name)
+	list := daemonWorkspaceCall(t, conn, daemon.TypeWorkspaceList, nil)
+	if list.Active != ws.File.StableID || len(list.Entries) != 1 {
+		t.Fatalf("workspace list = %+v, want the one remote foreground %q", list, ws.File.StableID)
+	}
+	quitDaemon(t, conn, done)
+
+	if !slot.Connected() || len(prompter.secretQ) != 1 {
+		t.Fatalf("slot connected = %v after %d password prompts, want connected after 1", slot.Connected(), len(prompter.secretQ))
+	}
+	saved, ok, err := session.Load(dir)
+	if err != nil || !ok {
+		t.Fatalf("saved session = %+v, %v, %v", saved, ok, err)
+	}
+	if saved.Root != "/srv/proj" || len(saved.Files) != 2 {
+		t.Fatalf("saved session root %q with %d files, want the restored /srv/proj session saved back", saved.Root, len(saved.Files))
 	}
 }

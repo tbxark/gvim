@@ -11,6 +11,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -82,6 +83,11 @@ type Options struct {
 	// workspace build copies the pointer into its editor options; nil for a direct or
 	// remote launch, which keeps independent buffers.
 	sharedBuffers *editor.SharedBuffers
+	// connectHook, when set, replaces the startup dial of the remote authority: buildRuntime
+	// calls it before the remote wiring and the session restore, so a connection that needs
+	// an interactive prompt (a jump-box daemon's password, passphrase or 2FA) is up before
+	// the runtime depends on it. Only the daemon's foreground launch sets it.
+	connectHook func(ctx context.Context, slot authority.Slot) error
 	// Remote is a parsed user@host:/path or ssh:// target. A direct remote launch mounts
 	// the SSH authority and does not restore or save the local session. With DaemonServe
 	// it is the jump-box daemon's startup authority: the daemon runs locally and hosts the
@@ -122,7 +128,7 @@ type Options struct {
 	// editor.auto_save_interval_secs, and it is off when the config does not enable it.
 	// A non-zero value wins over the config.
 	AutoSaveInterval time.Duration
-	// ReadOnly opens the editor in read-only code-viewer mode (-R, --read-only, --view).
+	// ReadOnly opens the editor in read-only code-viewer mode (-R, --read-only).
 	// All open documents are protected against edits and writes.
 	ReadOnly bool
 	// Diff opens the two files, in tabs 0 and 1, in the compare view. It needs exactly
@@ -143,7 +149,7 @@ type Options struct {
 	Restore bool
 	// NoRestore skips the restore of the saved tabs for this run, as
 	// editor.restore_previous_session=false does, while the unsaved text of the
-	// session still comes back. It is --no-restore (Fresh's --no-session).
+	// session still comes back. It is --no-restore.
 	NoRestore bool
 	// Simple opens just what is named (or the welcome screen) with no session
 	// restored or saved and no file explorer: gvim's file-launch behavior

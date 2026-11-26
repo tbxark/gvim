@@ -137,15 +137,6 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	return f, nil
 }
 
-// WriteJSON writes a frame whose payload is the JSON of v.
-func WriteJSON(w io.Writer, typ byte, v any) error {
-	payload, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return WriteFrame(w, typ, payload)
-}
-
 // DecodeJSON decodes a JSON payload into v.
 func DecodeJSON(f Frame, v any) error {
 	if len(f.Payload) == 0 {

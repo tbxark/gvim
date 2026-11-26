@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/highlight"
 	"os"
@@ -25,7 +26,7 @@ func TestEditedTabIsLexedAgainWhenShownInASplit(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(pathA))
 	apptest.Must(t, ed.OpenFile(pathB))
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 
 	// Tab 1 (b.go) is not active, so the split pane lexes it into its own cache.
 	a.ActivateTab(0)
@@ -44,7 +45,7 @@ func TestEditedTabIsLexedAgainWhenShownInASplit(t *testing.T) {
 	// Show b.go in the split pane again, after switching the active tab away.
 	a.ActivateTab(0)
 	after := a.DocAt(1).LineSpans(0)
-	fresh := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	fresh := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	want := fresh.DocAt(1).LineSpans(0)
 	if reflect.DeepEqual(after, before) {
 		t.Fatalf("the split pane shows the spans from before the edit: %v", after)

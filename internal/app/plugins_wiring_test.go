@@ -313,7 +313,7 @@ func TestPluginUsesTheEditorAndWorkspaceThroughTheRealHost(t *testing.T) {
 	root := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(root, "needle.txt"), []byte("xx needle\nsecond\n"), 0o644))
 	result := filepath.Join(t.TempDir(), "result.txt")
-	writeUserFile(t, "config.json", `{"tab_size": 3}`)
+	writeUserFile(t, "config.json", `{"editor": {"tab_size": 3}}`)
 	writeUserFile(t, "plugins/probe.lua", `
 local gvim = require "gvim"
 gvim.command.register{ name = "probe", title = "Probe Host", run = function()
@@ -352,7 +352,7 @@ end }
 	want := []string{
 		"root=" + wantRoot,
 		"tab_size=3",
-		"theme=dark",
+		"theme=gopher",
 		"grep=1:needle.txt:0:3",
 		"opened=needle.txt lines=3",
 		"modified=true",

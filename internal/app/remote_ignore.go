@@ -1,7 +1,7 @@
 package app
 
 // Remote .gitignore filtering (task-136). The local explorer and file walker match
-// go-git's gitignore patterns read from each directory's .gitignore file. A remote
+// .gitignore patterns read from each directory's .gitignore file. A remote
 // workspace has no local files to read, so this index reads the ignore files through
 // authority.Files() instead (never the local disk) and applies the same parser and
 // matcher: root and nested .gitignore files, negation and anchored patterns behave as
@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
-
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/explorer"
 )
@@ -52,14 +50,14 @@ type ignoreBatch struct {
 	files            func() authority.FileSystem
 	root             string
 	respectGitignore bool
-	customMatcher    gitignore.Matcher
+	customMatcher    *explorer.IgnoreMatcher
 	// scan is the file_scan_exclusions/file_scan_inclusions pair: an exclusion
 	// hard-drops an entry, an inclusion clears a .gitignore match.
 	scan explorer.ScanMatcher
 
 	mu       sync.Mutex
-	cache    map[string][]gitignore.Pattern
-	matchers map[string]gitignore.Matcher
+	cache    map[string][]explorer.IgnorePattern
+	matchers map[string]*explorer.IgnoreMatcher
 	notice   string
 }
 
@@ -73,11 +71,11 @@ func newIgnoreBatchWithOptions(files func() authority.FileSystem, root string, r
 		root:             root,
 		respectGitignore: respectGitignore,
 		scan:             explorer.NewScanMatcher(scanExclusions, scanInclusions),
-		cache:            map[string][]gitignore.Pattern{},
-		matchers:         map[string]gitignore.Matcher{},
+		cache:            map[string][]explorer.IgnorePattern{},
+		matchers:         map[string]*explorer.IgnoreMatcher{},
 	}
 	if rules := explorer.ParsePatterns(customPatterns); len(rules) > 0 {
-		b.customMatcher = gitignore.NewMatcher(rules)
+		b.customMatcher = explorer.NewIgnoreMatcher(rules)
 	}
 	return b
 }
@@ -117,13 +115,13 @@ func (b *ignoreBatch) relParts(dir string) []string {
 
 // rulesFor returns the patterns that apply to dir: the .gitignore of every directory on
 // the way from the workspace root down to dir, scoped to its directory.
-func (b *ignoreBatch) rulesFor(ctx context.Context, dir string) []gitignore.Pattern {
+func (b *ignoreBatch) rulesFor(ctx context.Context, dir string) []explorer.IgnorePattern {
 	parts := b.relParts(dir)
 	if len(parts) > remoteIgnoreMaxDepth {
 		b.setNotice("remote .gitignore rules are not applied below 64 directory levels; ignore filtering may be incomplete")
 		return nil
 	}
-	var out []gitignore.Pattern
+	var out []explorer.IgnorePattern
 	rules := 0
 	for i := 0; i <= len(parts); i++ {
 		dirPath := b.root
@@ -150,7 +148,7 @@ func (b *ignoreBatch) rulesFor(ctx context.Context, dir string) []gitignore.Patt
 
 // ignoreFile reads and parses dir/.gitignore once per batch. It returns nil for a
 // missing file and records a notice for an unreadable/oversized one.
-func (b *ignoreBatch) ignoreFile(ctx context.Context, dir string, dirParts []string) []gitignore.Pattern {
+func (b *ignoreBatch) ignoreFile(ctx context.Context, dir string, dirParts []string) []explorer.IgnorePattern {
 	file := path.Join(dir, ".gitignore")
 	b.mu.Lock()
 	if cached, ok := b.cache[file]; ok {
@@ -158,7 +156,7 @@ func (b *ignoreBatch) ignoreFile(ctx context.Context, dir string, dirParts []str
 		return cached
 	}
 	b.mu.Unlock()
-	patterns := make([]gitignore.Pattern, 0, 8)
+	patterns := make([]explorer.IgnorePattern, 0, 8)
 	if files := b.files(); files != nil {
 		readCtx, cancel := context.WithTimeout(ctx, remoteIgnoreReadTimeout)
 		data, err := files.ReadFile(readCtx, file, remoteIgnoreFileMaxBytes)
@@ -179,14 +177,14 @@ func (b *ignoreBatch) ignoreFile(ctx context.Context, dir string, dirParts []str
 }
 
 // matcher returns the ignore matcher that applies to dir, built once per batch.
-func (b *ignoreBatch) matcher(ctx context.Context, dir string) gitignore.Matcher {
+func (b *ignoreBatch) matcher(ctx context.Context, dir string) *explorer.IgnoreMatcher {
 	b.mu.Lock()
 	m, ok := b.matchers[dir]
 	b.mu.Unlock()
 	if ok {
 		return m
 	}
-	m = gitignore.NewMatcher(b.rulesFor(ctx, dir))
+	m = explorer.NewIgnoreMatcher(b.rulesFor(ctx, dir))
 	b.mu.Lock()
 	b.matchers[dir] = m
 	b.mu.Unlock()
@@ -194,8 +192,7 @@ func (b *ignoreBatch) matcher(ctx context.Context, dir string) gitignore.Matcher
 }
 
 // ignored reports whether the entry name of dir is matched by the ignore rules that apply
-// to dir. The path handed to the matcher is relative to the workspace root, as go-git
-// expects.
+// to dir. The path handed to the matcher is relative to the workspace root.
 func (b *ignoreBatch) ignored(ctx context.Context, dir, name string, isDir bool) bool {
 	if b.customMatcher == nil && !b.respectGitignore {
 		return false

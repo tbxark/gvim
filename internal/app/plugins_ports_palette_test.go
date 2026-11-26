@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 // TestOffByDefaultPortsReachThePalette is the real-host verification for the config-locked
@@ -46,48 +44,17 @@ func TestOffByDefaultPortsReachThePalette(t *testing.T) {
 	})
 }
 
-// TestPathCompleteRealHost drives the round-8 path_complete port on the real app: its command
-// is in the default palette, the prompt opens with the suggestion list working, and Esc
-// cancels (the suggestions vanish with the prompt, as Fresh's do on close).
-func TestPathCompleteRealHost(t *testing.T) {
+// TestLSPNavigationRealHost drives the default-off lsp_navigation plugin on the real app:
+// enabling it in config makes its commands appear in the palette.
+func TestLSPNavigationRealHost(t *testing.T) {
 	isolateConfig(t)
-	s := newSession(t, Options{})
-	s.waitStatus("path_complete", "loaded")
-	s.openFile("a.go", "package a\n")
-	s.settle(30 * time.Millisecond)
-	if !s.paletteHas("Path Completion: Complete Path") {
-		t.Fatal("the palette has no path completion row for the default-on plugin")
-	}
-	s.runCommand("Path Completion: Complete Path")
-	s.until("the path prompt", func() bool { return s.screenHas("Path:") })
-	// The suggestion contents are asserted on the fake host (hermetic filesystem); here the
-	// point is that the real prompt is wired and that Esc cancels it, taking the suggestion
-	// list with it, as Fresh's prompt close does.
-	s.typeText("p")
-	s.settle(40 * time.Millisecond)
-	s.press(tea.KeyPressMsg{Code: tea.KeyEscape})
-	s.settle(40 * time.Millisecond)
-	if got := s.statusRow(); !strings.Contains(got, "Path completion cancelled") {
-		t.Errorf("cancel notice = %q", got)
-	}
-}
-
-// TestRound9PortsRealHost drives the round-9 default-off ports on the real app: enabling
-// lsp_navigation and find_references in config makes their commands appear in the palette,
-// and the references command reaches the host's LSP layer (no server in this fixture, so it
-// reports the request failure instead of opening an empty list).
-func TestRound9PortsRealHost(t *testing.T) {
-	isolateConfig(t)
-	writeUserFile(t, "config.json", `{"plugins":{"lsp_navigation":{"enabled":true},"find_references":{"enabled":true}}}`)
+	writeUserFile(t, "config.json", `{"plugins":{"lsp_navigation":{"enabled":true}}}`)
 	s := newSession(t, Options{})
 	s.waitStatus("lsp_navigation", "loaded")
-	s.waitStatus("find_references", "loaded")
 	s.openFile("a.go", "package a\n\nfunc main() {}\n")
 	s.settle(30 * time.Millisecond)
-	for _, title := range []string{"Go to LSP Symbol", "Show References Panel"} {
-		if !s.paletteHas(title) {
-			t.Fatalf("the palette has no %q row for the config-enabled port:\n%s", title, strings.Join(s.rows(), "\n"))
-		}
+	if !s.paletteHas("Go to LSP Symbol") {
+		t.Fatalf("the palette has no %q row for the config-enabled plugin:\n%s", "Go to LSP Symbol", strings.Join(s.rows(), "\n"))
 	}
 }
 

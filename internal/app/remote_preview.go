@@ -7,6 +7,7 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -122,6 +123,7 @@ func (p *remotePreviewer) ReadWindow(ctx context.Context, path string, line, max
 	runCtx, cancel := context.WithTimeout(ctx, remotePreviewTimeout)
 	defer cancel()
 	var data []byte
+	newlines := 0
 	eof := false
 	for len(data) < scanBudget {
 		if err := runCtx.Err(); err != nil {
@@ -130,13 +132,14 @@ func (p *remotePreviewer) ReadWindow(ctx context.Context, path string, line, max
 		part, err := files.ReadRange(runCtx, path, int64(len(data)), chunk)
 		if len(part) > 0 {
 			data = append(data, part...)
+			newlines += bytes.Count(part, []byte{'\n'})
 		}
 		if err == nil {
 			if len(part) == 0 {
 				eof = true
 				break
 			}
-			if strings.Count(string(data), "\n") >= line+maxLines {
+			if newlines >= line+maxLines {
 				break
 			}
 			continue
@@ -241,8 +244,13 @@ type remoteRangeReader struct {
 // into a plausible-looking excerpt; the caller gets the explicit reason instead. A
 // multi-byte rune split at a chunk boundary is carried to the next read.
 func (r *remoteRangeReader) validate(data []byte) error {
-	buf := append(r.carry, data...)
-	r.carry = r.carry[:0]
+	buf := data
+	if len(r.carry) > 0 {
+		buf = make([]byte, 0, len(r.carry)+len(data))
+		buf = append(buf, r.carry...)
+		buf = append(buf, data...)
+		r.carry = r.carry[:0]
+	}
 	for len(buf) > 0 {
 		if buf[0] == 0 {
 			return errRemotePreviewBinary
@@ -275,6 +283,12 @@ func (r *remoteRangeReader) Read(p []byte) (int, error) {
 		p = p[:remotePreviewWindowChunk]
 	}
 	data, err := r.files.ReadRange(r.ctx, r.path, r.off, int64(len(p)))
+	if len(data) > len(p) {
+		data = data[:len(p)]
+		if errors.Is(err, io.EOF) {
+			err = nil
+		}
+	}
 	if len(data) > 0 {
 		if verr := r.validate(data); verr != nil {
 			return 0, verr

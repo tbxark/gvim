@@ -69,7 +69,6 @@ func (b *runtimeBuild) wireRemote() {
 	// the local disk, so it is refused for a remote launch.
 	var remoteRoot string
 	b.remoteFiles, remoteRoot = newRemoteFileIndex(ctx, authSlot, opts.Remote.Workspace(), b.cfg.FileScanExclusions, b.cfg.FileScanInclusions)
-	b.denoRoot = remoteRoot
 	deps.Files = b.remoteFiles
 	deps.FileRoot = remoteRoot
 	remoteRootPorts(&deps.Root)
@@ -184,7 +183,7 @@ func (b *runtimeBuild) wireRemoteWatch() {
 func (b *runtimeBuild) wireRemoteHooks() {
 	ctx, slot := b.ctx, b.authSlot
 	envShell, remoteWatch, remoteEnv := b.envShell, b.remoteFileWatch, b.remoteEnv
-	remoteGit, remoteFiles, denoAuto, lspPort := b.remoteGit, b.remoteFiles, b.denoAuto, b.deps.LSP
+	remoteGit, remoteFiles, lspPort := b.remoteGit, b.remoteFiles, b.deps.LSP
 	needsPassword := func() bool {
 		p, ok := slot.(interface{ NeedsPassword() bool })
 		return ok && p.NeedsPassword()
@@ -265,11 +264,6 @@ func (b *runtimeBuild) wireRemoteHooks() {
 			}
 			if remoteFiles != nil {
 				remoteFiles.Restart()
-			}
-			if denoAuto != nil {
-				// New carrier: clear the old decision and probe again; a late answer from
-				// the dropped carrier cannot apply because the generation moves.
-				denoAuto.Start(ctx)
 			}
 			return restartLSPAfterReconnect(slot, lspPort)
 		},

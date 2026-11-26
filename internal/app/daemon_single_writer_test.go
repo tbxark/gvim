@@ -59,7 +59,7 @@ func quitDaemonTest(t *testing.T, name string, done chan error) {
 	// input frames. Keep conn open until the daemon finishes quitting to avoid closing
 	// before Ctrl+Q is processed under heavy CPU load.
 	defer func() { _ = conn.Close() }()
-	_ = daemon.WriteJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30})
+	_ = writeDaemonJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30})
 	_ = daemon.WriteFrame(conn, daemon.TypeInput, []byte{0x11})
 	select {
 	case err := <-done:
@@ -140,12 +140,12 @@ func TestDaemonRefusalKeepsUnsavedWork(t *testing.T) {
 	t.Cleanup(func() { quitDaemonTest(t, name, done) })
 	conn := attachDaemonTest(t, name)
 	t.Cleanup(func() { _ = conn.Close() })
-	if err := daemon.WriteJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 	// Open the file in the daemon's workspace (a daemon launch itself opens no files),
 	// then type an unsaved change.
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: path}}}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: path}}}); err != nil {
 		t.Fatal(err)
 	}
 	drainDaemonForText(t, conn, "hello")

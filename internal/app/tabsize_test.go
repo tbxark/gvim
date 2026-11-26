@@ -14,7 +14,7 @@ func TestBuildModelPassesTheConfigTabSizeToTheUI(t *testing.T) {
 		body string
 		want int
 	}{
-		{name: "tab_size from the config", body: `{"tab_size": 2}`, want: 2},
+		{name: "tab_size from the config", body: `{"editor": {"tab_size": 2}}`, want: 2},
 		{name: "default when the config omits it", body: `{}`, want: 4},
 	}
 	for _, tt := range tests {

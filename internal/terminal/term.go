@@ -36,6 +36,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"runtime"
 )
 
 // ErrUnsupported is returned by Start on platforms without PTY support. It is
@@ -95,7 +96,15 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 		shell = os.Getenv("SHELL")
 	}
 	if shell == "" {
-		shell = "/bin/sh"
+		if runtime.GOOS == "windows" {
+			if comspec := os.Getenv("COMSPEC"); comspec != "" {
+				shell = comspec
+			} else {
+				shell = "cmd.exe"
+			}
+		} else {
+			shell = "/bin/sh"
+		}
 	}
 
 	cmd := exec.Command(shell, opts.Args...)

@@ -126,7 +126,9 @@ func (s *Session) SearchScrollbackMode(query string, regex, matchCase bool, limi
 	if query == "" || total == 0 {
 		return nil, total, nil
 	}
-	limit = min(max(limit, 1), maxScrollbackMatches)
+	if limit <= 0 || limit > maxScrollbackMatches {
+		limit = maxScrollbackMatches
+	}
 	width := s.emu.Width()
 	for y := 0; y < total && len(matches) < limit; y++ {
 		var b strings.Builder

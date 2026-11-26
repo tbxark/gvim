@@ -38,8 +38,9 @@ var keymapChoices = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 type settingsService struct {
 	mu sync.Mutex
 
-	opts    Options // the command line, whose flags win over the files
-	root    string  // the workspace root, for the project layer
+	opts    Options       // the command line, whose flags win over the files
+	root    string        // the workspace root the service started with, for the project layer
+	rootOf  func() string // the live workspace root (Switch Project moves it); nil means root
 	ed      *editor.Editor
 	trusted func() bool // whether the project layer may be written
 
@@ -47,6 +48,9 @@ type settingsService struct {
 	userFile string        // the user config file the page writes
 	theme    *themeCatalog // user/bundled theme resolution; nil means bundled only
 	rt       settingsRuntime
+	// facts are the file-system and PATH lookups the snapshot shows, resolved at
+	// construction and reload (see settingsFacts).
+	facts settingsFacts
 	// themePreviews are the Settings theme row's colour chips, resolved at build
 	// and Reload; Snapshot only reads them (no file IO on the update loop).
 	themePreviews map[string][]tui.SettingsSwatch
@@ -93,9 +97,7 @@ func (s *settingsService) loadTrustedLSP(root string) (config.Config, error) {
 	return current, nil
 }
 
-// currentConfig returns the effective configuration of the last load/reload. Deno
-// auto-selection reads it when a manager is created, so a settings reload invalidates a
-// decision taken before an explicit/disabled change.
+// currentConfig returns the effective configuration of the last load/reload.
 func (s *settingsService) currentConfig() config.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,6 +125,7 @@ func newSettingsService(root string, opts Options, ed *editor.Editor, trusted fu
 	}
 	s := &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat, rt: rt, formatters: fmts}
 	s.themePreviews = s.buildThemePreviews()
+	s.facts = s.resolveFacts(cfg, rt.iconsMode, rt.iconsWhy)
 	return s
 }
 
@@ -141,12 +144,18 @@ func (s *settingsService) Snapshot() tui.SettingsSnapshot {
 	return s.snapshotFor(s.cfg, s.themePreviews)
 }
 
-// snapshotFor builds the page content for a loaded config. It reads no files.
+// snapshotFor builds the page content for a loaded config from the cached facts.
 func (s *settingsService) snapshotFor(cfg config.Config, themePreviews map[string][]tui.SettingsSwatch) tui.SettingsSnapshot {
+	return s.snapshotWith(cfg, themePreviews, s.factsFor(cfg, s.facts))
+}
+
+// snapshotWith is snapshotFor with the facts given. It reads no files, so a reload can
+// hand it the facts it has just resolved without taking the state lock.
+func (s *settingsService) snapshotWith(cfg config.Config, themePreviews map[string][]tui.SettingsSwatch, facts settingsFacts) tui.SettingsSnapshot {
 	projectWritable := s.trusted() && s.opts.Remote == nil
 	snap := tui.SettingsSnapshot{
 		UserFile:        s.userFile,
-		ProjectFile:     s.projectFile(),
+		ProjectFile:     facts.projectFile,
 		ProjectWritable: projectWritable,
 	}
 	sectionAt := make(map[string]int)
@@ -186,7 +195,7 @@ func (s *settingsService) snapshotFor(cfg config.Config, themePreviews map[strin
 		}
 		snap.Sections[i].Items = append(snap.Sections[i].Items, item)
 	}
-	snap.Sections = append(snap.Sections, s.extraSections(cfg)...)
+	snap.Sections = append(snap.Sections, s.extraSections(cfg, facts)...)
 	return snap
 }
 
@@ -446,7 +455,7 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.mu.Lock()
 	previous := s.cfg
 	opts := s.opts
-	root := s.root
+	root := s.rootNow()
 	s.mu.Unlock()
 	if s.theme != nil {
 		// A Reload command is also the hot reload for a theme file edited on disk.
@@ -488,8 +497,9 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	}
 	previews := s.buildThemePreviews()
 	fmts := formattersFor(cfg, lookPath)
+	facts := s.resolveFacts(cfg, icon.Mode.String(), icon.Why)
 	change := tui.SettingsChange{
-		Snapshot:    s.snapshotFor(cfg, previews),
+		Snapshot:    s.snapshotWith(cfg, previews, facts),
 		Settings:    settings,
 		View:        *viewOptions(cfg, icon.Mode.String()),
 		Theme:       themeRef,
@@ -527,8 +537,7 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.cfg = cfg
 	s.lastDiags = diags
 	s.themePreviews = previews
-	s.rt.iconsMode = icon.Mode.String()
-	s.rt.iconsWhy = icon.Why
+	s.facts = facts
 	s.formatters = fmts
 	reloadFn := s.configReload
 	s.mu.Unlock()
@@ -601,6 +610,17 @@ func (s *settingsService) diagnosticsOf(file string) []config.Diagnostic {
 	return out
 }
 
+// newDiagnostics returns the diagnostics in after that are not in before.
+func newDiagnostics(after, before []config.Diagnostic) []config.Diagnostic {
+	var out []config.Diagnostic
+	for _, d := range after {
+		if !slices.Contains(before, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // themeRefFor is the portable config value of the effective theme: the --theme
 // flag wins over the config.
 func (s *settingsService) themeRefFor(opts Options, cfg config.Config) string {
@@ -609,7 +629,7 @@ func (s *settingsService) themeRefFor(opts Options, cfg config.Config) string {
 		ref = cfg.Theme
 	}
 	if ref == "" {
-		ref = "dark"
+		ref = config.DefaultTheme
 	}
 	if s.theme != nil {
 		if canonical, err := s.theme.Canonical(ref); err == nil {
@@ -666,7 +686,7 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 	s.mu.Lock()
 	cfg := s.cfg
 	userFile := s.userFile
-	root := s.root
+	root := s.rootNow()
 	remote := s.opts.Remote != nil
 	s.mu.Unlock()
 	project := layer == tui.SettingsLayerProject
@@ -1018,7 +1038,28 @@ func structuredSettingChanged(key string, old, next config.Config) bool {
 
 // projectFile returns the project config file the page writes: the nearest
 // existing one at or above the root, or root/.gvim/config.json to create.
-func (s *settingsService) projectFile() string { return projectFileFor(s.root, s.opts.Remote != nil) }
+func (s *settingsService) projectFile() string {
+	return projectFileFor(s.rootNow(), s.opts.Remote != nil)
+}
+
+// rootNow is the workspace root as it is now: the live root when the app wired one, so
+// the page keeps reading and writing the project config of the folder that was switched
+// to, else the root the service was built with.
+func (s *settingsService) rootNow() string {
+	if s.rootOf != nil {
+		if root := s.rootOf(); root != "" {
+			return root
+		}
+	}
+	return s.root
+}
+
+// setRootOf installs the live workspace root.
+func (s *settingsService) setRootOf(fn func() string) {
+	s.mu.Lock()
+	s.rootOf = fn
+	s.mu.Unlock()
+}
 
 // projectFileFor is projectFile for a root captured outside the state lock.
 func projectFileFor(root string, remote bool) string {

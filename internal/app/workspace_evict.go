@@ -150,6 +150,9 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, limit int) (ke
 		if ferr := m.fallbackSave(sess); ferr != nil {
 			return true, fmt.Errorf("cannot evict workspace %q: the capture write failed (%w) and the fallback save failed: %w; the workspace stays materialized", label, captureErr, ferr)
 		}
+	} else if job != nil && job.written {
+		// The capture is the final write: the teardown below must not save the session again.
+		sess.rt.markCaptured()
 	}
 	// Recheck under the lock: a switch that raced the pass must win over eviction.
 	m.mu.Lock()

@@ -1,14 +1,13 @@
 package uiadapter
 
 import (
-	"github.com/tbxark/gvim/internal/apptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
-
 	"github.com/tbxark/gvim/gitstate"
+	"github.com/tbxark/gvim/internal/apptest"
 )
 
 func TestGitMarkLetters(t *testing.T) {
@@ -37,23 +36,22 @@ func TestGitMarkLetters(t *testing.T) {
 func TestGitStatusMarksAbsolutePaths(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	repo, err := git.PlainInit(root, false)
-	if err != nil {
-		t.Fatal(err)
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
 	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatal(err)
-	}
+	runGit("init", "-b", "main")
 	sub := filepath.Join(root, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	apptest.Must(t, os.WriteFile(filepath.Join(sub, "u.txt"), []byte("u"), 0o644))
 	apptest.Must(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644))
-	if _, err := wt.Add("a.txt"); err != nil {
-		t.Fatal(err)
-	}
+	runGit("add", "a.txt")
 
 	marks, err := GitStatus{}.Marks(sub)
 	if err != nil {

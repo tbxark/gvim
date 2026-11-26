@@ -669,3 +669,51 @@ func BenchmarkRegistryDiscover(b *testing.B) {
 		}
 	}
 }
+
+// TestRegistryScanIsCachedUntilTheDirectoryChanges checks List and Get decode the registry
+// directory once while it stays unchanged, and see a file another process adds or this
+// registry writes.
+func TestRegistryScanIsCachedUntilTheDirectoryChanges(t *testing.T) {
+	reg := newRegistry(t)
+	rootA, rootB := t.TempDir(), t.TempDir()
+	a, _, err := reg.Create(rootA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The directory has been quiet for a while, so a scan of it may be cached.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(reg.Dir(), old, old); err != nil {
+		t.Fatal(err)
+	}
+	before := reg.diskScans
+	for range 3 {
+		if _, ok, err := reg.Get(a.File.StableID); err != nil || !ok {
+			t.Fatalf("Get = %v, %v", ok, err)
+		}
+		if list, _ := reg.List(); len(list) != 1 {
+			t.Fatalf("List = %d workspaces, want 1", len(list))
+		}
+	}
+	if got := reg.diskScans - before; got != 1 {
+		t.Fatalf("six reads scanned the directory %d times, want 1", got)
+	}
+
+	// Another process adds a workspace file: the directory changed, so the next read sees it.
+	rootBCanonical, err := CanonicalRoot(rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceFileAt(t, reg, WorkspaceFile{StableID: strings.Repeat("b", 32), Root: rootBCanonical, Label: "b", LastFocusedAt: 5})
+	if list, _ := reg.List(); len(list) != 2 {
+		t.Fatalf("List after an external add = %d workspaces, want 2", len(list))
+	}
+
+	// This registry's own write is visible at once too.
+	if _, err := reg.Rename(a.File.StableID, "renamed"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := reg.Get(a.File.StableID)
+	if err != nil || !ok || got.File.Label != "renamed" {
+		t.Fatalf("Get after Rename = %+v, %v, %v", got.File, ok, err)
+	}
+}

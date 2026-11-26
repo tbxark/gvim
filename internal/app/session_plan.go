@@ -10,8 +10,7 @@ import "github.com/tbxark/gvim/config"
 //
 // The three config keys involved are editor.restore_previous_session,
 // editor.skip_session_restore_when_files_passed and editor.hot_exit, and the
-// one-shot flags are --restore, --no-restore (Fresh's --no-session) and
-// --simple.
+// one-shot flags are --restore, --no-restore and --simple.
 type sessionPlan struct {
 	// fileLaunch records Fresh's is_file_launch decision for plugins: --simple or
 	// --diff, or explicit non-directory files with the skip-session setting on and no

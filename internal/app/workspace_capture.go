@@ -11,6 +11,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -46,6 +47,9 @@ type saveJob struct {
 	done chan struct{}
 	err  error
 	seq  uint64
+	// written is set when this snapshot was written to the session directory. A job a newer
+	// write superseded finishes without an error and without having written anything.
+	written bool
 }
 
 // snapshotCapture takes the consistent in-memory snapshot of a workspace on the UI
@@ -208,13 +212,26 @@ func (m *workspaceManager) fallbackSave(s *workspaceSession) error {
 	w := m.writers[s.ws.File.StableID]
 	m.mu.Unlock()
 	if w == nil {
-		return s.rt.save()
+		return s.saveFinal()
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.stopped = true
 	w.committed = w.seq.Load()
-	return s.rt.save()
+	return s.saveFinal()
+}
+
+// saveFinal is the synchronous session save of a runtime that is about to be torn down; a
+// successful one is the final write, so the runtime's exit does not repeat it.
+func (s *workspaceSession) saveFinal() error {
+	err := s.rt.save()
+	if err == nil {
+		if serr := s.rt.saveSearch(); serr != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: search history:", serr)
+		}
+		s.rt.markCaptured()
+	}
+	return err
 }
 
 // captureWrite is one queued snapshot write.
@@ -336,6 +353,7 @@ func (m *workspaceManager) processCaptureWrite(w *captureWriter, c *captureWrite
 	w.writingSeq.Store(c.seq)
 	err := write(c.sess, c.snap)
 	w.writingSeq.Store(0)
+	c.job.written = err == nil && c.sess.rt.sessionDir != ""
 	if err == nil && c.sess.rt.sessionDir != "" {
 		// Registry disk work stays off the UI goroutine; the registry is
 		// concurrency-safe and this is the newest written layout of the workspace.

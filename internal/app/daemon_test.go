@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +14,16 @@ import (
 
 	"github.com/tbxark/gvim/internal/daemon"
 )
+
+// writeDaemonJSON writes a frame whose payload is the JSON of v: how the tests send a
+// typed request to a daemon.
+func writeDaemonJSON(w io.Writer, typ byte, v any) error {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return daemon.WriteFrame(w, typ, payload)
+}
 
 // daemonTestHome sets a short HOME so the daemon socket path fits the Unix socket
 // address limit, and returns the socket name the test uses.
@@ -98,7 +110,7 @@ func attachDaemonTest(t *testing.T, name string) net.Conn {
 		t.Fatal(err)
 	}
 	conn := &daemonTestConn{Conn: raw}
-	if err := daemon.WriteJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 	if err := daemon.WriteFrame(conn, daemon.TypePing, nil); err != nil {
@@ -319,7 +331,7 @@ func daemonWorkspaceCall(t *testing.T, conn net.Conn, typ byte, payload any) dae
 	if payload == nil {
 		err = daemon.WriteFrame(conn, typ, nil)
 	} else {
-		err = daemon.WriteJSON(conn, typ, payload)
+		err = writeDaemonJSON(conn, typ, payload)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -503,7 +515,7 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	// Give the hosted program its size explicitly (the daemon may have finished
 	// building after this client's hello).
-	if err := daemon.WriteJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -513,7 +525,7 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 	}
 	first := list.Entries[0]
 	// Open a file in the foreground workspace and wait for its text.
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: filepath.Join(root1, "a.txt")}}}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: filepath.Join(root1, "a.txt")}}}); err != nil {
 		t.Fatal(err)
 	}
 	drainDaemonForText(t, conn, "hello")
@@ -559,7 +571,7 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 	}
 	// Single writer: opening a file that the switched-away workspace has open brings
 	// that workspace back instead of opening a second copy in the active one.
-	if err := daemon.WriteJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: filepath.Join(root1, "a.txt")}}}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeOpenFile, daemon.OpenFile{Files: []daemon.OpenFileTarget{{Path: filepath.Join(root1, "a.txt")}}}); err != nil {
 		t.Fatal(err)
 	}
 	deadline = time.Now().Add(10 * time.Second)
@@ -585,7 +597,7 @@ func TestDaemonWorkspaceSwitchPreservesUnsavedText(t *testing.T) {
 	}
 	// Force a fresh paint (the repaint after the switch was consumed while polling the
 	// workspace list) and check the unsaved text is visible again.
-	if err := daemon.WriteJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
+	if err := writeDaemonJSON(conn, daemon.TypeResize, daemon.Resize{Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 	drainDaemonForText(t, conn, "Xhello")

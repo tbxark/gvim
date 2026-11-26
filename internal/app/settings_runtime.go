@@ -24,21 +24,20 @@ type settingsLSP interface {
 	RestartServer(language, name string) error
 }
 
-// settingsPlugins is the Settings page's view of the plugin runtime: the plugin
-// manager rows, the live enable/disable and reload actions, and the plugin
-// settings values. Nil leaves the Plugins page with what the config alone says.
+// settingsPlugins is the Settings page's read-only view of the plugin runtime: the plugin
+// manager rows and, optionally, the declared settings and their values. The app gives it
+// a pluginInventory copy, never the single-goroutine runtime itself. Nil leaves the
+// Plugins page with what the config alone says.
 type settingsPlugins interface {
 	Plugins() []pluginapi.PluginInfo
-	Control(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.Notice)
 }
 
 // settingsRuntime is what the Settings page's live parts need, captured from the
 // runtime when the page's service is built. Each field is optional: a field that
 // is nil turns its page section into the config-only view.
 type settingsRuntime struct {
-	lsp        settingsLSP
-	plugins    settingsPlugins
-	pluginsCfg config.Config // the config the plugin runtime was built from
+	lsp     settingsLSP
+	plugins settingsPlugins
 	// keymapOf returns the effective keymap of cfg: the preset with the user's
 	// config keybindings applied. Nil leaves the Keybindings page without a list.
 	keymapOf func(cfg config.Config) tui.Keymap
@@ -140,12 +139,45 @@ type envFact struct {
 	name, value, note string
 }
 
-// envFacts gathers the Environment rows for cfg. It reads the process environment
-// and PATH (the shell lookup), never a config file.
-func (s *settingsService) envFacts(cfg config.Config) []envFact {
+// settingsFacts are the Settings values that need the file system or PATH: the shell
+// lookup, the project config file stat, and the resolved icon set. The service computes
+// them at construction and on reload, off the update goroutine, so a Snapshot only copies
+// them.
+type settingsFacts struct {
+	ready               bool
+	iconsMode, iconsWhy string
+	shell, shellNote    string
+	root, projectFile   string // projectFile is the one found for root
+}
+
+// resolveFacts reads the shell, the project file of the current root and the given icon
+// set. It does file IO and must not run on the update goroutine.
+func (s *settingsService) resolveFacts(cfg config.Config, iconsMode, iconsWhy string) settingsFacts {
 	shell, note := effectiveShell(cfg)
+	root := s.rootNow()
+	return settingsFacts{
+		ready: true, iconsMode: iconsMode, iconsWhy: iconsWhy, shell: shell, shellNote: note,
+		root: root, projectFile: projectFileFor(root, s.opts.Remote != nil),
+	}
+}
+
+// factsFor returns facts for a snapshot of cfg: the cached ones, with the project file
+// looked up again only when Switch Project moved the root since they were computed.
+func (s *settingsService) factsFor(cfg config.Config, facts settingsFacts) settingsFacts {
+	if !facts.ready {
+		return s.resolveFacts(cfg, s.rt.iconsMode, s.rt.iconsWhy)
+	}
+	if root := s.rootNow(); root != facts.root {
+		facts.root, facts.projectFile = root, projectFileFor(root, s.opts.Remote != nil)
+	}
+	return facts
+}
+
+// envFacts gathers the Environment rows for cfg from the precomputed facts and the
+// process environment (never a config file).
+func (s *settingsService) envFacts(cfg config.Config, f settingsFacts) []envFact {
 	facts := []envFact{
-		{name: "Shell", value: shell, note: note},
+		{name: "Shell", value: f.shell, note: f.shellNote},
 	}
 	if term := os.Getenv("TERM_PROGRAM"); term != "" {
 		facts = append(facts, envFact{name: "Terminal program", value: term, note: "TERM_PROGRAM"})
@@ -153,15 +185,15 @@ func (s *settingsService) envFacts(cfg config.Config) []envFact {
 	if term := os.Getenv("TERM"); term != "" {
 		facts = append(facts, envFact{name: "TERM", value: term, note: "TERM"})
 	}
-	if s.rt.iconsMode != "" {
-		facts = append(facts, envFact{name: "Icons", value: s.rt.iconsMode, note: s.rt.iconsWhy})
+	if f.iconsMode != "" {
+		facts = append(facts, envFact{name: "Icons", value: f.iconsMode, note: f.iconsWhy})
 	}
 	facts = append(facts,
 		envFact{name: "OS", value: goruntime.GOOS + "/" + goruntime.GOARCH, note: goruntime.Version()},
-		envFact{name: "Workspace root", value: s.root, note: "the explorer's root"},
+		envFact{name: "Workspace root", value: f.root, note: "the explorer's root"},
 		envFact{name: "User config", value: s.userFile, note: "the layer the page writes"},
 	)
-	if project := s.projectFile(); project != "" {
+	if project := f.projectFile; project != "" {
 		facts = append(facts, envFact{name: "Project config", value: project, note: boolNote(s.trusted(), "trusted, writable", "read-only: the workspace is not trusted")})
 	}
 	if s.rt.version != "" {
@@ -205,7 +237,7 @@ func boolNote(b bool, yes, no string) string {
 // extraSections are the page sections that are not scalar config keys: the
 // Language Servers page row and the read-only Environment facts. The Plugins and
 // Keybindings rows join them with their pages.
-func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection {
+func (s *settingsService) extraSections(cfg config.Config, f settingsFacts) []tui.SettingsSection {
 	languages := make(map[string]bool)
 	for _, spec := range manager.Defaults() {
 		languages[spec.Language] = true
@@ -228,7 +260,7 @@ func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection
 			Kind: "page", Value: s.keybindingsSummary(cfg), Layers: []string{tui.SettingsLayerUser},
 		}}})
 	items := make([]tui.SettingsItem, 0, 8)
-	for _, fact := range s.envFacts(cfg) {
+	for _, fact := range s.envFacts(cfg, f) {
 		items = append(items, tui.SettingsItem{
 			Key:  "env." + strings.ReplaceAll(strings.ToLower(fact.name), " ", "_"),
 			Name: fact.name, Section: "Environment", Kind: "info", Value: fact.value, Note: fact.note,

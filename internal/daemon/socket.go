@@ -62,7 +62,7 @@ func DefaultName(root string) string {
 
 // SocketPath is the socket path of a named daemon. A Unix socket address is limited
 // to about 104 bytes on several platforms, so a path that would not fit is refused
-// with a message that names the shorter --name workaround.
+// with a message that names the shorter --daemon=NAME / --attach=NAME workaround.
 func SocketPath(name string) (string, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -73,7 +73,7 @@ func SocketPath(name string) (string, error) {
 	}
 	path := filepath.Join(dir, name+".sock")
 	if len(path) > 100 {
-		return "", fmt.Errorf("daemon: socket path %q is too long for a Unix socket; use a shorter --name", path)
+		return "", fmt.Errorf("daemon: socket path %q is too long for a Unix socket; use a shorter --daemon=NAME or --attach=NAME", path)
 	}
 	return path, nil
 }

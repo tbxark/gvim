@@ -115,6 +115,7 @@ func LargeSessionFile(t *testing.T, dir string) (*editor.Editor, string) {
 	Must(t, os.WriteFile(path, []byte(sb.String()), 0o644))
 	ed := editor.New(LargeOpts())
 	Must(t, ed.OpenFile(path))
+	t.Cleanup(ed.Close)
 	d := ed.Active()
 	if !d.Large() {
 		t.Fatal("the document is not large")

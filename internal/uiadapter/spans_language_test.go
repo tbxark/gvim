@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/highlight"
 	"os"
@@ -18,7 +19,7 @@ func newSpanAdapter(t *testing.T, path, text string) *Editor {
 	apptest.Must(t, os.WriteFile(path, []byte(text), 0o644))
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(path))
-	return &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	return &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 }
 
 // kindAt returns the kind of the span that covers byte offset col of the line spans,

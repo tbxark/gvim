@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"time"
 
 	commands "github.com/tbxark/gvim/commands"
@@ -23,7 +24,7 @@ import (
 // on the result. File operations follow renames and closes in ed.
 func NewDeps(ed *editor.Editor, km *keymap.Map, th theme.Theme, tree *explorer.Tree, files *finder.Index) tui.Deps {
 	deps := tui.Deps{
-		Editor:   &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}, saves: &autoSaveGate{}},
+		Editor:   &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}, saves: &autoSaveGate{}},
 		Keys:     keybindings.NewKeymap(km),
 		Theme:    th,
 		Clock:    time.Now,

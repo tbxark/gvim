@@ -10,8 +10,9 @@ func TestConfiguredExtensionFormatterRunsOnAnOpenedFile(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "main.go")
 	writeTestFile(t, file, "hello\n")
-	writeTestFile(t, filepath.Join(root, ".gvim", "config.json"), `{"formatters": {".go": "tr a-z A-Z"}}`)
-	rt, err := buildRuntime(t.Context(), Options{Root: root, Files: []FileTarget{{Path: file}}}, false)
+	user := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, user, `{"formatters": {".go": "tr a-z A-Z"}}`)
+	rt, err := buildRuntime(t.Context(), Options{Root: root, Config: user, Files: []FileTarget{{Path: file}}}, false)
 	must(t, err)
 	t.Cleanup(rt.close)
 	if r := rt.ed.Do("format_buffer", nil); r.Err != nil {

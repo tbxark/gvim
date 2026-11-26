@@ -2,6 +2,7 @@ package uiadapter
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/highlight"
 	"os"
@@ -38,7 +39,7 @@ func TestAutoSaveAdapterWritesTheModifiedFileOnSchedule(t *testing.T) {
 		t.Fatal("auto-save is not due before its first save")
 	}
 	jobs := a.PlanAutoSave(now)
-	results := make([]editor.SaveResult, len(jobs))
+	results := make([]document.SaveResult, len(jobs))
 	for i, j := range jobs {
 		results[i] = j.Run()
 	}
@@ -77,7 +78,7 @@ func TestAutoSaveAdapterPlanAndApplyRoundTrip(t *testing.T) {
 	if data, _ := os.ReadFile(path); string(data) != "abc\n" {
 		t.Fatalf("file after the plan = %q, want the old text", data)
 	}
-	results := make([]editor.SaveResult, len(jobs))
+	results := make([]document.SaveResult, len(jobs))
 	for i, j := range jobs {
 		results[i] = j.Run()
 	}
@@ -106,7 +107,7 @@ func TestAutoSaveGateRefusesExplicitSaveWhileWriting(t *testing.T) {
 	a := &Editor{ed: ed, spans: highlight.New(), saves: &autoSaveGate{}}
 
 	jobs := a.PlanAutoSave(time.Now())
-	for _, act := range []editor.Action{"save", "save_as", "save_all"} {
+	for _, act := range []document.Action{"save", "save_as", "save_all"} {
 		if res := a.Do(act, map[string]any{"path": path}); !errors.Is(res.Err, errAutoSaveWriting) {
 			t.Fatalf("%s while writing error = %v, want errAutoSaveWriting", act, res.Err)
 		}
@@ -114,7 +115,7 @@ func TestAutoSaveGateRefusesExplicitSaveWhileWriting(t *testing.T) {
 	if again := a.PlanAutoSave(time.Now()); len(again) != 0 {
 		t.Fatalf("a second plan returned %d jobs while writing, want none", len(again))
 	}
-	results := []editor.SaveResult{jobs[0].Run()}
+	results := []document.SaveResult{jobs[0].Run()}
 	apptest.Must(t, a.ApplyAutoSave(results))
 	if res := a.Do("save", nil); res.Err != nil {
 		t.Fatalf("save after the apply error = %v, want nil", res.Err)

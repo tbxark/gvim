@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -51,8 +50,7 @@ const remoteNestedMaxRepos = 8
 // and BatchSearcher that runs ripgrep (or grep) through the authority's one-shot surface
 // with the remote workspace as cwd. The local project search is never consulted.
 type probeGenKey struct {
-	conn   uint64
-	manual uint64
+	conn uint64 // the connection generation the probe result was read under
 }
 
 type remoteSearch struct {
@@ -66,7 +64,6 @@ type remoteSearch struct {
 	// heads); syntax colour is CPU-only, bounded by the shared preview caps.
 	previewCache previewHighlighterCache
 
-	manualGen  atomic.Uint64
 	probeMu    sync.Mutex
 	toolGen    probeGenKey
 	cachedTool string
@@ -96,17 +93,12 @@ func (s *remoteSearch) withConnGen(fn func() uint64) *remoteSearch {
 	return s
 }
 
-// Invalidate drops cached connection-scoped tool/git probes (used on reconnect).
-func (s *remoteSearch) Invalidate() {
-	s.manualGen.Add(1)
-}
-
 func (s *remoteSearch) currentGen() probeGenKey {
 	var cg uint64
 	if s.connGen != nil {
 		cg = s.connGen()
 	}
-	return probeGenKey{conn: cg, manual: s.manualGen.Load() + 1}
+	return probeGenKey{conn: cg}
 }
 
 // ProjectSearchBatches starts one remote search and returns the channel its whole-file
@@ -460,7 +452,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 			currentRel = rel
 			current = &searchpanel.FileMatches{Name: rel, Path: joinRemotePath(s.root, rel)}
 		}
-		matches := remoteLineMatchesCompiled(cq, q.Text, lineNo, lineText, byteCol, totalMatches+len(current.Matches), limit)
+		matches := remoteLineMatchesCompiled(cq, q.Text, lineNo, lineText, byteCol, totalMatches, limit)
 		current.Matches = append(current.Matches, matches...)
 		totalMatches += len(matches)
 		if totalMatches >= limit {
@@ -1477,7 +1469,6 @@ type remoteGitGrep struct {
 	spawnEnv func() []string
 	connGen  func() uint64
 
-	manualGen  atomic.Uint64
 	probeMu    sync.Mutex
 	repoGen    probeGenKey
 	cachedRepo string
@@ -1498,7 +1489,7 @@ func (g *remoteGitGrep) currentGen() probeGenKey {
 	if g.connGen != nil {
 		cg = g.connGen()
 	}
-	return probeGenKey{conn: cg, manual: g.manualGen.Load() + 1}
+	return probeGenKey{conn: cg}
 }
 
 func (g *remoteGitGrep) resolveRepo(extraEnv []string) (string, error) {

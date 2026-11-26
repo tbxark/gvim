@@ -2,12 +2,19 @@ package uiadapter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/authority/authoritytest"
 	"github.com/tbxark/gvim/internal/tui/reviewdiff"
 )
 
@@ -160,5 +167,70 @@ func TestReviewGitChangesDiffAndBaseRef(t *testing.T) {
 		if !slices.Contains(refs, want) {
 			t.Errorf("Refs = %v, missing %q", refs, want)
 		}
+	}
+}
+
+// slowReadFS is a remote file system whose ReadFile takes a round trip and records how many
+// reads were in flight at once.
+type slowReadFS struct {
+	authority.UnsupportedFiles
+	inFlight, maxFlight atomic.Int64
+	reads               atomic.Int64
+}
+
+func (f *slowReadFS) ReadFile(_ context.Context, p string, _ int64) ([]byte, error) {
+	f.reads.Add(1)
+	n := f.inFlight.Add(1)
+	defer f.inFlight.Add(-1)
+	for {
+		m := f.maxFlight.Load()
+		if n <= m || f.maxFlight.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	time.Sleep(10 * time.Millisecond)
+	switch {
+	case strings.HasSuffix(p, "bin.dat"):
+		return []byte("a\x00b"), nil
+	case strings.HasSuffix(p, "gone.txt"):
+		return nil, errors.New("vanished")
+	}
+	return []byte("one\ntwo\nthree\n"), nil
+}
+
+// TestReviewGitStatsUntrackedFilesConcurrently checks the untracked files of a remote repo
+// are read with overlapping calls, and the line count, binary flag and unreadable file keep
+// their results and entry order.
+func TestReviewGitStatsUntrackedFilesConcurrently(t *testing.T) {
+	t.Parallel()
+	fs := &slowReadFS{}
+	slot := authoritytest.New()
+	slot.FileSystem = fs
+	var entries []reviewdiff.FileEntry
+	for i := range 20 {
+		entries = append(entries, reviewdiff.FileEntry{Path: fmt.Sprintf("f%02d.txt", i), Status: reviewdiff.StatusUntracked})
+	}
+	entries = append(entries,
+		reviewdiff.FileEntry{Path: "bin.dat", Status: reviewdiff.StatusUntracked},
+		reviewdiff.FileEntry{Path: "gone.txt", Status: reviewdiff.StatusUntracked},
+		reviewdiff.FileEntry{Path: "skipped.txt", Status: reviewdiff.StatusUntracked, StatOnly: true},
+	)
+	ReviewGit{Slot: slot, Remote: true}.statUntracked(context.Background(), "/srv/repo", entries)
+	for i, e := range entries[:20] {
+		if e.Path != fmt.Sprintf("f%02d.txt", i) || e.Added != 3 || e.Binary || e.StatOnly {
+			t.Fatalf("entry %d = %+v, want 3 added lines", i, e)
+		}
+	}
+	if bin := entries[20]; !bin.Binary || bin.Added != 0 {
+		t.Fatalf("binary entry = %+v", bin)
+	}
+	if gone := entries[21]; !gone.StatOnly {
+		t.Fatalf("unreadable entry = %+v, want StatOnly", gone)
+	}
+	if got := fs.reads.Load(); got != 22 {
+		t.Fatalf("%d reads, want 22 (the StatOnly entry is not read)", got)
+	}
+	if got := fs.maxFlight.Load(); got < 2 {
+		t.Fatalf("at most %d read in flight at once, want the reads to overlap", got)
 	}
 }

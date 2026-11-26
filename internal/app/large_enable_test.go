@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,8 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/tbxark/gvim/editor"
 )
 
 // codeLines writes a file of at least size bytes that looks like indented code, with
@@ -39,6 +38,7 @@ func largeRuntime(t *testing.T, root, body string, files ...string) *runtime {
 	isolateConfig(t)
 	must(t, os.MkdirAll(filepath.Join(root, ".gvim"), 0o755))
 	must(t, os.WriteFile(filepath.Join(root, ".gvim", "config.json"), []byte(body), 0o644))
+	trustProject(t, root)
 	opts := Options{Root: root}
 	for _, f := range files {
 		opts.Files = append(opts.Files, FileTarget{Path: f})
@@ -124,7 +124,7 @@ func TestBigFileWithEveryViewFeatureStaysBounded(t *testing.T) {
 	}
 
 	base := d.Buffer.Stats()
-	do := func(action editor.Action, args map[string]any) {
+	do := func(action document.Action, args map[string]any) {
 		t.Helper()
 		if r := ed.Do(action, args); r.Err != nil {
 			t.Fatalf("Do(%s): %v", action, r.Err)
@@ -133,7 +133,7 @@ func TestBigFileWithEveryViewFeatureStaysBounded(t *testing.T) {
 	for _, line := range []int{1, lines / 2, lines - 3, 51} {
 		must(t, ed.GotoLine(line, 5))
 		frame()
-		for _, a := range []editor.Action{
+		for _, a := range []document.Action{
 			"goto_matching_bracket", "move_right", "move_word_right", "select_word",
 			"add_cursor_below", "move_page_down", "move_page_up",
 		} {

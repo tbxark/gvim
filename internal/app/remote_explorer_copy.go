@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
@@ -338,7 +339,10 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 		}
 		list := append([]hostos.DirEntry(nil), entries...)
 		sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
-		for _, e := range list {
+		// The modes come from one parallel pass of Stat calls (a listing carries none), at
+		// most as many as the entry bound still allows.
+		metas := statEntries(ctx, files, dir, list, limits.MaxEntries-count+1)
+		for i, e := range list {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -350,10 +354,10 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 				return fmt.Errorf("remote copy refused: %s contains a symbolic link (%s); remote copy does not follow links", src, e.Name)
 			}
 			childMode, childTime := fs.FileMode(0), e.MTime
-			if cs, serr := files.Stat(ctx, path.Join(dir, e.Name)); serr == nil {
+			if i < len(metas) && metas[i].ok {
 				// Best effort: metadata is a nice-to-have, and a backend that cannot
 				// stat an entry still copies its bytes.
-				childMode, childTime = cs.Mode, cs.MTime
+				childMode, childTime = metas[i].mode, metas[i].mtime
 			}
 			count++
 			if count > limits.MaxEntries {
@@ -387,6 +391,38 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 		return nil, err
 	}
 	return nodes, nil
+}
+
+// remoteStatWorkers bounds the Stat calls of one directory that are in flight at once.
+const remoteStatWorkers = 8
+
+// entryMeta is the mode and mtime one Stat reported; ok is false when it failed.
+type entryMeta struct {
+	mode  fs.FileMode
+	mtime time.Time
+	ok    bool
+}
+
+// statEntries stats the first limit entries of dir with at most remoteStatWorkers calls in
+// flight, and returns one result per statted entry in list order. Over SSH every Stat is a
+// round trip, so a serial pass costs the sum of them.
+func statEntries(ctx context.Context, files authority.FileSystem, dir string, list []hostos.DirEntry, limit int) []entryMeta {
+	n := min(len(list), max(limit, 0))
+	out := make([]entryMeta, n)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, remoteStatWorkers)
+	for i := range n {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			if cs, err := files.Stat(ctx, path.Join(dir, list[i].Name)); err == nil {
+				out[i] = entryMeta{mode: cs.Mode, mtime: cs.MTime, ok: true}
+			}
+		}()
+	}
+	wg.Wait()
+	return out
 }
 
 // requireExclusiveCopy checks the optional no-replace surfaces before anything is
@@ -539,13 +575,30 @@ func (o *remoteExplorerOps) uniqueCopyName(ctx context.Context, dir, name string
 		return "", err
 	}
 	stem, ext := fsops.SplitStemExt(name)
-	for n := 1; n <= remoteCopyNameAttempts; n++ {
-		candidate := fsops.CopyCandidate(stem, ext, n)
-		ok, _, err := o.exists(ctx, path.Join(dir, candidate))
-		if err != nil {
-			return "", fmt.Errorf("remote copy: stat %s: %w", path.Join(dir, candidate), err)
-		}
-		if !ok {
+	// The first candidate is the usual answer: one Stat. When it is taken, one listing of
+	// the directory settles the rest, instead of a Stat round trip per candidate.
+	first := fsops.CopyCandidate(stem, ext, 1)
+	ok, _, err := o.exists(ctx, path.Join(dir, first))
+	if err != nil {
+		return "", fmt.Errorf("remote copy: stat %s: %w", path.Join(dir, first), err)
+	}
+	if !ok {
+		return first, nil
+	}
+	files := o.currentFiles()
+	if files == nil {
+		return "", errors.New("remote file operations: the workspace authority mounts no file system")
+	}
+	entries, err := files.ReadDir(ctx, dir, true)
+	if err != nil {
+		return "", fmt.Errorf("remote copy: list %s: %w", dir, err)
+	}
+	taken := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		taken[e.Name] = true
+	}
+	for n := 2; n <= remoteCopyNameAttempts; n++ {
+		if candidate := fsops.CopyCandidate(stem, ext, n); !taken[candidate] {
 			return candidate, nil
 		}
 	}

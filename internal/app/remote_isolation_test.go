@@ -77,9 +77,6 @@ func TestRemoteWorkspaceIsolationInHostAndExtract(t *testing.T) {
 	if _, err := m.ExtractTab(); err == nil || !strings.Contains(err.Error(), "remote workspace") {
 		t.Fatalf("ExtractTab on remote = %v", err)
 	}
-	if _, err := m.ExtractTabs([]string{decoyFile}); err == nil || !strings.Contains(err.Error(), "remote workspace") {
-		t.Fatalf("ExtractTabs on remote = %v", err)
-	}
 	if _, err := m.ExtractTabTo(remoteWS.File.StableID); err == nil || !strings.Contains(err.Error(), "remote workspace") {
 		t.Fatalf("ExtractTabTo on remote = %v", err)
 	}

@@ -1,28 +1,28 @@
 package app
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
 )
 
 // languageSettings returns the resolver that gives the editor and the UI the effective
 // per-language settings of a document. It reads cfg once per call, so it keeps the
 // config alive but changes nothing in it.
-func languageSettings(cfg config.Config) editor.SettingsResolver {
+func languageSettings(cfg config.Config) document.SettingsResolver {
 	type langKey struct {
 		lang, path string
 	}
 	const maxEntries = 512
 	var (
 		mu    sync.RWMutex
-		cache = make(map[langKey]editor.LanguageSettings)
+		cache = make(map[langKey]document.LanguageSettings)
 	)
-	return func(language, path string) editor.LanguageSettings {
+	return func(language, path string) document.LanguageSettings {
 		key := langKey{lang: language, path: path}
 		mu.RLock()
 		v, ok := cache[key]
@@ -48,8 +48,8 @@ func languageSettings(cfg config.Config) editor.SettingsResolver {
 }
 
 // languageSettingsOf converts the config result to the editor's plain type.
-func languageSettingsOf(s config.EditorSettings) editor.LanguageSettings {
-	out := editor.LanguageSettings{
+func languageSettingsOf(s config.EditorSettings) document.LanguageSettings {
+	out := document.LanguageSettings{
 		Language:               s.Language,
 		TabSize:                s.TabSize,
 		UseTabs:                s.UseTabs,
@@ -69,16 +69,16 @@ func languageSettingsOf(s config.EditorSettings) editor.LanguageSettings {
 		FormatOnSave:           s.FormatOnSave,
 	}
 	if f := s.Formatter; f != nil {
-		out.Formatter = &editor.FormatterSpec{Command: f.Command, Args: f.Args, Stdin: f.Stdin, TimeoutMS: f.TimeoutMS}
+		out.Formatter = &document.FormatterSpec{Command: f.Command, Args: f.Args, Stdin: f.Stdin, TimeoutMS: f.TimeoutMS}
 	}
 	for _, a := range s.OnSave {
-		out.OnSave = append(out.OnSave, editor.OnSaveAction{
+		out.OnSave = append(out.OnSave, document.OnSaveAction{
 			Command: a.Command, Args: a.Args, WorkingDir: a.WorkingDir,
 			Stdin: a.Stdin, TimeoutMS: a.TimeoutMS, Enabled: a.Enabled,
 		})
 	}
 	if r := s.Indent; r != nil {
-		out.Indent = &editor.IndentRules{
+		out.Indent = &document.IndentRules{
 			IncreaseIndentPattern: r.IncreaseIndentPattern,
 			DecreaseIndentPattern: r.DecreaseIndentPattern,
 			IndentNextLinePattern: r.IndentNextLinePattern,
@@ -161,10 +161,8 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 			Right:     slices.Clone(cfg.StatusBar.Right),
 			Separator: cfg.StatusBar.Separator,
 		},
-		MenuBarMnemonics:  cfg.MenuBarMnemonics,
-		SmoothScroll:      cfg.SmoothScroll,
-		SetWindowTitle:    cfg.SetWindowTitle,
-		TerminalAutoTitle: cfg.TerminalAutoTitle,
+		MenuBarMnemonics: cfg.MenuBarMnemonics,
+		SetWindowTitle:   cfg.SetWindowTitle,
 
 		MouseWheelScrollLines: cfg.MouseWheelScrollLines,
 		DoubleClickTimeMS:     cfg.DoubleClickTimeMS,

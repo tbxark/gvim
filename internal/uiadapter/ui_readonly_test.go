@@ -2,6 +2,7 @@ package uiadapter
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/highlight"
 	"os"
 	"path/filepath"
@@ -34,10 +35,10 @@ func TestReplaceThroughTheAdapterRefusesReadOnlyDocument(t *testing.T) {
 	if err != nil || len(matches) != 2 {
 		t.Fatalf("FindMatches = %d matches, %v; want 2", len(matches), err)
 	}
-	if _, err := a.ReplaceMatch(q, "x", matches[0]); !errors.Is(err, editor.ErrReadOnly) {
+	if _, err := a.ReplaceMatch(q, "x", matches[0]); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("ReplaceMatch err = %v, want ErrReadOnly", err)
 	}
-	if _, err := a.ReplaceMatches(q, "x"); !errors.Is(err, editor.ErrReadOnly) {
+	if _, err := a.ReplaceMatches(q, "x"); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("ReplaceMatches err = %v, want ErrReadOnly", err)
 	}
 	if got := ed.Active().Buffer.Text(); got != text {

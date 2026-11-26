@@ -3,9 +3,8 @@ package app
 // Extract-tab variants beyond round 16's "extract to new co-tenant workspace":
 // moving a file tab into an EXISTING workspace over the same root (gvim extension;
 // Fresh only creates new co-tenants), moving a terminal tab's saved state into
-// another workspace (no PTY hand-off: the target revives it on the first dive), and
-// extracting several selected file tabs into one new co-tenant workspace (gvim
-// extension; Fresh has no multi-tab extract). The data-safety ordering is round
+// another workspace (no PTY hand-off: the target revives it on the first dive); the
+// mixed multi-tab selection lives in workspace_extract_mixed.go. The data-safety ordering is round
 // 16's: the transfer is written/accepted by the target FIRST, the switch is queued
 // and accepted, and only then is the source tab closed; every refusal leaves the
 // source tab (and its unsaved text) untouched and reports why. Update does no I/O:
@@ -15,6 +14,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"sort"
 
 	"github.com/tbxark/gvim/buffer"
@@ -76,7 +76,7 @@ func (m *workspaceManager) ExtractTargets() []tui.WorkspaceEntry {
 
 // captureExtractTab reads one document's extract state. It mirrors ExtractTab's
 // capture (file path, cursor/top, unsaved text) for a tab that need not be active.
-func captureExtractTab(doc *editor.Document, sourceID, destRoot string) (*extractTab, error) {
+func captureExtractTab(doc *document.Document, sourceID, destRoot string) (*extractTab, error) {
 	if doc == nil || doc.Virtual() || doc.Path == "" {
 		return nil, errors.New("cannot extract: buffer has no file path")
 	}
@@ -110,6 +110,7 @@ func captureExtractTab(doc *editor.Document, sourceID, destRoot string) (*extrac
 		if err != nil {
 			return nil, fmt.Errorf("cannot extract: read the unsaved text: %w", err)
 		}
+		ext.modified = true
 		ext.unsaved = text
 		if size, mtime, ok := doc.DiskStamp(); ok {
 			ext.file.Size, ext.file.MTimeUnixNano = size, mtime
@@ -183,7 +184,7 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 		return
 	}
 	file := ext.file
-	if ext.unsaved != "" {
+	if ext.modified {
 		name, err := session.StashContent(dir, ext.unsaved)
 		if err != nil {
 			m.notify(fmt.Errorf("cannot extract: stash the unsaved text in the target workspace: %w", err))
@@ -508,154 +509,12 @@ func terminalTabName(tab terminal.SavedTab) string {
 	return "terminal"
 }
 
-// ExtractTabs extracts the selected open file tabs into one new co-tenant
-// workspace. It is gvim's bounded multi-tab extension: Fresh has no multi-tab
-// extract. Every selected tab must be a file-backed, non-large buffer; otherwise
-// the whole action is refused and nothing moves.
-func (m *workspaceManager) ExtractTabs(paths []string) (tui.WorkspaceCmd, error) {
-	m.mu.Lock()
-	sess := m.sessions[m.active]
-	m.mu.Unlock()
-	if sess == nil {
-		return nil, errors.New("cannot extract: the daemon is not ready")
-	}
-	if sess.ws.File.AuthoritySpec != "" {
-		return nil, errors.New("cannot extract: extracting tabs from a remote workspace is not supported")
-	}
-	seen := make(map[string]bool, len(paths))
-	exts := make([]*extractTab, 0, len(paths))
-	ed := sess.rt.ed
-	for _, path := range paths {
-		if path == "" || seen[path] {
-			continue
-		}
-		seen[path] = true
-		doc := documentForPath(ed, path)
-		if doc == nil {
-			return nil, fmt.Errorf("cannot extract: %s is not open any more; no tab was moved", path)
-		}
-		ext, err := captureExtractTab(doc, sess.ws.File.StableID, sess.ws.File.Root)
-		if err != nil {
-			return nil, fmt.Errorf("cannot extract %s: %v; no tab was moved", path, err)
-		}
-		exts = append(exts, ext)
-	}
-	if len(exts) == 0 {
-		return nil, errors.New("cannot extract: no file tabs were selected")
-	}
-	pathsSet := make(map[string]bool, len(exts))
-	for _, ext := range exts {
-		pathsSet[ext.path] = true
-	}
-	mru := extractMru(ed, pathsSet)
-	return tui.WorkspaceCmdOf(func() { m.runExtractTabs(exts, mru) }), nil
-}
-
 // documentForPath returns the open document whose path is path.
-func documentForPath(ed *editor.Editor, path string) *editor.Document {
+func documentForPath(ed *editor.Editor, path string) *document.Document {
 	for i, tab := range ed.Tabs() {
 		if tab.Path == path {
 			return ed.DocAt(i)
 		}
 	}
 	return nil
-}
-
-// runExtractTabs creates the co-tenant with all selected files, then queues the
-// switch and closes every source tab only after it was accepted.
-func (m *workspaceManager) runExtractTabs(exts []*extractTab, mru []session.MruFile) {
-	m.mu.Lock()
-	sess := m.sessions[exts[0].sourceID]
-	active := m.active
-	m.mu.Unlock()
-	if sess == nil || active != exts[0].sourceID {
-		m.notify(errors.New("cannot extract: the active workspace changed while extracting; nothing was moved"))
-		return
-	}
-	canonical, err := daemon.CanonicalRoot(exts[0].destRoot)
-	if err != nil {
-		m.notify(fmt.Errorf("cannot extract: %w", err))
-		return
-	}
-	ws, _, err := m.reg.CreateCoTenant(canonical, "")
-	if err != nil {
-		m.notify(fmt.Errorf("cannot extract: create the co-tenant workspace: %w", err))
-		return
-	}
-	id := ws.File.StableID
-	discard := func() { _ = m.reg.Remove(id) }
-	dir, err := m.workspaceSessionDir(id)
-	if err != nil {
-		discard()
-		m.notify(fmt.Errorf("cannot extract: %w", err))
-		return
-	}
-	layout := session.Session{Version: session.Version, Root: canonical, Explorer: true}
-	for _, ext := range exts {
-		file := ext.file
-		if ext.unsaved != "" {
-			name, err := session.StashContent(dir, ext.unsaved)
-			if err != nil {
-				discard()
-				m.notify(fmt.Errorf("cannot extract: stash the unsaved text: %w", err))
-				return
-			}
-			file.StashFile = name
-		}
-		layout.Files = append(layout.Files, file)
-	}
-	layout.MRU = mru
-	layout.Active = activeForMru(layout.Files, mru)
-	if err := session.Save(dir, layout); err != nil {
-		discard()
-		m.notify(fmt.Errorf("cannot extract: write the new workspace's session: %w", err))
-		return
-	}
-	_, _ = m.reg.UpdateLayout(id, &layout)
-
-	var wait func() error
-	var serr error
-	closed := 0
-	if !m.runOnUI(func() {
-		m.mu.Lock()
-		cur := m.sessions[exts[0].sourceID]
-		activeNow := m.active
-		m.mu.Unlock()
-		if activeNow != exts[0].sourceID || cur == nil {
-			serr = errors.New("the active workspace changed while extracting")
-			return
-		}
-		wait, serr = m.beginExtractSelect(id)
-		if serr != nil {
-			return
-		}
-		for _, ext := range exts {
-			if cur.rt.model.CloseTabForWorkspaceExtractAt(ext.path) {
-				closed++
-			}
-		}
-		if closed > 0 {
-			m.enqueueCapture(cur)
-		}
-	}) {
-		discard()
-		m.notify(errors.New("cannot extract: the daemon is not ready; no tab was moved"))
-		return
-	}
-	if serr != nil {
-		discard()
-		m.notify(fmt.Errorf("cannot extract: %w; no tab was moved", serr))
-		return
-	}
-	if wait != nil {
-		if err := wait(); err != nil {
-			m.notify(fmt.Errorf("cannot extract: open workspace %q: %v; the tabs' text is kept there", ws.File.Label, err))
-			return
-		}
-	}
-	noun := "tab"
-	if closed != 1 {
-		noun = "tabs"
-	}
-	m.report(appTextVars("gvim.workspace.report_count_noun", "Extracted %{count} %{noun} into workspace %{label}", map[string]any{"count": closed, "noun": noun, "label": fmt.Sprintf("%q", ws.File.Label)}))
 }

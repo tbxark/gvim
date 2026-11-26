@@ -25,6 +25,12 @@ type Projects struct {
 	root  string        // the folder the watcher watches
 	index *finder.Index // the file index of the current root
 
+	// explorerOpts and finderOpts give the options of the session as they are now, so
+	// the tree and index of an opened folder keep the ignore and scan settings of the
+	// config. Nil leaves the defaults.
+	explorerOpts func() explorer.Options
+	finderOpts   func() finder.Options
+
 	// current is the root of the latest Open, or of the first root. It is read without
 	// the lock: the plugins ask for the root from any goroutine, and Open can take a while.
 	current atomic.Pointer[string]
@@ -43,11 +49,19 @@ func (p *Projects) Open(path string) (tui.Project, error) {
 		}
 		return tui.Project{}, err
 	}
-	tree, err := explorer.Open(r.Path())
+	var expOpts explorer.Options
+	if p.explorerOpts != nil {
+		expOpts = p.explorerOpts()
+	}
+	tree, err := explorer.OpenWithOptions(r.Path(), expOpts)
 	if err != nil {
 		return tui.Project{}, err
 	}
-	idx := finder.Start(p.ctx, r.Path())
+	var findOpts finder.Options
+	if p.finderOpts != nil {
+		findOpts = p.finderOpts()
+	}
+	idx := finder.Start(p.ctx, r.Path(), findOpts)
 	if p.watcher != nil {
 		if p.root != "" {
 			_ = p.watcher.Remove(p.root)
@@ -75,6 +89,14 @@ func NewProjects(ctx context.Context, watcher *filewatch.Watcher, root string, f
 		p.root = root
 	}
 	return p
+}
+
+// SetOptions installs the providers of the live explorer and finder options that Open
+// gives the tree and the index of the folder it opens. Either may be nil.
+func (p *Projects) SetOptions(explorerOpts func() explorer.Options, finderOpts func() finder.Options) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.explorerOpts, p.finderOpts = explorerOpts, finderOpts
 }
 
 // RootDir returns the folder of the current project root.

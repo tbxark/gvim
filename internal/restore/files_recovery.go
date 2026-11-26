@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"sync"
@@ -29,8 +30,8 @@ type RecoveryWriter struct {
 	dir string
 
 	mu    sync.Mutex
-	last  map[*editor.Document]stashed // what the last write holds for each document
-	wrote bool                         // the directory holds a session with files
+	last  map[*document.Document]stashed // what the last write holds for each document
+	wrote bool                           // the directory holds a session with files
 }
 
 // stashed is the stash file that holds the text of a document at version ver of buffer buf.
@@ -54,7 +55,7 @@ func NewRecoveryWriter(ed *editor.Editor, dir string) *RecoveryWriter {
 // function empties the copy.
 func (w *RecoveryWriter) Plan() func() error {
 	type entry struct {
-		doc     *editor.Document
+		doc     *document.Document
 		state   session.FileState
 		buf     *buffer.Buffer
 		ver     uint64
@@ -103,7 +104,7 @@ func (w *RecoveryWriter) Plan() func() error {
 	// the restored tabs keep their relative completion/dabbrev order. Only the documents
 	// in the copy can be referenced, so a saved ref is limited to entries that have a
 	// stash (the same ones session.Save would write for a normal session).
-	savedByDoc := make(map[*editor.Document]int, len(entries))
+	savedByDoc := make(map[*document.Document]int, len(entries))
 	for i := range entries {
 		savedByDoc[entries[i].doc] = i
 	}
@@ -130,7 +131,7 @@ func (w *RecoveryWriter) Plan() func() error {
 	return func() error {
 		var files []session.FileState
 		var created []string
-		last := make(map[*editor.Document]stashed, len(entries))
+		last := make(map[*document.Document]stashed, len(entries))
 		fail := func(err error) error {
 			for _, name := range created {
 				_ = os.Remove(filepath.Join(w.dir, name))

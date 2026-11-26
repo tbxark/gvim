@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/daemon"
@@ -57,6 +58,11 @@ type workspaceManager struct {
 	sessions map[string]*workspaceSession
 	active   string
 	host     *tui.WorkspaceHost
+	// foregroundConnErr is why the remote foreground workspace could not connect while it was
+	// built (see connectForegroundAuthority), or nil.
+	foregroundConnErr error
+	// bg counts the background registry writes (touchAsync) a close waits for.
+	bg sync.WaitGroup
 	// seq is the switch request sequence; cancel cancels the build of the previous
 	// request so a newer switch does not wait for stale work.
 	seq uint64
@@ -167,7 +173,18 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 			return buildRuntime(ctx, opts, true)
 		},
 	}
+	if specText != "" {
+		// The jump-box daemon's remote foreground connects during its build, on the daemon
+		// terminal: the wiring and the saved-session restore need the live connection. A
+		// failure (a non-interactive start, a refused password) is kept for
+		// ensureForegroundAuthority, so the daemon exits with the actionable error.
+		m.opts.connectHook = func(ctx context.Context, slot authority.Slot) error {
+			m.foregroundConnErr = connectForegroundAuthority(ctx, slot)
+			return m.foregroundConnErr
+		}
+	}
 	sess, err := m.buildWorkspace(m.ctx, disc.Foreground.File.StableID)
+	m.opts.connectHook = nil
 	if err != nil {
 		return nil, err
 	}
@@ -202,29 +219,29 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 	return m, nil
 }
 
-// ensureForegroundAuthority connects a daemon-started remote foreground workspace on the
+// connectForegroundAuthority connects a daemon-started remote foreground workspace on the
 // daemon's own terminal before the socket starts hosting: the Fresh jump-box daemon answers
 // password/passphrase/2FA prompts there once, then attaches need no SSH setup of their own.
 // A non-interactive daemon fails with an actionable error instead of prompting on a stdin
 // nobody answers.
-func (m *workspaceManager) ensureForegroundAuthority(ctx context.Context) error {
-	m.mu.Lock()
-	sess := m.sessions[m.active]
-	m.mu.Unlock()
-	if sess == nil || sess.ws.File.AuthoritySpec == "" {
-		return nil
-	}
-	if sess.rt.auth == nil || sess.rt.auth.State().Connected {
+func connectForegroundAuthority(ctx context.Context, slot authority.Slot) error {
+	if slot == nil || slot.State().Connected {
 		return nil
 	}
 	prompter, err := daemonPrompterFactory()
 	if err != nil {
 		return err
 	}
-	if err := connectDaemonAuthority(ctx, sess.rt.auth, prompter); err != nil {
-		return err
-	}
-	return nil
+	return connectDaemonAuthority(ctx, slot, prompter)
+}
+
+// ensureForegroundAuthority reports whether the daemon-started remote foreground workspace
+// connected while it was built (connectForegroundAuthority ran from buildRuntime, before
+// the remote wiring and the session restore), and so whether the daemon may host.
+func (m *workspaceManager) ensureForegroundAuthority(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.foregroundConnErr
 }
 
 // setHost gives the manager the workspace host that swaps program models.
@@ -502,7 +519,7 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 	host := m.host
 	m.mu.Unlock()
 	target.rt.model.SetWorkspaceLabel(target.ws.File.Label)
-	_, _ = m.reg.Touch(targetID, m.now())
+	m.touchAsync(targetID, m.now())
 	if m.shared != nil {
 		// The entering workspace is the focused one: it takes ownership of every buffer
 		// it mirrors, and its owned buffers' mirrors pick up saved-state changes.
@@ -524,6 +541,16 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 	// least-recently-focused non-active workspace. The capture+teardown runs as a command,
 	// never on this UI goroutine.
 	m.scheduleEviction()
+}
+
+// touchAsync records that a workspace was focused. The registry write fsyncs, so it runs
+// off the UI goroutine; closeAllChecked waits for the ones still pending.
+func (m *workspaceManager) touchAsync(id string, when time.Time) {
+	m.bg.Add(1)
+	go func() {
+		defer m.bg.Done()
+		_, _ = m.reg.Touch(id, when)
+	}()
 }
 
 // activatePlugins rebinds the daemon's shared plugin runtime and host to sess: its
@@ -582,14 +609,13 @@ func (m *workspaceManager) beginSelect(id string) (func() error, error) {
 		cur.rt.model.CancelTransientWork()
 		m.enqueueCapture(cur)
 	}
-	m.mu.Lock()
 	if _, ok, err := m.reg.Get(id); err != nil || !ok {
-		m.mu.Unlock()
 		if err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("workspace: no workspace %q", id)
 	}
+	m.mu.Lock()
 	m.seq++
 	seq := m.seq
 	m.pendingID = id
@@ -881,6 +907,9 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 			}
 			persistErr = fmt.Errorf("close workspace %q: the capture write failed (%w); the fallback save kept the session", label, job.err)
 			m.notify(persistErr)
+		} else if sess != nil && job.written {
+			// The capture is the final write: the teardown below must not save the session again.
+			sess.rt.markCaptured()
 		}
 	}
 	if sess != nil {

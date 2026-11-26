@@ -40,7 +40,7 @@ func openLogFile(path string) (*fileLog, error) {
 	}
 	l := &fileLog{f: f, lines: make(chan string, logQueue), done: make(chan struct{}), now: time.Now}
 	go l.run()
-	l.write("log", fmt.Sprintf("gvim %s started", gvimVersion()))
+	l.write("log", fmt.Sprintf("gvim %s started", Version()))
 	return l, nil
 }
 
@@ -180,12 +180,8 @@ func startLogFile(path string, diags []config.Diagnostic) (*fileLog, string) {
 	return l, ""
 }
 
-// gvimVersion is the module version of the binary, or "dev" for a build from a work tree.
-// Version returns the human-readable build version of gvim (e.g. "v0.1.0").
+// Version returns the human-readable build version of gvim (e.g. "v0.1.0"), or "dev" for a
+// build from a work tree.
 func Version() string {
-	return updatecheck.DisplayVersion()
-}
-
-func gvimVersion() string {
 	return updatecheck.DisplayVersion()
 }

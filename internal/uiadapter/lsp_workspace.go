@@ -2,24 +2,24 @@ package uiadapter
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"io/fs"
 	"os"
 	"path/filepath"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fsops"
 )
 
 // ApplyLSPEditsExpect applies the edits of a language server to the open document
 // at path only when the document is still at expect. It is the version-checked
 // form the root's multi-file edit helper uses for a workspace edit.
-func (a *Editor) ApplyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error {
+func (a *Editor) ApplyLSPEditsExpect(path string, edits []document.LSPEdit, expect *document.Version) error {
 	return a.ed.ApplyLSPEditsExpect(path, edits, expect)
 }
 
 // DocumentVersion returns the version of the open document at path. ok is false
 // when no open document has that path.
-func (a *Editor) DocumentVersion(path string) (editor.Version, bool) {
+func (a *Editor) DocumentVersion(path string) (document.Version, bool) {
 	return a.ed.OpenDocumentVersion(path)
 }
 
@@ -63,18 +63,50 @@ func (a *Editor) RenameFile(oldPath, newPath string, ignoreIfExists bool) error 
 		}
 		return errors.New(newPath + " already exists")
 	}
-	if err := a.ed.CheckRename(oldPath, newPath); err != nil {
+	if err := a.CheckRename(oldPath, newPath); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+	moved, err := a.MoveFile(oldPath, newPath, ignoreIfExists)
+	if err != nil || !moved {
 		return err
+	}
+	return a.FollowRename(oldPath, newPath)
+}
+
+// CheckRename reports the error FollowRename would return, before the disk is touched.
+// It reads editor state, so it runs on the UI goroutine.
+func (a *Editor) CheckRename(oldPath, newPath string) error {
+	return a.ed.CheckRename(oldPath, newPath)
+}
+
+// MoveFile renames the file on disk and never overwrites. It touches only the disk, so
+// it may run in a tea.Cmd. moved is false when nothing changed: the target existed and
+// ignoreIfExists was set.
+func (a *Editor) MoveFile(oldPath, newPath string, ignoreIfExists bool) (moved bool, err error) {
+	if a != nil && a.remote {
+		return false, errors.New("renaming " + oldPath + " was refused: remote LSP file rename is not supported")
+	}
+	if _, err := os.Lstat(newPath); err == nil {
+		if ignoreIfExists {
+			return false, nil
+		}
+		return false, errors.New(newPath + " already exists")
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return false, err
 	}
 	if _, err := fsops.RenameNoReplaceResult(oldPath, newPath); err != nil {
 		if ignoreIfExists && errors.Is(err, fsops.ErrConflict) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
+	return true, nil
+}
+
+// FollowRename moves the open tabs of oldPath to newPath after a successful MoveFile.
+// It changes editor state, so it runs on the UI goroutine.
+func (a *Editor) FollowRename(oldPath, newPath string) error {
 	return a.ed.RenamePath(oldPath, newPath)
 }
 

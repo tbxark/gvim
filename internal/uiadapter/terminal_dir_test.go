@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
 
@@ -80,12 +81,69 @@ func (s *dirSlot) State() authority.State {
 	return authority.State{Kind: "ssh", Remote: s.remote, Connected: s.connected}
 }
 
-func dirStarter(slot authority.Slot, notices *[]string) TermStarter {
+// recStarter is a TermStarter that records the directory notice of each call in
+// *notices, the way the dock's Update shows the one that comes back with the result.
+type recStarter struct {
+	TermStarter
+	notices *[]string
+}
+
+func dirStarter(slot authority.Slot, notices *[]string) recStarter {
 	*notices = nil
-	return NewTermStarter(context.Background(), TermStarterOptions{
-		Authority: slot,
-		Notice:    func(text string) { *notices = append(*notices, text) },
-	})
+	return recStarter{TermStarter: NewTermStarter(context.Background(), TermStarterOptions{Authority: slot}), notices: notices}
+}
+
+func (r recStarter) record(notice string) {
+	if notice != "" {
+		*r.notices = append(*r.notices, notice)
+	}
+}
+
+func (r recStarter) checkedRemoteDir(ctx context.Context, dir string) string {
+	dir, notice := r.TermStarter.checkedRemoteDir(ctx, dir)
+	r.record(notice)
+	return dir
+}
+
+func (r recStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
+	t, notice, err := r.StartNotice(dir, cols, rows)
+	r.record(notice)
+	return t, err
+}
+
+// TestStartReturnsTheDirNoticeWithoutACallback checks that a refused saved directory
+// reaches the caller as StartNotice's result: Start runs in a tea.Cmd goroutine, so the
+// starter has no callback into the model, and the plain Start drops the text.
+func TestStartReturnsTheDirNoticeWithoutACallback(t *testing.T) {
+	t.Parallel()
+	remote := &authority.RemoteSpec{Host: "example.test"}
+	tests := []struct {
+		name, dir, want string
+	}{
+		{"missing remote dir", "/gone", "Remote terminal directory"},
+		{"windows path on a remote", `C:\work`, "not a POSIX path"},
+		{"valid remote dir", "/work", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			slot := &dirSlot{
+				fs:     &dirFS{stats: map[string]hostos.FileStat{"/work": {Kind: "dir"}}},
+				remote: remote, connected: true, term: &dirTerminal{},
+			}
+			starter := NewTermStarter(context.Background(), TermStarterOptions{Authority: slot})
+			_, notice, err := starter.StartNotice(tt.dir, 40, 6)
+			if err == nil {
+				t.Fatal("StartNotice did not return the scripted launch error")
+			}
+			if tt.want == "" && notice != "" || !strings.Contains(notice, tt.want) {
+				t.Fatalf("notice = %q, want it to contain %q", notice, tt.want)
+			}
+			if _, err := starter.Start(tt.dir, 40, 6); err == nil {
+				t.Fatal("Start did not return the scripted launch error")
+			}
+		})
+	}
 }
 
 // TestCheckedRemoteDir checks the pre-launch directory validation: a remote saved

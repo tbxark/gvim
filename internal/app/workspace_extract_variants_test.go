@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -295,97 +294,4 @@ func targetDirTab(t *testing.T, dir string) (terminal.SavedTab, bool) {
 		return terminal.SavedTab{}, false
 	}
 	return st.Tabs[0], true
-}
-
-// TestExtractTabsToNewWorkspace: several selected file tabs open in one new
-// co-tenant workspace, every unsaved text is stashed there, and every source tab is
-// closed only after the switch was accepted.
-func TestExtractTabsToNewWorkspace(t *testing.T) {
-	m, sourceID := newWorkspaceManagerTest(t)
-	m.mu.Lock()
-	root := m.sessions[sourceID].ws.File.Root
-	m.mu.Unlock()
-	one := extractionFile(t, root, "one.txt", "one\n")
-	two := extractionFile(t, root, "two.txt", "two\n")
-	openUnsaved(t, m, sourceID, one, "A-")
-	m.mu.Lock()
-	source := m.sessions[sourceID]
-	m.mu.Unlock()
-	openInModel(t, source.rt.model, two)
-	source.rt.ed.Active().InsertText("B-")
-
-	cmd, err := m.ExtractTabs([]string{one, two})
-	if err != nil || cmd == nil {
-		t.Fatalf("ExtractTabs = %v, %v", cmd, err)
-	}
-	// Before the command nothing moved and no workspace exists.
-	if len(m.Entries()) != 1 || !tabOpen(m, one) || !tabOpen(m, two) {
-		t.Fatal("ExtractTabs moved something inside Update")
-	}
-	cmd()
-	if workspaceHasTab(m, sourceID, one) || workspaceHasTab(m, sourceID, two) {
-		t.Fatal("a source tab survived the extraction")
-	}
-	entries := m.Entries()
-	if len(entries) != 2 {
-		t.Fatalf("entries = %+v", entries)
-	}
-	var destID string
-	for _, e := range entries {
-		if e.ID != sourceID {
-			destID = e.ID
-		}
-	}
-	dir, err := m.reg.SessionDir(destID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	layout, ok, err := session.Load(dir)
-	if err != nil || !ok || len(layout.Files) != 2 {
-		t.Fatalf("multi session = %+v, %v, %v", layout, ok, err)
-	}
-	if want := []session.MruFile{{Path: two}, {Path: one}}; !slices.Equal(layout.MRU, want) {
-		t.Fatalf("multi MRU = %+v, want the source recency order %+v", layout.MRU, want)
-	}
-	if layout.Active != 1 {
-		t.Fatalf("multi active = %d, want the source-active tab two.txt (index 1)", layout.Active)
-	}
-	stashed := map[string]string{}
-	for _, f := range layout.Files {
-		if f.StashFile == "" {
-			t.Fatalf("file %s has no stash", f.Path)
-		}
-		data, err := os.ReadFile(filepath.Join(dir, f.StashFile))
-		if err != nil {
-			t.Fatal(err)
-		}
-		stashed[f.Path] = string(data)
-	}
-	if stashed[one] != "A-one\n" || stashed[two] != "B-two\n" {
-		t.Fatalf("stashes = %+v", stashed)
-	}
-	if !strings.Contains(m.lastNotice, "Extracted 2 tabs into workspace") {
-		t.Fatalf("report = %q", m.lastNotice)
-	}
-	// The new workspace is active and has both files open.
-	if !workspaceHasTab(m, destID, one) || !workspaceHasTab(m, destID, two) {
-		t.Fatalf("extracted workspace tabs = %+v", m.sessions[destID].rt.ed.Tabs())
-	}
-}
-
-// TestExtractTabsRefusesUnknownPath: a selection that no longer names an open tab
-// refuses the whole action before any I/O; no tab moves.
-func TestExtractTabsRefusesUnknownPath(t *testing.T) {
-	m, sourceID := newWorkspaceManagerTest(t)
-	m.mu.Lock()
-	root := m.sessions[sourceID].ws.File.Root
-	m.mu.Unlock()
-	path := extractionFile(t, root, "known.txt", "x\n")
-	openUnsaved(t, m, sourceID, path, "Y-")
-	if _, err := m.ExtractTabs([]string{path, filepath.Join(root, "missing.txt")}); err == nil || !strings.Contains(err.Error(), "not open any more") {
-		t.Fatalf("ExtractTabs = %v", err)
-	}
-	if !tabOpen(m, path) || len(m.Entries()) != 1 {
-		t.Fatal("a refused multi extraction moved something")
-	}
 }

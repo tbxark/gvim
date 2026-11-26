@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
@@ -83,7 +83,6 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	b.wirePluginPorts()
 	b.wireSettingsService()
 	b.wireTrustLSP()
-	b.wireLSPExtras()
 	b.collectNotices()
 	b.newModel()
 	b.wireDock()
@@ -103,7 +102,6 @@ type runtimeBuild struct {
 
 	// Config, trust and the session plan (loadConfig).
 	root         string
-	denoRoot     string // the Deno auto-selection workspace root; the remote root once known
 	trustStore   *trust.Store
 	trustState   trust.State
 	trustWarning string
@@ -126,7 +124,7 @@ type runtimeBuild struct {
 	failed               []restore.Unrestored
 	sidebarState         *tui.SidebarState
 	openNotices          []string
-	fullLoads            []editor.ErrLargeNeedsFullLoad
+	fullLoads            []document.ErrLargeNeedsFullLoad
 	recPort              tui.RecoveryPort
 	recEvery             time.Duration
 	recNotice            string
@@ -172,6 +170,7 @@ type runtimeBuild struct {
 
 	// The plugin wiring (buildPlugins).
 	pw              *pluginhost.Wiring
+	pluginInv       *pluginInventory // the Settings page's copy of the plugin inventory
 	pluginWS        *pluginhost.Workspace
 	pluginStateFile string
 
@@ -185,8 +184,6 @@ type runtimeBuild struct {
 	// The settings service and the LSP helpers built on it.
 	settingsSvc *settingsService
 	lspBase     *lspBaselineUpdater
-	denoSlot    *atomic.Pointer[denoAutoSelector]
-	denoAuto    *denoAutoSelector
 
 	model *tui.Model
 }
@@ -214,9 +211,6 @@ func (b *runtimeBuild) loadConfig() error {
 		b.watching = false
 	}
 	b.root = root
-	// The Deno auto-selection workspace root: the local root, replaced by the expanded
-	// remote root below for a remote launch.
-	b.denoRoot = root
 	// The trust decision gates the project config layer, so it is resolved
 	// before the config is loaded: an untrusted workspace is configured by the
 	// user's own file only.
@@ -392,12 +386,12 @@ func (b *runtimeBuild) chooseAppearance() error {
 		// first run must still open the editor); other theme errors stay fatal as
 		// before.
 		if theme.IsURLForm(effectiveThemeRef(opts.Theme, cfg)) {
-			b.themeWarn = fmt.Sprintf("%v; using %q", err, "dark")
-			b.th, err = themeReg.Load("dark")
+			b.themeWarn = fmt.Sprintf("%v; using %q", err, config.DefaultTheme)
+			b.th, err = themeReg.Load(config.DefaultTheme)
 			if err == nil && opts.Theme == "" && os.Getenv("NO_COLOR") != "" {
 				b.th = b.th.WithoutColor()
 			}
-			b.themeRef = "dark"
+			b.themeRef = config.DefaultTheme
 		}
 		if err != nil {
 			return err
@@ -418,12 +412,7 @@ func (b *runtimeBuild) startWorkspace() {
 		// the placeholder until then.
 		b.files = finder.Idle()
 	} else {
-		b.files = uiadapter.StartFiles(b.ctx, b.root, finder.Options{
-			RespectGitignore:     b.cfg.FileExplorer.RespectGitignore,
-			CustomIgnorePatterns: b.cfg.FileExplorer.CustomIgnorePatterns,
-			ScanExclusions:       b.cfg.FileScanExclusions,
-			ScanInclusions:       b.cfg.FileScanInclusions,
-		})
+		b.files = uiadapter.StartFiles(b.ctx, b.root, finderOptions(b.cfg))
 	}
 	b.watcher, b.events = startWatcher(b.watching)
 	b.proj = uiadapter.NewProjects(b.ctx, b.watcher, b.root, b.files)

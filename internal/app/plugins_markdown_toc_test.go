@@ -104,13 +104,13 @@ func TestMarkdownContentsNeedsMarkdown(t *testing.T) {
 	s.until("the notice", func() bool { return strings.Contains(s.noticeText(), "Not a Markdown buffer") })
 }
 
-// TestMarkdownContentsSettings checks the plugins.markdown_toc.settings wiring
+// TestMarkdownContentsSettings checks the native contents.* settings wiring
 // on the real config: auto_open off keeps the section hidden until the command
 // shows it, and max_depth limits the rows the section lists.
 func TestMarkdownContentsSettings(t *testing.T) {
 	isolateConfig(t)
 	writeUserFile(t, "config.json", `{
-  "plugins": {"markdown_toc": {"settings": {"auto_open": false, "max_depth": 1}}}
+  "contents": {"auto_open": false, "max_depth": 1}
 }`)
 	s := newSession(t, Options{})
 	s.openFile("notes.md", tocDoc)
@@ -127,11 +127,10 @@ func TestMarkdownContentsSettings(t *testing.T) {
 	}
 }
 
-// TestMarkdownContentsDisabled checks plugins.markdown_toc.enabled: false, the
-// key the bundled plugin's manifest used.
+// TestMarkdownContentsDisabled checks contents.enabled: false.
 func TestMarkdownContentsDisabled(t *testing.T) {
 	isolateConfig(t)
-	writeUserFile(t, "config.json", `{"plugins": {"markdown_toc": {"enabled": false}}}`)
+	writeUserFile(t, "config.json", `{"contents": {"enabled": false}}`)
 	s := newSession(t, Options{})
 	s.openFile("notes.md", tocDoc)
 	s.wake()

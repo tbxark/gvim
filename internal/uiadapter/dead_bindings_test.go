@@ -10,7 +10,6 @@ import (
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
-	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/keymap"
@@ -44,7 +43,7 @@ var probedContexts = []keymap.Context{
 func boundActions(t *testing.T) []string {
 	t.Helper()
 	seen := map[string]bool{}
-	for _, name := range keybindings.BuiltinKeymaps {
+	for _, name := range keymap.BuiltinNames() {
 		km, err := keymap.ByName(name)
 		if err != nil {
 			t.Fatalf("ByName(%q): %v", name, err)
@@ -150,7 +149,7 @@ func TestEveryConsultedBindingActionIsKnown(t *testing.T) {
 		known[a] = true
 	}
 	seen := make(map[string]bool)
-	for _, name := range keybindings.BuiltinKeymaps {
+	for _, name := range keymap.BuiltinNames() {
 		km, err := keymap.ByName(name)
 		if err != nil {
 			t.Fatalf("ByName(%q): %v", name, err)

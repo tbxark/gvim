@@ -22,7 +22,7 @@ func TestSettingsThemePreview(t *testing.T) {
 	if len(item.Preview) != 4 {
 		t.Fatalf("theme preview = %+v, want four chips", item.Preview)
 	}
-	dark, err := theme.Load("dark")
+	gopher, err := theme.Load("gopher")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,10 +40,10 @@ func TestSettingsThemePreview(t *testing.T) {
 		if sw.Label != want.label {
 			t.Errorf("chip %d label = %q, want %q", i, sw.Label, want.label)
 		}
-		if got, wantColor := sw.BG, previewTestColor(t, dark, want.bg); got != wantColor {
+		if got, wantColor := sw.BG, previewTestColor(t, gopher, want.bg); got != wantColor {
 			t.Errorf("%s chip BG = %v, want %v", want.label, got, wantColor)
 		}
-		if got, wantColor := sw.FG, previewTestColor(t, dark, want.fg); got != wantColor {
+		if got, wantColor := sw.FG, previewTestColor(t, gopher, want.fg); got != wantColor {
 			t.Errorf("%s chip FG = %v, want %v", want.label, got, wantColor)
 		}
 	}

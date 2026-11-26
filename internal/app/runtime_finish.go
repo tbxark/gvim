@@ -1,17 +1,15 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
-	"sync/atomic"
 
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/keybindings"
-	"github.com/tbxark/gvim/internal/lsphost"
 	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/uiadapter"
@@ -40,15 +38,14 @@ func (b *runtimeBuild) wireSettingsService() {
 				lspBase.UpdateConfig(next, trust.State{Level: levelOf()})
 			}
 		},
-		plugins:    pw.Runtime,
-		pluginsCfg: cfg,
+		plugins: b.pluginInv,
 		keymapOf: func(cfg config.Config) tui.Keymap {
 			return keybindings.NewKeymap(keybindings.ApplyOverrides(presetKeymap(opts.Keymap, cfg), cfg))
 		},
 		presetName:        b.choice.name,
 		iconsMode:         b.icon.Mode.String(),
 		iconsWhy:          b.icon.Why,
-		version:           gvimVersion(),
+		version:           Version(),
 		initialFormatters: b.initFormatters,
 		keysReload: func(next config.Config) {
 			if keys != nil {
@@ -68,7 +65,17 @@ func (b *runtimeBuild) wireSettingsService() {
 	}
 	svc.env = b.envProvider
 	svc.setEnvWatch(b.envWatch)
-	projSearch, grep, files, root, isRemote, remoteLoader := b.projSearch, b.grep, b.files, b.root, opts.Remote != nil, b.remoteExplorerLoader
+	svc.setRootOf(b.rootNow)
+	proj := b.proj
+	if proj != nil {
+		// Switch Project builds the new root's tree and index from the live config, not
+		// from the defaults.
+		proj.SetOptions(
+			func() explorer.Options { return explorerOptions(svc.currentConfig()) },
+			func() finder.Options { return finderOptions(svc.currentConfig()) },
+		)
+	}
+	projSearch, grep, isRemote, remoteLoader := b.projSearch, b.grep, opts.Remote != nil, b.remoteExplorerLoader
 	svc.setConfigReload(func(next config.Config) {
 		if projSearch != nil {
 			projSearch.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
@@ -76,13 +83,9 @@ func (b *runtimeBuild) wireSettingsService() {
 		if grep != nil {
 			grep.SetCustomIgnorePatterns(next.FileExplorer.CustomIgnorePatterns)
 		}
-		if !isRemote && files != nil {
-			files.SetOptions(root, finder.Options{
-				RespectGitignore:     next.FileExplorer.RespectGitignore,
-				CustomIgnorePatterns: next.FileExplorer.CustomIgnorePatterns,
-				ScanExclusions:       next.FileScanExclusions,
-				ScanInclusions:       next.FileScanInclusions,
-			})
+		if !isRemote && proj != nil {
+			// The index and root of the folder that is open now, not the startup ones.
+			proj.Index().SetOptions(proj.RootDir(), finderOptions(next))
 		}
 		if grep != nil {
 			grep.SetScanFilter(next.FileScanExclusions, next.FileScanInclusions)
@@ -113,12 +116,10 @@ func (b *runtimeBuild) wireSettingsService() {
 // reload snapshot cannot overwrite a newer baseline. Manual Start/Restart remains
 // available.
 func (b *runtimeBuild) wireTrustLSP() {
-	ctx, trustCtl, lspBase, lsp, svc, isRemote := b.ctx, b.trustCtl, b.lspBase, b.deps.LSP, b.settingsSvc, b.opts.Remote != nil
+	trustCtl, lspBase, lsp, svc, isRemote := b.trustCtl, b.lspBase, b.deps.LSP, b.settingsSvc, b.opts.Remote != nil
 	if trustCtl == nil {
 		return
 	}
-	denoSlot := &atomic.Pointer[denoAutoSelector]{}
-	b.denoSlot = denoSlot
 	if !isRemote && lspBase != nil {
 		trustCtl.prepareTrust = func(state trust.State) error {
 			cfg, err := svc.loadTrustedLSP(state.Root)
@@ -143,62 +144,7 @@ func (b *runtimeBuild) wireTrustLSP() {
 		if lspBase != nil {
 			lspBase.UpdateTrust(trust.State{Level: state.Level})
 		}
-		if d := denoSlot.Load(); d != nil {
-			if state.AllowsProjectConfig() {
-				d.Start(ctx)
-			} else {
-				d.Clear()
-			}
-		}
 	})
-}
-
-// wireLSPExtras starts the Deno auto-selection and installs the external-location
-// opener on the LSP manager.
-func (b *runtimeBuild) wireLSPExtras() {
-	ctx, opts, deps, authSlot, root, overlay := b.ctx, b.opts, &b.deps, b.authSlot, b.root, b.envProvider.Overlay
-	levelOf := makeLevelOf(b.trustCtl, b.trustState.Level)
-	spawnGate := makeSpawnGate(opts.Remote != nil, root, levelOf)
-	authGate := func(ctx context.Context, argv []string, cwd string) error {
-		return spawnGate(ctx, argv, cwd, nil)
-	}
-	// Project-root Deno auto-selection (Fresh deno_lsp parity with authority-only checks):
-	// one bounded background probe against the workspace root; it never overrides an explicit
-	// or disabled user LSP config and is re-run after a reconnect or project-root switch. The
-	// provider is evaluated when a manager for exactly this root is created, re-reading the
-	// settings service's live config (a settings reload thus invalidates a stale decision).
-	if deps.LSP != nil && authSlot != nil && b.denoRoot != "" {
-		svc := b.settingsSvc
-		denoCfg := func() config.Config {
-			// The Deno selection is an auto-start choice, so evaluate it against the same
-			// live-trust-gated config the port uses, never the raw reloaded settings.
-			return lspConfig(svc.currentConfig(), trust.State{Level: levelOf()})
-		}
-		b.denoAuto = newDenoAutoSelector(deps.LSP, authSlot, b.denoRoot, opts.Remote != nil, authGate, overlay, denoCfg)
-		if b.denoSlot != nil {
-			b.denoSlot.Store(b.denoAuto)
-		}
-		if b.denoAuto != nil {
-			denoAuto := b.denoAuto
-			if setter, ok := deps.LSP.(interface{ SetRootChangeListener(func(string)) }); ok {
-				setter.SetRootChangeListener(func(root string) {
-					denoAuto.Rebind(ctx, root)
-				})
-			}
-			b.denoAuto.Start(ctx)
-		}
-	}
-	// Native external locations: Fresh's slang-lsp slang-synth builtin modules.
-	// The opener validates the URI, refuses remote authorities, runs the fixed slangd
-	// command through authority.OneShot under the trust gate with bounded output, and
-	// returns locally generated read-only source for the TUI to open.
-	if deps.LSP != nil && authSlot != nil {
-		if setter, ok := deps.LSP.(interface {
-			SetExternalLocationOpener(lsphost.ExternalLocationOpener)
-		}); ok {
-			setter.SetExternalLocationOpener(newSlangSynthOpener(opts.Remote != nil, authSlot, authGate, overlay, root))
-		}
-	}
 }
 
 // collectNotices sets the status row notice, the Show Warnings list and, for a daemon
@@ -275,9 +221,6 @@ func (b *runtimeBuild) wireDock() {
 			Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines,
 			SpawnEnv:  b.envProvider.Overlay,
 			Authority: b.authSlot,
-			// A refused remote cwd falls back to the authority's default directory and
-			// says so in the status row (the terminal port has no notice channel).
-			Notice: model.Notify,
 			// A child OSC 52 writes the system clipboard only when the config asks
 			// for it and the workspace is trusted (output is untrusted data, and
 			// the default is off); the session parser is inert otherwise.
@@ -316,7 +259,7 @@ func (b *runtimeBuild) wireAuthorityUI() {
 	// Agent discovery scans the local machine through the same spawn gate as the
 	// terminal and plugins; the picker runs the scan off the update loop.
 	proj := b.proj
-	spawnGate := makeSpawnGate(b.opts.Remote != nil, b.root, makeLevelOf(b.trustCtl, b.trustState.Level))
+	spawnGate := makeSpawnGate(b.opts.Remote != nil, b.rootNow, makeLevelOf(b.trustCtl, b.trustState.Level))
 	b.model.SetAgentDiscoverer(newAgentDiscoverer(func() string { return proj.RootDir() }, spawnGate, b.cfg.Terminal.Agents))
 	// The workspace authority of the session: the shell and formatter runner go
 	// through the slot, and a remote launch shows its segment and opens the SSH

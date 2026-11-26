@@ -57,10 +57,6 @@ type TermStarterOptions struct {
 	// before; a remote backend returns a transport the dock drives through
 	// terminal.StartWithBackend. The starter never asks what kind the slot is.
 	Authority authority.Slot
-	// Notice, when not nil, receives a short user-facing notice when a remote
-	// working directory is refused and the terminal falls back to the authority's
-	// default directory. It is only called for a remote slot.
-	Notice func(string)
 }
 
 // TermStarter starts shells for the dock. A shell lives until the dock closes it, or
@@ -86,8 +82,18 @@ func NewTermStarter(ctx context.Context, opts ...TermStarterOptions) TermStarter
 const remoteDirCheckTimeout = 5 * time.Second
 
 // Start runs the shell in dir with the given size. It returns a nil Terminal with
-// the error, so the dock never holds a typed nil.
+// the error, so the dock never holds a typed nil. A directory-fallback notice is
+// dropped; StartNotice returns it.
 func (s TermStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
+	t, _, err := s.StartNotice(dir, cols, rows)
+	return t, err
+}
+
+// StartNotice is Start that also returns the user-facing notice for a saved working
+// directory that was refused (the terminal then starts in the default directory), or
+// "". Start runs in a tea.Cmd goroutine, so the notice travels back with the result
+// for Update to show; the starter never touches the model itself.
+func (s TermStarter) StartNotice(dir string, cols, rows int) (tui.Terminal, string, error) {
 	return s.startProgram(s.opts.Shell, s.opts.Args, dir, cols, rows, true)
 }
 
@@ -95,9 +101,16 @@ func (s TermStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
 // agent session or a resume, as the argv names it. It satisfies the dock's
 // Launcher port, so Run Agent and Resume start without a shell in between.
 func (s TermStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows int) (tui.Terminal, error) {
+	t, _, err := s.StartLaunchNotice(launch, dir, cols, rows)
+	return t, err
+}
+
+// StartLaunchNotice is StartLaunch that also returns the directory notice, as
+// StartNotice does.
+func (s TermStarter) StartLaunchNotice(launch terminal.Launch, dir string, cols, rows int) (tui.Terminal, string, error) {
 	launch = launch.Clean()
 	if len(launch.Argv) == 0 {
-		return s.Start(dir, cols, rows)
+		return s.StartNotice(dir, cols, rows)
 	}
 	// An agent/resume program is a local executable: it does not go through a
 	// re-parenting authority (a remote login shell would ignore the argv).
@@ -105,8 +118,10 @@ func (s TermStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows 
 }
 
 // startProgram runs one program in dir with the dock's environment and clipboard
-// hook. An empty program runs the user's shell.
-func (s TermStarter) startProgram(shell string, args []string, dir string, cols, rows int, viaAuthority bool) (tui.Terminal, error) {
+// hook. An empty program runs the user's shell. The string result is the notice for
+// a refused directory, or "".
+func (s TermStarter) startProgram(shell string, args []string, dir string, cols, rows int, viaAuthority bool) (tui.Terminal, string, error) {
+	var notice string
 	scrollback := s.opts.ScrollbackLines
 	if scrollback == 0 {
 		// config's 0 means "no history"; the terminal package's 0 means its
@@ -132,15 +147,15 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 		// there. A local authority gets the same platform-flavour check as a local
 		// start.
 		if remote {
-			dir = s.checkedRemoteDir(s.ctx, dir)
+			dir, notice = s.checkedRemoteDir(s.ctx, dir)
 		} else {
-			dir = s.checkedLocalDir(dir)
+			dir, notice = s.checkedLocalDir(dir)
 		}
 		launch, err := s.opts.Authority.Terminal().Launch(s.ctx, authority.TerminalOptions{
 			Dir: dir, Shell: shell, Args: args, Env: extraEnv, Cols: cols, Rows: rows,
 		})
 		if err != nil {
-			return nil, err
+			return nil, notice, err
 		}
 		if launch.Shell != "" {
 			shell = launch.Shell
@@ -161,27 +176,30 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 			}, launch.Backend)
 			if err != nil {
 				_ = launch.Backend.Close()
-				return nil, err
+				return nil, notice, err
 			}
 			s.installOSC52(sess)
-			return sess, nil
+			return sess, notice, nil
 		}
 	}
 	// A local start (no authority, a local authority, or a remote workspace's local
 	// agent executable) validates the directory against this host's path flavour:
 	// a saved Windows path must not be handed to a POSIX PTY (or the reverse), and
 	// the fallback is the default local directory, never a translation.
-	dir = s.checkedLocalDir(dir)
+	dir, n := s.checkedLocalDir(dir)
+	if n != "" {
+		notice = n
+	}
 	sess, err := terminal.Start(s.ctx, terminal.Options{
 		Shell: shell, Args: args,
 		Dir: dir, Cols: cols, Rows: rows,
 		ScrollbackLines: scrollback, Env: extraEnv,
 	})
 	if err != nil {
-		return nil, err
+		return nil, notice, err
 	}
 	s.installOSC52(sess)
-	return sess, nil
+	return sess, notice, nil
 }
 
 // installOSC52 sets the clipboard hooks of the options, when there are any, on sess.
@@ -202,27 +220,24 @@ func (s TermStarter) installOSC52(sess *terminal.Session) {
 // missing, not a directory, or the authority is disconnected), it reports a
 // notice (when configured) and returns "" so the authority starts in its own
 // default directory; it never falls back to a local path.
-func (s TermStarter) checkedRemoteDir(ctx context.Context, dir string) string {
+func (s TermStarter) checkedRemoteDir(ctx context.Context, dir string) (string, string) {
 	slot := s.opts.Authority
 	if slot == nil || dir == "" || slot.State().Remote == nil {
-		return dir
+		return dir, ""
 	}
 	if !strings.HasPrefix(dir, "/") {
-		s.remoteDirFallback(dir, "it is not a POSIX path for this remote workspace")
-		return ""
+		return "", remoteDirFallback(dir, "it is not a POSIX path for this remote workspace")
 	}
 	if !slot.Connected() {
-		s.remoteDirFallback(dir, "the workspace is disconnected")
-		return ""
+		return "", remoteDirFallback(dir, "the workspace is disconnected")
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, remoteDirCheckTimeout)
 	defer cancel()
 	st, err := slot.Files().Stat(checkCtx, dir)
 	if err != nil || st.Kind != "dir" {
-		s.remoteDirFallback(dir, "the directory no longer exists")
-		return ""
+		return "", remoteDirFallback(dir, "the directory no longer exists")
 	}
-	return dir
+	return dir, ""
 }
 
 // dirAbsoluteForPlatform reports whether dir is absolute for goos: POSIX-absolute
@@ -250,22 +265,17 @@ func dirAbsoluteForPlatform(dir, goos string) bool {
 // host: a Windows path on a Unix host (or a POSIX path on a Windows host) is
 // reported and replaced by "" (the default local directory). It never translates
 // the path and never reads the local file system to guess.
-func (s TermStarter) checkedLocalDir(dir string) string {
+func (TermStarter) checkedLocalDir(dir string) (string, string) {
 	if dir == "" || dirAbsoluteForPlatform(dir, goruntime.GOOS) {
-		return dir
+		return dir, ""
 	}
-	if s.opts.Notice != nil {
-		s.opts.Notice(uiadapterTextVars("gvim.notice.terminal_dir_invalid", "Terminal directory %{dir} is not an absolute path on this platform; starting in the default directory", map[string]any{"dir": fmt.Sprintf("%q", dir)}))
-	}
-	return ""
+	return "", uiadapterTextVars("gvim.notice.terminal_dir_invalid", "Terminal directory %{dir} is not an absolute path on this platform; starting in the default directory", map[string]any{"dir": fmt.Sprintf("%q", dir)})
 }
 
-// remoteDirFallback tells the user why a saved remote directory was not used. The
-// directory is quoted so no control byte from a record can reach the status row.
-func (s TermStarter) remoteDirFallback(dir, reason string) {
-	if s.opts.Notice != nil {
-		s.opts.Notice(uiadapterTextVars("gvim.notice.remote_terminal_dir_unavailable", "Remote terminal directory %{dir} is unavailable (%{reason}); starting in the remote default directory", map[string]any{"dir": fmt.Sprintf("%q", dir), "reason": reason}))
-	}
+// remoteDirFallback is the notice that says why a saved remote directory was not used.
+// The directory is quoted so no control byte from a record can reach the status row.
+func remoteDirFallback(dir, reason string) string {
+	return uiadapterTextVars("gvim.notice.remote_terminal_dir_unavailable", "Remote terminal directory %{dir} is unavailable (%{reason}); starting in the remote default directory", map[string]any{"dir": fmt.Sprintf("%q", dir), "reason": reason})
 }
 
 // SystemClipboard reads the system clipboard with the platform's own tool.

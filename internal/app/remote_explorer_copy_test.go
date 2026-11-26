@@ -3,15 +3,18 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/authority/authoritytest"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/plugin/hostos"
 )
 
 // copyTestDecoy creates a local decoy tree and returns a snapshot of it.
@@ -738,5 +741,97 @@ func TestRemoteDirectoryCopyConcurrentDestinationIsExclusive(t *testing.T) {
 	}
 	if len(fake.mkdirs) != 1 {
 		t.Fatalf("directory creates = %v, want only the winner's top-level claim", fake.mkdirs)
+	}
+}
+
+// statCountFake counts the Stat and ReadDir calls of a remote copy and how many Stat calls
+// were in flight at once.
+type statCountFake struct {
+	*remoteOpsFake
+	stats, dirReadCalls atomic.Int64
+	inFlight, maxFlight atomic.Int64
+}
+
+func (f *statCountFake) Stat(ctx context.Context, p string) (hostos.FileStat, error) {
+	f.stats.Add(1)
+	n := f.inFlight.Add(1)
+	defer f.inFlight.Add(-1)
+	for {
+		m := f.maxFlight.Load()
+		if n <= m || f.maxFlight.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	time.Sleep(10 * time.Millisecond) // a round trip
+	return f.remoteOpsFake.Stat(ctx, p)
+}
+
+func (f *statCountFake) ReadDir(ctx context.Context, p string, hidden bool) ([]hostos.DirEntry, error) {
+	f.dirReadCalls.Add(1)
+	return f.remoteOpsFake.ReadDir(ctx, p, hidden)
+}
+
+// TestRemoteCopyPlanStatsEntriesConcurrently checks the plan reads each entry's mode with
+// bounded parallel Stat calls instead of one round trip after another, and still carries
+// the modes.
+func TestRemoteCopyPlanStatsEntriesConcurrently(t *testing.T) {
+	base := newRemoteOpsFake().put("/remote/w/src/", "")
+	const files = 24
+	for i := range files {
+		base.putMode(fmt.Sprintf("/remote/w/src/f%02d.txt", i), "x", 0o640, time.Unix(100, 0))
+	}
+	fake := &statCountFake{remoteOpsFake: base}
+	slot := authoritytest.New()
+	slot.FileSystem = fake
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	st, err := base.Stat(context.Background(), "/remote/w/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := ops.planCopy(context.Background(), "/remote/w/src", st, remoteCopyLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != files+1 {
+		t.Fatalf("plan has %d nodes, want %d", len(nodes), files+1)
+	}
+	for _, n := range nodes[1:] {
+		if n.mode != 0o640 || n.mtime.Unix() != 100 {
+			t.Fatalf("node %q lost its metadata: mode %v mtime %v", n.rel, n.mode, n.mtime)
+		}
+	}
+	if got := fake.stats.Load(); got != files {
+		t.Fatalf("plan made %d Stat calls, want %d", got, files)
+	}
+	if got := fake.maxFlight.Load(); got < 2 {
+		t.Fatalf("at most %d Stat call in flight at once, want the stats to overlap", got)
+	}
+}
+
+// TestRemoteUniqueCopyNameListsTheDirectoryOnce checks a taken first candidate is resolved
+// with one directory listing, not one Stat per candidate.
+func TestRemoteUniqueCopyNameListsTheDirectoryOnce(t *testing.T) {
+	base := newRemoteOpsFake().put("/remote/w/", "").put("/remote/w/a.txt", "a")
+	taken := []string{"a copy.txt"}
+	for i := 2; i <= 6; i++ {
+		taken = append(taken, fmt.Sprintf("a copy %d.txt", i))
+	}
+	for _, name := range taken {
+		base.put("/remote/w/"+name, "x")
+	}
+	fake := &statCountFake{remoteOpsFake: base}
+	slot := authoritytest.New()
+	slot.FileSystem = fake
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	got, err := ops.uniqueCopyName(context.Background(), "/remote/w", "a.txt")
+	if err != nil || got != "a copy 7.txt" {
+		t.Fatalf("uniqueCopyName = %q, %v, want a copy 7.txt", got, err)
+	}
+	if fake.stats.Load() > 1 || fake.dirReadCalls.Load() != 1 {
+		t.Fatalf("resolving the name made %d Stat calls and %d listings, want at most 1 and 1", fake.stats.Load(), fake.dirReadCalls.Load())
+	}
+	free, err := ops.uniqueCopyName(context.Background(), "/remote/w", "fresh.txt")
+	if err != nil || free != "fresh copy.txt" {
+		t.Fatalf("uniqueCopyName of a free name = %q, %v", free, err)
 	}
 }

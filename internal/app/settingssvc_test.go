@@ -140,6 +140,49 @@ func TestSettingsSaveUserLayer(t *testing.T) {
 	}
 }
 
+// TestSettingsSaveWithRetiredFlatKeyInTheFile: a user file that still holds the
+// retired flat spelling of an option does not make the Settings write fail. The
+// edit goes under "editor", the flat key is left as the user wrote it, and the
+// reload reports it as an unknown setting instead of reading it.
+func TestSettingsSaveWithRetiredFlatKeyInTheFile(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "config.json")
+	writeTestFile(t, userFile, "{\n  \"tab_size\": 2,\n  \"theme\": \"dark\"\n}\n")
+	file := filepath.Join(dir, "a.go")
+	writeTestFile(t, file, "package main\n")
+	got, err := buildCaptured(t, Options{Root: dir, Config: userFile, Files: []FileTarget{{Path: file}}})
+	apptest.Must(t, err)
+	port := settingsPort(t, got)
+
+	change, err := port.Save([]tui.SettingEdit{{Key: "editor.show_status_bar", Value: "false"}, {Key: "editor.tab_size", Value: "8"}}, tui.SettingsLayerUser)
+	apptest.Must(t, err)
+	if !slices.Contains(change.Live, "editor.tab_size") {
+		t.Errorf("Live = %v, want editor.tab_size applied live", change.Live)
+	}
+	if !slices.ContainsFunc(change.Warnings, func(w string) bool { return strings.Contains(w, "tab_size: unknown setting") }) {
+		t.Errorf("Warnings = %v, want the retired flat tab_size reported as unknown", change.Warnings)
+	}
+	cfg, diags, err := config.Load(config.Options{UserFile: userFile})
+	apptest.Must(t, err)
+	if cfg.TabSize != 8 || cfg.ShowStatusBar {
+		t.Errorf("reloaded tab_size = %d, show_status_bar = %v, want the nested 8 and false", cfg.TabSize, cfg.ShowStatusBar)
+	}
+	if len(diags) != 1 || diags[0].Key != "tab_size" {
+		t.Errorf("diagnostics = %v, want only the untouched flat tab_size", diags)
+	}
+	data, err := os.ReadFile(userFile)
+	apptest.Must(t, err)
+	var top map[string]json.RawMessage
+	apptest.Must(t, json.Unmarshal(data, &top))
+	if _, ok := top["show_status_bar"]; ok {
+		t.Errorf("the Settings write put a flat show_status_bar at the top level:\n%s", data)
+	}
+	if string(top["tab_size"]) != "2" {
+		t.Errorf("the flat tab_size = %s, want the user's 2 kept as it was:\n%s", top["tab_size"], data)
+	}
+}
+
 // TestSettingsSaveRestartSetting checks the restart boundary: a value read only
 // while the editor starts is reported as a restart, not applied live.
 func TestSettingsSaveRestartSetting(t *testing.T) {
@@ -721,4 +764,32 @@ func TestSettingsApplyDoesNotInvokeLookPath(t *testing.T) {
 	}
 	svc.Apply(tui.SettingsChange{})
 	_ = json.Valid([]byte("{}"))
+}
+
+// TestSettingsServiceFollowsTheLiveRoot checks that after Switch Project the page names,
+// reads and writes the project config of the folder that was switched to.
+func TestSettingsServiceFollowsTheLiveRoot(t *testing.T) {
+	isolateConfig(t)
+	first, second := t.TempDir(), t.TempDir()
+	userFile := filepath.Join(t.TempDir(), "user.json")
+	svc := newSettingsService(first, Options{Config: userFile}, editor.New(editor.Options{}), func() bool { return true }, config.Defaults(), nil, settingsRuntime{})
+	if got, want := svc.Snapshot().ProjectFile, filepath.Join(first, ".gvim", "config.json"); got != want {
+		t.Fatalf("project file = %q, want %q", got, want)
+	}
+
+	root := second
+	svc.setRootOf(func() string { return root })
+	want := filepath.Join(second, ".gvim", "config.json")
+	if got := svc.Snapshot().ProjectFile; got != want {
+		t.Fatalf("project file after the switch = %q, want %q", got, want)
+	}
+	if _, err := svc.Save([]tui.SettingEdit{{Key: "editor.tab_size", Value: "2"}}, tui.SettingsLayerProject); err != nil {
+		t.Fatalf("project Save after the switch: %v", err)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("the save did not write the new root's project config: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(first, ".gvim", "config.json")); err == nil {
+		t.Fatal("the save wrote the old root's project config")
+	}
 }

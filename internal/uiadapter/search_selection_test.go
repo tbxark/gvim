@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/highlight"
 	"os"
@@ -23,7 +24,7 @@ func TestFindSelectionThroughTheRootIsCaseInsensitive(t *testing.T) {
 	apptest.Must(t, os.WriteFile(path, []byte("todo x TODO\n"), 0o644))
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(path))
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	m := tui.New(tui.Deps{Editor: a, Theme: theme.Theme{}})
 
 	a.SetCursor(buffer.Pos{Line: 0, Col: 2}, false)

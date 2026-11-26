@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -370,7 +371,7 @@ func RestoreNotice(failed []Unrestored) string {
 
 // replaceText puts text in place of the whole buffer of doc. The change is one undo
 // step, and the document is modified unless text is its saved text.
-func replaceText(doc *editor.Document, text string) {
+func replaceText(doc *document.Document, text string) {
 	doc.Buffer.Group(func() {
 		doc.Buffer.Delete(buffer.Pos{}, doc.Buffer.End())
 		doc.Buffer.Insert(buffer.Pos{}, text)
@@ -389,7 +390,7 @@ func activeIndex(ed *editor.Editor) int {
 
 // stampDisk records in fs the state of the file that the unsaved text of doc is based
 // on, so a restore can tell whether the file changed after the stash was taken.
-func stampDisk(fs *session.FileState, doc *editor.Document) {
+func stampDisk(fs *session.FileState, doc *document.Document) {
 	if size, mtime, ok := doc.DiskStamp(); ok {
 		fs.Size, fs.MTimeUnixNano = size, mtime
 	}

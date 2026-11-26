@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/highlight"
 	"testing"
 
@@ -12,8 +13,8 @@ import (
 func TestDocumentAdapterReportsVirtual(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	ed.Do("new", nil)
-	id := ed.NewVirtual(editor.VirtualOptions{Name: "v"})
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	id := ed.NewVirtual(document.VirtualOptions{Name: "v"})
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	for i := range a.ed.Tabs() {
 		doc, ok := a.DocAt(i).(documentAdapter)
 		if !ok {

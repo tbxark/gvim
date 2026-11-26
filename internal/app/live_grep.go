@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/palette"
@@ -28,7 +28,7 @@ type liveGrep struct {
 	skipFrom int64
 
 	customMu      sync.Mutex
-	customMatcher gitignore.Matcher
+	customMatcher *explorer.IgnoreMatcher
 
 	// scanExclusions/scanInclusions are the file_scan_* lists handed to the
 	// ignored-scope walk: exclusions hard-drop entries, inclusions rescue
@@ -40,11 +40,17 @@ type liveGrep struct {
 	// tree, which is expensive, so it is cached for the root last searched, for
 	// ignoredWalkTTL: typing in the palette reuses it, and a file created since is
 	// found once it expires.
+	// mu is not held while the tree is walked: walkGen changes with the filters, so a walk
+	// that raced a filter change is returned to its caller but not cached.
 	mu       sync.Mutex
 	walkRoot string
 	walkList []string
 	walkAt   time.Time
+	walkGen  uint64
 }
+
+// enumerateAll lists a tree; a test replaces it to hold a walk open.
+var enumerateAll = finder.EnumerateAll
 
 // ignoredWalkTTL is how long the walk of the ignored scope is reused.
 const ignoredWalkTTL = 5 * time.Second
@@ -64,17 +70,9 @@ func grepFor(o editor.Options, customPatterns ...[]string) *liveGrep {
 
 // SetCustomIgnorePatterns configures custom ignore rules (e.g. *.log, build/).
 func (g *liveGrep) SetCustomIgnorePatterns(pats []string) {
-	var rules []gitignore.Pattern
-	for _, p := range pats {
-		p = strings.TrimSpace(p)
-		if p == "" || strings.HasPrefix(p, "#") {
-			continue
-		}
-		rules = append(rules, gitignore.ParsePattern(p, nil))
-	}
-	var matcher gitignore.Matcher
-	if len(rules) > 0 {
-		matcher = gitignore.NewMatcher(rules)
+	var matcher *explorer.IgnoreMatcher
+	if rules := explorer.ParsePatterns(pats); len(rules) > 0 {
+		matcher = explorer.NewIgnoreMatcher(rules)
 	}
 	g.customMu.Lock()
 	g.customMatcher = matcher
@@ -82,6 +80,7 @@ func (g *liveGrep) SetCustomIgnorePatterns(pats []string) {
 
 	g.mu.Lock()
 	g.walkList = nil
+	g.walkGen++
 	g.mu.Unlock()
 }
 
@@ -91,10 +90,11 @@ func (g *liveGrep) SetScanFilter(exclusions, inclusions []string) {
 	g.scanExclusions = slices.Clone(exclusions)
 	g.scanInclusions = slices.Clone(inclusions)
 	g.walkList = nil
+	g.walkGen++
 	g.mu.Unlock()
 }
 
-func (g *liveGrep) customIgnoreMatcher() gitignore.Matcher {
+func (g *liveGrep) customIgnoreMatcher() *explorer.IgnoreMatcher {
 	g.customMu.Lock()
 	defer g.customMu.Unlock()
 	return g.customMatcher
@@ -358,16 +358,21 @@ func terminalContextAfter(lines []string, index int) string {
 // tree on every key. A listing error gives the files found so far.
 func (g *liveGrep) ignoredFiles(root string) []string {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.walkRoot == root && g.walkList != nil && time.Since(g.walkAt) < ignoredWalkTTL {
-		return g.walkList
+		list := g.walkList
+		g.mu.Unlock()
+		return list
 	}
+	exclusions, inclusions, gen := g.scanExclusions, g.scanInclusions, g.walkGen
+	g.mu.Unlock()
+	// The walk runs without the lock, so a Settings reload that changes the filters is
+	// never queued behind a walk of the whole tree.
 	list := make([]string, 0, 1024)
-	_ = finder.EnumerateAll(context.Background(), root, finder.Options{
+	_ = enumerateAll(context.Background(), root, finder.Options{
 		ShowHidden:     true,
 		ShowIgnored:    true,
-		ScanExclusions: g.scanExclusions,
-		ScanInclusions: g.scanInclusions,
+		ScanExclusions: exclusions,
+		ScanInclusions: inclusions,
 	}, func(rel string) bool {
 		if g.matchesCustom(rel) {
 			return true
@@ -375,6 +380,10 @@ func (g *liveGrep) ignoredFiles(root string) []string {
 		list = append(list, rel)
 		return len(list) < finder.MaxFiles
 	})
-	g.walkRoot, g.walkList, g.walkAt = root, list, time.Now()
+	g.mu.Lock()
+	if g.walkGen == gen {
+		g.walkRoot, g.walkList, g.walkAt = root, list, time.Now()
+	}
+	g.mu.Unlock()
 	return list
 }

@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/highlight"
 	"os"
@@ -21,7 +22,7 @@ func TestReplaceAllThroughTheAdapterRespectsFindInSelection(t *testing.T) {
 	apptest.Must(t, os.WriteFile(path, []byte("a\na\na\n"), 0o644))
 	ed := editor.New(editor.Options{})
 	apptest.Must(t, ed.OpenFile(path))
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 
 	a.SetCursor(buffer.Pos{Line: 1}, false)
 	a.SetCursor(buffer.Pos{Line: 1, Col: 1}, true)

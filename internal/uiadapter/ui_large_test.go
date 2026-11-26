@@ -3,6 +3,7 @@ package uiadapter
 import (
 	"context"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"os"
 	"path/filepath"
@@ -71,7 +72,7 @@ func finishIndex(t *testing.T, a *Editor) int {
 func TestDocumentAdapterOfALargeDocumentHoldsNoSavedTextAndNoSpans(t *testing.T) {
 	t.Parallel()
 	ed := openBig(t, bigLines(t, t.TempDir()))
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	doc := a.Active()
 	ld, ok := doc.(tui.LargeDoc)
 	if !ok || !ld.Large() {

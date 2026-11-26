@@ -9,13 +9,13 @@ import (
 )
 
 // TestConfiguredFormatterRunsFromFormatBuffer checks the shipped path end to end: the
-// formatters key of the project config reaches the editor that buildRuntime builds, and
+// formatters key of the user config reaches the editor that buildRuntime builds, and
 // Format Buffer runs the formatter of the buffer's language through the editor's Do.
 func TestConfiguredFormatterRunsFromFormatBuffer(t *testing.T) {
 	isolateConfig(t)
 	tests := []struct {
 		name       string
-		body       string // the project config file, empty for none
+		body       string // the user config file, empty for none
 		lang       string // the language set on the buffer, empty for none
 		wantText   string
 		wantErr    error
@@ -54,7 +54,7 @@ func TestConfiguredFormatterRunsFromFormatBuffer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rt, err := buildRuntime(t.Context(), projectRoot(t, tt.body), false)
+			rt, err := buildRuntime(t.Context(), userRoot(t, tt.body), false)
 			if err != nil {
 				t.Fatalf("buildRuntime() error = %v", err)
 			}
@@ -86,8 +86,9 @@ func TestConfiguredFormatterFindsTheLanguageOfAnOpenedFile(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "x.go")
 	writeTestFile(t, file, "hello\n")
-	writeTestFile(t, filepath.Join(root, ".gvim", "config.json"), `{"formatters": {"go": "tr a-z A-Z"}}`)
-	rt, err := buildRuntime(t.Context(), Options{Root: root, Files: []FileTarget{{Path: file}}}, false)
+	user := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, user, `{"formatters": {"go": "tr a-z A-Z"}}`)
+	rt, err := buildRuntime(t.Context(), Options{Root: root, Config: user, Files: []FileTarget{{Path: file}}}, false)
 	if err != nil {
 		t.Fatalf("buildRuntime() error = %v", err)
 	}

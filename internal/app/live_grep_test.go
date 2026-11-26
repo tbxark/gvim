@@ -1,14 +1,18 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
@@ -477,4 +481,51 @@ func TestLiveGrepParallelWorkerWindowOrderAndLimit(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// TestLiveGrepFilterChangeDoesNotWaitForAWalk checks a filter change (a Settings reload)
+// is not queued behind a running walk of the ignored scope, and that the walk it raced is
+// not cached under the new filters.
+func TestLiveGrepFilterChangeDoesNotWaitForAWalk(t *testing.T) {
+	prev := enumerateAll
+	t.Cleanup(func() { enumerateAll = prev })
+	var walks atomic.Int64
+	entered, release := make(chan struct{}, 4), make(chan struct{})
+	enumerateAll = func(_ context.Context, _ string, _ finder.Options, emit func(string) bool) error {
+		walks.Add(1)
+		entered <- struct{}{}
+		<-release
+		emit("a.txt")
+		return nil
+	}
+	g := &liveGrep{}
+	root := t.TempDir()
+	walked := make(chan []string, 1)
+	go func() { walked <- g.ignoredFiles(root) }()
+	<-entered
+
+	changed := make(chan struct{})
+	go func() {
+		g.SetScanFilter([]string{"build"}, nil)
+		close(changed)
+	}()
+	select {
+	case <-changed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetScanFilter was blocked behind the running walk")
+	}
+	close(release)
+	if got := <-walked; len(got) != 1 || got[0] != "a.txt" {
+		t.Fatalf("the raced walk returned %v, want [a.txt]", got)
+	}
+	// The raced walk used the old filters, so it is not cached: the next search walks again.
+	_ = g.ignoredFiles(root)
+	if got := walks.Load(); got != 2 {
+		t.Fatalf("%d walks, want 2 (the raced one is not cached)", got)
+	}
+	// The walk under the current filters is cached.
+	_ = g.ignoredFiles(root)
+	if got := walks.Load(); got != 2 {
+		t.Fatalf("%d walks, want the second one cached", got)
+	}
 }

@@ -88,6 +88,9 @@ func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
 			continue
 		}
 		c.err = c.job.err
+		if c.err == nil && c.job.written {
+			c.sess.rt.markCaptured()
+		}
 	}
 
 	var errs []error
@@ -145,6 +148,7 @@ func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
 	for _, w := range writers {
 		w.retire()
 	}
+	m.bg.Wait()
 	return errors.Join(errs...)
 }
 
@@ -187,7 +191,7 @@ func (m *workspaceManager) tryCommitExitCapture(s *workspaceSession) (committed 
 	m.mu.Unlock()
 	if w == nil {
 		// No writer was ever created for this workspace: nothing to serialize with.
-		return true, s.rt.save()
+		return true, s.saveFinal()
 	}
 	if !w.mu.TryLock() {
 		return false, nil
@@ -199,7 +203,7 @@ func (m *workspaceManager) tryCommitExitCapture(s *workspaceSession) (committed 
 	}
 	w.stopped = true
 	w.committed = w.seq.Load()
-	return true, s.rt.save()
+	return true, s.saveFinal()
 }
 
 // recoveryNote writes the runtime's crash-recovery copy for an exit save that could not be

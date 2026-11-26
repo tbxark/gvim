@@ -82,7 +82,7 @@ func effectiveThemeRef(flag string, cfg config.Config) string {
 	if ref := strings.TrimSpace(cfg.Theme); ref != "" {
 		return ref
 	}
-	return "dark"
+	return config.DefaultTheme
 }
 
 // fetchURLTheme resolves a URL theme at startup. It validates the transport

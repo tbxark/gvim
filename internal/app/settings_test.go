@@ -17,7 +17,7 @@ import (
 func TestNestedConfigReachesEditorAndUI(t *testing.T) {
 	body := `{"editor": {
 		"auto_close": false, "auto_surround": false, "virtual_space": "on", "scroll_offset": 7,
-		"auto_read_only": false, "snapshot_interval": 10, "confirm_quit": true,
+		"auto_read_only": false, "confirm_quit": true,
 		"auto_create_empty_buffer_on_last_buffer_close": true,
 		"recovery_enabled": false, "auto_recovery_save_interval_secs": 9,
 		"auto_revert_poll_interval_ms": 11, "large_file_threshold_bytes": 12, "estimated_line_length": 13,
@@ -33,7 +33,7 @@ func TestNestedConfigReachesEditorAndUI(t *testing.T) {
 	}
 	o := got.editor
 	if o.AutoClose || o.AutoSurround || o.VirtualSpace != "on" || o.ScrollOffset != 7 || o.AutoReadOnly ||
-		o.SnapshotInterval != 10 || !o.ConfirmQuit || !o.AutoCreateEmptyBufferOnLastBufferClose ||
+		!o.ConfirmQuit || !o.AutoCreateEmptyBufferOnLastBufferClose ||
 		o.RecoveryEnabled || o.AutoRecoverySaveIntervalSecs != 9 || o.AutoRevertPollIntervalMS != 11 ||
 		o.LargeFileThresholdBytes != 12 || o.EstimatedLineLength != 13 {
 		t.Errorf("editor.Options = %+v", o)

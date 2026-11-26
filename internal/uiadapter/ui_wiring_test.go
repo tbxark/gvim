@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func TestDocAtGivesEachTabItsDocument(t *testing.T) {
 	t.Parallel()
 	ed := editor.New(editor.Options{})
 	openNamed(t, ed, "a.txt", "b.txt", "c.txt")
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	for i, want := range []string{"a.txt", "b.txt", "c.txt"} {
 		d := a.DocAt(i)
 		if d == nil || d.Name() != want {
@@ -53,7 +54,7 @@ func TestDocAtBoundsTheSpanCachesToOpenTabs(t *testing.T) {
 	t.Parallel()
 	ed := editor.New(editor.Options{})
 	openNamed(t, ed, "a.txt", "b.txt", "c.txt")
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	a.DocAt(0)
 	a.DocAt(1)
 	if got := len(a.others); got != 2 {
@@ -121,7 +122,7 @@ func TestEditorSetContextUpdatesActiveAndOtherTabCaches(t *testing.T) {
 	if err := ed0.OpenFile(otherPath); err != nil {
 		t.Fatal(err)
 	}
-	a0 := &Editor{ed: ed0, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a0 := &Editor{ed: ed0, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	a0.SetContext(0)
 	_ = a0.DocAt(0).LineSpans(0) // materialize inactive cache in a0.others with 0 context
 	if hasComment(a0.DocAt(0).LineSpans(350)) {
@@ -136,7 +137,7 @@ func TestEditorSetContextUpdatesActiveAndOtherTabCaches(t *testing.T) {
 	if err := ed.OpenFile(otherPath); err != nil {
 		t.Fatal(err)
 	}
-	a := &Editor{ed: ed, spans: highlight.New(), others: map[*editor.Document]*highlight.Cache{}}
+	a := &Editor{ed: ed, spans: highlight.New(), others: map[*document.Document]*highlight.Cache{}}
 	a.SetContext(0)
 	_ = a.DocAt(0).LineSpans(0) // creates a.others[doc0] with 0 context
 	a.SetContext(64 << 10)

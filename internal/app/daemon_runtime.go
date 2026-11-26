@@ -31,11 +31,17 @@ func attachToDaemon(ctx context.Context, opts Options) error {
 	return daemon.AttachClientTargets(ctx, name, cwd, targets)
 }
 
-// attachDaemonName uses the same resolved root as daemon startup. An explicit
-// name does not depend on the client workspace.
+// attachDaemonName uses the same resolved root (or remote target) as daemon
+// startup. An explicit name does not depend on the client workspace.
 func attachDaemonName(opts Options) (string, error) {
 	if opts.Daemon != nil && opts.Daemon.Name != "" {
 		return opts.Daemon.Name, nil
+	}
+	if opts.Remote != nil {
+		if specText, serr := authoritySpecText(opts.Remote); serr == nil && specText != "" {
+			return daemon.DefaultName(specText), nil
+		}
+		return daemon.DefaultName(opts.Remote.Display() + ":" + opts.Remote.Workspace()), nil
 	}
 	root, err := resolveRoot(opts.Root)
 	if err != nil {
@@ -55,8 +61,9 @@ func attachDaemonName(opts Options) (string, error) {
 // instruction is the safe behavior until that ownership feature exists; this is a
 // deliberate divergence from Fresh (docs/architecture.md §8).
 func refuseIfDaemonRunning(opts Options) error {
-	if opts.Daemon != nil {
-		// The daemon host itself and the attaching client are not direct editors.
+	if opts.Daemon != nil || opts.Remote != nil {
+		// The daemon host, attaching clients, and remote SSH launches do not
+		// compete with a local workspace daemon on the caller's cwd.
 		return nil
 	}
 	root, err := resolveRoot(opts.Root)

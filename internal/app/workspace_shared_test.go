@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,7 +214,7 @@ func TestWorkspaceSharedBuffersStartupRestoreConflict(t *testing.T) {
 	}
 	// The stale unsaved stash text is kept in an untitled conflict tab, not written
 	// into the shared buffer and not silently discarded.
-	var conflict *editor.Document
+	var conflict *document.Document
 	for i := range len(bSession.rt.ed.Tabs()) {
 		if d := bSession.rt.ed.DocAt(i); d != nil && d.Path == "" {
 			conflict = d
@@ -235,7 +236,7 @@ func TestWorkspaceSharedBuffersStartupRestoreConflict(t *testing.T) {
 }
 
 // conflictDocFrom returns the untitled [shared conflict] tab of ed, or nil.
-func conflictDocFrom(ed *editor.Editor) *editor.Document {
+func conflictDocFrom(ed *editor.Editor) *document.Document {
 	if ed == nil {
 		return nil
 	}

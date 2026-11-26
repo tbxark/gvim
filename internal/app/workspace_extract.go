@@ -34,6 +34,7 @@ type extractTab struct {
 	name     string
 	destRoot string // the workspace root shared with the source workspace (the co-tenant)
 	file     session.FileState
+	modified bool
 	unsaved  string
 	// mru is the source editor's most-recently-used order restricted to the extracted
 	// documents (newest first). The new workspace's session carries it so completion and
@@ -138,6 +139,7 @@ func (m *workspaceManager) ExtractTab() (tui.WorkspaceCmd, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot extract: read the unsaved text: %w", err)
 		}
+		ext.modified = true
 		ext.unsaved = text
 		if size, mtime, ok := doc.DiskStamp(); ok {
 			ext.file.Size, ext.file.MTimeUnixNano = size, mtime
@@ -180,7 +182,7 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 		return
 	}
 	file := ext.file
-	if ext.unsaved != "" {
+	if ext.modified {
 		name, err := session.StashContent(dir, ext.unsaved)
 		if err != nil {
 			discard()

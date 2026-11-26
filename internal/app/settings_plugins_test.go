@@ -2,8 +2,12 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tbxark/gvim/config"
@@ -145,6 +149,36 @@ func TestSettingsPluginToggleWritesUserLayer(t *testing.T) {
 	}
 }
 
+// TestSettingsPluginToggleToleratesRetiredFlatKeys: a user file that still has the
+// retired flat spelling of an editor option loads with an "unknown setting"
+// diagnostic. That diagnostic was there before the toggle, so the toggle must not
+// treat it as damage it caused: it writes the flag, keeps the file as the user had
+// it and does not roll back.
+func TestSettingsPluginToggleToleratesRetiredFlatKeys(t *testing.T) {
+	t.Parallel()
+	user := `{"tab_size": 2, "line_numbers": false, "theme": "dark"}`
+	cfg, diags := loadLayerConfig(t, user)
+	if len(diags) != 2 {
+		t.Fatalf("diagnostics = %v, want the two unknown flat keys", diags)
+	}
+	s, path := pluginSettingsService(t, user, cfg, &fakeSettingsPlugins{})
+	if msg, err := s.Act("plugin-enable", "git"); err != nil || !strings.Contains(msg, "enabled") {
+		t.Fatalf("enable = %q, %v, want the toggle to succeed", msg, err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"tab_size": 2`, `"line_numbers": false`, `"git"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("user config = %s, want it to contain %s", body, want)
+		}
+	}
+	if pc, ok := s.cfg.Plugins["git"]; !ok || pc.Enabled == nil || !*pc.Enabled {
+		t.Errorf("reloaded plugins = %+v, want git enabled", s.cfg.Plugins)
+	}
+}
+
 // TestSettingsPluginToggleRollback checks both failure paths: a failed file write
 // and a failed reload restore the previous file bytes, so a toggle never
 // half-applies.
@@ -257,5 +291,89 @@ func TestPluginsPageShowsDeclaredSettings(t *testing.T) {
 	count := rows["hello.count"]
 	if count.Value != "9" || !strings.Contains(count.Note, "range 1..10") || !strings.Contains(count.Note, "from project") || !strings.Contains(count.Note, "project") {
 		t.Fatalf("count row = %+v", count)
+	}
+}
+
+// racyPlugins is a plugin runtime as the real one is: not safe for concurrent use. Control
+// rewrites its inventory, and every read walks it.
+type racyPlugins struct {
+	pluginRuntime
+	infos  []pluginapi.PluginInfo
+	schema map[string][]pluginapi.PluginSettingSpec
+}
+
+func (r *racyPlugins) Plugins() []pluginapi.PluginInfo { return slices.Clone(r.infos) }
+
+func (r *racyPlugins) SettingsSchema(name string) ([]pluginapi.PluginSettingSpec, bool) {
+	s, ok := r.schema[name]
+	return s, ok
+}
+
+func (r *racyPlugins) SettingsValues(name string) ([]pluginapi.PluginSettingValue, bool) {
+	if _, ok := r.schema[name]; !ok {
+		return nil, false
+	}
+	return []pluginapi.PluginSettingValue{{Key: "k", Value: len(r.infos)}}, true
+}
+
+func (r *racyPlugins) Control(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.Notice) {
+	r.infos = append(r.infos, pluginapi.PluginInfo{Name: c.Name, Enabled: true, Source: "user"})
+	r.schema[c.Name] = []pluginapi.PluginSettingSpec{{Key: "k", Type: "int"}}
+	return nil, nil
+}
+
+// TestSettingsServiceNeverReadsThePluginRuntimeConcurrently drives the runtime through the
+// mirror on one goroutine, as the update loop does, while Snapshot, Reload and the Plugins
+// Structure run on others, as tea.Cmds do. Under -race it fails when the service reads the
+// runtime (or its icon facts) without the mirror's copy. The page then lists what the
+// runtime held after the last control.
+func TestSettingsServiceNeverReadsThePluginRuntimeConcurrently(t *testing.T) {
+	isolateConfig(t)
+	userFile := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, userFile, `{"ui_icons": "nerd"}`)
+	rt := &racyPlugins{schema: map[string][]pluginapi.PluginSettingSpec{}}
+	mirror, inv := newPluginMirror(rt)
+	svc := newSettingsService("", Options{Config: userFile}, editor.New(editor.Options{}), func() bool { return true }, config.Defaults(), nil, settingsRuntime{plugins: inv})
+
+	const controls = 50
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	readers := []func(){
+		func() { _ = svc.Snapshot() },
+		func() { _, _ = svc.Reload() },
+		func() { _, _ = svc.Structure("plugins", tui.SettingsLayerUser) },
+	}
+	for _, read := range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					read()
+				}
+			}
+		}()
+	}
+	for i := range controls {
+		mirror.Control(pluginapi.Control{Op: "enable", Name: fmt.Sprintf("p%02d", i)})
+	}
+	close(done)
+	wg.Wait()
+
+	st, err := svc.Structure("plugins", tui.SettingsLayerUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := 0
+	for _, row := range st.Rows {
+		if strings.HasPrefix(row.Name, "p") && row.Value == "enabled" && row.Group == "" {
+			listed++
+		}
+	}
+	if listed != controls {
+		t.Fatalf("the page lists %d enabled plugins, want %d", listed, controls)
 	}
 }

@@ -96,11 +96,6 @@ func TestExecuteFlagsReachOptions(t *testing.T) {
 			want: app.Options{ReadOnly: true, Files: []app.FileTarget{{Path: "a.txt"}}},
 		},
 		{
-			name: "view flag alias",
-			args: []string{"--view", "a.txt"},
-			want: app.Options{ReadOnly: true, Files: []app.FileTarget{{Path: "a.txt"}}},
-		},
-		{
 			name: "no-plugins flag",
 			args: []string{"--no-plugins"},
 			want: app.Options{NoPlugins: true},
@@ -135,11 +130,6 @@ func TestExecuteFlagsReachOptions(t *testing.T) {
 		{
 			name: "no-restore flag",
 			args: []string{"--no-restore"},
-			want: app.Options{NoRestore: true},
-		},
-		{
-			name: "no-session is the no-restore alias",
-			args: []string{"--no-session"},
 			want: app.Options{NoRestore: true},
 		},
 		{
@@ -188,7 +178,8 @@ func TestExecuteRejectsBadInputWithoutRunning(t *testing.T) {
 		{name: "no-plugins takes no value", args: []string{"--no-plugins=maybe"}, wantCode: 1, wantErr: "invalid argument"},
 		{name: "two directories", args: []string{dir, t.TempDir()}, wantCode: 1, wantErr: "only one directory"},
 		{name: "restore and no-restore", args: []string{"--restore", "--no-restore"}, wantCode: 1, wantErr: "--restore cannot be combined with --no-restore"},
-		{name: "restore and no-session", args: []string{"--restore", "--no-session"}, wantCode: 1, wantErr: "--restore cannot be combined with --no-restore"},
+		{name: "view is not a flag", args: []string{"--view", "a.txt"}, wantCode: 1, wantErr: "unknown flag: --view"},
+		{name: "no-session is not a flag", args: []string{"--no-session"}, wantCode: 1, wantErr: "unknown flag: --no-session"},
 		{name: "restore and simple", args: []string{"--restore", "--simple"}, wantCode: 1, wantErr: "--restore cannot be combined with --simple"},
 	}
 	for _, tt := range tests {
@@ -283,7 +274,7 @@ func TestExecuteHelpListsCommandTree(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
 	}
-	for _, want := range []string{"version", "config", "grammar", "completion", "help", "--config", "--keymap", "--theme", "--log-file", "--no-plugins", "--plugin", "--restore", "--no-restore", "--no-session", "--simple"} {
+	for _, want := range []string{"version", "config", "grammar", "completion", "help", "--config", "--keymap", "--theme", "--log-file", "--no-plugins", "--plugin", "--restore", "--no-restore", "--simple"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help misses %q:\n%s", want, stdout)
 		}

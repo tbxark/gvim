@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
@@ -27,14 +28,14 @@ const (
 	// when diffing a brand-new repository whose HEAD has no commits yet.
 	gitEmptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-	reviewGitTimeout          = 10 * time.Second
-	reviewMaxStatusBytes      = 4 << 20 // 4 MiB cap for name-status/numstat/ls-files
-	reviewMaxFileBytes        = 2 << 20 // 2 MiB cap per file side
-	reviewMaxLines            = 50000
-	reviewMaxFiles            = 2000
-	reviewMaxUntrackedStats   = 64
-	reviewUntrackedStatBytes  = 512 << 10
-	reviewBinaryProbeBytes    = 8192
+	reviewGitTimeout         = 10 * time.Second
+	reviewMaxStatusBytes     = 4 << 20 // 4 MiB cap for name-status/numstat/ls-files
+	reviewMaxFileBytes       = 2 << 20 // 2 MiB cap per file side
+	reviewMaxLines           = 50000
+	reviewMaxFiles           = 2000
+	reviewMaxUntrackedStats  = 64
+	reviewUntrackedStatBytes = 512 << 10
+	reviewBinaryProbeBytes   = 8192
 )
 
 // ReviewGit implements tui.ReviewGitPort over a workspace authority.Slot so
@@ -75,7 +76,7 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 
 	branch := g.readBranch(ctx, repoRoot)
 
-	effectiveBase, unborn, err := g.resolveBase(ctx, repoRoot, baseRef)
+	effectiveBase, _, err := g.resolveBase(ctx, repoRoot, baseRef)
 	if err != nil {
 		return tui.ReviewChangesResult{RepoRoot: repoRoot, Branch: branch, BaseRef: baseRef}, err
 	}
@@ -111,6 +112,7 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 	lsRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, "ls-files", "--others", "--exclude-standard", "-z")
 	if err == nil && lsRes.Code == 0 {
 		untracked := parseNullList(lsRes.Stdout)
+		first := len(entries)
 		statCount := 0
 		for _, p := range untracked {
 			if _, exists := byPath[p]; exists {
@@ -121,20 +123,8 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 				Path:   p,
 				Status: reviewdiff.StatusUntracked,
 			}
-			if unborn {
-				fe.Status = reviewdiff.StatusUntracked
-			}
 			if statCount < reviewMaxUntrackedStats {
 				statCount++
-				if raw, _, rerr := g.readWorkFile(ctx, repoRoot, p, reviewUntrackedStatBytes); rerr == nil {
-					if looksBinary(raw) {
-						fe.Binary = true
-					} else {
-						fe.Added = countLines(raw)
-					}
-				} else {
-					fe.StatOnly = true
-				}
 			} else {
 				fe.StatOnly = true
 			}
@@ -143,6 +133,7 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 				break
 			}
 		}
+		g.statUntracked(ctx, repoRoot, entries[first:])
 	}
 
 	if len(entries) > reviewMaxFiles {
@@ -158,6 +149,39 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 		BaseRef:  baseRef,
 		Files:    entries,
 	}, nil
+}
+
+// reviewStatWorkers bounds the untracked-file reads of one Changes call that are in flight at
+// once; over SSH each is a round trip.
+const reviewStatWorkers = 8
+
+// statUntracked fills the line count or binary flag of the untracked entries that are not
+// already StatOnly, reading their first bytes with at most reviewStatWorkers reads at once.
+// A file that cannot be read becomes StatOnly.
+func (g ReviewGit) statUntracked(ctx context.Context, repoRoot string, entries []reviewdiff.FileEntry) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, reviewStatWorkers)
+	for i := range entries {
+		if entries[i].StatOnly {
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			fe := &entries[i]
+			raw, _, err := g.readWorkFile(ctx, repoRoot, fe.Path, reviewUntrackedStatBytes)
+			switch {
+			case err != nil:
+				fe.StatOnly = true
+			case looksBinary(raw):
+				fe.Binary = true
+			default:
+				fe.Added = countLines(raw)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // FileDiff loads the old and new content of entry relative to baseRef and

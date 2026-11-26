@@ -2,6 +2,7 @@ package uiadapter
 
 import (
 	"context"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
@@ -23,13 +24,13 @@ func (a *Editor) ApplyIndex(r editor.IndexResult) bool { return a.ed.ApplyIndex(
 
 // LoadFullFunc returns the read that loads a file whole, for the answer "load" to the
 // question that opening a large file in another encoding than UTF-8 asks.
-func (a *Editor) LoadFullFunc(path string) func() (*editor.Document, error) {
+func (a *Editor) LoadFullFunc(path string) func() (*document.Document, error) {
 	return a.ed.LoadFullFunc(path)
 }
 
 // WriteSaveContext runs the writes of a plan until ctx is cancelled. The root calls it
 // from a command, so a quit can stop the write of a large file.
-func (a *Editor) WriteSaveContext(ctx context.Context, p editor.SavePlan) []editor.SaveResult {
+func (a *Editor) WriteSaveContext(ctx context.Context, p editor.SavePlan) []document.SaveResult {
 	return p.RunContext(ctx)
 }
 

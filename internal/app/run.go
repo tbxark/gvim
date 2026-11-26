@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"io"
 	"os"
 	"strings"
@@ -198,16 +199,22 @@ func (r *runtime) exit() {
 		// No clean save happened, so this exit must not delete the recovery copy.
 		r.interrupted = true
 	}
-	if err := r.saveSearch(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: search history:", err)
+	if !r.savedByCapture {
+		if err := r.saveSearch(); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: search history:", err)
+		}
 	}
 	if r.interrupted && r.sessionDir == "" && r.recoveryWriter != nil {
 		// No session is saved, so the recovery copy is the only one of the unsaved text.
 		// Write it once more, as it stands now, and keep it.
 		_ = r.recoveryWriter.Plan()()
 	}
-	if err := r.save(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", err)
+	var saveErr error
+	if !r.savedByCapture {
+		saveErr = r.save()
+	}
+	if saveErr != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", saveErr)
 	} else if r.recovery != "" && (!r.interrupted || r.sessionDir != "") && !r.skipSave {
 		if restore.ClearRecovery(r.recovery) == nil {
 			_ = os.RemoveAll(r.recovery)
@@ -218,6 +225,15 @@ func (r *runtime) exit() {
 	// the documents.
 	r.model.Close()
 	r.ed.Close()
+}
+
+// markCaptured records that the final capture of a torn-down workspace is durable, so exit
+// does not save again. A runtime that keeps the saved session untouched (keepSavedSession)
+// saved nothing and is left to its own exit.
+func (r *runtime) markCaptured() {
+	if !r.keepSavedSession {
+		r.savedByCapture = true
+	}
 }
 
 // shutdown is exit followed by close: the end of a daemon workspace's runtime, which
@@ -273,6 +289,10 @@ type runtime struct {
 	// so the exit must not write the session itself (it would race it) and must keep the
 	// crash-recovery copy instead of clearing it.
 	skipSave bool
+	// savedByCapture is set by the daemon teardown paths (close, evict, exit) once the
+	// workspace's final capture (or the synchronous fallback save) is durably written, so
+	// exit does not write the same session, terminal record and search history again.
+	savedByCapture bool
 	// log is the --log-file writer; nil when there is none.
 	log *fileLog
 	// auth is the workspace authority slot of the session (docs/authority.md): the
@@ -367,7 +387,7 @@ func loadSearch(model *tui.Model, dir string) {
 // stash is part of the session. Without one, when files were given on the command
 // line, each stash is a file of its own in the session directory.
 func (r *runtime) stashForQuit() error {
-	var docs []*editor.Document
+	var docs []*document.Document
 	for _, d := range r.ed.UnsavedDocs() {
 		if d.Large() {
 			docs = append(docs, d)
@@ -454,7 +474,6 @@ func editorOptions(cfg config.Config, empty bool) editor.Options {
 		VirtualSpace:                           cfg.VirtualSpace,
 		ScrollOffset:                           cfg.ScrollOffset,
 		AutoReadOnly:                           cfg.AutoReadOnly,
-		SnapshotInterval:                       cfg.SnapshotInterval,
 		ConfirmQuit:                            cfg.ConfirmQuit,
 		AutoCreateEmptyBufferOnLastBufferClose: cfg.AutoCreateEmptyBufferOnLastBufferClose,
 		RecoveryEnabled:                        cfg.RecoveryEnabled,
@@ -493,7 +512,7 @@ func runKeymap(flag string, cfg config.Config) (keymapChoice, error) {
 		if flag != "" {
 			return keymapChoice{}, err
 		}
-		err = fmt.Errorf("%w (valid keymaps: %s); using the %s keymap", err, strings.Join(keybindings.BuiltinKeymaps, ", "), keymap.DefaultName())
+		err = fmt.Errorf("%w (valid keymaps: %s); using the %s keymap", err, strings.Join(keymap.BuiltinNames(), ", "), keymap.DefaultName())
 		warnings = append(warnings, inConfigFile(cfg, "keymap", err).Error())
 		km, name = keymap.Default(), ""
 	}

@@ -2,6 +2,7 @@ package restore
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -312,7 +313,7 @@ func TestRecoverCrashDoesNotOverwriteAFileChangedSinceTheCopy(t *testing.T) {
 				apptest.Must(t, err)
 				return
 			}
-			if !errors.Is(err, editor.ErrChangedOnDisk) {
+			if !errors.Is(err, document.ErrChangedOnDisk) {
 				t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
 			}
 			if got, _ := os.ReadFile(a); string(got) != "one\ntwo\nTEAMMATE\n" {
@@ -342,7 +343,7 @@ func TestRestoreSessionKeepsTheBaselineOfStashedText(t *testing.T) {
 	if failed := RestoreSession(fresh, sessDir, s); len(failed) != 0 {
 		t.Fatalf("restoreSession failed: %v", failed)
 	}
-	if err := fresh.Save(); !errors.Is(err, editor.ErrChangedOnDisk) {
+	if err := fresh.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
 	}
 }

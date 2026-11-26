@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -86,9 +87,24 @@ type Registry struct {
 	dir string
 	now func() time.Time
 	// mu serializes the file operations: the UI goroutine, the socket goroutine and
-	// the capture writers share one registry. Disk work never runs under the UI.
+	// the capture writers share one registry.
 	mu sync.Mutex
+
+	// The parsed directory, so List and Get do not read and decode every workspace file
+	// on each call. It is valid while the directory's modification time is cacheStamp (an
+	// atomic file replace, a new file and a removal all change it, whichever process did
+	// it) and is dropped by this registry's own writes. A directory modified too recently
+	// is not cached: a coarse file system clock could hide a second change within one tick.
+	cache         []Workspace
+	cacheProblems []error
+	cacheStamp    time.Time
+	cached        bool
+	diskScans     int // how many times the directory was read, for tests
 }
+
+// registryCacheSettle is how long the directory must have been unchanged before a scan of
+// it is cached, longer than the modification-time granularity of the usual file systems.
+const registryCacheSettle = 50 * time.Millisecond
 
 // WorkspaceDir returns the workspace directory: <state dir>/workspaces, mode 0700. It
 // creates the directory. The registry and the per-workspace sessions are runtime state,
@@ -406,6 +422,7 @@ func (r *Registry) saveLocked(w Workspace) (Workspace, error) {
 	case readErr != nil && errors.Is(readErr, ErrWorkspaceVersionTooNew):
 		return Workspace{}, readErr
 	}
+	r.cached = false
 	if err := writeWorkspaceFile(path, w.File); err != nil {
 		return Workspace{}, err
 	}
@@ -476,6 +493,7 @@ func (r *Registry) Remove(id string) error {
 	if !ok {
 		return fmt.Errorf("workspace: no workspace %q", id)
 	}
+	r.cached = false
 	if err := os.Remove(w.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("workspace: remove %s: %w", w.Path, err)
 	}
@@ -502,6 +520,27 @@ func (r *Registry) SessionDir(id string) (string, error) {
 // root group first (roots by their freshest LastFocusedAt, then root path) and freshest
 // first inside a root, so the ordering is deterministic.
 func (r *Registry) scan() ([]Workspace, []error) {
+	info, statErr := os.Stat(r.dir)
+	if statErr != nil {
+		r.cached = false
+		return r.scanDisk()
+	}
+	stamp := info.ModTime()
+	if r.cached && stamp.Equal(r.cacheStamp) {
+		return slices.Clone(r.cache), slices.Clone(r.cacheProblems)
+	}
+	out, problems := r.scanDisk()
+	if time.Since(stamp) >= registryCacheSettle {
+		r.cache, r.cacheProblems, r.cacheStamp, r.cached = slices.Clone(out), slices.Clone(problems), stamp, true
+	} else {
+		r.cached = false
+	}
+	return out, problems
+}
+
+// scanDisk reads and decodes every registry file; scan is the cached entry point.
+func (r *Registry) scanDisk() ([]Workspace, []error) {
+	r.diskScans++
 	dirEntries, err := os.ReadDir(r.dir)
 	if err != nil {
 		return nil, []error{fmt.Errorf("workspace: read %s: %w", r.dir, err)}

@@ -26,7 +26,7 @@ func autoAttachEligible(opts Options) bool {
 	if opts.Daemon != nil || opts.Remote != nil {
 		return false
 	}
-	if len(opts.Files) > 0 || opts.Diff || opts.Simple || opts.ReadStdin || opts.Restore || opts.NoRestore {
+	if len(opts.Files) > 0 || opts.Diff || opts.Review || opts.ReadOnly || opts.Simple || opts.StdinLaunch() || opts.Restore || opts.NoRestore {
 		return false
 	}
 	return true

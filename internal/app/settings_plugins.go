@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
@@ -26,6 +28,124 @@ import (
 // it is not called from the Act command: Act writes the config file and reloads
 // (IO, off the update goroutine), and the root calls Control from Update when the
 // Act result arrives (internal/tui/settings.go).
+
+// pluginRuntime is the plugin runtime the model drives: the pluginapi.Runtime plus the
+// two file queries the plugin manager asks of the concrete runtime.
+type pluginRuntime interface {
+	pluginapi.Runtime
+	InitFile() string
+	NoPlugins() bool
+}
+
+// pluginInventory is a copy of the plugin runtime's manager rows and declared settings
+// for the Settings page. The runtime is single-goroutine and the page reads it from
+// tea.Cmd goroutines, so the page never touches the runtime: the update goroutine
+// refreshes this copy (pluginMirror) and the page reads it under its own lock.
+type pluginInventory struct {
+	mu      sync.RWMutex
+	infos   []pluginapi.PluginInfo
+	schemas map[string][]pluginapi.PluginSettingSpec
+	values  map[string][]pluginapi.PluginSettingValue
+	at      time.Time
+}
+
+// Plugins returns the copied manager rows.
+func (v *pluginInventory) Plugins() []pluginapi.PluginInfo {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return slices.Clone(v.infos)
+}
+
+// SettingsSchema returns the copied settings a plugin declared.
+func (v *pluginInventory) SettingsSchema(name string) ([]pluginapi.PluginSettingSpec, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	s, ok := v.schemas[name]
+	return slices.Clone(s), ok
+}
+
+// SettingsValues returns the copied effective values of a plugin's declared settings.
+func (v *pluginInventory) SettingsValues(name string) ([]pluginapi.PluginSettingValue, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	s, ok := v.values[name]
+	return slices.Clone(s), ok
+}
+
+// capture reads rt on the calling goroutine, which must be the one that drives rt, and
+// swaps the copy in.
+func (v *pluginInventory) capture(rt pluginapi.Runtime) {
+	infos := rt.Plugins()
+	schemas := make(map[string][]pluginapi.PluginSettingSpec, len(infos))
+	values := make(map[string][]pluginapi.PluginSettingValue, len(infos))
+	for _, info := range infos {
+		if schema, ok := rt.SettingsSchema(info.Name); ok {
+			schemas[info.Name] = schema
+			if vals, ok := rt.SettingsValues(info.Name); ok {
+				values[info.Name] = vals
+			}
+		}
+	}
+	v.mu.Lock()
+	v.infos, v.schemas, v.values, v.at = infos, schemas, values, time.Now()
+	v.mu.Unlock()
+}
+
+// drainRefreshEvery bounds how often the model's frequent plugin Drain refreshes the copy.
+const drainRefreshEvery = 250 * time.Millisecond
+
+// pluginMirror is the plugin runtime the model sees. Every call passes through to the
+// runtime on the update goroutine, and the ones that can change the inventory (start,
+// completion, control, a command run, a drain) refresh the copy the Settings page reads.
+type pluginMirror struct {
+	pluginRuntime
+	inv *pluginInventory
+}
+
+// newPluginMirror wraps rt. The returned inventory is what the Settings page reads.
+func newPluginMirror(rt pluginRuntime) (*pluginMirror, *pluginInventory) {
+	inv := &pluginInventory{}
+	return &pluginMirror{pluginRuntime: rt, inv: inv}, inv
+}
+
+func (m *pluginMirror) Start(h pluginapi.Host) []pluginapi.Work {
+	work := m.pluginRuntime.Start(h)
+	m.inv.capture(m.pluginRuntime)
+	return work
+}
+
+func (m *pluginMirror) Resolve(c pluginapi.Completion) {
+	m.pluginRuntime.Resolve(c)
+	m.inv.capture(m.pluginRuntime)
+}
+
+func (m *pluginMirror) Run(action string, args map[string]any, src pluginapi.CommandSource) error {
+	err := m.pluginRuntime.Run(action, args, src)
+	m.inv.capture(m.pluginRuntime)
+	return err
+}
+
+func (m *pluginMirror) Control(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.Notice) {
+	work, notices := m.pluginRuntime.Control(c)
+	m.inv.capture(m.pluginRuntime)
+	return work, notices
+}
+
+func (m *pluginMirror) Drain(budget time.Duration) ([]pluginapi.Work, bool) {
+	work, more := m.pluginRuntime.Drain(budget)
+	// The model drains after nearly every event: refresh at most every drainRefreshEvery.
+	if m.inv.stale(drainRefreshEvery) {
+		m.inv.capture(m.pluginRuntime)
+	}
+	return work, more
+}
+
+// stale reports whether the copy is older than age.
+func (v *pluginInventory) stale(age time.Duration) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return time.Since(v.at) >= age
+}
 
 // structurePlugins is the Plugins page: one row per runtime plugin with its source
 // and state and an enable/disable action, the reload row, and the read-only
@@ -239,6 +359,9 @@ func (s *settingsService) setPluginEnabled(name string, enabled bool) error {
 	if err != nil {
 		return err
 	}
+	// What the file already reports (an unknown or retired key the user left in it)
+	// is not damage the toggle causes, so it is remembered and not held against it.
+	_, existing, _ := config.Load(config.Options{UserFile: path})
 	patch := []config.Edit{{Path: []string{"plugins", name, "enabled"}, Raw: raw}}
 	if err := patchConfigFileFn(path, patch); err != nil {
 		return err
@@ -264,10 +387,10 @@ func (s *settingsService) setPluginEnabled(name string, enabled bool) error {
 		}
 		return err
 	}
-	// Writing the flag must leave a config file that still loads; a diagnostic in
-	// the file we just wrote means the toggle would run the runtime on a config the
-	// next start rejects, so it is rolled back too.
-	if diags := s.diagnosticsOf(path); len(diags) > 0 {
+	// Writing the flag must leave a config file that still loads; a new diagnostic
+	// in the file we just wrote means the toggle would run the runtime on a config
+	// the next start rejects, so it is rolled back too.
+	if diags := newDiagnostics(s.diagnosticsOf(path), existing); len(diags) > 0 {
 		err := fmt.Errorf("the config file does not load after the write: %s", diags[0])
 		if rerr := rollback(); rerr != nil {
 			return fmt.Errorf("%w (rollback failed: %w)", err, rerr)

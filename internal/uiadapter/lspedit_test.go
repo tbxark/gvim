@@ -1,6 +1,7 @@
 package uiadapter
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,8 +21,8 @@ func TestApplyLSPEditsThroughTheEditorAdapter(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &Editor{ed: ed}
-	edit := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 6}, To: buffer.Pos{Line: 0, Col: 11}, Text: "gvim"}
-	if err := a.ApplyLSPEdits(path, []editor.LSPEdit{edit}); err != nil {
+	edit := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 6}, To: buffer.Pos{Line: 0, Col: 11}, Text: "gvim"}
+	if err := a.ApplyLSPEdits(path, []document.LSPEdit{edit}); err != nil {
 		t.Fatalf("ApplyLSPEdits: %v", err)
 	}
 	if got := ed.Active().Buffer.Text(); got != "hello gvim\n" {

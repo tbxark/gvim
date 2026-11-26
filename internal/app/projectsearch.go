@@ -16,9 +16,9 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/search"
@@ -37,7 +37,7 @@ type projectSearch struct {
 	previewCache previewHighlighterCache
 
 	mu            sync.Mutex
-	customMatcher gitignore.Matcher
+	customMatcher *explorer.IgnoreMatcher
 }
 
 // newProjectSearch returns the project search for an editor with the options o.
@@ -54,40 +54,26 @@ func newProjectSearch(o editor.Options, customPatterns ...[]string) *projectSear
 
 // SetCustomIgnorePatterns configures custom ignore rules (e.g. *.log, build/).
 func (s *projectSearch) SetCustomIgnorePatterns(pats []string) {
-	var rules []gitignore.Pattern
-	for _, p := range pats {
-		p = strings.TrimSpace(p)
-		if p == "" || strings.HasPrefix(p, "#") {
-			continue
-		}
-		rules = append(rules, gitignore.ParsePattern(p, nil))
-	}
-	var matcher gitignore.Matcher
-	if len(rules) > 0 {
-		matcher = gitignore.NewMatcher(rules)
+	var matcher *explorer.IgnoreMatcher
+	if rules := explorer.ParsePatterns(pats); len(rules) > 0 {
+		matcher = explorer.NewIgnoreMatcher(rules)
 	}
 	s.mu.Lock()
 	s.customMatcher = matcher
 	s.mu.Unlock()
 }
 
-func (s *projectSearch) customIgnoreMatcher() gitignore.Matcher {
+func (s *projectSearch) customIgnoreMatcher() *explorer.IgnoreMatcher {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.customMatcher
 }
 
-func matchIgnoreMatcher(m gitignore.Matcher, rel string) bool {
+func matchIgnoreMatcher(m *explorer.IgnoreMatcher, rel string) bool {
 	if m == nil {
 		return false
 	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	for i := 1; i <= len(parts); i++ {
-		if m.Match(parts[:i], i < len(parts)) {
-			return true
-		}
-	}
-	return false
+	return m.Match(strings.Split(filepath.ToSlash(rel), "/"), false)
 }
 
 // searchBinaryProbe is how many leading bytes are checked for a NUL when a file is

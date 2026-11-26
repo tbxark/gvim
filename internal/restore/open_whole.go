@@ -2,6 +2,7 @@ package restore
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/editor"
 )
@@ -13,7 +14,7 @@ import (
 // editor.ErrTooLargeToTranscode.
 func openFile(ed *editor.Editor, path string) error {
 	err := ed.OpenFile(path)
-	if _, ok := errors.AsType[editor.ErrLargeNeedsFullLoad](err); !ok {
+	if _, ok := errors.AsType[document.ErrLargeNeedsFullLoad](err); !ok {
 		return err
 	}
 	d, err := ed.LoadFullFunc(path)()

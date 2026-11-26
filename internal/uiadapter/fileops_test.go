@@ -3,6 +3,7 @@ package uiadapter
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/apptest"
 	"io/fs"
 	"os"
@@ -215,7 +216,7 @@ func TestCheckRenameRefusesAnOpenTab(t *testing.T) {
 	apptest.Must(t, ed.OpenFile(b))
 	ops := newFileOps(ed)
 
-	if err := ops.CheckRename(a, b); !errors.Is(err, editor.ErrAlreadyOpen) {
+	if err := ops.CheckRename(a, b); !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("CheckRename: err = %v, want editor.ErrAlreadyOpen", err)
 	}
 	if !exists(a) || exists(filepath.Join(root, "c.txt")) {
@@ -237,7 +238,7 @@ func TestCheckRenameRefusesAMoveOntoAnOpenTab(t *testing.T) {
 	apptest.Must(t, ed.OpenFile(inSub))
 	ops := newFileOps(ed)
 
-	if err := ops.CheckRename(a, inSub); !errors.Is(err, editor.ErrAlreadyOpen) {
+	if err := ops.CheckRename(a, inSub); !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("CheckRename: err = %v, want editor.ErrAlreadyOpen", err)
 	}
 }
