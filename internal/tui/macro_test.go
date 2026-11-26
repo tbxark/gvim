@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
@@ -212,10 +213,10 @@ func TestMacroRecordAgainReplacesTheLast(t *testing.T) {
 // in the middle of a replay.
 type hookEditor struct {
 	*fakeEditor
-	hook func(a editor.Action)
+	hook func(a document.Action)
 }
 
-func (h *hookEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (h *hookEditor) Do(a document.Action, args map[string]any) editor.Result {
 	if h.hook != nil {
 		h.hook(a)
 	}
@@ -443,7 +444,7 @@ func TestMacroReplayDoesNotRecordItselfOrNest(t *testing.T) {
 			before := slices.Clone(m.root.macro.last)
 
 			fired := false
-			h.hook = func(editor.Action) {
+			h.hook = func(document.Action) {
 				if !fired {
 					fired = true
 					_ = m.Run(tc.action)

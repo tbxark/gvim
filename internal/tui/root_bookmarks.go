@@ -2,10 +2,10 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
@@ -44,7 +44,7 @@ func (m *Model) bookmarkAnswer(tag bookmarkTag, d prompt.Done) tea.Cmd {
 	if d.Outcome != prompt.Submitted {
 		return nil
 	}
-	action := editor.Action("set_bookmark")
+	action := document.Action("set_bookmark")
 	if tag.jump {
 		action = "jump_to_bookmark"
 	}

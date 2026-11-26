@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestResizeKeepsTheCaretOnScreenWhenLinesWrap(t *testing.T) {
 // root reveals its display row.
 type jumpEditor struct{ *fakeEditor }
 
-func (e jumpEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e jumpEditor) Do(a document.Action, args map[string]any) editor.Result {
 	if a == "jump" {
 		e.doc.cursor = buffer.Pos{Line: 5}
 		return editor.Result{}

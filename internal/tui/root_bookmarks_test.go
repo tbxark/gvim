@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
@@ -18,7 +19,7 @@ type bookmarkErrEditor struct {
 	*fakeEditor
 }
 
-func (e bookmarkErrEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e bookmarkErrEditor) Do(a document.Action, args map[string]any) editor.Result {
 	res := e.fakeEditor.Do(a, args)
 	if a == "jump_to_bookmark" {
 		res.Err = errors.New("bookmark '3' not set")

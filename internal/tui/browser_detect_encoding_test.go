@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -113,7 +114,7 @@ func TestBrowserEncodingLargeFileFallsBack(t *testing.T) {
 	if !strings.Contains(m.notice, "large file") {
 		t.Fatalf("notice = %q, want the large-file fallback", m.notice)
 	}
-	if slices.Contains(ed.actions, editor.Action("reload_with_encoding")) {
+	if slices.Contains(ed.actions, document.Action("reload_with_encoding")) {
 		t.Fatalf("actions = %v, want no reload for a large file", ed.actions)
 	}
 }

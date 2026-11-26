@@ -65,7 +65,7 @@ func TestOpenPromptDoesNotChangeTheLayout(t *testing.T) {
 // not on its last row.
 func TestPromptCardIsCentred(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "hello\n", 60, 12)
-	m.pushOverlay(prompt.NewConfirm(m.styles, "Delete file?", nil))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, "Delete file?", nil, prompt.ConfirmOptions{}))
 	last := viewRow(m, 11)
 	if strings.Contains(last, "Delete file?") {
 		t.Fatalf("the confirm painted on the last row: %q", last)

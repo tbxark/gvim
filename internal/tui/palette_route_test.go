@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
@@ -8,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/theme"
@@ -99,7 +99,7 @@ func TestPaletteRowRunsItsActionInTheEditor(t *testing.T) {
 		t.Fatal("Enter on a row returned no command")
 	}
 	m.Update(cmd())
-	if !slices.Contains(ed.actions, editor.Action("select_all")) {
+	if !slices.Contains(ed.actions, document.Action("select_all")) {
 		t.Fatalf("editor actions = %v, want select_all from the palette row", ed.actions)
 	}
 }

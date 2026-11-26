@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/editor"
 )
@@ -33,7 +34,7 @@ func (m *Model) shellAction(action string, args map[string]any) (tea.Cmd, bool) 
 	if !ok {
 		return nil, false
 	}
-	job, err := sr.BeginShell(editor.Action(action), args)
+	job, err := sr.BeginShell(document.Action(action), args)
 	if err != nil {
 		// The editor writes the error to the status row, as Do does for a failed action.
 		sr.EndShell(editor.ShellJob{}, "", err)

@@ -1,13 +1,13 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
@@ -71,7 +71,7 @@ func TestLanguageSegmentOpensAFilterableListOfRealLanguages(t *testing.T) {
 	for _, msg := range runCmd(cmd) {
 		m.Update(msg)
 	}
-	if !slices.Equal(ed.actions, []editor.Action{"set_language"}) || ed.args[0]["name"] != "Python" {
+	if !slices.Equal(ed.actions, []document.Action{"set_language"}) || ed.args[0]["name"] != "Python" {
 		t.Fatalf("editor ran %v %v, want set_language Python", ed.actions, ed.args)
 	}
 	if len(m.overlays) != 0 {

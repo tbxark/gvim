@@ -1,12 +1,11 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/tbxark/gvim/editor"
 )
 
 func TestReadOnlyPagerNavigationKeys(t *testing.T) {
@@ -16,7 +15,7 @@ func TestReadOnlyPagerNavigationKeys(t *testing.T) {
 
 	// Editable document: typing 'x' dispatches insert_char
 	press(m, typed("x"))
-	if !slices.Contains(ed.actions, editor.Action("insert_char")) {
+	if !slices.Contains(ed.actions, document.Action("insert_char")) {
 		t.Fatalf("actions = %v, want insert_char", ed.actions)
 	}
 
@@ -38,7 +37,7 @@ func TestReadOnlyPagerNavigationKeys(t *testing.T) {
 	// 'G' -> move_document_end
 	press(m, typed("G"))
 
-	wantActions := []editor.Action{
+	wantActions := []document.Action{
 		"move_down",
 		"move_up",
 		"move_page_down",

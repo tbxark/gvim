@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"unicode"
@@ -280,7 +281,7 @@ func (m *Model) closeTab(t tabEditor, i int, force bool) error {
 
 // editorDo runs an editor action. An action that closes the active tab, such as
 // close_tab, updates the leaves as closeTab does.
-func (m *Model) editorDo(a editor.Action, args map[string]any) editor.Result {
+func (m *Model) editorDo(a document.Action, args map[string]any) editor.Result {
 	before, active := len(m.ed.Tabs()), m.activeTab()
 	path := m.tabPath(active)
 	res := m.ed.Do(a, args)
@@ -441,8 +442,14 @@ func (m *Model) overviewRulerMarks(pane editorpane.Pane, doc Document) editorpan
 	}
 	// The marks only change with the published set (a new slice) or the theme, so they
 	// are kept until one of them does.
-	c := &m.rulerMarks
-	if c.path != path || c.n != len(ds) || c.first != &ds[0] || c.themeGen != m.themeGen {
+	// One entry per document, so two split panes with diagnostics do not evict each other
+	// on every frame. An entry is rebuilt when its published set or the theme changes, and
+	// the map is dropped when it grows past a few documents.
+	if m.rulerMarks == nil || len(m.rulerMarks) > rulerMarkCacheMax {
+		m.rulerMarks = map[string]*rulerMarkCache{}
+	}
+	c := m.rulerMarks[path]
+	if c == nil || c.n != len(ds) || c.first != &ds[0] || c.themeGen != m.themeGen {
 		marks := make([]editorpane.TrackMark, 0, len(ds))
 		for _, d := range ds {
 			st := pane.Styles.DiagError
@@ -460,17 +467,19 @@ func (m *Model) overviewRulerMarks(pane editorpane.Pane, doc Document) editorpan
 				Style: st,
 			})
 		}
-		*c = rulerMarkCache{path: path, first: &ds[0], n: len(ds), themeGen: m.themeGen, marks: marks}
+		c = &rulerMarkCache{first: &ds[0], n: len(ds), themeGen: m.themeGen, marks: marks}
+		m.rulerMarks[path] = c
 	}
 	pane.TrackMarks = append(pane.TrackMarks, c.marks...)
 	return pane
 }
 
-// rulerMarkCache is the overview marks of the last document that had diagnostics, and
-// what they were built from: the document, the published set (its first element and
-// length) and the theme generation.
+// rulerMarkCacheMax bounds the documents whose overview marks are kept.
+const rulerMarkCacheMax = 16
+
+// rulerMarkCache is the overview marks of one document that had diagnostics, and what they
+// were built from: the published set (its first element and length) and the theme generation.
 type rulerMarkCache struct {
-	path     string
 	first    *Diagnostic
 	n        int
 	themeGen uint64
@@ -608,14 +617,15 @@ func (m *Model) paintPanes(g *grid.Grid, l frame.Layout) (cx, cy int, ok, painte
 		if m.hexPane(g, p, doc) {
 			continue
 		}
-		pcx, pcy, pok := m.paneFor(p, doc).RenderIntoWithCaret(g, p.X, p.Y, p.W, p.H)
+		pane := m.paneFor(p, doc)
+		pcx, pcy, pok := pane.RenderIntoWithCaret(g, p.X, p.Y, p.W, p.H)
 		if i == l.Focus && p.Focused {
 			paintedFocus = true
 			if pok {
 				cx, cy, ok = p.X+pcx, p.Y+pcy, true
 			}
 		}
-		m.paintStickyScroll(g, p, doc)
+		m.paintStickyWith(g, p, doc, pane)
 	}
 	drawBorders(g, l.Borders, m.splitCell())
 	if m.borderHover >= 0 && m.borderHover < len(l.Borders) {
@@ -657,23 +667,36 @@ func (m *Model) imagePane(p split.Pane, doc Document, placement int) (*grid.Grid
 // stickyScrollLine returns the enclosing scope's start line when pane p shows
 // a sticky header at row p.Y.
 func (m *Model) stickyScrollLine(p split.Pane, doc Document) (int, bool) {
+	if !m.stickyCandidate(p, doc) {
+		return 0, false
+	}
+	return m.stickyLineFor(p, doc, m.paneGeometry(p, doc).TabSize)
+}
+
+// stickyCandidate is the cheap part of the sticky header check: whether pane p could show a
+// header at all. It builds no pane geometry.
+func (m *Model) stickyCandidate(p split.Pane, doc Document) bool {
 	if !m.stickyScroll || m.splits.comparing || doc == nil || p.Top <= 0 || p.W <= 10 || p.H <= 2 {
-		return 0, false
+		return false
 	}
-	if doc.Cursor().Line == p.Top || m.panePageView(p, doc).On {
-		return 0, false
-	}
-	pane := m.paneGeometry(p, doc)
-	tabW := pane.TabSize
+	return doc.Cursor().Line != p.Top && !m.panePageView(p, doc).On
+}
+
+// stickyLineFor is stickyScrollLine for a candidate pane whose tab size is paneTabSize.
+func (m *Model) stickyLineFor(p split.Pane, doc Document, paneTabSize int) (int, bool) {
+	tabW := paneTabSize
 	if tabW <= 0 {
 		tabW = 4
 	}
 	var ranges []fold.Range
-	collapsed := map[int]bool{}
+	var collapsed map[int]bool
 	if fl, ok := doc.(editorpane.Folder); ok {
 		ranges = fl.Folds(tabW)
 		for _, r := range ranges {
 			if fl.Folded(r.Start) {
+				if collapsed == nil {
+					collapsed = map[int]bool{}
+				}
 				collapsed[r.Start] = true
 			}
 		}
@@ -682,6 +705,9 @@ func (m *Model) stickyScrollLine(p split.Pane, doc Document) (int, bool) {
 		ranges = append(slices.Clip(ranges), extra...)
 		for start, c := range extraCollapsed {
 			if _, ok := collapsed[start]; !ok {
+				if collapsed == nil {
+					collapsed = map[int]bool{}
+				}
 				collapsed[start] = c
 			}
 		}
@@ -712,11 +738,22 @@ func (m *Model) stickyScrollLine(p split.Pane, doc Document) (int, bool) {
 // paintStickyScroll displays a sticky header on the top row of the pane showing
 // the enclosing function or scope declaration when scrolled down into a body.
 func (m *Model) paintStickyScroll(g *grid.Grid, p split.Pane, doc Document) {
-	stickyLine, ok := m.stickyScrollLine(p, doc)
+	if !m.stickyCandidate(p, doc) {
+		return
+	}
+	m.paintStickyWith(g, p, doc, m.paneGeometry(p, doc))
+}
+
+// paintStickyWith is paintStickyScroll for a pane the caller already built for p and doc, so
+// the geometry (diagnostics, decorations, gutter data) is not rebuilt for the header.
+func (m *Model) paintStickyWith(g *grid.Grid, p split.Pane, doc Document, pane editorpane.Pane) {
+	if !m.stickyCandidate(p, doc) {
+		return
+	}
+	stickyLine, ok := m.stickyLineFor(p, doc, pane.TabSize)
 	if !ok {
 		return
 	}
-	pane := m.paneGeometry(p, doc)
 	if pane.PageView.On {
 		return
 	}
@@ -792,7 +829,11 @@ func (m *Model) paintStickyScroll(g *grid.Grid, p split.Pane, doc Document) {
 		}
 		chunkSt = st
 		chunk.WriteRune(r)
-		col += ansi.StringWidth(string(r))
+		if r < 0x7f {
+			col++ // a printable ASCII rune is one cell wide
+		} else {
+			col += ansi.StringWidth(string(r))
+		}
 	}
 	flush()
 }

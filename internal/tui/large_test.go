@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +65,7 @@ func newLargeEditor(t *testing.T, paths ...string) *largeEditor {
 }
 
 func (e *largeEditor) SetViewport(rows, cols int) { e.ed.SetViewport(rows, cols) }
-func (e *largeEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e *largeEditor) Do(a document.Action, args map[string]any) editor.Result {
 	return e.ed.Do(a, args)
 }
 func (e *largeEditor) Status() string { return e.ed.Status() }
@@ -82,14 +83,14 @@ func (e *largeEditor) ScrollTo(top int)                    { e.ed.ScrollTo(top) 
 func (e *largeEditor) OpenFile(path string) error          { return e.ed.OpenFile(path) }
 func (e *largeEditor) OpenPreview(path string) error       { return e.ed.OpenPreview(path) }
 func (e *largeEditor) GotoLine(line, col int) error        { return e.ed.GotoLine(line, col) }
-func (e *largeEditor) OpenLoaded(d *editor.Document)       { e.ed.OpenLoaded(d) }
+func (e *largeEditor) OpenLoaded(d *document.Document)     { e.ed.OpenLoaded(d) }
 func (e *largeEditor) ActivateTab(i int)                   { e.ed.ActivateTab(i) }
 func (e *largeEditor) CloseTab(i int, force bool) error    { return e.ed.CloseTab(i, force) }
 func (e *largeEditor) CloseNeedsConfirm(i int) (bool, error) {
 	return e.ed.CloseNeedsConfirm(i)
 }
 func (e *largeEditor) Quit(force bool) []editor.Dirty { return e.ed.Quit(force) }
-func (e *largeEditor) LoadFullFunc(path string) func() (*editor.Document, error) {
+func (e *largeEditor) LoadFullFunc(path string) func() (*document.Document, error) {
 	return e.ed.LoadFullFunc(path)
 }
 
@@ -109,16 +110,16 @@ func (e *largeEditor) PlanSaveAs(path string, force bool) (editor.SavePlan, erro
 	return e.ed.PlanSaveAs(path, force)
 }
 func (e *largeEditor) PlanSaveAll() (editor.SavePlan, error) { return e.ed.PlanSaveAll() }
-func (e *largeEditor) WriteSave(p editor.SavePlan) []editor.SaveResult {
+func (e *largeEditor) WriteSave(p editor.SavePlan) []document.SaveResult {
 	return p.Run()
 }
-func (e *largeEditor) WriteSaveContext(ctx context.Context, p editor.SavePlan) []editor.SaveResult {
+func (e *largeEditor) WriteSaveContext(ctx context.Context, p editor.SavePlan) []document.SaveResult {
 	<-ctx.Done() // the write waits to be cancelled, so a test can quit while it runs
 	time.Sleep(e.cancelWork)
 	e.cancelled = true
 	return p.RunContext(ctx)
 }
-func (e *largeEditor) ApplySavePlan(p editor.SavePlan, results []editor.SaveResult) error {
+func (e *largeEditor) ApplySavePlan(p editor.SavePlan, results []document.SaveResult) error {
 	return e.ed.ApplySavePlan(p, results)
 }
 
@@ -165,7 +166,7 @@ func (e *largeEditor) VisibleMatches(q search.Query, first, last int) ([]search.
 
 // largeView is the Document of a real document, as the app's documentAdapter shows it.
 type largeView struct {
-	d *editor.Document
+	d *document.Document
 	e *largeEditor
 }
 
@@ -653,7 +654,7 @@ func TestDecliningTheFullLoadLeavesTheFileClosed(t *testing.T) {
 	path := latin1File(t, t.TempDir(), 3000)
 	m, le := newLargeModel(t)
 	start(m)
-	msg := fullLoadPromptMsg{err: editor.ErrLargeNeedsFullLoad{Path: path, Size: 3000, Codec: "iso-8859-1"}}
+	msg := fullLoadPromptMsg{err: document.ErrLargeNeedsFullLoad{Path: path, Size: 3000, Codec: "iso-8859-1"}}
 	m.Update(msg)
 	if len(m.overlays) != 1 {
 		t.Fatalf("the prompt message did not ask")
@@ -1049,11 +1050,11 @@ func TestInitAsksAboutLargeFilesThatAreNotUTF8(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		prompts []editor.ErrLargeNeedsFullLoad
+		prompts []document.ErrLargeNeedsFullLoad
 	}{
 		{"none", nil},
-		{"one", []editor.ErrLargeNeedsFullLoad{{Path: "a.log", Size: 1 << 30, Codec: "iso-8859-1"}}},
-		{"two", []editor.ErrLargeNeedsFullLoad{{Path: "a.log"}, {Path: "b.log"}}},
+		{"one", []document.ErrLargeNeedsFullLoad{{Path: "a.log", Size: 1 << 30, Codec: "iso-8859-1"}}},
+		{"two", []document.ErrLargeNeedsFullLoad{{Path: "a.log"}, {Path: "b.log"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

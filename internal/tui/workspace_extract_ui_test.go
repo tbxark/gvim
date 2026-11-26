@@ -20,10 +20,6 @@ func (f *fakeWorkspacePort) ExtractTerminalTabTo(id string) (WorkspaceCmd, error
 	f.extractTerminalTo = id
 	return nil, f.extractErr
 }
-func (f *fakeWorkspacePort) ExtractTabs(paths []string) (WorkspaceCmd, error) {
-	f.extractMany = append([]string(nil), paths...)
-	return nil, f.extractErr
-}
 func (f *fakeWorkspacePort) ExtractMixed(sel ExtractSelection, targetID string, replace bool) (WorkspaceCmd, error) {
 	f.mixSelection = sel
 	f.mixTarget = targetID

@@ -642,7 +642,7 @@ func (p *themeEditorPage) deleteDone(msg themeEditorDeleteDoneMsg) tea.Cmd {
 	}
 	p.dirty = false
 	p.Close()
-	p.model.applyTheme("dark")
+	p.model.applyTheme("gopher")
 	p.model.notice = uiText("gvim.theme_editor.deleted", "Theme deleted")
 	return nil
 }

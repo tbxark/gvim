@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -128,7 +129,7 @@ func TestQuitWithoutAStashFunctionQuitsAtOnce(t *testing.T) {
 // be cancelled.
 type quickSaver struct{ *largeEditor }
 
-func (e *quickSaver) WriteSaveContext(ctx context.Context, p editor.SavePlan) []editor.SaveResult {
+func (e *quickSaver) WriteSaveContext(ctx context.Context, p editor.SavePlan) []document.SaveResult {
 	return p.RunContext(ctx)
 }
 

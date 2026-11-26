@@ -1,11 +1,10 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/tbxark/gvim/editor"
 )
 
 // autoSaveTickMsg is the once-a-second tick of auto-save. A tick asks the editor
@@ -16,7 +15,7 @@ type autoSaveTickMsg struct{}
 // autoSaveDoneMsg is the outcome of one auto-save write. Its results are applied on
 // the update loop, which then arms the next tick.
 type autoSaveDoneMsg struct {
-	results []editor.SaveResult
+	results []document.SaveResult
 }
 
 // asyncAutoSaver is the editor's auto-save surface, as the app adapter provides it.
@@ -24,8 +23,8 @@ type autoSaveDoneMsg struct {
 // command. The app adapter implements it, and the root asserts it on the EditorState.
 type asyncAutoSaver interface {
 	AutoSaveDue(now time.Time) bool
-	PlanAutoSave(now time.Time) []editor.SaveJob
-	ApplyAutoSave(results []editor.SaveResult) error
+	PlanAutoSave(now time.Time) []document.SaveJob
+	ApplyAutoSave(results []document.SaveResult) error
 }
 
 // autoSaveEvery is the period of the auto-save tick.
@@ -65,9 +64,9 @@ func (m *Model) autoSaveTick() tea.Cmd {
 
 // autoSaveWrite returns the command that runs the planned saves. It reads no editor
 // state, so it does its disk work off the update loop.
-func autoSaveWrite(jobs []editor.SaveJob) tea.Cmd {
+func autoSaveWrite(jobs []document.SaveJob) tea.Cmd {
 	return func() tea.Msg {
-		results := make([]editor.SaveResult, len(jobs))
+		results := make([]document.SaveResult, len(jobs))
 		for i, j := range jobs {
 			results[i] = j.Run()
 		}

@@ -288,12 +288,13 @@ func (m *Model) askRemoteClipboard(kind, path string, paths []string, dir string
 		title = uiText("gvim.prompt.title.copy", "Copy")
 	case remoteClipboardCut:
 		title = uiText("gvim.prompt.title.cut", "Cut")
+	case remoteClipboardDuplicate:
+		title = uiText("gvim.prompt.title.duplicate", "Duplicate")
 	case remoteClipboardPaste:
-		count := 0
-		if m.clip != nil {
-			count = len(m.clip.paths)
+		if m.clip == nil || len(m.clip.paths) == 0 {
+			return m.runRemoteClipboard(remoteClipboardTag{kind: kind, paths: paths, dir: dir})
 		}
-		q = pasteQuestion(count, dir, target)
+		q = pasteQuestion(len(m.clip.paths), dir, target)
 	}
 	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, remoteClipboardTag{kind: kind, paths: paths, dir: dir}, prompt.ConfirmOptions{Title: title}))
 	return nil
@@ -625,6 +626,9 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 			return m.runJobs(jobs)
 		}
 	case remoteClipboardTag:
+		if d.Outcome != prompt.Yes {
+			return nil
+		}
 		return m.runRemoteClipboard(tag)
 	case overwriteTag:
 		job := tag.job

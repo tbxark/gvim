@@ -143,9 +143,6 @@ func (h *pluginHost) DecorClearRange(plugin, ns string, id pluginapi.BufferID, f
 	}
 }
 
-// DecorRefreshLines is a no-op: painting reads the store every frame.
-func (h *pluginHost) DecorRefreshLines(pluginapi.BufferID) {}
-
 // DecorClear removes everything the namespace has on the buffer; buffer 0 means every
 // buffer.
 func (h *pluginHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {

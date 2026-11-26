@@ -629,3 +629,117 @@ func TestHostQueueWithoutShowStillRuns(t *testing.T) {
 		t.Fatalf("queued work without a Show ran %d time(s), want 1", len(a.overlays))
 	}
 }
+
+// showHookEditor runs hook the first time Model.Update reads its tabs, so a test can make
+// a workspace switch (Host.Show) happen in the middle of the active model's Update.
+type showHookEditor struct {
+	*fakeEditor
+	hook func()
+}
+
+func (e *showHookEditor) Tabs() []TabInfo {
+	if h := e.hook; h != nil {
+		e.hook = nil
+		h()
+	}
+	return e.fakeEditor.Tabs()
+}
+
+// TestHostUpdateKeepsTheModelShownDuringUpdate: a Show made while the active model handles a
+// message (a warm workspace switch) must not be reverted to the model that was just left,
+// for the window-size path and for every other message.
+func TestHostUpdateKeepsTheModelShownDuringUpdate(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "window size", msg: tea.WindowSizeMsg{Width: 90, Height: 30}},
+		{name: "other message", msg: tea.KeyPressMsg{Code: tea.KeyF12}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ed := &showHookEditor{fakeEditor: newFakeEditor("a")}
+			a := New(Deps{Editor: ed, Explorer: newFakeTree(1), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+			b := newTestModel(t, newFakeEditor("b"), newFakeTree(1), 80, 24)
+			h := NewWorkspaceHost(a)
+			h.initialized[b] = true
+			ed.hook = func() { h.Show(b) }
+			_, cmd := h.Update(tt.msg)
+			if h.Active() != b {
+				t.Fatal("the update reverted the host to the model it left")
+			}
+			pumpHostCmd(t, h, cmd)
+			if h.Active() != b {
+				t.Fatal("a later update reverted the host to the model it left")
+			}
+		})
+	}
+}
+
+// TestHostForgetsClosedModels: a model that was shown and later closed or evicted must not
+// stay in initialized, or the host keeps its editor and buffers alive for the daemon's life.
+func TestHostForgetsClosedModels(t *testing.T) {
+	t.Parallel()
+	a := newTestModel(t, newFakeEditor("a"), newFakeTree(1), 80, 24)
+	b := newTestModel(t, newFakeEditor("b"), newFakeTree(1), 80, 24)
+	c := newTestModel(t, newFakeEditor("c"), newFakeTree(1), 80, 24)
+	h := NewWorkspaceHost(a)
+	h.Show(b)
+	if !h.initialized[a] || !h.initialized[b] {
+		t.Fatal("the warm models are not tracked")
+	}
+	a.MarkClosed()
+	h.Show(c)
+	if h.initialized[a] {
+		t.Fatal("Show kept the closed model")
+	}
+	if !h.initialized[b] || !h.initialized[c] {
+		t.Fatal("Show dropped a live warm model")
+	}
+	b.MarkClosed()
+	h.Update(tea.FocusMsg{})
+	if h.initialized[b] {
+		t.Fatal("Update kept the closed model")
+	}
+	if !h.initialized[c] {
+		t.Fatal("Update dropped the active model")
+	}
+}
+
+// TestHostOpenFileRunsTheModelUpdateHooks: a client open request goes through Model.Update,
+// so the per-update syncs run for it, and the host still flushes the work a Show queued in
+// the same update.
+func TestHostOpenFileRunsTheModelUpdateHooks(t *testing.T) {
+	t.Parallel()
+	for _, hidden := range []bool{false, true} {
+		ed := &lineEditor{fakeEditor: newFakeEditor("a")}
+		a := New(Deps{Editor: ed, Explorer: newFakeTree(1), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+		b := newTestModel(t, newFakeEditor("b"), newFakeTree(1), 80, 24)
+		a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		h := NewWorkspaceHost(a)
+		if hidden {
+			h.Show(b)
+		}
+		before := a.plug.ui.updates
+		h.Update(openFileAtMsg{path: "/ws/a.txt", line: 2, col: 1, source: a})
+		if a.plug.ui.updates != before+1 {
+			t.Fatalf("hidden=%v: the open did not go through Model.Update", hidden)
+		}
+		if len(ed.opened) != 1 || ed.opened[0] != "/ws/a.txt" {
+			t.Fatalf("hidden=%v: opened %v", hidden, ed.opened)
+		}
+	}
+	// The host's pending Show is flushed by the open update, not left for the next one.
+	a := newTestModel(t, newFakeEditor("a"), newFakeTree(1), 80, 24)
+	b := newTestModel(t, newFakeEditor("b"), newFakeTree(1), 80, 24)
+	h := NewWorkspaceHost(a)
+	h.Show(b)
+	h.Update(openFileAtMsg{path: "/ws/a.txt", source: b})
+	h.mu.Lock()
+	pending := h.pendingShow
+	h.mu.Unlock()
+	if pending {
+		t.Fatal("the open update left the pending Show unflushed")
+	}
+}

@@ -314,20 +314,6 @@ func TestPluginActionsWithoutRuntime(t *testing.T) {
 	}
 }
 
-// TestPluginManagerActionsAreNotNotApplicable checks that the ten actions this stage
-// handles are gone from the table of commands that cannot work.
-func TestPluginManagerActionsAreNotNotApplicable(t *testing.T) {
-	t.Parallel()
-	for _, a := range []string{
-		"plugin_manager", "plugin_show_log", "plugin_reload", "plugin_reload_all", "load_plugin_from_buffer",
-		"init_check", "init_edit", "init_reload", "prompt_save_macro_to_init", "prompt_promote_macro",
-	} {
-		if _, ok := notApplicable[a]; ok {
-			t.Errorf("%s is still in the table of commands that cannot work", a)
-		}
-	}
-}
-
 // TestManagerRunActions checks what each action of the popup does.
 func TestManagerRunActions(t *testing.T) {
 	t.Parallel()

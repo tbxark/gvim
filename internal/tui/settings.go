@@ -68,7 +68,7 @@ func settingsRows(s Settings) []list.Row {
 		{Left: "auto_indent", Right: onOff(s.AutoIndent)},
 		{Left: "line_numbers", Right: onOff(s.LineNumbers)},
 		{Left: "show_menu_bar", Right: onOff(s.MenuBar)},
-		{Left: "explorer_show_hidden", Right: onOff(s.ExplorerShowHidden)},
+		{Left: "file_explorer.show_hidden", Right: onOff(s.ExplorerShowHidden)},
 		{Left: "file_explorer.hide_gitignore", Right: onOff(s.ExplorerHideGitignore)},
 		{Left: settingsIconsKey, Right: iconsSettingText(s, iconModeOf(s))},
 		{Left: "ui_icons_font", Right: orNone(s.UIIconsFont)},
@@ -1109,7 +1109,7 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) tea.Cmd {
 		}
 	case "scroll_sync":
 		m.view.scrollSync = v.ScrollSync
-	case "explorer_show_hidden":
+	case "file_explorer.show_hidden":
 		if m.tree != nil {
 			m.tree.SetShowHidden(change.Settings.ExplorerShowHidden)
 		}
@@ -1197,8 +1197,6 @@ func copyViewOption(opts, next ViewOptions, key string) ViewOptions {
 		opts.HighlightMatchingBrackets = next.HighlightMatchingBrackets
 	case "editor.rainbow_brackets":
 		opts.RainbowBrackets = next.RainbowBrackets
-	case "editor.smooth_scroll":
-		opts.SmoothScroll = next.SmoothScroll
 	case "editor.mouse_wheel_scroll_lines":
 		opts.MouseWheelScrollLines = next.MouseWheelScrollLines
 	case "editor.double_click_time_ms":

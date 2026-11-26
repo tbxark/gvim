@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"image/color"
 	"slices"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -415,7 +415,7 @@ func TestDockKeysRouteByFocus(t *testing.T) {
 		setup  []string
 		keys   []tea.KeyPressMsg
 		writes []string
-		editor []editor.Action
+		editor []document.Action
 	}{
 		{
 			name:   "typed text goes to the shell while the dock has focus",
@@ -427,7 +427,7 @@ func TestDockKeysRouteByFocus(t *testing.T) {
 			name:   "typed text goes to the editor while the editor has focus",
 			setup:  []string{"open_terminal_in_dock", "focus_editor"},
 			keys:   []tea.KeyPressMsg{typed("a")},
-			editor: []editor.Action{"insert_char"},
+			editor: []document.Action{"insert_char"},
 		},
 		{
 			name:   "Enter and Backspace reach the shell as CR and DEL",
@@ -451,7 +451,7 @@ func TestDockKeysRouteByFocus(t *testing.T) {
 			name:   "Ctrl+] gives the focus to the editor",
 			setup:  []string{"open_terminal_in_dock"},
 			keys:   []tea.KeyPressMsg{{Code: ']', Mod: tea.ModCtrl}, typed("a")},
-			editor: []editor.Action{"insert_char"},
+			editor: []document.Action{"insert_char"},
 		},
 		{
 			name:  "Ctrl+Space enters scrollback instead of the editor",
@@ -462,7 +462,7 @@ func TestDockKeysRouteByFocus(t *testing.T) {
 			name:   "Alt+O gives the focus to the editor",
 			setup:  []string{"open_terminal_in_dock"},
 			keys:   []tea.KeyPressMsg{{Code: 'o', Mod: tea.ModAlt}, typed("a")},
-			editor: []editor.Action{"insert_char"},
+			editor: []document.Action{"insert_char"},
 		},
 	}
 	for _, tt := range tests {
@@ -933,7 +933,7 @@ func TestDockTooSmallForAShellKeepsKeysInTheEditor(t *testing.T) {
 	if len(starter.term.writes) != 0 {
 		t.Fatalf("a hidden dock took input: shell writes = %q", starter.term.writes)
 	}
-	if !slices.Equal(ed.actions, []editor.Action{"insert_char"}) {
+	if !slices.Equal(ed.actions, []document.Action{"insert_char"}) {
 		t.Fatalf("editor actions = %v, want the typed text in the editor", ed.actions)
 	}
 }
@@ -1002,11 +1002,11 @@ func TestDockKeysWithoutAShellGoToTheEditor(t *testing.T) {
 	tests := []struct {
 		name   string
 		keys   []tea.KeyPressMsg
-		editor []editor.Action
+		editor []document.Action
 	}{
-		{name: "typed text is inserted", keys: []tea.KeyPressMsg{typed("a")}, editor: []editor.Action{"insert_char"}},
-		{name: "a bound editor key runs", keys: []tea.KeyPressMsg{ctrl('s')}, editor: []editor.Action{"save"}},
-		{name: "Escape reaches the keymap", keys: []tea.KeyPressMsg{special(tea.KeyEscape)}, editor: []editor.Action{"cancel_selection"}},
+		{name: "typed text is inserted", keys: []tea.KeyPressMsg{typed("a")}, editor: []document.Action{"insert_char"}},
+		{name: "a bound editor key runs", keys: []tea.KeyPressMsg{ctrl('s')}, editor: []document.Action{"save"}},
+		{name: "Escape reaches the keymap", keys: []tea.KeyPressMsg{special(tea.KeyEscape)}, editor: []document.Action{"cancel_selection"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1041,7 +1041,7 @@ func TestDockExitGivesTheFocusToTheEditor(t *testing.T) {
 		t.Fatal("the dock keeps the focus after its shell exited")
 	}
 	dockSettle(t, m, press(m, typed("a")))
-	if !slices.Equal(ed.actions, []editor.Action{"insert_char"}) {
+	if !slices.Equal(ed.actions, []document.Action{"insert_char"}) {
 		t.Fatalf("editor actions = %v, want the typed text in the editor", ed.actions)
 	}
 	if len(starter.term.writes) != 0 {
@@ -1083,7 +1083,7 @@ func TestDockKeyboardCaptureSendsBoundKeysToTheShell(t *testing.T) {
 		name   string
 		keys   []tea.KeyPressMsg
 		writes []string
-		editor []editor.Action
+		editor []document.Action
 	}{
 		{
 			name:   "F9 turns capture on, so a bound key goes to the shell",
@@ -1098,7 +1098,7 @@ func TestDockKeyboardCaptureSendsBoundKeysToTheShell(t *testing.T) {
 		{
 			name:   "a second F9 turns capture off, so the escape binding runs again",
 			keys:   []tea.KeyPressMsg{special(tea.KeyF9), special(tea.KeyF9), {Code: ']', Mod: tea.ModCtrl}, typed("a")},
-			editor: []editor.Action{"insert_char"},
+			editor: []document.Action{"insert_char"},
 		},
 		{
 			name: "capture off, Ctrl+Space opens scrollback and the shell gets no key",

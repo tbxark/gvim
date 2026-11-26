@@ -290,6 +290,8 @@ func (v *View) key(k tea.Key) tea.Cmd {
 	case tea.KeySpace:
 		if v.Multi {
 			v.toggleMark()
+		} else if k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
+			v.typeText(" ")
 		}
 	case tea.KeyEnter:
 		if v.Multi {

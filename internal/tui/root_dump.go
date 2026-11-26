@@ -3,11 +3,10 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/tbxark/gvim/editor"
 )
 
 // configDump is the JSON shape of Dump Config. Its keys are the names the config file
@@ -45,14 +44,14 @@ func dumpConfig(s Settings) string {
 // text is not saved to any file.
 func (m *Model) openScratch(text string) tea.Cmd {
 	m.focusEditor()
-	if res := m.editorDo(editor.Action("new"), nil); res.Err != nil {
+	if res := m.editorDo(document.Action("new"), nil); res.Err != nil {
 		m.notice = res.Err.Error()
 		return nil
 	}
-	if res := m.editorDo(editor.Action("insert_char"), map[string]any{"text": text}); res.Err != nil {
+	if res := m.editorDo(document.Action("insert_char"), map[string]any{"text": text}); res.Err != nil {
 		m.notice = res.Err.Error()
 	}
-	m.editorDo(editor.Action("move_document_start"), nil)
+	m.editorDo(document.Action("move_document_start"), nil)
 	m.syncViewport()
 	return nil
 }

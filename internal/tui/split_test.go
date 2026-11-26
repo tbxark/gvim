@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strconv"
 	"strings"
@@ -215,7 +216,7 @@ func (f *multiFake) SetViewport(rows, cols int) { f.rows, f.cols = rows, cols }
 // Do runs close_tab and its alias close on the active tab, as the editor does. Any
 // other action is unknown to the fake, as it is to the app adapter, so Run reports it
 // as unsupported.
-func (f *multiFake) Do(a editor.Action, args map[string]any) editor.Result {
+func (f *multiFake) Do(a document.Action, args map[string]any) editor.Result {
 	switch a {
 	case "close_tab", "close":
 		force, _ := args["force"].(bool)

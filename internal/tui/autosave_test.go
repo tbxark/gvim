@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,12 +38,12 @@ type asyncEditor struct {
 
 func (e *asyncEditor) AutoSaveDue(time.Time) bool { return e.due }
 
-func (e *asyncEditor) PlanAutoSave(now time.Time) []editor.SaveJob {
+func (e *asyncEditor) PlanAutoSave(now time.Time) []document.SaveJob {
 	e.plans++
 	return e.ed.PlanAutoSave(now)
 }
 
-func (e *asyncEditor) ApplyAutoSave(results []editor.SaveResult) error {
+func (e *asyncEditor) ApplyAutoSave(results []document.SaveResult) error {
 	e.applies++
 	return e.ed.ApplySaves(results)
 }
@@ -204,7 +205,7 @@ type refusingSaveEditor struct {
 	err error
 }
 
-func (e refusingSaveEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e refusingSaveEditor) Do(a document.Action, args map[string]any) editor.Result {
 	if a == "save" {
 		return editor.Result{Err: e.err}
 	}

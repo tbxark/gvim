@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 )
 
 // triggerLSP advertises completion trigger characters on top of a fake server.
@@ -117,7 +117,7 @@ func TestCompletionLiveFilterNarrowsWithoutAServerRequest(t *testing.T) {
 	if len(edits) != 1 {
 		t.Fatalf("applied = %+v, want one edit", edits)
 	}
-	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 2}, Text: "alpha"}
+	want := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 2}, Text: "alpha"}
 	if edits[0] != want {
 		t.Fatalf("applied edit = %+v, want %+v", edits[0], want)
 	}
@@ -217,7 +217,7 @@ func TestCompletionBackspaceRefiltersAndKeepsSelection(t *testing.T) {
 	// two-character word the filter covered before Backspace.
 	lt.feed(tea.KeyPressMsg{Code: tea.KeyTab})
 	edits := lt.ed.applied["/p/a.go"]
-	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 1}, Text: "alpine"}
+	want := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 1}, Text: "alpine"}
 	if len(edits) != 1 || edits[0] != want {
 		t.Fatalf("applied = %+v, want %+v", edits, want)
 	}
@@ -230,9 +230,9 @@ func TestCompletionBackspaceRecapturesTheVersionGuard(t *testing.T) {
 	port := newFakeLSP("go")
 	port.items = []CompletionItem{{Label: "alpha", Insert: "alpha"}, {Label: "alpine", Insert: "alpine"}}
 	lt := completionTestModel(t, port, []string{"a"}, buffer.Pos{Line: 0, Col: 1})
-	lt.ed.version, lt.ed.versionOK = editor.Version{Gen: 1, Ver: 1}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{Gen: 1, Ver: 1}, true
 	feedCompletion(t, lt, lt.m.completionAsked())
-	lt.ed.version = editor.Version{Gen: 2, Ver: 2}
+	lt.ed.version = document.Version{Gen: 2, Ver: 2}
 	lt.feed(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if lt.m.lsp.comp == nil {
 		t.Fatalf("Backspace closed the list (notice %q)", lt.m.notice)
@@ -240,7 +240,7 @@ func TestCompletionBackspaceRecapturesTheVersionGuard(t *testing.T) {
 	if !lt.m.lsp.comp.versionOK || lt.m.lsp.comp.version != lt.ed.version {
 		t.Fatalf("refiltered list version = %+v/%v, want the post-edit %+v", lt.m.lsp.comp.version, lt.m.lsp.comp.versionOK, lt.ed.version)
 	}
-	lt.ed.applyErr = editor.ErrStale
+	lt.ed.applyErr = document.ErrStale
 	lt.feed(tea.KeyPressMsg{Code: tea.KeyTab})
 	if len(lt.ed.applied) != 0 {
 		t.Fatalf("applied = %+v after a stale accept, want nothing", lt.ed.applied)

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -59,8 +60,8 @@ type streamSearcher interface {
 // fullLoader is the editor's whole-file load of a file that large file mode cannot
 // open lazily: a file in another encoding than UTF-8. The app adapter implements it.
 type fullLoader interface {
-	LoadFullFunc(path string) func() (*editor.Document, error)
-	OpenLoaded(d *editor.Document)
+	LoadFullFunc(path string) func() (*document.Document, error)
+	OpenLoaded(d *document.Document)
 }
 
 // pathClassifier is the optional editor view that says whether a path would open in large
@@ -73,7 +74,7 @@ type pathClassifier interface {
 // large document takes a long time, and a quit must not wait for it. An editor without
 // it writes through asyncSaver.WriteSave, which cannot be stopped.
 type ctxSaver interface {
-	WriteSaveContext(ctx context.Context, p editor.SavePlan) []editor.SaveResult
+	WriteSaveContext(ctx context.Context, p editor.SavePlan) []document.SaveResult
 }
 
 // The messages of large file mode.
@@ -87,16 +88,18 @@ type (
 	searchStepMsg struct{ run *searchRun }
 	// fullLoadPromptMsg asks the root to ask whether to load a file whole, because
 	// it is not UTF-8 and so cannot be opened lazily.
-	fullLoadPromptMsg struct{ err editor.ErrLargeNeedsFullLoad }
+	fullLoadPromptMsg struct {
+		err document.ErrLargeNeedsFullLoad
+	}
 	// fullLoadedMsg is the result of loading such a file whole.
 	fullLoadedMsg struct {
-		doc *editor.Document
+		doc *document.Document
 		err error
 	}
 	// openLoadedMsg is a large file that a command read to open in a tab; line and
 	// col, when line is set, are where the caret goes.
 	openLoadedMsg struct {
-		doc       *editor.Document
+		doc       *document.Document
 		err       error
 		path      string
 		line, col int
@@ -269,13 +272,15 @@ func (m *Model) largeMessage(msg tea.Msg) (tea.Cmd, bool) {
 // ---- The question about a file that is not UTF-8.
 
 // fullLoadTag is the tag of the question whether to load a file whole.
-type fullLoadTag struct{ err editor.ErrLargeNeedsFullLoad }
+type fullLoadTag struct {
+	err document.ErrLargeNeedsFullLoad
+}
 
 // askFullLoad asks whether to load the file of err whole. A large file in an
 // encoding other than UTF-8 cannot be read lazily, so loading it means decoding all
 // of it. The question is a Yes/No confirm; No leaves the notice, so the user sees why
 // the file did not open.
-func (m *Model) askFullLoad(err editor.ErrLargeNeedsFullLoad) {
+func (m *Model) askFullLoad(err document.ErrLargeNeedsFullLoad) {
 	m.notice = err.Error()
 	if _, ok := m.ed.(fullLoader); !ok {
 		return
@@ -287,7 +292,7 @@ func (m *Model) askFullLoad(err editor.ErrLargeNeedsFullLoad) {
 // maybeAskFullLoad asks the question when err is the error of a large file that is not
 // UTF-8, and reports whether it was.
 func (m *Model) maybeAskFullLoad(err error) bool {
-	var need editor.ErrLargeNeedsFullLoad
+	var need document.ErrLargeNeedsFullLoad
 	if !errors.As(err, &need) {
 		return false
 	}
@@ -408,7 +413,7 @@ func (m *Model) cancelSavesOf(path string) {
 
 // writeSave runs the writes of a plan, as a command does. A write that can be stopped
 // is stopped by ctx.
-func writeSave(ctx context.Context, as asyncSaver, p editor.SavePlan) []editor.SaveResult {
+func writeSave(ctx context.Context, as asyncSaver, p editor.SavePlan) []document.SaveResult {
 	if cs, ok := as.(ctxSaver); ok {
 		return cs.WriteSaveContext(ctx, p)
 	}

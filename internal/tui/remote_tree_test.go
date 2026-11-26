@@ -363,3 +363,35 @@ func TestRemoteTreeErrorNotice(t *testing.T) {
 		t.Fatalf("notice = %q, want the error text", got)
 	}
 }
+
+// TestRemoteTreeRowsAreCachedUntilTheTreeChanges checks the row cache: repeated reads share
+// one flattening, and each change that moves the rows (a toggle, the hidden filter, a new
+// listing) is seen by the next read.
+func TestRemoteTreeRowsAreCachedUntilTheTreeChanges(t *testing.T) {
+	loader := remoteTreeTestLoader()
+	tree := NewRemoteExplorerTree("/srv/proj", loader)
+	msg, _ := tree.ToggleCmd("/srv/proj")().(remoteTreeToggleMsg)
+	if err := tree.applyToggle(msg); err != nil {
+		t.Fatalf("applyToggle: %v", err)
+	}
+	first := tree.Rows()
+	if again := tree.Rows(); &first[0] != &again[0] {
+		t.Fatal("a second read rebuilt the rows")
+	}
+	tree.SetShowHidden(true)
+	if got := tree.Rows(); len(got) != len(first)+1 {
+		t.Fatalf("rows after showing hidden = %d, want %d", len(got), len(first)+1)
+	}
+	if cmd := tree.ToggleCmd("/srv/proj"); cmd != nil {
+		t.Fatal("a loaded directory toggled through a command")
+	}
+	wantRemoteRows(t, tree, "proj")
+	tree.ToggleCmd("/srv/proj")
+	wantRemoteRows(t, tree, "proj", "cmd", ".hidden.go", "main.go")
+	loader.set("/srv/proj", RemoteDirEntry{Name: "only.go"})
+	reload, _ := tree.ReloadCmd("")().(remoteTreeLoadedMsg)
+	if err := tree.ApplyReload(reload); err != nil {
+		t.Fatalf("ApplyReload: %v", err)
+	}
+	wantRemoteRows(t, tree, "proj", "only.go")
+}

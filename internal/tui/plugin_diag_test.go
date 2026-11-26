@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
@@ -62,7 +63,7 @@ func TestUnknownWhenNameIsNamed(t *testing.T) {
 // unknownActionEditor is an editor that has no action of any name.
 type unknownActionEditor struct{ *fakeEditor }
 
-func (e *unknownActionEditor) Do(a editor.Action, _ map[string]any) editor.Result {
+func (e *unknownActionEditor) Do(a document.Action, _ map[string]any) editor.Result {
 	return editor.Result{Err: fmt.Errorf("%w: %s", editor.ErrUnknownAction, a)}
 }
 

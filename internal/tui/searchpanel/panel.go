@@ -404,6 +404,27 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 			}
 		}
 		return p, nil
+	default:
+		// Forward bracketed paste (tea.PasteMsg) and textinput's own Ctrl+V paste
+		// completion messages to the currently focused input field.
+		if p.focus != focusResults {
+			if f := p.field(); f != nil {
+				before := f.Value()
+				next, cmd := f.Update(msg)
+				*f = next
+				if p.focus == focusSearch && p.query.Value() != before {
+					p.histWalk = false
+					return p, tea.Batch(cmd, p.requery())
+				}
+				if p.focus == focusGlob && p.glob.Value() != before {
+					return p, tea.Batch(cmd, p.requery())
+				}
+				if p.focus == focusReplace && p.replace.Value() != before {
+					p.errText = ""
+				}
+				return p, cmd
+			}
+		}
 	}
 	return p, nil
 }
@@ -1185,8 +1206,9 @@ func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
 	p.scanned, p.totalFiles = msg.batch.Scanned, msg.batch.Total
 	if p.pendingReset {
 		// The first batch of a new search replaces the rows of the older result, so the
-		// stale rows never mix with the streamed ones.
+		// stale rows and truncation/skip notices never mix with the streamed ones.
 		p.fileMatches, p.rows, p.checked, p.expanded = nil, nil, nil, nil
+		p.truncated, p.skippedCount, p.skipped, p.resultNotice = false, 0, nil, ""
 		p.selected, p.top = 0, 0
 		p.pendingReset = false
 	}
@@ -1220,8 +1242,10 @@ func (p *Panel) appendBatchFiles(files []FileMatches) {
 	if wasEmpty {
 		// The fold and check state is per file: a new result starts its own.
 		p.expanded, p.checked = nil, nil
+		p.rows = p.rows[:0]
 	}
 	for _, f := range files {
+		fileIdx := len(p.fileMatches)
 		p.fileMatches = append(p.fileMatches, f)
 		p.expanded = append(p.expanded, true)
 		checked := make([]bool, len(f.Matches))
@@ -1229,11 +1253,20 @@ func (p *Panel) appendBatchFiles(files []FileMatches) {
 			checked[i] = true
 		}
 		p.checked = append(p.checked, checked)
+		p.rows = append(p.rows, panelRow{kind: rowFile, file: fileIdx, path: textsafe.Clean(f.Name), count: len(f.Matches)})
+		for j, m := range f.Matches {
+			text, start, end := matchText(m)
+			p.rows = append(p.rows, panelRow{
+				kind: rowMatch, file: fileIdx, match: j,
+				line: m.Line, col: m.Col, text: text, hlStart: start, hlEnd: end,
+			})
+		}
 	}
 	if wasEmpty {
 		p.selected, p.top = 0, 0
 	}
-	p.rebuildRows()
+	p.selected = space.Clamp(p.selected, 0, max(len(p.rows)-1, 0))
+	p.clampTop()
 }
 
 // cancelBatches stops the live stream, if any, and forgets it. The search goroutine sees

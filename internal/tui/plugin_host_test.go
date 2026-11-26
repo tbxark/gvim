@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -422,7 +423,7 @@ func TestHostRevert(t *testing.T) {
 		wantErr string
 	}{
 		{name: "reverted"},
-		{name: "refused by the editor", err: editor.ErrReadOnly, wantErr: "read_only: read-only"},
+		{name: "refused by the editor", err: document.ErrReadOnly, wantErr: "read_only: read-only"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -673,7 +674,7 @@ func TestHostRefusalsDoNotDependOnTheNotice(t *testing.T) {
 		t.Parallel()
 		rt := newFakeRuntime(t, "x.cmd")
 		base, _, pe := newPluginEditorModel(t, rt)
-		ee := &errEditor{fakeEditor: base.ed.(*fakeEditor), err: editor.ErrReadOnly, only: []string{"revert"}}
+		ee := &errEditor{fakeEditor: base.ed.(*fakeEditor), err: document.ErrReadOnly, only: []string{"revert"}}
 		m := New(Deps{Editor: ee, Keys: testKeys(), Clock: testClock, Root: RootPorts{Plugins: rt, PluginEditor: pe}})
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		useHost(rt, m)

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"reflect"
 	"slices"
 	"testing"
@@ -31,7 +32,7 @@ type copyEditor struct {
 	err  error
 }
 
-func (c *copyEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (c *copyEditor) Do(a document.Action, args map[string]any) editor.Result {
 	c.docEditor.Do(a, args)
 	return editor.Result{Text: c.text, Err: c.err}
 }
@@ -56,7 +57,7 @@ func TestCopyPathCopiesTheTextTheEditorGives(t *testing.T) {
 			ed := &copyEditor{docEditor: newDocEditor("/ws/src/main.go", false), text: tt.text}
 			m := newRevertModel(t, ed)
 			cmd := rootPaletteRun(m, tt.action)
-			if !slices.Contains(ed.actions, editor.Action(tt.action)) {
+			if !slices.Contains(ed.actions, document.Action(tt.action)) {
 				t.Fatalf("the editor ran %q, want %q", ed.actions, tt.action)
 			}
 			if writes := clipboardWrites(cmd); !reflect.DeepEqual(writes, []string{tt.text}) {
@@ -81,8 +82,8 @@ func TestCopyPathShowsTheEditorsRefusal(t *testing.T) {
 	}{
 		{
 			name:   "a buffer with no file is refused by the editor",
-			ed:     &copyEditor{docEditor: newDocEditor("", false), err: editor.ErrNoPath},
-			notice: editor.ErrNoPath.Error(),
+			ed:     &copyEditor{docEditor: newDocEditor("", false), err: document.ErrNoPath},
+			notice: document.ErrNoPath.Error(),
 		},
 		{name: "no tab", ed: docEditor{fakeEditor: newFakeEditor("x")}, notice: noDocumentNotice},
 	}

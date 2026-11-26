@@ -281,7 +281,7 @@ func TestPromptStacksOverThePalette(t *testing.T) {
 	t.Parallel()
 	m := policyModel(t)
 	m.openPalette(">")
-	m.pushOverlay(prompt.NewConfirm(m.styles, "Save the file?", "policy-test"))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, "Save the file?", "policy-test", prompt.ConfirmOptions{}))
 	if len(m.overlays) != 2 {
 		t.Fatalf("overlays = %d, want the palette and the prompt", len(m.overlays))
 	}
@@ -301,7 +301,7 @@ func TestFindBarOpensUnderAnOpenPrompt(t *testing.T) {
 	t.Parallel()
 	m := policyModel(t)
 	m.openPalette(">")
-	m.pushOverlay(prompt.NewConfirm(m.styles, "Discard the changes?", "policy-test"))
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, "Discard the changes?", "policy-test", prompt.ConfirmOptions{}))
 	m.openFind(false)
 	if len(m.overlays) != 2 {
 		t.Fatalf("overlays = %d, want the find bar under the prompt", len(m.overlays))

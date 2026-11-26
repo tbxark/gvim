@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"time"
 
@@ -112,7 +113,7 @@ func (m *Model) revertFile(force bool) tea.Cmd {
 		return nil
 	}
 	if docPath(doc) == "" {
-		m.notice = editor.ErrNoPath.Error()
+		m.notice = document.ErrNoPath.Error()
 		return nil
 	}
 	if doc.Modified() && !force {
@@ -191,7 +192,7 @@ func (m *Model) revertDoneErr(msg revertDoneMsg) error {
 		m.plugReverted(msg.plan.Path)
 	}
 	switch {
-	case errors.Is(err, editor.ErrStaleRevert) && !msg.auto:
+	case errors.Is(err, document.ErrStaleRevert) && !msg.auto:
 		m.pushOverlay(prompt.NewConfirmWith(m.styles, "Text changed during the revert. Try again?", revertRetryTag{}, prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.revert_file", "Revert File")}))
 	case err != nil:
 		m.notice = err.Error()
@@ -225,7 +226,7 @@ func (m *Model) toggleAutoRevert() tea.Cmd {
 	}
 	p := docPath(doc)
 	if p == "" {
-		m.notice = editor.ErrNoPath.Error()
+		m.notice = document.ErrNoPath.Error()
 		return nil
 	}
 	name := filepath.Base(p)

@@ -2,7 +2,7 @@ package tui
 
 import (
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/explorer"
 
 	tea "charm.land/bubbletea/v2"
@@ -285,11 +285,6 @@ func (m *Model) ExplorerState() ExplorerState {
 	}
 }
 
-// extractTabNotice is the answer to Extract Tab to New Workspace. A workspace is a project
-// root, and the window that shows it cannot take a tab from another window.
-const extractTabNotice = "Extract Tab to New Workspace is not available: a workspace is a project root, " +
-	"so a tab cannot move to a new window"
-
 // fixState is the state of the root fixes: the choices about auto-revert. Its zero value
 // leaves auto-revert on for every file.
 type fixState struct {
@@ -302,7 +297,7 @@ type fixState struct {
 }
 
 // fixAction runs the actions the root fixes own: Revert File, the tab list, the copy of
-// a file path, Toggle Auto-Revert and the extract-tab command. It reports whether it
+// a file path and Toggle Auto-Revert. It reports whether it
 // handled the action, and the command the action starts. args are the command's
 // arguments, nil when the action comes from the palette or the menu.
 func (m *Model) fixAction(action string, args map[string]any) (tea.Cmd, bool) {
@@ -317,12 +312,9 @@ func (m *Model) fixAction(action string, args map[string]any) (tea.Cmd, bool) {
 		}
 		return m.openTabList(), true
 	case "copy_file_path", "copy_relative_file_path":
-		return m.copyPath(editor.Action(action)), true
+		return m.copyPath(document.Action(action)), true
 	case "toggle_auto_revert":
 		return m.toggleAutoRevert(), true
-	case "extract_tab_to_new_workspace":
-		m.notice = extractTabNotice
-		return nil, true
 	case "toggle_hex_view":
 		return m.toggleHexView(), true
 	}

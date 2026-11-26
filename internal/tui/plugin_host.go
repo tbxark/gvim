@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"time"
 
@@ -410,7 +411,7 @@ func (h *pluginHost) Revert(t pluginapi.Token, id pluginapi.BufferID) error {
 		return pluginapi.Errf(pluginapi.CodeClosed, "buffer %d is closed", id)
 	}
 	if info.Path == "" {
-		return pluginapi.Errf(pluginapi.CodeInvalid, "%v", editor.ErrNoPath)
+		return pluginapi.Errf(pluginapi.CodeInvalid, "%v", document.ErrNoPath)
 	}
 	if err := m.plugWait(t, "revert"); err != nil {
 		return err

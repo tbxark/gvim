@@ -1,13 +1,13 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 )
@@ -70,7 +70,7 @@ func TestEncodingActionsOpenAChooser(t *testing.T) {
 			for _, msg := range runCmd(cmd) {
 				m.Update(msg)
 			}
-			if !slices.Equal(ed.actions, []editor.Action{editor.Action(tt.action)}) {
+			if !slices.Equal(ed.actions, []document.Action{document.Action(tt.action)}) {
 				t.Fatalf("editor actions = %v, want [%s]", ed.actions, tt.action)
 			}
 			if got := ed.args[0]; len(got) != len(tt.wantArgs) || got["name"] != tt.wantArgs["name"] || got["value"] != tt.wantArgs["value"] {
@@ -102,7 +102,7 @@ func TestEncodingActionsWithArgumentsGoStraightToTheEditor(t *testing.T) {
 	ed := newFakeEditor("abc")
 	m := newTestModel(t, ed, newFakeTree(3), 100, 30)
 	m.dispatch(Command{Action: "set_encoding", Args: map[string]any{"name": "gbk"}})
-	if len(m.overlays) != 0 || !slices.Equal(ed.actions, []editor.Action{"set_encoding"}) {
+	if len(m.overlays) != 0 || !slices.Equal(ed.actions, []document.Action{"set_encoding"}) {
 		t.Fatalf("overlays %d, actions %v, want the editor to run it", len(m.overlays), ed.actions)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 
@@ -139,7 +140,7 @@ func (m *Model) refilterCompletion(c *lspCompletion, prefix string, wordStart, a
 		}
 	}
 	m.closeCompletion(c)
-	m.openCompletionList(c.path, at, c.all, shown, origins, editor.Version{}, false, selected)
+	m.openCompletionList(c.path, at, c.all, shown, origins, document.Version{}, false, selected)
 	return true
 }
 

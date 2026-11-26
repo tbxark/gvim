@@ -15,8 +15,39 @@ import (
 // Cf (format) categories are removed; a tab and a newline keep their normal semantics;
 // every other readable rune is unchanged.
 func Clean(s string) string {
-	clean, _ := CleanWithMap(s)
-	return clean
+	// Zero-allocation fast path for the overwhelming majority of clean printable ASCII.
+	asciiClean := true
+	for i := range len(s) {
+		b := s[i]
+		if (b < 0x20 && b != '\t' && b != '\n') || b >= 0x7f {
+			asciiClean = false
+			break
+		}
+	}
+	if asciiClean {
+		return s
+	}
+	runes := make([]rune, 0, len(s))
+	changed := false
+	rest := s
+	for len(rest) > 0 {
+		r, size := utf8.DecodeRuneInString(rest)
+		if r == utf8.RuneError && size == 1 {
+			changed = true
+			rest = rest[1:]
+			continue
+		}
+		rest = rest[size:]
+		if r == '\t' || r == '\n' || (!unicode.Is(unicode.Cc, r) && !unicode.Is(unicode.Cf, r)) {
+			runes = append(runes, r)
+		} else {
+			changed = true
+		}
+	}
+	if !changed {
+		return s
+	}
+	return string(runes)
 }
 
 // CleanWithMap is Clean plus mapping: for every raw rune position (and one past the

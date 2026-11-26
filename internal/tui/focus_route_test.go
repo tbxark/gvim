@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/browser"
 )
 
@@ -32,7 +32,7 @@ func TestTabStripFocusTypesNoText(t *testing.T) {
 			}
 			ed := m.ed.(*fakeEditor)
 			press(m, tt.key)
-			if slices.Contains(ed.actions, editor.Action("insert_char")) {
+			if slices.Contains(ed.actions, document.Action("insert_char")) {
 				t.Errorf("tab strip focus ran insert_char for %q: actions %v", tt.key.Text, ed.actions)
 			}
 		})
@@ -48,7 +48,7 @@ func TestExplorerFocusSavesWithCtrlS(t *testing.T) {
 		t.Fatal("setup: explorer not focused")
 	}
 	press(m, ctrl('s'))
-	if !slices.Contains(ed.actions, editor.Action("save")) {
+	if !slices.Contains(ed.actions, document.Action("save")) {
 		t.Errorf("Ctrl+S with the explorer focused ran %v, want save", ed.actions)
 	}
 }
@@ -103,7 +103,7 @@ func TestNewTabFocusesTheEditor(t *testing.T) {
 		m, ed, _ := newExplorerModel(t, &fakeOps{}, "alpha.txt")
 		m.Update(click(plusColumn(m), m.layout().StripY, tea.MouseLeft))
 		chooseRow(t, m, "New File")
-		if !slices.Contains(ed.actions, editor.Action("new")) {
+		if !slices.Contains(ed.actions, document.Action("new")) {
 			t.Fatalf("the + button ran %v, want new", ed.actions)
 		}
 		if m.stage() != stageEditor {
@@ -119,7 +119,7 @@ func TestNewTabFocusesTheEditor(t *testing.T) {
 		}
 		ed := m.ed.(*fakeEditor)
 		press(m, ctrl('n'))
-		if !slices.Contains(ed.actions, editor.Action("new")) {
+		if !slices.Contains(ed.actions, document.Action("new")) {
 			t.Fatalf("Ctrl+N ran %v, want new", ed.actions)
 		}
 		if m.stage() != stageEditor {

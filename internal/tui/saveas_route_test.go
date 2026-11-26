@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ type docsEditor struct {
 	docs    []*untitledDoc
 	active  int
 	seq     int
-	actions []editor.Action
+	actions []document.Action
 }
 
 func newDocsEditor() *docsEditor {
@@ -49,7 +50,7 @@ func (e *docsEditor) cur() *untitledDoc { return e.docs[e.active] }
 
 func (e *docsEditor) SetViewport(int, int) {}
 
-func (e *docsEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e *docsEditor) Do(a document.Action, args map[string]any) editor.Result {
 	e.actions = append(e.actions, a)
 	switch a {
 	case "new":
@@ -68,7 +69,7 @@ func (e *docsEditor) Do(a editor.Action, args map[string]any) editor.Result {
 		e.cur().lines[0] += args["text"].(string)
 	case "save":
 		if e.cur().path == "" {
-			return editor.Result{Err: editor.ErrNoPath}
+			return editor.Result{Err: document.ErrNoPath}
 		}
 	case "save_as":
 		p := args["path"].(string)

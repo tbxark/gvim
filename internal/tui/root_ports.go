@@ -2,9 +2,9 @@ package tui
 
 import (
 	"context"
+	"github.com/tbxark/gvim/document"
 	"time"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/reviewdiff"
@@ -116,7 +116,7 @@ type RootPorts struct {
 	// FullLoadPrompts are the files named at startup that are large and not UTF-8, so
 	// they were not opened. The root asks about each once it runs, as it does for a file
 	// opened from a menu, instead of decoding it whole before the first frame.
-	FullLoadPrompts []editor.ErrLargeNeedsFullLoad
+	FullLoadPrompts []document.ErrLargeNeedsFullLoad
 	// Keybindings reads and writes the user's custom keybindings for the keybinding
 	// editor. Nil makes the editor read only.
 	Keybindings KeybindingStore

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestMenuOpenMatchesTheLabelWithoutCaseAndIgnoresAnUnknownName(t *testing.T)
 // an action that no layer runs.
 type unlistedEditor struct{ *fakeEditor }
 
-func (unlistedEditor) Do(editor.Action, map[string]any) editor.Result {
+func (unlistedEditor) Do(document.Action, map[string]any) editor.Result {
 	return editor.Result{Err: editor.ErrUnknownAction}
 }
 

@@ -2,13 +2,13 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 )
 
 // ResolveCompletion answers a token with the canned item, so fakeLSP satisfies the
@@ -53,7 +53,7 @@ func feedCommand(lt *lspTest, cmd tea.Cmd) {
 func TestCompletionAdditionalEditsApplyAsOneGuardedEdit(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a", "", "func f() {"}, buffer.Pos{Line: 2})
-	lt.ed.version, lt.ed.versionOK = editor.Version{}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{}, true
 	main := LSPRange{Start: buffer.Pos{Line: 2}, End: buffer.Pos{Line: 2}}
 	importEdit := CompletionEdit{
 		Range: LSPRange{Start: buffer.Pos{Line: 0}, End: buffer.Pos{Line: 0}},
@@ -82,8 +82,8 @@ func TestCompletionAdditionalEditsApplyAsOneGuardedEdit(t *testing.T) {
 func TestCompletionIsRefusedWhenTheDocumentChanged(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a"}, buffer.Pos{Line: 0})
-	lt.ed.version, lt.ed.versionOK = editor.Version{}, true
-	lt.ed.applyErr = editor.ErrStale
+	lt.ed.version, lt.ed.versionOK = document.Version{}, true
+	lt.ed.applyErr = document.ErrStale
 	c := openLSPCompletion(t, lt, []CompletionItem{{Label: "fmt", Insert: "fmt"}}, buffer.Pos{})
 	lt.m.acceptCompletion(c, 0)
 	if len(lt.ed.applied) != 0 {
@@ -99,7 +99,7 @@ func TestCompletionIsRefusedWhenTheDocumentChanged(t *testing.T) {
 func TestCompletionRefusesOverlappingEdits(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a", "abc"}, buffer.Pos{Line: 1, Col: 3})
-	lt.ed.version, lt.ed.versionOK = editor.Version{}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{}, true
 	main := LSPRange{Start: buffer.Pos{Line: 1}, End: buffer.Pos{Line: 1, Col: 3}}
 	c := openLSPCompletion(t, lt, []CompletionItem{{
 		Label: "abcd", Insert: "abcd", Range: &main,
@@ -137,7 +137,7 @@ func TestCompletionSnippetPlacesTheCaretAtTheFinalStop(t *testing.T) {
 func TestCompletionResolveThenApplies(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a", "", "func f() {"}, buffer.Pos{Line: 2})
-	lt.ed.version, lt.ed.versionOK = editor.Version{}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{}, true
 	main := LSPRange{Start: buffer.Pos{Line: 2}, End: buffer.Pos{Line: 2}}
 	port.resolvedItem = CompletionItem{
 		Label: "fmt", Insert: "fmt", Range: &main,
@@ -216,7 +216,7 @@ func TestCompletionLabelDetailsShownAndBareLabelInserted(t *testing.T) {
 	// never reaches the document.
 	lt.feed(tea.KeyPressMsg{Code: tea.KeyTab})
 	edits := lt.ed.applied["/p/a.go"]
-	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 4}, Text: "HashMap"}
+	want := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 4}, Text: "HashMap"}
 	if len(edits) != 1 || edits[0] != want {
 		t.Fatalf("applied = %+v, want the bare label inserted over the typed prefix %+v", edits, want)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,11 +13,11 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/frame"
@@ -38,7 +39,7 @@ var (
 // lspEditor is the optional editor view that applies the edits of a server: the
 // rename and the completion. The app adapter implements it.
 type lspEditor interface {
-	ApplyLSPEdits(path string, edits []editor.LSPEdit) error
+	ApplyLSPEdits(path string, edits []document.LSPEdit) error
 }
 
 // CompletionResolver is the optional LSPSession part that fills an incomplete
@@ -54,15 +55,15 @@ type CompletionResolver interface {
 // in Update. An editor without it opens the file in Update, as it did before.
 type gotoEditor interface {
 	fileEditor
-	LoadFunc(path string) func() (*editor.Document, error)
-	OpenLoaded(d *editor.Document)
+	LoadFunc(path string) func() (*document.Document, error)
+	OpenLoaded(d *document.Document)
 }
 
 // readOnlyGotoEditor is the optional part of a gotoEditor that opens generated
 // content read-only. A goto that needs it refuses rather than opening an editable
 // tab when the editor cannot mark the document.
 type readOnlyGotoEditor interface {
-	OpenLoadedReadOnly(d *editor.Document)
+	OpenLoadedReadOnly(d *document.Document)
 }
 
 // lspState is the root's language-server state. Its zero value runs no server.
@@ -84,6 +85,12 @@ type lspState struct {
 	// last workspace poll. The poll replaces the whole list, so a publish or pull
 	// update is reflected; it is cleared on stop.
 	wsDiags []FileDiagnostics
+	// diagRowsCache is the panel's rows built from wsDiags, kept until the list is replaced
+	// (diagRowsOf is the list it was built from), so a frame does not clone and sort every
+	// file's diagnostics again.
+	diagRowsCache []diagRow
+	diagRowsOf    []FileDiagnostics
+	diagRowsOK    bool
 	// progress is the live servers' unfinished $/progress entries, as text, for the
 	// diagnostics panel. The poll refreshes it; stopping or restarting the servers
 	// empties it.
@@ -213,7 +220,7 @@ type lspCompletion struct {
 	// version is the document version the list was asked at, and versionOK says it
 	// is set. Acceptance passes it as the expected version so a changed document is
 	// never edited with an item computed against older text.
-	version   editor.Version
+	version   document.Version
 	versionOK bool
 }
 
@@ -231,7 +238,7 @@ type completionResolvedMsg struct {
 // land at positions computed for a different document or a different caret set.
 type completionMultiResolve struct {
 	path    string
-	version editor.Version
+	version document.Version
 	carets  []buffer.Pos // the primary caret first, then the extra carets
 }
 
@@ -300,6 +307,7 @@ type (
 		workspace      []WorkspaceEdit
 		workspaceDiags []FileDiagnostics
 		progress       []LSPProgress
+		periodic       bool
 	}
 	lspReplyMsg struct {
 		ask     lspAsk
@@ -315,7 +323,7 @@ type (
 		// the request started. versionOK says it is set; a completion reply without
 		// it (one that opened the popup in Update) captures the current version when
 		// the popup opens.
-		version   editor.Version
+		version   document.Version
 		versionOK bool
 		// peek is the start of the definition's file for a peek, read in the request
 		// command so Update does no IO: up to peekLines lines from peekFrom.
@@ -332,7 +340,7 @@ type (
 	// lspLoadedMsg is the file a goto read. Its tab opens, and the caret moves to
 	// line and col, one-based.
 	lspLoadedMsg struct {
-		doc       *editor.Document
+		doc       *document.Document
 		err       error
 		line, col int
 		readOnly  bool
@@ -430,6 +438,11 @@ func (m *Model) lspReconcile() tea.Cmd {
 				s.tracks = make(map[string]*lspTrack)
 			}
 			s.tracks[path] = tr
+		}
+		// A tab the track already read at its current version keeps its text: reading it is
+		// the length of the file, and a tab switch reconciles every open tab.
+		if ver, verOK := docVersion(doc); verOK && tr.verOK && tr.ver == ver && !tr.dirty {
+			continue
 		}
 		tr.want, tr.dirty = lspDocText(doc), false
 		tr.ver, tr.verOK = docVersion(doc)
@@ -743,6 +756,7 @@ func (m *Model) lspPoll() tea.Cmd {
 			workspace:      port.WorkspaceEdits(),
 			workspaceDiags: port.WorkspaceDiagnostics(),
 			progress:       port.Progress(),
+			periodic:       true,
 		}
 	}
 }
@@ -788,18 +802,21 @@ func (m *Model) lspDiags(msg lspDiagsMsg) tea.Cmd {
 	// diagnostic, so replace it rather than merge. The progress list is replaced the
 	// same way: an entry the server ended is not reported again.
 	s.wsDiags = msg.workspaceDiags
+	s.diagRowsOK = false
 	s.progress = msg.progress
 	var cmds []tea.Cmd
 	for _, edit := range msg.workspace {
 		cmds = append(cmds, m.applyServerWorkspaceEdit(edit))
 	}
-	for _, tr := range s.tracks {
-		if tr.state == lspOpen {
-			cmds = append(cmds, m.lspPollArm())
-			return tea.Batch(cmds...)
+	if msg.periodic {
+		for _, tr := range s.tracks {
+			if tr.state == lspOpen {
+				cmds = append(cmds, m.lspPollArm())
+				return tea.Batch(cmds...)
+			}
 		}
+		s.polling = false
 	}
-	s.polling = false
 	return tea.Batch(cmds...)
 }
 
@@ -844,6 +861,7 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 		s.stopped = true
 		s.tracks = nil
 		s.wsDiags = nil
+		s.diagRowsOK = false
 		s.progress = nil
 		for _, path := range slices.Sorted(maps.Keys(s.diags)) {
 			m.lspDropDiags(path)
@@ -1082,7 +1100,7 @@ func (m *Model) lspCompletions(r lspReplyMsg) {
 // passes the row the candidate had before so Backspace/typing keep the user's choice.
 // versionOK false means the caller has no request version (a local list or a
 // re-filter), so the current document version is captured as the guard.
-func (m *Model) openCompletionItems(path string, at buffer.Pos, items []CompletionItem, version editor.Version, versionOK bool, selected int) *lspCompletion {
+func (m *Model) openCompletionItems(path string, at buffer.Pos, items []CompletionItem, version document.Version, versionOK bool, selected int) *lspCompletion {
 	return m.openCompletionList(path, at, items, items, identityOrigins(len(items)), version, versionOK, selected)
 }
 
@@ -1099,7 +1117,7 @@ func identityOrigins(n int) []int {
 // rows that match the current prefix) and origins (each shown row's index in all).
 // The server list, the local buffer-word list, a merge reply and a re-filter all use
 // it, so identity, acceptance and the version guard stay in one place.
-func (m *Model) openCompletionList(path string, at buffer.Pos, all, shown []CompletionItem, origins []int, version editor.Version, versionOK bool, selected int) *lspCompletion {
+func (m *Model) openCompletionList(path string, at buffer.Pos, all, shown []CompletionItem, origins []int, version document.Version, versionOK bool, selected int) *lspCompletion {
 	if len(shown) == 0 {
 		m.notice = uiText("gvim.notice.lsp.no_completions", "No completions")
 		return nil
@@ -1454,7 +1472,7 @@ func (m *Model) completionMultiResolved(msg completionMultiResolvedMsg) tea.Cmd 
 // caret as one atomic edit with a version guard. The app adapter implements it; a fake
 // or an editor without it keeps the single-caret accept path.
 type completionAtCarets interface {
-	ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error)
+	ApplyCompletionAtCarets(path, text, wordChars string, expect *document.Version) (int, error)
 }
 
 // completionItemAtCarets is the optional editor view for a snippet/auto-import accept at
@@ -1462,7 +1480,7 @@ type completionAtCarets interface {
 // the additional (import) edits, guarded by the request version. An editor without it
 // keeps the explicit refusal.
 type completionItemAtCarets interface {
-	ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []editor.LSPEdit, wordChars string, expect *editor.Version) (int, error)
+	ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []document.LSPEdit, wordChars string, expect *document.Version) (int, error)
 }
 
 // multiCursorAccept accepts the completion at every caret when the active document has
@@ -1482,7 +1500,7 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 	if !ok || len(lister.Cursors()) == 0 {
 		return false
 	}
-	var expect *editor.Version
+	var expect *document.Version
 	if c.versionOK {
 		expect = &c.version
 	}
@@ -1515,9 +1533,9 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 // completionAcceptNotice is the status-row text for a refused multi-caret accept.
 func completionAcceptNotice(err error) string {
 	switch {
-	case errors.Is(err, editor.ErrStale):
+	case errors.Is(err, document.ErrStale):
 		return uiText("gvim.notice.completion.offer_stale", "completion is stale: the document changed, so nothing was applied")
-	case errors.Is(err, editor.ErrOverlappingEdits):
+	case errors.Is(err, document.ErrOverlappingEdits):
 		return uiText("gvim.notice.completion.offer_overlap", "completion edits overlap, so nothing was applied")
 	}
 	return err.Error()
@@ -1532,11 +1550,11 @@ func (m *Model) applyCompletionItem(c *lspCompletion, item CompletionItem) error
 	if item.Range != nil {
 		from, to = item.Range.Start, item.Range.End
 	}
-	edits := append([]editor.LSPEdit{{From: from, To: to, Text: item.Insert}}, completionAdditionalEdits(item)...)
+	edits := append([]document.LSPEdit{{From: from, To: to, Text: item.Insert}}, completionAdditionalEdits(item)...)
 	if err := completionEditConflict(edits); err != nil {
 		return err
 	}
-	var expect *editor.Version
+	var expect *document.Version
 	if c.versionOK {
 		expect = &c.version
 	}
@@ -1551,10 +1569,10 @@ func (m *Model) applyCompletionItem(c *lspCompletion, item CompletionItem) error
 }
 
 // completionAdditionalEdits are the additional (auto-import) edits of item as editor edits.
-func completionAdditionalEdits(item CompletionItem) []editor.LSPEdit {
-	edits := make([]editor.LSPEdit, 0, len(item.Additional))
+func completionAdditionalEdits(item CompletionItem) []document.LSPEdit {
+	edits := make([]document.LSPEdit, 0, len(item.Additional))
 	for _, add := range item.Additional {
-		edits = append(edits, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
+		edits = append(edits, document.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
 	}
 	return edits
 }
@@ -1571,7 +1589,7 @@ func completionStop(item CompletionItem) int {
 // completionEditConflict reports whether the main edit and the additional edits of
 // an item overlap (or two zero-width edits sit at the same place). An ambiguous
 // edit is refused before it touches the document.
-func completionEditConflict(edits []editor.LSPEdit) error {
+func completionEditConflict(edits []document.LSPEdit) error {
 	for i := range edits {
 		if edits[i].To.Less(edits[i].From) {
 			return errors.New("completion edit has an inverted range, so nothing was applied")
@@ -1880,7 +1898,7 @@ func (m *Model) lspRenameDone(tag lspRenameTag, d prompt.Done) tea.Cmd {
 
 // applyLSPEdits applies edits to the open document at path through the editor, if
 // it can apply them.
-func (m *Model) applyLSPEdits(path string, edits []editor.LSPEdit) error {
+func (m *Model) applyLSPEdits(path string, edits []document.LSPEdit) error {
 	ed, ok := m.ed.(lspEditor)
 	if !ok {
 		return errors.New("editing by a language server is not supported in this port")
@@ -1962,12 +1980,6 @@ func (m *Model) lspStatusCmd() tea.Cmd {
 	switch {
 	case m.lsp.unavailable[lang] != nil:
 		m.notice = "LSP: " + m.lsp.unavailable[lang].Error()
-		return nil
-	case m.lsp.stopped:
-		m.notice = "LSP: stopped"
-		return nil
-	case m.lsp.muted[lang]:
-		m.notice = "LSP: muted for " + lang + " (the status popup enables it)"
 		return nil
 	case lspLargeReason(doc) != "":
 		m.notice = "LSP: " + lspLargeReason(doc)
@@ -2220,8 +2232,18 @@ func (m *Model) lspForgetLanguage(language string) {
 	}
 	for _, path := range forgotten {
 		m.lspDropDiags(path)
+		m.lspDropData(path)
 	}
-	s.polling = false
+	hasOpen := false
+	for _, tr := range s.tracks {
+		if tr.state == lspOpen {
+			hasOpen = true
+			break
+		}
+	}
+	if !hasOpen {
+		s.polling = false
+	}
 }
 
 // lspServerGlyph is the one-cell state mark of a server row.
@@ -2378,12 +2400,12 @@ func (m *Model) lspSpans(doc Document) func(line int) []editorpane.DiagnosticSpa
 			if line < d.Start.Line || line > d.End.Line {
 				continue
 			}
-			start, end := 0, len([]rune(doc.Line(line)))
+			start, end := 0, d.End.Col
 			if line == d.Start.Line {
 				start = d.Start.Col
 			}
-			if line == d.End.Line {
-				end = d.End.Col
+			if line != d.End.Line {
+				end = utf8.RuneCountInString(doc.Line(line))
 			}
 			if end <= start {
 				end = start + 1

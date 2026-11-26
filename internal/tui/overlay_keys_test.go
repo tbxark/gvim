@@ -40,7 +40,7 @@ func TestOverlayContextsMapToTheirFreshNames(t *testing.T) {
 	if ctx, ok := overlayContextOf(p); !ok || ctx != KeyContextPrompt {
 		t.Fatalf("prompt context = %q, %v", ctx, ok)
 	}
-	c := prompt.NewConfirm(m.styles, "Sure?", "tag")
+	c := prompt.NewConfirmWith(m.styles, "Sure?", "tag", prompt.ConfirmOptions{})
 	if ctx, ok := overlayContextOf(c); !ok || ctx != KeyContextPrompt {
 		t.Fatalf("confirm context = %q, %v", ctx, ok)
 	}
@@ -653,7 +653,7 @@ func TestPromptCopyReportsNativeWriterResult(t *testing.T) {
 		cb := &promptCutClipboard{}
 		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
 		m.SetDock(DockPorts{Clipboard: cb})
-		m.pushOverlay(prompt.NewConfirm(m.styles, "Delete the file?", "confirm"))
+		m.pushOverlay(prompt.NewConfirmWith(m.styles, "Delete the file?", "confirm", prompt.ConfirmOptions{}))
 		_, cmd := m.Update(ctrl('c'))
 		msg := firstPromptCopyMsg(t, cmd)
 		m.Update(msg)

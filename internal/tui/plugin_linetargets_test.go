@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -8,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -123,7 +123,7 @@ func TestLineTargetsRunPluginAction(t *testing.T) {
 	if cmd := m.dispatch(Command{Action: "insert_newline"}); cmd != nil {
 		cmd()
 	}
-	if !slices.Contains(ed.actions, editor.Action("p.run")) {
+	if !slices.Contains(ed.actions, document.Action("p.run")) {
 		t.Fatalf("Enter actions = %v, want p.run", ed.actions)
 	}
 	if len(ed.opened) != 0 {
@@ -131,7 +131,7 @@ func TestLineTargetsRunPluginAction(t *testing.T) {
 	}
 	ed.actions = nil
 	m.pressEditor(editorpane.Pane{Doc: doc}, editorpane.Hit{Kind: editorpane.HitText, Pos: buffer.Pos{Line: 0, Col: 0}}, 1)
-	if !slices.Contains(ed.actions, editor.Action("p.run")) {
+	if !slices.Contains(ed.actions, document.Action("p.run")) {
 		t.Fatalf("click actions = %v, want p.run", ed.actions)
 	}
 
@@ -163,7 +163,7 @@ func TestLineTargetsRunPluginAction(t *testing.T) {
 	if cmd := m.dispatch(Command{Action: "insert_newline"}); cmd != nil {
 		cmd()
 	}
-	if slices.Contains(ed.actions, editor.Action("p.run")) {
+	if slices.Contains(ed.actions, document.Action("p.run")) {
 		t.Fatalf("a dropped target still ran its action: %v", ed.actions)
 	}
 }

@@ -146,3 +146,35 @@ func TestTerminalRestartElementRestartsTheDock(t *testing.T) {
 		t.Fatalf("shells = %d, exited = %v; want a new shell running after the click", len(starter.terms), m.dock.Exited())
 	}
 }
+
+// TestHoverLayoutCacheIsPerHoverUpdateAndFollowsTheStatus checks the geometry cache of a pointer
+// move: it is on only while that update runs, a second layout call in it reuses the first, and
+// a status notice that appears in the middle of it is laid out rather than served stale.
+func TestHoverLayoutCacheIsPerHoverUpdateAndFollowsTheStatus(t *testing.T) {
+	m := statusViewModel(t, nil)
+	m.Update(tea.MouseMotionMsg{X: 5, Y: 5})
+	if m.hoverLayout.on || m.hoverLayout.ok {
+		t.Fatal("the hover cache outlived its update")
+	}
+	m.Update(tea.MouseMotionMsg{X: 5, Y: 5, Button: tea.MouseLeft})
+	if m.hoverLayout.on {
+		t.Fatal("a drag update used the hover cache")
+	}
+
+	m.hoverLayout = hoverLayoutCache{on: true}
+	first := m.layout()
+	if !m.hoverLayout.ok {
+		t.Fatal("the first layout call did not fill the cache")
+	}
+	m.hoverLayout.l.W++ // a marker: a cache hit returns it, a recompute does not
+	if m.layout().W != first.W+1 {
+		t.Fatal("the second layout call recomputed instead of reusing the first")
+	}
+	m.notice = "a notice that arrived during the update"
+	if got := m.layout().W; got != first.W {
+		t.Fatalf("the layout after a notice was the stale cached one (W %d)", got)
+	}
+	if m.hoverLayout.key.notice != m.notice {
+		t.Fatalf("cache key notice = %q, want the new notice", m.hoverLayout.key.notice)
+	}
+}

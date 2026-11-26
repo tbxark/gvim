@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"reflect"
 	"slices"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/popup"
 )
 
@@ -53,7 +53,7 @@ func TestCopyAndCutReachTheSystemClipboard(t *testing.T) {
 		{name: "cut", action: "cut", text: "a\nb\n", want: []string{"a\nb\n"}},
 		{name: "copy with theme", action: "copy_with_theme", text: "abc", want: []string{"abc"}},
 		{name: "an empty result leaves the clipboard alone", action: "copy", text: ""},
-		{name: "a refused copy leaves the clipboard alone", action: "copy", text: "abc", err: editor.ErrNothingSelected},
+		{name: "a refused copy leaves the clipboard alone", action: "copy", text: "abc", err: document.ErrNothingSelected},
 		{name: "other actions leave the clipboard alone", action: "select_all", text: "/x"},
 	}
 	for _, tt := range tests {
@@ -98,7 +98,7 @@ func TestPasteReadsTheSystemClipboard(t *testing.T) {
 				t.Fatalf("the editor ran %q before the clipboard was read", ed.actions)
 			}
 			feedMessages(m, cmd)
-			if !slices.Equal(ed.actions, []editor.Action{"paste"}) {
+			if !slices.Equal(ed.actions, []document.Action{"paste"}) {
 				t.Fatalf("actions = %q, want one paste", ed.actions)
 			}
 			if !reflect.DeepEqual(ed.args[0], tt.want) {
@@ -113,7 +113,7 @@ func TestBracketedPasteGoesToTheEditor(t *testing.T) {
 	ed := newFakeEditor("hello")
 	m := clipModel(t, ed, nil)
 	m.Update(tea.PasteMsg{Content: "a\r\nb"})
-	if !slices.Equal(ed.actions, []editor.Action{"paste"}) {
+	if !slices.Equal(ed.actions, []document.Action{"paste"}) {
 		t.Fatalf("actions = %q, want one paste", ed.actions)
 	}
 	if got := ed.args[0]["text"]; got != "a\r\nb" {
@@ -179,7 +179,7 @@ func TestMacroPasteKeepsItsPlaceInTheReplay(t *testing.T) {
 	}
 	ed.actions, ed.args = nil, nil
 	feedMessages(m, m.playMacro())
-	want := []editor.Action{"paste", "insert_char"}
+	want := []document.Action{"paste", "insert_char"}
 	if !slices.Equal(ed.actions, want) {
 		t.Fatalf("actions = %q, want %q", ed.actions, want)
 	}
@@ -194,7 +194,7 @@ func TestBracketedPasteClosesAPopupAndReachesTheEditor(t *testing.T) {
 	m := clipModel(t, ed, nil)
 	m.ShowPopup(popup.Point{X: 1, Y: 1}, "t", []popup.Item{{Label: "a"}})
 	m.Update(tea.PasteMsg{Content: "needle"})
-	if !slices.Equal(ed.actions, []editor.Action{"paste"}) {
+	if !slices.Equal(ed.actions, []document.Action{"paste"}) {
 		t.Fatalf("actions = %q, want one paste", ed.actions)
 	}
 	if len(m.overlays) != 0 {

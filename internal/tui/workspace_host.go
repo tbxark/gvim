@@ -266,6 +266,7 @@ func (h *WorkspaceHost) Show(m *Model) {
 	}
 	h.mu.Lock()
 	h.active = m
+	h.forgetClosedLocked()
 	h.pendingShow = true
 	if !h.initialized[m] {
 		h.initialized[m] = true
@@ -559,13 +560,7 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		h.width, h.height = msg.Width, msg.Height
 		h.mu.Unlock()
 		if active := h.Active(); active != nil {
-			next, c := active.Update(msg)
-			if m, ok := next.(*Model); ok {
-				h.mu.Lock()
-				h.active = m
-				h.mu.Unlock()
-			}
-			cmd = wrapModelCmd(active.WorkspaceOwner(), active, c)
+			cmd = h.updateActive(active, msg)
 		}
 	case notifyMsg:
 		if active := h.Active(); active != nil {
@@ -594,23 +589,23 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if target == nil || target.Closed() {
 			return h, nil
 		}
-		cmd := wrapModelCmd(target.WorkspaceOwner(), target, target.openFileCmd(msg.path, false, msg.line, msg.col))
-		target.focusEditor()
-		return h, cmd
+		// Model.Update opens and focuses the file, so the post-update syncs (tabs, LSP,
+		// watchers, contents) run as for any other message. The host's pending Show/Queue
+		// work is flushed below like every other update.
+		if target == h.Active() {
+			cmd = h.updateActive(target, msg)
+		} else {
+			// A hidden warm model: deliver without changing the active model.
+			_, c := target.Update(msg)
+			cmd = wrapModelCmd(target.WorkspaceOwner(), target, c)
+		}
 	default:
-		active := h.Active()
-		if active == nil {
-			break
+		if active := h.Active(); active != nil {
+			cmd = h.updateActive(active, msg)
 		}
-		next, c := active.Update(msg)
-		if m, ok := next.(*Model); ok {
-			h.mu.Lock()
-			h.active = m
-			h.mu.Unlock()
-		}
-		cmd = wrapModelCmd(active.WorkspaceOwner(), active, c)
 	}
 	h.mu.Lock()
+	h.forgetClosedLocked()
 	pending, shown := h.pendingCmd, h.pendingShow
 	h.pendingCmd, h.pendingShow = nil, false
 	h.pendingCount = 0
@@ -635,6 +630,33 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(pending, cmd)
 	}
 	return h, cmd
+}
+
+// updateActive delivers msg to active, which was the active model when the update began, and
+// returns its command tagged with active as the source. The host follows the model Update
+// returns only while active is still the shown one: a workspace switch that Update started
+// through Show must not be reverted to the model it just left.
+func (h *WorkspaceHost) updateActive(active *Model, msg tea.Msg) tea.Cmd {
+	next, c := active.Update(msg)
+	if m, ok := next.(*Model); ok {
+		h.mu.Lock()
+		if h.active == active {
+			h.active = m
+		}
+		h.mu.Unlock()
+	}
+	return wrapModelCmd(active.WorkspaceOwner(), active, c)
+}
+
+// forgetClosedLocked drops the closed models (evicted or closed workspaces) from
+// initialized, so the host does not keep their runtimes alive for the daemon's lifetime.
+// The caller holds h.mu.
+func (h *WorkspaceHost) forgetClosedLocked() {
+	for m := range h.initialized {
+		if m != h.active && m.Closed() {
+			delete(h.initialized, m)
+		}
+	}
 }
 
 // View implements tea.Model.

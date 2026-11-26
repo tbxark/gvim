@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/document"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -17,7 +16,7 @@ type remoteStartupEditor struct {
 	*fakeEditor
 	loadErr   error
 	loads     int
-	opened    *editor.Document
+	opened    *document.Document
 	line, col int
 }
 
@@ -25,8 +24,8 @@ func newRemoteStartupEditor() *remoteStartupEditor {
 	return &remoteStartupEditor{fakeEditor: newFakeEditor("local")}
 }
 
-func (e *remoteStartupEditor) LoadFunc(path string) func() (*editor.Document, error) {
-	return func() (*editor.Document, error) {
+func (e *remoteStartupEditor) LoadFunc(path string) func() (*document.Document, error) {
+	return func() (*document.Document, error) {
 		e.loads++
 		if e.loadErr != nil {
 			return nil, e.loadErr
@@ -35,7 +34,7 @@ func (e *remoteStartupEditor) LoadFunc(path string) func() (*editor.Document, er
 	}
 }
 
-func (e *remoteStartupEditor) OpenLoaded(d *editor.Document) { e.opened = d }
+func (e *remoteStartupEditor) OpenLoaded(d *document.Document) { e.opened = d }
 
 func (e *remoteStartupEditor) IsLargePath(string) bool { return true }
 

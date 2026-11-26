@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/editor"
@@ -14,7 +15,7 @@ type shellFake struct {
 	*fakeEditor
 	job      editor.ShellJob
 	beginErr error
-	begun    []editor.Action
+	begun    []document.Action
 	ended    []shellEnd
 }
 
@@ -25,7 +26,7 @@ type shellEnd struct {
 	err error
 }
 
-func (f *shellFake) BeginShell(a editor.Action, _ map[string]any) (editor.ShellJob, error) {
+func (f *shellFake) BeginShell(a document.Action, _ map[string]any) (editor.ShellJob, error) {
 	f.begun = append(f.begun, a)
 	return f.job, f.beginErr
 }

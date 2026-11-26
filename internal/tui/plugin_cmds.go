@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"maps"
 	"slices"
 	"strings"
@@ -197,10 +198,9 @@ type keyLabeler interface {
 func (m *Model) allCommands() []commands.Entry {
 	p := &m.plug
 	base := slices.Concat(m.commands, m.compareCommands(), m.reviewCommands())
-	if len(m.updates.Command) > 0 && len(m.updateCommands) > 0 {
-		// The updater rows exist only while an update command is configured: a bare
-		// gvim has no command that would do nothing.
-		base = slices.Concat(base, m.updateCommands)
+	if rows := m.updateTerminalCommands(); len(rows) > 0 {
+		// The updater rows exist only while an update command is configured.
+		base = slices.Concat(base, rows)
 	}
 	if len(p.order) == 0 {
 		return base
@@ -289,7 +289,7 @@ func (m *Model) actionOnce(action string, args map[string]any) (tea.Cmd, error) 
 	if c, ok := m.lineTargetAction(action, args); ok {
 		return c, nil
 	}
-	res := m.editorDo(editor.Action(action), args)
+	res := m.editorDo(document.Action(action), args)
 	m.syncViewport()
 	if res.Quit {
 		return m.quit(), nil
@@ -304,11 +304,11 @@ func plugActionErr(action string, err error) error {
 		return nil
 	case errors.Is(err, editor.ErrUnknownAction):
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "action %q is not supported", action)
-	case errors.Is(err, editor.ErrReadOnly):
+	case errors.Is(err, document.ErrReadOnly):
 		return pluginapi.Errf(pluginapi.CodeReadOnly, "%v", err)
-	case errors.Is(err, editor.ErrLargeFile), errors.Is(err, editor.ErrIndexing):
+	case errors.Is(err, document.ErrLargeFile), errors.Is(err, document.ErrIndexing):
 		return pluginapi.Errf(pluginapi.CodeTooLarge, "%v", err)
-	case errors.Is(err, editor.ErrUnsaved), errors.Is(err, editor.ErrChangedOnDisk):
+	case errors.Is(err, editor.ErrUnsaved), errors.Is(err, document.ErrChangedOnDisk):
 		return pluginapi.Errf(pluginapi.CodeConflict, "%v", err)
 	case errors.Is(err, editor.ErrNoDocument), errors.Is(err, editor.ErrNoTab), errors.Is(err, editor.ErrNotOpen):
 		return pluginapi.Errf(pluginapi.CodeNotFound, "%v", err)

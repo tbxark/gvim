@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/editor"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
@@ -22,7 +22,7 @@ func (e *asyncOpenEditor) OpenFile(path string) error {
 	return e.largeEditor.OpenFile(path)
 }
 func (e *asyncOpenEditor) IsLargePath(path string) bool { return e.ed.IsLargePath(path) }
-func (e *asyncOpenEditor) LoadFunc(path string) func() (*editor.Document, error) {
+func (e *asyncOpenEditor) LoadFunc(path string) func() (*document.Document, error) {
 	e.loads++
 	return e.ed.LoadFunc(path)
 }

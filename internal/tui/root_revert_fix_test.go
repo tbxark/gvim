@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
@@ -210,7 +211,7 @@ func TestRevertFileAsksAgainWhenTheTextChangedAfterThePlan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ed := &revertEditor{docEditor: newDocEditor("/ws/a.txt", false), applyErr: editor.ErrStaleRevert}
+			ed := &revertEditor{docEditor: newDocEditor("/ws/a.txt", false), applyErr: document.ErrStaleRevert}
 			m := newRevertModel(t, ed)
 			feedMessages(m, rootPaletteRun(m, "revert"))
 			if len(m.overlays) == 0 {
@@ -238,7 +239,7 @@ func TestRevertFileNoticesWhatItCannotRevert(t *testing.T) {
 		planned int
 	}{
 		{name: "no tab", ed: &revertEditor{fakeEditor: newFakeEditor("x")}, want: noDocumentNotice},
-		{name: "untitled buffer", ed: &revertEditor{docEditor: newDocEditor("", false)}, want: editor.ErrNoPath.Error()},
+		{name: "untitled buffer", ed: &revertEditor{docEditor: newDocEditor("", false)}, want: document.ErrNoPath.Error()},
 		{
 			name: "plan refused",
 			ed:   &revertEditor{docEditor: newDocEditor("/ws/a.txt", false), planErr: editor.ErrUnsaved},
@@ -317,7 +318,7 @@ type failingRevert struct {
 	err error
 }
 
-func (f *failingRevert) Do(a editor.Action, args map[string]any) editor.Result {
+func (f *failingRevert) Do(a document.Action, args map[string]any) editor.Result {
 	if a == "revert" {
 		return editor.Result{Err: f.err}
 	}

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"hash/fnv"
 	"path/filepath"
 	"slices"
@@ -12,7 +13,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
@@ -500,10 +500,10 @@ func (m *Model) finishProjectReplace(files, tabs, skipped int) tea.Cmd {
 
 // projectLSPEdits converts a replacement plan's edits to the editor edit type of the
 // shared multi-file apply helper.
-func projectLSPEdits(edits []searchpanel.ReplaceEdit) []editor.LSPEdit {
-	out := make([]editor.LSPEdit, len(edits))
+func projectLSPEdits(edits []searchpanel.ReplaceEdit) []document.LSPEdit {
+	out := make([]document.LSPEdit, len(edits))
 	for i, e := range edits {
-		out[i] = editor.LSPEdit{
+		out[i] = document.LSPEdit{
 			From: buffer.Pos{Line: e.From.Line, Col: e.From.Col},
 			To:   buffer.Pos{Line: e.To.Line, Col: e.To.Col},
 			Text: e.Text,

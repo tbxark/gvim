@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestDualEditInSourceUpdatesTheCompose(t *testing.T) {
 	}
 	// Type at the start of the source: the same document feeds both panes.
 	m.ed.SetCursor(buffer.Pos{Line: 0, Col: 0}, false)
-	m.editorDo(editor.Action("insert_char"), map[string]any{"text": "y"})
+	m.editorDo(document.Action("insert_char"), map[string]any{"text": "y"})
 	if !paneHas(m, 0, "ySome") || !paneHas(m, 1, "ySome") {
 		t.Fatalf("the edit is not in both panes: source %q preview %q", paneRows(m, 0), paneRows(m, 1))
 	}
@@ -272,7 +273,7 @@ func TestDualEndsWhenTheTabChanges(t *testing.T) {
 	t.Parallel()
 	m, _ := dualModel(t)
 	runAction(t, m, "markdown_mode_dual")
-	m.editorDo(editor.Action("new"), nil)
+	m.editorDo(document.Action("new"), nil)
 	m.syncDual()
 	if m.validDual() != nil || m.splits.dual != nil {
 		t.Fatal("the dual view survived a tab change")

@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
@@ -21,6 +22,32 @@ const (
 	// updateTabName is the dock tab's name.
 	updateTabName = "Update"
 )
+
+// updateTerminalCommands returns the palette entries for the configured
+// update_command, or nil when no update_command is set.
+func (m *Model) updateTerminalCommands() []commands.Entry {
+	if len(m.updates.Command) == 0 {
+		return nil
+	}
+	return []commands.Entry{
+		{
+			Name:        "Update gvim",
+			Description: "Run the configured update_command in the terminal dock",
+			Action:      "update_fresh",
+			I18nKey:     "gvim.command.update_gvim",
+			DescKey:     "gvim.command.update_gvim_desc",
+			Source:      commands.SourceBuiltin,
+		},
+		{
+			Name:        "Show update output",
+			Description: "Switch to the update terminal buffer",
+			Action:      "open_update_log",
+			I18nKey:     "cmd.open_update_log",
+			DescKey:     "cmd.open_update_log_desc",
+			Source:      commands.SourceBuiltin,
+		},
+	}
+}
 
 // runUpdateCommand starts the configured update command in the dock, or restarts the
 // existing update tab. Everything runs through the dock's terminal ports as a command,

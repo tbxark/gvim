@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strconv"
 	"testing"
 
@@ -64,7 +65,7 @@ func (f *tabFake) Active() Document {
 
 // Do records the action. Save and save_as fail the way the editor does for an
 // untitled buffer and for an existing target.
-func (f *tabFake) Do(a editor.Action, args map[string]any) editor.Result {
+func (f *tabFake) Do(a document.Action, args map[string]any) editor.Result {
 	f.actions = append(f.actions, a)
 	f.args = append(f.args, args)
 	switch a {
@@ -73,13 +74,13 @@ func (f *tabFake) Do(a editor.Action, args map[string]any) editor.Result {
 			return editor.Result{Err: f.saveErr}
 		}
 		if f.untitled {
-			return editor.Result{Err: editor.ErrNoPath}
+			return editor.Result{Err: document.ErrNoPath}
 		}
 		f.dirty[f.active] = false
 	case "save_as":
 		force, _ := args["force"].(bool)
 		if f.exists && !force {
-			return editor.Result{Err: editor.ErrExists}
+			return editor.Result{Err: document.ErrExists}
 		}
 		f.untitled = false
 		f.dirty[f.active] = false

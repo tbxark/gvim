@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"regexp"
 	"slices"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/pluginapi"
@@ -59,7 +59,7 @@ func (e *keyEnv) mode(t *testing.T, info pluginapi.ModeInfo) {
 
 func (e *keyEnv) press(k tea.KeyPressMsg) tea.Cmd { return press(e.m, k) }
 
-func (e *keyEnv) actions() []editor.Action { return e.ed.actions }
+func (e *keyEnv) actions() []document.Action { return e.ed.actions }
 
 // decodeKey decodes a terminal byte sequence the way the Bubble Tea input driver does.
 func decodeKey(t *testing.T, seq string) tea.KeyPressMsg {
@@ -100,7 +100,7 @@ func TestModeBindingsRunActions(t *testing.T) {
 	e.press(typed("j"))
 	e.press(typed("k"))
 	e.press(ctrl('d'))
-	if want := []editor.Action{"move_down", "page_down"}; !slices.Equal(e.actions(), want) {
+	if want := []document.Action{"move_down", "page_down"}; !slices.Equal(e.actions(), want) {
 		t.Fatalf("editor actions = %v, want %v", e.actions(), want)
 	}
 	if got := e.ed.args[0]["n"]; got != 2 {
@@ -115,11 +115,11 @@ func TestModeTextPolicies(t *testing.T) {
 	tests := []struct {
 		name    string
 		info    pluginapi.ModeInfo
-		actions []editor.Action
+		actions []document.Action
 		runs    []string
 		args    map[string]any
 	}{
-		{"pass types the text", pluginapi.ModeInfo{Name: "m"}, []editor.Action{"insert_char"}, nil, nil},
+		{"pass types the text", pluginapi.ModeInfo{Name: "m"}, []document.Action{"insert_char"}, nil, nil},
 		{"swallow drops it", pluginapi.ModeInfo{Name: "m", Text: pluginapi.TextSwallow}, nil, nil, nil},
 		{"handler gets it", pluginapi.ModeInfo{Name: "m", Text: pluginapi.TextHandler, TextAction: "p.text"}, nil, []string{"p.text"}, map[string]any{"text": "z"}},
 	}
@@ -164,7 +164,7 @@ func TestModeSequences(t *testing.T) {
 			t.Fatalf("actions after one step = %v", e.actions())
 		}
 		e.press(typed("d"))
-		if !slices.Equal(e.actions(), []editor.Action{"delete_line"}) {
+		if !slices.Equal(e.actions(), []document.Action{"delete_line"}) {
 			t.Fatalf("actions = %v", e.actions())
 		}
 	})
@@ -193,7 +193,7 @@ func TestModeSequences(t *testing.T) {
 		e.mode(t, info)
 		e.press(typed("g"))
 		e.press(typed("g"))
-		if !slices.Equal(e.actions(), []editor.Action{"goto_top"}) || len(e.rt.runs) != 0 {
+		if !slices.Equal(e.actions(), []document.Action{"goto_top"}) || len(e.rt.runs) != 0 {
 			t.Fatalf("actions %v runs %v", e.actions(), e.rt.runs)
 		}
 	})
@@ -206,7 +206,7 @@ func TestModeSequences(t *testing.T) {
 			t.Fatalf("runs = %v, want the shorter g binding", e.rt.runs)
 		}
 		e.press(typed("d"))
-		if !slices.Equal(e.actions(), []editor.Action{"delete_line"}) {
+		if !slices.Equal(e.actions(), []document.Action{"delete_line"}) {
 			t.Fatalf("actions = %v: the key that broke the sequence started a new one", e.actions())
 		}
 	})
@@ -249,7 +249,7 @@ func TestPasteInModes(t *testing.T) {
 		e := newKeyEnv(t)
 		e.mode(t, pluginapi.ModeInfo{Name: "m", Text: pluginapi.TextSwallow})
 		e.m.Update(tea.PasteMsg{Content: "pasted"})
-		if !slices.Equal(e.actions(), []editor.Action{"paste"}) {
+		if !slices.Equal(e.actions(), []document.Action{"paste"}) {
 			t.Fatalf("actions = %v", e.actions())
 		}
 	})
@@ -285,7 +285,7 @@ func TestKeyWait(t *testing.T) {
 			t.Fatalf("key = %+v", k)
 		}
 		e.press(typed("b")) // the capture is over
-		if !slices.Equal(e.actions(), []editor.Action{"insert_char"}) {
+		if !slices.Equal(e.actions(), []document.Action{"insert_char"}) {
 			t.Fatalf("actions after the wait = %v", e.actions())
 		}
 	})
@@ -344,7 +344,7 @@ func TestKeyWait(t *testing.T) {
 		wait(e, 1, 0)
 		e.m.plug.host.CancelWait(1)
 		e.press(typed("a"))
-		if !slices.Equal(e.actions(), []editor.Action{"insert_char"}) || len(e.rt.resolved) != 0 {
+		if !slices.Equal(e.actions(), []document.Action{"insert_char"}) || len(e.rt.resolved) != 0 {
 			t.Fatalf("actions %v resolved %v", e.actions(), e.rt.resolved)
 		}
 	})
@@ -607,7 +607,7 @@ func TestEditorModeAndBufferMode(t *testing.T) {
 			t.Fatalf("notice = %q", e.m.notice)
 		}
 		e.press(typed("j"))
-		if !slices.Equal(e.actions(), []editor.Action{"move_down"}) {
+		if !slices.Equal(e.actions(), []document.Action{"move_down"}) {
 			t.Fatalf("the valid binding is lost: %v", e.actions())
 		}
 	})
@@ -637,12 +637,12 @@ func TestEditorModeAndBufferMode(t *testing.T) {
 		e.pe.bufs[0].Mode = "bm"
 		e.press(typed("j"))
 		e.press(typed("x"))
-		if !slices.Equal(e.actions(), []editor.Action{"move_down"}) {
+		if !slices.Equal(e.actions(), []document.Action{"move_down"}) {
 			t.Fatalf("actions = %v", e.actions())
 		}
 		e.m.Update(decodeKey(t, "\x1e")) // the panic chord ends it for that buffer
 		e.press(typed("x"))
-		if !slices.Equal(e.actions(), []editor.Action{"move_down", "insert_char"}) {
+		if !slices.Equal(e.actions(), []document.Action{"move_down", "insert_char"}) {
 			t.Fatalf("actions after the panic chord = %v", e.actions())
 		}
 	})
@@ -655,7 +655,7 @@ func TestEditorModeAndBufferMode(t *testing.T) {
 		e.pe.bufs[0].Mode = "bm"
 		must(t, e.m.plug.host.SetInputMode("p", "em"))
 		e.press(typed("j"))
-		if !slices.Equal(e.actions(), []editor.Action{"editor_action"}) {
+		if !slices.Equal(e.actions(), []document.Action{"editor_action"}) {
 			t.Fatalf("actions = %v", e.actions())
 		}
 	})
@@ -720,7 +720,7 @@ func TestOwnerGoneClearsTheKeyLayer(t *testing.T) {
 		t.Fatalf("state left behind: %+v", ks)
 	}
 	e.press(typed("a"))
-	if !slices.Equal(e.actions(), []editor.Action{"insert_char"}) {
+	if !slices.Equal(e.actions(), []document.Action{"insert_char"}) {
 		t.Fatalf("the swallowing mode outlived its plugin: %v", e.actions())
 	}
 }

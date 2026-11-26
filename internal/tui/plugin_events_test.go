@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,12 +64,12 @@ func (e *eventsPE) queue(id pluginapi.BufferID, c pluginapi.Changes) {
 // the caret and the text inside the Update that handles a key.
 type scriptEditor struct {
 	*fakeEditor
-	onDo func(a editor.Action)
+	onDo func(a document.Action)
 	err  error // the error every action answers with
 	doc  Document
 }
 
-func (s *scriptEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (s *scriptEditor) Do(a document.Action, args map[string]any) editor.Result {
 	if s.onDo != nil {
 		s.onDo(a)
 	}
@@ -134,7 +135,7 @@ func (h *evHarness) update(msg tea.Msg) []string {
 
 // act runs script inside the Update of Ctrl+N, which dispatches the action "new".
 func (h *evHarness) act(script func()) []string {
-	h.ed.onDo = func(editor.Action) { script() }
+	h.ed.onDo = func(document.Action) { script() }
 	return h.update(ctrl('n'))
 }
 
@@ -531,15 +532,15 @@ type autoSaver struct {
 	*scriptEditor
 	real  *editor.Editor
 	plans int
-	saved []editor.SaveResult
+	saved []document.SaveResult
 }
 
 func (a *autoSaver) AutoSaveDue(time.Time) bool { return true }
-func (a *autoSaver) PlanAutoSave(now time.Time) []editor.SaveJob {
+func (a *autoSaver) PlanAutoSave(now time.Time) []document.SaveJob {
 	a.plans++
 	return a.real.PlanAutoSave(now)
 }
-func (a *autoSaver) ApplyAutoSave(r []editor.SaveResult) error {
+func (a *autoSaver) ApplyAutoSave(r []document.SaveResult) error {
 	a.saved = r
 	return a.real.ApplySaves(r)
 }
@@ -646,13 +647,13 @@ type saver struct {
 	real *editor.Editor
 }
 
-func (s *saver) PlanSave() (editor.SavePlan, error)              { return s.real.PlanSave() }
-func (s *saver) PlanSaveAll() (editor.SavePlan, error)           { return s.real.PlanSaveAll() }
-func (s *saver) WriteSave(p editor.SavePlan) []editor.SaveResult { return p.Run() }
+func (s *saver) PlanSave() (editor.SavePlan, error)                { return s.real.PlanSave() }
+func (s *saver) PlanSaveAll() (editor.SavePlan, error)             { return s.real.PlanSaveAll() }
+func (s *saver) WriteSave(p editor.SavePlan) []document.SaveResult { return p.Run() }
 func (s *saver) PlanSaveAs(path string, force bool) (editor.SavePlan, error) {
 	return s.real.PlanSaveAs(path, force)
 }
-func (s *saver) ApplySavePlan(p editor.SavePlan, r []editor.SaveResult) error {
+func (s *saver) ApplySavePlan(p editor.SavePlan, r []document.SaveResult) error {
 	return s.real.ApplySavePlan(p, r)
 }
 

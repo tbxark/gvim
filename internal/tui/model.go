@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"io"
 	"os"
 	"slices"
@@ -61,9 +62,13 @@ type Model struct {
 	// statusName caches the status row's file name, so the two symlink resolutions
 	// behind it do not run on every frame.
 	statusName statusNameCache
-	// rulerMarks caches the overview ruler's diagnostic marks, and themeGen counts the
-	// style rebuilds so the cache sees a theme change.
-	rulerMarks rulerMarkCache
+	// statusRows caches the parsed editor.status_bar element lists.
+	statusRows statusRowCache
+	// rulerMarks caches the overview ruler's diagnostic marks per document path, and
+	// themeGen counts the style rebuilds so the cache sees a theme change.
+	rulerMarks map[string]*rulerMarkCache
+	// hoverLayout is the geometry cache of a hover-only mouse-motion update.
+	hoverLayout hoverLayoutCache
 	// frameLayout is the geometry View computed for the frame it is painting; layout
 	// returns it until View ends.
 	frameLayout *frame.Layout
@@ -89,13 +94,8 @@ type Model struct {
 	// The palette's sources. The commands always have a table, and files and
 	// ranker are nil when Deps leaves them out.
 	commands []commands.Entry
-	// commandHistory is the palette's usage history, most recent action first (max 50),
-	// as Fresh's command registry keeps it; it ranks equal command matches and the
-	// empty command query.
+	// commandHistory is the palette's usage history, most recent action first (max 50).
 	commandHistory []string
-	// updateCommands are the Fresh updater rows (Update fresh / Show update output),
-	// offered in the palette only when UpdateHooks.Command is configured.
-	updateCommands []commands.Entry
 	files          palette.Files
 	ranker         palette.Ranker
 	recorder       fileRecorder // the ranker's frecency record, when it has one
@@ -333,10 +333,7 @@ func New(deps Deps) *Model {
 	if cmds == nil {
 		cmds = commands.Commands(nil)
 	}
-	updateRows := hiddenCommandRows(cmds)
-	cmds = withoutHidden(cmds)
 	m := &Model{
-		updateCommands:  updateRows,
 		ed:              deps.Editor,
 		tree:            deps.Explorer,
 		keys:            deps.Keys,
@@ -695,6 +692,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if isMotion {
 		prevStrip, prevStatus, prevGrip, prevBorderHover, prevDockHover = m.stripHover, m.statusHover, m.gripHover, m.borderHover, m.dock.Hovered()
 		prevExDrag = m.explorerPanel.Dragging()
+	}
+	if isMotion && m.pointerOnly(moMsg) {
+		m.hoverLayout = hoverLayoutCache{on: true}
+		defer func() { m.hoverLayout = hoverLayoutCache{} }()
 	}
 	m.util.recordEvent(msg)
 	before, beforeStatus := m.notice, m.ed.Status()
@@ -1104,6 +1105,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.answer(msg)
 	case mixedExtractSelectionMsg:
 		cmd = m.afterMixedExtractSelection(msg.selection)
+	case openFileAtMsg:
+		cmd = m.openFileCmd(msg.path, false, msg.line, msg.col)
+		m.focusEditor()
+	case workspaceOpErrMsg:
+		m.quietNotice(msg.err.Error())
 	case ExtractConflictMsg:
 		// The extraction command detected target conflicts BEFORE writing anything.
 		// Ask here; the answer retries with replace or cancels untouched.
@@ -1314,7 +1320,7 @@ func (m *Model) runAction(action string) error {
 		m.pending = tea.Batch(m.pending, cmd)
 		return nil
 	}
-	res := m.editorDo(editor.Action(action), args)
+	res := m.editorDo(document.Action(action), args)
 	m.plugFailed(res.Err)
 	m.syncViewport()
 	if errors.Is(res.Err, editor.ErrUnknownAction) {
@@ -1574,7 +1580,7 @@ func (m *Model) activateTab(i int) {
 		if i < 0 || i >= len(tabs) || tabs[i].Active {
 			break
 		}
-		m.ed.Do(editor.Action("next_buffer"), nil)
+		m.ed.Do(document.Action("next_buffer"), nil)
 	}
 	m.syncViewport()
 }
@@ -1766,7 +1772,7 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 	if c, ok := m.lineTargetAction(cmd.Action, cmd.Args); ok {
 		return c
 	}
-	res := m.editorDo(editor.Action(cmd.Action), cmd.Args)
+	res := m.editorDo(document.Action(cmd.Action), cmd.Args)
 	m.plugFailed(res.Err)
 	m.plugUnknownAction(cmd.Action, res.Err)
 	m.syncViewport()
@@ -2298,7 +2304,50 @@ func (m *Model) layout() frame.Layout {
 	if m.frameLayout != nil {
 		return *m.frameLayout
 	}
+	if c := &m.hoverLayout; c.on {
+		key := m.hoverLayoutKey()
+		if !c.ok || c.key != key {
+			c.l, c.key, c.ok = frame.ComputeLayout(m.width, m.height, m.layoutInput()), key, true
+		}
+		return c.l
+	}
 	return frame.ComputeLayout(m.width, m.height, m.layoutInput())
+}
+
+// hoverLayoutCache shares one geometry between the layout calls of a hover-only mouse
+// motion update, which makes five or more of them (the hover state, the hit map, the caret,
+// the plugin sections) for a state that a pointer move does not change. It is on only for
+// the duration of that update, and it is rebuilt if the state it is keyed on moves.
+type hoverLayoutCache struct {
+	on, ok bool
+	key    hoverLayoutKey
+	l      frame.Layout
+}
+
+// hoverLayoutKey is the cheap state of a hover update that the geometry follows: the
+// status text, the tabs, the overlays and the panels that open or close.
+type hoverLayoutKey struct {
+	notice, status                             string
+	tabs, active, overlays, panels             int
+	explorerWidth                              explorer.Width
+	dockRows                                   int
+	explorerOpen, dockOpen, menuOpen, findOpen bool
+}
+
+func (m *Model) hoverLayoutKey() hoverLayoutKey {
+	return hoverLayoutKey{
+		notice: m.notice, status: m.ed.Status(),
+		tabs: len(m.ed.Tabs()), active: m.activeTab(), overlays: len(m.overlays), panels: len(m.plug.panels.order),
+		explorerWidth: m.explorerWidth, dockRows: m.dockRows,
+		explorerOpen: m.explorerOpen, dockOpen: m.dock.Open(), menuOpen: m.menu.IsOpen(), findOpen: m.findOpen(),
+	}
+}
+
+// pointerOnly reports whether mo moves the pointer with no button and no drag in progress,
+// so the update changes hover state only.
+func (m *Model) pointerOnly(mo tea.MouseMotionMsg) bool {
+	return tea.Mouse(mo).Button == tea.MouseNone && !m.drag.active && !m.divider.active && m.drag.tab == nil &&
+		!m.explorerPanel.Dragging() && !m.dock.MouseDragging()
 }
 
 // statusHidden reports whether the status row gives way to a suggestion list or to
@@ -2420,6 +2469,24 @@ func virtualPosition(doc Document) (line, col int) {
 // passes them.
 func (m *Model) statusRow() frame.StatusRow {
 	opts := m.view.opts.StatusBar
+	// The element lists are parsed once per configuration: the row is read by every layout.
+	if c := &m.statusRows; c.ok && slices.Equal(c.opts.Left, opts.Left) && slices.Equal(c.opts.Right, opts.Right) && c.opts.Separator == opts.Separator {
+		return c.row
+	}
+	row := m.parseStatusRow(opts)
+	m.statusRows = statusRowCache{opts: StatusBarOptions{Left: slices.Clone(opts.Left), Right: slices.Clone(opts.Right), Separator: opts.Separator}, row: row, ok: true}
+	return row
+}
+
+// statusRowCache is the parsed status row of the options it was parsed from.
+type statusRowCache struct {
+	opts StatusBarOptions
+	row  frame.StatusRow
+	ok   bool
+}
+
+// parseStatusRow parses the element lists of opts.
+func (m *Model) parseStatusRow(opts StatusBarOptions) frame.StatusRow {
 	left := frame.ParseStatusElements(opts.Left)
 	if left == nil {
 		left = frame.DefaultStatusLeft()

@@ -2,12 +2,12 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 )
 
 // openBufferWordPopup opens a local buffer-word completion list on tab and returns the
@@ -36,7 +36,7 @@ func TestCompletionMultiCursorAccept(t *testing.T) {
 	tab := &lspTab{path: "/p/a.go", lines: []string{"foobar fo"}, cursor: buffer.Pos{Line: 0, Col: 9}}
 	lt := newLSPTest(t, nil, tab)
 	lt.open()
-	tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
+	tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
 	comp, index := openBufferWordPopup(t, lt, "foobar")
 	lt.m.acceptCompletion(comp, index)
 	if len(lt.ed.multiApplies) != 1 {
@@ -62,8 +62,8 @@ func TestCompletionMultiCursorSnippetAndImport(t *testing.T) {
 		tab := &lspTab{path: "/p/a.go", lines: []string{"foobar fo"}, cursor: buffer.Pos{Line: 0, Col: 9}}
 		lt := newLSPTest(t, nil, tab)
 		lt.open()
-		lt.ed.version, lt.ed.versionOK = editor.Version{Ver: 7}, true
-		tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
+		lt.ed.version, lt.ed.versionOK = document.Version{Ver: 7}, true
+		tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
 		comp, _ := openBufferWordPopup(t, lt, "foobar")
 		item := CompletionItem{Label: "call", Insert: "call()", Snippet: true, CursorOffset: 2}
 		if !lt.m.multiCursorAccept(comp, item) {
@@ -91,7 +91,7 @@ func TestCompletionMultiCursorSnippetAndImport(t *testing.T) {
 		tab := &lspTab{path: "/p/a.go", lines: []string{"foobar fo"}, cursor: buffer.Pos{Line: 0, Col: 9}}
 		lt := newLSPTest(t, nil, tab)
 		lt.open()
-		tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
+		tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
 		comp, _ := openBufferWordPopup(t, lt, "foobar")
 		item := CompletionItem{
 			Label: "fmt", Insert: "fmt",
@@ -123,9 +123,9 @@ func multiResolveTest(t *testing.T) (*lspTest, *lspTab, *lspCompletion) {
 	t.Helper()
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a", "foobar fo"}, buffer.Pos{Line: 1, Col: 9})
-	lt.ed.version, lt.ed.versionOK = editor.Version{Ver: 7}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{Ver: 7}, true
 	tab := lt.ed.tabs[0]
-	tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
+	tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
 	port.resolvedItem = CompletionItem{
 		Label: "fmt", Insert: "fmt",
 		Additional: []CompletionEdit{{
@@ -182,7 +182,7 @@ func TestCompletionMultiCursorResolveStaleVersion(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("no resolve command")
 	}
-	lt.ed.version = editor.Version{Ver: 8}
+	lt.ed.version = document.Version{Ver: 8}
 	feedCommand(lt, cmd)
 	if len(lt.ed.multiItemApplies) != 0 {
 		t.Fatalf("stale resolve applied: %+v", lt.ed.multiItemApplies)
@@ -199,7 +199,7 @@ func TestCompletionMultiCursorResolveCaretChanges(t *testing.T) {
 	t.Run("moved", func(t *testing.T) {
 		lt, tab, c := multiResolveTest(t)
 		cmd := lt.m.acceptCompletion(c, 0)
-		tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 3}}}
+		tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 3}}}
 		feedCommand(lt, cmd)
 		if len(lt.ed.multiItemApplies) != 0 {
 			t.Fatalf("a moved caret still applied the resolve: %+v", lt.ed.multiItemApplies)
@@ -229,7 +229,7 @@ func TestCompletionMultiCursorResolveWithoutVersionRefused(t *testing.T) {
 	lt := completionTest(t, port, []string{"package a", "foobar fo"}, buffer.Pos{Line: 1, Col: 9})
 	lt.ed.versionOK = false
 	tab := lt.ed.tabs[0]
-	tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
+	tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
 	c := openLSPCompletion(t, lt, []CompletionItem{{Label: "fmt", ResolveToken: 7}}, buffer.Pos{Line: 1, Col: 9})
 	if cmd := lt.m.acceptCompletion(c, 0); cmd != nil {
 		t.Fatal("a resolve without a version guard started a command")
@@ -266,8 +266,8 @@ func TestCompletionMultiCursorResolveInactiveDocument(t *testing.T) {
 func TestCompletionMultiCursorResolveFailure(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a", "foobar fo"}, buffer.Pos{Line: 1, Col: 9})
-	lt.ed.version, lt.ed.versionOK = editor.Version{Ver: 7}, true
-	lt.ed.tabs[0].carets = []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
+	lt.ed.version, lt.ed.versionOK = document.Version{Ver: 7}, true
+	lt.ed.tabs[0].carets = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
 	c := openLSPCompletion(t, lt, []CompletionItem{{Label: "fmt", ResolveToken: 7}}, buffer.Pos{Line: 1, Col: 9})
 	cmd := lt.m.acceptCompletion(c, 0)
 	port.resolveErr = errors.New("the server went away")
@@ -285,8 +285,8 @@ func TestCompletionMultiCursorResolveFailure(t *testing.T) {
 func TestCompletionMultiCursorResolveSnippet(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := completionTest(t, port, []string{"package a", "foobar fo"}, buffer.Pos{Line: 1, Col: 9})
-	lt.ed.version, lt.ed.versionOK = editor.Version{Ver: 7}, true
-	lt.ed.tabs[0].carets = []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
+	lt.ed.version, lt.ed.versionOK = document.Version{Ver: 7}, true
+	lt.ed.tabs[0].carets = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
 	port.resolvedItem = CompletionItem{
 		Label: "call", Insert: "call()", Snippet: true, CursorOffset: 2,
 		Additional: []CompletionEdit{{
@@ -313,7 +313,7 @@ func TestCompletionMultiCursorResolveSnippet(t *testing.T) {
 func TestCompletionMultiCursorResolveOverlap(t *testing.T) {
 	lt, _, c := multiResolveTest(t)
 	cmd := lt.m.acceptCompletion(c, 0)
-	lt.ed.multiItemErr = editor.ErrOverlappingEdits
+	lt.ed.multiItemErr = document.ErrOverlappingEdits
 	feedCommand(lt, cmd)
 	if len(lt.ed.multiItemApplies) != 1 {
 		t.Fatalf("overlap apply = %+v", lt.ed.multiItemApplies)
@@ -329,10 +329,10 @@ func TestCompletionMultiCursorSnippetStaleGuard(t *testing.T) {
 	tab := &lspTab{path: "/p/a.go", lines: []string{"foobar fo"}, cursor: buffer.Pos{Line: 0, Col: 9}}
 	lt := newLSPTest(t, nil, tab)
 	lt.open()
-	lt.ed.version, lt.ed.versionOK = editor.Version{Ver: 9}, true
-	tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
+	lt.ed.version, lt.ed.versionOK = document.Version{Ver: 9}, true
+	tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
 	comp, _ := openBufferWordPopup(t, lt, "foobar")
-	lt.ed.multiItemErr = editor.ErrStale
+	lt.ed.multiItemErr = document.ErrStale
 	lt.m.multiCursorAccept(comp, CompletionItem{Label: "call", Insert: "call()", Snippet: true})
 	if len(lt.ed.multiItemApplies) != 1 {
 		t.Fatalf("snippet accepts = %+v", lt.ed.multiItemApplies)
@@ -350,11 +350,11 @@ func TestCompletionMultiCursorSnippetStaleGuard(t *testing.T) {
 func TestCompletionMultiCursorStaleGuard(t *testing.T) {
 	tab := &lspTab{path: "/p/a.go", lines: []string{"foobar fo"}, cursor: buffer.Pos{Line: 0, Col: 9}}
 	lt := newLSPTest(t, nil, tab)
-	lt.ed.version, lt.ed.versionOK = editor.Version{Ver: 42}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{Ver: 42}, true
 	lt.open()
-	tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
+	tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
 	comp, index := openBufferWordPopup(t, lt, "foobar")
-	lt.ed.multiErr = editor.ErrStale
+	lt.ed.multiErr = document.ErrStale
 	lt.m.acceptCompletion(comp, index)
 	if len(lt.ed.multiApplies) != 1 {
 		t.Fatalf("multi-caret accepts = %d, want 1", len(lt.ed.multiApplies))
@@ -390,7 +390,7 @@ func TestCompletionMultiCursorTypingAndBackspaceUseTheSameActions(t *testing.T) 
 	tab := &lspTab{path: "/p/a.go", lines: []string{"foobar fo"}, cursor: buffer.Pos{Line: 0, Col: 9}}
 	lt := newLSPTest(t, nil, tab)
 	lt.open()
-	tab.carets = []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
+	tab.carets = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 2}}}
 	comp, _ := openBufferWordPopup(t, lt, "foobar")
 	lt.m.completionTyped(comp, "o")
 	if !completionActionRan(lt.ed.actions, "insert_char") {

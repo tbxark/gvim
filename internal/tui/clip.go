@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -393,7 +394,7 @@ func (m *Model) closeTopPopups() {
 // the editor's root. The editor works out the text, since it knows its root, and it also
 // sets its own clipboard. The text goes to the terminal clipboard with tea.SetClipboard, as
 // OSC 52. A refusal of the editor is the notice.
-func (m *Model) copyPath(a editor.Action) tea.Cmd {
+func (m *Model) copyPath(a document.Action) tea.Cmd {
 	if m.ed.Active() == nil {
 		m.notice = noDocumentNotice
 		return nil

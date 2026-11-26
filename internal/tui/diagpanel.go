@@ -121,9 +121,20 @@ type diagRow struct {
 	item   Diagnostic
 }
 
-// diagRows builds the panel's flat rows from the workspace store, which the port
-// keeps sorted by path.
+// diagRows returns the panel's flat rows from the workspace store, which the port keeps
+// sorted by path. The rows are built once per published list and shared: callers read them.
 func (m *Model) diagRows() []diagRow {
+	s := &m.lsp
+	if s.diagRowsOK && len(s.diagRowsOf) == len(s.wsDiags) && (len(s.wsDiags) == 0 || &s.diagRowsOf[0] == &s.wsDiags[0]) {
+		return s.diagRowsCache
+	}
+	rows := m.buildDiagRows()
+	s.diagRowsCache, s.diagRowsOf, s.diagRowsOK = rows, s.wsDiags, true
+	return rows
+}
+
+// buildDiagRows clones and sorts every file's diagnostics into the panel's rows.
+func (m *Model) buildDiagRows() []diagRow {
 	var rows []diagRow
 	for _, file := range m.lsp.wsDiags {
 		if len(file.Items) == 0 {

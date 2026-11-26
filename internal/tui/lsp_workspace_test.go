@@ -1,13 +1,14 @@
 package tui
 
 import (
+	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 )
 
@@ -52,8 +53,8 @@ func TestWorkspaceEditAppliesTextAcrossFiles(t *testing.T) {
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
 	lt.open()
 	port.workspace = []WorkspaceEdit{{Label: "organize imports", Ops: []WorkspaceOp{
-		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
-		{Kind: WorkspaceOpText, Path: "/p/b.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: "bar"}}},
+		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
+		{Kind: WorkspaceOpText, Path: "/p/b.go", Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: "bar"}}},
 	}}}
 	lt.drain(lt.m.lspPoll())
 	if got := lt.ed.applied["/p/a.go"]; len(got) != 1 || got[0].Text != "package b" {
@@ -78,7 +79,7 @@ func TestWorkspaceEditRefusesStaleVersion(t *testing.T) {
 	lt.open()
 	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{{
 		Kind: WorkspaceOpText, Path: "/p/a.go", Version: &stale,
-		Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "old"}},
+		Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "old"}},
 	}}}}
 	lt.drain(lt.m.lspPoll())
 	if len(lt.ed.applied["/p/a.go"]) != 0 {
@@ -117,11 +118,11 @@ func TestApplyFileEditsSkipsAChangedClosedFile(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
 	lt.open()
-	loaded := &editor.Document{Path: "/p/b.go"}
-	lt.ed.loadDocs = map[string]*editor.Document{"/p/b.go": loaded}
+	loaded := &document.Document{Path: "/p/b.go"}
+	lt.ed.loadDocs = map[string]*document.Document{"/p/b.go": loaded}
 	// The hash of "" is the hash of the document an empty loaded document gives;
 	// any other hash is a mismatch.
-	cmd := lt.m.ApplyFileEdits([]FileEdit{{Path: "/p/b.go", ExpectHash: 1, Edits: []editor.LSPEdit{{Text: "x"}}}}, nil)
+	cmd := lt.m.ApplyFileEdits([]FileEdit{{Path: "/p/b.go", ExpectHash: 1, Edits: []document.LSPEdit{{Text: "x"}}}}, nil)
 	lt.settle(cmd, 3)
 	if len(lt.ed.applied["/p/b.go"]) != 0 {
 		t.Fatalf("a file whose text changed was edited: %+v", lt.ed.applied["/p/b.go"])
@@ -210,7 +211,7 @@ func TestWorkspaceEditInterleavesResourceOpsAndTextEdits(t *testing.T) {
 	lt.open()
 	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{
 		{Kind: WorkspaceOpCreate, Path: "/p/new.go"},
-		{Kind: WorkspaceOpText, Path: "/p/new.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, Text: "package new"}}},
+		{Kind: WorkspaceOpText, Path: "/p/new.go", Edits: []document.LSPEdit{{From: buffer.Pos{}, Text: "package new"}}},
 		{Kind: WorkspaceOpRename, Path: "/p/new.go", NewPath: "/p/moved.go"},
 	}}}
 	lt.drain(lt.m.lspPoll())
@@ -242,7 +243,7 @@ func TestWorkspaceEditStopsAfterARefusedOperation(t *testing.T) {
 	lt.open()
 	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{
 		{Kind: WorkspaceOpDelete, Path: "/p/gone.go"},
-		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
+		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
 		{Kind: WorkspaceOpCreate, Path: "/p/later.go"},
 	}}}
 	lt.drain(lt.m.lspPoll())
@@ -268,7 +269,7 @@ func TestWorkspaceEditPartialSuccessBeforeARefusal(t *testing.T) {
 	lt.open()
 	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{
 		{Kind: WorkspaceOpCreate, Path: "/p/first.go"},
-		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
+		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
 		{Kind: WorkspaceOpDelete, Path: "/p/gone.go"},
 	}}}
 	lt.drain(lt.m.lspPoll())
@@ -282,5 +283,105 @@ func TestWorkspaceEditPartialSuccessBeforeARefusal(t *testing.T) {
 		if !strings.Contains(lt.m.notice, want) {
 			t.Errorf("notice = %q, want it to contain %q", lt.m.notice, want)
 		}
+	}
+}
+
+// splitRenameEd is an editor port with the split rename: the disk move is a separate call
+// from the editor's check and follow, so a test can tell which goroutine each one is for.
+type splitRenameEd struct {
+	*lspEd
+	log      []string
+	checkErr error
+}
+
+func (e *splitRenameEd) CheckRename(oldPath, newPath string) error {
+	e.log = append(e.log, "check "+oldPath+" "+newPath)
+	return e.checkErr
+}
+
+func (e *splitRenameEd) MoveFile(oldPath, newPath string, _ bool) (bool, error) {
+	e.log = append(e.log, "move "+oldPath+" "+newPath)
+	return true, nil
+}
+
+func (e *splitRenameEd) FollowRename(oldPath, newPath string) error {
+	e.log = append(e.log, "follow "+oldPath+" "+newPath)
+	return nil
+}
+
+// TestWorkspaceEditRenameKeepsTheEditorOnTheUIGoroutine checks the split of an LSP file
+// rename: the editor is read in the call that builds the command, only the disk move runs
+// inside the command, and the open tabs follow when the command's message comes back to
+// Update. RenameFile, which does both, is not used for a port with the split.
+func TestWorkspaceEditRenameKeepsTheEditorOnTheUIGoroutine(t *testing.T) {
+	tests := []struct {
+		name     string
+		checkErr error
+		wantLog  []string
+		wantSkip string
+	}{
+		{name: "renames", wantLog: []string{"check /p/old.go /p/new.go", "move /p/old.go /p/new.go", "follow /p/old.go /p/new.go"}},
+		{name: "refused by an open tab", checkErr: errors.New("new.go is open"), wantLog: []string{"check /p/old.go /p/new.go"}, wantSkip: "new.go is open"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lt := newLSPTest(t, newFakeLSP("go"), &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+			ed := &splitRenameEd{lspEd: lt.ed, checkErr: tt.checkErr}
+			lt.m.ed = ed
+			var res FileEditResult
+			cmd := lt.m.applyWorkspaceEdit(WorkspaceEdit{Ops: []WorkspaceOp{{Kind: WorkspaceOpRename, Path: "/p/old.go", NewPath: "/p/new.go"}}},
+				func(r FileEditResult) tea.Cmd { res = r; return nil })
+			if tt.wantSkip != "" {
+				if cmd != nil || len(res.Skipped) == 0 || !strings.Contains(res.Skipped[0], tt.wantSkip) {
+					t.Fatalf("refused rename: cmd=%v skipped=%v", cmd != nil, res.Skipped)
+				}
+			} else {
+				if cmd == nil {
+					t.Fatal("a rename returned no command for its disk move")
+				}
+				if want := []string{"check /p/old.go /p/new.go"}; !slicesEqual(ed.log, want) {
+					t.Fatalf("before the command ran: log = %v, want %v", ed.log, want)
+				}
+				msg := cmd()
+				if want := []string{"check /p/old.go /p/new.go", "move /p/old.go /p/new.go"}; !slicesEqual(ed.log, want) {
+					t.Fatalf("the command did more than the disk move: log = %v", ed.log)
+				}
+				lt.m.Update(msg)
+				if res.Operations != 1 {
+					t.Fatalf("operations = %d, want 1 (skipped %v)", res.Operations, res.Skipped)
+				}
+			}
+			if !slicesEqual(ed.log, tt.wantLog) {
+				t.Fatalf("log = %v, want %v", ed.log, tt.wantLog)
+			}
+			if len(ed.fileOps) != 0 {
+				t.Fatalf("RenameFile ran as well: %v", ed.fileOps)
+			}
+		})
+	}
+}
+
+// TestWorkspaceEditWithoutFileOperationsStillReports checks that an editor port with no file
+// operations stops the plan like a refused step: the report runs with the reason and the
+// tab the edit started in is active again, instead of the plan being dropped half way.
+func TestWorkspaceEditWithoutFileOperationsStillReports(t *testing.T) {
+	lt := newLSPTest(t, newFakeLSP("go"),
+		&lspTab{path: "/p/a.go", lines: []string{"package a"}}, &lspTab{path: "/p/b.go", lines: []string{"package b"}})
+	lt.ed.active = 0
+	lt.m.ed = struct{ EditorState }{lt.ed}
+	var res FileEditResult
+	reported := false
+	cmd := lt.m.applyWorkspaceEdit(WorkspaceEdit{Ops: []WorkspaceOp{
+		{Kind: WorkspaceOpRename, Path: "/p/old.go", NewPath: "/p/new.go"},
+		{Kind: WorkspaceOpCreate, Path: "/p/later.go"},
+	}}, func(r FileEditResult) tea.Cmd { res, reported = r, true; return nil })
+	if cmd != nil {
+		t.Fatal("the plan returned a command with no file operations to run")
+	}
+	if !reported {
+		t.Fatal("the report did not run: the plan was dropped")
+	}
+	if len(res.Skipped) != 2 || !strings.Contains(res.Skipped[0], "file operations") || !strings.Contains(res.Skipped[1], "1 later changes") {
+		t.Fatalf("skipped = %v", res.Skipped)
 	}
 }

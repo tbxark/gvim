@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"maps"
 	"slices"
 	"strconv"
@@ -79,16 +80,9 @@ type ViewOptions struct {
 	// side, follow-active-buffer, compact directories, auto-open on the last
 	// buffer close). Zero keeps gvim's automatic width and the left side; the app
 	// fills it from the config, whose defaults are Fresh's.
-	Explorer          explorer.Options
-	MenuBarMnemonics  bool // editor.menu_bar_mnemonics, default true
-	SmoothScroll      bool // editor.smooth_scroll, default true
-	SetWindowTitle    bool // editor.set_window_title, default true
-	TerminalAutoTitle bool // editor.terminal_auto_title, default true
-	// editor.animations, editor.cursor_jump_animation, editor.viewport_edge_fade
-	// and editor.screensaver_* are not ViewOptions: gvim's cell-grid TUI draws no
-	// animations, fades or screensaver, so the config keys are accepted and
-	// parsed (config/editoropts.go) but not carried into the UI. The decision is
-	// recorded in docs/parity.md; the keys load without diagnostics.
+	Explorer         explorer.Options
+	MenuBarMnemonics bool // editor.menu_bar_mnemonics, default true
+	SetWindowTitle   bool // editor.set_window_title, default true
 
 	// Mouse. Zero reads as the default.
 
@@ -159,9 +153,7 @@ func DefaultViewOptions() ViewOptions {
 		RainbowBrackets:           true,
 		Explorer:                  explorer.DefaultOptions(),
 		MenuBarMnemonics:          true,
-		SmoothScroll:              true,
 		SetWindowTitle:            true,
-		TerminalAutoTitle:         true,
 		MouseWheelScrollLines:     3,
 		DoubleClickTimeMS:         500,
 		MouseHoverDelayMS:         500,
@@ -189,7 +181,7 @@ type viewState struct {
 	// above the toggles are readable by the painting (m.view.opts.ShowTilde, ...).
 	opts ViewOptions
 	// languages resolves the per-language settings of a document. Nil means none.
-	languages editor.SettingsResolver
+	languages document.SettingsResolver
 	// completionAutoSeq is the generation of the pending auto-popup debounce: a
 	// scheduled trigger fires only while it is still the newest one. Bumping it
 	// cancels the pending trigger (a non-word character, Esc, closing the list).
@@ -225,22 +217,22 @@ func newViewState(o ViewOptions) viewState {
 // forwards it from the editor document. A document without it has the global settings
 // only.
 type viewDocument interface {
-	ViewSettings() editor.ViewSettings
+	ViewSettings() document.ViewSettings
 }
 
 // docViewOf returns the display settings of doc, or none when doc does not keep them.
-func docViewOf(doc Document) editor.ViewSettings {
+func docViewOf(doc Document) document.ViewSettings {
 	if v, ok := doc.(viewDocument); ok {
 		return v.ViewSettings()
 	}
-	return editor.ViewSettings{}
+	return document.ViewSettings{}
 }
 
 // docViewSettings returns the display settings of the active document.
-func (m *Model) docViewSettings() editor.ViewSettings {
+func (m *Model) docViewSettings() document.ViewSettings {
 	doc := m.ed.Active()
 	if doc == nil {
-		return editor.ViewSettings{}
+		return document.ViewSettings{}
 	}
 	return docViewOf(doc)
 }
@@ -286,15 +278,15 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 		m.view.occurrences = !m.view.occurrences
 		m.notice = onOffNotice("Occurrence highlight", m.view.occurrences)
 	case "toggle_line_numbers_current_buffer":
-		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().LineNumbers, !m.hideLineNumbers))
+		return m.bufferFlag(action, args, document.OverrideOr(m.docViewSettings().LineNumbers, !m.hideLineNumbers))
 	case "toggle_line_wrap_current_buffer":
-		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().LineWrap, m.view.lineWrap))
+		return m.bufferFlag(action, args, document.OverrideOr(m.docViewSettings().LineWrap, m.view.lineWrap))
 	case "toggle_current_line_highlight_current_buffer":
-		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().CurrentLine, m.view.currentLine))
+		return m.bufferFlag(action, args, document.OverrideOr(m.docViewSettings().CurrentLine, m.view.currentLine))
 	case "toggle_occurrence_highlight_current_buffer":
-		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().Occurrences, m.view.occurrences))
+		return m.bufferFlag(action, args, document.OverrideOr(m.docViewSettings().Occurrences, m.view.occurrences))
 	case "toggle_whitespace_indicators":
-		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().Whitespace, m.view.whitespace))
+		return m.bufferFlag(action, args, document.OverrideOr(m.docViewSettings().Whitespace, m.view.whitespace))
 	case "toggle_indentation_guide_current_buffer":
 		// The toggle flips what is drawn, which the mode, the buffer and the language
 		// decide together, not the buffer's own override.
@@ -303,17 +295,17 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 		if _, ok := args["column"]; ok {
 			return nil, false
 		}
-		m.askNumber(action, "column", uiText("gvim.prompt.title.ruler_column", "Ruler Column"), "Ruler column:", editor.MaxViewColumn)
+		m.askNumber(action, "column", uiText("gvim.prompt.title.ruler_column", "Ruler Column"), "Ruler column:", document.MaxViewColumn)
 	case "set_tab_size":
 		if _, ok := args["size"]; ok {
 			return nil, false
 		}
-		m.askNumber(action, "size", uiText("gvim.prompt.title.tab_size", "Tab Size"), "Tab size:", editor.MaxViewTabSize)
+		m.askNumber(action, "size", uiText("gvim.prompt.title.tab_size", "Tab Size"), "Tab size:", document.MaxViewTabSize)
 	case "set_page_width":
 		if _, ok := args["width"]; ok {
 			return nil, false
 		}
-		m.askNumber(action, "width", uiText("gvim.prompt.title.page_width", "Page Width"), "Page width:", editor.MaxViewColumn)
+		m.askNumber(action, "width", uiText("gvim.prompt.title.page_width", "Page Width"), "Page width:", document.MaxViewColumn)
 	case "set_language":
 		return m.languageAction(args)
 	case "select_cursor_style":
@@ -357,16 +349,11 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "toggle_debug_highlights":
 		m.view.debug = !m.view.debug
 		m.notice = onOffNotice("Highlight debug", m.view.debug)
-	case "set_background", "set_background_blend":
-		m.notice = backgroundNotice
 	default:
 		return nil, false
 	}
 	return nil, true
 }
-
-// backgroundNotice says why the background commands do nothing in a terminal.
-const backgroundNotice = "Not applicable in a terminal: text cells are drawn over the terminal's own background, which has no image layer to fade"
 
 // shownNotice is the status text of a shown or hidden part.
 func shownNotice(what string, shown bool) string {
@@ -398,7 +385,7 @@ func (m *Model) bufferFlag(action string, args map[string]any, cur bool) (tea.Cm
 	if _, ok := args["value"]; ok {
 		return nil, false
 	}
-	m.editorDo(editor.Action(action), map[string]any{"value": !cur})
+	m.editorDo(document.Action(action), map[string]any{"value": !cur})
 	return nil, true
 }
 
@@ -503,7 +490,7 @@ func (m *Model) currentThemeRef() string {
 // catalog it loads a bundled theme by name.
 func (m *Model) loadTheme(ref string) (theme.Theme, string, error) {
 	if ref == "" {
-		ref = "dark"
+		ref = "gopher"
 	}
 	if m.util.themeCatalog == nil {
 		th, err := theme.Load(ref)
@@ -692,7 +679,7 @@ func (m *Model) viewLayout(in *frame.Input) {
 	if doc := m.ed.Active(); doc != nil {
 		// The gutter of the layout is the focused pane's, so the layout follows the
 		// active document.
-		in.HideLineNumbers = !editor.OverrideOr(docViewOf(doc).LineNumbers, !m.hideLineNumbers)
+		in.HideLineNumbers = !document.OverrideOr(docViewOf(doc).LineNumbers, !m.hideLineNumbers)
 	}
 }
 
@@ -717,11 +704,11 @@ func (m *Model) viewPane(sp split.Pane, p editorpane.Pane, doc Document) editorp
 	}
 	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes
 	// is laid out in segments, a few of them at a time, so its length costs nothing.
-	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap)
-	p.HideGutter = !editor.OverrideOr(s.LineNumbers, !m.hideLineNumbers)
-	p.CurrentLine = editor.OverrideOr(s.CurrentLine, m.view.currentLine)
-	p.Occurrences = editor.OverrideOr(s.Occurrences, m.view.occurrences) && !m.occurrencesOff(doc)
-	p.VisibleWhitespace = editor.OverrideOr(s.Whitespace, m.view.whitespace)
+	p.Wrap = document.OverrideOr(s.LineWrap, m.view.lineWrap)
+	p.HideGutter = !document.OverrideOr(s.LineNumbers, !m.hideLineNumbers)
+	p.CurrentLine = document.OverrideOr(s.CurrentLine, m.view.currentLine)
+	p.Occurrences = document.OverrideOr(s.Occurrences, m.view.occurrences) && !m.occurrencesOff(doc)
+	p.VisibleWhitespace = document.OverrideOr(s.Whitespace, m.view.whitespace)
 	p.IndentGuides = s.IndentGuidesOn()
 	p.HideFoldMarkers = !s.FoldIndicatorsOn()
 	p.Icons = m.view.icons
@@ -758,7 +745,7 @@ func (m *Model) pageViewFor(doc Document) editorpane.PageView {
 }
 
 // pageViewForWith computes doc's page view using already-resolved view and language settings.
-func (m *Model) pageViewForWith(doc Document, s editor.ViewSettings, ls editor.LanguageSettings) editorpane.PageView {
+func (m *Model) pageViewForWith(doc Document, s document.ViewSettings, ls document.LanguageSettings) editorpane.PageView {
 	if doc == nil {
 		return editorpane.PageView{}
 	}
@@ -780,7 +767,7 @@ func (m *Model) pageViewForWith(doc Document, s editor.ViewSettings, ls editor.L
 }
 
 // panePageViewWith computes pane p's page view using already-resolved view and language settings.
-func (m *Model) panePageViewWith(p split.Pane, doc Document, s editor.ViewSettings, ls editor.LanguageSettings) editorpane.PageView {
+func (m *Model) panePageViewWith(p split.Pane, doc Document, s document.ViewSettings, ls document.LanguageSettings) editorpane.PageView {
 	pv := m.pageViewForWith(doc, s, ls)
 	switch m.dualRoleOf(p) {
 	case dualPreview:
@@ -997,14 +984,14 @@ func (m *Model) viewHolds(name string) (bool, bool) {
 // languageSettings returns the effective settings of a document with the given language
 // name and file path: Deps.Languages applied, or the Fresh defaults when it is nil. The
 // document's own ViewSettings are not applied; read them with docViewSettings.
-func (m *Model) languageSettings(language, path string) editor.LanguageSettings {
+func (m *Model) languageSettings(language, path string) document.LanguageSettings {
 	if m.view.languages != nil {
 		return m.view.languages(language, path)
 	}
-	return editor.LanguageSettings{
+	return document.LanguageSettings{
 		TabSize:                m.tabSize,
 		LineWrap:               m.view.lineWrap,
-		PageWidth:              editor.DefaultPageWidth,
+		PageWidth:              document.DefaultPageWidth,
 		WhitespaceTabsLeading:  true,
 		WhitespaceTabsInner:    true,
 		WhitespaceTabsTrailing: true,

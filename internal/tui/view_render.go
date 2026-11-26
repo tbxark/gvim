@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"unicode/utf8"
 
@@ -13,7 +14,7 @@ const defaultGuideGlyph = '▏'
 
 // docLanguageSettings returns the effective settings of doc's language: its name and
 // path go to the resolver. A document that has neither gets the language-less settings.
-func (m *Model) docLanguageSettings(doc Document) editor.LanguageSettings {
+func (m *Model) docLanguageSettings(doc Document) document.LanguageSettings {
 	var language, path string
 	if l, ok := doc.(interface{ Language() string }); ok {
 		language = l.Language()
@@ -28,7 +29,7 @@ func (m *Model) docLanguageSettings(doc Document) editor.LanguageSettings {
 // the hanging indent and wrap column, the indentation guides, the whitespace marks and
 // the bracket highlights. s are the document's own view settings, which win over the
 // config, and ls are its resolved language settings.
-func (m *Model) viewRender(p editorpane.Pane, s editor.ViewSettings, ls editor.LanguageSettings) editorpane.Pane {
+func (m *Model) viewRender(p editorpane.Pane, s document.ViewSettings, ls document.LanguageSettings) editorpane.Pane {
 	o := m.view.opts
 	p.Opts.RelativeLineNumbers = o.RelativeLineNumbers
 	p.Opts.WrapIndent = o.WrapIndent

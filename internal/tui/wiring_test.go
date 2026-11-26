@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -357,7 +358,7 @@ func withMenuKeys(m *Model) *Model {
 // know, the way the app adapter does for the actions that are not built yet.
 type unknownEditor struct{ *fakeEditor }
 
-func (u unknownEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (u unknownEditor) Do(a document.Action, args map[string]any) editor.Result {
 	if a == "find_selection_next" {
 		return editor.Result{Err: editor.ErrUnknownAction}
 	}
@@ -415,7 +416,7 @@ func TestClickEditLabelThenEnterRunsUndo(t *testing.T) {
 		t.Fatalf("menu title = %q after the Edit click, want Edit", m.menu.Title())
 	}
 	press(m, special(tea.KeyEnter))
-	if !slices.Contains(ed.actions, editor.Action("undo")) {
+	if !slices.Contains(ed.actions, document.Action("undo")) {
 		t.Fatalf("editor actions = %v, want undo", ed.actions)
 	}
 	if m.menu.IsOpen() {

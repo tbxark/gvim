@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -17,8 +18,8 @@ type asyncSaver interface {
 	PlanSave() (editor.SavePlan, error)
 	PlanSaveAs(path string, force bool) (editor.SavePlan, error)
 	PlanSaveAll() (editor.SavePlan, error)
-	WriteSave(p editor.SavePlan) []editor.SaveResult
-	ApplySavePlan(p editor.SavePlan, results []editor.SaveResult) error
+	WriteSave(p editor.SavePlan) []document.SaveResult
+	ApplySavePlan(p editor.SavePlan, results []document.SaveResult) error
 }
 
 // saveDoneMsg is the outcome of the writes of an explicit save. The results are applied
@@ -27,7 +28,7 @@ type asyncSaver interface {
 // for a Save of the active document, whose refusal over a changed file asks to overwrite.
 type saveDoneMsg struct {
 	plan    editor.SavePlan
-	results []editor.SaveResult
+	results []document.SaveResult
 	then    flow
 	reload  bool
 	ask     bool
@@ -174,7 +175,7 @@ func (m *Model) saveDone(msg saveDoneMsg) tea.Cmd {
 		m.notice = "Save cancelled"
 		return nil
 	}
-	if msg.ask && errors.Is(err, editor.ErrChangedOnDisk) && m.askOverwriteSave(err, msg.then) {
+	if msg.ask && errors.Is(err, document.ErrChangedOnDisk) && m.askOverwriteSave(err, msg.then) {
 		return nil
 	}
 	return m.finished(err, msg.then, msg.reload)
@@ -185,7 +186,7 @@ func (m *Model) saveDone(msg saveDoneMsg) tea.Cmd {
 // notice row and stops the flow, because the editor's own status is not always shown.
 // A saved Save As reloads the explorer when reload is set, and the flow goes on.
 func (m *Model) finished(err error, f flow, reload bool) tea.Cmd {
-	if errors.Is(err, editor.ErrNoPath) {
+	if errors.Is(err, document.ErrNoPath) {
 		m.askSaveAs(f)
 		return nil
 	}

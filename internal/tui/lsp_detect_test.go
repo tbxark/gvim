@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"image/color"
 	"slices"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/theme"
@@ -26,7 +26,7 @@ type detectLSP struct {
 	openLang []string // "<lang>:<path>" of every Open
 	info     map[string]LSPServerInfo
 
-	fmtEdits []editor.LSPEdit
+	fmtEdits []document.LSPEdit
 	fmtErr   error
 	fmts     []string // the text of every Format
 }
@@ -45,7 +45,7 @@ func (f *detectLSP) Open(path, lang, text string) (int32, error) {
 
 func (f *detectLSP) Server(lang string) LSPServerInfo { return f.info[lang] }
 
-func (f *detectLSP) Format(_, text string, _ int, _ bool) ([]editor.LSPEdit, error) {
+func (f *detectLSP) Format(_, text string, _ int, _ bool) ([]document.LSPEdit, error) {
 	f.fmts = append(f.fmts, text)
 	return f.fmtEdits, f.fmtErr
 }
@@ -194,7 +194,7 @@ func TestNoServerNoticesFollowTheConfig(t *testing.T) {
 
 func TestFormatBufferFallsBackToTheLanguageServer(t *testing.T) {
 	port := newDetectLSP("go")
-	port.fmtEdits = []editor.LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 7}, Text: "package"}}
+	port.fmtEdits = []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 7}, Text: "package"}}
 	tab := &lspTab{path: "/p/a.go", lines: []string{"package a", "func  f() {}"}}
 	lt := newDetectTest(t, port, tab)
 	lt.ed.formatter = false
@@ -269,7 +269,7 @@ func TestFormatBufferSaysWhyNothingCanFormat(t *testing.T) {
 
 func TestFormatBufferDropsEditsForTextThatChanged(t *testing.T) {
 	port := newDetectLSP("go")
-	port.fmtEdits = []editor.LSPEdit{{To: buffer.Pos{Col: 1}, Text: "X"}}
+	port.fmtEdits = []document.LSPEdit{{To: buffer.Pos{Col: 1}, Text: "X"}}
 	tab := &lspTab{path: "/p/a.go", lines: []string{"package a"}}
 	lt := newDetectTest(t, port, tab)
 	lt.ed.formatter = false

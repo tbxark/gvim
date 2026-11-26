@@ -1,13 +1,13 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -58,20 +58,20 @@ func TestMultiKeyBindings(t *testing.T) {
 	tests := []struct {
 		name   string
 		keys   []tea.KeyPressMsg
-		want   []editor.Action
+		want   []document.Action
 		notice string
 	}{
 		{"the first key does not run its own binding", []tea.KeyPressMsg{ctrl('x')}, nil, "Ctrl+X-"},
-		{"two chords", []tea.KeyPressMsg{ctrl('x'), ctrl('s')}, []editor.Action{"undo"}, ""},
-		{"chord then plain key", []tea.KeyPressMsg{ctrl('x'), typed("k")}, []editor.Action{"select_all"}, ""},
-		{"alt prefix", []tea.KeyPressMsg{alt('g'), typed("g")}, []editor.Action{"goto_line_start"}, ""},
+		{"two chords", []tea.KeyPressMsg{ctrl('x'), ctrl('s')}, []document.Action{"undo"}, ""},
+		{"chord then plain key", []tea.KeyPressMsg{ctrl('x'), typed("k")}, []document.Action{"select_all"}, ""},
+		{"alt prefix", []tea.KeyPressMsg{alt('g'), typed("g")}, []document.Action{"goto_line_start"}, ""},
 		{"a wrong second key is dropped", []tea.KeyPressMsg{ctrl('x'), typed("q")}, nil, "Ctrl+X Q is not bound"},
 		{"a wrong second key cannot run its single binding", []tea.KeyPressMsg{ctrl('x'), ctrl('z')}, nil, "Ctrl+X Ctrl+Z is not bound"},
 		{"escape cancels", []tea.KeyPressMsg{ctrl('x'), special(tea.KeyEscape)}, nil, "Ctrl+X Esc is not bound"},
-		{"the sequence ends after a miss", []tea.KeyPressMsg{ctrl('x'), typed("q"), ctrl('z')}, []editor.Action{"redo"}, ""},
-		{"the sequence can run twice", []tea.KeyPressMsg{ctrl('x'), typed("k"), ctrl('x'), typed("k")}, []editor.Action{"select_all", "select_all"}, ""},
-		{"an unrelated key keeps its binding", []tea.KeyPressMsg{ctrl('z')}, []editor.Action{"redo"}, ""},
-		{"typing is not held", []tea.KeyPressMsg{typed("x")}, []editor.Action{"insert_char"}, ""},
+		{"the sequence ends after a miss", []tea.KeyPressMsg{ctrl('x'), typed("q"), ctrl('z')}, []document.Action{"redo"}, ""},
+		{"the sequence can run twice", []tea.KeyPressMsg{ctrl('x'), typed("k"), ctrl('x'), typed("k")}, []document.Action{"select_all", "select_all"}, ""},
+		{"an unrelated key keeps its binding", []tea.KeyPressMsg{ctrl('z')}, []document.Action{"redo"}, ""},
+		{"typing is not held", []tea.KeyPressMsg{typed("x")}, []document.Action{"insert_char"}, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

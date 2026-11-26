@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ import (
 // action named "fail" sets an error text.
 type statusEditor struct{ *fakeEditor }
 
-func (s statusEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (s statusEditor) Do(a document.Action, args map[string]any) editor.Result {
 	res := s.fakeEditor.Do(a, args)
 	switch a {
 	case "save":

@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"reflect"
 	"slices"
 	"strings"
@@ -27,7 +28,7 @@ type errEditor struct {
 	only []string
 }
 
-func (e *errEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e *errEditor) Do(a document.Action, args map[string]any) editor.Result {
 	res := e.fakeEditor.Do(a, args)
 	if len(e.only) == 0 || slices.Contains(e.only, string(a)) {
 		res.Err = e.err
@@ -610,8 +611,8 @@ func TestDoRepeatsAndMapsErrors(t *testing.T) {
 		{"three times", nil, 3, "", 3},
 		{"count 0 is once", nil, 0, "", 1},
 		{"unknown action", fmt.Errorf("%w: nope", editor.ErrUnknownAction), 3, pluginapi.CodeUnsupported, 1},
-		{"read-only", editor.ErrReadOnly, 2, pluginapi.CodeReadOnly, 1},
-		{"large file", editor.ErrLargeFile, 1, pluginapi.CodeTooLarge, 1},
+		{"read-only", document.ErrReadOnly, 2, pluginapi.CodeReadOnly, 1},
+		{"large file", document.ErrLargeFile, 1, pluginapi.CodeTooLarge, 1},
 		{"unsaved", editor.ErrUnsaved, 1, pluginapi.CodeConflict, 1},
 		{"no document", editor.ErrNoDocument, 1, pluginapi.CodeNotFound, 1},
 		{"anything else", errors.New("boom"), 1, pluginapi.CodeInvalid, 1},
@@ -667,7 +668,7 @@ func TestDoAllGroupsStopsAndDefers(t *testing.T) {
 	t.Run("stops at the first error", func(t *testing.T) {
 		t.Parallel()
 		ed := newFakeEditor("x")
-		ee := &errEditor{fakeEditor: ed, err: editor.ErrReadOnly, only: []string{"delete_line"}}
+		ee := &errEditor{fakeEditor: ed, err: document.ErrReadOnly, only: []string{"delete_line"}}
 		rt := newFakeRuntime(t)
 		m := New(Deps{Editor: ee, Keys: testKeys(), Clock: testClock, Root: RootPorts{Plugins: rt}})
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

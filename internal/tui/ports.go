@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"github.com/tbxark/gvim/document"
 	"image/color"
 	"time"
 
@@ -37,7 +38,7 @@ type TabInfo = frame.TabInfo
 // editor's own rules.
 type EditorState interface {
 	SetViewport(rows, cols int)
-	Do(a editor.Action, args map[string]any) editor.Result
+	Do(a document.Action, args map[string]any) editor.Result
 	Active() Document // the active document, or nil when no tab is open (the welcome screen shows)
 	Tabs() []TabInfo
 	Status() string
@@ -108,7 +109,7 @@ type EnvPort interface {
 // editor without it runs the command in Do, which blocks until the command ends. The
 // app adapter implements it.
 type ShellRunner interface {
-	BeginShell(a editor.Action, args map[string]any) (editor.ShellJob, error)
+	BeginShell(a document.Action, args map[string]any) (editor.ShellJob, error)
 	EndShell(job editor.ShellJob, out string, runErr error) editor.Result
 }
 
@@ -518,7 +519,7 @@ type WorkspaceOp struct {
 	Path    string
 	NewPath string // the target of a rename
 	// Edits are the text edits of a text operation, in rune positions.
-	Edits []editor.LSPEdit
+	Edits []document.LSPEdit
 	// Version is the document version the edits were computed against, when the
 	// server gave one. The root rejects the edits when the open document has
 	// moved past it.
@@ -751,7 +752,7 @@ type Deps struct {
 	// Languages resolves the per-language settings (config languages.<id> merged over
 	// the global options) of a document from its language name and file path. Nil
 	// means no language overrides: the global options apply to every document.
-	Languages editor.SettingsResolver
+	Languages document.SettingsResolver
 	// Root holds the optional ports of the root features: Switch Project, Live
 	// Grep, git markers, the file watcher and the auto-save interval.
 	Root RootPorts

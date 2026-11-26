@@ -436,3 +436,27 @@ func TestWorkspaceDiagnosticsRowMarksAndOpensAnUnopenedFile(t *testing.T) {
 		t.Fatalf("opened = %v, want the unopened workspace file", lt.ed.opened)
 	}
 }
+
+// TestDiagRowsAreBuiltOncePerPublishedList checks the row cache: the panel reads the rows on
+// every frame, so they are sorted once per list, and a new poll or a stop replaces them.
+func TestDiagRowsAreBuiltOncePerPublishedList(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"x"}})
+	lt.open()
+	lt.feed(lspDiagsMsg{workspaceDiags: diagSampleFiles()})
+	first := lt.m.diagRows()
+	if len(first) != 5 {
+		t.Fatalf("rows = %d, want 2 headers and 3 items", len(first))
+	}
+	if again := lt.m.diagRows(); &first[0] != &again[0] {
+		t.Fatal("a second read rebuilt the rows")
+	}
+	lt.feed(lspDiagsMsg{workspaceDiags: diagSampleFiles()[1:]})
+	if got := lt.m.diagRows(); len(got) != 2 || got[0].path != "/p/b.go" {
+		t.Fatalf("rows after a new list = %+v", got)
+	}
+	lt.feed(lspServerMsg{action: "stop"})
+	if got := lt.m.diagRows(); len(got) != 0 {
+		t.Fatalf("rows after stop = %+v, want none", got)
+	}
+}

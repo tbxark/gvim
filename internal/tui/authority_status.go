@@ -172,6 +172,7 @@ func (m *Model) authorityReconnectCmd(password string) tea.Cmd {
 	if fn == nil {
 		return nil
 	}
+	m.authorityBusy = true
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), authorityDialTimeout)
 		defer cancel()

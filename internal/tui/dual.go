@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/split"
 )
@@ -188,7 +188,7 @@ func (m *Model) requireMarkdown() bool {
 // setMarkdownPageView sets the active document's page view through the editor's
 // own per-buffer action, so the view settings are the one place the mode lives.
 func (m *Model) setMarkdownPageView(on bool) {
-	m.editorDo(editor.Action("toggle_page_view"), map[string]any{"value": on})
+	m.editorDo(document.Action("toggle_page_view"), map[string]any{"value": on})
 }
 
 // openMarkdownDual opens the dual view of the active Markdown document: the

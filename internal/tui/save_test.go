@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,12 +31,12 @@ func (e *saveEditor) PlanSaveAs(path string, force bool) (editor.SavePlan, error
 
 func (e *saveEditor) PlanSaveAll() (editor.SavePlan, error) { return e.ed.PlanSaveAll() }
 
-func (e *saveEditor) WriteSave(p editor.SavePlan) []editor.SaveResult {
+func (e *saveEditor) WriteSave(p editor.SavePlan) []document.SaveResult {
 	e.writes++
 	return p.Run()
 }
 
-func (e *saveEditor) ApplySavePlan(p editor.SavePlan, results []editor.SaveResult) error {
+func (e *saveEditor) ApplySavePlan(p editor.SavePlan, results []document.SaveResult) error {
 	return e.ed.ApplySavePlan(p, results)
 }
 
@@ -234,14 +235,14 @@ func (e *saveTabEditor) PlanSaveAs(path string, force bool) (editor.SavePlan, er
 
 func (e *saveTabEditor) PlanSaveAll() (editor.SavePlan, error) { return e.ed.PlanSaveAll() }
 
-func (e *saveTabEditor) WriteSave(p editor.SavePlan) []editor.SaveResult {
+func (e *saveTabEditor) WriteSave(p editor.SavePlan) []document.SaveResult {
 	e.writes++
 	e.closedAtWrite = len(e.closed)
 	return p.Run()
 }
 
 // ApplySavePlan records the save, and the fake tab is clean once it worked.
-func (e *saveTabEditor) ApplySavePlan(p editor.SavePlan, results []editor.SaveResult) error {
+func (e *saveTabEditor) ApplySavePlan(p editor.SavePlan, results []document.SaveResult) error {
 	err := e.ed.ApplySavePlan(p, results)
 	if err == nil {
 		e.dirty[e.active] = false

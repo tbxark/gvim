@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -48,7 +48,7 @@ type lspDescriber interface {
 // sends to the server first if the server holds an older one, so the edits fit it. The edits
 // are in rune columns of text.
 type lspFormatter interface {
-	Format(path, text string, tabSize int, insertSpaces bool) ([]editor.LSPEdit, error)
+	Format(path, text string, tabSize int, insertSpaces bool) ([]document.LSPEdit, error)
 }
 
 // LSPUnavailableError is what LSPSession.Open returns when no server can run for the
@@ -171,7 +171,7 @@ func lowerFirst(s string) string {
 // lspFormatMsg is the answer of a formatting request. text is the text the edits fit.
 type lspFormatMsg struct {
 	path, text string
-	edits      []editor.LSPEdit
+	edits      []document.LSPEdit
 	err        error
 }
 

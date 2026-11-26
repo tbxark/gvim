@@ -2,6 +2,7 @@ package tui
 
 import (
 	"cmp"
+	"github.com/tbxark/gvim/document"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,11 +26,11 @@ type fakeEditor struct {
 	tabs        []TabInfo
 	status      string
 	rows, cols  int
-	actions     []editor.Action
+	actions     []document.Action
 	args        []map[string]any
-	quitAction  editor.Action // the action that reports quit
-	extends     []buffer.Pos  // the drag ends passed to ExtendSelection
-	root        string        // the workspace root that SetRoot gave
+	quitAction  document.Action // the action that reports quit
+	extends     []buffer.Pos    // the drag ends passed to ExtendSelection
+	root        string          // the workspace root that SetRoot gave
 	bookmarks   []Bookmark
 	confirmQuit bool // QuitNeedsConfirm
 }
@@ -45,7 +46,7 @@ func (f *fakeEditor) QuitNeedsConfirm() bool { return f.confirmQuit }
 
 func (f *fakeEditor) SetViewport(rows, cols int) { f.rows, f.cols = rows, cols }
 
-func (f *fakeEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (f *fakeEditor) Do(a document.Action, args map[string]any) editor.Result {
 	f.actions = append(f.actions, a)
 	f.args = append(f.args, args)
 	return editor.Result{Quit: a == f.quitAction}

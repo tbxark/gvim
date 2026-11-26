@@ -1,13 +1,13 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 )
 
 // textRow returns the text cells of body row n (0 is the first) from the editor's text
@@ -79,8 +79,8 @@ func TestIndentationGuideOptions(t *testing.T) {
 			o := DefaultViewOptions()
 			o.IndentationGuideMode, o.IndentationGuideGlyph = tc.mode, tc.glyph
 			m, ed := viewModel(t, o, "a {\n    b\n", 40, 10)
-			m.view.languages = func(string, string) editor.LanguageSettings {
-				return editor.LanguageSettings{TabSize: 4, IndentationGuide: tc.allowed}
+			m.view.languages = func(string, string) document.LanguageSettings {
+				return document.LanguageSettings{TabSize: 4, IndentationGuide: tc.allowed}
 			}
 			if tc.override != nil {
 				if err := ed.Do("toggle_indentation_guide_current_buffer", nil).Err; err != nil {
@@ -134,8 +134,8 @@ func TestWhitespaceOptions(t *testing.T) {
 			o := DefaultViewOptions()
 			tc.setup(&o)
 			m, _ := viewModel(t, o, tc.text, 40, 10)
-			m.view.languages = func(string, string) editor.LanguageSettings {
-				return editor.LanguageSettings{TabSize: 4, WhitespaceTabsLeading: tc.tabs, WhitespaceTabsInner: tc.tabs, WhitespaceTabsTrailing: tc.tabs}
+			m.view.languages = func(string, string) document.LanguageSettings {
+				return document.LanguageSettings{TabSize: 4, WhitespaceTabsLeading: tc.tabs, WhitespaceTabsInner: tc.tabs, WhitespaceTabsTrailing: tc.tabs}
 			}
 			if got := textRow(t, m, 0, len([]rune(tc.want))); got != tc.want {
 				t.Errorf("row 0 = %q, want %q", got, tc.want)
@@ -207,8 +207,8 @@ func TestHangingIndentKeepsTheFrameCaretOnTheText(t *testing.T) {
 
 func TestWrapColumnOfTheLanguageNarrowsTheRows(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "aaaa bbbb cccc dddd\n", 40, 10)
-	m.view.languages = func(string, string) editor.LanguageSettings {
-		return editor.LanguageSettings{TabSize: 4, LineWrap: true, WrapColumn: 10, IndentationGuide: true}
+	m.view.languages = func(string, string) document.LanguageSettings {
+		return document.LanguageSettings{TabSize: 4, LineWrap: true, WrapColumn: 10, IndentationGuide: true}
 	}
 	if got := textRow(t, m, 0, 20); got != "aaaa bbbb" {
 		t.Errorf("row 0 = %q, want the line wrapped at column 10", got)
@@ -221,13 +221,13 @@ func TestWrapColumnOfTheLanguageNarrowsTheRows(t *testing.T) {
 func TestTabsDisplayAtTheLanguageTabSize(t *testing.T) {
 	tests := []struct {
 		name     string
-		resolver func(language, path string) editor.LanguageSettings
+		resolver func(language, path string) document.LanguageSettings
 		prompt   string // the answer to Set Tab Size, if any
 		wantX    int    // the column of the x after the tab
 	}{
-		{"the language tab size", func(string, string) editor.LanguageSettings { return editor.LanguageSettings{TabSize: 8} }, "", 8},
-		{"a language that sets none keeps the default", func(string, string) editor.LanguageSettings { return editor.LanguageSettings{} }, "", 4},
-		{"the buffer's tab size wins", func(string, string) editor.LanguageSettings { return editor.LanguageSettings{TabSize: 8} }, "2", 2},
+		{"the language tab size", func(string, string) document.LanguageSettings { return document.LanguageSettings{TabSize: 8} }, "", 8},
+		{"a language that sets none keeps the default", func(string, string) document.LanguageSettings { return document.LanguageSettings{} }, "", 4},
+		{"the buffer's tab size wins", func(string, string) document.LanguageSettings { return document.LanguageSettings{TabSize: 8} }, "2", 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,8 +265,8 @@ func TestToggleIndentationGuidesFlipsWhatIsDrawn(t *testing.T) {
 			o := DefaultViewOptions()
 			o.IndentationGuideMode = tc.mode
 			m, ed := viewModel(t, o, "a {\n    b\n", 40, 10)
-			m.view.languages = func(string, string) editor.LanguageSettings {
-				return editor.LanguageSettings{TabSize: 4, IndentationGuide: tc.allowed}
+			m.view.languages = func(string, string) document.LanguageSettings {
+				return document.LanguageSettings{TabSize: 4, IndentationGuide: tc.allowed}
 			}
 			for i, want := range tc.want {
 				if _, handled := m.viewAction("toggle_indentation_guide_current_buffer", nil); !handled {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,7 +31,7 @@ type realEditor struct{ ed *editor.Editor }
 
 func (r realEditor) SetViewport(rows, cols int) { r.ed.SetViewport(rows, cols) }
 
-func (r realEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (r realEditor) Do(a document.Action, args map[string]any) editor.Result {
 	return r.ed.Do(a, args)
 }
 
@@ -67,24 +68,24 @@ func (r realEditor) ScrollTo(top int)  { r.ed.ScrollTo(top) }
 
 // realDoc is Document over a real *editor.Document, forwarding the optional views the
 // way the app adapter does.
-type realDoc struct{ d *editor.Document }
+type realDoc struct{ d *document.Document }
 
-func (r realDoc) Modified() bool                    { return r.d.Modified() }
-func (r realDoc) LineCount() int                    { return r.d.Buffer.Lines() }
-func (r realDoc) Line(i int) string                 { return r.d.Buffer.Line(i) }
-func (r realDoc) SavedLines() []string              { return r.d.SavedLines() }
-func (r realDoc) Cursor() buffer.Pos                { return r.d.Cursor }
-func (r realDoc) LineSpans(int) []syntax.Span       { return nil }
-func (r realDoc) Name() string                      { return r.d.Name() }
-func (r realDoc) Top() int                          { return r.d.Top }
-func (r realDoc) Encoding() string                  { return r.d.Encoding() }
-func (r realDoc) LineEnding() string                { return r.d.LineEnding() }
-func (r realDoc) ViewSettings() editor.ViewSettings { return r.d.ViewSettings() }
-func (r realDoc) Language() string                  { return r.d.Language() }
-func (r realDoc) Version() uint64                   { return r.d.Buffer.Version() }
-func (r realDoc) Cursors() []editor.Caret           { return r.d.Cursors() }
-func (r realDoc) Folds(tab int) []fold.Range        { return r.d.Folds(tab) }
-func (r realDoc) Folded(line int) bool              { return r.d.Folded(line) }
+func (r realDoc) Modified() bool                      { return r.d.Modified() }
+func (r realDoc) LineCount() int                      { return r.d.Buffer.Lines() }
+func (r realDoc) Line(i int) string                   { return r.d.Buffer.Line(i) }
+func (r realDoc) SavedLines() []string                { return r.d.SavedLines() }
+func (r realDoc) Cursor() buffer.Pos                  { return r.d.Cursor }
+func (r realDoc) LineSpans(int) []syntax.Span         { return nil }
+func (r realDoc) Name() string                        { return r.d.Name() }
+func (r realDoc) Top() int                            { return r.d.Top }
+func (r realDoc) Encoding() string                    { return r.d.Encoding() }
+func (r realDoc) LineEnding() string                  { return r.d.LineEnding() }
+func (r realDoc) ViewSettings() document.ViewSettings { return r.d.ViewSettings() }
+func (r realDoc) Language() string                    { return r.d.Language() }
+func (r realDoc) Version() uint64                     { return r.d.Buffer.Version() }
+func (r realDoc) Cursors() []document.Caret           { return r.d.Cursors() }
+func (r realDoc) Folds(tab int) []fold.Range          { return r.d.Folds(tab) }
+func (r realDoc) Folded(line int) bool                { return r.d.Folded(line) }
 
 func (r realDoc) Selection() (anchor, head buffer.Pos, ok bool) {
 	if r.d.Sel == nil {
@@ -587,18 +588,6 @@ func TestSelectLocaleWithAPortWaitsForTheSave(t *testing.T) {
 	}
 	if _, ok := firstSettingsChange(msgs); !ok {
 		t.Fatalf("the locale save produced %T messages, want a settings change", msgs)
-	}
-}
-
-func TestBackgroundCommandsAreNotApplicable(t *testing.T) {
-	for _, action := range []string{"set_background", "set_background_blend"} {
-		m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 8)
-		if err := m.Run(action); err != nil {
-			t.Fatalf("Run(%s) = %v, want it handled", action, err)
-		}
-		if !strings.Contains(m.notice, "Not applicable in a terminal") {
-			t.Errorf("%s notice %q does not say why", action, m.notice)
-		}
 	}
 }
 

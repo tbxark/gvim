@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ var tallText = strings.Repeat("abcdefghi ", 60)
 // ctrl+end or typing at the end of the paragraph does. The fake does not scroll.
 type endEditor struct{ *fakeEditor }
 
-func (e endEditor) Do(a editor.Action, args map[string]any) editor.Result {
+func (e endEditor) Do(a document.Action, args map[string]any) editor.Result {
 	if a == "jump" {
 		e.doc.cursor = buffer.Pos{Col: len([]rune(tallText))}
 		return editor.Result{}

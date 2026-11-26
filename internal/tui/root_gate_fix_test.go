@@ -1,28 +1,13 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/tbxark/gvim/editor"
 )
-
-// TestExtractTabToNewWorkspaceSaysItCannotMove checks that the palette command answers
-// with a notice: a workspace is a project root, so the tab cannot move to a new window.
-func TestExtractTabToNewWorkspaceSaysItCannotMove(t *testing.T) {
-	t.Parallel()
-	m := newRevertModel(t, newDocEditor("/ws/a.txt", false))
-	cmd := rootPaletteRun(m, "extract_tab_to_new_workspace")
-	if cmd != nil {
-		t.Fatal("the extract command started a command, want none")
-	}
-	const want = "Extract Tab to New Workspace is not available: a workspace is a project root, " +
-		"so a tab cannot move to a new window"
-	if m.notice != want {
-		t.Fatalf("notice = %q, want %q", m.notice, want)
-	}
-}
 
 // TestToggleAutoRevertFlagsTheCurrentBuffer checks the flag on the current buffer: auto-revert
 // is on until a toggle turns it off, the next toggle turns it on again, and a buffer with no
@@ -37,7 +22,7 @@ func TestToggleAutoRevertFlagsTheCurrentBuffer(t *testing.T) {
 		on      bool
 	}{
 		{name: "no tab", ed: docEditor{fakeEditor: newFakeEditor("x")}, toggles: 1, notice: noDocumentNotice, on: true},
-		{name: "untitled buffer", ed: newDocEditor("", false), toggles: 1, notice: editor.ErrNoPath.Error(), on: true},
+		{name: "untitled buffer", ed: newDocEditor("", false), toggles: 1, notice: document.ErrNoPath.Error(), on: true},
 		{name: "on before any toggle", ed: newDocEditor("/ws/a.txt", false), on: true},
 		{name: "first toggle turns it off", ed: newDocEditor("/ws/a.txt", false), toggles: 1, notice: "Auto-revert off for a.txt"},
 		{name: "second toggle turns it on", ed: newDocEditor("/ws/a.txt", false), toggles: 2, notice: "Auto-revert on for a.txt", on: true},

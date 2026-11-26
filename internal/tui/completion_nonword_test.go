@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 )
 
 // recordingTriggerLSP records the completion request positions and advertises trigger
@@ -91,7 +91,7 @@ func TestCompletionNonWordTriggerReopensNewList(t *testing.T) {
 	lt.m.lsp.port = rec
 	lt.m.view.opts.CompletionPopupAutoShow = true
 	lt.m.view.opts.SuggestOnTriggerCharacters = true
-	lt.ed.version, lt.ed.versionOK = editor.Version{Gen: 3, Ver: 7}, true
+	lt.ed.version, lt.ed.versionOK = document.Version{Gen: 3, Ver: 7}, true
 
 	feedCompletion(t, lt, lt.m.completionAsked())
 	if lt.m.lsp.comp == nil {

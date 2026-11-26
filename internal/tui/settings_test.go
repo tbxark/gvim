@@ -37,7 +37,7 @@ func TestSettingsRowsShowTheEffectiveValues(t *testing.T) {
 		"auto_indent=off",
 		"line_numbers=on",
 		"show_menu_bar=on",
-		"explorer_show_hidden=off",
+		"file_explorer.show_hidden=off",
 		"file_explorer.hide_gitignore=on",
 		"ui_icons=nerd",
 		"ui_icons_font=JetBrainsMono Nerd Font Mono",

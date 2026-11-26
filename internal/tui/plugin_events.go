@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -398,7 +398,7 @@ func (m *Model) plugDiffCaret(before, cur *pluginSnap) {
 
 // plugSaved raises after_file_save for each file a save or auto-save wrote. The results
 // are applied already, so a handler sees the document as saved.
-func (m *Model) plugSaved(results []editor.SaveResult) {
+func (m *Model) plugSaved(results []document.SaveResult) {
 	if !m.plugWants("after_file_save") {
 		return
 	}

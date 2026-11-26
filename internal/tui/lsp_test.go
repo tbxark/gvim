@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"hash/fnv"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ type lspTab struct {
 	virtual bool
 	// carets are the extra carets the document reports (CaretLister). Empty means
 	// one caret.
-	carets []editor.Caret
+	carets []document.Caret
 	// texts counts the reads of the whole text: a line count followed by every line, as the
 	// LSP sync reads the text of a document.
 	texts int
@@ -58,13 +59,13 @@ type lspEd struct {
 	opened           []string
 	readOnlyOpened   []string
 	gotos            [][2]int
-	applied          map[string][]editor.LSPEdit
+	applied          map[string][]document.LSPEdit
 	// version is what DocumentVersion reports, when versionOK is set.
-	version   editor.Version
+	version   document.Version
 	versionOK bool
 	// expect records the expected version of the last ApplyLSPEditsExpect, and
 	// expectCalls counts those calls. applyErr makes the next apply fail.
-	expect      *editor.Version
+	expect      *document.Version
 	expectCalls int
 	applyErr    error
 	// loadErr is what the read of a goto returns, when it is set.
@@ -76,7 +77,7 @@ type lspEd struct {
 	// fileOps records the workspace file operations the root ran.
 	fileOps []string
 	// loadDocs, when set, is what LoadFunc returns for a path.
-	loadDocs map[string]*editor.Document
+	loadDocs map[string]*document.Document
 	// externalFolds records the LSP folding ranges pushed into the editor.
 	externalFolds map[string][]fold.Range
 	// opLog records the file operations, loads and edits of the workspace-edit
@@ -91,7 +92,7 @@ func (e *lspEd) SetViewport(int, int) {}
 
 // Do records the action. insert_char also types its text into the active tab at
 // the caret, so a test can read the document back.
-func (e *lspEd) Do(a editor.Action, args map[string]any) editor.Result {
+func (e *lspEd) Do(a document.Action, args map[string]any) editor.Result {
 	e.actions = append(e.actions, string(a))
 	if a == "next_buffer" && len(e.tabs) > 0 {
 		e.active = (e.active + 1) % len(e.tabs)
@@ -154,8 +155,8 @@ func (e *lspEd) OpenPreview(string) error { return nil }
 
 // LoadFunc returns the read of path: an empty document that carries the path, or
 // loadErr when that is set.
-func (e *lspEd) LoadFunc(path string) func() (*editor.Document, error) {
-	return func() (*editor.Document, error) {
+func (e *lspEd) LoadFunc(path string) func() (*document.Document, error) {
+	return func() (*document.Document, error) {
 		if e.loadErr != nil {
 			return nil, e.loadErr
 		}
@@ -163,7 +164,7 @@ func (e *lspEd) LoadFunc(path string) func() (*editor.Document, error) {
 		if d, ok := e.loadDocs[path]; ok {
 			return d, nil
 		}
-		return &editor.Document{Path: path}, nil
+		return &document.Document{Path: path}, nil
 	}
 }
 
@@ -188,7 +189,7 @@ func (e *lspEd) DeleteFile(path string) error {
 }
 
 // OpenLoaded records the path of a document that LoadFunc read as opened.
-func (e *lspEd) OpenLoaded(d *editor.Document) {
+func (e *lspEd) OpenLoaded(d *document.Document) {
 	e.opened = append(e.opened, d.Path)
 	e.opLog = append(e.opLog, "open "+d.Path)
 	for i, t := range e.tabs {
@@ -209,7 +210,7 @@ func (e *lspEd) SetExternalFolds(path string, ranges []fold.Range) {
 	e.externalFolds[path] = ranges
 }
 
-func (e *lspEd) OpenLoadedReadOnly(d *editor.Document) {
+func (e *lspEd) OpenLoadedReadOnly(d *document.Document) {
 	e.readOnlyOpened = append(e.readOnlyOpened, d.Path)
 	e.OpenLoaded(d)
 }
@@ -218,12 +219,12 @@ func (e *lspEd) GotoLine(line, col int) error {
 	e.gotos = append(e.gotos, [2]int{line, col})
 	return nil
 }
-func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
+func (e *lspEd) ApplyLSPEdits(path string, edits []document.LSPEdit) error {
 	if !slices.ContainsFunc(e.tabs, func(t *lspTab) bool { return t.path == path }) {
 		return fmt.Errorf("%w: %s", editor.ErrNotOpen, path)
 	}
 	if e.applied == nil {
-		e.applied = map[string][]editor.LSPEdit{}
+		e.applied = map[string][]document.LSPEdit{}
 	}
 	e.applied[path] = append(e.applied[path], edits...)
 	e.opLog = append(e.opLog, "edit "+path)
@@ -231,16 +232,16 @@ func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
 }
 
 // DocumentVersion reports the version the test set, when it set one.
-func (e *lspEd) DocumentVersion(string) (editor.Version, bool) { return e.version, e.versionOK }
+func (e *lspEd) DocumentVersion(string) (document.Version, bool) { return e.version, e.versionOK }
 
 // multiCompletionApply records one multi-caret completion accept.
 type multiCompletionApply struct {
 	path, text, wordChars string
-	expect                *editor.Version
+	expect                *document.Version
 }
 
 // ApplyCompletionAtCarets records a multi-caret accept, or fails with multiErr.
-func (e *lspEd) ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error) {
+func (e *lspEd) ApplyCompletionAtCarets(path, text, wordChars string, expect *document.Version) (int, error) {
 	e.multiApplies = append(e.multiApplies, multiCompletionApply{path: path, text: text, wordChars: wordChars, expect: expect})
 	if e.multiErr != nil {
 		return 0, e.multiErr
@@ -252,13 +253,13 @@ func (e *lspEd) ApplyCompletionAtCarets(path, text, wordChars string, expect *ed
 type multiItemApply struct {
 	path, text   string
 	cursorOffset int
-	additional   []editor.LSPEdit
+	additional   []document.LSPEdit
 	wordChars    string
-	expect       *editor.Version
+	expect       *document.Version
 }
 
 // ApplyCompletionItemAtCarets records a multi-caret snippet/import accept.
-func (e *lspEd) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []editor.LSPEdit, wordChars string, expect *editor.Version) (int, error) {
+func (e *lspEd) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []document.LSPEdit, wordChars string, expect *document.Version) (int, error) {
 	e.multiItemApplies = append(e.multiItemApplies, multiItemApply{path: path, text: text, cursorOffset: cursorOffset, additional: additional, wordChars: wordChars, expect: expect})
 	if e.multiItemErr != nil {
 		return 0, e.multiItemErr
@@ -268,7 +269,7 @@ func (e *lspEd) ApplyCompletionItemAtCarets(path, text string, cursorOffset int,
 
 // ApplyLSPEditsExpect records the expected version and applies like ApplyLSPEdits,
 // or returns applyErr first so a test can simulate a stale document.
-func (e *lspEd) ApplyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error {
+func (e *lspEd) ApplyLSPEditsExpect(path string, edits []document.LSPEdit, expect *document.Version) error {
 	e.expectCalls++
 	e.expect = expect
 	if e.applyErr != nil {
@@ -299,12 +300,12 @@ func (d *lspDoc) Version() uint64 {
 	}
 	return h.Sum64()
 }
-func (d *lspDoc) SavedLines() []string    { return d.t.lines }
-func (d *lspDoc) Top() int                { return 0 }
-func (d *lspDoc) Encoding() string        { return "UTF-8" }
-func (d *lspDoc) LineEnding() string      { return "LF" }
-func (d *lspDoc) Cursor() buffer.Pos      { return d.t.cursor }
-func (d *lspDoc) Cursors() []editor.Caret { return d.t.carets }
+func (d *lspDoc) SavedLines() []string      { return d.t.lines }
+func (d *lspDoc) Top() int                  { return 0 }
+func (d *lspDoc) Encoding() string          { return "UTF-8" }
+func (d *lspDoc) LineEnding() string        { return "LF" }
+func (d *lspDoc) Cursor() buffer.Pos        { return d.t.cursor }
+func (d *lspDoc) Cursors() []document.Caret { return d.t.carets }
 func (d *lspDoc) Selection() (a, h buffer.Pos, ok bool) {
 	return d.t.cursor, d.t.cursor, false
 }
@@ -946,17 +947,17 @@ func TestLSPCompletionAcceptInsertsTheChosenItem(t *testing.T) {
 	tests := []struct {
 		name string
 		item CompletionItem
-		want editor.LSPEdit
+		want document.LSPEdit
 	}{
 		{
 			name: "no edit range inserts at the caret",
 			item: CompletionItem{Label: "alpha", Insert: "alpha"},
-			want: editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "alpha"},
+			want: document.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "alpha"},
 		},
 		{
 			name: "the server edit range is replaced",
 			item: CompletionItem{Label: "beta", Insert: "beta", Range: &LSPRange{Start: buffer.Pos{Line: 0, Col: 0}, End: buffer.Pos{Line: 0, Col: 2}}},
-			want: editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"},
+			want: document.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"},
 		},
 	}
 	for _, tt := range tests {
@@ -999,7 +1000,7 @@ func TestLSPCompletionDismissClosesThePopup(t *testing.T) {
 func TestLSPRenameAppliesTheEditsToTheDocument(t *testing.T) {
 	port := newFakeLSP("go")
 	port.renames = WorkspaceEdit{Ops: []WorkspaceOp{{Kind: WorkspaceOpText, Path: "/p/a.go",
-		Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: "New"}}}}}
+		Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: "New"}}}}}
 	tab := &lspTab{path: "/p/a.go", lines: []string{"   "}}
 	lt := newLSPTest(t, port, tab)
 	lt.open()
@@ -1023,8 +1024,8 @@ func TestLSPRenameAppliesTheEditsToTheDocument(t *testing.T) {
 // A rename that reaches a file no tab holds opens it, edits it, and leaves the
 // tab the user was in active. The notice says the file was opened unsaved.
 func TestLSPRenameOpensAndEditsFilesThatAreNotOpen(t *testing.T) {
-	edit := func(text string) []editor.LSPEdit {
-		return []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: text}}
+	edit := func(text string) []document.LSPEdit {
+		return []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: text}}
 	}
 	port := newFakeLSP("go")
 	port.renames = WorkspaceEdit{Ops: []WorkspaceOp{
@@ -1056,7 +1057,7 @@ func TestLSPRenameOpensAndEditsFilesThatAreNotOpen(t *testing.T) {
 func TestLSPRenameReadFailureOfAnUnopenedFileIsShown(t *testing.T) {
 	port := newFakeLSP("go")
 	port.renames = WorkspaceEdit{Ops: []WorkspaceOp{{Kind: WorkspaceOpText, Path: "/p/b.go",
-		Edits: []editor.LSPEdit{{Text: "New"}}}}}
+		Edits: []document.LSPEdit{{Text: "New"}}}}}
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"   "}})
 	lt.ed.loadErr = errors.New("read failed")
 	lt.open()
@@ -1095,7 +1096,7 @@ func TestLSPCodeActionAppliesThroughTheThreeWays(t *testing.T) {
 	edit := &WorkspaceEdit{Ops: []WorkspaceOp{{
 		Kind:  WorkspaceOpText,
 		Path:  "/p/a.go",
-		Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}},
+		Edits: []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}},
 	}}}
 	tests := []struct {
 		name      string
@@ -1387,7 +1388,7 @@ func TestLSPCompletionEnterInsertsTheHighlightedItem(t *testing.T) {
 	for _, msg := range deliver(popupCmd(lt.popup(), tea.KeyPressMsg{Code: tea.KeyEnter})) {
 		lt.feed(msg)
 	}
-	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"}
+	want := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"}
 	if got := lt.ed.applied["/p/a.go"]; len(got) != 1 || got[0] != want {
 		t.Fatalf("applied = %+v, want [%+v]", got, want)
 	}
@@ -1447,7 +1448,7 @@ func TestLSPCompletionChosenThroughTheRootInsertsOnce(t *testing.T) {
 			openCompletion(lt)
 
 			tt.choose(lt)
-			want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"}
+			want := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"}
 			if got := lt.ed.applied["/p/a.go"]; len(got) != 1 || got[0] != want {
 				t.Fatalf("applied = %+v, want [%+v] once", got, want)
 			}
@@ -1533,7 +1534,7 @@ func TestLSPCompletionEscForgetsTheList(t *testing.T) {
 // editor for its read-only open path instead of an editable tab.
 func TestLSPLoadedReadOnlyUsesReadOnlyOpen(t *testing.T) {
 	lt := newLSPTest(t, nil)
-	doc := &editor.Document{Path: "/cache/core.slang"}
+	doc := &document.Document{Path: "/cache/core.slang"}
 	lt.m.lspLoaded(lspLoadedMsg{doc: doc, line: 2, col: 3, readOnly: true})
 	if !slices.Equal(lt.ed.readOnlyOpened, []string{"/cache/core.slang"}) {
 		t.Fatalf("read-only opens = %v", lt.ed.readOnlyOpened)
@@ -1544,3 +1545,28 @@ func TestLSPLoadedReadOnlyUsesReadOnlyOpen(t *testing.T) {
 }
 
 func (e *lspEd) QuitNeedsConfirm() bool { return false }
+
+// TestLSPReconcileReadsOnlyChangedTabs checks the tab-switch sync: every open tab is
+// reconciled, but the text of a tab the track already holds at its current version is not read
+// again, and an edit to a background tab is still picked up.
+func TestLSPReconcileReadsOnlyChangedTabs(t *testing.T) {
+	port := newFakeLSP("go")
+	a := &lspTab{path: "/p/a.go", lines: []string{"package a"}}
+	b := &lspTab{path: "/p/b.go", lines: []string{"package b"}}
+	lt := newLSPTest(t, port, a, b)
+	lt.open()
+	lt.m.lspReconcile()
+	a.texts, b.texts = 0, 0
+	lt.m.lspReconcile()
+	if a.texts != 0 || b.texts != 0 {
+		t.Fatalf("reconcile re-read unchanged tabs: a=%d b=%d", a.texts, b.texts)
+	}
+	b.lines[0] = "package bb"
+	lt.m.lspReconcile()
+	if a.texts != 0 || b.texts == 0 {
+		t.Fatalf("reconcile reads after a background edit: a=%d b=%d, want only b", a.texts, b.texts)
+	}
+	if got := lt.m.lsp.tracks["/p/b.go"].want; got != "package bb" {
+		t.Fatalf("track text = %q, want the edited text", got)
+	}
+}

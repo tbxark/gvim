@@ -99,6 +99,11 @@ type RemoteExplorerTree struct {
 	// during a reload does not make the reload's result look stale.
 	reloadGen uint64
 	pending   map[string]uint64
+	// rows caches the flattened rows (rowsOK says it is current). Every change to the
+	// nodes or to what the rows filter drops it, so Rows, Selected and ScrollOffset do not
+	// walk and sort the whole expanded tree on each frame and mouse move.
+	rows   []explorer.Row
+	rowsOK bool
 }
 
 // NewRemoteExplorerTree returns the tree of root, whose directories come from
@@ -143,6 +148,7 @@ func (t *RemoteExplorerTree) ShowHidden() bool {
 func (t *RemoteExplorerTree) SetShowHidden(v bool) {
 	t.mu.Lock()
 	t.showHidden = v
+	t.rowsOK = false
 	t.mu.Unlock()
 }
 
@@ -158,6 +164,7 @@ func (t *RemoteExplorerTree) ShowIgnored() bool {
 func (t *RemoteExplorerTree) SetShowIgnored(v bool) {
 	t.mu.Lock()
 	t.showIgnored = v
+	t.rowsOK = false
 	t.mu.Unlock()
 }
 
@@ -169,8 +176,17 @@ func (t *RemoteExplorerTree) Rows() []explorer.Row {
 	return t.rowsLocked()
 }
 
-// rowsLocked flattens the expanded nodes. The caller holds t.mu.
+// rowsLocked returns the flattened expanded nodes, rebuilt when a change dropped the cache.
+// The caller holds t.mu.
 func (t *RemoteExplorerTree) rowsLocked() []explorer.Row {
+	if !t.rowsOK {
+		t.rows, t.rowsOK = t.buildRowsLocked(), true
+	}
+	return t.rows
+}
+
+// buildRowsLocked flattens the expanded nodes. The caller holds t.mu.
+func (t *RemoteExplorerTree) buildRowsLocked() []explorer.Row {
 	rows := make([]explorer.Row, 0, 64)
 	parents := map[string]int{}
 	var add func(p string, depth int)
@@ -313,6 +329,7 @@ func (t *RemoteExplorerTree) Expand(p string) error {
 	defer t.mu.Unlock()
 	if n, ok := t.nodes[p]; ok && n.isDir {
 		n.expanded = true
+		t.rowsOK = false
 	}
 	return nil
 }
@@ -367,6 +384,7 @@ func (t *RemoteExplorerTree) Toggle(p string) error {
 		return errors.New("remote directory is not loaded yet")
 	}
 	n.expanded = !n.expanded
+	t.rowsOK = false
 	t.selected = p
 	return nil
 }
@@ -383,6 +401,7 @@ func (t *RemoteExplorerTree) ToggleCmd(p string) tea.Cmd {
 	}
 	if n.loaded {
 		n.expanded = !n.expanded
+		t.rowsOK = false
 		t.selected = p
 		t.mu.Unlock()
 		return nil
@@ -499,6 +518,7 @@ func (t *RemoteExplorerTree) ApplyReload(msg remoteTreeLoadedMsg) error {
 	if root, ok := t.nodes[t.root]; ok && root.loaded {
 		root.expanded = true
 	}
+	t.rowsOK = false
 	if msg.reveal != "" {
 		reveal := strings.TrimSpace(msg.reveal)
 		t.expandWaypointsLocked(reveal)
@@ -526,6 +546,7 @@ func (t *RemoteExplorerTree) expandWaypointsLocked(reveal string) {
 		dir = path.Join(dir, part)
 		if n, ok := t.nodes[dir]; ok && n.isDir {
 			n.expanded = true
+			t.rowsOK = false
 		}
 	}
 }
@@ -537,6 +558,7 @@ func (t *RemoteExplorerTree) mergeLocked(dir string, entries []RemoteDirEntry) {
 	if !ok || !n.isDir {
 		return
 	}
+	t.rowsOK = false
 	fresh := make([]string, 0, len(entries))
 	seen := make(map[string]bool, len(entries))
 	for _, e := range entries {
@@ -591,6 +613,7 @@ func (t *RemoteExplorerTree) forgetLocked(p string) {
 		t.forgetLocked(c)
 	}
 	delete(t.nodes, p)
+	t.rowsOK = false
 	if t.selected == p {
 		t.selected = ""
 	}
@@ -614,6 +637,7 @@ func (t *RemoteExplorerTree) applyToggle(msg remoteTreeToggleMsg) error {
 	t.mergeLocked(msg.path, msg.entries)
 	if n, ok := t.nodes[msg.path]; ok {
 		n.expanded = true
+		t.rowsOK = false
 	}
 	t.selected = msg.path
 	return nil

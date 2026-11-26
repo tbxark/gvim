@@ -28,7 +28,6 @@ type fakeWorkspacePort struct {
 	extractErr                               error
 	targets                                  []WorkspaceEntry
 	extractTo, extractTerminalTo             string
-	extractMany                              []string
 	mixSelection                             ExtractSelection
 	mixTarget                                string
 	mixReplace                               bool
@@ -83,10 +82,11 @@ func TestWorkspaceStatusSegment(t *testing.T) {
 // TestWorkspacePaletteActions checks the workspace actions and the switcher overlay.
 func TestWorkspacePaletteActions(t *testing.T) {
 	m := statusViewModel(t, nil)
-	m.SetWorkspacePort(&fakeWorkspacePort{entries: []WorkspaceEntry{
+	port := &fakeWorkspacePort{entries: []WorkspaceEntry{
 		{ID: "id1", Label: "one", Root: "/one", Materialized: true, Active: true},
 		{ID: "id2", Label: "two", Root: "/two"},
-	}})
+	}}
+	m.SetWorkspacePort(port)
 	// No port: no action table row is claimed.
 	local := statusViewModel(t, nil)
 	if _, ok := local.workspaceAction("workspace_switch"); ok {
@@ -112,9 +112,17 @@ func TestWorkspacePaletteActions(t *testing.T) {
 		}
 		m.overlays = nil
 	}
-	// Next runs immediately.
-	if cmd, ok := m.workspaceAction("workspace_next"); !ok || cmd != nil {
+	// Next runs in a command: the port may wait on the UI goroutine, so Update must not call it.
+	cmd, ok := m.workspaceAction("workspace_next")
+	if !ok || cmd == nil {
 		t.Fatalf("workspace_next = %v, %v", cmd, ok)
+	}
+	if port.next != "" {
+		t.Fatal("Next ran inside Update, on the UI goroutine")
+	}
+	cmd()
+	if port.next != "yes" {
+		t.Fatal("the Next command did not call the port")
 	}
 }
 
@@ -137,7 +145,14 @@ func TestWorkspaceNewPromptFlow(t *testing.T) {
 		t.Fatalf("Create(%q, %q)", port.createRoot, port.createLabel)
 	}
 	// Rename.
-	m.workspaceActionAnswer(prompt.Done{Tag: workspaceRenameTag{id: "id1"}, Outcome: prompt.Submitted, Text: "renamed"})
+	cmd, _ := m.workspaceActionAnswer(prompt.Done{Tag: workspaceRenameTag{id: "id1"}, Outcome: prompt.Submitted, Text: "renamed"})
+	if port.renamed != "" {
+		t.Fatal("Rename ran inside Update, on the UI goroutine")
+	}
+	if cmd == nil {
+		t.Fatal("Rename returned no command")
+	}
+	cmd()
 	if port.renamed != "id1" || port.renameLabel != "renamed" {
 		t.Fatalf("Rename(%q, %q)", port.renamed, port.renameLabel)
 	}
@@ -336,7 +351,9 @@ func TestWorkspaceCloseAsksBeforeStoppingTerminals(t *testing.T) {
 		t.Fatalf("No closed the workspace: %q", port.closed)
 	}
 	// Yes: the port closes the workspace.
-	m.answer(prompt.Done{Tag: workspaceCloseRunningTag{id: "id1"}, Outcome: prompt.Yes})
+	if cmd := m.answer(prompt.Done{Tag: workspaceCloseRunningTag{id: "id1"}, Outcome: prompt.Yes}); cmd != nil {
+		cmd()
+	}
 	if port.closed != "id1" {
 		t.Fatalf("Yes did not close: %q", port.closed)
 	}
@@ -345,7 +362,7 @@ func TestWorkspaceCloseAsksBeforeStoppingTerminals(t *testing.T) {
 	quiet := &fakeWorkspacePort{entries: []WorkspaceEntry{{ID: "id2", Label: "two"}}}
 	m.SetWorkspacePort(quiet)
 	if cmd := m.workspaceCloseEntry(WorkspaceEntry{ID: "id2", Label: "two"}); cmd != nil {
-		t.Fatal("the direct close returned a command")
+		cmd()
 	}
 	if quiet.closed != "id2" {
 		t.Fatalf("the quiet workspace did not close: %q", quiet.closed)
@@ -563,5 +580,40 @@ func TestRunWorkspaceHostDropsZeroWindowSize(t *testing.T) {
 	}
 	if m.width != 80 || m.height != 24 {
 		t.Fatalf("model size = %dx%d, want 80x24", m.width, m.height)
+	}
+}
+
+// TestWorkspaceOpReportsFailureOffTheUIGoroutine: Select, Next, Close and Rename run in a
+// command, because the app's port waits on the UI goroutine; a failure comes back as a message
+// that Update puts on the status row.
+func TestWorkspaceOpReportsFailureOffTheUIGoroutine(t *testing.T) {
+	t.Parallel()
+	m := statusViewModel(t, nil)
+	port := &fakeWorkspacePort{entries: []WorkspaceEntry{{ID: "id1", Label: "one"}, {ID: "id2", Label: "two"}}}
+	m.SetWorkspacePort(port)
+	m.openWorkspaceSwitcher()
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		cmd()
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if port.selected != "" {
+		t.Fatal("Select ran inside Update, on the UI goroutine")
+	}
+	if cmd == nil {
+		t.Fatal("choosing a workspace returned no command")
+	}
+	cmd()
+	if port.selected != "id2" {
+		t.Fatalf("Select(%q), want id2", port.selected)
+	}
+
+	msg := workspaceOp(func() (WorkspaceCmd, error) { return nil, errors.New("workspace: the daemon is not ready") })()
+	if _, ok := msg.(workspaceOpErrMsg); !ok {
+		t.Fatalf("a failed operation returned %T, want workspaceOpErrMsg", msg)
+	}
+	m.Update(msg)
+	if m.notice != "workspace: the daemon is not ready" {
+		t.Fatalf("notice = %q", m.notice)
 	}
 }

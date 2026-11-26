@@ -1,17 +1,16 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
-
-	"github.com/tbxark/gvim/editor"
 )
 
 func TestLanguageSettingsUseTheResolver(t *testing.T) {
 	var gotLang, gotPath string
 	m := &Model{}
-	m.view.languages = func(language, path string) editor.LanguageSettings {
+	m.view.languages = func(language, path string) document.LanguageSettings {
 		gotLang, gotPath = language, path
-		return editor.LanguageSettings{TabSize: 8, UseTabs: true}
+		return document.LanguageSettings{TabSize: 8, UseTabs: true}
 	}
 	s := m.languageSettings("Go", "a.go")
 	if gotLang != "Go" || gotPath != "a.go" || s.TabSize != 8 || !s.UseTabs {
@@ -24,7 +23,7 @@ func TestLanguageSettingsWithoutResolverFollowTheGlobals(t *testing.T) {
 	o.LineWrap = false
 	m := &Model{tabSize: 2, view: newViewState(o)}
 	s := m.languageSettings("Go", "a.go")
-	if s.TabSize != 2 || s.LineWrap || s.PageWidth != editor.DefaultPageWidth || !s.IndentationGuide ||
+	if s.TabSize != 2 || s.LineWrap || s.PageWidth != document.DefaultPageWidth || !s.IndentationGuide ||
 		!s.WhitespaceTabsInner || s.UseTabs {
 		t.Errorf("settings = %+v", s)
 	}

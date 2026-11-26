@@ -5,8 +5,7 @@ import tea "charm.land/bubbletea/v2"
 // featureAction runs an action of the root features in this file group: the warnings,
 // the bookmark and macro commands, the hidden-files toggle, the stash review, the
 // screen commands, the dumps and the plugin management commands (plugin_manager.go). It
-// reports whether it handled the action, and the command the action starts. The commands
-// that cannot work in gvim are in notice_na.go.
+// reports whether it handled the action, and the command the action starts.
 func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 	switch action {
 	case "show_warnings":
@@ -50,7 +49,7 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 		m.openThemeEditor()
 		return nil, true
 	default:
-		return m.notApplicableNotice(action)
+		return nil, false
 	}
 	return nil, true
 }

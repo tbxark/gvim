@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,27 +25,27 @@ type projEd struct {
 	texts   []BufferText
 	active  Document // when set, what Active returns (a selected document)
 	opened  []string
-	applied map[string][]editor.LSPEdit
+	applied map[string][]document.LSPEdit
 }
 
 func newProjEd(tabs []TabInfo, texts []BufferText) *projEd {
-	return &projEd{fakeEditor: newFakeEditor("x"), ptabs: tabs, texts: texts, applied: map[string][]editor.LSPEdit{}}
+	return &projEd{fakeEditor: newFakeEditor("x"), ptabs: tabs, texts: texts, applied: map[string][]document.LSPEdit{}}
 }
 
 func (e *projEd) Tabs() []TabInfo                    { return e.ptabs }
 func (e *projEd) Active() Document                   { return e.active }
 func (e *projEd) BufferTexts() ([]BufferText, error) { return e.texts, nil }
 
-func (e *projEd) LoadFunc(path string) func() (*editor.Document, error) {
-	return func() (*editor.Document, error) { return &editor.Document{Path: path}, nil }
+func (e *projEd) LoadFunc(path string) func() (*document.Document, error) {
+	return func() (*document.Document, error) { return &document.Document{Path: path}, nil }
 }
 
-func (e *projEd) OpenLoaded(d *editor.Document) {
+func (e *projEd) OpenLoaded(d *document.Document) {
 	e.opened = append(e.opened, d.Path)
 	e.ptabs = append(e.ptabs, TabInfo{Name: filepath.Base(d.Path), Path: d.Path, Modified: true})
 }
 
-func (e *projEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
+func (e *projEd) ApplyLSPEdits(path string, edits []document.LSPEdit) error {
 	open := false
 	for _, t := range e.ptabs {
 		if t.Path == path {

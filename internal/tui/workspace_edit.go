@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -18,10 +19,10 @@ import (
 // rename and code-action flows do.
 type FileEdit struct {
 	Path  string
-	Edits []editor.LSPEdit
+	Edits []document.LSPEdit
 	// Expect, when set, must be the open document's version at the time the edits
 	// were planned, or the edits are refused (editor.ErrStale).
-	Expect *editor.Version
+	Expect *document.Version
 	// ExpectHash is the fnv64a hash of the text the edits were planned from, for a
 	// file that is not open: the loaded file is skipped when its text differs. Zero
 	// means no check.
@@ -85,7 +86,7 @@ func (m *Model) ApplyFileEdits(edits []FileEdit, onDone func(FileEditResult) tea
 		}
 		return finishFileEdits(res, onDone)
 	}
-	loads := make([]func() (*editor.Document, error), len(closed))
+	loads := make([]func() (*document.Document, error), len(closed))
 	for i, fe := range closed {
 		loads[i] = ge.LoadFunc(fe.Path)
 	}
@@ -103,7 +104,7 @@ func (m *Model) ApplyFileEdits(edits []FileEdit, onDone func(FileEditResult) tea
 // fileEditsLoadedMsg is the closed files of a multi-file apply that were read.
 type fileEditsLoadedMsg struct {
 	edits   []FileEdit
-	docs    []*editor.Document
+	docs    []*document.Document
 	errs    []error
 	files   int
 	back    string
@@ -189,7 +190,7 @@ func finishFileEdits(res FileEditResult, onDone func(FileEditResult) tea.Cmd) te
 }
 
 // documentHash is the fnv64a hash of a loaded document's text.
-func documentHash(doc *editor.Document) uint64 {
+func documentHash(doc *document.Document) uint64 {
 	if doc == nil || doc.Buffer == nil {
 		return hashText("")
 	}
@@ -210,7 +211,7 @@ func (m *Model) activateTabPath(path string) {
 // version-checking editor the edits are refused with editor.ErrStale when the
 // document no longer has expect; a port without that check refuses an expected
 // version rather than applying edits it cannot verify.
-func (m *Model) applyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error {
+func (m *Model) applyLSPEditsExpect(path string, edits []document.LSPEdit, expect *document.Version) error {
 	if ed, ok := m.ed.(lspExpectEditor); ok {
 		return ed.ApplyLSPEditsExpect(path, edits, expect)
 	}
@@ -224,7 +225,7 @@ func (m *Model) applyLSPEditsExpect(path string, edits []editor.LSPEdit, expect 
 // edits only when the document still has the expected version. The app adapter
 // implements it.
 type lspExpectEditor interface {
-	ApplyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error
+	ApplyLSPEditsExpect(path string, edits []document.LSPEdit, expect *document.Version) error
 }
 
 // lspVersionedEditor is the optional editor part that reports an open document's
@@ -232,7 +233,7 @@ type lspExpectEditor interface {
 // each edit must still see, and a multi-caret completion resolve refuses to start
 // without it: the async reply needs the version captured at acceptance.
 type lspVersionedEditor interface {
-	DocumentVersion(path string) (editor.Version, bool)
+	DocumentVersion(path string) (document.Version, bool)
 }
 
 // workspaceFileOps is the optional editor part that performs the file operations of
@@ -242,6 +243,21 @@ type workspaceFileOps interface {
 	CreateFile(path string, ignoreIfExists bool) error
 	RenameFile(oldPath, newPath string, ignoreIfExists bool) error
 	DeleteFile(path string) error
+}
+
+// workspaceRenameOps is the optional split form of RenameFile, for an editor port whose
+// rename must not touch the editor from a command. The file operations of a plan run in a
+// tea.Cmd, a goroutine of their own, while the editor belongs to the UI goroutine: CheckRename
+// and FollowRename change or read editor state and run in Update, around MoveFile, which
+// touches only the disk. A port without it has its RenameFile called on the UI goroutine.
+type workspaceRenameOps interface {
+	// CheckRename reports the error FollowRename would return, before the disk is touched.
+	CheckRename(oldPath, newPath string) error
+	// MoveFile renames the file on disk and never overwrites. moved is false when nothing
+	// changed (the target existed and ignoreIfExists was set).
+	MoveFile(oldPath, newPath string, ignoreIfExists bool) (moved bool, err error)
+	// FollowRename moves the open tabs of oldPath to newPath after a successful MoveFile.
+	FollowRename(oldPath, newPath string) error
 }
 
 // workspaceEditPlan is the ordered steps of one server's workspace edit. The
@@ -261,16 +277,18 @@ type workspaceEditPlan struct {
 type workspaceStepLoadedMsg struct {
 	plan  *workspaceEditPlan
 	index int
-	doc   *editor.Document
+	doc   *document.Document
 	err   error
 }
 
 // workspaceStepOpMsg is the result of one file operation of a plan. A non-empty
 // reason means the operation was refused or failed and the rest of the plan stops.
+// moved marks a rename whose file moved on disk, so Update still has to move the open tabs.
 type workspaceStepOpMsg struct {
 	plan   *workspaceEditPlan
 	index  int
 	reason string
+	moved  bool
 }
 
 // applyWorkspaceEdit applies a server's workspace edit: its documentChanges in the
@@ -315,11 +333,30 @@ func (m *Model) runWorkspaceEdit(plan *workspaceEditPlan) tea.Cmd {
 			}
 		}
 		ops, ok := m.ed.(workspaceFileOps)
-		if !ok {
-			m.notice = "This port cannot apply the file operations of a server edit"
-			return nil
-		}
 		index := plan.index
+		if !ok {
+			// Stop the plan like a refused operation, so the caller still gets its report
+			// and the tab the edit started in is restored.
+			return m.workspaceStepOp(workspaceStepOpMsg{plan: plan, index: index,
+				reason: "this port cannot apply the file operations of a server edit"})
+		}
+		if op.Kind == WorkspaceOpRename && !op.Overwrite {
+			if rn, ok := m.ed.(workspaceRenameOps); ok {
+				if err := rn.CheckRename(op.Path, op.NewPath); err != nil {
+					return m.workspaceStepOp(workspaceStepOpMsg{plan: plan, index: index, reason: err.Error()})
+				}
+				return func() tea.Msg {
+					moved, err := rn.MoveFile(op.Path, op.NewPath, op.IgnoreIfExists)
+					msg := workspaceStepOpMsg{plan: plan, index: index, moved: moved}
+					if err != nil {
+						msg.reason = err.Error()
+					}
+					return msg
+				}
+			}
+			// RenameFile changes the editor as well as the disk: run it here, on the UI goroutine.
+			return m.workspaceStepOp(workspaceStepOpMsg{plan: plan, index: index, reason: applyResourceOp(ops, op)})
+		}
 		return func() tea.Msg {
 			return workspaceStepOpMsg{plan: plan, index: index, reason: applyResourceOp(ops, op)}
 		}
@@ -339,7 +376,7 @@ func (m *Model) applyWorkspaceTextStep(plan *workspaceEditPlan, op WorkspaceOp, 
 			return
 		}
 	}
-	var expect *editor.Version
+	var expect *document.Version
 	if ve, ok := m.ed.(lspVersionedEditor); ok {
 		if v, ok := ve.DocumentVersion(path); ok {
 			expect = &v
@@ -391,7 +428,15 @@ func (m *Model) workspaceStepOp(msg workspaceStepOpMsg) tea.Cmd {
 	if plan == nil || plan.index != msg.index {
 		return nil
 	}
+	op := plan.ops[msg.index]
 	plan.index++
+	if msg.moved && msg.reason == "" {
+		if rn, ok := m.ed.(workspaceRenameOps); ok {
+			if err := rn.FollowRename(op.Path, op.NewPath); err != nil {
+				msg.reason = err.Error()
+			}
+		}
+	}
 	if msg.reason != "" {
 		plan.res.Skipped = append(plan.res.Skipped, msg.reason)
 		if later := len(plan.ops) - plan.index; later > 0 {

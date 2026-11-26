@@ -122,7 +122,7 @@ func (m *Model) updateAction(action string) (tea.Cmd, bool) {
 		return nil, true
 	case "update_fresh":
 		if len(m.updates.Command) == 0 {
-			return nil, false // notApplicableNotice keeps the old "does not update itself"
+			return nil, false // no UpdateHooks command: the row is not offered
 		}
 		return m.runUpdateCommand(), true
 	case "open_update_log":

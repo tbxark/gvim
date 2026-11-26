@@ -2,8 +2,8 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/document"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 )
@@ -41,7 +41,7 @@ func (m *Model) openEncodings(action, title string) {
 	if doc := m.ed.Active(); doc != nil {
 		current = doc.Encoding()
 	}
-	choices := editor.EncodingChoices()
+	choices := document.EncodingChoices()
 	rows := make([]list.Row, len(choices))
 	for i, c := range choices {
 		right := ""
@@ -65,7 +65,7 @@ func (m *Model) openEncodings(action, title string) {
 // would require loading it whole first.
 func (m *Model) askOpenWithEncoding(path string, line, col int) {
 	rows := []list.Row{}
-	for _, c := range editor.EncodingChoices() {
+	for _, c := range document.EncodingChoices() {
 		rows = append(rows, list.Row{Left: c.Label, Value: c.Name})
 	}
 	v := list.New("Open with Encoding", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {

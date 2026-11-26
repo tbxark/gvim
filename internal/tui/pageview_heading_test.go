@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -27,7 +28,7 @@ func TestPageViewHeadingScrollbarMarks(t *testing.T) {
 	}
 	// The marks follow an edit (the memo is keyed by the text version).
 	ed.SetCursor(buffer.Pos{Line: 1, Col: 0}, false)
-	ed.Do(editor.Action("insert_char"), map[string]any{"text": "#"})
+	ed.Do(document.Action("insert_char"), map[string]any{"text": "#"})
 	p = m.viewPane(m.layout().FocusedPane(), m.paneGeometry(m.layout().FocusedPane(), m.ed.Active()), m.ed.Active())
 	if len(p.TrackMarks) < 2 {
 		t.Fatalf("marks after the edit = %+v", p.TrackMarks)

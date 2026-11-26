@@ -58,14 +58,6 @@ type workspaceExtractTargetPort interface {
 	ExtractTerminalTabTo(id string) (WorkspaceCmd, error)
 }
 
-// workspaceExtractManyPort is the optional multi-tab surface: open the selected FILE tabs
-// of the active workspace in one new co-tenant workspace (Fresh has no multi-tab extract;
-// this is gvim's bounded extension, documented in docs/ui.md). A port without it has no
-// multi-select row.
-type workspaceExtractManyPort interface {
-	ExtractTabs(paths []string) (WorkspaceCmd, error)
-}
-
 // ExtractTerminalRef names one dock terminal tab in a mixed extract selection. Index
 // is the tab's slot at capture time and Name its saved name ("" for a default-named
 // tab), so the command can verify the tab still exists before closing it.
@@ -253,8 +245,9 @@ func WorkspaceCmdOf(fn func()) WorkspaceCmd {
 	}
 }
 
-// WorkspacePort is the daemon's workspace layer as the TUI calls it. The methods run on
-// the UI goroutine (the overlay callbacks) and return a command for the work that must
+// WorkspacePort is the daemon's workspace layer as the TUI calls it. Select, Next, Close
+// and Rename may wait on the UI goroutine, so the TUI calls them through workspaceOp, off
+// it; the other methods run in Update. A method returns a command for the work that must
 // not block the UI (materializing a dormant workspace builds a whole runtime); a
 // user-visible failure is reported as an error or through the command's notice.
 type WorkspacePort interface {
@@ -264,6 +257,27 @@ type WorkspacePort interface {
 	Close(id string) (WorkspaceCmd, error)
 	Rename(id, label string) error
 	Next() (WorkspaceCmd, error)
+}
+
+// workspaceOpErrMsg reports the failure of a workspaceOp to Update.
+type workspaceOpErrMsg struct{ err error }
+
+// workspaceOp runs a WorkspacePort operation off the UI goroutine. The app's Select, Next,
+// Close and Rename marshal their model work onto the UI goroutine and wait for it, so
+// calling them inside Update would block the UI on itself until the host call timed out.
+// The operation's own command runs right after it in the same goroutine; an error comes
+// back as a workspaceOpErrMsg for the status row.
+func workspaceOp(op func() (WorkspaceCmd, error)) tea.Cmd {
+	return func() tea.Msg {
+		cmd, err := op()
+		if err != nil {
+			return workspaceOpErrMsg{err: err}
+		}
+		if cmd == nil {
+			return nil
+		}
+		return cmd()
+	}
 }
 
 // SetWorkspacePort gives the root the daemon's workspace layer. The app calls it after
@@ -347,11 +361,7 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 		m.openWorkspaceSwitcher()
 		return nil, true
 	case "workspace_next":
-		cmd, err := m.workspace.Next()
-		if err != nil {
-			m.quietNotice(err.Error())
-		}
-		return cmd, true
+		return workspaceOp(m.workspace.Next), true
 	case "workspace_new":
 		m.openNewWorkspacePrompt()
 		return nil, true
@@ -365,11 +375,7 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 	case "workspace_extract_terminal_to":
 		return m.extractWorkspaceTerminalTo(), true
 	case "workspace_extract_tabs":
-		if _, ok := m.workspace.(workspaceExtractMixedPort); ok {
-			m.openMixedExtractPicker()
-		} else {
-			m.openExtractTabsPicker()
-		}
+		m.openMixedExtractPicker()
 		return nil, true
 	case "workspace_rename":
 		m.openWorkspacePicker(uiText("gvim.workspace.picker_rename", "Rename Workspace"), func(e WorkspaceEntry) tea.Cmd {
@@ -400,11 +406,7 @@ func (m *Model) workspaceCloseEntry(e WorkspaceEntry) tea.Cmd {
 			prompt.ConfirmOptions{Title: uiText("gvim.prompt.title.close_workspace", "Close Workspace"), Yes: uiText("gvim.workspace.close_button", "Close"), No: uiText("gvim.dialog.button.cancel", "Cancel"), DefaultYes: true}))
 		return nil
 	}
-	cmd, err := m.workspace.Close(e.ID)
-	if err != nil {
-		m.quietNotice(err.Error())
-	}
-	return cmd
+	return workspaceOp(func() (WorkspaceCmd, error) { return m.workspace.Close(e.ID) })
 }
 
 // workspaceCloseRunningTag is the tag of the close confirmation that lists the running
@@ -544,67 +546,6 @@ func (m *Model) extractWorkspaceTerminalTo() tea.Cmd {
 	}
 	m.openExtractTargetPicker(uiText("gvim.workspace.extract_title_terminal", "Extract Terminal Tab to Workspace"), p.ExtractTerminalTabTo)
 	return nil
-}
-
-// openExtractTabsPicker offers the open file tabs in a multi-select list. Space marks a tab,
-// Enter extracts the marked ones (or the highlighted one) into a new co-tenant workspace.
-// A terminal tab, a folder and a large-file overlay are not offered: the first has its own
-// extract action, the others have no file state to carry.
-func (m *Model) openExtractTabsPicker() {
-	if _, ok := m.workspace.(workspaceExtractManyPort); !ok {
-		m.quietNotice(uiText("gvim.workspace.extract_many_unsupported", "Extracting several tabs is not supported by this workspace layer"))
-		return
-	}
-	tabs := m.ed.Tabs()
-	rows := make([]list.Row, 0, len(tabs))
-	for _, t := range tabs {
-		if t.Path == "" {
-			continue
-		}
-		left := t.Name
-		if left == "" {
-			left = t.Path
-		}
-		right := "modified"
-		if !t.Modified {
-			right = ""
-		}
-		rows = append(rows, list.Row{Left: left, Right: right, Value: t.Path})
-	}
-	if len(rows) == 0 {
-		m.quietNotice(uiText("gvim.workspace.extract_no_file_tabs", "No file tabs to extract"))
-		return
-	}
-	extract := func(view *list.View, paths []string) tea.Cmd {
-		view.Close()
-		p, ok := m.workspace.(workspaceExtractManyPort)
-		if !ok {
-			return nil
-		}
-		cmd, err := p.ExtractTabs(paths)
-		if err != nil {
-			m.workspaceActionError(err)
-			return nil
-		}
-		return cmd
-	}
-	// Enter with no marks runs the highlighted row through this single-tab callback;
-	// a marked set goes through ChooseMany. Both keep the multi-select rule "the
-	// active tab alone or the marked tabs".
-	v := list.New(uiText("gvim.workspace.extract_title_tabs_new", "Extract Tabs to New Workspace"), rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
-		return extract(view, []string{r.Value})
-	})
-	v.Multi = true
-	v.Fit, v.MaxW = true, 80
-	v.Hint = uiText("gvim.workspace.extract_hint_select", "Space mark, Enter extract, type to filter, Esc close")
-	v.ChooseMany = func(view *list.View, marked []list.Row) tea.Cmd {
-		paths := make([]string, 0, len(marked))
-		for _, r := range marked {
-			paths = append(paths, r.Value)
-		}
-		return extract(view, paths)
-	}
-	m.pushOverlay(v)
 }
 
 // The extract picker values: a file tab's path or a dock tab's index, so one
@@ -779,11 +720,7 @@ func (m *Model) openWorkspaceSwitcher() {
 		rows = append(rows, list.Row{Left: left, Right: right, Value: e.ID})
 	}
 	v := list.New("Workspaces", rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
-		cmd, err := m.workspace.Select(r.Value)
-		if err != nil {
-			m.quietNotice(err.Error())
-		}
-		return cmd
+		return workspaceOp(func() (WorkspaceCmd, error) { return m.workspace.Select(r.Value) })
 	})
 	v.Fit, v.MaxW = true, 80
 	m.pushOverlay(v)
@@ -862,11 +799,7 @@ func (m *Model) workspaceActionAnswer(d prompt.Done) (tea.Cmd, bool) {
 		return cmd, true
 	case workspaceCloseRunningTag:
 		if d.Outcome == prompt.Yes && m.workspace != nil {
-			cmd, err := m.workspace.Close(tag.id)
-			if err != nil {
-				m.quietNotice(err.Error())
-			}
-			return cmd, true
+			return workspaceOp(func() (WorkspaceCmd, error) { return m.workspace.Close(tag.id) }), true
 		}
 		return nil, true
 	case workspaceRenameTag:
@@ -874,9 +807,8 @@ func (m *Model) workspaceActionAnswer(d prompt.Done) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if m.workspace != nil {
-			if err := m.workspace.Rename(tag.id, strings.TrimSpace(d.Text)); err != nil {
-				m.quietNotice(err.Error())
-			}
+			label := strings.TrimSpace(d.Text)
+			return workspaceOp(func() (WorkspaceCmd, error) { return nil, m.workspace.Rename(tag.id, label) }), true
 		}
 		return nil, true
 	}
@@ -909,8 +841,6 @@ func (m *Model) AddWorkspaceCommands() {
 	}
 	if _, ok := m.workspace.(workspaceExtractMixedPort); ok {
 		rows = append(rows, commands.Entry{Name: "Extract tabs to workspace…", Description: "Choose file and terminal tabs and move them into a new or existing workspace over the same root", Action: "workspace_extract_tabs", Source: commands.SourceBuiltin})
-	} else if _, ok := m.workspace.(workspaceExtractManyPort); ok {
-		rows = append(rows, commands.Entry{Name: "Extract tabs to new workspace…", Description: "Choose several file tabs and open them in one new workspace over the same root", Action: "workspace_extract_tabs", Source: commands.SourceBuiltin})
 	}
 	for _, row := range rows {
 		if slices.ContainsFunc(m.commands, func(e commands.Entry) bool { return e.Action == row.Action }) {

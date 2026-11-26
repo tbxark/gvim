@@ -144,16 +144,13 @@ func TestSwitchingTheKeymapRelabelsThePalette(t *testing.T) {
 	}
 }
 
-// The palette lists no command that can only say "Not available in gvim" (PC54: Update fresh).
+// The palette lists no updater commands when update_command is not configured.
 func TestPaletteHidesTheUpdaterRows(t *testing.T) {
 	m := hintModel(t, testKeys(), nil)
 	for _, e := range m.allCommands() {
 		if e.Action == "update_fresh" || e.Action == "open_update_log" {
 			t.Errorf("the palette lists %q", e.Name)
 		}
-	}
-	if err := m.Run("update_fresh"); err != nil || !strings.Contains(m.notice, "does not update itself") {
-		t.Errorf("the action itself must still answer: %v, notice %q", err, m.notice)
 	}
 }
 
