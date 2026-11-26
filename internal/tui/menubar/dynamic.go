@@ -6,11 +6,9 @@ import "github.com/tbxark/gvim/theme"
 // the prefix and the theme name. The root runs copy_with_theme with that theme.
 const CopyThemePrefix = "copy_with_theme:"
 
-// submenuItems returns the rows a submenu opens. The generated table has no rows
-// for the submenus that Fresh builds at run time (DynamicSubmenu), so this
-// hand-written layer fills them in: Copy with Formatting lists one row per theme,
-// as Fresh's generate_dynamic_items does. Every other submenu keeps its rows.
-func submenuItems(it legacyItem, themeChoices []ThemeChoice) []legacyItem {
+// submenuItems returns the rows a submenu opens. Copy with Formatting lists
+// one row per theme dynamically; every other submenu keeps its static rows.
+func submenuItems(it menuItem, themeChoices []ThemeChoice) []menuItem {
 	if len(it.children) > 0 || it.label != "Copy with Formatting" {
 		return it.children
 	}
@@ -19,9 +17,9 @@ func submenuItems(it legacyItem, themeChoices []ThemeChoice) []legacyItem {
 			themeChoices = append(themeChoices, ThemeChoice{Name: name, Ref: name})
 		}
 	}
-	var items []legacyItem
+	var items []menuItem
 	for _, choice := range themeChoices {
-		items = append(items, legacyItem{
+		items = append(items, menuItem{
 			kind: itemAction, label: choice.Name, action: CopyThemePrefix + choice.Ref, when: "has_selection",
 		})
 	}

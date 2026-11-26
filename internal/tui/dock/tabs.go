@@ -616,8 +616,13 @@ func (t *Tabs) Show() tea.Cmd {
 	for _, p := range t.tabs {
 		p.open = true
 	}
-	t.queueDive(t.Active())
-	return t.Active().Show()
+	active := t.Active()
+	t.queueDive(active)
+	cmd := active.Show()
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg { return tabStartedMsg{tab: active, inner: cmd()} }
 }
 
 // Hide hides the dock; the shells keep running.

@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rivo/uniseg"
 
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
@@ -591,67 +590,12 @@ func statusNotice(frameW, x0, width int, s StatusView, maxRows int) []string {
 func noticeRows(text string, width, maxRows int) []string {
 	budget := width * maxRows
 	for {
-		rows := wrapText(space.Middle(text, budget), width)
+		rows := space.WrapWords(space.Middle(text, budget), width)
 		if len(rows) <= maxRows || budget <= width {
 			return rows
 		}
 		budget -= max(width/4, 1)
 	}
-}
-
-// wrapText breaks s into rows of at most width cells, at its spaces. A word longer than
-// the room left on a row fills that row first and goes on in the next, so a long path does
-// not leave the row before it nearly empty.
-func wrapText(s string, width int) []string {
-	var rows []string
-	if width <= 0 {
-		return nil
-	}
-	cur := ""
-	for word := range strings.FieldsSeq(s) {
-		for word != "" {
-			sep := ""
-			if cur != "" {
-				sep = " "
-			}
-			room := width - ansi.StringWidth(cur+sep)
-			switch ww := ansi.StringWidth(word); {
-			case ww <= room:
-				cur += sep + word
-				word = ""
-			case ww <= width:
-				// The word fits a row of its own: start the next row with it.
-				if cur != "" {
-					rows = append(rows, cur)
-				}
-				cur = ""
-			case room > 0:
-				// Longer than any row: the room left takes its start.
-				head := ansi.Truncate(word, room, "")
-				if head == "" {
-					if cur != "" {
-						rows = append(rows, cur)
-						cur = ""
-						continue
-					}
-					head, word, _, _ = uniseg.FirstGraphemeClusterInString(word, -1)
-					rows = append(rows, head)
-					continue
-				}
-				cur += sep + head
-				word = ansi.TruncateLeft(word, ansi.StringWidth(head), "")
-				rows = append(rows, cur)
-				cur = ""
-			default:
-				rows = append(rows, cur)
-				cur = ""
-			}
-		}
-	}
-	if cur != "" {
-		rows = append(rows, cur)
-	}
-	return rows
 }
 
 // hideScrollbars clears the scrollbar of every pane. The column stays in the pane, so
@@ -1119,10 +1063,7 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 	skipSep := false
 	for _, seg := range left {
 		if seg.plugin {
-			if itemRoom > 0 {
-				seg.text = space.End(seg.text, itemRoom)
-				itemRoom -= ansi.StringWidth(seg.text)
-			}
+			seg.text = space.End(seg.text, itemRoom)
 			if seg.text == "" {
 				if n := len(painted); n > 0 && painted[n-1].sep {
 					painted = painted[:n-1]
@@ -1130,6 +1071,7 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 				skipSep = true
 				continue
 			}
+			itemRoom -= ansi.StringWidth(seg.text)
 		} else if seg.sep && skipSep {
 			skipSep = false
 			continue

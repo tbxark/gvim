@@ -248,7 +248,7 @@ func (m *Model) PaintSidebar(g *grid.Grid, r SidebarRect, st Styles, iconMode ic
 	}
 
 	if hasScroll {
-		thumbTop, thumbLen := scrollbarThumb(len(m.Filtered), listRows, m.FileScroll)
+		thumbTop, thumbLen := space.Thumb(len(m.Filtered), listRows, m.FileScroll)
 		sx := innerX + innerW - 1
 		for row := range listRows {
 			y := r.ListTop() + row
@@ -1047,7 +1047,7 @@ func (m *Model) paintScrollbar(g *grid.Grid, x, y, viewRows, total, scroll int, 
 		}
 		return
 	}
-	thumbTop, thumbLen := scrollbarThumb(total, viewRows, scroll)
+	thumbTop, thumbLen := space.Thumb(total, viewRows, scroll)
 
 	// Map changed rows onto overview track ticks (added=green, removed=red, modify=amber).
 	marks := make([]color.Color, viewRows)
@@ -1095,19 +1095,6 @@ func (m *Model) paintScrollbar(g *grid.Grid, x, y, viewRows, total, scroll int, 
 			g.Set(x, y+row, "│", st.Scrollbar)
 		}
 	}
-}
-
-func scrollbarThumb(total, viewRows, scroll int) (top, length int) {
-	if total <= viewRows || viewRows <= 0 {
-		return 0, viewRows
-	}
-	length = max(viewRows*viewRows/total, 1)
-	maxScroll := total - viewRows
-	if maxScroll <= 0 {
-		return 0, length
-	}
-	top = scroll * (viewRows - length) / maxScroll
-	return min(max(top, 0), viewRows-length), length
 }
 
 func diffLineBG(kind RowKind, isCur bool, st Styles) color.Color {

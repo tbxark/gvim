@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 )
 
 const ellipsis = "…"
@@ -130,6 +131,62 @@ func Wrap(s string, w, maxRows int) []string {
 		last = ansi.Truncate(last, w-1, "")
 	}
 	rows[maxRows-1] = last + ellipsis
+	return rows
+}
+
+// WrapWords breaks s into rows of at most width cells, at its spaces; any run of
+// whitespace, newlines included, is one space. A word longer than
+// the room left on a row fills that row first and goes on in the next, so a long path does
+// not leave the row before it nearly empty.
+func WrapWords(s string, width int) []string {
+	var rows []string
+	if width <= 0 {
+		return nil
+	}
+	cur := ""
+	for word := range strings.FieldsSeq(s) {
+		for word != "" {
+			sep := ""
+			if cur != "" {
+				sep = " "
+			}
+			room := width - ansi.StringWidth(cur+sep)
+			switch ww := ansi.StringWidth(word); {
+			case ww <= room:
+				cur += sep + word
+				word = ""
+			case ww <= width:
+				// The word fits a row of its own: start the next row with it.
+				if cur != "" {
+					rows = append(rows, cur)
+				}
+				cur = ""
+			case room > 0:
+				// Longer than any row: the room left takes its start.
+				head := ansi.Truncate(word, room, "")
+				if head == "" {
+					if cur != "" {
+						rows = append(rows, cur)
+						cur = ""
+						continue
+					}
+					head, word, _, _ = uniseg.FirstGraphemeClusterInString(word, -1)
+					rows = append(rows, head)
+					continue
+				}
+				cur += sep + head
+				word = ansi.TruncateLeft(word, ansi.StringWidth(head), "")
+				rows = append(rows, cur)
+				cur = ""
+			default:
+				rows = append(rows, cur)
+				cur = ""
+			}
+		}
+	}
+	if cur != "" {
+		rows = append(rows, cur)
+	}
 	return rows
 }
 

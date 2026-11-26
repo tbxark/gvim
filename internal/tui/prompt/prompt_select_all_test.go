@@ -38,14 +38,8 @@ func TestLineSelectAllBackspaceAndDeleteClear(t *testing.T) {
 	}
 }
 
-// pasteMsg stands in for textinput's unexported Ctrl+V paste result. The prompt
-// recognizes it by type name and string kind, exactly as it recognizes the real one, so
-// this test drives Update(Ctrl+V) -> command -> result -> Update without the system
-// clipboard.
-type pasteMsg string
-
 // TestLineSelectAllCtrlVPasteReplaces: Ctrl+V keeps the selection while the clipboard
-// read command is in flight. Executing that command yields textinput's pasteMsg; feeding
+// read command is in flight. Executing that command yields a pasteResultMsg; feeding
 // it back clears the selected range and inserts the pasted text, so Ctrl+A Ctrl+V replaces
 // rather than appends. The selection is gone afterwards, so a Backspace edits the new text
 // instead of clearing it.
@@ -53,7 +47,7 @@ func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	t.Parallel()
 	var changed []string
 	l := NewLine(testStyles(), LineOptions{Label: "Value:", Input: "old", OnChange: func(s string) { changed = append(changed, s) }})
-	l.paste = func() tea.Msg { return pasteMsg("new") }
+	l.paste = func() string { return "new" }
 	l.SelectAll()
 	_, cmd := l.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {

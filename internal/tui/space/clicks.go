@@ -37,14 +37,23 @@ func (c *ClickCounter) PressWindow(at time.Time, x, y int, window time.Duration)
 
 // Thumb sizes a scrollbar thumb for lines rows in a window of h rows, with the
 // first window row top. The thumb is at least one row long and at most the
-// window.
+// window. Its start runs over 0..h-length as top runs over 0..lines-h, so it
+// reaches the bottom of the track when the last page is shown.
 func Thumb(lines, h, top int) (start, length int) {
+	return ThumbMax(lines, h, top, lines-h)
+}
+
+// ThumbMax is Thumb for a view whose last page starts at row maxTop, as when the
+// rows are wrapped and fewer than lines-h of them scroll.
+func ThumbMax(lines, h, top, maxTop int) (start, length int) {
 	if lines <= 0 || h <= 0 {
 		return 0, 0
 	}
 	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
-	start = int(int64(min(max(top, 0), lines-1)) * int64(h) / int64(lines))
-	return min(start, max(h-length, 0)), length
+	if maxTop > 0 {
+		start = int(int64(min(max(top, 0), maxTop)) * int64(h-length) / int64(maxTop))
+	}
+	return start, length
 }
 
 // Checkbox is the box before an option name.

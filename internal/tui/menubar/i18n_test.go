@@ -59,10 +59,10 @@ func TestGeneratedMenuKeysExist(t *testing.T) {
 			t.Errorf("menu label %q: key %q is not in the English catalogue", label, key)
 		}
 	}
-	for _, menu := range legacyMenus {
+	for _, menu := range builtinMenus {
 		check(menu.label, menu.key)
-		var walk func([]legacyItem)
-		walk = func(items []legacyItem) {
+		var walk func([]menuItem)
+		walk = func(items []menuItem) {
 			for _, it := range items {
 				check(it.label, it.key)
 				walk(it.children)

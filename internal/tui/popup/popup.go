@@ -16,7 +16,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rivo/uniseg"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
@@ -335,8 +334,8 @@ func boxWidthNote(title, note string, items []Item, fw int) int {
 	return min(max(w, minBoxWidth), max(fw-2*space.Margin(fw), minBoxWidth), fw)
 }
 
-// wrapNote word-wraps a note to width cells, one line per row. A word longer than the
-// width is broken.
+// wrapNote word-wraps a note to width cells, one paragraph per source line. A word longer
+// than the width is broken (see space.WrapWords).
 func wrapNote(note string, width int) []string {
 	note = strings.TrimSpace(note)
 	if note == "" || width <= 0 {
@@ -344,44 +343,11 @@ func wrapNote(note string, width int) []string {
 	}
 	var lines []string
 	for para := range strings.SplitSeq(note, "\n") {
-		words := strings.Fields(para)
-		if len(words) == 0 {
-			lines = append(lines, "")
-			continue
+		rows := space.WrapWords(para, width)
+		if len(rows) == 0 {
+			rows = []string{""}
 		}
-		line := ""
-		for _, word := range words {
-			for ansi.StringWidth(word) > width {
-				if line != "" {
-					lines = append(lines, line)
-					line = ""
-				}
-				head := ansi.Truncate(word, width, "")
-				if head == "" {
-					head, word, _, _ = uniseg.FirstGraphemeClusterInString(word, -1)
-					lines = append(lines, head)
-					continue
-				}
-				lines = append(lines, head)
-				if strings.HasPrefix(word, head) {
-					word = word[len(head):]
-				} else {
-					word = ansi.TruncateLeft(word, ansi.StringWidth(head), "")
-				}
-			}
-			switch {
-			case line == "":
-				line = word
-			case ansi.StringWidth(line)+1+ansi.StringWidth(word) <= width:
-				line += " " + word
-			default:
-				lines = append(lines, line)
-				line = word
-			}
-		}
-		if line != "" {
-			lines = append(lines, line)
-		}
+		lines = append(lines, rows...)
 	}
 	return lines
 }

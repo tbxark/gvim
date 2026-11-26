@@ -70,16 +70,8 @@ func (n *Node) Leaves() []*Node {
 
 // ParentOf returns the inner node of the tree n whose child is leaf, or nil.
 func (n *Node) ParentOf(leaf *Node) *Node {
-	if n.Leaf() {
-		return nil
-	}
-	if n.A == leaf || n.B == leaf {
-		return n
-	}
-	if p := n.A.ParentOf(leaf); p != nil {
-		return p
-	}
-	return n.B.ParentOf(leaf)
+	parent, _, _ := Parent(n, leaf)
+	return parent
 }
 
 // Tree is the tree state of the split: the tree itself and the focused leaf,

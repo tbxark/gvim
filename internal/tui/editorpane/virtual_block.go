@@ -2,8 +2,8 @@ package editorpane
 
 import (
 	"github.com/charmbracelet/x/ansi"
+	"github.com/tbxark/gvim/document"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
 
@@ -14,7 +14,7 @@ import (
 type BlockDocument interface {
 	// BlockSelection returns the rectangle of the block selection in progress,
 	// and false when no block is active.
-	BlockSelection() (editor.BlockRect, bool)
+	BlockSelection() (document.BlockRect, bool)
 }
 
 // blockRect is the part of a block selection the pane paints: its line and rune

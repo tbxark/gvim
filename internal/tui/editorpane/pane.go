@@ -31,6 +31,7 @@ import (
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -508,16 +509,22 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	f.placeHorizontal(p.Left, h)
 	// The vertical overflow counts the text rows left after the horizontal bar.
 	f.overflow = f.visibleCount()+f.fillRows() > f.h || (f.display > f.lines && f.display > f.h)
+	return f, true
+}
+
+// setMarks computes the margin bar and scrollbar change marks of the frame. Only
+// painting reads them, so queries that never paint (hit tests, caret and scroll
+// maths) skip the diff.
+func (f *frame) setMarks() {
 	switch {
-	case isLarge(p.Doc):
+	case isLarge(f.doc):
 		// The saved text of a large document is not held, so there is nothing to diff
 		// the lines against. The margin bar marks the modified lines on screen, and the
 		// scrollbar carries no change marks.
 		f.bar = f.dirtyRows()
-	case p.Doc.Modified():
+	case f.doc.Modified():
 		f.bar, f.scroll = f.changes()
 	}
-	return f, true
 }
 
 // ChangeMemo is implemented by a Document that keeps the change marks until its text or
@@ -746,6 +753,7 @@ func (p Pane) paintTo(g *grid.Grid, w, h int) (cx, cy int, ok bool) {
 	if !ok {
 		return 0, 0, false
 	}
+	f.setMarks()
 	rows := f.paintText(g)
 	f.paintCurrentColumn(g)
 	f.paintRulers(g)
@@ -1502,7 +1510,7 @@ func (p Pane) ScrollTopFor(w, h, row int) int {
 		// With wrap a line is several rows, so the last page starts at the line whose
 		// rows to the end just fill the body, not at lines-h.
 		maxTop := f.lastPageTop()
-		_, length := thumbOfMax(f.display, f.h, 0, maxTop)
+		_, length := space.ThumbMax(f.display, f.h, 0, maxTop)
 		if span := f.h - length; maxTop > 0 && span > 0 {
 			pos := min(max(row-length/2, 0), span)
 			return min((pos*maxTop+span/2)/span, maxTop)
@@ -1515,7 +1523,7 @@ func (p Pane) ScrollTopFor(w, h, row int) int {
 	if p.Fillers != nil {
 		display = rows
 	}
-	_, length := thumbOf(display, h, 0)
+	_, length := space.Thumb(display, h, 0)
 	if h == length {
 		return 0
 	}
@@ -1541,19 +1549,17 @@ func (p Pane) ScrollTopFor(w, h, row int) int {
 // the whole document on each frame), and so does a document without inserted rows.
 func (f frame) thumb() (start, length int) {
 	if f.fill != nil {
-		return thumbOf(f.fill.Total(f.lines), f.h, f.fill.BlockStart(f.top)+f.topRow)
+		return space.Thumb(f.fill.Total(f.lines), f.h, f.fill.BlockStart(f.top)+f.topRow)
 	}
 	if f.insertedRows() && !isLarge(f.doc) && f.win == nil {
-		if total, ok := f.rowTotal(); ok && total > f.h {
-			if before, ok := f.rowsBeforeTop(); ok {
-				return thumbRows(total, f.h, before)
-			}
+		if total, before, ok := f.rowTotals(); ok && total > f.h {
+			return space.ThumbMax(total, f.h, before, total-f.h)
 		}
 	}
 	if f.wrapped() {
-		return thumbOfMax(f.display, f.h, f.top, f.lastPageTop())
+		return space.ThumbMax(f.display, f.h, f.top, f.lastPageTop())
 	}
-	return thumbOf(f.display, f.h, f.top)
+	return space.Thumb(f.display, f.h, f.top)
 }
 
 // insertedRows reports whether the frame paints display rows no document line count
@@ -1562,43 +1568,22 @@ func (f frame) insertedRows() bool {
 	return f.extras != nil || (f.pageExtras != nil && f.pageOn) || f.soft != nil
 }
 
-// rowTotal is the number of display rows of the whole document, counting the inserted
-// rows: one pass over the visible lines. ok is false when the count is not cheap (a
-// large or windowed document).
-func (f frame) rowTotal() (total int, ok bool) {
+// rowTotals is the number of display rows of the whole document, counting the inserted
+// rows, and the number above the frame's first visible row (the rows of the lines above
+// the top line, plus topRow rows of the top line itself), both from one pass over the
+// visible lines. ok is false when the count is not cheap (a large or windowed document).
+func (f frame) rowTotals() (total, before int, ok bool) {
 	if isLarge(f.doc) || f.win != nil {
-		return 0, false
+		return 0, 0, false
 	}
 	for i := 0; i < f.lines; i = f.next(i) {
-		total += f.rowCount(i)
+		n := f.rowCount(i)
+		if i < f.top {
+			before += n
+		}
+		total += n
 	}
-	return total, true
-}
-
-// rowsBeforeTop is the number of display rows above the frame's first visible row: the
-// rows of the lines above the top line, plus topRow rows of the top line itself.
-func (f frame) rowsBeforeTop() (before int, ok bool) {
-	if isLarge(f.doc) || f.win != nil {
-		return 0, false
-	}
-	for i := 0; i < f.top && i < f.lines; i = f.next(i) {
-		before += f.rowCount(i)
-	}
-	return before + max(f.topRow, 0), true
-}
-
-// thumbRows sizes the thumb for total display rows in a body h rows tall, with before
-// rows above the first visible row. It is thumbOf for rows instead of lines.
-func thumbRows(total, h, before int) (start, length int) {
-	if total <= h {
-		return 0, h
-	}
-	length = min(h, max(1, (h*h+total/2)/total))
-	span := h - length
-	if maxTop := total - h; maxTop > 0 && span > 0 {
-		start = min(max(before, 0), maxTop) * span / maxTop
-	}
-	return start, length
+	return total, before + max(f.topRow, 0), true
 }
 
 // wrapped reports whether the scrollbar maps the wrapped rows of the lines: wrap is on
@@ -1620,26 +1605,6 @@ func (f frame) lastPageTop() int {
 		top = i
 	}
 	return top
-}
-
-// thumbOf sizes the thumb for lines document lines in a body h rows tall, with
-// the first visible line top. The thumb is one row per lines/h of the document.
-// Its start runs over 0..h-length as the top runs over 0..lines-h, so it reaches
-// the bottom of the track when the last page is shown.
-func thumbOf(lines, h, top int) (start, length int) {
-	return thumbOfMax(lines, h, top, lines-h)
-}
-
-// thumbOfMax is thumbOf for a view whose last page starts at line maxTop.
-func thumbOfMax(lines, h, top, maxTop int) (start, length int) {
-	if lines <= 0 || h <= 0 {
-		return 0, 0
-	}
-	length = min(h, max(1, int((int64(h)*int64(h)+int64(lines)/2)/int64(lines))))
-	if maxTop > 0 {
-		start = int(int64(min(max(top, 0), maxTop)) * int64(h-length) / int64(maxTop))
-	}
-	return start, length
 }
 
 // posAt maps the cell at (x, row) to a document position. See PosAt.

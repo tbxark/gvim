@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/i18n"
 )
 
-// menuKind classifies a row of the generated menu table.
+// menuKind classifies a row of the built-in menu table.
 type menuKind uint8
 
 const (
@@ -16,28 +16,26 @@ const (
 	itemLabel
 )
 
-// legacyItem is one row of the generated table in menu_table_gen.go. when names
-// the context key that enables an action; checkbox names the context key for the
-// checked state, which the menu bar draws as a box before the label.
-type legacyItem struct {
+// menuItem is one row of builtinMenus. when names the context key that enables
+// an action; checkbox names the context key for the checked state, which the
+// menu bar draws as a box before the label.
+type menuItem struct {
 	kind  menuKind
 	label string
-	// key is the label's catalogue key (menu.<menu>.<item> or a gvim-only key for a
-	// gvim-rewritten label); empty for a row with no translated label.
+	// key is the label's catalogue key; empty for a row with no translated label.
 	key      string
-	keys     string
 	action   string
 	when     string
 	checkbox string
-	children []legacyItem
+	children []menuItem
 }
 
-// legacyMenu is one label of the menu bar with its rows.
-type legacyMenu struct {
+// menuDef is one label of the menu bar with its rows.
+type menuDef struct {
 	id, label, when string
 	// key is the bar title's catalogue key (menu.<menu>).
 	key   string
-	items []legacyItem
+	items []menuItem
 }
 
 // Row is one row of an open dropdown, built from the table for the state at the
@@ -63,7 +61,7 @@ func (r Row) selectable() bool {
 }
 
 // barLabels is the menu bar, in order. "Explorer" is listed only while the
-// explorer has focus, as the legacy screens show.
+// explorer has focus.
 func barLabels(explorerFocus bool) []string {
 	labels := []string{"File", "Edit", "View", "Selection", "Go", "LSP"}
 	if explorerFocus {
@@ -82,50 +80,12 @@ func menuBarLabel(title string) string {
 
 // dropdownRows returns the rows of the bar label title, with each action
 // enabled when its context key holds. A row shows the shortcut that keyOf gives
-// for its action when keyOf is not nil and reports ok, and the shortcut of the
-// table otherwise. It returns nil when the table has no such label.
+// for its action when keyOf is not nil and reports ok. It returns nil when the
+// table has no such label.
 func dropdownRows(title string, holds func(string) bool, keyOf func(string) (string, bool), themeChoices []ThemeChoice) []Row {
-	for _, lm := range legacyMenus {
-		if lm.label == title {
-			rows := menuRows(lm.items, holds, keyOf, themeChoices)
-			switch title {
-			case "View":
-				var keys string
-				if keyOf != nil {
-					keys, _ = keyOf("toggle_sticky_scroll")
-				}
-				checked := holds != nil && holds("sticky_scroll")
-				var reviewKeys string
-				if keyOf != nil {
-					reviewKeys, _ = keyOf("toggle_review_diff_mode")
-				}
-				reviewChecked := holds != nil && holds("review_diff_mode")
-				rows = append(rows,
-					Row{
-						Label:    i18n.TOr("", "gvim.menu.sticky_scroll", "Sticky Scroll", nil),
-						Keys:     keys,
-						Action:   "toggle_sticky_scroll",
-						Checkbox: true,
-						Checked:  checked,
-					},
-					Row{
-						Label:    i18n.TOr("", "gvim.menu.review_diff_mode", "Review Diff Mode", nil),
-						Keys:     reviewKeys,
-						Action:   "toggle_review_diff_mode",
-						Checkbox: true,
-						Checked:  reviewChecked,
-					},
-				)
-			case "Help":
-				rows = append(rows,
-					Row{Separator: true},
-					Row{
-						Label:  i18n.TOr("", "gvim.menu.about_gvim", "About gvim", nil),
-						Action: "about_gvim",
-					},
-				)
-			}
-			return rows
+	for _, m := range builtinMenus {
+		if m.label == title {
+			return menuRows(m.items, holds, keyOf, themeChoices)
 		}
 	}
 	return nil
@@ -133,11 +93,10 @@ func dropdownRows(title string, holds func(string) bool, keyOf func(string) (str
 
 // menuRows converts table rows into dropdown rows. An action whose when key does
 // not hold is disabled, and a checkbox row is checked when its key holds.
-func menuRows(items []legacyItem, holds func(string) bool, keyOf func(string) (string, bool), themeChoices []ThemeChoice) []Row {
+func menuRows(items []menuItem, holds func(string) bool, keyOf func(string) (string, bool), themeChoices []ThemeChoice) []Row {
 	rows := make([]Row, 0, len(items))
 	for _, it := range items {
-		// The shortcut comes from the active keymap only. The table's own keys are the macOS
-		// labels of Fresh's menu, so a row with no keymap to ask shows none.
+		// The shortcut comes from the active keymap only, so a row with no keymap to ask shows none.
 		// The label is resolved when the dropdown opens, so a live locale change is
 		// seen on the next open; the English label is the explicit fallback.
 		row := Row{Label: i18n.TOr("", it.key, it.label, nil), Action: childAction(it)}
@@ -151,9 +110,9 @@ func menuRows(items []legacyItem, holds func(string) bool, keyOf func(string) (s
 		case itemLabel:
 			row.Disabled = true
 		case itemAction:
-			row.Disabled = it.when != "" && !holds(it.when)
+			row.Disabled = it.when != "" && (holds == nil || !holds(it.when))
 			row.Checkbox = it.checkbox != ""
-			row.Checked = row.Checkbox && holds(it.checkbox)
+			row.Checked = row.Checkbox && holds != nil && holds(it.checkbox)
 			if keyOf != nil {
 				row.Keys, _ = keyOf(it.action)
 			}
@@ -170,7 +129,7 @@ const keymapActionPrefix = "switch_keybinding_map:"
 
 // childAction is the action a row runs. A Keybinding Style row runs
 // "switch_keybinding_map:" and the preset name, so the port knows which one.
-func childAction(it legacyItem) string {
+func childAction(it menuItem) string {
 	if it.action == "switch_keybinding_map" {
 		if name, ok := strings.CutPrefix(it.checkbox, "keymap_"); ok {
 			return keymapActionPrefix + strings.ReplaceAll(name, "_", "-")

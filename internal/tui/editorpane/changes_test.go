@@ -150,3 +150,22 @@ func changeMarks(saved, cur []string) (bar, scroll map[int]bool) {
 	bar = barMarks(saved, plain)
 	return bar, scroll
 }
+
+// TestNewFrameLeavesChangeMarksToPainting checks that building a frame for a query (hit
+// test, caret or scroll maths) does not diff the lines against the saved text: the marks
+// are computed by setMarks, which paintTo calls.
+func TestNewFrameLeavesChangeMarksToPainting(t *testing.T) {
+	t.Parallel()
+	doc := &fakeDoc{lines: []string{"a", "B", "c"}, saved: []string{"a", "b", "c"}, modified: true}
+	f, ok := Pane{Doc: doc}.newFrame(20, 5)
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if f.bar != nil || f.scroll != nil {
+		t.Fatalf("newFrame computed the marks: bar %v scroll %v", f.bar, f.scroll)
+	}
+	f.setMarks()
+	if !maps.Equal(f.bar, map[int]bool{1: true}) || !maps.Equal(f.scroll, map[int]bool{1: true}) {
+		t.Errorf("setMarks = bar %v scroll %v, want line 1 in both", f.bar, f.scroll)
+	}
+}

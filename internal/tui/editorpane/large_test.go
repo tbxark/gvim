@@ -1,11 +1,11 @@
 package editorpane
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/syntax"
 )
@@ -332,10 +332,10 @@ func TestBracketPairScanOfALargeDocumentIsBounded(t *testing.T) {
 // caretSpy is a spy with extra carets, the way *editor.Document reports them.
 type caretSpy struct {
 	*spyDoc
-	extra []editor.Caret
+	extra []document.Caret
 }
 
-func (d caretSpy) Cursors() []editor.Caret { return d.extra }
+func (d caretSpy) Cursors() []document.Caret { return d.extra }
 
 // TestExtraCaretsOffScreenCostNoLayout is the regression test for a frame whose time
 // grew with the number of carets, on screen or not: each extra caret laid out the rows
@@ -343,17 +343,17 @@ func (d caretSpy) Cursors() []editor.Caret { return d.extra }
 func TestExtraCaretsOffScreenCostNoLayout(t *testing.T) {
 	const rows = 10
 	spy := newSpy(20000, numbered)
-	var extra []editor.Caret
+	var extra []document.Caret
 	for i := 100; i < 9100; i++ {
 		p := buffer.Pos{Line: i, Col: 2}
-		extra = append(extra, editor.Caret{
+		extra = append(extra, document.Caret{
 			Cursor: p, Sel: &buffer.Selection{Anchor: buffer.Pos{Line: i}, Head: p},
 		})
 	}
 	// Two carets on screen, and one just above the window.
 	extra = append(extra,
-		editor.Caret{Cursor: buffer.Pos{Line: 1, Col: 3}},
-		editor.Caret{Cursor: buffer.Pos{Line: 4, Col: 1}},
+		document.Caret{Cursor: buffer.Pos{Line: 1, Col: 3}},
+		document.Caret{Cursor: buffer.Pos{Line: 4, Col: 1}},
 	)
 	spy.cursor = buffer.Pos{Line: 50}
 	doc := caretSpy{spyDoc: spy, extra: extra}

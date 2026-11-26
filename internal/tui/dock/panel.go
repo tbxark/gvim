@@ -135,7 +135,8 @@ type Panel struct {
 type startedMsg struct {
 	term       Terminal
 	err        error
-	cols, rows int // the size the shell was started with
+	notice     string // a note on the start, such as a refused working directory; "" for none
+	cols, rows int    // the size the shell was started with
 }
 
 // outputMsg reports a screen change of the shell. ended is true once the output has
@@ -441,8 +442,15 @@ func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ep
 		if old != nil {
 			_ = old.Close()
 		}
-		t, err := launcher.StartLaunch(launch, dir, cols, rows)
-		return startedMsg{term: t, err: err, cols: cols, rows: rows}
+		var notice string
+		var t Terminal
+		var err error
+		if nl, ok := launcher.(NoticeLauncher); ok {
+			t, notice, err = nl.StartLaunchNotice(launch, dir, cols, rows)
+		} else {
+			t, err = launcher.StartLaunch(launch, dir, cols, rows)
+		}
+		return startedMsg{term: t, err: err, notice: notice, cols: cols, rows: rows}
 	}
 }
 
@@ -461,8 +469,15 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 		if old != nil {
 			_ = old.Close()
 		}
-		t, err := starter.Start(dir, cols, rows)
-		return startedMsg{term: t, err: err, cols: cols, rows: rows}
+		var notice string
+		var t Terminal
+		var err error
+		if ns, ok := starter.(NoticeStarter); ok {
+			t, notice, err = ns.StartNotice(dir, cols, rows)
+		} else {
+			t, err = starter.Start(dir, cols, rows)
+		}
+		return startedMsg{term: t, err: err, notice: notice, cols: cols, rows: rows}
 	}
 }
 
@@ -545,6 +560,9 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		p.live = true
 		p.exited = false
 		p.notice = ""
+		if msg.notice != "" {
+			p.noticeOf(msg.notice)
+		}
 		p.applied = shellSize{msg.cols, msg.rows}
 		p.armed, p.resizing, p.writing = false, false, false
 		p.queue = nil

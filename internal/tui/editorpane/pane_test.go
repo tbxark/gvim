@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
@@ -621,19 +622,9 @@ func (p Pane) Thumb(h int) (start, length int) {
 	display := max(DisplayLines(p.Doc), lines)
 	top := min(max(p.Top, 0), lines-1)
 	if p.Fillers != nil {
-		return thumbOf(p.Fillers.Total(lines), h, p.Fillers.BlockStart(top)+max(p.TopRow, 0))
+		return space.Thumb(p.Fillers.Total(lines), h, p.Fillers.BlockStart(top)+max(p.TopRow, 0))
 	}
-	return thumbOf(display, h, top)
-}
-
-func TestThumbOfMaxZeroAndLargeLines(t *testing.T) {
-	t.Parallel()
-	if s, l := thumbOfMax(0, 6, 0, 0); s != 0 || l != 0 {
-		t.Fatalf("thumbOfMax(0,6,0,0) = %d,%d, want 0,0", s, l)
-	}
-	if s, l := thumbOfMax(10_000_000, 1_000_000, 5_000_000, 9_000_000); s < 400_000 || s > 600_000 || l < 1 {
-		t.Fatalf("thumbOfMax large = %d,%d, unexpected overflow or clamp", s, l)
-	}
+	return space.Thumb(display, h, top)
 }
 
 func TestBlitSkipsContinuationAndClipsWideEdgeRune(t *testing.T) {

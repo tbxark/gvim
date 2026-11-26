@@ -1,17 +1,17 @@
 package editorpane
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
 
 // The text area of a 20-column pane with the default gutter starts at column 6.
 func TestSecondaryCaretPaintsItsCellInTheSecondaryStyle(t *testing.T) {
-	d := caretDoc{fakeDoc: newDoc("abc", "def"), extra: []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}}
+	d := caretDoc{fakeDoc: newDoc("abc", "def"), extra: []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}}
 	p := Pane{Doc: d, Styles: Styles{SecondaryCaret: grid.Style{FG: cBlue, BG: cRed}}}
 	g := p.Render(20, 3)
 	c := cellAt(t, g, 8, 1)
@@ -24,7 +24,7 @@ func TestSecondaryCaretPaintsItsCellInTheSecondaryStyle(t *testing.T) {
 }
 
 func TestSecondaryCaretPastTheTextIsABlankCell(t *testing.T) {
-	d := caretDoc{fakeDoc: newDoc("abc"), extra: []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 3}}}}
+	d := caretDoc{fakeDoc: newDoc("abc"), extra: []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 3}}}}
 	p := Pane{Doc: d, Styles: Styles{SecondaryCaret: grid.Style{BG: cRed}}}
 	c := cellAt(t, p.Render(20, 2), 9, 0)
 	if c.Text != " " || bgOf(c) != cRed {
@@ -33,7 +33,7 @@ func TestSecondaryCaretPastTheTextIsABlankCell(t *testing.T) {
 }
 
 func TestPrimaryCaretStaysReversedWithSecondaryCarets(t *testing.T) {
-	d := caretDoc{fakeDoc: newDoc("abc", "def"), extra: []editor.Caret{{Cursor: buffer.Pos{Line: 1, Col: 0}}}}
+	d := caretDoc{fakeDoc: newDoc("abc", "def"), extra: []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 0}}}}
 	p := Pane{Doc: d, Styles: Styles{SecondaryCaret: grid.Style{BG: cRed}}}
 	g := p.Render(20, 2)
 	if c := cellAt(t, g, 6, 0); !c.Style.Reverse {
@@ -53,7 +53,7 @@ func TestNoSecondaryCaretsWithoutCarets(t *testing.T) {
 }
 
 func TestSecondaryCaretOffTheWindowIsNotPainted(t *testing.T) {
-	d := caretDoc{fakeDoc: newDoc("a", "b", "c", "d", "e"), extra: []editor.Caret{{Cursor: buffer.Pos{Line: 4, Col: 0}}}}
+	d := caretDoc{fakeDoc: newDoc("a", "b", "c", "d", "e"), extra: []document.Caret{{Cursor: buffer.Pos{Line: 4, Col: 0}}}}
 	p := Pane{Doc: d, Styles: Styles{SecondaryCaret: grid.Style{BG: cRed}}}
 	g := p.Render(20, 2)
 	for y := range 2 {
@@ -65,7 +65,7 @@ func TestSecondaryCaretOffTheWindowIsNotPainted(t *testing.T) {
 
 func TestExtraCaretSelectionIsPainted(t *testing.T) {
 	sel := buffer.Selection{Anchor: buffer.Pos{Line: 1, Col: 0}, Head: buffer.Pos{Line: 1, Col: 2}}
-	d := caretDoc{fakeDoc: newDoc("abc", "def"), extra: []editor.Caret{{Cursor: sel.Head, Sel: &sel}}}
+	d := caretDoc{fakeDoc: newDoc("abc", "def"), extra: []document.Caret{{Cursor: sel.Head, Sel: &sel}}}
 	p := Pane{Doc: d, Styles: Styles{Selection: grid.Style{BG: cBlue}}}
 	g := p.Render(20, 2)
 	if bgOf(cellAt(t, g, 6, 1)) != cBlue || bgOf(cellAt(t, g, 7, 1)) != cBlue {
@@ -102,7 +102,7 @@ func TestCaretOnWideGraphemeDoesNotShiftTheRow(t *testing.T) {
 	}{
 		{"primary", newDoc("日本語 end")},
 		{"selection", &fakeDoc{lines: []string{"日本語 end"}, selected: true, head: buffer.Pos{Col: 1}, cursor: buffer.Pos{Col: 1}}},
-		{"secondary", caretDoc{fakeDoc: newDoc("日本語 end"), extra: []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 0}}}}},
+		{"secondary", caretDoc{fakeDoc: newDoc("日本語 end"), extra: []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 0}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := Pane{Doc: tc.doc, Styles: st}

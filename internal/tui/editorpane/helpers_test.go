@@ -1,10 +1,10 @@
 package editorpane
 
 import (
+	"github.com/tbxark/gvim/document"
 	"image/color"
 	"testing"
 
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
@@ -12,18 +12,18 @@ import (
 // The optional interfaces must match what *editor.Document offers. The app
 // adapter forwards them, so a signature change breaks this file first.
 var (
-	_ CaretLister = (*editor.Document)(nil)
-	_ Folder      = (*editor.Document)(nil)
-	_ LargeDoc    = (*editor.Document)(nil)
+	_ CaretLister = (*document.Document)(nil)
+	_ Folder      = (*document.Document)(nil)
+	_ LargeDoc    = (*document.Document)(nil)
 )
 
 // caretDoc is a fakeDoc with extra carets, the way *editor.Document reports them.
 type caretDoc struct {
 	*fakeDoc
-	extra []editor.Caret
+	extra []document.Caret
 }
 
-func (d caretDoc) Cursors() []editor.Caret { return d.extra }
+func (d caretDoc) Cursors() []document.Caret { return d.extra }
 
 // foldDoc is a fakeDoc with indentation folds, the way *editor.Document reports them.
 type foldDoc struct {

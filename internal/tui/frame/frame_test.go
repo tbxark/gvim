@@ -1037,18 +1037,6 @@ func TestStatusRowResidualElementsElideAtTheTail(t *testing.T) {
 	}
 }
 
-func TestWrapTextWideCJKAtWidthOne(t *testing.T) {
-	t.Parallel()
-	got := wrapText("中文", 1)
-	if len(got) != 2 || got[0] != "中" || got[1] != "文" {
-		t.Fatalf("wrapText(\"中文\", 1) = %q, want [\"中\" \"文\"]", got)
-	}
-	got2 := wrapText("a 中文", 3)
-	if len(got2) != 3 || got2[0] != "a" || got2[1] != "中" || got2[2] != "文" {
-		t.Fatalf("wrapText(\"a 中文\", 3) = %q, want [\"a\" \"中\" \"文\"]", got2)
-	}
-}
-
 func TestStatusRunsRightDiagnosticsPreservesStyle(t *testing.T) {
 	t.Parallel()
 	s := StatusView{

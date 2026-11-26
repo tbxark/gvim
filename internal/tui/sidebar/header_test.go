@@ -6,23 +6,10 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
-
-func TestHeaderExplorerAloneKeepsTheOldCells(t *testing.T) {
-	t.Parallel()
-	for width := range 61 {
-		want := explorer.HeaderFor(width, icons.Plain)
-		got := HeaderFor(width, icons.Plain, HeaderSpec{Kind: KindExplorer, First: true})
-		if got.Text != want.Text || got.Reload != want.Reload || got.Close != want.Close ||
-			got.TitleX != want.TitleX || got.TitleW != want.TitleW {
-			t.Errorf("width %d: %+v, want the explorer header %+v", width, got, want)
-		}
-	}
-}
 
 // TestHeaderTitleStaysInsideTheRow sweeps every header width: the bold title range
 // never leaves the row or the text, and the corner stays regular.

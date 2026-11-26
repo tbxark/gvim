@@ -1,11 +1,13 @@
 package editorpane
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/textlayout"
 )
 
 // guideRow returns the text cells of row y from column 6, for the guide tests.
@@ -64,9 +66,20 @@ func TestGuidesStartFromTheBlocksOpenAboveTheWindow(t *testing.T) {
 	}
 }
 
+// guideRanges is the indentation fold ranges of lines, as the document computes them.
+func guideRanges(lines []string, tab int) []fold.Range {
+	return fold.RangesFunc(len(lines), func(i int) (int, bool) {
+		if strings.TrimSpace(lines[i]) == "" {
+			return 0, true
+		}
+		w, _ := textlayout.LineIndent(lines[i], tab)
+		return w, false
+	})
+}
+
 func TestActiveGuideIsTheInnermostBlockOfTheCaret(t *testing.T) {
 	lines := []string{"func f() {", "    if a {", "        x", "        y", "    }", "}"}
-	d := foldDoc{fakeDoc: newDoc(lines...), ranges: fold.Ranges(lines, 4)}
+	d := foldDoc{fakeDoc: newDoc(lines...), ranges: guideRanges(lines, 4)}
 	tests := []struct {
 		name  string
 		caret int

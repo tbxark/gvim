@@ -2,8 +2,8 @@ package menubar
 
 import "strings"
 
-// Plugin-contributed rows of the menu bar dropdowns (plugin API tier 1a). The generated
-// table is the native layer; a plugin's rows are inserted into the dropdown when it opens,
+// Plugin-contributed rows of the menu bar dropdowns (plugin API tier 1a). The native
+// table (builtinMenus) is the base layer; a plugin's rows are inserted into the dropdown when it opens,
 // next to the row they name. A row is a plain action: the host runs it as any menu action,
 // and an unknown action reaches the plugin dispatch (Ports.Run), which is where the plugin's
 // commands run.
@@ -56,9 +56,9 @@ func menuMatches(label, want string) bool {
 	if strings.EqualFold(label, want) {
 		return true
 	}
-	for _, lm := range legacyMenus {
-		if lm.label == label {
-			return strings.EqualFold(lm.id, want)
+	for _, m := range builtinMenus {
+		if m.label == label {
+			return strings.EqualFold(m.id, want)
 		}
 	}
 	return false

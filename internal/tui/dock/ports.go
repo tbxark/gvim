@@ -67,6 +67,19 @@ type TerminalStarter interface {
 	Start(dir string, cols, rows int) (Terminal, error)
 }
 
+// NoticeStarter is the optional form of TerminalStarter whose start also returns a
+// user-facing notice, such as a saved working directory that was refused. The notice
+// comes back inside the start result, so the starter never has to touch the UI.
+type NoticeStarter interface {
+	StartNotice(dir string, cols, rows int) (Terminal, string, error)
+}
+
+// NoticeLauncher is the optional form of Launcher that also returns a notice, as
+// NoticeStarter does.
+type NoticeLauncher interface {
+	StartLaunchNotice(launch terminal.Launch, dir string, cols, rows int) (Terminal, string, error)
+}
+
 // Launcher is the optional starter half that runs a program other than the
 // configured shell: an agent session, or a resume of one. A starter without it
 // can still run the plain shell; the dock reports that agents are unavailable.

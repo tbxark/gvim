@@ -132,7 +132,7 @@ func TestTinyFramesDoNotPanic(t *testing.T) {
 	for _, size := range [][2]int{{0, 0}, {10, 1}, {8, 3}, {5, 5}} {
 		g := grid.New(size[0], size[1])
 		NewLine(testStyles(), LineOptions{Label: "L:", Input: "x"}).Draw(g)
-		NewConfirm(testStyles(), "Q?", nil).Draw(g)
+		NewConfirmWith(testStyles(), "Q?", nil, ConfirmOptions{}).Draw(g)
 		NewChoice(testStyles(), "T", "Q?", nil, choiceOptions()).Draw(g)
 	}
 }
@@ -144,7 +144,7 @@ func TestFallbackTitles(t *testing.T) {
 	if l.title != "Input" {
 		t.Fatalf("line title = %q, want Input", l.title)
 	}
-	c := NewConfirm(testStyles(), "Q?", nil)
+	c := NewConfirmWith(testStyles(), "Q?", nil, ConfirmOptions{})
 	if c.title != "Confirm" {
 		t.Fatalf("confirm title = %q, want Confirm", c.title)
 	}

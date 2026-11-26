@@ -687,10 +687,7 @@ func (p *Picker) paintQuery(g *grid.Grid, y, x0 int) {
 		g.Put(x0+1, y, w, space.End(p.placeholder, w-x0-1), faint(p.st.prompt))
 	}
 	pos := min(max(p.input.Position(), 0), len(runes))
-	start := 0
-	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
-		start++
-	}
+	start, _ := space.WindowRange(p.input.Value(), pos, w-x0)
 	x := x0
 	for i := start; i < len(runes); i++ {
 		st := p.st.prompt

@@ -1,6 +1,6 @@
 // Package menubar is the menu bar of gvim: the row of labels, the dropdowns that
 // open under them, and their keyboard and mouse handling. The rows come from
-// the generated table in menu_table_gen.go, which follows the legacy Fresh menu.
+// the native table builtinMenus in menus.go.
 //
 // The menu bar runs no action itself. An activated row goes to Ports.Run, and
 // the context keys that enable rows come from Ports.Holds. The root model
@@ -52,20 +52,20 @@ type Ports interface {
 	// Run runs the action of an activated row. It returns ErrUnsupported for an
 	// action with no implementation yet.
 	Run(action string) error
-	// Holds reports whether the legacy context key holds in the current state.
+	// Holds reports whether the context key holds in the current state.
 	// A row whose when key does not hold is disabled when its dropdown opens.
 	Holds(key string) bool
 }
 
 // KeyLabeler is an optional part of Ports. KeyLabel returns the shortcut of action in
 // the active keymap, as the menu shows it, or "" when the keymap has none. ok is false
-// when there is no keymap to ask, and the rows then keep the shortcut of the table.
+// when there is no keymap to ask, and the rows then show no shortcut.
 type KeyLabeler interface {
 	KeyLabel(action string) (label string, ok bool)
 }
 
 // Mnemonicer is the optional part of Ports that knows the accelerator letter of a
-// menu: the letter Fresh's active keymap binds to menu_open for that label, so the
+// menu: the letter the active keymap binds to menu_open for that label, so the
 // label underlines the character that opens it. A port without it underlines nothing,
 // which is also the case for a keymap that binds no menu accelerators.
 type Mnemonicer interface {

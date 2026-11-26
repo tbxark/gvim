@@ -1,26 +1,26 @@
 package editorpane
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 // blockDoc is a document with a block selection's rectangle.
 type blockDoc struct {
 	*fakeDoc
-	rect editor.BlockRect
+	rect document.BlockRect
 }
 
-func (d blockDoc) BlockSelection() (editor.BlockRect, bool) { return d.rect, true }
+func (d blockDoc) BlockSelection() (document.BlockRect, bool) { return d.rect, true }
 
 // blockPane returns a pane over doc that paints the selection background, with
 // the block rect of test.
-func blockPane(t *testing.T, doc *fakeDoc, rect editor.BlockRect) (Pane, Styles) {
+func blockPane(t *testing.T, doc *fakeDoc, rect document.BlockRect) (Pane, Styles) {
 	t.Helper()
 	doc.cursor = buffer.Pos{Line: doc.cursor.Line, Col: doc.cursor.Col}
 	styles := Styles{Selection: style.Cell(lipgloss.NewStyle().Background(lipgloss.Color("2")))}
@@ -31,7 +31,7 @@ func TestBlockVirtualStripPainted(t *testing.T) {
 	t.Parallel()
 	doc := newDoc("abc")
 	doc.cursor = buffer.Pos{Line: 0, Col: 3}
-	p, styles := blockPane(t, doc, editor.BlockRect{
+	p, styles := blockPane(t, doc, document.BlockRect{
 		Top: 0, Bottom: 0, Left: 2, Right: 5,
 		Head: buffer.Pos{Line: 0, Col: 5}, Virtual: true,
 	})
@@ -60,7 +60,7 @@ func TestBlockVirtualRectWithinTextPaintsNoStrip(t *testing.T) {
 	t.Parallel()
 	doc := newDoc("abcdef")
 	doc.cursor = buffer.Pos{Line: 0, Col: 4}
-	p, styles := blockPane(t, doc, editor.BlockRect{
+	p, styles := blockPane(t, doc, document.BlockRect{
 		Top: 0, Bottom: 0, Left: 1, Right: 4,
 		Head: buffer.Pos{Line: 0, Col: 4}, Virtual: true,
 	})
@@ -79,7 +79,7 @@ func TestBlockVirtualHeadScrollsIntoView(t *testing.T) {
 	t.Parallel()
 	doc := newDoc("abc")
 	doc.cursor = buffer.Pos{Line: 0, Col: 3}
-	p, _ := blockPane(t, doc, editor.BlockRect{
+	p, _ := blockPane(t, doc, document.BlockRect{
 		Top: 0, Bottom: 0, Left: 3, Right: 23,
 		Head: buffer.Pos{Line: 0, Col: 23}, Virtual: true,
 	})
@@ -96,7 +96,7 @@ func TestBlockVirtualStripRespectsTheWindow(t *testing.T) {
 	t.Parallel()
 	doc := newDoc("abc")
 	doc.cursor = buffer.Pos{Line: 0, Col: 3}
-	p, styles := blockPane(t, doc, editor.BlockRect{
+	p, styles := blockPane(t, doc, document.BlockRect{
 		Top: 0, Bottom: 0, Left: 3, Right: 60,
 		Head: buffer.Pos{Line: 0, Col: 60}, Virtual: true,
 	})

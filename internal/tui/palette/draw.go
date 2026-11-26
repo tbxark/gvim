@@ -357,10 +357,7 @@ func (p *Palette) drawInput(g *grid.Grid, y, x0, w int) {
 	x0 = min(x0, max(w-1, 0))
 	runes := []rune(p.input.Value())
 	pos := min(max(p.input.Position(), 0), len(runes))
-	start := 0
-	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
-		start++
-	}
+	start, _ := space.WindowRange(p.input.Value(), pos, w-x0)
 	base := p.chrome.input
 	x := x0
 	for i := start; i < len(runes); i++ {

@@ -39,6 +39,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/overlay"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
@@ -811,10 +812,7 @@ func (p *Palette) clickInput(geo geometry, clickX int) {
 	pos := min(max(p.input.Position(), 0), len(runes))
 	w := min(geo.textEnd, p.width)
 	x0 := min(geo.nameX, max(w-1, 0))
-	start := 0
-	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
-		start++
-	}
+	start, _ := space.WindowRange(p.input.Value(), pos, w-x0)
 	x := x0
 	target := start
 	for i := start; i < len(runes); i++ {

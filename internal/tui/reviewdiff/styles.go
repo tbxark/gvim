@@ -47,11 +47,11 @@ type Styles struct {
 	InputField     grid.Style
 	InputCaret     grid.Style
 
-	DiffAddBG          color.Color
-	DiffRemoveBG       color.Color
-	DiffAddHighlight   color.Color
+	DiffAddBG           color.Color
+	DiffRemoveBG        color.Color
+	DiffAddHighlight    color.Color
 	DiffRemoveHighlight color.Color
-	DiffModifyBG       color.Color
+	DiffModifyBG        color.Color
 
 	AddFG       color.Color
 	RemoveFG    color.Color

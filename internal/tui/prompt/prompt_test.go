@@ -169,7 +169,7 @@ func TestValidateLineCol(t *testing.T) {
 
 func TestConfirmDefaultsToNoAndEnterTakesIt(t *testing.T) {
 	t.Parallel()
-	c := NewConfirm(testStyles(), "Delete a.txt? (y/n)", 7)
+	c := NewConfirmWith(testStyles(), "Delete a.txt? (y/n)", 7, ConfirmOptions{})
 	_, cmd := c.Update(key("enter"))
 	d, ok := emitted(cmd)
 	if !ok || d.Outcome != No || d.Tag != 7 {
@@ -182,7 +182,7 @@ func TestConfirmDefaultsToNoAndEnterTakesIt(t *testing.T) {
 
 func TestConfirmArrowsMoveFocusToYes(t *testing.T) {
 	t.Parallel()
-	c := NewConfirm(testStyles(), "Overwrite? (y/n)", "save")
+	c := NewConfirmWith(testStyles(), "Overwrite? (y/n)", "save", ConfirmOptions{})
 	c.Update(key("left"))
 	_, cmd := c.Update(key("enter"))
 	d, ok := emitted(cmd)
@@ -203,7 +203,7 @@ func TestConfirmLetterKeys(t *testing.T) {
 		{"N", No},
 	}
 	for _, tt := range tests {
-		c := NewConfirm(testStyles(), "Q?", nil)
+		c := NewConfirmWith(testStyles(), "Q?", nil, ConfirmOptions{})
 		_, cmd := c.Update(key(tt.text))
 		d, ok := emitted(cmd)
 		if !ok || d.Outcome != tt.want {
@@ -214,7 +214,7 @@ func TestConfirmLetterKeys(t *testing.T) {
 
 func TestConfirmIgnoresOtherKeys(t *testing.T) {
 	t.Parallel()
-	c := NewConfirm(testStyles(), "Q?", nil)
+	c := NewConfirmWith(testStyles(), "Q?", nil, ConfirmOptions{})
 	_, cmd := c.Update(key("k"))
 	if _, ok := emitted(cmd); ok || !c.Active() {
 		t.Fatal("an unrelated key answered or closed the confirm")
@@ -223,7 +223,7 @@ func TestConfirmIgnoresOtherKeys(t *testing.T) {
 
 func TestConfirmEscCloses(t *testing.T) {
 	t.Parallel()
-	c := NewConfirm(testStyles(), "Q?", nil)
+	c := NewConfirmWith(testStyles(), "Q?", nil, ConfirmOptions{})
 	_, cmd := c.Update(key("esc"))
 	if c.Active() {
 		t.Fatal("Esc left the confirm open")
@@ -235,7 +235,7 @@ func TestConfirmEscCloses(t *testing.T) {
 
 func TestConfirmDrawShowsBothAnswers(t *testing.T) {
 	t.Parallel()
-	c := NewConfirm(testStyles(), "Delete a.txt? (y/n)", nil)
+	c := NewConfirmWith(testStyles(), "Delete a.txt? (y/n)", nil, ConfirmOptions{})
 	rows := draw(c, 50, 8)
 	text := strings.Join(rows, "\n")
 	for _, want := range []string{"Delete a.txt? (y/n)", "  Yes  ", "  No  "} {
@@ -256,7 +256,7 @@ func TestEmptyFrameDrawsNothing(t *testing.T) {
 	if _, _, ok := l.Cursor(10, 0); ok {
 		t.Fatal("caret in a frame with no rows")
 	}
-	NewConfirm(testStyles(), "Q?", nil).Draw(g)
+	NewConfirmWith(testStyles(), "Q?", nil, ConfirmOptions{}).Draw(g)
 }
 
 // drawer is a prompt that can paint itself into a grid.

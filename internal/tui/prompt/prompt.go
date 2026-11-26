@@ -14,7 +14,6 @@
 package prompt
 
 import (
-	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -164,9 +163,9 @@ type Line struct {
 	suggestions                                                          []Suggestion
 	selSuggestion                                                        int
 	suggestionX, suggestionY, suggestionW, suggestionRows, suggestionTop int
-	// paste reads the clipboard for Ctrl+V. It is textinput.Paste in production; a
+	// paste reads the clipboard text for Ctrl+V. It is readClipboard in production; a
 	// test can substitute a deterministic result without touching the system clipboard.
-	paste func() tea.Msg
+	paste func() string
 }
 
 // selectionAnchor is the initial real selection for a LineOptions.SelectAll prompt.
@@ -201,7 +200,7 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		selAnchor: selectionAnchor(o.SelectAll, o.Input),
 		history:   o.History,
 		at:        len(o.History),
-		paste:     textinput.Paste,
+		paste:     readClipboard,
 
 		selSuggestion: -1,
 	}
@@ -376,8 +375,8 @@ func (l *Line) DeleteSelection() string {
 	return removed
 }
 
-// CutValue is Fresh's prompt_cut without a selection: copy the whole prompt text and
-// clear the field, as the prompt has no selection to cut in gvim.
+// CutValue copies the whole prompt text and clears the field. A prompt cut with no
+// real selection takes everything.
 func (l *Line) CutValue() string {
 	text := l.field.Value()
 	if text == "" {
@@ -412,7 +411,7 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 			}
 			return l, nil
 		}
-		if text, ok := pasteContent(msg); ok {
+		if text, ok := pasteText(msg); ok {
 			text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 			if text == "" {
 				// An empty paste (empty clipboard) is not an edit: keep the text and any
@@ -496,14 +495,14 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	}
 	if ks == "ctrl+v" {
 		// Keep the selection while the clipboard read is in flight. Its result
-		// (textinput's unexported pasteMsg) is handled in the non-key branch, where the
-		// selected range is cleared before the field inserts the pasted text, so a
-		// selected prompt replaces rather than appends.
+		// (pasteResultMsg) is handled in the non-key branch, where the selected range is
+		// cleared before the field inserts the pasted text, so a selected prompt
+		// replaces rather than appends.
 		read := l.paste
 		if read == nil {
-			read = textinput.Paste
+			read = readClipboard
 		}
-		return l, func() tea.Msg { return read() }
+		return l, func() tea.Msg { return pasteResultMsg{text: read()} }
 	}
 	return l, l.edit(kp)
 }
@@ -541,19 +540,30 @@ func selectionMovementKey(ks string) bool {
 	return false
 }
 
-// pasteContent recognizes a paste result delivered to the prompt. tea.PasteMsg is the
-// public bracketed paste; textinput's Ctrl+V command returns its own unexported string
-// type pasteMsg, which is recognized by type name and kind (the package path is not
-// exported, and this is the only string-kind pasteMsg a prompt receives).
-func pasteContent(msg tea.Msg) (string, bool) {
-	if p, ok := msg.(tea.PasteMsg); ok {
-		return p.Content, true
+// pasteResultMsg is the result of the clipboard read that Ctrl+V starts: the text read,
+// empty when the clipboard is empty or unreadable.
+type pasteResultMsg struct{ text string }
+
+// pasteText recognizes a paste delivered to the prompt: a bracketed paste (tea.PasteMsg)
+// or the clipboard text that Ctrl+V asked for (pasteResultMsg).
+func pasteText(msg tea.Msg) (string, bool) {
+	switch m := msg.(type) {
+	case tea.PasteMsg:
+		return m.Content, true
+	case pasteResultMsg:
+		return m.text, true
 	}
-	t := reflect.TypeOf(msg)
-	if t == nil || t.Kind() != reflect.String || t.Name() != "pasteMsg" {
-		return "", false
-	}
-	return reflect.ValueOf(msg).String(), true
+	return "", false
+}
+
+// readClipboard reads the system clipboard through the input model's paste command. The
+// command's result type is unexported, so a scratch input model takes it in and the text
+// it inserted is the clipboard text, cleaned as the field cleans a paste.
+func readClipboard() string {
+	scratch := textinput.New()
+	scratch.Focus()
+	scratch, _ = scratch.Update(textinput.Paste())
+	return scratch.Value()
 }
 
 // SetSuggestions replaces the suggestion list and the highlighted row (0-based; -1 for
@@ -842,11 +852,6 @@ type Confirm struct {
 
 	yesText, noText string // the labels of the answers
 	hits            [2]space.Rect
-}
-
-// NewConfirm returns a Yes/No prompt that asks label. The focus starts on No.
-func NewConfirm(st style.Styles, label string, tag any) *Confirm {
-	return NewConfirmWith(st, label, tag, ConfirmOptions{})
 }
 
 // ConfirmOptions tune a Yes/No prompt. The zero value is the plain prompt.

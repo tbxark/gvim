@@ -151,9 +151,9 @@ func TestScrollbarThumbCountsInsertedRows(t *testing.T) {
 	if !ok {
 		t.Fatal("no frame")
 	}
-	total, ok := f.rowTotal()
+	total, _, ok := f.rowTotals()
 	if !ok || total != 13 {
-		t.Fatalf("rowTotal = %d, %v; want 13", total, ok)
+		t.Fatalf("rowTotals total = %d, %v; want 13", total, ok)
 	}
 	start, length := f.thumb()
 	if length >= 5 || start != 0 {
@@ -166,9 +166,9 @@ func TestScrollbarThumbCountsInsertedRows(t *testing.T) {
 	if !ok {
 		t.Fatal("no frame")
 	}
-	before, ok := lf.rowsBeforeTop()
+	_, before, ok := lf.rowTotals()
 	if !ok || before != 12 {
-		t.Fatalf("rowsBeforeTop = %d, %v; want 12", before, ok)
+		t.Fatalf("rowTotals before = %d, %v; want 12", before, ok)
 	}
 	s2, l2 := lf.thumb()
 	if s2 != 5-l2 {

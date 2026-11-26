@@ -50,8 +50,8 @@ func TestConfirmWithLabelsAndDefault(t *testing.T) {
 	if d, ok := emitted(cmd); !ok || d.Outcome != Yes || d.Tag != "tag" {
 		t.Fatalf("done = %+v %v", d, ok)
 	}
-	// NewConfirm is the plain form.
-	plain := NewConfirm(testStyles(), "Q?", "t")
+	// The zero ConfirmOptions is the plain form.
+	plain := NewConfirmWith(testStyles(), "Q?", "t", ConfirmOptions{})
 	text = strings.Join(draw(plain, 60, 8), "\n")
 	for _, want := range []string{"Q?", "  Yes  ", "  No  "} {
 		if !strings.Contains(text, want) {

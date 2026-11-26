@@ -17,7 +17,7 @@ func TestLineEmptyPasteKeepsSelection(t *testing.T) {
 	}{
 		{name: "empty PasteMsg", do: func(l *Line) { l.Update(tea.PasteMsg{Content: ""}) }},
 		{name: "empty Ctrl+V", do: func(l *Line) {
-			l.paste = func() tea.Msg { return pasteMsg("") }
+			l.paste = func() string { return "" }
 			_, cmd := l.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 			if cmd == nil {
 				t.Fatal("Ctrl+V started no clipboard read")

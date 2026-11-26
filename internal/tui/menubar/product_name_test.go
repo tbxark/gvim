@@ -8,8 +8,8 @@ import (
 // TestNoMenuLabelNamesTheLegacyProduct guards the generated table: the menu
 // bar is gvim, so no label a user can see may say Fresh.
 func TestNoMenuLabelNamesTheLegacyProduct(t *testing.T) {
-	var walk func(menu string, items []legacyItem)
-	walk = func(menu string, items []legacyItem) {
+	var walk func(menu string, items []menuItem)
+	walk = func(menu string, items []menuItem) {
 		for _, it := range items {
 			if strings.Contains(it.label, "Fresh") {
 				t.Errorf("menu %q: label %q names the legacy product", menu, it.label)
@@ -17,7 +17,7 @@ func TestNoMenuLabelNamesTheLegacyProduct(t *testing.T) {
 			walk(menu, it.children)
 		}
 	}
-	for _, m := range legacyMenus {
+	for _, m := range builtinMenus {
 		if strings.Contains(m.label, "Fresh") {
 			t.Errorf("menu title %q names the legacy product", m.label)
 		}
@@ -27,7 +27,7 @@ func TestNoMenuLabelNamesTheLegacyProduct(t *testing.T) {
 
 // TestHelpMenuNamesGvim checks the Help menu's header and help row.
 func TestHelpMenuNamesGvim(t *testing.T) {
-	for _, m := range legacyMenus {
+	for _, m := range builtinMenus {
 		if m.label != "Help" {
 			continue
 		}

@@ -2,7 +2,7 @@ package editorpane
 
 import (
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
 
@@ -10,7 +10,7 @@ import (
 // *editor.Document does. The pane paints each extra caret in the secondary
 // caret style, and it paints the selections of the extra carets too.
 type CaretLister interface {
-	Cursors() []editor.Caret
+	Cursors() []document.Caret
 }
 
 // setSelections collects the selections of the primary caret and of the extra
