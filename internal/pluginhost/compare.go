@@ -2,9 +2,9 @@ package pluginhost
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/buffer"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -104,17 +104,17 @@ func (p *pluginEditor) ReplaceRange(id pluginapi.BufferID, start, end int, text 
 	if err != nil {
 		return false, nil
 	}
-	opts := editor.EditOptions{}
+	opts := document.EditOptions{}
 	if expect != nil {
-		opts.Expect = &editor.Version{Gen: expect.Gen, Ver: expect.Ver}
+		opts.Expect = &document.Version{Gen: expect.Gen, Ver: expect.Ver}
 	}
-	edit := []editor.LSPEdit{{From: from, To: to, Text: plugin.NormalizeEOL(text)}}
-	err = p.ed.ApplyEdits(editor.DocID(id), edit, opts)
+	edit := []document.LSPEdit{{From: from, To: to, Text: plugin.NormalizeEOL(text)}}
+	err = p.ed.ApplyEdits(document.DocID(id), edit, opts)
 	switch {
 	case err == nil:
 		return true, nil
-	case errors.Is(err, editor.ErrStale), errors.Is(err, editor.ErrReadOnly),
-		errors.Is(err, editor.ErrLargeFile), errors.Is(err, buffer.ErrLargeBuffer):
+	case errors.Is(err, document.ErrStale), errors.Is(err, document.ErrReadOnly),
+		errors.Is(err, document.ErrLargeFile), errors.Is(err, buffer.ErrLargeBuffer):
 		return false, nil
 	}
 	return false, editorErr(err)

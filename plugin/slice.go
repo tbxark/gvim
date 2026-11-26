@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"runtime/metrics"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -22,9 +23,13 @@ var (
 // slice is the time and memory envelope of one resume of a root task.
 //
 // The deadline is a manual timer, not context.WithDeadline: while a heavy Host call runs
-// the timer is stopped (pause), so slow editor work is not charged to the plugin; resume
-// re-arms it with the remaining budget. The hard timer is never paused, so a loop of heavy
-// Host calls still ends at hardFactor x budget.
+// the soft deadline is suspended (pause), so slow editor work is not charged to the plugin;
+// resume re-arms it with the remaining budget. The hard deadline is never paused, so a loop
+// of heavy Host calls still ends at hardFactor x budget.
+//
+// One time.Timer serves the soft deadline, the hard deadline and the start of the heap
+// guard: it is always set to the earliest of the three that is still pending, and fire
+// decides which of them is due. A slice that ends first costs one timer and no goroutine.
 type slice struct {
 	r      *Runtime
 	ctx    context.Context
@@ -33,15 +38,20 @@ type slice struct {
 	budget time.Duration
 	start  time.Time
 
-	timer, hard, guardStart *time.Timer
-	armedAt                 time.Time
-	used                    time.Duration // Lua time spent before the last pause
-	paused                  bool
-	pausedAt                time.Time
-	hostTime                time.Duration // wall time spent inside paused Host calls
+	mu       sync.Mutex // guards the fields below, which the timer callback shares
+	timer    *time.Timer
+	hardAt   time.Time
+	softAt   time.Time // zero while paused or once spent
+	guardAt  time.Time // zero once the guard has started
+	finished bool
+
+	armedAt  time.Time
+	used     time.Duration // Lua time spent before the last pause
+	paused   bool
+	pausedAt time.Time
+	hostTime time.Duration // wall time spent inside paused Host calls
 
 	pausedFlag atomic.Bool // read by the heap guard goroutine
-	done       chan struct{}
 
 	// obj0 and live0 are the heap when the slice began, read there and not when the guard
 	// goroutine starts: what a slice allocates before the guard looks is still its growth.
@@ -49,29 +59,88 @@ type slice struct {
 	obj0, live0 uint64
 }
 
+// objectSamples pools the one-sample buffer of the heap read at the start of a slice, so the
+// read allocates nothing. The heap guard, which reads rarely, allocates its own.
+var objectSamples = sync.Pool{New: func() any { return &[1]metrics.Sample{{Name: heapNames[0]}} }}
+
+// readObjects returns the bytes of allocated heap objects (live and garbage).
+func readObjects() uint64 {
+	samples := objectSamples.Get().(*[1]metrics.Sample)
+	defer objectSamples.Put(samples)
+	metrics.Read(samples[:])
+	if samples[0].Value.Kind() == metrics.KindUint64 {
+		return samples[0].Value.Uint64()
+	}
+	return 0
+}
+
 // newSlice starts a slice under parent with the given Lua-time budget.
 func (r *Runtime) newSlice(parent context.Context, budget time.Duration) *slice {
 	ctx, cancel := context.WithCancelCause(parent)
 	now := time.Now()
-	s := &slice{r: r, ctx: ctx, cancel: cancel, budget: budget, start: now, armedAt: now, done: make(chan struct{})}
-	s.obj0, s.live0 = readHeap()
+	s := &slice{r: r, ctx: ctx, cancel: cancel, budget: budget, start: now, armedAt: now}
 	// The live size of the last collection is stale: whatever the process allocated and kept
 	// since (a file being loaded) is not in it, and the confirming collection would count that
-	// as the plugin's growth. The allocated objects are an upper bound of what is live now.
-	s.live0 = max(s.live0, s.obj0)
-	s.timer = time.AfterFunc(budget, func() { cancel(errSliceDeadline) })
-	s.hard = time.AfterFunc(budget*hardFactor, func() { cancel(errHardDeadline) })
-	s.guardStart = time.AfterFunc(guardStartAfter, s.runGuard)
+	// as the plugin's growth. The allocated objects are an upper bound of what is live now,
+	// so the slice starts from them and the live metric is read only by the guard, which
+	// most slices never start.
+	s.obj0 = readObjects()
+	s.live0 = s.obj0
+	s.softAt = now.Add(budget)
+	s.hardAt = now.Add(budget * hardFactor)
+	s.guardAt = now.Add(guardStartAfter)
+	s.mu.Lock()
+	s.timer = time.AfterFunc(s.nextWake(now), s.fire)
+	s.mu.Unlock()
 	return s
+}
+
+// nextWake is the delay until the earliest pending deadline. The caller holds mu.
+func (s *slice) nextWake(now time.Time) time.Duration {
+	next := s.hardAt
+	if !s.softAt.IsZero() && s.softAt.Before(next) {
+		next = s.softAt
+	}
+	if !s.guardAt.IsZero() && s.guardAt.Before(next) {
+		next = s.guardAt
+	}
+	return max(next.Sub(now), 0)
+}
+
+// fire is the timer callback: it acts on every deadline that is due and re-arms the timer
+// for the next one.
+func (s *slice) fire() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.finished {
+		return
+	}
+	now := time.Now()
+	if !now.Before(s.hardAt) {
+		s.cancel(errHardDeadline)
+		return
+	}
+	if !s.softAt.IsZero() && !now.Before(s.softAt) {
+		s.cancel(errSliceDeadline)
+		return
+	}
+	if !s.guardAt.IsZero() && !now.Before(s.guardAt) {
+		s.guardAt = time.Time{}
+		go s.runGuard()
+	}
+	s.timer.Reset(s.nextWake(now))
 }
 
 // pause stops charging time to the plugin (a heavy Host call begins). Idempotent.
 func (s *slice) pause() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.paused {
 		return
 	}
 	now := time.Now()
-	s.timer.Stop()
+	// The timer may still wake at the old soft deadline; fire sees softAt unset and goes on.
+	s.softAt = time.Time{}
 	s.used += now.Sub(s.armedAt)
 	s.paused = true
 	s.pausedAt = now
@@ -80,6 +149,8 @@ func (s *slice) pause() {
 
 // resume charges time again. When the budget is already used up the slice is cancelled.
 func (s *slice) resume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.paused {
 		return
 	}
@@ -89,7 +160,10 @@ func (s *slice) resume() {
 	s.pausedFlag.Store(false)
 	s.armedAt = now
 	if remaining := s.budget - s.used; remaining > 0 {
-		s.timer.Reset(remaining)
+		s.softAt = now.Add(remaining)
+		if !s.finished {
+			s.timer.Reset(s.nextWake(now))
+		}
 	} else {
 		s.cancel(errSliceDeadline)
 	}
@@ -98,13 +172,13 @@ func (s *slice) resume() {
 // elapsed is the wall time since the slice began.
 func (s *slice) elapsed() time.Duration { return time.Since(s.start) }
 
-// finish releases the timers and the guard. The context is cancelled; read the cause
+// finish releases the timer and the guard. The context is cancelled; read the cause
 // before calling it.
 func (s *slice) finish() {
+	s.mu.Lock()
+	s.finished = true
 	s.timer.Stop()
-	s.hard.Stop()
-	s.guardStart.Stop()
-	close(s.done)
+	s.mu.Unlock()
 	s.cancel(errSliceDone)
 }
 
@@ -142,7 +216,7 @@ func (s *slice) heapRunaway(obj0, ceiling uint64, tick <-chan time.Time) bool {
 			return true
 		}
 		select {
-		case <-s.done:
+		case <-s.ctx.Done():
 			return true
 		case <-collected:
 			return false
@@ -168,7 +242,7 @@ const maxGuardGCs = 8
 // LState.SetMx is never used (it calls os.Exit).
 func (s *slice) runGuard() {
 	select {
-	case <-s.done:
+	case <-s.ctx.Done():
 		return
 	default:
 	}
@@ -178,7 +252,7 @@ func (s *slice) runGuard() {
 	defer tick.Stop()
 	for gcs := 0; ; {
 		select {
-		case <-s.done:
+		case <-s.ctx.Done():
 			return
 		case <-tick.C:
 		}

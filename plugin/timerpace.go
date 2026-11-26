@@ -62,10 +62,6 @@ func (tp *timerPace) roll(now time.Time) (throttle, strike bool) {
 		hot := tp.busy >= busy || (!tp.throttled && tp.fast >= paceFastArms)
 		longest := tp.longest
 		tp.start = tp.start.Add(paceWindow)
-		if now.Sub(tp.start) >= paceWindow {
-			// a gap of whole windows with no event in it: they were all calm
-			tp.start = now
-		}
 		tp.fast, tp.busy, tp.longest = 0, 0, 0
 		switch {
 		case hot && !tp.throttled:
@@ -86,6 +82,16 @@ func (tp *timerPace) roll(now time.Time) (throttle, strike bool) {
 			if tp.calm++; tp.throttled && tp.calm >= paceCalmWindows {
 				tp.throttled, tp.calm = false, 0
 			}
+		}
+		if gap := now.Sub(tp.start); gap >= paceWindow {
+			// A gap of whole windows with no event in it: they were all calm.
+			skipped := int(gap / paceWindow)
+			tp.hot = 0
+			tp.calm += skipped
+			if tp.throttled && tp.calm >= paceCalmWindows {
+				tp.throttled, tp.calm = false, 0
+			}
+			tp.start = now
 		}
 	}
 	return throttle, strike

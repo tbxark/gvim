@@ -47,28 +47,14 @@ local function watch_head(head)
   end
 end
 
--- location is the directory to look for a repository in: the active file's own, else the
--- workspace.
-local function location()
-  local b = gvim.buf.current()
-  local path = b and b:path() or ""
-  if path ~= "" and not b:is_virtual() then
-    return gvim.path.dirname(path)
-  end
-  return gvim.workspace.root()
-end
-
 local function update(force)
-  local here = location()
+  local here = git.active_dir()
   -- While the watch on HEAD works, a change of branch reaches us as an event, so git is
   -- asked again only when the active file lives somewhere else.
   if not force and watcher and here == looked_at then
     return
   end
-  local repo = git.repo(here)
-  if not repo and here ~= gvim.workspace.root() then
-    repo = git.repo(gvim.workspace.root())
-  end
+  local repo = git.active_repo(here)
   if not repo then
     stop_watch()
     item:hide()

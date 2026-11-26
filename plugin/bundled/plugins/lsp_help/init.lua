@@ -157,9 +157,13 @@ local function handle_action(language, help, action)
   if action:sub(1, 4) == "act:" then
     local name = action:sub(5)
     if name == "lsp_disable_language_target" then
-      gvim.command.run(name, { language = language })
-      gvim.notify(t("status.disabled", { name = help.name }))
-      failures[language] = nil
+      local buf = gvim.buf.current()
+      local path = buf and buf:path() or ""
+      local ok = gvim.command.run(name, { path = path, language = language })
+      if ok ~= false then
+        gvim.notify(t("status.disabled", { name = help.name }))
+        failures[language] = nil
+      end
     else
       gvim.command.run(name)
     end

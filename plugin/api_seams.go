@@ -14,8 +14,6 @@ import (
 //	gvim.buf.get_window_state(buf, key[, default]) -> value | default
 //	gvim.buf.set_window_state(buf, key, value) -> true | nil, err   (nil clears)
 //	gvim.buf.open_file_in_split(path, opts?) ⏳ -> Buffer | nil, err
-//	gvim.buf.focus_split(win) -> true | nil, err
-//	gvim.buf.close_split(win) -> true | nil, err
 //
 // Split labels are per window and survive focus moves; they go away when the window closes.
 // Window state is per plugin and buffer, string/number/boolean only, and is cleared when the
@@ -81,14 +79,6 @@ func installSeams(e *apiEnv) {
 	})
 
 	buf.RawSetString("open_file_in_split", e.async("buf_open_in_split"))
-	e.set(buf, "focus_split", func(L *lua.LState) int {
-		id := pluginapi.WinID(checkID(L, 1, kindWindow))
-		return bufTrue(L, host().FocusWindow(id))
-	})
-	e.set(buf, "close_split", func(L *lua.LState) int {
-		id := pluginapi.WinID(checkID(L, 1, kindWindow))
-		return bufTrue(L, host().CloseWindow(id))
-	})
 }
 
 // awaitBufOpenInSplit is gvim.buf.open_file_in_split: split the focused window (right by

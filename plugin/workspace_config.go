@@ -79,6 +79,7 @@ func (r *Runtime) ApplyWorkspacePluginConfig(enabled map[string]bool, settings m
 		running := r.plugins[name] != nil && !r.plugins[name].dead
 		switch {
 		case c.enabled && !oldEnabled:
+			l.toggled(name)
 			enabledN++
 			if running {
 				continue
@@ -102,6 +103,7 @@ func (r *Runtime) ApplyWorkspacePluginConfig(enabled map[string]bool, settings m
 				}
 			}))
 		case !c.enabled && oldEnabled:
+			l.toggled(name)
 			disabledN++
 			// Disable like ctlDisable, minus the editor-wide toggle write: the project
 			// layer is not a user choice.
@@ -120,6 +122,7 @@ func (r *Runtime) ApplyWorkspacePluginConfig(enabled map[string]bool, settings m
 			}
 			r.say(pluginapi.LevelInfo, fmt.Sprintf("Plugin '%s' disabled by the workspace config", name))
 		case c.enabled && running && stChanged:
+			l.toggled(name)
 			reloadedN++
 			n := name
 			work = append(work, r.rescan(c.ref, func(nc *candidate) {

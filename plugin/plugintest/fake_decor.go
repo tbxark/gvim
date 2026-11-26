@@ -216,8 +216,3 @@ func (f *FakeHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
 	}
 	f.Ext["foldranges"] = kept
 }
-
-// DecorRefreshLines is a no-op that records the call.
-func (f *FakeHost) DecorRefreshLines(id pluginapi.BufferID) {
-	f.rec("DecorRefreshLines", id)
-}

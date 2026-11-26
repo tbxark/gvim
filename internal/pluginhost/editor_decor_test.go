@@ -1,6 +1,7 @@
 package pluginhost
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,7 +106,7 @@ func TestDecorListenerRunsBeforeLaterListeners(t *testing.T) {
 	st := pe.DecorStore()
 	apptest.Must(t, st.Set(uint64(id), "p", "a", []decorations.Item{{Kind: decorations.EOL, FromLine: 1, Text: "t"}}))
 	var sawLine = -1
-	ed.AddChangeListener("later", func(doc editor.DocID, c buffer.Change) {
+	ed.AddChangeListener("later", func(doc document.DocID, c buffer.Change) {
 		for l := range 5 {
 			if len(st.Line(uint64(doc), l).EOL) == 1 {
 				sawLine = l

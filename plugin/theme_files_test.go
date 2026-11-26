@@ -8,7 +8,7 @@ import (
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// themeFilesPlugin exercises the theme-file APIs and the text-properties helper.
+// themeFilesPlugin exercises the theme-file APIs.
 const themeFilesPlugin = `
 local gvim = require 'gvim'
 
@@ -26,12 +26,6 @@ gvim.command.register{ name = "themes", run = function()
   gvim.notify("reload:" .. tostring(gvim.theme.reload("mine.json")))
   local schema = gvim.theme.schema()
   gvim.notify("schema:" .. tostring(#schema.keys) .. ":" .. tostring(#schema.modifier_only) .. ":" .. tostring(#schema.named_colors))
-end }
-
-gvim.command.register{ name = "props", run = function()
-  local props = gvim.buf.text_properties_at_cursor()
-  if props == nil then gvim.notify("none") return end
-  gvim.notify("prop:" .. tostring(props.file) .. ":" .. tostring(props.line))
 end }
 `
 
@@ -61,31 +55,5 @@ func TestThemeFileAPIs(t *testing.T) {
 	}
 	if len(theme.Saved) != 0 {
 		t.Fatalf("saved = %+v, want the delete to remove it", theme.Saved)
-	}
-}
-
-func TestTextPropertiesAtCursor(t *testing.T) {
-	h := plugintest.New(t, plugintest.Files{"tf.lua": themeFilesPlugin}, plugintest.Options{})
-	h.Start()
-	id, err := h.Host.CreateBuffer(pluginapi.CreateBuffer{Plugin: "tf", Name: "panel", Text: "line\n"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := h.Host.SetContent(id, []pluginapi.ContentEntry{{
-		Text:  "line\n",
-		Props: map[string]any{"file": "main.go", "line": 3},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	h.Host.SetActive(id)
-	if err := h.Host.SetCursor(id, pluginapi.Pos{Line: 0, Col: 1}, false, false, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.Run("tf.props", nil); err != nil {
-		t.Fatal(err)
-	}
-	notices := h.NoticeTexts()
-	if len(notices) == 0 || notices[len(notices)-1] != "prop:main.go:3" {
-		t.Fatalf("notices = %q", notices)
 	}
 }

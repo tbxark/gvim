@@ -109,8 +109,15 @@ function M.translate(pat)
         out[#out + 1] = "\\["
         i = i + 1
       end
-    elseif very and ch == "{" and interval(pat, i) then
-      out[#out + 1], i = interval(pat, i)
+    elseif very and ch == "{" then
+      local q, after = interval(pat, i + 1)
+      if q then
+        out[#out + 1] = q
+        i = after
+      else
+        out[#out + 1] = ch
+        i = i + 1
+      end
     elseif not very and (ch == "(" or ch == ")" or ch == "|" or ch == "+" or ch == "?" or ch == "{" or ch == "}") then
       out[#out + 1] = "\\" .. ch
       i = i + 1

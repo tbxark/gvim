@@ -2,9 +2,16 @@
 --
 --   gvim.git.available() -> boolean                 the git binary can be found
 --   gvim.git.run(args, opts?) ⏳ -> Result | nil, err
---         args = {"rev-parse", "HEAD"} (without "git"); opts {cwd, stdin, timeout_ms, max_output, env}
+--         args = {"rev-parse", "HEAD"} (without "git"); opts {cwd, stdin, timeout_ms, max_output, env,
+--         pinned_diff}. pinned_diff pins every setting that changes the patch format back to
+--         its default and adds --no-color, for output that a parser reads.
+--   gvim.git.spawn(args, opts?) -> Process | nil, err    the same command line, streamed;
+--         opts {cwd, env, timeout_ms, pinned_diff, on_stdout, on_stderr, on_exit}
 --   gvim.git.repo(path) ⏳ -> {root=, head=} | nil | nil, err   the work tree of a file or directory, and its HEAD file
 --   gvim.git.root(path) ⏳ -> root | nil | nil, err
+--   gvim.git.active_dir() -> dir                        the directory of the active file, else the workspace root
+--   gvim.git.repo_or_workspace(path) ⏳ -> repo | nil | nil, err   repo(path), else the workspace's repo
+--   gvim.git.active_repo(dir?) ⏳ -> repo, dir | nil | nil, err    the repo of dir (default active_dir()), else the workspace's
 --   gvim.git.branch(root?) ⏳ -> name, detached | nil | nil, err
 --   gvim.git.show(path, opts?) ⏳ -> text | nil, err           opts {rev = "HEAD", for_buffer = Buffer}
 --   gvim.git.ls_files(root?) ⏳ -> files, truncated | nil, err
@@ -42,9 +49,24 @@ local function null_device()
   return gvim.platform == "windows" and "NUL" or "/dev/null"
 end
 
+-- Settings that change how a patch is written, pinned back to git's documented defaults
+-- for the callers whose output a parser reads (opts.pinned_diff).
+local PINNED_DIFF = {
+  "-c", "diff.noprefix=false",
+  "-c", "diff.mnemonicPrefix=false",
+  "-c", "diff.srcPrefix=a/",
+  "-c", "diff.dstPrefix=b/",
+  "-c", "core.quotepath=false",
+  "-c", "diff.suppressBlankEmpty=false",
+  "-c", "diff.relative=false",
+  "-c", "diff.submodule=short",
+  "-c", "core.bigFileThreshold=1m",
+}
+
 -- argv is the full command line for args = {subcommand, ...}. extra lists more "key=value"
--- settings for -c, for the calls that need them (see neutral_filters).
-local function argv(args, extra)
+-- settings for -c, for the calls that need them (see neutral_filters). pinned adds the
+-- pinned patch-format settings (see PINNED_DIFF).
+local function argv(args, extra, pinned)
   local out = {
     "git",
     "-c", "core.fsmonitor=false",
@@ -57,9 +79,18 @@ local function argv(args, extra)
     out[#out + 1] = "-c"
     out[#out + 1] = kv
   end
+  if pinned then
+    out[#out + 1] = "--no-optional-locks"
+    for _, v in ipairs(PINNED_DIFF) do
+      out[#out + 1] = v
+    end
+  end
   out[#out + 1] = args[1]
   for _, a in ipairs(EXTRA[args[1]] or {}) do
     out[#out + 1] = a
+  end
+  if pinned then
+    out[#out + 1] = "--no-color"
   end
   for i = 2, #args do
     out[#out + 1] = args[i]
@@ -79,14 +110,9 @@ function M.available()
   return gvim.has("git")
 end
 
-local function run(args, opts, extra)
-  if type(args) ~= "table" or type(args[1]) ~= "string" or args[1] == "" then
-    error("bad argument #1 to 'run' (command table expected)", 2)
-  end
-  if not M.available() then
-    return nil, NO_GIT
-  end
-  opts = opts or {}
+-- git_env is the caller's environment plus the variables that keep git from locking,
+-- prompting or reading the system configuration.
+local function git_env(opts)
   local env = {}
   for k, v in pairs(opts.env or {}) do
     env[k] = v
@@ -94,9 +120,24 @@ local function run(args, opts, extra)
   env.GIT_OPTIONAL_LOCKS = "0"
   env.GIT_TERMINAL_PROMPT = "0"
   env.GIT_CONFIG_NOSYSTEM = "1"
-  return gvim.proc.run(argv(args, extra), {
+  return env
+end
+
+local function check_args(args, name)
+  if type(args) ~= "table" or type(args[1]) ~= "string" or args[1] == "" then
+    error("bad argument #1 to '" .. name .. "' (command table expected)", 3)
+  end
+end
+
+local function run(args, opts, extra)
+  check_args(args, "run")
+  if not M.available() then
+    return nil, NO_GIT
+  end
+  opts = opts or {}
+  return gvim.proc.run(argv(args, extra, opts.pinned_diff), {
     cwd = opts.cwd,
-    env = env,
+    env = git_env(opts),
     stdin = opts.stdin,
     timeout_ms = opts.timeout_ms or DEFAULT_TIMEOUT_MS,
     max_output = opts.max_output or MAX_OUTPUT,
@@ -105,6 +146,22 @@ end
 
 function M.run(args, opts)
   return run(args, opts)
+end
+
+function M.spawn(args, opts)
+  check_args(args, "spawn")
+  if not M.available() then
+    return nil, NO_GIT
+  end
+  opts = opts or {}
+  return gvim.proc.spawn(argv(args, nil, opts.pinned_diff), {
+    cwd = opts.cwd,
+    env = git_env(opts),
+    timeout_ms = opts.timeout_ms or DEFAULT_TIMEOUT_MS,
+    on_stdout = opts.on_stdout,
+    on_stderr = opts.on_stderr,
+    on_exit = opts.on_exit,
+  })
 end
 
 local MAX_FILTERS = 32
@@ -182,6 +239,46 @@ function M.root(path)
     return nil, err
   end
   return repo.root
+end
+
+-- active_dir is the directory the editor's current context points at: the active file's
+-- own, else the workspace root.
+function M.active_dir()
+  local b = gvim.buf.current()
+  local path = b and b:path() or ""
+  if path ~= "" and not b:is_virtual() then
+    return gvim.path.dirname(path)
+  end
+  return gvim.workspace.root()
+end
+
+-- repo_or_workspace is the repository of path, else the workspace's when that is a
+-- different place. It answers nil when neither is inside a repository, or nil, err.
+function M.repo_or_workspace(path)
+  local repo, err = M.repo(path)
+  if repo then
+    return repo
+  end
+  local root = gvim.workspace.root()
+  if root ~= "" and root ~= path then
+    local ws, werr = M.repo(root)
+    if ws then
+      return ws
+    end
+    err = err or werr
+  end
+  return nil, err
+end
+
+-- active_repo is the repository of dir (default active_dir()), else the workspace's. It
+-- also returns the directory it looked in.
+function M.active_repo(dir)
+  dir = dir or M.active_dir()
+  local repo, err = M.repo_or_workspace(dir)
+  if not repo then
+    return nil, err
+  end
+  return repo, dir
 end
 
 function M.branch(root)

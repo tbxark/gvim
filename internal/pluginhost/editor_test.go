@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -674,14 +675,14 @@ func TestEditorErrMapping(t *testing.T) {
 		want pluginapi.Code
 	}{
 		{nil, ""},
-		{editor.ErrReadOnly, pluginapi.CodeReadOnly},
+		{document.ErrReadOnly, pluginapi.CodeReadOnly},
 		{editor.ErrNotOpen, pluginapi.CodeClosed},
-		{editor.ErrStale, pluginapi.CodeStale},
-		{editor.ErrOverlappingEdits, pluginapi.CodeInvalid},
+		{document.ErrStale, pluginapi.CodeStale},
+		{document.ErrOverlappingEdits, pluginapi.CodeInvalid},
 		{editor.ErrUnsaved, pluginapi.CodeConflict},
-		{editor.ErrRestoring, pluginapi.CodeConflict},
-		{editor.ErrIndexing, pluginapi.CodeBusy},
-		{editor.ErrLargeFile, pluginapi.CodeTooLarge},
+		{document.ErrRestoring, pluginapi.CodeConflict},
+		{document.ErrIndexing, pluginapi.CodeBusy},
+		{document.ErrLargeFile, pluginapi.CodeTooLarge},
 		{buffer.ErrLargeBuffer, pluginapi.CodeTooLarge},
 		{buffer.ErrOverCap, pluginapi.CodeTooLarge},
 		{search.ErrRangeTooLarge, pluginapi.CodeTooLarge},

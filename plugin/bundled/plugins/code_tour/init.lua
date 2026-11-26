@@ -436,15 +436,7 @@ local function commit_drift(manifest)
   if not recorded or not gvim.git.available() then
     return nil
   end
-  local here = workspace_root()
-  local buf = gvim.buf.current()
-  if buf and not buf:is_virtual() and buf:path() and buf:path() ~= "" then
-    here = buf:path()
-  end
-  local repo = gvim.git.repo(here)
-  if not repo and here ~= workspace_root() then
-    repo = gvim.git.repo(workspace_root())
-  end
+  local repo = gvim.git.active_repo()
   if not repo then
     return nil
   end

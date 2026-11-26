@@ -314,16 +314,18 @@ func (o *pluginOS) Start(ctx context.Context, argv []string, opts hostos.ProcOpt
 		return nil, mapErr(err, "")
 	}
 	readers := []*os.File{outR}
-	var errR *os.File
+	var errR, errW *os.File
 	closeAll := func() {
 		_ = outR.Close()
 		_ = outW.Close()
 		if errR != nil {
 			_ = errR.Close()
 		}
+		if errW != nil && errW != outW {
+			_ = errW.Close()
+		}
 	}
 	cmd.Stdout = outW
-	var errW *os.File
 	if opts.MergeStderr {
 		cmd.Stderr = outW
 	} else {

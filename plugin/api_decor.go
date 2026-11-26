@@ -312,7 +312,6 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 		if err = scopeFromLua(t, &d); err != nil {
 			return d, err
 		}
-		d.Above = kind == pluginapi.DecorVirtualLineAbove
 		if tv := t.RawGetString("text_overlays"); tv != lua.LNil {
 			list, ok := tv.(*lua.LTable)
 			if !ok {
@@ -536,7 +535,6 @@ func installDecor(e *apiEnv) {
 		d := pluginapi.Decoration{
 			Kind: pluginapi.DecorVirtualLineAbove, Line: clampInt(float64(L.CheckNumber(2))),
 			Text: clipText(L.CheckString(3), decorMaxVirtualText), ComposeOnly: o.boolean("compose_only", false),
-			Above: above,
 		}
 		if !above {
 			d.Kind = pluginapi.DecorVirtualLineBelow
@@ -678,37 +676,6 @@ func installDecor(e *apiEnv) {
 		host().DecorClear(p.name, ns, id)
 		L.Push(lua.LTrue)
 		return 1
-	})
-	e.set(area, "refresh_lines", func(L *lua.LState) int {
-		if L.Get(1) != lua.LNil {
-			host().DecorRefreshLines(pluginapi.BufferID(checkID(L, 1, kindBuffer)))
-		}
-		L.Push(lua.LTrue)
-		return 1
-	})
-	e.set(area, "add_fold", func(L *lua.LState) int {
-		o := optsOf(L, 4)
-		buf := pluginapi.BufferID(checkID(L, 1, kindBuffer))
-		start := clampInt(float64(L.CheckNumber(2)))
-		end := clampInt(float64(L.CheckNumber(3)))
-		ns, err := defaultNS(L, &o)
-		if err != nil {
-			return bufRet(L, err)
-		}
-		fr := pluginapi.FoldRange{
-			Range:       pluginapi.Range{From: pluginapi.Pos{Line: start}, To: pluginapi.Pos{Line: end}},
-			Collapsed:   o.boolean("collapsed", false),
-			Placeholder: clipText(optString(&o, "placeholder"), decorMaxVirtualText),
-			Kind:        clipText(optString(&o, "kind"), 64),
-		}
-		expect, verr := bufParseVersion(o.get("version"))
-		if verr != nil {
-			return bufRet(L, verr)
-		}
-		if o.err != "" {
-			return bufRet(L, invalidErr("%s", o.err))
-		}
-		return bufTrue(L, host().DecorSetFoldingRanges(p.name, ns, buf, []pluginapi.FoldRange{fr}, expect))
 	})
 	e.set(area, "set_folding_ranges", func(L *lua.LState) int {
 		o := optsOf(L, 3)

@@ -11,6 +11,10 @@
     "cmd.move_to_left": "Move Tab To Left",
     "cmd.move_to_left_desc": "Move active tab to the left in the current split",
     "cmd.move_to_right": "Move Tab To Right",
-    "cmd.move_to_right_desc": "Move active tab to the right in the current split"
+    "cmd.move_to_right_desc": "Move active tab to the right in the current split",
+    "status.tab_one": "1 tab",
+    "status.tab_many": "%{count} tabs",
+    "status.closed": "Closed %{closed}",
+    "status.closed_kept": "Closed %{closed}; kept %{kept} with unsaved changes"
   }
 }

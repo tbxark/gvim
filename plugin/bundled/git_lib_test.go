@@ -426,3 +426,86 @@ func TestGitBlameNeutralisesRepositoryFilters(t *testing.T) {
 		})
 	}
 }
+
+// pinnedDiff is the part of a pinned_diff command line between git's fixed prefix and the
+// subcommand.
+var pinnedDiff = []string{
+	"--no-optional-locks",
+	"-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "-c", "diff.srcPrefix=a/",
+	"-c", "diff.dstPrefix=b/", "-c", "core.quotepath=false", "-c", "diff.suppressBlankEmpty=false",
+	"-c", "diff.relative=false", "-c", "diff.submodule=short", "-c", "core.bigFileThreshold=1m",
+}
+
+func TestGitPinnedDiffRunAndSpawn(t *testing.T) {
+	want := slices.Concat(gitHead, pinnedDiff, []string{"show", "--no-ext-diff", "--no-textconv", "--no-color", "--stat", "abc1234"})
+	tests := []struct {
+		name    string
+		lua     string
+		started bool
+	}{
+		{"run", `git.run({"show", "--stat", "abc1234"}, {cwd = "/r", pinned_diff = true})`, false},
+		{"spawn", `git.spawn({"show", "--stat", "abc1234"}, {cwd = "/r", pinned_diff = true})`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _ := probe(t, rigOpts{script: anyGit}, tt.lua)
+			runs := r.os.Runs()
+			if len(runs) != 1 || !slices.Equal(runs[0].Argv, want) || runs[0].Started != tt.started {
+				t.Fatalf("runs = %v\nwant argv %v (started %v)", runs, want, tt.started)
+			}
+			o := runs[0].Opts
+			if o.Cwd != "/r" || o.Timeout == 0 || o.Env["GIT_OPTIONAL_LOCKS"] != "0" || o.Env["GIT_CONFIG_NOSYSTEM"] != "1" {
+				t.Errorf("options = %+v, want the cwd, a timeout and the hardened environment", o)
+			}
+		})
+	}
+	t.Run("not pinned by default", func(t *testing.T) {
+		r, _ := probe(t, rigOpts{script: anyGit}, `git.spawn({"show", "abc1234"})`)
+		want := gitArgv("show", "--no-ext-diff", "--no-textconv", "abc1234")
+		if runs := r.os.Runs(); len(runs) != 1 || !slices.Equal(runs[0].Argv, want) {
+			t.Fatalf("runs = %v, want %v", runs, want)
+		}
+	})
+	t.Run("spawn without a git binary", func(t *testing.T) {
+		r, out := probe(t, rigOpts{noGit: true}, `say(git.spawn({"show"}))`)
+		if !slices.Equal(out, []string{"nil,unsupported: git binary not found"}) || len(r.os.Runs()) != 0 {
+			t.Errorf("out = %q, runs %v", out, r.os.Runs())
+		}
+	})
+}
+
+// TestGitActiveRepo: the repository of the active file's directory, else the workspace's
+// (the root of the fake workspace is /work).
+func TestGitActiveRepo(t *testing.T) {
+	roots := map[string]string{"/repo": "/repo", "/work": "/work"}
+	tests := []struct {
+		name    string
+		roots   map[string]string
+		buffers []rigBuffer
+		want    []string
+	}{
+		{"the repository of the active file", roots, []rigBuffer{{"/repo/sub/a.go", "x"}},
+			[]string{"dir,/repo/sub", "active,/repo,/repo/sub", "near,/work"}},
+		{"a file outside any repository falls back to the workspace's", roots, []rigBuffer{{"/other/a.go", "x"}},
+			[]string{"dir,/other", "active,/work,/other", "near,/work"}},
+		{"no buffer: the workspace", roots, nil,
+			[]string{"dir,/work", "active,/work,/work", "near,/work"}},
+		{"no repository anywhere", map[string]string{}, []rigBuffer{{"/other/a.go", "x"}},
+			[]string{"dir,/other", "active,nil,nil", "near,nil"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &plugintest.FakeServices{GitRoots: tt.roots}
+			_, out := probe(t, rigOpts{noGit: true, services: svc, buffers: tt.buffers}, `
+say("dir", git.active_dir())
+local repo, dir = git.active_repo()
+say("active", repo and repo.root, dir)
+local near = git.repo_or_workspace("/other/x.go")
+say("near", near and near.root)`)
+			// "near" always probes /other/x.go: outside both repositories, so the workspace's.
+			if !slices.Equal(out, tt.want) {
+				t.Errorf("out = %q, want %q", out, tt.want)
+			}
+		})
+	}
+}

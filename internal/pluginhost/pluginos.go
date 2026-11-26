@@ -80,11 +80,17 @@ const (
 
 // ---------- paths and errors ----------
 
-// abs makes p absolute against the working directory of the plugins and cleans it.
+// abs makes p absolute against the workspace root (falling back to the working
+// directory) and cleans it. This matches prepFSRemove and remote authorityOS.
 func (o *pluginOS) abs(p string) string {
 	if !filepath.IsAbs(p) {
-		if cwd := o.dirs().Cwd; cwd != "" {
-			p = filepath.Join(cwd, p)
+		d := o.dirs()
+		base := d.Root
+		if base == "" {
+			base = d.Cwd
+		}
+		if base != "" {
+			p = filepath.Join(base, p)
 		}
 	}
 	if a, err := filepath.Abs(p); err == nil {

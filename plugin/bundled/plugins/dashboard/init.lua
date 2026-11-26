@@ -127,7 +127,7 @@ local ACTIONS = {
   { label = "Live Grep", action = "resume_live_grep" },
   { label = "Select Theme", action = "select_theme" },
   { label = "Git Log", action = "git_log.show_git_log" },
-  { label = "Diagnostics Panel", action = "diagnostics_panel.toggle_diagnostics_panel" },
+  { label = "Diagnostics Panel", action = "toggle_diagnostics_panel" },
 }
 -- Each action row clicks its own hidden command (registered at the bottom), so the
 -- line-target API only ever dispatches commands this plugin owns.

@@ -1,4 +1,4 @@
--- Git gutter. A port of Fresh's git_gutter and diff_nav plugins.
+-- Git gutter: git change marks in the gutter, with merged Next/Previous Change navigation.
 --
 -- The open buffer is compared with the file at HEAD. Added and modified lines get a bar in
 -- the gutter and a mark on the scrollbar, a place where lines were deleted gets a triangle.
@@ -335,12 +335,12 @@ gvim.on("buffer_changed", function(ev)
   end
 end, { debounce = settings.debounce_ms })
 
--- ---------- Next and Previous Change (Fresh's diff_nav) ----------
+-- ---------- Next and Previous Change ----------
 
--- diff_nav_targets is Fresh's diff_nav merge: the buffer's git (HEAD) changed
+-- nav_targets merges the change sources: the buffer's git (HEAD) changed
 -- regions, the active live_diff hunks when that plugin is loaded, and the
 -- saved-diff ranges of unsaved changes. Lines are 0-based, unique and ascending.
-local function diff_nav_targets(b, base)
+local function nav_targets(b, base)
   local seen, lines = {}, {}
   local function add(line)
     line = tonumber(line)
@@ -371,7 +371,7 @@ local function diff_nav_targets(b, base)
   return lines
 end
 
--- change_lines returns the merged diff_nav jump targets of b: its HEAD changes
+-- change_lines returns the merged jump targets of b: its HEAD changes
 -- when git tracks the file, live_diff's active hunks when that plugin is loaded,
 -- and the saved-diff lines of unsaved changes.
 local function change_lines(b)
@@ -383,7 +383,7 @@ local function change_lines(b)
     end
     base = st.regions
   end
-  return diff_nav_targets(b, base)
+  return nav_targets(b, base)
 end
 
 local function jump(direction)
@@ -392,11 +392,11 @@ local function jump(direction)
     return
   end
   -- Large-file mode skips only the git HEAD regions (the plugin never scans such a
-  -- buffer); diff_nav's saved-diff and live_diff targets are still navigable.
+  -- buffer); the saved-diff and live_diff targets are still navigable.
   local info = b:info()
   local lines
   if info and info.large then
-    lines = diff_nav_targets(b, nil)
+    lines = nav_targets(b, nil)
   else
     lines = change_lines(b)
   end

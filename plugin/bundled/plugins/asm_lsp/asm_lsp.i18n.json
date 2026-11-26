@@ -27,6 +27,7 @@
     "status.config_exists": "Not overwriting %{path}: it was created by another process",
     "status.create_refused": "Could not create %{path} exclusively: %{error}; the file was not written",
     "actions.disable": "Disable Assembly LSP",
-    "status.no_lsp": "No language server is configured"
+    "status.no_lsp": "No language server is configured",
+    "status.config_present": "An .asm-lsp.toml already exists for this project, so nothing was created"
   }
 }

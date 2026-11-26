@@ -17,7 +17,7 @@ local gvim = require "gvim"
 
 local function t(key, vars) return gvim.i18n.t(key, vars) end
 
-local state = { item = nil, sets = 0, last = "" }
+local state = { item = nil }
 
 local function trust_level()
   local ok, level = pcall(function() return gvim.env.trust_level() end)
@@ -90,7 +90,6 @@ local function apply(d, reload)
     end
     return false
   end
-  state.sets = state.sets + 1
   if reload then
     gvim.notify(t("status.reloading", { name = tostring(d.name) }))
   else

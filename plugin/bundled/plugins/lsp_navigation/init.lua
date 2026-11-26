@@ -9,12 +9,12 @@
 --     highlight. The symbol name position is refined against the line (LSP reports the start
 --     of the declaration, not always the name), as Fresh does. A no-language/empty/error
 --     document produces the Fresh status line instead of an empty list.
---   * The kind labels and the DocumentSymbol/SymbolInformation parsing are Fresh's; children
---     of a hierarchical DocumentSymbol are not listed (Fresh reads the top level only).
+--   * The kind labels and the DocumentSymbol/SymbolInformation parsing are Fresh's; the
+--     children of a hierarchical DocumentSymbol are flattened into the list.
 --
 -- gvim additions (Fresh's plugin has only Go to LSP Symbol; the definition/implementation/
 -- type-definition jumping is a core action there, and gvim keeps its native Go to Definition
--- rows): list commands that use the same Finder location list as find_references - LSP: Show
+-- rows): list commands that use the shared Finder location list - LSP: Show
 -- Definitions / Show Implementations / Show Type Definitions for the symbol under the cursor,
 -- LSP: Workspace Symbols, LSP: Incoming Calls / Outgoing Calls (call sites), LSP: Document
 -- Outline (the same list as Go to LSP Symbol), and LSP: Show Breadcrumbs / Breadcrumbs

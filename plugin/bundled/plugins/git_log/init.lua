@@ -68,7 +68,6 @@ local MAX_REFS_CELLS = 120
 local MAX_AUTHOR_CELLS = 80
 local MAX_LINE_PARSE = 4096
 local SELECT_DEBOUNCE_MS = 60
-local GIT_TIMEOUT_MS = 15000
 local CACHE_SUBDIR = "git_log"
 local MAX_CACHED_COMMITS = 50
 local END_OF_LINE = 1073741824 -- 2^30: "the end of the line" for a Range column
@@ -98,83 +97,36 @@ local STYLE = {
 }
 
 -- ---------------------------------------------------------------------------
--- Hardened git command lines (the same rules as the bundled gvim.git module and
--- Fresh's diffArgs: a repository can never make git run a program for us, and the
--- patch format the parser reads is pinned back to its documented default).
+-- Git command lines. gvim.git adds the hardened settings (a repository can never make
+-- git run a program for us); the commands whose output is parsed as a patch also ask for
+-- the patch format pinned back to its documented default (pinned_diff).
 -- ---------------------------------------------------------------------------
-local NULL_DEVICE = gvim.platform == "windows" and "NUL" or "/dev/null"
-local GIT_C = {
-  "git",
-  "-c", "core.fsmonitor=false",
-  "-c", "core.pager=cat",
-  "-c", "diff.external=",
-  "-c", "core.attributesFile=" .. NULL_DEVICE,
-  "-c", "protocol.ext.allow=never",
-}
-local DIFF_C = {
-  "-c", "diff.noprefix=false",
-  "-c", "diff.mnemonicPrefix=false",
-  "-c", "diff.srcPrefix=a/",
-  "-c", "diff.dstPrefix=b/",
-  "-c", "core.quotepath=false",
-  "-c", "diff.suppressBlankEmpty=false",
-  "-c", "diff.relative=false",
-  "-c", "diff.submodule=short",
-  "-c", "core.bigFileThreshold=1m",
-}
-local GIT_ENV = {
-  GIT_OPTIONAL_LOCKS = "0",
-  GIT_TERMINAL_PROMPT = "0",
-  GIT_CONFIG_NOSYSTEM = "1",
-}
 
--- git_argv builds a full git command line: the hardened -c settings, the subcommand,
--- the caller's options, the pinned diff flags when this command's output is parsed as
--- a patch, then the operands.
-local function git_argv(sub, opts, operands, pinned)
+-- git_args is the subcommand, the caller's options, then the operands.
+local function git_args(sub, opts, operands)
   local out = {}
-  for _, v in ipairs(GIT_C) do
-    out[#out + 1] = v
-  end
-  if pinned then
-    out[#out + 1] = "--no-optional-locks"
-    for _, v in ipairs(DIFF_C) do
+  for _, list in ipairs { sub, opts or {}, operands or {} } do
+    for _, v in ipairs(list) do
       out[#out + 1] = v
     end
-  end
-  for _, v in ipairs(sub) do
-    out[#out + 1] = v
-  end
-  for _, v in ipairs(opts or {}) do
-    out[#out + 1] = v
-  end
-  if pinned then
-    out[#out + 1] = "--no-ext-diff"
-    out[#out + 1] = "--no-textconv"
-    out[#out + 1] = "--no-color"
-  end
-  for _, v in ipairs(operands or {}) do
-    out[#out + 1] = v
   end
   return out
 end
 
 local function git_run(sub, opts, operands, opt)
   opt = opt or {}
-  return gvim.proc.run(git_argv(sub, opts, operands, opt.pinned), {
+  return gvim.git.run(git_args(sub, opts, operands), {
     cwd = opt.cwd,
-    env = GIT_ENV,
-    timeout_ms = GIT_TIMEOUT_MS,
+    pinned_diff = opt.pinned,
     max_output = opt.max_output or MAX_NUMSTAT_OUTPUT,
   })
 end
 
 local function git_spawn(sub, opts, operands, opt)
   opt = opt or {}
-  return gvim.proc.spawn(git_argv(sub, opts, operands, opt.pinned), {
+  return gvim.git.spawn(git_args(sub, opts, operands), {
     cwd = opt.cwd,
-    env = GIT_ENV,
-    timeout_ms = GIT_TIMEOUT_MS,
+    pinned_diff = opt.pinned,
     on_stdout = opt.on_stdout,
     on_stderr = opt.on_stderr,
     on_exit = opt.on_exit,
@@ -1199,19 +1151,9 @@ local function resolve_repo(path)
   if not probe or probe == "" then
     return nil, nil
   end
-  local repo, err = gvim.git.repo(probe)
+  local repo, err = gvim.git.repo_or_workspace(probe)
   if repo and repo.root and repo.root ~= "" then
     return repo.root
-  end
-  if err then
-    return nil, err
-  end
-  local root = gvim.workspace.root()
-  if root ~= "" and root ~= probe then
-    repo, err = gvim.git.repo(root)
-    if repo and repo.root and repo.root ~= "" then
-      return repo.root
-    end
   end
   return nil, err
 end

@@ -184,9 +184,6 @@ type DecorHost interface {
 	// and the user may toggle them. The plugin re-sets them after its content changes.
 	DecorSetFoldingRanges(plugin, ns string, id BufferID, ranges []FoldRange, expect *Version) error
 	DecorClearFolds(plugin, ns string, id BufferID) // id 0: all buffers
-	// DecorRefreshLines asks the editor to repaint the buffer's decorations. Painting reads
-	// the store every frame, so this is a no-op kept for Fresh's API shape.
-	DecorRefreshLines(id BufferID)
 }
 
 // WorkspaceHost is read access to the workspace and the theme.

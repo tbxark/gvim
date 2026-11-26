@@ -293,7 +293,6 @@ type Decoration struct {
 	Color    Color
 	Priority int
 	// The tier-1c fields.
-	Above       bool   // virtual line above (the kind already names the side)
 	GutterText  string // virtual line: the gutter cell
 	GutterStyle Style
 	Activation  Activation
@@ -304,8 +303,6 @@ type Decoration struct {
 	Indent               int    // soft break: indent cells of the continuation row
 	PrefixText           string // soft break: text at the start of the continuation row
 	PrefixStyle          Style
-	Collapsed            bool // fold range
-	Placeholder          string
 	TextOverlays         []TextOverlay // virtual line: styled ranges within Text
 }
 

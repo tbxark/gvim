@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -89,7 +90,7 @@ func TestPluginCreateBufferRefusals(t *testing.T) {
 	}{
 		{"no name", pluginapi.CreateBuffer{}, pluginapi.CodeInvalid},
 		{"blank name", pluginapi.CreateBuffer{Name: " \t"}, pluginapi.CodeInvalid},
-		{"text over the cap", pluginapi.CreateBuffer{Name: "n", Text: strings.Repeat("x", editor.MaxVirtualText+1)}, pluginapi.CodeTooLarge},
+		{"text over the cap", pluginapi.CreateBuffer{Name: "n", Text: strings.Repeat("x", document.MaxVirtualText+1)}, pluginapi.CodeTooLarge},
 		{"unknown language", pluginapi.CreateBuffer{Name: "n", Language: "no-such-language"}, pluginapi.CodeInvalid},
 		{"language name longer than any lexer", pluginapi.CreateBuffer{Name: "n", Language: strings.Repeat("x", pluginMaxLanguageName+1)}, pluginapi.CodeInvalid},
 		{"mode name too long", pluginapi.CreateBuffer{Name: "n", Mode: strings.Repeat("m", pluginMaxModeName+1)}, pluginapi.CodeInvalid},
@@ -285,7 +286,7 @@ func TestPluginSetContentRefusals(t *testing.T) {
 		{"a regular buffer", func(r, _ pluginapi.BufferID) pluginapi.BufferID { return r }, nil, pluginapi.CodeInvalid},
 		{"a closed buffer", func(_, _ pluginapi.BufferID) pluginapi.BufferID { return 999 }, nil, pluginapi.CodeClosed},
 		{"over the byte cap", func(_, v pluginapi.BufferID) pluginapi.BufferID { return v },
-			[]pluginapi.ContentEntry{{Text: strings.Repeat("x", editor.MaxVirtualText/2+1)}, {Text: strings.Repeat("x", editor.MaxVirtualText/2+1)}}, pluginapi.CodeTooLarge},
+			[]pluginapi.ContentEntry{{Text: strings.Repeat("x", document.MaxVirtualText/2+1)}, {Text: strings.Repeat("x", document.MaxVirtualText/2+1)}}, pluginapi.CodeTooLarge},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -437,7 +438,7 @@ func TestPluginOptions(t *testing.T) {
 		}},
 		{"tab_size", []step{
 			{"8", int64(8), "", 8}, {"float", float64(2), "", 2}, {"cleared", nil, "", nil},
-			{"zero", int64(0), pluginapi.CodeInvalid, nil}, {"too big", int64(editor.MaxViewTabSize + 1), pluginapi.CodeInvalid, nil},
+			{"zero", int64(0), pluginapi.CodeInvalid, nil}, {"too big", int64(document.MaxViewTabSize + 1), pluginapi.CodeInvalid, nil},
 			{"fraction", float64(2.5), pluginapi.CodeInvalid, nil}, {"string", "4", pluginapi.CodeInvalid, nil},
 		}},
 	}
@@ -483,7 +484,7 @@ func TestPluginOptionReachesTheEditorSettings(t *testing.T) {
 	pe, ed, _, id := virtualOver(t, pluginapi.CreateBuffer{})
 	apptest.Must(t, pe.SetOption(id, "wrap", false))
 	apptest.Must(t, pe.SetOption(id, "tab_size", int64(3)))
-	d, _, _ := ed.DocByID(editor.DocID(id))
+	d, _, _ := ed.DocByID(document.DocID(id))
 	if s := ed.SettingsFor(d); s.LineWrap || s.TabSize != 3 {
 		t.Fatalf("settings = wrap %v tab %d, want false and 3", s.LineWrap, s.TabSize)
 	}
@@ -512,7 +513,7 @@ func TestPluginCloseVirtualNeverAsks(t *testing.T) {
 	if err := pe.Close(id, false); err != nil {
 		t.Fatalf("Close = %v", err)
 	}
-	if _, _, ok := ed.DocByID(editor.DocID(id)); ok {
+	if _, _, ok := ed.DocByID(document.DocID(id)); ok {
 		t.Fatal("the buffer is still open")
 	}
 }
@@ -525,10 +526,10 @@ func TestSessionLeavesOutVirtualBuffers(t *testing.T) {
 	apptest.Must(t, os.WriteFile(file, []byte("one\n"), 0o644))
 	ed := apptest.NewSessionEditor()
 	apptest.Must(t, ed.OpenFile(file))
-	id := ed.NewVirtual(editor.VirtualOptions{Name: "outline", Text: "heading\nbody"})
+	id := ed.NewVirtual(document.VirtualOptions{Name: "outline", Text: "heading\nbody"})
 	// edited, active: still not part of the session
 	apptest.Must(t, ed.ActivateID(id))
-	apptest.Must(t, ed.ApplyEdits(id, []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "X"}}, editor.EditOptions{}))
+	apptest.Must(t, ed.ApplyEdits(id, []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "X"}}, document.EditOptions{}))
 	sess := filepath.Join(dir, "session")
 	apptest.Must(t, restore.WriteSession(ed, sess, tui.ExplorerState{}, nil))
 	s, ok, err := session.Load(sess)
@@ -548,8 +549,8 @@ func TestRecoveryWriterLeavesOutVirtualBuffers(t *testing.T) {
 	dir := t.TempDir()
 	rec := filepath.Join(dir, "recovery")
 	ed := apptest.NewSessionEditor()
-	id := ed.NewVirtual(editor.VirtualOptions{Name: "v", Text: "text"})
-	apptest.Must(t, ed.ApplyEdits(id, []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "X"}}, editor.EditOptions{}))
+	id := ed.NewVirtual(document.VirtualOptions{Name: "v", Text: "text"})
+	apptest.Must(t, ed.ApplyEdits(id, []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "X"}}, document.EditOptions{}))
 	w := restore.NewRecoveryWriter(ed, rec)
 	apptest.Must(t, w.Plan()())
 	if _, err := os.Stat(rec); err == nil {

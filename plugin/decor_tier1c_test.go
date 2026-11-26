@@ -10,7 +10,7 @@ import (
 
 // tier1cDecorPlugin exercises the tier-1c-A decoration surface: virtual lines with text
 // overlays, conceal, soft breaks, cursor-line overlay, scrollbar ranges, plugin folds,
-// clears by range/namespace and refresh_lines.
+// and clears by range/namespace.
 const tier1cDecorPlugin = `
 local gvim = require 'gvim'
 
@@ -30,11 +30,9 @@ gvim.command.register{ name = "decorate", run = function()
   gvim.notify("cursor:" .. tostring(gvim.decor.set_cursor_line_overlay(buf, { bg = "#202020" })))
   gvim.notify("scroll:" .. tostring(gvim.decor.set_scrollbar_markers_in_range(buf,
     { from = { line = 1, col = 0 }, to = { line = 3, col = 0 } }, "error", {})))
-  gvim.notify("fold:" .. tostring(gvim.decor.add_fold(buf, 10, 20, { placeholder = "20 lines", collapsed = true })))
   gvim.notify("ranges:" .. tostring(gvim.decor.set_folding_ranges(buf, {
     { start_line = 30, end_line = 40, kind = "function", placeholder = "fn" },
   })))
-  gvim.notify("refresh:" .. tostring(gvim.decor.refresh_lines(buf)))
   gvim.notify("clear:" .. tostring(gvim.decor.clear_decorations(buf,
     { from = { line = 100, col = 0 }, to = { line = 200, col = 0 } }, { namespace = "t1c" })))
   gvim.notify("clearfolds:" .. tostring(gvim.decor.clear_folds(buf, { namespace = "t1c" })))
@@ -58,7 +56,7 @@ func TestTier1CDecorations(t *testing.T) {
 	for _, n := range notices {
 		joined += n + "|"
 	}
-	if !containsAll(joined, "vline:1|", "vbelow:2|", "conceal:3|", "soft:4|", "cursor:5|", "scroll:6|", "fold:true|", "ranges:true|", "refresh:true|", "clear:true|", "clearfolds:true|", "set:true|") {
+	if !containsAll(joined, "vline:1|", "vbelow:2|", "conceal:3|", "soft:4|", "cursor:5|", "scroll:6|", "ranges:true|", "clear:true|", "clearfolds:true|", "set:true|") {
 		t.Fatalf("notices = %q", joined)
 	}
 	// Six convenience adds made it to the host (the trailing ns:set then replaced the
@@ -73,9 +71,6 @@ func TestTier1CDecorations(t *testing.T) {
 	items := h.Host.Decor().Items("d", "t1c", id)
 	if len(items) != 2 || items[0].Kind != pluginapi.DecorConceal || items[1].Kind != pluginapi.DecorSoftBreak || items[1].Indent != 2 {
 		t.Fatalf("ns:set items = %+v", items)
-	}
-	if h.Host.CallCount("DecorRefreshLines") != 1 {
-		t.Fatalf("refresh calls = %d", h.Host.CallCount("DecorRefreshLines"))
 	}
 }
 
@@ -173,23 +168,6 @@ func TestDecorConvenienceOptions(t *testing.T) {
 	}
 }
 
-// add_fold and set_folding_ranges name the fold kind the same way: `kind`.
-func TestAddFoldTakesKind(t *testing.T) {
-	h := plugintest.New(t, plugintest.Files{"d.lua": `local gvim = require "gvim"
-gvim.command.register { name = "fold", title = "fold", run = function()
-  gvim.decor.add_fold(gvim.buf.current(), 1, 3, { kind = "region", namespace = "k" })
-end }`}, plugintest.Options{})
-	h.Start()
-	h.Host.AddBuffer("/w/a.go", "package a\n")
-	if err := h.Run("d.fold", nil); err != nil {
-		t.Fatal(err)
-	}
-	folds := h.Host.FoldRanges()
-	if len(folds) != 1 || len(folds[0].Ranges) != 1 || folds[0].Ranges[0].Kind != "region" {
-		t.Fatalf("folds = %+v, want one range of kind region", folds)
-	}
-}
-
 func TestDecorErrorPropagationAndVirtualAbove(t *testing.T) {
 	h, host := bufRun(t, "one\ntwo\n", `
 local _, e1 = gvim.decor.add_virtual_line(b, 0, "above", { gutter_color = "error" })
@@ -204,11 +182,11 @@ T.spy(tostring(e1), tostring(e2), tostring(e3), tostring(e4), tostring(e5), tost
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want 2 virtual lines", items)
 	}
-	if !items[0].Above || items[0].GutterStyle.FG.Key != "error" {
-		t.Fatalf("above virtual line = %+v, want Above=true and GutterStyle.FG.Key=error", items[0])
+	if items[0].Kind != pluginapi.DecorVirtualLineAbove || items[0].GutterStyle.FG.Key != "error" {
+		t.Fatalf("above virtual line = %+v, want DecorVirtualLineAbove and GutterStyle.FG.Key=error", items[0])
 	}
-	if items[1].Above {
-		t.Fatalf("below virtual line = %+v, want Above=false", items[1])
+	if items[1].Kind != pluginapi.DecorVirtualLineBelow {
+		t.Fatalf("below virtual line = %+v, want DecorVirtualLineBelow", items[1])
 	}
 	got := spyText(h)
 	parts := strings.Split(got, " ")

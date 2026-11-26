@@ -202,7 +202,6 @@ func (Unsupported) DecorSetFoldingRanges(string, string, BufferID, []FoldRange, 
 	return unsupported("DecorSetFoldingRanges")
 }
 func (Unsupported) DecorClearFolds(string, string, BufferID) {}
-func (Unsupported) DecorRefreshLines(BufferID)               {}
 
 // WorkspaceHost.
 

@@ -8,17 +8,15 @@
 --   * prompt frontend -- Finder.new{...} over gvim.ui.picker with filter = "none": the host
 --     shows the rows, the library ranks them. Esc cancels, Enter selects, and on_close runs
 --     exactly once with the reason ("selected", "cancelled", "programmatic").
---   * panel backend -- M.tree(items, opts): Fresh's grouped, deduped (one entry per id) tree
---     rows for a widget panel (diagnostics_panel's livePanel subset).
 --   * location lists -- M.open_locations{items, ...}: the "list of locations" finder shared
---     by find_references and lsp_navigation (relative path:line labels, snippet descriptions,
+--     by lsp_navigation (relative path:line labels, snippet descriptions,
 --     preview tabs on move, commit on Enter, discard on cancel).
 --
 -- Reduced vs Fresh's finder.ts: no asynchronous SearchSource with cancellation handles or
 -- per-query process spawns (a source is a Lua loader plus the library's ranking, and the
 -- picker generations protect against out-of-order set_items), no embedded preview pane /
 -- utility-dock routing / syncWithEditor / navigateOnCursorMove / panelKeys / prompt-type
--- events, and the panel backend covers the grouped-tree use only. Everything is bounded:
+-- events. Everything is bounded:
 -- at most MAX_ITEMS source items, MAX_RESULTS rows, MAX_QUERY bytes, MAX_LABEL/MAX_DETAIL
 -- cells and MAX_LOCATION_FILES file reads of MAX_LOCATION_BYTES each.
 local gvim = require "gvim"
@@ -382,73 +380,6 @@ function M.new(opts)
   f.on_select, f.on_move, f.on_close = opts.on_select, opts.on_move, opts.on_close
   f.on_rows = opts.on_rows
   return f
-end
-
--- ---------------------------------------------------------------------------
--- Panel backend: grouped, deduped tree rows for a widget panel
--- ---------------------------------------------------------------------------
--- tree builds widget-panel tree nodes from ordered items. opts:
---   key       (item) -> stable id (the dedupe key; nil skips dedupe)
---   dedupe    default true
---   group     (item) -> {key=, text=, detail=} | nil   (nil: a flat list)
---   row       (item) -> {text=, detail=, key=}
---   max_rows  cap (default MAX_ITEMS)
--- Returns {nodes=, node_map=, count=}; node_map[i] is the item of node i (nil for a group
--- header), so an activate event's node index resolves to its item.
-function M.tree(items, opts)
-  opts = opts or {}
-  local nodes, node_map, seen = {}, {}, {}
-  local last_group = nil
-  local kept = 0
-  local max_rows = opts.max_rows or M.MAX_ITEMS
-  for _, item in ipairs(items) do
-    local key = opts.key and opts.key(item) or nil
-    local duplicate = false
-    if key ~= nil and opts.dedupe ~= false then
-      if seen[key] then
-        duplicate = true
-      else
-        seen[key] = true
-      end
-    end
-    if not duplicate then
-      local group = opts.group and opts.group(item) or nil
-      if group and group.key ~= last_group then
-        nodes[#nodes + 1] = {
-          key = group.key,
-          text = group.text or "",
-          detail = group.detail or "",
-          depth = 0,
-          expanded = true,
-        }
-        last_group = group.key
-      end
-      local row = opts.row(item)
-      nodes[#nodes + 1] = {
-        key = row.key or key,
-        text = row.text,
-        detail = row.detail or "",
-        depth = group and 1 or 0,
-        leaf = true,
-      }
-      node_map[#nodes] = item
-      kept = kept + 1
-      if kept >= max_rows then
-        break
-      end
-    end
-  end
-  return { nodes = nodes, node_map = node_map, count = kept }
-end
-
--- first_leaf returns the 1-based node index of the first row (not a group header).
-function M.first_leaf(tree)
-  for i = 1, #tree.nodes do
-    if tree.node_map[i] ~= nil then
-      return i
-    end
-  end
-  return 1
 end
 
 -- ---------------------------------------------------------------------------

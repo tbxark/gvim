@@ -2,12 +2,12 @@ package pluginhost
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/decorations"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -72,7 +72,7 @@ func (p *pluginEditor) virtualDoc(id pluginapi.BufferID) error {
 // never reused, so nothing else would free them.
 func (p *pluginEditor) sweepVirtual() {
 	for _, doc := range p.decor.Docs() {
-		if _, _, ok := p.ed.DocByID(editor.DocID(doc)); !ok {
+		if _, _, ok := p.ed.DocByID(document.DocID(doc)); !ok {
 			p.decor.DropDoc(doc)
 		}
 	}
@@ -84,8 +84,8 @@ func (p *pluginEditor) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferI
 	switch {
 	case strings.TrimSpace(o.Name) == "":
 		return 0, pluginapi.Errf(pluginapi.CodeInvalid, "a virtual buffer needs a name")
-	case len(o.Text) > editor.MaxVirtualText:
-		return 0, pluginapi.Errf(pluginapi.CodeTooLarge, "text is over %d bytes", editor.MaxVirtualText)
+	case len(o.Text) > document.MaxVirtualText:
+		return 0, pluginapi.Errf(pluginapi.CodeTooLarge, "text is over %d bytes", document.MaxVirtualText)
 	case o.Language != "" && !knownLanguage(o.Language):
 		return 0, unknownLanguage(o.Language)
 	case len(o.Mode) > pluginMaxModeName:
@@ -96,7 +96,7 @@ func (p *pluginEditor) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferI
 	if err := p.virtualRoom(o.Plugin, true, 0, len(text)); err != nil {
 		return 0, err
 	}
-	id := p.ed.NewVirtual(editor.VirtualOptions{
+	id := p.ed.NewVirtual(document.VirtualOptions{
 		Name: o.Name, Language: o.Language, Mode: o.Mode, ReadOnly: o.ReadOnly, Text: text, Owner: o.Plugin,
 	})
 	if o.Focus {
@@ -108,7 +108,7 @@ func (p *pluginEditor) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferI
 // virtualRoom checks the quotas of virtual buffers for owner: a new buffer (add) or the
 // replacement of the text of buffer replace, which is size bytes long afterwards, must
 // fit the buffer count and the text budget of the owner and of the editor.
-func (p *pluginEditor) virtualRoom(owner string, add bool, replace editor.DocID, size int) error {
+func (p *pluginEditor) virtualRoom(owner string, add bool, replace document.DocID, size int) error {
 	freed := 0
 	if !add {
 		_, freed, _ = p.ed.VirtualOwner(replace)
@@ -133,7 +133,7 @@ func (p *pluginEditor) SetReadOnly(id pluginapi.BufferID, ro bool) error {
 	if err := p.virtualDoc(id); err != nil {
 		return err
 	}
-	return editorErr(p.ed.SetReadOnlyID(editor.DocID(id), ro))
+	return editorErr(p.ed.SetReadOnlyID(document.DocID(id), ro))
 }
 
 // textPos is a position in the content being built: a line and a UTF-8 byte column.
@@ -153,14 +153,14 @@ type contentBuilder struct {
 	text  strings.Builder
 	at    textPos
 	items []decorations.Item
-	props []editor.PropSpan
+	props []document.PropSpan
 }
 
 // full is the error of a content that does not fit: bytes of text or styled runs.
 func (c *contentBuilder) full() error {
 	switch {
-	case c.text.Len() > editor.MaxVirtualText:
-		return pluginapi.Errf(pluginapi.CodeTooLarge, "content is over %d bytes", editor.MaxVirtualText)
+	case c.text.Len() > document.MaxVirtualText:
+		return pluginapi.Errf(pluginapi.CodeTooLarge, "content is over %d bytes", document.MaxVirtualText)
 	case len(c.items) > decorations.MaxPerNamespace:
 		return pluginapi.Errf(pluginapi.CodeLimit, "too many styled runs in the content (max %d)", decorations.MaxPerNamespace)
 	}
@@ -210,7 +210,7 @@ func (c *contentBuilder) entry(e pluginapi.ContentEntry) error {
 		return err
 	}
 	if len(e.Props) > 0 && c.at != start {
-		c.props = append(c.props, editor.PropSpan{
+		c.props = append(c.props, document.PropSpan{
 			FromLine: start.line, FromCol: start.col, ToLine: c.at.line, ToCol: c.at.col, Props: e.Props,
 		})
 	}
@@ -241,7 +241,7 @@ func (p *pluginEditor) SetContent(id pluginapi.BufferID, entries []pluginapi.Con
 			return err
 		}
 	}
-	doc := editor.DocID(id)
+	doc := document.DocID(id)
 	owner, _, _ := p.ed.VirtualOwner(doc)
 	if err := p.virtualRoom(owner, false, doc, c.text.Len()); err != nil {
 		return err
@@ -270,7 +270,7 @@ func (p *pluginEditor) PropsAt(id pluginapi.BufferID, pos pluginapi.Pos) (map[st
 	if !d.Virtual() {
 		return nil, nil
 	}
-	props, err := p.ed.VirtualProps(editor.DocID(id), max(pos.Line, 0), max(pos.Col, 0))
+	props, err := p.ed.VirtualProps(document.DocID(id), max(pos.Line, 0), max(pos.Col, 0))
 	return props, editorErr(err)
 }
 
@@ -279,7 +279,7 @@ func (p *pluginEditor) SetBufferMode(id pluginapi.BufferID, mode string) error {
 	if len(mode) > pluginMaxModeName {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "mode name is longer than %d bytes", pluginMaxModeName)
 	}
-	return editorErr(p.ed.SetModeID(editor.DocID(id), mode))
+	return editorErr(p.ed.SetModeID(document.DocID(id), mode))
 }
 
 // The options of a buffer: its own override of the display settings. A value of nil
@@ -293,7 +293,7 @@ const (
 // SetOption sets an option of one buffer: "wrap" and "line_numbers" take a boolean,
 // "tab_size" a whole number from 1 to editor.MaxViewTabSize; nil clears the override.
 func (p *pluginEditor) SetOption(id pluginapi.BufferID, name string, v any) error {
-	var set func(*editor.ViewSettings)
+	var set func(*document.ViewSettings)
 	switch name {
 	case optWrap, optLineNumbers:
 		var flag *bool
@@ -304,7 +304,7 @@ func (p *pluginEditor) SetOption(id pluginapi.BufferID, name string, v any) erro
 			}
 			flag = &b
 		}
-		set = func(s *editor.ViewSettings) {
+		set = func(s *document.ViewSettings) {
 			if name == optWrap {
 				s.LineWrap = flag
 			} else {
@@ -315,16 +315,16 @@ func (p *pluginEditor) SetOption(id pluginapi.BufferID, name string, v any) erro
 		size := 0
 		if v != nil {
 			n, ok := wholeValue(v)
-			if !ok || n < 1 || n > editor.MaxViewTabSize {
-				return pluginapi.Errf(pluginapi.CodeInvalid, "option %q takes a whole number from 1 to %d", name, editor.MaxViewTabSize)
+			if !ok || n < 1 || n > document.MaxViewTabSize {
+				return pluginapi.Errf(pluginapi.CodeInvalid, "option %q takes a whole number from 1 to %d", name, document.MaxViewTabSize)
 			}
 			size = n
 		}
-		set = func(s *editor.ViewSettings) { s.TabSize = size }
+		set = func(s *document.ViewSettings) { s.TabSize = size }
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "unknown option %q (wrap, line_numbers, tab_size)", name)
 	}
-	return editorErr(p.ed.UpdateViewSettings(editor.DocID(id), set))
+	return editorErr(p.ed.UpdateViewSettings(document.DocID(id), set))
 }
 
 // GetOption returns the override a buffer has for an option, or nil when it follows the

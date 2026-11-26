@@ -491,7 +491,7 @@ func TestLiveDiffFullRenderingShowsTheDeletedOldLine(t *testing.T) {
 		t.Fatalf("virtual lines = %d, want the one deleted old line (log %v)", len(lines), r.h.LogText("live_diff"))
 	}
 	v := lines[0]
-	if v.Kind != pluginapi.DecorVirtualLineAbove || !v.Above || v.Line != 0 || v.Text != "alpha beta gamma" {
+	if v.Kind != pluginapi.DecorVirtualLineAbove || v.Line != 0 || v.Text != "alpha beta gamma" {
 		t.Errorf("virtual line = %+v, want the old line above line 0", v)
 	}
 	if v.GutterText != "-" || v.Style.BG.Key != "editor.diff_remove_bg" || v.Style.FG.Key != "editor.diff_remove_collision_fg" {

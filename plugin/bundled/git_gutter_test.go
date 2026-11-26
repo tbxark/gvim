@@ -293,7 +293,7 @@ func TestGitGutterNavigationWithoutChanges(t *testing.T) {
 	}
 }
 
-// Large-file mode skips the git HEAD regions, but diff_nav's saved-diff targets still
+// Large-file mode skips the git HEAD regions, but the saved-diff targets still
 // navigate: unsaved changes move the caret and use the normal Change n/m notice.
 func TestGitGutterNavigationInLargeFileMode(t *testing.T) {
 	r := startRig(t, rigOpts{
@@ -463,7 +463,7 @@ func TestGitGutterFollowsAnExternalCommit(t *testing.T) {
 }
 
 // TestGitGutterNavigationMergesLiveDiffAndSavedChanges: the Next/Previous
-// Change commands are Fresh's diff_nav merged surface. A tracked buffer whose
+// Change commands are the merged navigation. A tracked buffer whose
 // HEAD is unchanged still navigates to the active live_diff hunk (line 3) and
 // the unsaved saved-diff line (line 2), deduplicated and sorted, with Fresh's
 // Change n/total statuses and wrapping.

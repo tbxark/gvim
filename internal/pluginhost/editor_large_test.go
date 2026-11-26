@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 
 // largeIndexedPluginEditor opens a file of the given number of 13 byte lines in large file
 // mode, with its line index complete.
-func largeIndexedPluginEditor(t *testing.T, lines int) (*pluginEditor, *editor.Document, pluginapi.BufferID) {
+func largeIndexedPluginEditor(t *testing.T, lines int) (*pluginEditor, *document.Document, pluginapi.BufferID) {
 	t.Helper()
 	var sb strings.Builder
 	for i := range lines {

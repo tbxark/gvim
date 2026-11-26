@@ -4,6 +4,12 @@
     "cmd.find_desc": "Find and open a git-tracked file",
     "cmd.reload": "Git Find File: Reload",
     "cmd.reload_desc": "Reload the git file index",
+    "picker.title": "Find file",
+    "picker.placeholder": "type to filter",
+    "status.no_git": "Git Find File: git is not installed",
+    "status.not_in_git": "Git Find File: not inside a git repository",
+    "status.cannot_list": "Git Find File: cannot list the files (%{error})",
+    "status.cannot_open": "Cannot open %{path}: %{error}",
     "status.loading": "Reloading git files...",
     "status.no_files": "No git-tracked files found",
     "status.showing_first": "Showing the first %{shown} git-tracked files"

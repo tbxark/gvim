@@ -64,6 +64,9 @@ func gitLogArgv(pinned bool, extra ...string) []string {
 	if pinned {
 		out = append(out, "--no-optional-locks")
 		out = append(out, diffConfig()...)
+		// gvim.git puts the flags that pin the patch format right after the subcommand.
+		out = append(out, extra[0], "--no-ext-diff", "--no-textconv", "--no-color")
+		extra = extra[1:]
 	}
 	return append(out, extra...)
 }

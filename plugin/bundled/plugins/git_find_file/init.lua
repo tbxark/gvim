@@ -12,34 +12,21 @@ local t = gvim.i18n.t
 local MAX_FILES = 50000
 local MAX_NAME = 4000 -- the picker takes names up to 4096 bytes
 
-local function location()
-  local b = gvim.buf.current()
-  local path = b and b:path() or ""
-  if path ~= "" and not b:is_virtual() then
-    return path
-  end
-  return gvim.workspace.root()
-end
-
 -- load_files returns the root of the repository and the tracked files, or nil after telling
 -- the user why not.
 local function load_files()
   if not git.available() then
-    gvim.notify("Git Find File: git is not installed")
+    gvim.notify(t("status.no_git"))
     return
   end
-  local here = location()
-  local repo = git.repo(here)
-  if not repo and here ~= gvim.workspace.root() then
-    repo = git.repo(gvim.workspace.root())
-  end
+  local repo = git.active_repo()
   if not repo then
-    gvim.notify("Git Find File: not inside a git repository")
+    gvim.notify(t("status.not_in_git"))
     return
   end
   local files, truncated = git.ls_files(repo.root)
   if not files then
-    gvim.notify("Git Find File: cannot list the files (" .. tostring(truncated) .. ")", "warn")
+    gvim.notify(t("status.cannot_list", { error = tostring(truncated) }), "warn")
     return
   end
   -- A big repository is a long loop: give the scheduler a turn now and then, so no slice
@@ -72,14 +59,14 @@ local function find_file()
   if not root then
     return
   end
-  local rel = gvim.ui.select(files, { title = "Find file", placeholder = "type to filter" })
+  local rel = gvim.ui.select(files, { title = t("picker.title"), placeholder = t("picker.placeholder") })
   if not rel then
     return
   end
   local path = gvim.path.join(root, rel)
   local b, err = gvim.buf.open(path)
   if not b then
-    gvim.notify("Cannot open " .. rel .. ": " .. tostring(err), "warn")
+    gvim.notify(t("status.cannot_open", { path = rel, error = tostring(err) }), "warn")
   end
 end
 

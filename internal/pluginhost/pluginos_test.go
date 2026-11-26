@@ -496,3 +496,40 @@ func TestPluginDirsHandlesNilRootAndRenameRefusesProtected(t *testing.T) {
 		t.Fatalf("Rename protected dir = %v, want CodeInvalid", err)
 	}
 }
+
+func TestPluginOSRelativePathPrefersRootOverCwd(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cwd := t.TempDir()
+	o := newPluginOS(func() hostos.Dirs {
+		return hostos.Dirs{Home: cwd, Temp: cwd, Cwd: cwd, Root: root}
+	})
+	t.Cleanup(o.Shutdown)
+
+	ctx := context.Background()
+	if err := o.WriteFile(ctx, "hello.txt", []byte("from-root"), hostos.WriteOptions{Atomic: true}); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "hello.txt")); err != nil {
+		t.Fatalf("expected file under Root, stat failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "hello.txt")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected file under Cwd: %v", err)
+	}
+	data, err := o.ReadFile(ctx, "hello.txt", 1024)
+	if err != nil || string(data) != "from-root" {
+		t.Fatalf("ReadFile = %q, %v; want from-root", string(data), err)
+	}
+
+	// Empty Root falls back to Cwd.
+	oFallback := newPluginOS(func() hostos.Dirs {
+		return hostos.Dirs{Home: cwd, Temp: cwd, Cwd: cwd, Root: ""}
+	})
+	t.Cleanup(oFallback.Shutdown)
+	if err := oFallback.WriteFile(ctx, "fallback.txt", []byte("from-cwd"), hostos.WriteOptions{Atomic: true}); err != nil {
+		t.Fatalf("WriteFile fallback: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "fallback.txt")); err != nil {
+		t.Fatalf("expected file under Cwd when Root is empty: %v", err)
+	}
+}

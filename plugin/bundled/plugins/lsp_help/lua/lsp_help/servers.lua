@@ -133,4 +133,11 @@ return {
       { id = "copy_npm", value = "npm install -g sql-language-server" },
     },
   },
+  {
+    id = "slang", name = "Slang", server = "slangd", languages = { "slang" },
+    message = [["{server}" provides diagnostics, completion, hover, and go-to-definition for Slang shader files (.slang, .slangh). Download a Slang binary release from https://github.com/shader-slang/slang/releases and put slangc and slangd on PATH.]],
+    copies = {
+      { id = "copy_release", value = "https://github.com/shader-slang/slang/releases" },
+    },
+  },
 }

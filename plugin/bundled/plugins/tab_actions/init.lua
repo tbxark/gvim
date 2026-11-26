@@ -6,7 +6,10 @@ local gvim = require "gvim"
 local t = gvim.i18n.t
 
 local function plural(n)
-  return n == 1 and "1 tab" or (n .. " tabs")
+  if n == 1 then
+    return t("status.tab_one")
+  end
+  return t("status.tab_many", { count = tostring(n) })
 end
 
 -- close_where closes the tabs for which want(position, active_position) is true, from the
@@ -40,11 +43,11 @@ local function close_where(want)
   if keep:valid() then
     keep:show()
   end
-  local msg = "Closed " .. plural(closed)
   if kept > 0 then
-    msg = msg .. "; kept " .. plural(kept) .. " with unsaved changes"
+    gvim.notify(t("status.closed_kept", { closed = plural(closed), kept = plural(kept) }))
+  else
+    gvim.notify(t("status.closed", { closed = plural(closed) }))
   end
-  gvim.notify(msg)
 end
 
 local function move_active(delta)

@@ -46,17 +46,6 @@ local case_sensitive = false
 local prompt = nil
 local root = nil
 
-local function location()
-  local buf = gvim.buf.current()
-  if buf and not buf:is_virtual() then
-    local path = buf:path()
-    if path and path ~= "" then
-      return path
-    end
-  end
-  return gvim.workspace.root()
-end
-
 -- resolve_repo finds the repository that holds the active file, else the workspace's, or
 -- tells the user why there is none.
 local function resolve_repo()
@@ -64,11 +53,7 @@ local function resolve_repo()
     gvim.notify(t("status.no_git"))
     return nil
   end
-  local here = location()
-  local repo = git.repo(here)
-  if not repo and here ~= gvim.workspace.root() then
-    repo = git.repo(gvim.workspace.root())
-  end
+  local repo = git.active_repo()
   if not repo then
     gvim.notify(t("status.not_in_git"))
     return nil

@@ -33,13 +33,9 @@ gvim.command.register{ name = "state", run = function()
   gvim.notify("clear:" .. tostring(gvim.buf.set_window_state(buf, "mode", nil)))
   gvim.notify("cleared:" .. tostring(gvim.buf.get_window_state(buf, "mode", "none")))
 end }
-gvim.command.register{ name = "splits", run = function()
-  gvim.notify("focus:" .. tostring(gvim.buf.focus_split(win2)))
-  gvim.notify("close:" .. tostring(gvim.buf.close_split(win2)))
-end }
 `
 
-// TestSeamsLuaSurface checks the split label, window state and split wrapper bindings.
+// TestSeamsLuaSurface checks the split label and window state bindings.
 func TestSeamsLuaSurface(t *testing.T) {
 	h := plugintest.New(t, plugintest.Files{"s.lua": seamsPlugin}, plugintest.Options{})
 	h.Start()
@@ -74,14 +70,6 @@ func TestSeamsLuaSurface(t *testing.T) {
 	}
 	if _, ok := h.Host.WindowStateValue("s", 1, "mode"); ok {
 		t.Fatal("the cleared key is still set")
-	}
-
-	if err := h.Run("s.splits", nil); err != nil {
-		t.Fatal(err)
-	}
-	notices = strings.Join(h.NoticeTexts(), "|")
-	if !strings.Contains(notices, "focus:true") || !strings.Contains(notices, "close:true") {
-		t.Fatalf("split wrapper notices = %q", notices)
 	}
 }
 

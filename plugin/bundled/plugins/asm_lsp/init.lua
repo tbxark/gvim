@@ -6,10 +6,9 @@
 -- assembly file opens, guessing the dialect from the language and a bounded sample of
 -- the buffer, and it provides the install-help popup for a missing asm-lsp server.
 --
--- Fresh's actions that gvim's plugin API has no seam for are not ported: disabling the
--- assembly language server from the popup (gvim exposes no plugin call for it; the native
--- LSP status menu does) and restarting the server for a language (the port runs the
--- native "lsp_restart" action instead, which restarts the active language's servers).
+-- The popup can also disable the assembly language server (the native
+-- "lsp_disable_language_target" command) and restart it (the native "lsp_restart" action,
+-- which restarts the active language's servers).
 local gvim = require "gvim"
 
 local t = gvim.i18n.t
@@ -184,9 +183,13 @@ local function offer_config(buf, force)
     return
   end
   if gvim.fs.exists(project_config_path()) or global_config_exists() then
+    if force then
+      gvim.status(t("status.config_present"))
+    end
     return
   end
-  if gvim.state.get(never_key(), false) then
+  -- "Don't ask again" stops the automatic offer; the explicit command still asks.
+  if not force and gvim.state.get(never_key(), false) then
     return
   end
   offered = true

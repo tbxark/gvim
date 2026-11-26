@@ -183,6 +183,39 @@ func TestAsmLspSkipsWhenConfigExists(t *testing.T) {
 	}
 }
 
+// The explicit "Create .asm-lsp.toml" command says why it did nothing, and ignores the
+// "don't ask again" choice, which only stops the automatic offer.
+func TestAsmLspCreateConfigCommandAnswers(t *testing.T) {
+	t.Parallel()
+	t.Run("a config exists", func(t *testing.T) {
+		t.Parallel()
+		r := asmRig(t, "/work/a.asm", "section .text\n", func(o *plugintest.FakeOS) {
+			o.SetFile("/work/.asm-lsp.toml", "[default_config]\nassembler = \"gas\"\n")
+		})
+		if err := r.h.Run("asm_lsp.create_config", nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastNoticeText(r.h); !strings.Contains(got, "already exists") || asmPopupCount(r.h) != 0 {
+			t.Errorf("status %q, popups %d, want the exists message and no popup", got, asmPopupCount(r.h))
+		}
+	})
+	t.Run("after never", func(t *testing.T) {
+		t.Parallel()
+		r := asmRig(t, "/work/a.asm", "section .text\n", nil)
+		ov := asmPopup(r.h)
+		if ov == nil {
+			t.Fatal("no config offer popup")
+		}
+		r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"never"}})
+		if err := r.h.Run("asm_lsp.create_config", nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := asmPopupCount(r.h); got != 2 {
+			t.Errorf("popups = %d, want the explicit command to offer again", got)
+		}
+	})
+}
+
 func TestAsmLspNeverAsksAgainForTheProject(t *testing.T) {
 	t.Parallel()
 	r := asmRig(t, "/work/a.asm", "section .text\n", nil)

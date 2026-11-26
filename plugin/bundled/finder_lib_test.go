@@ -39,24 +39,6 @@ gvim.command.register{ name = "rank", title = "rank", run = function()
   gvim.notify(table.concat(out, "|"))
 end }
 
-gvim.command.register{ name = "tree", title = "tree", run = function()
-  local rows = {
-    { path = "/w/a.go", t = "one" },
-    { path = "/w/a.go", t = "one" }, -- the same id: deduped
-    { path = "/w/b.go", t = "two" },
-  }
-  local tree = finder.tree(rows, {
-    key = function(r) return r.path .. ":" .. r.t end,
-    group = function(r) return { key = "f:" .. r.path, text = r.path .. ":" } end,
-    row = function(r) return { text = r.t } end,
-  })
-  local out = {}
-  for i, node in ipairs(tree.nodes) do
-    out[#out + 1] = node.depth .. ":" .. node.text .. ":" .. tostring(tree.node_map[i] ~= nil)
-  end
-  gvim.notify("count=" .. tree.count .. " leaf=" .. finder.first_leaf(tree) .. " " .. table.concat(out, ","))
-end }
-
 gvim.command.register{ name = "prompt", title = "prompt", run = function()
   local f = finder.new{
     title = "Probe",
@@ -103,18 +85,6 @@ func TestFinderRankingAndCaps(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("ranking lacks %q: %q", want, got)
 		}
-	}
-}
-
-func TestFinderTreeGroupingDedupe(t *testing.T) {
-	t.Parallel()
-	h := startFinderProbe(t)
-	if err := h.Run("probe.tree", nil); err != nil {
-		t.Fatal(err)
-	}
-	want := "count=2 leaf=2 0:/w/a.go::false,1:one:true,0:/w/b.go::false,1:two:true"
-	if got := finderLastNotice(h); got != want {
-		t.Errorf("tree = %q, want %q", got, want)
 	}
 }
 

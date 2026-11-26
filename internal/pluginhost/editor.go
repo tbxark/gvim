@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -59,19 +60,19 @@ func editorErr(err error) error {
 		return err
 	case errors.Is(err, editor.ErrNotOpen):
 		return pluginapi.Errf(pluginapi.CodeClosed, "%v", err)
-	case errors.Is(err, editor.ErrReadOnly):
+	case errors.Is(err, document.ErrReadOnly):
 		return pluginapi.Errf(pluginapi.CodeReadOnly, "%v", err)
-	case errors.Is(err, editor.ErrStale):
+	case errors.Is(err, document.ErrStale):
 		return pluginapi.Errf(pluginapi.CodeStale, "%v", err)
-	case errors.Is(err, editor.ErrOverlappingEdits):
+	case errors.Is(err, document.ErrOverlappingEdits):
 		return pluginapi.Errf(pluginapi.CodeInvalid, "overlapping edits")
-	case errors.Is(err, editor.ErrRestoring), errors.Is(err, editor.ErrUnsaved), errors.Is(err, editor.ErrChangedOnDisk):
+	case errors.Is(err, document.ErrRestoring), errors.Is(err, editor.ErrUnsaved), errors.Is(err, document.ErrChangedOnDisk):
 		return pluginapi.Errf(pluginapi.CodeConflict, "%v", err)
-	case errors.Is(err, editor.ErrIndexing), errors.Is(err, buffer.ErrIndexPending):
+	case errors.Is(err, document.ErrIndexing), errors.Is(err, buffer.ErrIndexPending):
 		return pluginapi.Errf(pluginapi.CodeBusy, "%v", err)
 	case errors.Is(err, search.ErrTooCostly):
 		return pluginapi.Errf(pluginapi.CodeLimit, "%v", err)
-	case errors.Is(err, editor.ErrLargeFile), errors.Is(err, buffer.ErrLargeBuffer), errors.Is(err, search.ErrLargeBuffer),
+	case errors.Is(err, document.ErrLargeFile), errors.Is(err, buffer.ErrLargeBuffer), errors.Is(err, search.ErrLargeBuffer),
 		errors.Is(err, search.ErrRangeTooLarge), errors.Is(err, buffer.ErrOverCap), errors.Is(err, buffer.ErrLineTooLong),
 		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrLineOverBudget):
 		return pluginapi.Errf(pluginapi.CodeTooLarge, "%v", err)
@@ -118,15 +119,15 @@ func removedBytes(b *buffer.Buffer, from, to buffer.Pos, limit int64) int64 {
 }
 
 // doc returns the open document of a buffer id.
-func (p *pluginEditor) doc(id pluginapi.BufferID) (*editor.Document, error) {
-	d, _, ok := p.ed.DocByID(editor.DocID(id))
+func (p *pluginEditor) doc(id pluginapi.BufferID) (*document.Document, error) {
+	d, _, ok := p.ed.DocByID(document.DocID(id))
 	if !ok {
 		return nil, closedErr(id)
 	}
 	return d, nil
 }
 
-func versionOf(d *editor.Document) pluginapi.Version {
+func versionOf(d *document.Document) pluginapi.Version {
 	v := d.Version()
 	return pluginapi.Version{Gen: v.Gen, Ver: v.Ver}
 }
@@ -154,7 +155,7 @@ func (p *pluginEditor) Buffer(id pluginapi.BufferID) (pluginapi.BufferInfo, bool
 	return p.info(d, d == p.ed.Active()), true
 }
 
-func (p *pluginEditor) info(d *editor.Document, active bool) pluginapi.BufferInfo {
+func (p *pluginEditor) info(d *document.Document, active bool) pluginapi.BufferInfo {
 	lines := d.Buffer.Lines()
 	if d.Large() && !d.Index().Complete {
 		lines = -1
@@ -170,7 +171,7 @@ func (p *pluginEditor) info(d *editor.Document, active bool) pluginapi.BufferInf
 
 // language is the language set with Set Language, else the one the file name gives
 // (lower case, as lexers.Get takes it), else "".
-func (p *pluginEditor) language(d *editor.Document) string {
+func (p *pluginEditor) language(d *document.Document) string {
 	if l := d.Language(); l != "" {
 		return l
 	}
@@ -353,7 +354,7 @@ func (p *pluginEditor) Edit(id pluginapi.BufferID, edits []pluginapi.Edit, o plu
 		return pluginapi.Errf(pluginapi.CodeLimit, "too many edits (max %d)", pluginMaxEdits)
 	}
 	b := d.Buffer
-	list := make([]editor.LSPEdit, len(edits))
+	list := make([]document.LSPEdit, len(edits))
 	var total int64
 	for i, e := range edits {
 		from, to := bufPos(b, e.Range.From), bufPos(b, e.Range.To)
@@ -365,27 +366,27 @@ func (p *pluginEditor) Edit(id pluginapi.BufferID, edits []pluginapi.Edit, o plu
 		if total > pluginMaxEditBytes {
 			return pluginapi.Errf(pluginapi.CodeLimit, "edit is over %d bytes (inserted plus removed)", pluginMaxEditBytes)
 		}
-		list[i] = editor.LSPEdit{From: from, To: to, Text: text}
+		list[i] = document.LSPEdit{From: from, To: to, Text: text}
 	}
-	opts := editor.EditOptions{Cursor: cursorMode(o.Cursor)}
+	opts := document.EditOptions{Cursor: cursorMode(o.Cursor)}
 	if o.Expect != nil {
-		opts.Expect = &editor.Version{Gen: o.Expect.Gen, Ver: o.Expect.Ver}
+		opts.Expect = &document.Version{Gen: o.Expect.Gen, Ver: o.Expect.Ver}
 	}
-	err = p.ed.ApplyEdits(editor.DocID(id), list, opts)
-	if errors.Is(err, editor.ErrStale) {
+	err = p.ed.ApplyEdits(document.DocID(id), list, opts)
+	if errors.Is(err, document.ErrStale) {
 		return pluginapi.Errf(pluginapi.CodeStale, "buffer %d changed (version %s, expected %s)", id, versionOf(d), o.Expect)
 	}
 	return editorErr(err)
 }
 
-func cursorMode(m pluginapi.CursorMode) editor.CursorMode {
+func cursorMode(m pluginapi.CursorMode) document.CursorMode {
 	switch m {
 	case pluginapi.CursorKeep:
-		return editor.CursorKeep
+		return document.CursorKeep
 	case pluginapi.CursorEnd:
-		return editor.CursorEnd
+		return document.CursorEnd
 	}
-	return editor.CursorMap
+	return document.CursorMap
 }
 
 // UndoGroup runs fn so that every edit it makes is one undo step.
@@ -393,7 +394,7 @@ func (p *pluginEditor) UndoGroup(id pluginapi.BufferID, fn func() error) error {
 	if _, err := p.doc(id); err != nil {
 		return err
 	}
-	err := p.ed.Group(editor.DocID(id), fn)
+	err := p.ed.Group(document.DocID(id), fn)
 	return err
 }
 
@@ -407,11 +408,11 @@ func (p *pluginEditor) Redo(id pluginapi.BufferID) error {
 	return p.history(id, p.ed.RedoID, "redo")
 }
 
-func (p *pluginEditor) history(id pluginapi.BufferID, step func(editor.DocID) (bool, error), what string) error {
+func (p *pluginEditor) history(id pluginapi.BufferID, step func(document.DocID) (bool, error), what string) error {
 	if _, err := p.doc(id); err != nil {
 		return err
 	}
-	ok, err := step(editor.DocID(id))
+	ok, err := step(document.DocID(id))
 	if err != nil {
 		return editorErr(err)
 	}
@@ -430,7 +431,7 @@ func (p *pluginEditor) SetLanguage(id pluginapi.BufferID, lang string) error {
 	if lang != "" && !knownLanguage(lang) {
 		return unknownLanguage(lang)
 	}
-	err := p.ed.SetLanguageID(editor.DocID(id), lang)
+	err := p.ed.SetLanguageID(document.DocID(id), lang)
 	return editorErr(err)
 }
 
@@ -465,11 +466,11 @@ func (p *pluginEditor) SetCursor(id pluginapi.BufferID, pos pluginapi.Pos, exten
 	if err != nil {
 		return err
 	}
-	if err := p.ed.SetCursorID(editor.DocID(id), bufPos(d.Buffer, pos), extend); err != nil {
+	if err := p.ed.SetCursorID(document.DocID(id), bufPos(d.Buffer, pos), extend); err != nil {
 		return editorErr(err)
 	}
 	if reveal || center {
-		return editorErr(p.ed.RevealID(editor.DocID(id), center))
+		return editorErr(p.ed.RevealID(document.DocID(id), center))
 	}
 	return nil
 }
@@ -480,7 +481,7 @@ func (p *pluginEditor) SetSelection(id pluginapi.BufferID, r pluginapi.Range) er
 	if err != nil {
 		return err
 	}
-	return editorErr(p.ed.SelectID(editor.DocID(id), bufPos(d.Buffer, r.From), bufPos(d.Buffer, r.To)))
+	return editorErr(p.ed.SelectID(document.DocID(id), bufPos(d.Buffer, r.From), bufPos(d.Buffer, r.To)))
 }
 
 // ---------- search ----------
@@ -535,7 +536,7 @@ func (p *pluginEditor) FindLines(id pluginapi.BufferID, q pluginapi.FindLinesQue
 
 // Activate makes the document the active tab.
 func (p *pluginEditor) Activate(id pluginapi.BufferID) error {
-	return editorErr(p.ed.ActivateID(editor.DocID(id)))
+	return editorErr(p.ed.ActivateID(document.DocID(id)))
 }
 
 // Close closes the tab. Unsaved changes without force are a conflict, and no dialog opens.
@@ -549,12 +550,12 @@ func (p *pluginEditor) Close(id pluginapi.BufferID, force bool) error {
 	if !force && d.Modified() {
 		return pluginapi.Errf(pluginapi.CodeConflict, "unsaved changes")
 	}
-	return editorErr(p.ed.CloseID(editor.DocID(id), true))
+	return editorErr(p.ed.CloseID(document.DocID(id), true))
 }
 
 // MoveTab moves the tab by delta places, stopping at the ends.
 func (p *pluginEditor) MoveTab(id pluginapi.BufferID, delta int) error {
-	return editorErr(p.ed.MoveTab(editor.DocID(id), delta))
+	return editorErr(p.ed.MoveTab(document.DocID(id), delta))
 }
 
 // ---------- change tracking ----------
@@ -569,7 +570,7 @@ func (p *pluginEditor) TakeChanges(id pluginapi.BufferID, consumer string) plugi
 	if err != nil {
 		return pluginapi.Changes{}
 	}
-	cs, overflow := p.ed.TakeChanges(editor.DocID(id), consumer)
+	cs, overflow := p.ed.TakeChanges(document.DocID(id), consumer)
 	out := pluginapi.Changes{Version: versionOf(d), Overflow: overflow}
 	for _, c := range cs {
 		out.Edits = append(out.Edits, pluginapi.ChangeRec{

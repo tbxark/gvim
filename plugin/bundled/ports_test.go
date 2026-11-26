@@ -59,8 +59,8 @@ func TestBundledPluginsHaveManifests(t *testing.T) {
 			}
 		}
 	}
-	if seen != 26 {
-		t.Errorf("bundled plugins = %d, want 26", seen)
+	if seen != 21 {
+		t.Errorf("bundled plugins = %d, want 21", seen)
 	}
 }
 

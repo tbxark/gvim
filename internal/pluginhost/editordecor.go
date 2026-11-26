@@ -3,7 +3,7 @@ package pluginhost
 import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/decorations"
-	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/document"
 )
 
 // Plugin decorations. The decoration store belongs to the
@@ -21,7 +21,7 @@ const decorListenerKey = "decor"
 // with no decoration.
 func (p *pluginEditor) trackDecorations() {
 	p.decor = decorations.New()
-	p.ed.AddChangeListener(decorListenerKey, func(doc editor.DocID, c buffer.Change) {
+	p.ed.AddChangeListener(decorListenerKey, func(doc document.DocID, c buffer.Change) {
 		applyChange(p.decor, uint64(doc), c)
 	})
 	p.ed.TrackChanges(decorListenerKey, true)

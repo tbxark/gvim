@@ -123,7 +123,6 @@ local similarity_threshold = 0.95 -- refined pairs at or above this stay "modifi
 local REFRESH_AFTER_MS = 5000 -- an activated buffer asks git again when its reference is older
 
 local split_lines
-local line_starts_for
 local mode_key
 local hunks_key_of
 
@@ -152,18 +151,6 @@ split_lines = function(text)
     lines[#lines] = nil
   end
   return lines
-end
-
--- line_starts_for returns the byte offset of every line start, plus one past
--- the last line start (a trailing newline counts one byte).
-line_starts_for = function(lines)
-  local starts = { 0 }
-  local pos = 0
-  for i = 1, #lines do
-    pos = pos + #lines[i] + 1
-    starts[i + 1] = pos
-  end
-  return starts
 end
 
 local function mode_to_text(mode)
@@ -1401,8 +1388,8 @@ end)
 
 -- Exports and unload --------------------------------------------------------
 
--- hunks returns the last diff of a buffer for other plugins (diff_nav and
--- friends): {kind, newStart, newCount}, no old-side text.
+-- hunks returns the last diff of a buffer for other plugins (git_gutter's merged
+-- navigation): {kind, newStart, newCount}, no old-side text.
 gvim.plugins.export {
   hunks = function(buf_id)
     local st = states[buf_id]
