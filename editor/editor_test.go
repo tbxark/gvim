@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,7 +12,7 @@ import (
 )
 
 // run applies a sequence of actions with no arguments and fails on any error.
-func run(t *testing.T, e *Editor, actions ...Action) {
+func run(t *testing.T, e *Editor, actions ...document.Action) {
 	t.Helper()
 	for _, a := range actions {
 		if r := e.Do(a, nil); r.Err != nil {
@@ -155,10 +156,10 @@ func TestCopyWithoutSelectionFails(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
 	r := e.Do("copy", nil)
-	if !errors.Is(r.Err, ErrNothingSelected) {
+	if !errors.Is(r.Err, document.ErrNothingSelected) {
 		t.Fatalf("copy err = %v, want ErrNothingSelected", r.Err)
 	}
-	if e.Status() != ErrNothingSelected.Error() {
+	if e.Status() != document.ErrNothingSelected.Error() {
 		t.Fatalf("status = %q", e.Status())
 	}
 }
@@ -351,7 +352,7 @@ func TestOpenErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := New(Options{})
-	if err := e.OpenFile(bad); !errors.Is(err, ErrNotDecodable) {
+	if err := e.OpenFile(bad); !errors.Is(err, document.ErrNotDecodable) {
 		t.Fatalf("binary open err = %v, want ErrNotDecodable", err)
 	}
 	if len(e.Tabs()) != 1 {
@@ -362,7 +363,7 @@ func TestOpenErrors(t *testing.T) {
 func TestSaveWithoutPathFails(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	if r := e.Do("save", nil); !errors.Is(r.Err, ErrNoPath) {
+	if r := e.Do("save", nil); !errors.Is(r.Err, document.ErrNoPath) {
 		t.Fatalf("save unnamed err = %v", r.Err)
 	}
 }
@@ -406,7 +407,7 @@ func TestActionsListIsSortedAndComplete(t *testing.T) {
 			t.Fatalf("Actions not sorted at %d: %q >= %q", i, names[i-1], names[i])
 		}
 	}
-	for _, want := range []Action{"move_left", "select_left", "move_word_right", "smart_home", "save", "undo"} {
+	for _, want := range []document.Action{"move_left", "select_left", "move_word_right", "smart_home", "save", "undo"} {
 		found := slices.Contains(names, want)
 		if !found {
 			t.Fatalf("Actions() missing %q", want)

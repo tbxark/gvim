@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 
 func TestViActionsAreListed(t *testing.T) {
 	t.Parallel()
-	for _, a := range []Action{"toggle_case", "move_left_in_line", "move_right_in_line", "vi_move_up", "vi_move_down"} {
+	for _, a := range []document.Action{"toggle_case", "move_left_in_line", "move_right_in_line", "vi_move_up", "vi_move_down"} {
 		if !slices.Contains(Actions(), a) {
 			t.Errorf("Actions() does not list %q", a)
 		}
@@ -23,7 +24,7 @@ func TestViMoves(t *testing.T) {
 		Name   string
 		Text   string
 		At     buffer.Pos
-		action Action
+		action document.Action
 		Want   buffer.Pos
 	}{
 		{"left in the line", "abc\ndef", buffer.Pos{Line: 0, Col: 2}, "move_left_in_line", buffer.Pos{Line: 0, Col: 1}},
@@ -63,7 +64,7 @@ func TestViVerticalKeepsTheWantedColumn(t *testing.T) {
 	e := docWith(Options{}, "abcdef\nxy\nghijkl")
 	e.SetCursor(buffer.Pos{Line: 0, Col: 4}, false)
 	steps := []struct {
-		action Action
+		action document.Action
 		Want   buffer.Pos
 	}{
 		{"vi_move_down", buffer.Pos{Line: 1, Col: 1}},
@@ -125,12 +126,12 @@ func TestToggleCaseAtEveryCaret(t *testing.T) {
 	tests := []struct {
 		Name     string
 		Text     string
-		carets   []caret
+		carets   []document.CaretState
 		wantText string
 		Want     carets
 	}{
-		{"two lines", "ab\ncd", []caret{at(0, 0), at(1, 1)}, "Ab\ncD", wantCarets(plain(0, 1), plain(1, 2))},
-		{"a digit caret moves with the edits before it", "a1 b", []caret{at(0, 0), at(0, 1)}, "A1 b", wantCarets(plain(0, 1), plain(0, 2))},
+		{"two lines", "ab\ncd", []document.CaretState{at(0, 0), at(1, 1)}, "Ab\ncD", wantCarets(plain(0, 1), plain(1, 2))},
+		{"a digit caret moves with the edits before it", "a1 b", []document.CaretState{at(0, 0), at(0, 1)}, "A1 b", wantCarets(plain(0, 1), plain(0, 2))},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -159,13 +160,13 @@ func TestToggleCaseRefusedOnReadOnly(t *testing.T) {
 	e := docWith(Options{}, "abc")
 	run(t, e, "toggle_read_only")
 	r := e.Do("toggle_case", nil)
-	if !errors.Is(r.Err, ErrReadOnly) {
+	if !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 	}
 	if got := text(e); got != "abc" {
 		t.Fatalf("text = %q after the refused toggle_case", got)
 	}
-	if !textChanging["toggle_case"] {
+	if !document.TextChanging["toggle_case"] {
 		t.Fatal("toggle_case is not in textChanging")
 	}
 }

@@ -137,7 +137,7 @@ func TestOpenImageFileGivesImageDocument(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := readDocument(path, loadSpec{Eol: eolLF})
+	d, err := ReadDocument(path, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}
@@ -172,8 +172,8 @@ func TestOpenLargeImageStaysAnImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A threshold below the file size forces the large path.
-	spec := loadSpec{Eol: eolLF, LargeConf: largeSpec{Threshold: 16, FullMax: maxFullLoad}}
-	d, err := readDocument(path, spec)
+	spec := LoadSpec{Eol: EolLF, LargeConf: LargeSpec{Threshold: 16, FullMax: MaxFullLoad}}
+	d, err := ReadDocument(path, spec)
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestOpenWebpFileGivesImageDocument(t *testing.T) {
 	if err := os.WriteFile(path, webpBytes(t), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := readDocument(path, loadSpec{Eol: eolLF})
+	d, err := ReadDocument(path, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestOpenBinaryFileIsNotAnImage(t *testing.T) {
 	if err := os.WriteFile(path, bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 32), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := readDocument(path, loadSpec{Eol: eolLF})
+	d, err := ReadDocument(path, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}
@@ -269,7 +269,7 @@ func jpegWithMetadata(t *testing.T, w, h, n int) []byte {
 func TestOpenJPEGWithLargeMetadataIsAnImage(t *testing.T) {
 	t.Parallel()
 	data := jpegWithMetadata(t, 40, 30, 100<<10)
-	if _, ok := imageInfoOf(data[:largeSampleSize]); ok {
+	if _, ok := imageInfoOf(data[:LargeSampleSize]); ok {
 		t.Fatal("fixture: the sample alone decodes, so the metadata is too short to test")
 	}
 	path := filepath.Join(t.TempDir(), "photo.jpg")
@@ -287,28 +287,28 @@ func TestOpenJPEGWithLargeMetadataIsAnImage(t *testing.T) {
 		}
 	}
 	t.Run("local", func(t *testing.T) {
-		d, err := readDocument(path, loadSpec{Eol: eolLF})
+		d, err := ReadDocument(path, LoadSpec{Eol: EolLF})
 		if err != nil {
 			t.Fatal(err)
 		}
 		check(t, d)
 	})
 	t.Run("local large", func(t *testing.T) {
-		d, err := readDocument(path, loadSpec{Eol: eolLF, LargeConf: largeSpec{Threshold: 16, FullMax: maxFullLoad}})
+		d, err := ReadDocument(path, LoadSpec{Eol: EolLF, LargeConf: LargeSpec{Threshold: 16, FullMax: MaxFullLoad}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		check(t, d)
 	})
-	for name, conf := range map[string]largeSpec{"remote": {}, "remote large": {Threshold: 16, FullMax: maxFullLoad}} {
+	for name, conf := range map[string]LargeSpec{"remote": {}, "remote large": {Threshold: 16, FullMax: MaxFullLoad}} {
 		t.Run(name, func(t *testing.T) {
 			access := &countingRangeAccess{data: data}
-			d, err := readDocument("/remote/photo.jpg", loadSpec{Eol: eolLF, Access: access, LargeConf: conf})
+			d, err := ReadDocument("/remote/photo.jpg", LoadSpec{Eol: EolLF, Access: access, LargeConf: conf})
 			if err != nil {
 				t.Fatal(err)
 			}
 			check(t, d)
-			if access.bytes > jpegMaxHead+largeSampleSize {
+			if access.bytes > jpegMaxHead+LargeSampleSize {
 				t.Fatalf("read %d bytes, want at most the %d-byte JPEG head bound", access.bytes, jpegMaxHead)
 			}
 		})
@@ -335,7 +335,7 @@ func TestJPEGFrameBeyondTheBoundIsNotAnImage(t *testing.T) {
 		data = append(data, seg...)
 	}
 	more := func(n int64) ([]byte, error) { return data[:n], nil }
-	if _, ok := imageInfoOfHead(data[:largeSampleSize], int64(len(data)), more); ok {
+	if _, ok := imageInfoOfHead(data[:LargeSampleSize], int64(len(data)), more); ok {
 		t.Fatal("a frame header beyond the bound was accepted")
 	}
 }
@@ -344,8 +344,8 @@ func TestJPEGFrameBeyondTheBoundIsNotAnImage(t *testing.T) {
 // document is still not text, so it takes the same gates as its owner.
 func TestMirrorKeepsBinaryAndImage(t *testing.T) {
 	t.Parallel()
-	img := newImageDocument("/w/a.png", diskState{}, ImageInfo{Format: "png", Width: 3, Height: 2, Size: 9, Color: "RGBA"})
-	bin := binaryDocument("/w/a.bin", diskState{})
+	img := newImageDocument("/w/a.png", DiskState{}, ImageInfo{Format: "png", Width: 3, Height: 2, Size: 9, Color: "RGBA"})
+	bin := binaryDocument("/w/a.bin", DiskState{})
 	for name, owner := range map[string]*Document{"image": img, "binary": bin} {
 		m, err := NewMirrorDocument(owner)
 		if err != nil {
@@ -357,7 +357,7 @@ func TestMirrorKeepsBinaryAndImage(t *testing.T) {
 		if got, ok := m.Image(); ok != owner.IsImage() || (ok && got != *owner.ImagePtr()) {
 			t.Errorf("%s mirror image = %+v, %v", name, got, ok)
 		}
-		stale := newDocument("/w/a", "text")
+		stale := NewDocument("/w/a", "text")
 		stale.sharedMirror = true
 		if err := stale.SyncMirrorFrom(owner); err != nil {
 			t.Fatal(err)

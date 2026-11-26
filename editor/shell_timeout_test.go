@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ func TestShellCommandTimesOut(t *testing.T) {
 	shellTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { shellTimeout = old })
 
-	for _, a := range []Action{"shell_command", "shell_command_replace"} {
+	for _, a := range []document.Action{"shell_command", "shell_command_replace"} {
 		e := withDoc("keep")
 		start := time.Now()
 		r := e.Do(a, shellArgs("sleep 5"))

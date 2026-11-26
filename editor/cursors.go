@@ -2,49 +2,24 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 )
 
-// undoAction reverts the newest undo group. When that group is the last
-// multi-caret edit, the primary caret goes back to where it was before the edit.
-// Otherwise the caret goes to the first edit of the group, as it always has.
-func undoAction(_ *Editor, d *Document, _ map[string]any) error {
-	m := d.LastMulti
-	if m == nil || m.Undone {
-		d.LastMulti = nil
-		if pos, ok := d.Buffer.Undo(); ok {
-			d.PlacePrimary(pos)
-		}
-		return nil
-	}
-	if _, ok := d.Buffer.Undo(); ok {
-		m.Undone = true
-		d.PlacePrimary(m.Before)
-	}
+// undoAction reverts the newest undo group.
+func undoAction(_ *Editor, d *document.Document, _ map[string]any) error {
+	d.Undo()
 	return nil
 }
 
-// redoAction reapplies the newest undone group. When that group is the last
-// multi-caret edit, the primary caret goes to where it was after the edit.
-// Otherwise the caret goes to the end of the group, as it always has.
-func redoAction(_ *Editor, d *Document, _ map[string]any) error {
-	m := d.LastMulti
-	if m == nil || !m.Undone {
-		d.LastMulti = nil
-		if pos, ok := d.Buffer.Redo(); ok {
-			d.PlacePrimary(pos)
-		}
-		return nil
-	}
-	if _, ok := d.Buffer.Redo(); ok {
-		m.Undone = false
-		d.PlacePrimary(m.After)
-	}
+// redoAction reapplies the newest undone group.
+func redoAction(_ *Editor, d *document.Document, _ map[string]any) error {
+	d.Redo()
 	return nil
 }
 
 // typeAtCarets types the text at every caret, replacing each selection. It is
 // the multi-caret form of insertText, with the smart rules of typeText.
-func typeAtCarets(e *Editor, d *Document, args map[string]any) error {
+func typeAtCarets(e *Editor, d *document.Document, args map[string]any) error {
 	text, ok := args["text"].(string)
 	if !ok {
 		return errors.New("insert_char: missing string argument \"text\"")
@@ -55,29 +30,29 @@ func typeAtCarets(e *Editor, d *Document, args map[string]any) error {
 
 // newlineAtCarets breaks the line at every caret, replacing each selection, with
 // the indent rules of newline.
-func newlineAtCarets(e *Editor, d *Document, _ map[string]any) error {
+func newlineAtCarets(e *Editor, d *document.Document, _ map[string]any) error {
 	e.newline(d)
 	return nil
 }
 
 // deleteBackwardAtCarets removes each selection, or the character before each
 // empty caret, with the smart rules of backspace.
-func deleteBackwardAtCarets(e *Editor, d *Document, _ map[string]any) error {
+func deleteBackwardAtCarets(e *Editor, d *document.Document, _ map[string]any) error {
 	e.backspace(d)
 	return nil
 }
 
 // deleteForwardAtCarets removes each selection, or the character after each
 // empty caret, which may be a line break.
-func deleteForwardAtCarets(_ *Editor, d *Document, _ map[string]any) error {
-	d.EditAtCarets(func(c caret) edit {
+func deleteForwardAtCarets(_ *Editor, d *document.Document, _ map[string]any) error {
+	d.EditAtCarets(func(c document.CaretState) document.Edit {
 		if lo, hi := c.Bounds(); lo != hi {
-			return edit{From: lo, To: hi}
+			return document.Edit{From: lo, To: hi}
 		}
-		if next, ok := nextPos(d.Buffer, c.Head); ok {
-			return edit{From: c.Head, To: next}
+		if next, ok := document.NextPos(d.Buffer, c.Head); ok {
+			return document.Edit{From: c.Head, To: next}
 		}
-		return edit{From: c.Head, To: c.Head}
+		return document.Edit{From: c.Head, To: c.Head}
 	})
 	return nil
 }
@@ -86,20 +61,20 @@ func deleteForwardAtCarets(_ *Editor, d *Document, _ map[string]any) error {
 // line that a selection covers is indented, as Tab does for the primary caret.
 // Otherwise each empty caret gets one indent unit: tab_size spaces, or a tab
 // character when UseTabs is set.
-func tabAtCarets(e *Editor, d *Document, _ map[string]any) error {
+func tabAtCarets(e *Editor, d *document.Document, _ map[string]any) error {
 	if d.HasAnySelection() {
 		d.IndentSelectedLines(e.indentUnit(d))
 		return nil
 	}
 	unit := e.indentUnit(d)
-	d.EditAtCarets(func(c caret) edit { return replaceEdit(c, unit) })
+	d.EditAtCarets(func(c document.CaretState) document.Edit { return document.ReplaceEdit(c, unit) })
 	return nil
 }
 
 // withCarets returns a handler that runs multi while the document has extra
 // carets, and single otherwise. A single caret therefore behaves exactly as it
 // did before the extra carets existed.
-func withCarets(single handler, multi func(e *Editor, d *Document, args map[string]any) error) handler {
+func withCarets(single handler, multi func(e *Editor, d *document.Document, args map[string]any) error) handler {
 	return func(e *Editor, args map[string]any) error {
 		if d := e.Active(); d != nil && len(d.Extra) > 0 {
 			return multi(e, d, args)
@@ -123,7 +98,7 @@ func collapseCarets(next handler) handler {
 // buildHandlers, so it replaces the entries it names. The single-caret handlers
 // it replaces for typing and deletion are kept inside withCarets, and run when
 // there is one caret.
-func registerCursorHandlers(h map[Action]handler) {
+func registerCursorHandlers(h map[document.Action]handler) {
 	h["insert_char"] = withCarets(h["insert_char"], typeAtCarets)
 	h["insert_newline"] = withCarets(h["insert_newline"], newlineAtCarets)
 	h["insert_tab"] = withCarets(h["insert_tab"], tabAtCarets)
@@ -132,16 +107,16 @@ func registerCursorHandlers(h map[Action]handler) {
 	registerMotionCaretHandlers(h)
 	h["undo"] = collapseCarets(h["undo"])
 	h["redo"] = collapseCarets(h["redo"])
-	h["add_cursor_above"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["add_cursor_above"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		return d.AddCaretVertical(-1, e.tabSizeOf(d))
 	})
-	h["add_cursor_below"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["add_cursor_below"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		return d.AddCaretVertical(1, e.tabSizeOf(d))
 	})
-	h["add_cursor_next_match"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
+	h["add_cursor_next_match"] = docAction(func(_ *Editor, d *document.Document, _ map[string]any) error {
 		return d.AddNextMatch()
 	})
-	h["add_cursors_to_line_ends"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
+	h["add_cursors_to_line_ends"] = docAction(func(_ *Editor, d *document.Document, _ map[string]any) error {
 		d.CursorsToLineEnds()
 		return nil
 	})

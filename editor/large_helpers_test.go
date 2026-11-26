@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +46,7 @@ func writeLargeFile(t *testing.T, name, content string) string {
 
 // openLarge opens content as a file in an editor built from opts and returns the
 // editor and the opened document.
-func openLarge(t *testing.T, opts Options, content string) (*Editor, *Document) {
+func openLarge(t *testing.T, opts Options, content string) (*Editor, *document.Document) {
 	t.Helper()
 	e := New(opts)
 	if err := e.OpenFile(writeLargeFile(t, "big.txt", content)); err != nil {
@@ -56,13 +57,13 @@ func openLarge(t *testing.T, opts Options, content string) (*Editor, *Document) 
 
 // withSource returns opts with the bytes of every large file read from src, not the disk.
 func withSource(opts Options, src buffer.Source) Options {
-	opts.openSrc = &sourceOpener{Open: func(string) (buffer.Source, error) { return src, nil }}
+	opts.openSrc = &document.SourceOpener{Open: func(string) (buffer.Source, error) { return src, nil }}
 	return opts
 }
 
 // openMem opens a file of content whose bytes are read from a MemSource, which
 // the test can fail, truncate or count.
-func openMem(t *testing.T, opts Options, content string) (*Editor, *Document, *buffertest.MemSource) {
+func openMem(t *testing.T, opts Options, content string) (*Editor, *document.Document, *buffertest.MemSource) {
 	t.Helper()
 	src := buffertest.NewMemSource([]byte(content))
 	e := New(withSource(opts, src))

@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"regexp"
 	"strconv"
 	"strings"
@@ -47,7 +48,7 @@ type markdownList struct {
 // markdown_source plugin: a Markdown file by the plugin's suffixes, or a buffer
 // whose language id is markdown or multimarkdown. The plugin runs in source view
 // only, and gvim has no other view.
-func (e *Editor) markdownSource(d *Document) bool {
+func (e *Editor) markdownSource(d *document.Document) bool {
 	if d == nil {
 		return false
 	}
@@ -144,7 +145,7 @@ func cycleMarkdownBullet(bullet rune, forward bool) rune {
 
 // markdownLineAt splits the caret's line at col into its runes, the text before the
 // caret and the text after it.
-func markdownLineAt(d *Document, col int) (line []rune, before, after string) {
+func markdownLineAt(d *document.Document, col int) (line []rune, before, after string) {
 	line = []rune(d.Buffer.Line(d.Cursor.Line))
 	col = min(max(col, 0), len(line))
 	return line, string(line[:col]), string(line[col:])
@@ -161,11 +162,11 @@ func leadingWhitespace(s string) string {
 
 // replaceMarkdownLine replaces the caret's line's text with text and leaves the
 // caret at its end, as the plugin's deleteRange, insertText and setBufferCursor do.
-func replaceMarkdownLine(d *Document, text string) {
-	d.EditAtCarets(func(c caret) edit {
+func replaceMarkdownLine(d *document.Document, text string) {
+	d.EditAtCarets(func(c document.CaretState) document.Edit {
 		from := buffer.Pos{Line: c.Head.Line}
 		to := buffer.Pos{Line: c.Head.Line, Col: len([]rune(d.Buffer.Line(c.Head.Line)))}
-		return edit{From: from, To: to, Text: text}
+		return document.Edit{From: from, To: to, Text: text}
 	})
 }
 
@@ -173,7 +174,7 @@ func replaceMarkdownLine(d *Document, text string) {
 // the line break. With a selection or extra carets it steps aside: the plugin falls
 // back to the built-in insert_newline for multiple cursors, and its marker parse
 // only knows the primary caret's line.
-func (e *Editor) markdownEnter(d *Document) bool {
+func (e *Editor) markdownEnter(d *document.Document) bool {
 	if len(d.Extra) > 0 || d.HasSelection() || !e.markdownSource(d) {
 		return false
 	}
@@ -181,9 +182,9 @@ func (e *Editor) markdownEnter(d *Document) bool {
 	if m, ok := parseMarkdownList(before); ok {
 		if m.blank(after) {
 			// Enter on an empty list item removes the marker, leaving a blank line.
-			d.EditAtCarets(func(c caret) edit {
+			d.EditAtCarets(func(c document.CaretState) document.Edit {
 				from := buffer.Pos{Line: c.Head.Line}
-				return edit{From: from, To: buffer.Pos{Line: c.Head.Line, Col: len(line)}}
+				return document.Edit{From: from, To: buffer.Pos{Line: c.Head.Line, Col: len(line)}}
 			})
 			return true
 		}
@@ -198,7 +199,7 @@ func (e *Editor) markdownEnter(d *Document) bool {
 // key. On a blank unordered item or checkbox it indents the marker by four spaces and
 // cycles the bullet forward; anywhere else it inserts four spaces. A selection or
 // extra carets are handled by the caller with the built-in Tab, as the plugin does.
-func (e *Editor) markdownTab(d *Document) bool {
+func (e *Editor) markdownTab(d *document.Document) bool {
 	if len(d.Extra) > 0 || d.VirtualColumns() > 0 || !e.markdownSource(d) {
 		return false
 	}
@@ -218,7 +219,7 @@ func (e *Editor) markdownTab(d *Document) bool {
 // else the caller falls through to dedent_selection. The plugin does not guard this
 // one for extra carets or a selection; gvim steps aside then, because the rewrite
 // only names the caret's line.
-func (e *Editor) markdownDedent(d *Document) bool {
+func (e *Editor) markdownDedent(d *document.Document) bool {
 	if len(d.Extra) > 0 || d.HasSelection() || d.VirtualColumns() > 0 || !e.markdownSource(d) {
 		return false
 	}

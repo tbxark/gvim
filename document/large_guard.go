@@ -10,38 +10,38 @@ import (
 // maxLargeCarets is the most carets that an action creates in a large document. A
 // caret per line of a selection would otherwise take memory and time in proportion to
 // the size of the file.
-const maxLargeCarets = 10_000
+const MaxLargeCarets = 10_000
 
 // contentMark identifies the content of a document, to find out whether an action
 // changed it. A document in memory is marked by its text. A large document is marked by
 // the version of its buffer, because its text cannot be held: an edit that restores the
 // text still counts as a change, which is the safe side.
-type contentMark struct {
+type ContentMark struct {
 	Text string
 	Ver  uint64
 }
 
 // ContentMark returns the mark of the document as it is now. Marks compare with ==.
-func (d *Document) ContentMark() contentMark {
+func (d *Document) ContentMark() ContentMark {
 	if d.large != nil {
-		return contentMark{Ver: d.Buffer.Version()}
+		return ContentMark{Ver: d.Buffer.Version()}
 	}
-	return contentMark{Text: d.Buffer.Text()}
+	return ContentMark{Text: d.Buffer.Text()}
 }
 
 // largeError is a refusal with the words the status row shows. It matches each error
 // of errs with errors.Is.
-type largeError struct {
+type LargeError struct {
 	Msg  string
 	Errs []error
 }
 
-func (e *largeError) Error() string   { return e.Msg }
-func (e *largeError) Unwrap() []error { return e.Errs }
+func (e *LargeError) Error() string   { return e.Msg }
+func (e *LargeError) Unwrap() []error { return e.Errs }
 
 // errLargeAction is the refusal of an action that cannot work on a large document. It
 // matches ErrLargeFile.
-func errLargeAction(action Action) error {
+func ErrLargeAction(action Action) error {
 	return fmt.Errorf("%s: %w", action, ErrLargeFile)
 }
 
@@ -49,7 +49,7 @@ func errLargeAction(action Action) error {
 // is over the size a large document hands out. It matches ErrLargeFile and
 // buffer.ErrOverCap.
 func errSelectionTooLarge() error {
-	return &largeError{
+	return &LargeError{
 		Msg:  fmt.Sprintf("selection too large for large file mode (%d MiB)", buffer.MaxMaterialize>>20),
 		Errs: []error{ErrLargeFile, buffer.ErrOverCap},
 	}
@@ -58,8 +58,8 @@ func errSelectionTooLarge() error {
 // errTooManyCarets is the refusal of an action that would create more carets than a
 // large document allows. It matches ErrLargeFile.
 func errTooManyCarets() error {
-	return &largeError{
-		Msg:  fmt.Sprintf("more than %d carets are not available in large file mode", maxLargeCarets),
+	return &LargeError{
+		Msg:  fmt.Sprintf("more than %d carets are not available in large file mode", MaxLargeCarets),
 		Errs: []error{ErrLargeFile},
 	}
 }
@@ -67,7 +67,7 @@ func errTooManyCarets() error {
 // errLineCut is the refusal of an action that needs the whole text of a line that is
 // longer than a large document reads. line is 0-based.
 func errLineCut(line int, what string) error {
-	return &largeError{
+	return &LargeError{
 		Msg:  fmt.Sprintf("line %d is longer than %d MiB: not %s", line+1, buffer.DefaultMaxLine>>20, what),
 		Errs: []error{ErrLargeFile, buffer.ErrLineTooLong},
 	}
@@ -179,7 +179,7 @@ func (d *Document) editRefused() bool {
 func (d *Document) EditRefused() bool { return d.editRefused() }
 
 // cursorSnapshot is the caret state of a document, to put back when an action is refused.
-type cursorSnapshot struct {
+type CursorSnapshot struct {
 	Cursor    buffer.Pos
 	Sel       *buffer.Selection
 	Extra     []Caret
@@ -189,8 +189,8 @@ type cursorSnapshot struct {
 }
 
 // SnapCursors copies the caret state of d.
-func (d *Document) SnapCursors() *cursorSnapshot {
-	s := &cursorSnapshot{Cursor: d.Cursor, Block: d.Block, LastMulti: d.LastMulti, Want: d.Want}
+func (d *Document) SnapCursors() *CursorSnapshot {
+	s := &CursorSnapshot{Cursor: d.Cursor, Block: d.block, LastMulti: d.lastMulti, Want: d.Want}
 	if d.Sel != nil {
 		sel := *d.Sel
 		s.Sel = &sel
@@ -206,8 +206,8 @@ func (d *Document) SnapCursors() *cursorSnapshot {
 }
 
 // RestoreCursors puts the caret state of s back into d.
-func (d *Document) RestoreCursors(s *cursorSnapshot) {
-	d.Cursor, d.Sel, d.Extra, d.Block, d.LastMulti, d.Want = s.Cursor, s.Sel, s.Extra, s.Block, s.LastMulti, s.Want
+func (d *Document) RestoreCursors(s *CursorSnapshot) {
+	d.Cursor, d.Sel, d.Extra, d.block, d.lastMulti, d.Want = s.Cursor, s.Sel, s.Extra, s.Block, s.LastMulti, s.Want
 }
 
 // TakeRefusal returns the reason the last action on d was refused, as an error with the
@@ -251,7 +251,7 @@ func (d *Document) RefusalError(err error) error {
 	default:
 		return err
 	}
-	return &largeError{Msg: msg, Errs: []error{err}}
+	return &LargeError{Msg: msg, Errs: []error{err}}
 }
 
 // refusedInLargeMode lists the actions that need the whole text of the document and
@@ -269,7 +269,7 @@ var refusedInLargeMode = map[Action]bool{
 // differently: it has no line break to cut or move past. While the index of a large
 // document is being built, the last line known is not the last line, so the action
 // would act on a line that has a break. They return ErrIndexing for a caret on that line.
-var frontierSensitive = map[Action]bool{
+var FrontierSensitive = map[Action]bool{
 	"delete_line":    true,
 	"cut":            true,
 	"copy":           true,
@@ -279,7 +279,7 @@ var frontierSensitive = map[Action]bool{
 
 // selectionOrLines lists the frontierSensitive actions that act on the text of a
 // selection when there is one, and on the caret line only without one.
-var selectionOrLines = map[Action]bool{
+var SelectionOrLines = map[Action]bool{
 	"cut":  true,
 	"copy": true,
 }
@@ -299,7 +299,7 @@ var lineWise = map[Action]bool{
 }
 
 // maxLargeLines is the most lines a line-by-line action works on in a large document.
-const maxLargeLines = 100_000
+const MaxLargeLines = 100_000
 
 // RefuseInLargeMode returns the refusal of action a, when d is a large document and a
 // cannot work on it: the actions of refusedInLargeMode, and a line-by-line action on a
@@ -312,11 +312,11 @@ func (d *Document) RefuseInLargeMode(a Action) error {
 		return err
 	}
 	if refusedInLargeMode[a] {
-		return errLargeAction(a)
+		return ErrLargeAction(a)
 	}
-	if lineWise[a] && d.selectedLineCount() > maxLargeLines {
-		return &largeError{
-			Msg:  fmt.Sprintf("%s: selection of more than %d lines is too large for large file mode", a, maxLargeLines),
+	if lineWise[a] && d.selectedLineCount() > MaxLargeLines {
+		return &LargeError{
+			Msg:  fmt.Sprintf("%s: selection of more than %d lines is too large for large file mode", a, MaxLargeLines),
 			Errs: []error{ErrLargeFile},
 		}
 	}
@@ -355,7 +355,7 @@ func (d *Document) OnFrontier() bool {
 // joinsNextLine lists the deletes that, at the end of a line, remove its line break and
 // so join the next line to it. While the index is incomplete, the next line of the last
 // line known may exist, so such a delete at the end of that line waits (ErrIndexing).
-var joinsNextLine = map[Action]bool{
+var JoinsNextLine = map[Action]bool{
 	"delete_forward":      true,
 	"delete_to_line_end":  true,
 	"delete_word_forward": true,

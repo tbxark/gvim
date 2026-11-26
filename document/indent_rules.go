@@ -84,7 +84,7 @@ var treeSitterLanguages = map[string]bool{
 }
 
 // indentRules is a compiled indentDef.
-type indentRules struct {
+type IndentRulesState struct {
 	Increase, Decrease, IndentNext, DedentNext, SelfClose *regexp.Regexp
 	Significant                                           bool
 }
@@ -93,9 +93,9 @@ var compiledRules sync.Map // indentDef -> *indentRules
 
 // compileRules compiles def once. A pattern that does not compile is dropped, so one
 // typo in a config does not take the editor down.
-func compileRules(def indentDef) *indentRules {
+func compileRules(def indentDef) *IndentRulesState {
 	if r, ok := compiledRules.Load(def); ok {
-		return r.(*indentRules)
+		return r.(*IndentRulesState)
 	}
 	c := func(p string) *regexp.Regexp {
 		if p == "" {
@@ -107,7 +107,7 @@ func compileRules(def indentDef) *indentRules {
 		}
 		return re
 	}
-	r := &indentRules{
+	r := &IndentRulesState{
 		Increase: c(def.Increase), Decrease: c(def.Decrease), IndentNext: c(def.IndentNext),
 		DedentNext: c(def.DedentNext), SelfClose: c(def.SelfClose), Significant: def.Significant,
 	}
@@ -119,7 +119,7 @@ func compileRules(def indentDef) *indentRules {
 // use the heuristic of smart_indent.go. A languages.<id>.indent block wins, each
 // pattern it sets replacing the family's and the others kept (set_user_rule).
 // Otherwise the family of the language decides, except where Fresh uses a grammar.
-func indentRulesOf(s LanguageSettings) *indentRules {
+func IndentRulesOf(s LanguageSettings) *IndentRulesState {
 	def, hasFamily := indentFamilies[indentFamilyOf[s.Language]]
 	if u := s.Indent; u != nil && *u != (IndentRules{}) {
 		set := func(dst *string, v string) {
@@ -142,17 +142,17 @@ func indentRulesOf(s LanguageSettings) *indentRules {
 
 // indentView gives the rules access to the lines of one document, with the display
 // width of a tab and the mask of comments and strings.
-type indentView struct {
+type IndentView struct {
 	Doc  *Document
 	Tab  int
 	Mask NonCodeContext
 }
 
-func (v indentView) runes(line int) []rune { return []rune(v.Doc.Buffer.Line(line)) }
+func (v IndentView) runes(line int) []rune { return []rune(v.Doc.Buffer.Line(line)) }
 
 // Code returns runes[from:to] of line with the comment and string characters turned
 // into spaces and the carriage returns dropped.
-func (v indentView) Code(line int, runes []rune, from, to int) string {
+func (v IndentView) Code(line int, runes []rune, from, to int) string {
 	from, to = min(max(from, 0), len(runes)), min(max(to, 0), len(runes))
 	var masked []bool
 	if v.Mask != nil {
@@ -172,7 +172,7 @@ func (v indentView) Code(line int, runes []rune, from, to int) string {
 }
 
 // hasText reports whether runes[from:to] holds a character that is not a blank.
-func hasText(runes []rune, from, to int) bool {
+func HasText(runes []rune, from, to int) bool {
 	from, to = min(max(from, 0), len(runes)), min(max(to, 0), len(runes))
 	for _, r := range runes[from:to] {
 		if !isBlank(r) {
@@ -183,9 +183,9 @@ func hasText(runes []rune, from, to int) bool {
 }
 
 // prevTextLine returns the nearest line above line that has text, or -1.
-func (v indentView) prevTextLine(line int) int {
+func (v IndentView) prevTextLine(line int) int {
 	for q := line - 1; q >= 0; q-- {
-		if r := v.runes(q); hasText(r, 0, len(r)) {
+		if r := v.runes(q); HasText(r, 0, len(r)) {
 			return q
 		}
 	}
@@ -195,18 +195,18 @@ func (v indentView) prevTextLine(line int) int {
 func matchRe(re *regexp.Regexp, s string) bool { return re != nil && re.MatchString(s) }
 
 // increases reports whether code opens a block: increase matches and self_close does not.
-func (r *indentRules) increases(code string) bool {
+func (r *IndentRulesState) increases(code string) bool {
 	return matchRe(r.Increase, code) && !matchRe(r.SelfClose, code)
 }
 
 // NewLineIndent returns the indent width for a line that Enter starts at p
 // (calculate_indent).
-func (r *indentRules) NewLineIndent(v indentView, p buffer.Pos) int {
+func (r *IndentRulesState) NewLineIndent(v IndentView, p buffer.Pos) int {
 	line := v.runes(p.Line)
 	col := min(p.Col, len(line))
-	curHasContent := hasText(line, 0, col)
-	if r.Significant && !curHasContent && !hasText(line, col, len(line)) {
-		return leadColumns(line, col, v.Tab)
+	curHasContent := HasText(line, 0, col)
+	if r.Significant && !curHasContent && !HasText(line, col, len(line)) {
+		return LeadColumns(line, col, v.Tab)
 	}
 	refLine, refRunes, refEnd := p.Line, line, col
 	if !curHasContent {
@@ -217,7 +217,7 @@ func (r *indentRules) NewLineIndent(v indentView, p buffer.Pos) int {
 		refRunes = v.runes(refLine)
 		refEnd = len(refRunes)
 	}
-	indent := leadColumns(refRunes, refEnd, v.Tab)
+	indent := LeadColumns(refRunes, refEnd, v.Tab)
 	ref := v.Code(refLine, refRunes, 0, refEnd)
 	opened := r.increases(ref) || matchRe(r.IndentNext, ref)
 	switch {
@@ -239,7 +239,7 @@ func (r *indentRules) NewLineIndent(v indentView, p buffer.Pos) int {
 // DedentForDelimiter returns the indent of a line whose first typed character is the
 // closing delimiter ch, or false when the language has no decrease rule for it
 // (calculate_dedent_for_delimiter).
-func (r *indentRules) DedentForDelimiter(v indentView, p buffer.Pos, ch rune) (int, bool) {
+func (r *IndentRulesState) DedentForDelimiter(v IndentView, p buffer.Pos, ch rune) (int, bool) {
 	if !matchRe(r.Decrease, string(ch)) {
 		return 0, false
 	}
@@ -248,7 +248,7 @@ func (r *indentRules) DedentForDelimiter(v indentView, p buffer.Pos, ch rune) (i
 		return 0, false
 	}
 	runes := v.runes(refLine)
-	indent := leadColumns(runes, len(runes), v.Tab)
+	indent := LeadColumns(runes, len(runes), v.Tab)
 	if r.increases(v.Code(refLine, runes, 0, len(runes))) {
 		indent += v.Tab
 	}
@@ -257,7 +257,7 @@ func (r *indentRules) DedentForDelimiter(v indentView, p buffer.Pos, ch rune) (i
 
 // ConsumesLine reports whether line is exactly a decrease trigger: the pattern
 // matches, and the leftmost match is the whole text (decrease_consumes_line).
-func (r *indentRules) ConsumesLine(line string) bool {
+func (r *IndentRulesState) ConsumesLine(line string) bool {
 	if r.Decrease == nil {
 		return false
 	}
@@ -269,7 +269,7 @@ func (r *indentRules) ConsumesLine(line string) bool {
 // decrease trigger: one level shallower than the previous line with text, or false when
 // that line opens a block, where the trigger is the block's first body line
 // (on_type_dedent_target).
-func (r *indentRules) OnTypeDedentTarget(v indentView, line int) (int, bool) {
+func (r *IndentRulesState) OnTypeDedentTarget(v IndentView, line int) (int, bool) {
 	refLine := v.prevTextLine(line)
 	if refLine < 0 {
 		return 0, false
@@ -279,9 +279,9 @@ func (r *indentRules) OnTypeDedentTarget(v indentView, line int) (int, bool) {
 	if r.increases(ref) || matchRe(r.IndentNext, ref) {
 		return 0, false
 	}
-	return max(leadColumns(runes, len(runes), v.Tab)-v.Tab, 0), true
+	return max(LeadColumns(runes, len(runes), v.Tab)-v.Tab, 0), true
 }
 
 // keywordDedentReach is how much of a line before the caret the electric keyword
 // dedent examines, so that a long line costs nothing per keystroke.
-const keywordDedentReach = 128
+const KeywordDedentReach = 128

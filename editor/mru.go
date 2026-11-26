@@ -1,23 +1,26 @@
 package editor
 
-import "slices"
+import (
+	"github.com/tbxark/gvim/document"
+	"slices"
+)
 
 // touchRecent moves d to the front of the editor's MRU tab list. Called when a tab is
 // added or becomes active. A document that is not a tab is ignored by RecentTabIndices.
-func (e *Editor) touchRecent(d *Document) {
+func (e *Editor) touchRecent(d *document.Document) {
 	if d == nil {
 		return
 	}
-	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == d })
-	e.recent = append([]*Document{d}, e.recent...)
+	e.recent = slices.DeleteFunc(e.recent, func(x *document.Document) bool { return x == d })
+	e.recent = append([]*document.Document{d}, e.recent...)
 }
 
 // forgetRecent drops d from the MRU list (a closed or replaced tab).
-func (e *Editor) forgetRecent(d *Document) {
+func (e *Editor) forgetRecent(d *document.Document) {
 	if d == nil || len(e.recent) == 0 {
 		return
 	}
-	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == d })
+	e.recent = slices.DeleteFunc(e.recent, func(x *document.Document) bool { return x == d })
 }
 
 // replaceRecent swaps old for new in place in the MRU history, keeping old's rank. It is
@@ -26,14 +29,14 @@ func (e *Editor) forgetRecent(d *Document) {
 // RecentTabIndices would fall back to tab order for it, changing completion and dabbrev
 // other-buffer order after a handoff. A fallback (old not tracked) leaves any existing
 // rank of new alone, which is correct for a document that was already in the history.
-func (e *Editor) replaceRecent(old, next *Document) {
+func (e *Editor) replaceRecent(old, next *document.Document) {
 	if next == nil || old == next {
 		return
 	}
 	if slices.Index(e.recent, old) < 0 {
 		return
 	}
-	e.recent = slices.DeleteFunc(e.recent, func(x *Document) bool { return x == next })
+	e.recent = slices.DeleteFunc(e.recent, func(x *document.Document) bool { return x == next })
 	pos := slices.Index(e.recent, old)
 	if pos < 0 {
 		return

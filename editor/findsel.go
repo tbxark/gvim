@@ -3,13 +3,14 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/search"
 )
 
 // registerFindSelHandlers registers find_selection_next and find_selection_previous.
-func registerFindSelHandlers(h map[Action]handler) {
+func registerFindSelHandlers(h map[document.Action]handler) {
 	h["find_selection_next"] = func(e *Editor, _ map[string]any) error {
 		return findSelection(e, true)
 	}
@@ -30,7 +31,7 @@ func findSelection(e *Editor, forward bool) error {
 	}
 	if d.LargeState() != nil {
 		// The search lists every match in the document.
-		return errLargeAction("find_selection")
+		return document.ErrLargeAction("find_selection")
 	}
 	text := d.Buffer.Range(from, to)
 	matches, err := search.Find(d.Buffer, search.Query{Text: text, CaseSensitive: true})
@@ -71,12 +72,12 @@ func (e *Editor) SelectionOrWord() (text string, from, to buffer.Pos, ok bool, e
 		return "", buffer.Pos{}, buffer.Pos{}, false, nil
 	}
 	if d.LargeState() != nil && d.SearchTextTooLarge(from, to) {
-		return "", buffer.Pos{}, buffer.Pos{}, false, errSearchTextTooLarge()
+		return "", buffer.Pos{}, buffer.Pos{}, false, document.ErrSearchTextTooLarge()
 	}
 	// A large document gives no text that is over the size it hands out.
 	text, err = d.ReadRange(from, to)
-	if err == nil && d.LargeState() != nil && len(text) > maxSearchSelection {
-		err = errSearchTextTooLarge()
+	if err == nil && d.LargeState() != nil && len(text) > document.MaxSearchSelection {
+		err = document.ErrSearchTextTooLarge()
 	}
 	if err != nil {
 		return "", buffer.Pos{}, buffer.Pos{}, false, err
@@ -87,7 +88,7 @@ func (e *Editor) SelectionOrWord() (text string, from, to buffer.Pos, ok bool, e
 // findSelectionRange returns the range the search starts from: the selection,
 // or else the word that the caret is in or just after. ok is false when there
 // is neither.
-func findSelectionRange(d *Document) (from, to buffer.Pos, ok bool) {
+func findSelectionRange(d *document.Document) (from, to buffer.Pos, ok bool) {
 	if d.HasSelection() {
 		from, to = d.Sel.Ordered()
 		return from, to, true

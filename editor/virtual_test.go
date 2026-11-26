@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 )
 
 // virtualEditor returns an editor with one regular untitled tab and one virtual tab.
-func virtualEditor(t *testing.T, o VirtualOptions, opts ...Options) (*Editor, DocID) {
+func virtualEditor(t *testing.T, o document.VirtualOptions, opts ...Options) (*Editor, document.DocID) {
 	t.Helper()
 	var op Options
 	if len(opts) > 0 {
@@ -26,15 +27,15 @@ func TestNewVirtual(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name     string
-		opts     VirtualOptions
+		opts     document.VirtualOptions
 		wantName string
 	}{
-		{"plain", VirtualOptions{Name: "outline", Text: "a\nb"}, "*outline*"},
-		{"trimmed", VirtualOptions{Name: "  spaced  "}, "*spaced*"},
-		{"control characters become blanks", VirtualOptions{Name: "a\x1b[31mb"}, "*a [31mb*"},
-		{"empty name gets a default", VirtualOptions{Name: " \t"}, "*virtual*"},
-		{"long name is cut", VirtualOptions{Name: strings.Repeat("é", 200)}, "*" + strings.Repeat("é", maxVirtualName) + "*"},
-		{"crlf text is lf", VirtualOptions{Name: "x", Text: "a\r\nb"}, "*x*"},
+		{"plain", document.VirtualOptions{Name: "outline", Text: "a\nb"}, "*outline*"},
+		{"trimmed", document.VirtualOptions{Name: "  spaced  "}, "*spaced*"},
+		{"control characters become blanks", document.VirtualOptions{Name: "a\x1b[31mb"}, "*a [31mb*"},
+		{"empty name gets a default", document.VirtualOptions{Name: " \t"}, "*virtual*"},
+		{"long name is cut", document.VirtualOptions{Name: strings.Repeat("é", 200)}, "*" + strings.Repeat("é", document.MaxVirtualName) + "*"},
+		{"crlf text is lf", document.VirtualOptions{Name: "x", Text: "a\r\nb"}, "*x*"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -68,8 +69,8 @@ func TestVirtualCount(t *testing.T) {
 	if e.VirtualCount() != 0 {
 		t.Fatal("a new editor has virtual documents")
 	}
-	a := e.NewVirtual(VirtualOptions{Name: "a"})
-	e.NewVirtual(VirtualOptions{Name: "b"})
+	a := e.NewVirtual(document.VirtualOptions{Name: "a"})
+	e.NewVirtual(document.VirtualOptions{Name: "b"})
 	if n := e.VirtualCount(); n != 2 {
 		t.Fatalf("VirtualCount = %d, want 2", n)
 	}
@@ -86,10 +87,10 @@ func TestVirtualCount(t *testing.T) {
 // takes it (FINAL X10).
 func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 	t.Parallel()
-	setup := func(t *testing.T) (*Editor, *Document, DocID) {
-		e, id := virtualEditor(t, VirtualOptions{Name: "v", Text: "one"}, Options{AutoSaveInterval: time.Second})
+	setup := func(t *testing.T) (*Editor, *document.Document, document.DocID) {
+		e, id := virtualEditor(t, document.VirtualOptions{Name: "v", Text: "one"}, Options{AutoSaveInterval: time.Second})
 		// the user types into it: an editable virtual buffer
-		if err := e.ApplyEdits(id, []LSPEdit{lspEdit(0, 3, 0, 3, " two")}, EditOptions{}); err != nil {
+		if err := e.ApplyEdits(id, []document.LSPEdit{lspEdit(0, 3, 0, 3, " two")}, document.EditOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		d, _, _ := e.DocByID(id)
@@ -100,9 +101,9 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 	}
 	tests := []struct {
 		Name  string
-		check func(t *testing.T, e *Editor, d *Document, id DocID)
+		check func(t *testing.T, e *Editor, d *document.Document, id document.DocID)
 	}{
-		{"Modified and the tab", func(t *testing.T, e *Editor, d *Document, _ DocID) {
+		{"Modified and the tab", func(t *testing.T, e *Editor, d *document.Document, _ document.DocID) {
 			if d.Modified() {
 				t.Error("Modified() = true")
 			}
@@ -112,7 +113,7 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 				}
 			}
 		}},
-		{"quit dirty list", func(t *testing.T, e *Editor, _ *Document, _ DocID) {
+		{"quit dirty list", func(t *testing.T, e *Editor, _ *document.Document, _ document.DocID) {
 			if dirty := e.Quit(false); len(dirty) != 0 {
 				t.Errorf("Quit lists %v", dirty)
 			}
@@ -120,7 +121,7 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 				t.Error("the quit was refused")
 			}
 		}},
-		{"close asks nothing", func(t *testing.T, e *Editor, _ *Document, id DocID) {
+		{"close asks nothing", func(t *testing.T, e *Editor, _ *document.Document, id document.DocID) {
 			if err := e.CloseID(id, false); err != nil {
 				t.Errorf("CloseID = %v", err)
 			}
@@ -128,43 +129,43 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 				t.Error("the tab is still open")
 			}
 		}},
-		{"recovery copy", func(t *testing.T, e *Editor, _ *Document, _ DocID) {
+		{"recovery copy", func(t *testing.T, e *Editor, _ *document.Document, _ document.DocID) {
 			if docs := e.UnsavedDocs(); len(docs) != 0 {
 				t.Errorf("UnsavedDocs = %d documents", len(docs))
 			}
 		}},
-		{"auto-save", func(t *testing.T, e *Editor, _ *Document, _ DocID) {
+		{"auto-save", func(t *testing.T, e *Editor, _ *document.Document, _ document.DocID) {
 			if jobs := e.PlanAutoSave(time.Now()); len(jobs) != 0 {
 				t.Errorf("PlanAutoSave planned %d jobs", len(jobs))
 			}
 		}},
-		{"save", func(t *testing.T, e *Editor, d *Document, id DocID) {
+		{"save", func(t *testing.T, e *Editor, d *document.Document, id document.DocID) {
 			if err := e.ActivateID(id); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := e.PlanSave(); !errors.Is(err, ErrVirtual) {
+			if _, err := e.PlanSave(); !errors.Is(err, document.ErrVirtual) {
 				t.Errorf("PlanSave = %v, want ErrVirtual", err)
 			}
-			if err := e.Save(); !errors.Is(err, ErrVirtual) {
+			if err := e.Save(); !errors.Is(err, document.ErrVirtual) {
 				t.Errorf("Save = %v, want ErrVirtual", err)
 			}
 		}},
-		{"save as", func(t *testing.T, e *Editor, _ *Document, id DocID) {
+		{"save as", func(t *testing.T, e *Editor, _ *document.Document, id document.DocID) {
 			if err := e.ActivateID(id); err != nil {
 				t.Fatal(err)
 			}
 			target := filepath.Join(t.TempDir(), "out.txt")
-			if _, err := e.PlanSaveAs(target, false); !errors.Is(err, ErrVirtual) {
+			if _, err := e.PlanSaveAs(target, false); !errors.Is(err, document.ErrVirtual) {
 				t.Errorf("PlanSaveAs = %v, want ErrVirtual", err)
 			}
-			if err := e.SaveAs(target); !errors.Is(err, ErrVirtual) {
+			if err := e.SaveAs(target); !errors.Is(err, document.ErrVirtual) {
 				t.Errorf("SaveAs = %v, want ErrVirtual", err)
 			}
 			if _, err := os.Stat(target); err == nil {
 				t.Error("Save As wrote the file")
 			}
 		}},
-		{"save all", func(t *testing.T, e *Editor, _ *Document, _ DocID) {
+		{"save all", func(t *testing.T, e *Editor, _ *document.Document, _ document.DocID) {
 			p, err := e.PlanSaveAll()
 			if err != nil {
 				t.Fatal(err)
@@ -173,7 +174,7 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 				t.Errorf("PlanSaveAll counted the virtual tab: %d jobs, %d untitled, %d read-only", len(p.jobs), p.untitled, p.readOnly)
 			}
 		}},
-		{"disk check", func(t *testing.T, e *Editor, _ *Document, _ DocID) {
+		{"disk check", func(t *testing.T, e *Editor, _ *document.Document, _ document.DocID) {
 			if changes := e.PlanDiskCheck()(); len(changes) != 0 {
 				t.Errorf("PlanDiskCheck covers %v", changes)
 			}
@@ -200,7 +201,7 @@ func TestRegularDocumentsStillCount(t *testing.T) {
 	if err := e.OpenFile(path); err != nil {
 		t.Fatal(err)
 	}
-	e.NewVirtual(VirtualOptions{Name: "v"})
+	e.NewVirtual(document.VirtualOptions{Name: "v"})
 	e.Do("insert_char", map[string]any{"text": "y"})
 	if docs := e.UnsavedDocs(); len(docs) != 1 || docs[0].Path != path {
 		t.Fatalf("UnsavedDocs = %v, want the file", docs)
@@ -223,7 +224,7 @@ func TestOpenDoesNotReplaceEmptyVirtualDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := New(Options{Empty: true})
-	id := e.NewVirtual(VirtualOptions{Name: "v"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v"})
 	if err := e.OpenFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestOpenDoesNotReplaceEmptyVirtualDocument(t *testing.T) {
 func TestVirtualDocumentIsNeverLarge(t *testing.T) {
 	t.Parallel()
 	e := New(Options{LargeFileMode: true, LargeFileThresholdBytes: 64})
-	id := e.NewVirtual(VirtualOptions{Name: "v", Text: strings.Repeat("0123456789\n", 100)})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v", Text: strings.Repeat("0123456789\n", 100)})
 	d, _, _ := e.DocByID(id)
 	if d.Large() {
 		t.Fatal("a virtual document is in large file mode")
@@ -256,7 +257,7 @@ func TestVirtualDocumentIsNeverLarge(t *testing.T) {
 func TestSetVirtualText(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	id := e.NewVirtual(VirtualOptions{Name: "v", Text: "one\ntwo\nthree\nfour"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v", Text: "one\ntwo\nthree\nfour"})
 	d, _, _ := e.DocByID(id)
 	if err := e.ActivateID(id); err != nil {
 		t.Fatal(err)
@@ -308,16 +309,16 @@ func TestSetVirtualTextRefusals(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
 	regular := e.ActiveID()
-	id := e.NewVirtual(VirtualOptions{Name: "v"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v"})
 	tests := []struct {
 		Name string
-		Id   DocID
+		Id   document.DocID
 		Text string
 		Want error
 	}{
 		{"not virtual", regular, "x", ErrNotVirtual},
 		{"not open", 999, "x", ErrNotOpen},
-		{"over the cap", id, strings.Repeat("x", MaxVirtualText+1), buffer.ErrOverCap},
+		{"over the cap", id, strings.Repeat("x", document.MaxVirtualText+1), buffer.ErrOverCap},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -334,7 +335,7 @@ func TestSetVirtualTextRefusals(t *testing.T) {
 func TestSetVirtualTextTracksChanges(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	id := e.NewVirtual(VirtualOptions{Name: "v", Text: "old"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v", Text: "old"})
 	e.TrackChanges("test", true)
 	e.TakeChanges(id, "test")
 	if err := e.SetVirtualText(id, "new"); err != nil {
@@ -350,7 +351,7 @@ func TestVirtualProps(t *testing.T) {
 	t.Parallel()
 	// "head\n" + "item one\n" + "item two" + "\n" + "tail"
 	const text = "head\nitem one\nitem two\ntail"
-	spans := []PropSpan{
+	spans := []document.PropSpan{
 		{FromLine: 1, FromCol: 0, ToLine: 2, ToCol: 0, Props: map[string]any{"n": 1}},
 		{FromLine: 2, FromCol: 0, ToLine: 3, ToCol: 0, Props: map[string]any{"n": 2}},
 		{FromLine: 3, FromCol: 0, ToLine: 3, ToCol: 4, Props: map[string]any{"n": 3}},
@@ -375,7 +376,7 @@ func TestVirtualProps(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			e := New(Options{})
-			id := e.NewVirtual(VirtualOptions{Name: "v", Text: text})
+			id := e.NewVirtual(document.VirtualOptions{Name: "v", Text: text})
 			if err := e.SetVirtualProps(id, spans); err != nil {
 				t.Fatal(err)
 			}
@@ -401,8 +402,8 @@ func TestVirtualProps(t *testing.T) {
 func TestVirtualPropsDieWithTheirText(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	id := e.NewVirtual(VirtualOptions{Name: "v", Text: "abc"})
-	span := []PropSpan{{FromLine: 0, ToLine: 0, ToCol: 3, Props: map[string]any{"k": "v"}}}
+	id := e.NewVirtual(document.VirtualOptions{Name: "v", Text: "abc"})
+	span := []document.PropSpan{{FromLine: 0, ToLine: 0, ToCol: 3, Props: map[string]any{"k": "v"}}}
 	if err := e.SetVirtualProps(id, span); err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +411,7 @@ func TestVirtualPropsDieWithTheirText(t *testing.T) {
 	if !has() {
 		t.Fatal("props missing right after SetVirtualProps")
 	}
-	if err := e.ApplyEdits(id, []LSPEdit{lspEdit(0, 3, 0, 3, "d")}, EditOptions{}); err != nil {
+	if err := e.ApplyEdits(id, []document.LSPEdit{lspEdit(0, 3, 0, 3, "d")}, document.EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if has() {
@@ -440,7 +441,7 @@ func TestVirtualFlagsAndOptions(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
 	regular := e.ActiveID()
-	id := e.NewVirtual(VirtualOptions{Name: "v"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v"})
 	d, _, _ := e.DocByID(id)
 
 	if err := e.SetReadOnlyID(id, true); err != nil || !d.ReadOnly() {
@@ -450,7 +451,7 @@ func TestVirtualFlagsAndOptions(t *testing.T) {
 		t.Fatalf("SetReadOnlyID on a regular document = %v, want ErrNotVirtual", err)
 	}
 	// a read-only virtual document refuses plugin edits like any read-only one
-	if err := e.ApplyEdits(id, []LSPEdit{lspEdit(0, 0, 0, 0, "x")}, EditOptions{}); !errors.Is(err, ErrReadOnly) {
+	if err := e.ApplyEdits(id, []document.LSPEdit{lspEdit(0, 0, 0, 0, "x")}, document.EditOptions{}); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("ApplyEdits on a read-only virtual document = %v", err)
 	}
 
@@ -467,7 +468,7 @@ func TestVirtualFlagsAndOptions(t *testing.T) {
 	}
 
 	wrap := false
-	if err := e.UpdateViewSettings(id, func(s *ViewSettings) { s.LineWrap = &wrap; s.TabSize = 8 }); err != nil {
+	if err := e.UpdateViewSettings(id, func(s *document.ViewSettings) { s.LineWrap = &wrap; s.TabSize = 8 }); err != nil {
 		t.Fatal(err)
 	}
 	if s := d.ViewSettings(); s.LineWrap == nil || *s.LineWrap || s.TabSize != 8 {
@@ -476,7 +477,7 @@ func TestVirtualFlagsAndOptions(t *testing.T) {
 	if got := e.SettingsFor(d); got.LineWrap || got.TabSize != 8 {
 		t.Fatalf("SettingsFor = wrap %v tab %d", got.LineWrap, got.TabSize)
 	}
-	if err := e.UpdateViewSettings(999, func(*ViewSettings) {}); !errors.Is(err, ErrNotOpen) {
+	if err := e.UpdateViewSettings(999, func(*document.ViewSettings) {}); !errors.Is(err, ErrNotOpen) {
 		t.Fatalf("UpdateViewSettings(unknown) = %v", err)
 	}
 }
@@ -484,9 +485,9 @@ func TestVirtualFlagsAndOptions(t *testing.T) {
 func TestVirtualUsage(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	a1 := e.NewVirtual(VirtualOptions{Name: "a1", Owner: "a", Text: "12345"})
-	e.NewVirtual(VirtualOptions{Name: "a2", Owner: "a", Text: "123"})
-	b1 := e.NewVirtual(VirtualOptions{Name: "b1", Owner: "b", Text: "12"})
+	a1 := e.NewVirtual(document.VirtualOptions{Name: "a1", Owner: "a", Text: "12345"})
+	e.NewVirtual(document.VirtualOptions{Name: "a2", Owner: "a", Text: "123"})
+	b1 := e.NewVirtual(document.VirtualOptions{Name: "b1", Owner: "b", Text: "12"})
 	check := func(what, owner string, wantN, wantBytes int) {
 		t.Helper()
 		var n, b int
@@ -525,7 +526,7 @@ func TestVirtualUsage(t *testing.T) {
 func TestSetVirtualTextChangesTheBufferVersion(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	id := e.NewVirtual(VirtualOptions{Name: "v", Text: "old"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "v", Text: "old"})
 	d, _, _ := e.DocByID(id)
 	seen := map[uint64]bool{d.Buffer.Version(): true}
 	for _, text := range []string{"new", "newer", ""} {

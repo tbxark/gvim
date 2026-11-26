@@ -16,14 +16,14 @@ func blockDoc(t *testing.T, mode, content string) *Editor {
 }
 
 // blockAt starts a block selection at p and runs steps.
-func blockAt(t *testing.T, e *Editor, p buffer.Pos, steps ...Action) {
+func blockAt(t *testing.T, e *Editor, p buffer.Pos, steps ...document.Action) {
 	t.Helper()
 	e.SetCursor(p, false)
 	run(t, e, steps...)
 }
 
 // result runs one action and returns its Result.
-func result(t *testing.T, e *Editor, a Action, args map[string]any) Result {
+func result(t *testing.T, e *Editor, a document.Action, args map[string]any) Result {
 	t.Helper()
 	r := e.Do(a, args)
 	if r.Err != nil {
@@ -119,7 +119,7 @@ func TestBlockRectZeroWidthCopiesNothing(t *testing.T) {
 	e := blockDoc(t, document.VirtualSpaceBlock, "abcde\nab")
 	e.SetCursor(buffer.Pos{Line: 0, Col: 4}, false)
 	run(t, e, "block_select_down")
-	if r := e.Do("copy", nil); r.Err != ErrNothingSelected {
+	if r := e.Do("copy", nil); r.Err != document.ErrNothingSelected {
 		t.Fatalf("copy of a zero-width rectangle: err %v, text %q", r.Err, r.Text)
 	}
 }

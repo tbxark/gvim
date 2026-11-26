@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ func TestApplyCompletionAtCarets(t *testing.T) {
 	e.Active().Rename("/fake/a.go")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 0, Col: 2}
-	d.Extra = []Caret{{Cursor: buffer.Pos{Line: 1, Col: 6}}}
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 6}}}
 	n, err := e.ApplyCompletionAtCarets("/fake/a.go", "abc", "", nil)
 	if err != nil {
 		t.Fatalf("ApplyCompletionAtCarets: %v", err)
@@ -45,7 +46,7 @@ func TestApplyCompletionAtCaretsEmptyPrefixAndStale(t *testing.T) {
 	e.Active().Rename("/fake/a.go")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 0, Col: 0}
-	d.Extra = []Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
 	if _, err := e.ApplyCompletionAtCarets("/fake/a.go", "abc", "", nil); err != nil {
 		t.Fatalf("empty-prefix accept: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestApplyCompletionAtCaretsEmptyPrefixAndStale(t *testing.T) {
 	stale := d.Version()
 	typeKey(t, e, "z")
 	before := text(e)
-	if _, err := e.ApplyCompletionAtCarets("/fake/a.go", "abc", "", &stale); !errors.Is(err, ErrStale) {
+	if _, err := e.ApplyCompletionAtCarets("/fake/a.go", "abc", "", &stale); !errors.Is(err, document.ErrStale) {
 		t.Fatalf("stale accept error = %v, want ErrStale", err)
 	}
 	if got := text(e); got != before {
@@ -70,8 +71,8 @@ func TestApplyCompletionAtCaretsOverlapRefused(t *testing.T) {
 	e.Active().Rename("/fake/a.go")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 0, Col: 3}
-	d.Extra = []Caret{{Cursor: buffer.Pos{Line: 0, Col: 1}}}
-	if _, err := e.ApplyCompletionAtCarets("/fake/a.go", "x", "", nil); !errors.Is(err, ErrOverlappingEdits) {
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 0, Col: 1}}}
+	if _, err := e.ApplyCompletionAtCarets("/fake/a.go", "x", "", nil); !errors.Is(err, document.ErrOverlappingEdits) {
 		t.Fatalf("overlap error = %v, want ErrOverlappingEdits", err)
 	}
 	if got := text(e); got != "foobar\n" {
@@ -87,7 +88,7 @@ func TestApplyCompletionItemAtCaretsSnippet(t *testing.T) {
 	e.Active().Rename("/fake/a.go")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 0, Col: 2}
-	d.Extra = []Caret{{Cursor: buffer.Pos{Line: 1, Col: 6}}}
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 6}}}
 	n, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abcXYZ", 3, nil, "", nil)
 	if err != nil {
 		t.Fatalf("snippet accept: %v", err)
@@ -140,9 +141,9 @@ func TestApplyCompletionItemAtCaretsAutoImport(t *testing.T) {
 	e.Active().Rename("/fake/a.go")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 1, Col: 2}
-	d.Extra = []Caret{{Cursor: buffer.Pos{Line: 2, Col: 1}}}
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 2, Col: 1}}}
 	before := d.Version()
-	additional := []LSPEdit{{
+	additional := []document.LSPEdit{{
 		From: buffer.Pos{Line: 0, Col: 0},
 		To:   buffer.Pos{Line: 0, Col: 0},
 		Text: "import X\n",
@@ -172,27 +173,27 @@ func TestApplyCompletionItemAtCaretsStaleAndOverlap(t *testing.T) {
 	e.Active().Rename("/fake/a.go")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 0, Col: 2}
-	d.Extra = []Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 1, Col: 2}}}
 	stale := d.Version()
 	typeKey(t, e, "x")
 	afterTyping := text(e)
-	if _, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abc", -1, nil, "", &stale); !errors.Is(err, ErrStale) {
+	if _, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abc", -1, nil, "", &stale); !errors.Is(err, document.ErrStale) {
 		t.Fatalf("stale err = %v", err)
 	}
 	if got := text(e); got != afterTyping {
 		t.Fatalf("stale changed text: %q, want %q", got, afterTyping)
 	}
 	// An additional edit covering a caret replacement range overlaps it.
-	overlap := []LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 2}, Text: "Y"}}
-	if _, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abc", -1, overlap, "", nil); !errors.Is(err, ErrOverlappingEdits) {
+	overlap := []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 2}, Text: "Y"}}
+	if _, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abc", -1, overlap, "", nil); !errors.Is(err, document.ErrOverlappingEdits) {
 		t.Fatalf("overlap err = %v", err)
 	}
 	// Two zero-width inserts at the same point would have ambiguous order.
-	dup := []LSPEdit{
+	dup := []document.LSPEdit{
 		{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "1"},
 		{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "2"},
 	}
-	if _, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abc", -1, dup, "", nil); !errors.Is(err, ErrOverlappingEdits) {
+	if _, err := e.ApplyCompletionItemAtCarets("/fake/a.go", "abc", -1, dup, "", nil); !errors.Is(err, document.ErrOverlappingEdits) {
 		t.Fatalf("duplicate insert err = %v", err)
 	}
 	if got := text(e); strings.Contains(got, "abc") || strings.Contains(got, "Y") {

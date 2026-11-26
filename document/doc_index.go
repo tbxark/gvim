@@ -7,7 +7,7 @@ import (
 
 // indexBatchBytes is how much of a file one index job reads: a job ends after the
 // chunk that takes it to this many bytes.
-const indexBatchBytes = 32 << 20
+const IndexBatchBytes = 32 << 20
 
 // largeDoc is the state a document in large file mode has beyond its buffer: the
 // background scan that builds the line index, and the work that waits for the index.
@@ -29,7 +29,7 @@ type largeDoc struct {
 	// only after the scan_line_index action cleared it.
 	IndexErr error
 	// pending is the jump that waits for the index, or nil. See pending.go.
-	Pending *pending
+	Pending *Pending
 	// rebaseFailed is set when a save wrote the file but the buffer could not move
 	// onto the new file. The buffer then still reads the old file, which is now
 	// unlinked, and holds the edits as an overlay.
@@ -76,7 +76,7 @@ type writtenFile struct {
 }
 
 // lineIndexStatus is the status row text of a finished line index.
-func lineIndexStatus(lines int) string {
+func LineIndexStatus(lines int) string {
 	noun := "lines"
 	if lines == 1 {
 		noun = "line"
@@ -86,7 +86,7 @@ func lineIndexStatus(lines int) string {
 
 // scanningStatus is the status row text of an index that is still being built, with
 // the share of the file scanned, as Fresh shows it.
-func scanningStatus(info buffer.IndexInfo) string {
+func ScanningStatus(info buffer.IndexInfo) string {
 	pct := 0
 	if info.Size > 0 {
 		pct = int(min(info.Indexed*100/info.Size, 99))

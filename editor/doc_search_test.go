@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -18,7 +19,7 @@ func selectFoo(t *testing.T) *Editor {
 func TestFindInSelectionNeedsASelection(t *testing.T) {
 	t.Parallel()
 	e := docWith(Options{}, "foo bar")
-	if r := e.Do("find_in_selection", nil); !errors.Is(r.Err, ErrNothingSelected) {
+	if r := e.Do("find_in_selection", nil); !errors.Is(r.Err, document.ErrNothingSelected) {
 		t.Fatalf("err = %v, want ErrNothingSelected", r.Err)
 	}
 	if _, ok := e.SearchRange(); ok {

@@ -2,12 +2,22 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 )
 
 // toggleReadOnly turns the read-only flag of the document on or off.
-func toggleReadOnly(e *Editor, d *Document, _ map[string]any) error {
+func toggleReadOnly(e *Editor, d *document.Document, _ map[string]any) error {
 	if d.Binary() {
-		return fmt.Errorf("toggle_read_only: %w", ErrBinary)
+		return fmt.Errorf("toggle_read_only: %w", document.ErrBinary)
+	}
+	if d.SharedMirror() {
+		// A mirror is a view of another workspace's buffer; unlocking it would make a
+		// second writer.
+		return fmt.Errorf("toggle_read_only: %w: a mirror of another workspace's buffer; focus its workspace to take ownership first", document.ErrReadOnly)
+	}
+	if d.Frozen() {
+		// The file changed under a large document, which is read-only until it is reverted.
+		return fmt.Errorf("toggle_read_only: %w: the file changed on disk; revert it first", document.ErrReadOnly)
 	}
 	d.SetReadOnly(!d.ReadOnly())
 	if d.ReadOnly() {
@@ -21,7 +31,7 @@ func toggleReadOnly(e *Editor, d *Document, _ map[string]any) error {
 // registerDocumentHandlers adds the document-state actions to h, then wraps every
 // action in h with guardDocument. buildHandlers calls it last, so the wrap covers
 // the handlers registered before it.
-func registerDocumentHandlers(h map[Action]handler) {
+func registerDocumentHandlers(h map[document.Action]handler) {
 	h["toggle_read_only"] = docAction(toggleReadOnly)
 	h["toggle_fold"] = docAction(toggleFold)
 	h["fold_all"] = docAction(foldAll)
@@ -40,7 +50,7 @@ func registerDocumentHandlers(h map[Action]handler) {
 // record would no longer match the undo history. Undo and redo keep it. After
 // the action, the carets are moved off collapsed folds (see revealCarets) on the
 // tab that is active then. That tab may differ from the one active before.
-func guardDocument(name Action, fn handler) handler {
+func guardDocument(name document.Action, fn handler) handler {
 	return func(e *Editor, args map[string]any) error {
 		before := e.Active()
 		var from int
@@ -53,13 +63,13 @@ func guardDocument(name Action, fn handler) handler {
 			}
 			// A large document whose file changed under it is read-only, and revert is
 			// how it is made usable again.
-			if before.ReadOnly() && textChanging[name] && (name != "revert" || !before.Frozen()) {
-				return ErrReadOnly
+			if before.ReadOnly() && document.TextChanging[name] && (name != "revert" || !before.Frozen()) {
+				return document.ErrReadOnly
 			}
-			if textChanging[name] && name != "undo" && name != "redo" {
-				before.LastMulti = nil
+			if document.TextChanging[name] && name != "undo" && name != "redo" {
+				before.ClearLastMulti()
 			}
-			if textChanging[name] {
+			if document.TextChanging[name] {
 				// The search range holds positions, which an edit makes stale.
 				before.FindRange = nil
 			}

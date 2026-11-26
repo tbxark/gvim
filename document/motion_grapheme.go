@@ -15,7 +15,7 @@ func clusterSimple(r rune) bool { return r < 0x300 }
 // and clusterBackup how many runes it may be backed up from there, over runes that continue a
 // cluster, to a place where one can begin.
 const (
-	clusterWholeLine = 4096
+	ClusterWholeLine = 4096
 	clusterLookback  = 256
 	clusterBackup    = 64
 )
@@ -25,7 +25,7 @@ const (
 // a cluster begins. A boundary that is a lookback away from the start is the same as if the whole
 // line were walked, except inside a run of paired regional indicators, which no text has so long.
 func clusterStart(b *buffer.Buffer, line, col int) int {
-	if b.LineLen(line) <= clusterWholeLine {
+	if b.LineLen(line) <= ClusterWholeLine {
 		return 0
 	}
 	start := max(col-clusterLookback, 0)
@@ -40,7 +40,7 @@ func clusterStart(b *buffer.Buffer, line, col int) int {
 
 // prevBoundary returns the column of the cluster boundary before col on line.
 // col must be above 0.
-func prevBoundary(b *buffer.Buffer, line, col int) int {
+func PrevBoundary(b *buffer.Buffer, line, col int) int {
 	before, _ := b.RuneAt(buffer.Pos{Line: line, Col: col - 1})
 	at, ok := b.RuneAt(buffer.Pos{Line: line, Col: col})
 	if clusterSimple(before) && (!ok || clusterSimple(at)) {
@@ -62,7 +62,7 @@ func prevBoundary(b *buffer.Buffer, line, col int) int {
 
 // nextBoundary returns the column of the cluster boundary after col on line.
 // col must be below the line length.
-func nextBoundary(b *buffer.Buffer, line, col int) int {
+func NextBoundary(b *buffer.Buffer, line, col int) int {
 	at, _ := b.RuneAt(buffer.Pos{Line: line, Col: col})
 	after, ok := b.RuneAt(buffer.Pos{Line: line, Col: col + 1})
 	if clusterSimple(at) && (!ok || clusterSimple(after)) {
@@ -86,7 +86,7 @@ func nextBoundary(b *buffer.Buffer, line, col int) int {
 // column set by a click or a vertical move never splits a cluster.
 func snapToCluster(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
 	if p.Col > 0 && p.Col < b.LineLen(p.Line) {
-		p.Col = prevBoundary(b, p.Line, p.Col+1)
+		p.Col = PrevBoundary(b, p.Line, p.Col+1)
 	}
 	return p
 }

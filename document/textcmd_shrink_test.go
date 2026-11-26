@@ -10,7 +10,7 @@ import (
 // the end of a text that has become shorter.
 func TestShrinkSelectionClampsToShorterText(t *testing.T) {
 	t.Parallel()
-	d := newDocument("", "foo bar baz")
+	d := NewDocument("", "foo bar baz")
 	d.Cursor = buffer.Pos{Col: 5}
 	d.ExpandSelection()
 	if !d.HasSelection() {
@@ -32,7 +32,7 @@ func TestShrinkSelectionClampsToShorterText(t *testing.T) {
 // selection from before the move.
 func TestShrinkSelectionAfterTheCaretMovedDoesNothing(t *testing.T) {
 	t.Parallel()
-	d := newDocument("", "foo bar baz")
+	d := NewDocument("", "foo bar baz")
 	d.Cursor = buffer.Pos{Col: 5}
 	d.ExpandSelection()
 	if !d.HasSelection() {

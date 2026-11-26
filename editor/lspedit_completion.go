@@ -11,6 +11,7 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 
 	"github.com/tbxark/gvim/buffer"
@@ -23,7 +24,7 @@ import (
 // offset inside its own inserted text. cursorOffset < 0 means no snippet placement (carets
 // stay after their inserted text). Returns the number of carets; ErrStale leaves the
 // document untouched, and ErrOverlappingEdits refuses an ambiguous combined list.
-func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []LSPEdit, wordChars string, expect *Version) (int, error) {
+func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []document.LSPEdit, wordChars string, expect *document.Version) (int, error) {
 	d := e.docWithPath(path)
 	if d == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
@@ -32,9 +33,9 @@ func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int
 	carets := len(edits)
 	edits = append(edits, additional...)
 	if completionEditsConflict(d, edits) {
-		return 0, ErrOverlappingEdits
+		return 0, document.ErrOverlappingEdits
 	}
-	if err := d.ApplyEditList(edits, EditOptions{Cursor: CursorMap, Expect: expect}, false); err != nil {
+	if err := d.ApplyEditList(edits, document.EditOptions{Cursor: document.CursorMap, Expect: expect}, false); err != nil {
 		return 0, err
 	}
 	if cursorOffset >= 0 {
@@ -59,8 +60,8 @@ func (e *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int
 // before ApplyEditList: inverted ranges, overlapping ranges, an insert strictly inside a
 // replaced range, and two zero-width inserts at the same point are all ambiguous and
 // refuse the whole accept. Positions are clamped the way ApplyEditList clamps them.
-func completionEditsConflict(d *Document, edits []LSPEdit) bool {
-	clamped := make([]LSPEdit, len(edits))
+func completionEditsConflict(d *document.Document, edits []document.LSPEdit) bool {
+	clamped := make([]document.LSPEdit, len(edits))
 	for i, ed := range edits {
 		ed.From, ed.To = d.Buffer.Clamp(ed.From), d.Buffer.Clamp(ed.To)
 		if ed.To.Less(ed.From) {
@@ -68,7 +69,7 @@ func completionEditsConflict(d *Document, edits []LSPEdit) bool {
 		}
 		clamped[i] = ed
 	}
-	slices.SortStableFunc(clamped, func(a, b LSPEdit) int {
+	slices.SortStableFunc(clamped, func(a, b document.LSPEdit) int {
 		if a.From != b.From {
 			if a.From.Less(b.From) {
 				return -1

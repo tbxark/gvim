@@ -42,14 +42,19 @@ func (r BlockRect) Width() int { return r.Right - r.Left }
 // unclamped column, while the caret's byte position is clipped onto the line, so
 // the two are compared after clipping.
 func (d *Document) blockInProgress() bool {
-	if d == nil || d.Block == nil {
+	if d == nil || d.block == nil {
 		return false
 	}
-	at := d.Block.At
+	at := d.block.At
 	if at.Line != d.Cursor.Line {
 		return false
 	}
 	return min(at.Col, d.Buffer.LineLen(at.Line)) == d.Cursor.Col
+}
+
+// ClearBlock clears any in-progress block selection.
+func (d *Document) ClearBlock() {
+	d.block = nil
 }
 
 // BlockSelection returns the rectangle of the block selection in progress, and
@@ -58,14 +63,14 @@ func (d *Document) BlockSelection() (rect BlockRect, ok bool) {
 	if !d.blockInProgress() {
 		return BlockRect{}, false
 	}
-	a, at := d.Block.Anchor, d.Block.At
+	a, at := d.block.Anchor, d.block.At
 	return BlockRect{
 		Top:     min(a.Line, at.Line),
 		Bottom:  max(a.Line, at.Line),
 		Left:    min(a.Col, at.Col),
 		Right:   max(a.Col, at.Col),
 		Head:    at,
-		Virtual: d.Block.Virtual,
+		Virtual: d.block.Virtual,
 	}, true
 }
 
@@ -96,9 +101,9 @@ func (d *Document) BlockStep(dLine, dCol int, virtual bool) {
 	case d.blockInProgress():
 		// Continue the rectangle from its own corner; the caret's byte column
 		// is clipped, the stored block column is not.
-		anchor = d.Block.Anchor
-		at.Col = d.Block.At.Col
-		if d.Block.Virtual {
+		anchor = d.block.Anchor
+		at.Col = d.block.At.Col
+		if d.block.Virtual {
 			virtual = true
 		}
 	case virtual && d.VirtualColumns() > 0:
@@ -113,13 +118,13 @@ func (d *Document) BlockStep(dLine, dCol int, virtual bool) {
 		if virtual {
 			col++
 		} else if col < d.Buffer.LineLen(at.Line) {
-			col = nextBoundary(d.Buffer, at.Line, col)
+			col = NextBoundary(d.Buffer, at.Line, col)
 		}
 	case dCol < 0 && col > 0:
 		if virtual {
 			col--
 		} else {
-			col = prevBoundary(d.Buffer, at.Line, col)
+			col = PrevBoundary(d.Buffer, at.Line, col)
 		}
 	}
 	line := max(at.Line+dLine, 0)
@@ -141,21 +146,21 @@ func (d *Document) BlockStep(dLine, dCol int, virtual bool) {
 // need the rectangle's true columns.
 func (d *Document) setBlock(anchor, at buffer.Pos, virtual bool) {
 	first, last := min(anchor.Line, at.Line), max(anchor.Line, at.Line)
-	if d.large != nil && last-first+1 > maxLargeCarets {
+	if d.large != nil && last-first+1 > MaxLargeCarets {
 		d.failPlan(errTooManyCarets())
 		return
 	}
-	cs := make([]caret, 0, last-first+1)
+	cs := make([]CaretState, 0, last-first+1)
 	for line := first; line <= last; line++ {
 		n := d.Buffer.LineLen(line)
-		cs = append(cs, caret{
+		cs = append(cs, CaretState{
 			Anchor:  buffer.Pos{Line: line, Col: min(anchor.Col, n)},
 			Head:    buffer.Pos{Line: line, Col: min(at.Col, n)},
 			Primary: line == at.Line,
 		})
 	}
 	d.SetCarets(cs)
-	d.Block = &blockState{Anchor: anchor, At: at, Virtual: virtual}
+	d.block = &blockState{Anchor: anchor, At: at, Virtual: virtual}
 }
 
 // blockPad is how many spaces a line of a virtual block needs before an edit at

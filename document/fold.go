@@ -25,7 +25,7 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 		return nil
 	}
 	key := foldKey{Gen: d.Gen(), Ver: d.Buffer.Version(), Tab: tabWidth, Rev: d.externalRev, OutlineRev: d.outlineRev}
-	m := &d.FoldMemo
+	m := &d.foldMemo
 	if m.Ok && m.Key == key {
 		return m.Ranges
 	}
@@ -79,7 +79,7 @@ func (d *Document) SetExternalFolds(ranges []fold.Range, rev uint64) {
 	}
 	d.externalFolds = slices.Clone(ranges)
 	d.externalRev = rev
-	d.FoldMemo.Ok = false
+	d.foldMemo.Ok = false
 }
 
 // SetOutlineFolds replaces the structural fold ranges an outline source gave, tied
@@ -93,7 +93,7 @@ func (d *Document) SetOutlineFolds(ranges []fold.Range, textVersion uint64) {
 	d.outlineVer = textVersion
 	d.outlineSet = len(ranges) > 0
 	d.outlineRev++
-	d.FoldMemo.Ok = false
+	d.foldMemo.Ok = false
 }
 
 // OutlineFolds returns a copy of the outline ranges last given, whether or not the
@@ -111,7 +111,7 @@ func (d *Document) currentOutlineFolds() []fold.Range {
 
 // mergeFoldRanges merges the external and outline ranges into the indentation
 // ranges, ordered by start line and with exact duplicates removed. A range nested
-// in another keeps its place after it, as fold.Ranges returns nesting: the pane and
+// in another keeps its place after it, as fold.RangesFunc returns nesting: the pane and
 // the fold actions read the same ordering from every source.
 func mergeFoldRanges(indent, external, outline []fold.Range) []fold.Range {
 	if len(external) == 0 && len(outline) == 0 {
@@ -130,7 +130,7 @@ func mergeFoldRanges(indent, external, outline []fold.Range) []fold.Range {
 	return slices.CompactFunc(out, func(a, b fold.Range) bool { return a == b })
 }
 
-// foldKey identifies the input of fold.Ranges: the buffer, its content version, the
+// foldKey identifies the input of fold.RangesFunc: the buffer, its content version, the
 // tab width and the revision of the external (language server) ranges.
 type foldKey struct {
 	Gen, Ver   uint64
@@ -232,7 +232,7 @@ func (d *Document) RevealCarets(from, tabWidth int) {
 	}
 	// A reveal is not a vertical move, so the wanted column and the block
 	// selection are kept.
-	want, block := d.Want, d.Block
+	want, block := d.Want, d.block
 	d.SetCarets(cs)
-	d.Want, d.Block = want, block
+	d.Want, d.block = want, block
 }

@@ -31,7 +31,7 @@ const (
 // other open buffers in tab order. Index -1 stands for the prefix itself, so a
 // full cycle ends by restoring what the user typed. Any change to the text or
 // the caret that the session did not make ends it.
-type dabbrevCycle struct {
+type DabbrevCycle struct {
 	Doc        *Document
 	Start, End buffer.Pos // the text the session replaces
 	Prefix     string
@@ -40,7 +40,7 @@ type dabbrevCycle struct {
 }
 
 // Shows reports whether the open session still describes the text of d.
-func (c *dabbrevCycle) Shows(d *Document) bool {
+func (c *DabbrevCycle) Shows(d *Document) bool {
 	if c.Doc != d || d.Cursor != c.End {
 		return false
 	}
@@ -48,7 +48,7 @@ func (c *dabbrevCycle) Shows(d *Document) bool {
 }
 
 // current is the text the session has in the document now.
-func (c *dabbrevCycle) current() string {
+func (c *DabbrevCycle) current() string {
 	if c.Index < 0 {
 		return c.Prefix
 	}
@@ -60,7 +60,7 @@ func (c *dabbrevCycle) current() string {
 // read from a bounded middle window per buffer (see DabbrevOtherBufferBytes and
 // DabbrevOtherBufferLimit). A large or virtual other buffer is skipped; a large
 // ACTIVE buffer keeps its existing bounded backward scan.
-func (c *dabbrevCycle) Begin(d *Document, others []*Document) error {
+func (c *DabbrevCycle) Begin(d *Document, others []*Document) error {
 	start := dabbrevWordStart(d)
 	prefix := d.Buffer.Range(start, d.Cursor)
 	if prefix == "" {
@@ -76,13 +76,13 @@ func (c *dabbrevCycle) Begin(d *Document, others []*Document) error {
 		}
 		return fmt.Errorf("dabbrev: no earlier word starts with %q", prefix)
 	}
-	*c = dabbrevCycle{Doc: d, Start: start, End: d.Cursor, Prefix: prefix, Candidates: candidates, Index: -1}
+	*c = DabbrevCycle{Doc: d, Start: start, End: d.Cursor, Prefix: prefix, Candidates: candidates, Index: -1}
 	return nil
 }
 
 // Step moves to the next text of the cycle. After the last candidate it puts
 // the prefix back and ends the session.
-func (c *dabbrevCycle) Step(d *Document) {
+func (c *DabbrevCycle) Step(d *Document) {
 	c.Index++
 	if c.Index == len(c.Candidates) {
 		c.replace(d, c.Prefix)
@@ -94,7 +94,7 @@ func (c *dabbrevCycle) Step(d *Document) {
 
 // replace swaps the session text for text, as one undo step, and puts the caret
 // after it.
-func (c *dabbrevCycle) replace(d *Document, text string) {
+func (c *DabbrevCycle) replace(d *Document, text string) {
 	var after buffer.Pos
 	d.Buffer.Group(func() {
 		d.Buffer.Delete(c.Start, d.Cursor)
@@ -154,7 +154,7 @@ func dabbrevCandidates(b *buffer.Buffer, start buffer.Pos, prefix string) (out [
 	fold := strings.ToLower(prefix)
 	plen := utf8.RuneCountInString(prefix)
 	seen := map[string]bool{}
-	budget := newScanBudget(b)
+	budget := NewScanBudget(b)
 	for line := start.Line; line >= 0; line-- {
 		if !budget.Take(b, line) {
 			return out, true

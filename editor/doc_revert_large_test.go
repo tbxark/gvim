@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func TestRevertSwapsTheBufferOfAnUnmodifiedLargeDocument(t *testing.T) {
 	if d.Status != "Reverted big.txt" || d.Modified() {
 		t.Errorf("status %q, modified %v", d.Status, d.Modified())
 	}
-	if !d.Disk.SameAs(diskStateOf(d.Path)) {
+	if !d.Disk.SameAs(document.DiskStateOf(d.Path)) {
 		t.Error("the disk state is not the new file's")
 	}
 	indexAll(t, e)
@@ -94,7 +95,7 @@ func TestRevertRefusesAModifiedLargeDocument(t *testing.T) {
 	replaceFile(t, d.Path, lineText(250))
 	for _, force := range []bool{false, true} {
 		_, err := e.PlanRevert(force)
-		if !errors.Is(err, ErrLargeFile) {
+		if !errors.Is(err, document.ErrLargeFile) {
 			t.Fatalf("PlanRevert(%v) = %v, want ErrLargeFile", force, err)
 		}
 	}
@@ -128,7 +129,7 @@ func TestRevertOfAFrozenDocumentReloadsIt(t *testing.T) {
 	}
 	// A document that the user made read-only is still refused by the revert action.
 	d.SetReadOnly(true)
-	if r := e.Do("revert", nil); !errors.Is(r.Err, ErrReadOnly) {
+	if r := e.Do("revert", nil); !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("revert = %v, want ErrReadOnly", r.Err)
 	}
 }
@@ -156,7 +157,7 @@ func TestRevertOfALargeDocumentThatShrankIsASmallOne(t *testing.T) {
 	}
 	// And the other way: a document that is small is not swapped for a large one.
 	replaceFile(t, d.Path, lineText(200))
-	if _, err := e.PlanRevert(true); !errors.Is(err, ErrLargeFile) {
+	if _, err := e.PlanRevert(true); !errors.Is(err, document.ErrLargeFile) {
 		t.Fatalf("PlanRevert = %v, want ErrLargeFile", err)
 	}
 }
@@ -175,7 +176,7 @@ func TestApplyRevertOfAStalePlanReleasesTheFreshFile(t *testing.T) {
 		t.Fatalf("err %v, %d sources", res.Err, ledger.live())
 	}
 	d.Buffer.Insert(buffer.Pos{}, "x")
-	if err := e.ApplyRevert(plan, res); !errors.Is(err, ErrStaleRevert) {
+	if err := e.ApplyRevert(plan, res); !errors.Is(err, document.ErrStaleRevert) {
 		t.Fatalf("ApplyRevert = %v, want ErrStaleRevert", err)
 	}
 	if ledger.live() != 1 || !d.Modified() {
@@ -184,7 +185,7 @@ func TestApplyRevertOfAStalePlanReleasesTheFreshFile(t *testing.T) {
 	// A plan for a document that is gone releases its file too.
 	plan2 := e.PlanRevertPath(d.Path)
 	res2 := RunRevert(plan2)
-	if err := e.ApplyRevert(plan2, res2); !errors.Is(err, ErrStaleRevert) {
+	if err := e.ApplyRevert(plan2, res2); !errors.Is(err, document.ErrStaleRevert) {
 		t.Fatalf("ApplyRevert of a path plan on a modified tab = %v", err)
 	}
 	if ledger.live() != 1 {
@@ -217,7 +218,7 @@ func TestRevertOfABackgroundLargeTab(t *testing.T) {
 		t.Errorf("%d sources are open", ledger.live())
 	}
 	// A plan made from the path alone cannot reload a large document.
-	if err := e.ApplyRevert(RevertPlan{Path: big.Path}, RunRevert(RevertPlan{Path: big.Path})); !errors.Is(err, ErrLargeFile) {
+	if err := e.ApplyRevert(RevertPlan{Path: big.Path}, RunRevert(RevertPlan{Path: big.Path})); !errors.Is(err, document.ErrLargeFile) {
 		t.Fatalf("ApplyRevert = %v, want ErrLargeFile", err)
 	}
 }
@@ -229,7 +230,7 @@ func TestRunRevertDoesNotReadAHugeFileWhole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Truncate(maxFullLoad + 1); err != nil {
+	if err := f.Truncate(document.MaxFullLoad + 1); err != nil {
 		_ = f.Close()
 		t.Skipf("no sparse files: %v", err)
 	}
@@ -237,7 +238,7 @@ func TestRunRevertDoesNotReadAHugeFileWhole(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := RunRevert(RevertPlan{Path: path})
-	if !errors.Is(res.Err, ErrLargeFile) {
+	if !errors.Is(res.Err, document.ErrLargeFile) {
 		t.Fatalf("err = %v, want ErrLargeFile", res.Err)
 	}
 }
@@ -248,7 +249,7 @@ func TestRevertToAFileThatIsNotUTF8AsksForAFullLoad(t *testing.T) {
 	latin := strings.Repeat("caf\xe9 au lait\n", 200)
 	replaceFile(t, d.Path, latin)
 	err := e.Revert(false)
-	if _, ok := errors.AsType[ErrLargeNeedsFullLoad](err); !ok {
+	if _, ok := errors.AsType[document.ErrLargeNeedsFullLoad](err); !ok {
 		t.Fatalf("Revert = %v, want ErrLargeNeedsFullLoad", err)
 	}
 	if d.Buffer.Line(0) != "line 0000" || d.Modified() {

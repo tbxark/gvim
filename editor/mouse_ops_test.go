@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -218,7 +219,7 @@ func TestOpenPreviewErrors(t *testing.T) {
 	}
 	e := New(Options{})
 	err := e.OpenPreview(bad)
-	if !errors.Is(err, ErrNotDecodable) {
+	if !errors.Is(err, document.ErrNotDecodable) {
 		t.Fatalf("OpenPreview(binary) = %v, want ErrNotDecodable", err)
 	}
 	if e.Status() != err.Error() {

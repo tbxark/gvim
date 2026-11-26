@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
@@ -408,7 +409,7 @@ func TestCaseConversion(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name       string
-		action     Action
+		action     document.Action
 		Text       string
 		At         placed
 		wantText   string
@@ -503,7 +504,7 @@ func TestCaseConversion(t *testing.T) {
 // happen is an unknown-action error.
 func TestTrackActionsAreHandled(t *testing.T) {
 	t.Parallel()
-	names := []Action{
+	names := []document.Action{
 		"dedent_selection", "delete_line", "duplicate_line", "expand_line_selection",
 		"move_to_paragraph_up", "move_to_paragraph_down", "select_to_paragraph_up",
 		"select_to_paragraph_down", "to_upper_case", "to_lower_case", "transpose_chars",

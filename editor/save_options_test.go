@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,7 +122,7 @@ func TestSaveUntitledWithOptionsStillNeedsAName(t *testing.T) {
 	t.Parallel()
 	e := New(Options{TrimTrailingWhitespace: true, EnsureFinalNewline: true})
 	typeText(t, e, "x  ")
-	if err := e.Save(); !errors.Is(err, ErrNoPath) {
+	if err := e.Save(); !errors.Is(err, document.ErrNoPath) {
 		t.Fatalf("Save() = %v, want ErrNoPath", err)
 	}
 	if got := text(e); got != "x  " {

@@ -13,13 +13,13 @@ import (
 // index has not reached them the restore waits: it returns nil, the document refuses
 // changes to its text meanwhile (ErrRestoring), and ApplyIndex finishes it. An error
 // means nothing was restored and the caller keeps the stash.
-func (e *Editor) RestoreOverlay(d *Document, st document.OverlayStash) error {
+func (e *Editor) RestoreOverlay(d *document.Document, st document.OverlayStash) error {
 	l := d.LargeState()
 	switch {
 	case l == nil:
-		return errNotLargeNow
+		return document.ErrNotLargeNow
 	case st.Size != l.Size || st.MTimeUnixNano != l.Mtime || st.Skip != l.Skip:
-		return ErrStashStale
+		return document.ErrStashStale
 	case d.Buffer.Modified() || l.Restore != nil:
 		return errors.New("the document has changes already")
 	}
@@ -36,24 +36,24 @@ func (e *Editor) RestoreOverlay(d *Document, st document.OverlayStash) error {
 // crash-recovery copy over a session that was restored first). The document is read from
 // its file again for that, so st must fit the file as it is now. When it does not, or
 // the file cannot be read, d is left as it was and the error says why.
-func (e *Editor) ReplaceOverlay(d *Document, st document.OverlayStash) error {
+func (e *Editor) ReplaceOverlay(d *document.Document, st document.OverlayStash) error {
 	l := d.LargeState()
 	if l == nil {
-		return errNotLargeNow
+		return document.ErrNotLargeNow
 	}
 	if !d.Buffer.Modified() && l.Restore == nil {
 		return e.RestoreOverlay(d, st)
 	}
-	fresh, err := loadDocument(d.Path, e.loadSpec())
+	fresh, err := document.LoadDocument(d.Path, e.loadSpec())
 	switch {
 	case err != nil:
 		return err
 	case fresh.LargeState() == nil:
 		e.releaseDoc(fresh)
-		return errNotLargeNow
+		return document.ErrNotLargeNow
 	case st.Size != fresh.LargeState().Size || st.MTimeUnixNano != fresh.LargeState().Mtime || st.Skip != fresh.LargeState().Skip:
 		e.releaseDoc(fresh)
-		return ErrStashStale
+		return document.ErrStashStale
 	}
 	e.swapFile(d, fresh)
 	return e.RestoreOverlay(d, st)
@@ -62,7 +62,7 @@ func (e *Editor) ReplaceOverlay(d *Document, st document.OverlayStash) error {
 // tryRestore puts the waiting stash of d into its buffer. It returns nil when that is
 // done, and when it must wait for the index. The caller owns an error: nothing was
 // restored.
-func (e *Editor) tryRestore(d *Document) error {
+func (e *Editor) tryRestore(d *document.Document) error {
 	l := d.LargeState()
 	err := d.Buffer.RestoreOverlay(l.Restore.Overlay)
 	switch {
@@ -75,7 +75,7 @@ func (e *Editor) tryRestore(d *Document) error {
 		l.Pending = jump
 		d.Status = "Restored unsaved changes"
 	case errors.Is(err, buffer.ErrIndexPending):
-		d.Status = "Restoring unsaved changes: " + scanningStatus(d.Index())
+		d.Status = "Restoring unsaved changes: " + document.ScanningStatus(d.Index())
 		return nil
 	}
 	return err
@@ -85,7 +85,7 @@ func (e *Editor) tryRestore(d *Document) error {
 // back at all ends the wait: the document is usable again, the stash stays with it so
 // that a session saved later keeps it, and the status says so. It returns the sentence
 // for the status when this call ended the wait, and "" otherwise.
-func (e *Editor) continueRestore(d *Document) (note string) {
+func (e *Editor) continueRestore(d *document.Document) (note string) {
 	l := d.LargeState()
 	if l == nil || l.Restore == nil || l.RestoreErr != nil {
 		return ""

@@ -1,5 +1,7 @@
 package editor
 
+import "github.com/tbxark/gvim/document"
+
 // StdinOptions shapes the untitled buffer that holds standard input.
 type StdinOptions struct {
 	// Label is the tab name shown for the buffer, e.g. "[stdin]".
@@ -14,8 +16,8 @@ type StdinOptions struct {
 // Fresh's file-backed stdin buffer: its saved state is the piped text, so typing marks it
 // modified. It has no path, so Save goes through Save As; the label names it (the stdin
 // buffer is "[stdin]") instead of Untitled-N. Returns the document.
-func (e *Editor) OpenStdinText(text string, opts StdinOptions) *Document {
-	d := newStdinDocument(text)
+func (e *Editor) OpenStdinText(text string, opts StdinOptions) *document.Document {
+	d := document.NewStdinDocument(text)
 	if opts.Label != "" {
 		d.SetLabel(opts.Label)
 	}

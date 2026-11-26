@@ -3,13 +3,14 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 )
 
 // resetBufferSettings clears the per-buffer view settings (ViewSettings, see
 // viewsettings.go) to their defaults. The text, the undo history and the modified
 // state of the document do not change.
-func resetBufferSettings(e *Editor, d *Document, _ map[string]any) error {
-	d.SetView(ViewSettings{})
+func resetBufferSettings(e *Editor, d *document.Document, _ map[string]any) error {
+	d.SetView(document.ViewSettings{})
 	e.seedRulers(d)
 	e.setStatus("Buffer settings reset")
 	return nil
@@ -19,7 +20,7 @@ func resetBufferSettings(e *Editor, d *Document, _ map[string]any) error {
 // not changed, but the file will be, so a new ending marks the document modified.
 // Its argument "value" is "lf" or "crlf". Any other value is an error, and the
 // ending stays as it was.
-func setLineEnding(e *Editor, d *Document, args map[string]any) error {
+func setLineEnding(e *Editor, d *document.Document, args map[string]any) error {
 	value, ok := args["value"].(string)
 	if !ok {
 		return errors.New("set_line_ending: missing string argument \"value\"")
@@ -27,9 +28,9 @@ func setLineEnding(e *Editor, d *Document, args map[string]any) error {
 	var eol string
 	switch value {
 	case "lf":
-		eol = eolLF
+		eol = document.EolLF
 	case "crlf":
-		eol = eolCRLF
+		eol = document.EolCRLF
 	default:
 		return fmt.Errorf("set_line_ending: value %q is not \"lf\" or \"crlf\"", value)
 	}

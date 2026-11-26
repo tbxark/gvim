@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 )
 
@@ -31,7 +32,7 @@ func (e *Editor) saveAs(path string, force bool) error {
 // is path, or -1. An empty path never matches.
 func (e *Editor) openElsewhere(path string, skip int) int {
 	for i, d := range e.docs {
-		if i != skip && sameFile(d.Path, path) {
+		if i != skip && document.SameFile(d.Path, path) {
 			return i
 		}
 	}
@@ -59,6 +60,9 @@ func (e *Editor) RenamePath(oldPath, newPath string) error {
 		if moving[i] {
 			d.Rename(targets[i])
 			d.FollowDisk(targets[i])
+			if e.shared != nil {
+				e.shared.AfterRename(e, d)
+			}
 		}
 	}
 	return nil
@@ -69,12 +73,12 @@ func (e *Editor) RenamePath(oldPath, newPath string) error {
 // set, document i goes to targets[i].
 func (e *Editor) renamePlan(oldPath, newPath string) (targets []string, moving []bool, err error) {
 	if oldPath == "" || newPath == "" {
-		return nil, nil, fmt.Errorf("rename: %w", ErrEmptyPath)
+		return nil, nil, fmt.Errorf("rename: %w", document.ErrEmptyPath)
 	}
-	if oldPath, err = absPath(oldPath); err != nil {
+	if oldPath, err = document.AbsPath(oldPath); err != nil {
 		return nil, nil, err
 	}
-	if newPath, err = absPath(newPath); err != nil {
+	if newPath, err = document.AbsPath(newPath); err != nil {
 		return nil, nil, err
 	}
 	// Work out every new path before changing any document, so a conflict
@@ -82,7 +86,7 @@ func (e *Editor) renamePlan(oldPath, newPath string) (targets []string, moving [
 	targets = make([]string, len(e.docs))
 	moving = make([]bool, len(e.docs))
 	for i, d := range e.docs {
-		rest, ok := within(d.Path, oldPath)
+		rest, ok := document.Within(d.Path, oldPath)
 		if !ok {
 			continue
 		}
@@ -98,8 +102,8 @@ func (e *Editor) renamePlan(oldPath, newPath string) (targets []string, moving [
 			continue
 		}
 		for j, other := range e.docs {
-			if !moving[j] && sameFile(other.Path, targets[i]) {
-				return nil, nil, fmt.Errorf("rename %s: %w", targets[i], ErrAlreadyOpen)
+			if !moving[j] && document.SameFile(other.Path, targets[i]) {
+				return nil, nil, fmt.Errorf("rename %s: %w", targets[i], document.ErrAlreadyOpen)
 			}
 		}
 	}
@@ -123,17 +127,17 @@ func (e *Editor) CheckRename(oldPath, newPath string) error {
 // path returns an error wrapping ErrEmptyPath.
 func (e *Editor) CloseByPath(path string, force bool) error {
 	if path == "" {
-		err := fmt.Errorf("close: %w", ErrEmptyPath)
+		err := fmt.Errorf("close: %w", document.ErrEmptyPath)
 		e.setError(err)
 		return err
 	}
-	path, err := absPath(path)
+	path, err := document.AbsPath(path)
 	if err != nil {
 		e.setError(err)
 		return err
 	}
-	victim := func(d *Document) bool {
-		_, ok := within(d.Path, path)
+	victim := func(d *document.Document) bool {
+		_, ok := document.Within(d.Path, path)
 		return ok
 	}
 	if !force {
@@ -170,7 +174,7 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 			}
 		}
 	}
-	kept := make([]*Document, 0, len(e.docs))
+	kept := make([]*document.Document, 0, len(e.docs))
 	removed := 0
 	newActive := -1   // index of the active document in kept, if it survives
 	beforeActive := 0 // surviving documents that sat before the active tab

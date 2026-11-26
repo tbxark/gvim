@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"os"
 )
 
@@ -11,7 +12,7 @@ import (
 // document that has not changed moves onto the file that was written. If the buffer
 // cannot, the file is saved anyway, the buffer keeps reading the file it has, and the
 // status says the document should be reloaded.
-func (e *Editor) applyLargeSave(r SaveResult) {
+func (e *Editor) applyLargeSave(r document.SaveResult) {
 	d, lg := r.Job.Doc, r.Job.LargeSave()
 	if d.LargeState() == nil || d.Buffer != lg.Buf {
 		// The document was reverted or closed while the file was written.
@@ -27,7 +28,7 @@ func (e *Editor) applyLargeSave(r SaveResult) {
 	l.SaveNote = r.Note
 	if d.Buffer.Version() != lg.Ver {
 		// The buffer goes on reading the old file, which is not the file at the path now.
-		l.Written = writtenOf(r)
+		l.Written = document.WrittenOf(r)
 		return
 	}
 	hadHistory := d.Buffer.Stats().HistoryGroups > 0
@@ -38,10 +39,10 @@ func (e *Editor) applyLargeSave(r SaveResult) {
 			// The file at the path is not the one that was written, or could not be
 			// told to be: record the file that was written, so that the next save sees
 			// the difference.
-			d.Disk = diskState{Exists: true, Size: r.Tmp.Size(), Mtime: r.Tmp.ModTime()}
+			d.Disk = document.DiskState{Exists: true, Size: r.Tmp.Size(), Mtime: r.Tmp.ModTime()}
 		}
 		l.RebaseFailed = true
-		l.Written = writtenOf(r)
+		l.Written = document.WrittenOf(r)
 		l.SaveNote = "Saved; reload to continue editing"
 		return
 	}
@@ -56,7 +57,7 @@ func (e *Editor) applyLargeSave(r SaveResult) {
 // checks that the file at the path is the temporary file that was renamed there: the
 // same file, of the size that was written. It reports whether the buffer moved. On a
 // false nothing has changed.
-func (e *Editor) rebaseOnSaved(d *Document, r SaveResult) bool {
+func (e *Editor) rebaseOnSaved(d *document.Document, r document.SaveResult) bool {
 	lg := r.Job.LargeSave()
 	if r.Source != nil {
 		// A remote windowed large save opened the new source in its command. Adopt it
@@ -70,11 +71,11 @@ func (e *Editor) rebaseOnSaved(d *Document, r SaveResult) bool {
 			return false
 		}
 		d.LargeState().Size = r.Source.Size()
-		d.LargeState().Mtime = mtimeNano(r.Disk)
+		d.LargeState().Mtime = document.MtimeNano(r.Disk)
 		d.LargeState().Skip = int64(len(lg.Prefix))
 		return true
 	}
-	open := openSavedSource
+	open := document.OpenSavedSource
 	if e.opts.openSrc != nil {
 		open = func(path string) (buffer.Source, os.FileInfo, error) {
 			src, err := e.opts.openSrc.Open(path)
@@ -94,7 +95,7 @@ func (e *Editor) rebaseOnSaved(d *Document, r SaveResult) bool {
 		return false
 	}
 	d.LargeState().Size = src.Size()
-	d.LargeState().Mtime = mtimeNano(r.Disk)
+	d.LargeState().Mtime = document.MtimeNano(r.Disk)
 	d.LargeState().Skip = int64(len(lg.Prefix))
 	return true
 }

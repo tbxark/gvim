@@ -6,7 +6,7 @@ import (
 
 // rowOf returns the index of the row of starts that holds column col. A column at
 // the start of a row belongs to that row. Nil starts is one row.
-func rowOf(starts []int, col int) int {
+func RowOf(starts []int, col int) int {
 	r := 0
 	for i, s := range starts {
 		if s <= col {
@@ -19,7 +19,7 @@ func rowOf(starts []int, col int) int {
 // rowBounds returns the first column of row r and the last column the caret may
 // take on it. The caret stays on a row that is not the last, so it may not take
 // the start of the next row. The last row ends at the end of the line.
-func rowBounds(starts []int, r, lineLen int) (first, last int) {
+func RowBounds(starts []int, r, lineLen int) (first, last int) {
 	if starts == nil {
 		return 0, lineLen
 	}
@@ -34,10 +34,10 @@ func rowBounds(starts []int, r, lineLen int) (first, last int) {
 // limit. The display column of startCol is counted from the start of the line, so a tab
 // in the row runs to its stop, unless fromRow is set, for a row of a very long line, when it
 // is counted from startCol, which is as far as a tab stop is known.
-func colAtCellFrom(b *buffer.Buffer, line, startCol, want, limit, tab int, fromRow bool) int {
+func ColAtCellFrom(b *buffer.Buffer, line, startCol, want, limit, tab int, fromRow bool) int {
 	base := 0
 	if !fromRow {
-		base = cellsFrom(b, line, 0, startCol, 0, tab)
+		base = CellsFrom(b, line, 0, startCol, 0, tab)
 	}
 	cells := base
 	w := newClusterWalker(b, line, startCol)
@@ -50,7 +50,7 @@ func colAtCellFrom(b *buffer.Buffer, line, startCol, want, limit, tab int, fromR
 		if !ok {
 			break
 		}
-		cells += clusterCells(cluster, cw, cells, tab)
+		cells += ClusterCells(cluster, cw, cells, tab)
 	}
 	return w.Col
 }

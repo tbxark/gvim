@@ -477,6 +477,14 @@ func (b *Buffer) MarkSaved() {
 	b.resetSpan()
 }
 
+// MarkUnsaved makes the buffer count as modified without changing its text or its
+// history: it takes a fresh version, so Modified is true until the next MarkSaved.
+// A mirror of a modified buffer uses it to show the same unsaved state.
+func (b *Buffer) MarkUnsaved() {
+	b.seq++
+	b.ver = b.seq
+}
+
 func (b *Buffer) clampLine(i int) int {
 	if b.big != nil {
 		return b.big.clampLine(i)

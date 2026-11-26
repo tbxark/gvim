@@ -3,7 +3,7 @@ package editor
 import "github.com/tbxark/gvim/document"
 
 // registerDabbrevHandlers registers dabbrev_expand.
-func registerDabbrevHandlers(h map[Action]handler) {
+func registerDabbrevHandlers(h map[document.Action]handler) {
 	h["dabbrev_expand"] = dabbrevExpand
 }
 
@@ -16,7 +16,7 @@ func dabbrevExpand(e *Editor, _ map[string]any) error {
 	if !c.Shows(d) {
 		// Other tabs in MRU order (the active tab first, skipped here), the same order
 		// Fresh's dabbrev provider scans its other buffers in.
-		other := make([]*Document, 0, min(len(e.docs)-1, document.DabbrevOtherBufferLimit))
+		other := make([]*document.Document, 0, min(len(e.docs)-1, document.DabbrevOtherBufferLimit))
 		for _, i := range e.RecentTabIndices() {
 			if i == e.active {
 				continue
@@ -27,7 +27,7 @@ func dabbrevExpand(e *Editor, _ map[string]any) error {
 			}
 		}
 		if err := c.Begin(d, other); err != nil {
-			*c = dabbrevCycle{}
+			*c = document.DabbrevCycle{}
 			return err
 		}
 	}

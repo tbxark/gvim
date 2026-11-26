@@ -3,6 +3,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,9 +39,9 @@ func otherGroup(t *testing.T, gid int) int {
 // savers are the ways a document is saved: a small one and a large one.
 var savers = []struct {
 	Name string
-	Open func(t *testing.T, path string) (*Editor, *Document)
+	Open func(t *testing.T, path string) (*Editor, *document.Document)
 }{
-	{"small", func(t *testing.T, path string) (*Editor, *Document) {
+	{"small", func(t *testing.T, path string) (*Editor, *document.Document) {
 		t.Helper()
 		e := New(Options{})
 		if err := e.OpenFile(path); err != nil {
@@ -48,7 +49,7 @@ var savers = []struct {
 		}
 		return e, e.Active()
 	}},
-	{"large", func(t *testing.T, path string) (*Editor, *Document) {
+	{"large", func(t *testing.T, path string) (*Editor, *document.Document) {
 		t.Helper()
 		e := New(largeOptions())
 		if err := e.OpenFile(path); err != nil {

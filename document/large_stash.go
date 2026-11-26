@@ -18,11 +18,11 @@ var ErrStashStale = errors.New("the file changed since the unsaved changes were 
 
 // errNotLargeNow is the refusal of a stash of a large document when the file opens as
 // a small one now, for instance because the size threshold changed.
-var errNotLargeNow = errors.New("the file is not opened in large file mode now")
+var ErrNotLargeNow = errors.New("the file is not opened in large file mode now")
 
 // mtimeNano is the modification time of the file ds describes in nanoseconds, or 0 when
 // there is no such file.
-func mtimeNano(ds diskState) int64 {
+func MtimeNano(ds DiskState) int64 {
 	if !ds.Exists {
 		return 0
 	}
@@ -135,7 +135,7 @@ func (d *Document) StashUnsaved() string {
 // refuseWhileRestoring returns ErrRestoring for an action that changes the text of d
 // while its stash waits for the index.
 func (d *Document) refuseWhileRestoring(a Action) error {
-	if d.Restoring() && textChanging[a] {
+	if d.Restoring() && TextChanging[a] {
 		return fmt.Errorf("%s: %w", a, ErrRestoring)
 	}
 	return nil

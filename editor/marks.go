@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strings"
 
 	"github.com/tbxark/gvim/buffer"
@@ -14,22 +15,22 @@ type extraState struct {
 	slots map[string]markSlot
 	// marked is the set of tabs in mark mode, where plain moves extend the
 	// selection from its anchor (see set_mark).
-	marked map[*Document]bool
+	marked map[*document.Document]bool
 	// jumps is the navigation history (nav.go).
 	jumps jumpHistory
 	// dabbrev is the open dabbrev cycle, if any (dabbrev.go).
-	dabbrev dabbrevCycle
+	dabbrev document.DabbrevCycle
 }
 
 // markSlot is a bookmark: the tab it was set in and the caret position there.
 type markSlot struct {
-	Doc *Document
+	Doc *document.Document
 	Pos buffer.Pos
 }
 
 // registerMarksHandlers registers the handlers of this track. It is the one
 // call buildHandlers makes, and it registers the handlers of the other files.
-func registerMarksHandlers(h map[Action]handler) {
+func registerMarksHandlers(h map[document.Action]handler) {
 	h["set_mark"] = setMark
 	h["cancel_mark"] = cancelMark
 	h["clear_mark"] = clearMark
@@ -44,7 +45,7 @@ func registerMarksHandlers(h map[Action]handler) {
 }
 
 // marking reports whether d is in mark mode.
-func (e *Editor) marking(d *Document) bool {
+func (e *Editor) marking(d *document.Document) bool {
 	return e.extras.marked[d]
 }
 
@@ -54,7 +55,7 @@ func setMark(e *Editor, _ map[string]any) error {
 	d := e.Active()
 	d.Sel = &buffer.Selection{Anchor: d.Cursor, Head: d.Cursor}
 	if e.extras.marked == nil {
-		e.extras.marked = map[*Document]bool{}
+		e.extras.marked = map[*document.Document]bool{}
 	}
 	e.extras.marked[d] = true
 	return nil
@@ -77,7 +78,7 @@ func clearMark(e *Editor, _ map[string]any) error {
 
 // bookmarkSlot reads the "char" argument of the bookmark actions. It must be
 // one digit, from 0 to 9.
-func bookmarkSlot(action Action, args map[string]any) (string, error) {
+func bookmarkSlot(action document.Action, args map[string]any) (string, error) {
 	s, ok := args["char"].(string)
 	if !ok {
 		return "", fmt.Errorf("%s: missing string argument \"char\"", action)
@@ -121,13 +122,13 @@ func jumpToBookmark(e *Editor, args map[string]any) error {
 		return fmt.Errorf("bookmark '%s': buffer no longer exists", slot)
 	}
 	e.pushJump()
-	e.goToJump(jumpEntry{Doc: mark.Doc, Pos: mark.Pos})
+	e.goToJump(document.JumpEntry{Doc: mark.Doc, Pos: mark.Pos})
 	e.setStatus(fmt.Sprintf("Jumped to bookmark '%s'", slot))
 	return nil
 }
 
 // indexOfDoc returns the index of d in the open tabs, or -1.
-func (e *Editor) indexOfDoc(d *Document) int {
+func (e *Editor) indexOfDoc(d *document.Document) int {
 	for i, x := range e.docs {
 		if x == d {
 			return i

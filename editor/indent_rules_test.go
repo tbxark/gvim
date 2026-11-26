@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -9,10 +10,10 @@ import (
 
 // rulesEditor returns an editor whose document has the given language id, the smart
 // typing options on and four-space indents, and the caret at the end of text.
-func rulesEditor(lang string, ind *IndentRules, text string) *Editor {
+func rulesEditor(lang string, ind *document.IndentRules, text string) *Editor {
 	e := docWith(smartOpts, text)
-	e.SetLanguageSettings(func(string, string) LanguageSettings {
-		return LanguageSettings{
+	e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+		return document.LanguageSettings{
 			Language: lang, TabSize: 4, AutoIndent: true, AutoClose: true, AutoSurround: true,
 			Indent: ind,
 		}
@@ -80,7 +81,7 @@ func TestEnterIgnoresAnOpenerInAComment(t *testing.T) {
 	for _, masked := range []bool{false, true} {
 		e := rulesEditor("rust", nil, src)
 		if masked {
-			e.SetNonCodeContext(func(_ *Document, line int) []bool {
+			e.SetNonCodeContext(func(_ *document.Document, line int) []bool {
 				if line != 0 {
 					return nil
 				}
@@ -107,20 +108,20 @@ func TestUserIndentRulesOverrideTheFamily(t *testing.T) {
 	tests := []struct {
 		Name string
 		lang string
-		ind  *IndentRules
+		ind  *document.IndentRules
 		Text string
 		Want string
 	}{
-		{"a language with no family starts blank", "foo", &IndentRules{IncreaseIndentPattern: `BEGIN$`}, "BEGIN", "    "},
-		{"no family, no match", "foo", &IndentRules{IncreaseIndentPattern: `BEGIN$`}, "x:", ""},
-		{"a set pattern replaces the family's", "rust", &IndentRules{IncreaseIndentPattern: `\bthen$`}, "a then", "    "},
-		{"the family's other patterns stay", "rust", &IndentRules{IncreaseIndentPattern: `\bthen$`}, "if (x)", "    "},
-		{"the replaced pattern is gone", "rust", &IndentRules{IncreaseIndentPattern: `\bthen$`}, "fn f() {", ""},
-		{"self close cancels an increase", "foo", &IndentRules{IncreaseIndentPattern: `BEGIN`, SelfClosePattern: `END`}, "BEGIN x END", ""},
-		{"indent next line", "foo", &IndentRules{IndentNextLinePattern: `^IF`}, "IF x", "    "},
-		{"dedent next line", "foo", &IndentRules{DedentNextLinePattern: `^\s*STOP`}, "    STOP", ""},
-		{"a user rule applies to a tree-sitter language", "go", &IndentRules{IncreaseIndentPattern: `BEGIN$`}, "x:", ""},
-		{"a bad pattern is dropped", "foo", &IndentRules{IncreaseIndentPattern: `(`}, "x(", ""},
+		{"a language with no family starts blank", "foo", &document.IndentRules{IncreaseIndentPattern: `BEGIN$`}, "BEGIN", "    "},
+		{"no family, no match", "foo", &document.IndentRules{IncreaseIndentPattern: `BEGIN$`}, "x:", ""},
+		{"a set pattern replaces the family's", "rust", &document.IndentRules{IncreaseIndentPattern: `\bthen$`}, "a then", "    "},
+		{"the family's other patterns stay", "rust", &document.IndentRules{IncreaseIndentPattern: `\bthen$`}, "if (x)", "    "},
+		{"the replaced pattern is gone", "rust", &document.IndentRules{IncreaseIndentPattern: `\bthen$`}, "fn f() {", ""},
+		{"self close cancels an increase", "foo", &document.IndentRules{IncreaseIndentPattern: `BEGIN`, SelfClosePattern: `END`}, "BEGIN x END", ""},
+		{"indent next line", "foo", &document.IndentRules{IndentNextLinePattern: `^IF`}, "IF x", "    "},
+		{"dedent next line", "foo", &document.IndentRules{DedentNextLinePattern: `^\s*STOP`}, "    STOP", ""},
+		{"a user rule applies to a tree-sitter language", "go", &document.IndentRules{IncreaseIndentPattern: `BEGIN$`}, "x:", ""},
+		{"a bad pattern is dropped", "foo", &document.IndentRules{IncreaseIndentPattern: `(`}, "x(", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -140,7 +141,7 @@ func TestKeywordTypedLineDedents(t *testing.T) {
 	tests := []struct {
 		Name  string
 		lang  string
-		ind   *IndentRules
+		ind   *document.IndentRules
 		Text  string
 		typed string
 		Want  string
@@ -155,7 +156,7 @@ func TestKeywordTypedLineDedents(t *testing.T) {
 		{"ruby text after the trigger never fires", "ruby", nil, "def f\n    x\n    end", "x", "def f\n    x\n    endx"},
 		{"lua until", "lua", nil, "repeat\n    x\n    unti", "l", "repeat\n    x\nuntil"},
 		{"bash fi", "bash", nil, "if x; then\n    y\n    f", "i", "if x; then\n    y\nfi"},
-		{"user pattern", "foo", &IndentRules{DecreaseIndentPattern: `^\s*CLOSE`}, "OPEN\n    x\n    CLOS", "E", "OPEN\n    x\nCLOSE"},
+		{"user pattern", "foo", &document.IndentRules{DecreaseIndentPattern: `^\s*CLOSE`}, "OPEN\n    x\n    CLOS", "E", "OPEN\n    x\nCLOSE"},
 		{"a language without a decrease rule", "rust", nil, "if x {\n    y\n    els", "e", "if x {\n    y\n    else"},
 	}
 	for _, tt := range tests {
@@ -208,8 +209,8 @@ func TestKeywordDedentConditions(t *testing.T) {
 	t.Run("auto indent off", func(t *testing.T) {
 		t.Parallel()
 		e := rulesEditor("python", nil, src)
-		e.SetLanguageSettings(func(string, string) LanguageSettings {
-			return LanguageSettings{Language: "python", TabSize: 4}
+		e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+			return document.LanguageSettings{Language: "python", TabSize: 4}
 		})
 		typeText(t, e, ":")
 		if got := text(e); got != src+":" {
@@ -219,7 +220,7 @@ func TestKeywordDedentConditions(t *testing.T) {
 	t.Run("a trigger inside a comment", func(t *testing.T) {
 		t.Parallel()
 		e := rulesEditor("python", nil, src)
-		e.SetNonCodeContext(func(_ *Document, line int) []bool {
+		e.SetNonCodeContext(func(_ *document.Document, line int) []bool {
 			if line != 2 {
 				return nil
 			}
@@ -233,7 +234,7 @@ func TestKeywordDedentConditions(t *testing.T) {
 	t.Run("every caret", func(t *testing.T) {
 		t.Parallel()
 		e := rulesEditor("python", nil, "if x:\n    y\n    else\nif z:\n    w\n    else")
-		e.Active().SetCarets([]caret{
+		e.Active().SetCarets([]document.CaretState{
 			{Anchor: caretPos(2, 8), Head: caretPos(2, 8), Primary: true},
 			at(5, 8),
 		})

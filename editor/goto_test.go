@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -124,14 +125,14 @@ func TestGotoLineJumpsClearTheSelectionEvenInMarkMode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name      string
-		actions   []Action
+		actions   []document.Action
 		Selecting bool
 		wantSel   bool
 	}{
-		{"mark mode: a jump clears the selection", []Action{"set_mark"}, false, false},
-		{"mark mode: the prompt selects up to the line", []Action{"set_mark"}, true, true},
+		{"mark mode: a jump clears the selection", []document.Action{"set_mark"}, false, false},
+		{"mark mode: the prompt selects up to the line", []document.Action{"set_mark"}, true, true},
 		{"the prompt without a mark is a plain goto", nil, true, false},
-		{"after clear_mark the prompt is plain", []Action{"set_mark", "clear_mark"}, true, false},
+		{"after clear_mark the prompt is plain", []document.Action{"set_mark", "clear_mark"}, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

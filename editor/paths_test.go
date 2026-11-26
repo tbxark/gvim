@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,7 +84,7 @@ func TestSaveAsRefusesDifferentExistingFile(t *testing.T) {
 	e := New(Options{})
 	typeText(t, e, "new")
 	err := e.SaveAs(target)
-	if !errors.Is(err, ErrExists) {
+	if !errors.Is(err, document.ErrExists) {
 		t.Fatalf("SaveAs err = %v, want ErrExists", err)
 	}
 	if got := readFile(t, target); got != "keep me" {
@@ -103,7 +104,7 @@ func TestSaveAsForceOverwritesThroughAction(t *testing.T) {
 	putFile(t, target, "old")
 	e := New(Options{})
 	typeText(t, e, "new")
-	if r := e.Do("save_as", map[string]any{"path": target}); !errors.Is(r.Err, ErrExists) {
+	if r := e.Do("save_as", map[string]any{"path": target}); !errors.Is(r.Err, document.ErrExists) {
 		t.Fatalf("save_as without force err = %v, want ErrExists", r.Err)
 	}
 	if r := e.Do("save_as", map[string]any{"path": target, "force": true}); r.Err != nil {
@@ -134,7 +135,7 @@ func TestSaveAsSamePathIsNotAConflict(t *testing.T) {
 func TestSaveAsEmptyPathAndMissingArgument(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	if err := e.SaveAs(""); !errors.Is(err, ErrEmptyPath) {
+	if err := e.SaveAs(""); !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("SaveAs(\"\") err = %v", err)
 	}
 	if r := e.Do("save_as", nil); r.Err == nil {
@@ -213,10 +214,10 @@ func TestRenamePathFolderRebasesOpenFilesBelowIt(t *testing.T) {
 func TestRenamePathEmptyArgumentsFail(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	if err := e.RenamePath("", "x"); !errors.Is(err, ErrEmptyPath) {
+	if err := e.RenamePath("", "x"); !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("RenamePath empty old err = %v", err)
 	}
-	if err := e.RenamePath("x", ""); !errors.Is(err, ErrEmptyPath) {
+	if err := e.RenamePath("x", ""); !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("RenamePath empty new err = %v", err)
 	}
 }
@@ -322,7 +323,7 @@ func TestCloseByPathUnmatchedAndEmpty(t *testing.T) {
 	if err := e.CloseByPath(filepath.Join(t.TempDir(), "none.txt"), false); err != nil {
 		t.Fatalf("unmatched CloseByPath err = %v", err)
 	}
-	if err := e.CloseByPath("", false); !errors.Is(err, ErrEmptyPath) {
+	if err := e.CloseByPath("", false); !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("empty CloseByPath err = %v", err)
 	}
 }

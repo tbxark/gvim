@@ -21,7 +21,7 @@ type SaveJob struct {
 	Text   string    // the buffer text that data encodes
 	Ends   []string  // the line endings written, when the file mixes them; see Document.ends
 	Label  string    // the encoding label of text, see encodingLabel
-	Expect diskState // the disk state of path when the job was planned
+	Expect DiskState // the disk state of path when the job was planned
 	// checkDisk makes Run refuse a file whose state differs from expect. Save and
 	// auto-save check it. Save As does not, because it writes over the file it names.
 	CheckDisk bool
@@ -38,7 +38,7 @@ type SaveJob struct {
 // SaveResult is the outcome of running a SaveJob. ApplySaves records it.
 type SaveResult struct {
 	Job  SaveJob
-	Disk diskState // the state of the file after the write, when it was written
+	Disk DiskState // the state of the file after the write, when it was written
 	err  error
 
 	// The rest is set for a large document only.
@@ -59,7 +59,7 @@ func (r SaveResult) Err() error { return r.err }
 // PlanSave prepares the save of d to path: it applies the save-time options to the
 // buffer and encodes the text. A text the codec cannot hold makes a job that fails.
 // The job checks the disk state of path, as a save to the document's own file does.
-func (d *Document) PlanSave(path string, o Settings) SaveJob {
+func (d *Document) PlanSave(path string, o SaveOptions) SaveJob {
 	job := SaveJob{Doc: d, Name: d.Name(), Path: path, Expect: d.Disk, CheckDisk: true}
 	if d.binary || d.image != nil {
 		job.err = fmt.Errorf("save %s: %w", path, ErrBinary)
@@ -72,7 +72,7 @@ func (d *Document) PlanSave(path string, o Settings) SaveJob {
 	}
 	d.TidyForSave(o)
 	job.Text = d.Buffer.Text()
-	job.Label = encodingLabel(d.CodecName(), job.Text)
+	job.Label = EncodingLabel(d.CodecName(), job.Text)
 	if d.Ends != nil {
 		job.Ends = d.breaks(job.Text)
 	}
@@ -108,10 +108,10 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 	if j.Doc != nil && j.Doc.access != nil {
 		return j.runWithAccess(ctx, j.Doc.access)
 	}
-	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && diskStateOf(j.Path).Exists {
+	if j.RefuseExisting && !SameFile(j.OwnPath, j.Path) && DiskStateOf(j.Path).Exists {
 		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
 	}
-	now := diskStateOf(j.Path)
+	now := DiskStateOf(j.Path)
 	if j.large != nil && j.large.Noop && now.Exists && now.SameAs(j.Expect) {
 		// Nothing was changed and the file is as the document left it.
 		return SaveResult{Job: j, Disk: now, Skipped: true}
@@ -126,7 +126,7 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 	if err != nil {
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
 	}
-	return SaveResult{Job: j, Disk: diskStateOf(j.Path), Note: saveNote("", note)}
+	return SaveResult{Job: j, Disk: DiskStateOf(j.Path), Note: saveNote("", note)}
 }
 
 // runWithAccess writes a remote (or otherwise non-local) document's save through its
@@ -143,7 +143,7 @@ func (j SaveJob) runWithAccess(ctx context.Context, access FileAccess) SaveResul
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
 	}
 	disk := now.diskState()
-	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && disk.Exists {
+	if j.RefuseExisting && !SameFile(j.OwnPath, j.Path) && disk.Exists {
 		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
 	}
 	if j.CheckDisk && disk.Exists && !disk.SameAs(j.Expect) {
@@ -157,7 +157,7 @@ func (j SaveJob) runWithAccess(ctx context.Context, access FileAccess) SaveResul
 		// The write worked; only the follow-up stat failed. Report the saved write with
 		// the size the editor wrote, so the document is marked saved; a later disk check
 		// then sees the remote state rather than treating the file as missing.
-		return SaveResult{Job: j, Disk: diskState{Exists: true, Size: int64(len(j.Data))}}
+		return SaveResult{Job: j, Disk: DiskState{Exists: true, Size: int64(len(j.Data))}}
 	}
 	return SaveResult{Job: j, Disk: after.diskState()}
 }

@@ -12,17 +12,17 @@ import (
 // command does. Its errors are the ones OpenFile returns, but it does not write them
 // to the status row. A large file that is not UTF-8 returns an ErrLargeNeedsFullLoad;
 // LoadFullFunc loads it after the user agrees.
-func (e *Editor) LoadFunc(path string) func() (*Document, error) {
+func (e *Editor) LoadFunc(path string) func() (*document.Document, error) {
 	spec := e.loadSpec()
-	return func() (*Document, error) {
+	return func() (*document.Document, error) {
 		if path == "" {
-			return nil, fmt.Errorf("open: %w", ErrEmptyPath)
+			return nil, fmt.Errorf("open: %w", document.ErrEmptyPath)
 		}
-		resolved, err := e.openPath(path)
+		resolved, err := resolveOpenPath(spec.Access, path)
 		if err != nil {
 			return nil, err
 		}
-		return loadDocument(resolved, spec)
+		return document.LoadDocument(resolved, spec)
 	}
 }
 
@@ -30,7 +30,7 @@ func (e *Editor) LoadFunc(path string) func() (*Document, error) {
 // OpenFile does. If its path is already open, that tab is activated and d is
 // dropped, and released, so the text of the open tab is kept. It changes editor state,
 // so it runs on the UI goroutine.
-func (e *Editor) OpenLoaded(d *Document) {
+func (e *Editor) OpenLoaded(d *document.Document) {
 	if i := e.pathIndex(d.Path); i >= 0 {
 		if e.docs[i] != d {
 			e.releaseDoc(d)

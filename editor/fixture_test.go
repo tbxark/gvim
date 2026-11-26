@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,7 @@ func openFixture(t *testing.T, opts Options, content string) (*Editor, string) {
 // the caret at the start. Nothing is read from disk.
 func docWith(opts Options, text string) *Editor {
 	e := New(opts)
-	e.docs = []*Document{newDocument("", text)}
+	e.docs = []*document.Document{document.NewDocument("", text)}
 	e.switchTo(0)
 	return e
 }

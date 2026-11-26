@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +73,7 @@ func TestSaveJobRunWritesOrRefuses(t *testing.T) {
 		wantFile string
 	}{
 		{Name: "writes the planned text", wantFile: "xabc\n"},
-		{Name: "refuses a file changed on disk", outside: "other\n", wantErr: ErrChangedOnDisk, wantFile: "other\n"},
+		{Name: "refuses a file changed on disk", outside: "other\n", wantErr: document.ErrChangedOnDisk, wantFile: "other\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -123,7 +124,7 @@ func TestApplySavesMarksSavedOnlyWhenTextIsUnchanged(t *testing.T) {
 				typeIntoDoc(t, ed, "y")
 			}
 			res := jobs[0].Run()
-			if err := ed.ApplySaves([]SaveResult{res}); err != nil {
+			if err := ed.ApplySaves([]document.SaveResult{res}); err != nil {
 				t.Fatalf("ApplySaves() error = %v", err)
 			}
 			if got := ed.Active().Modified(); got != tt.wantModified {
@@ -152,8 +153,8 @@ func TestApplySavesRecordsAFailureAndKeepsTheEdits(t *testing.T) {
 	if err := os.WriteFile(path, []byte("other\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ed.ApplySaves([]SaveResult{jobs[0].Run()})
-	if !errors.Is(err, ErrChangedOnDisk) {
+	err := ed.ApplySaves([]document.SaveResult{jobs[0].Run()})
+	if !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("ApplySaves() error = %v, want ErrChangedOnDisk", err)
 	}
 	doc := ed.Active()

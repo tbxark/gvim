@@ -1,6 +1,9 @@
 package editor
 
-import "github.com/tbxark/gvim/buffer"
+import (
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
+)
 
 // Large caret moves are places to come back to. Fresh records a move of more
 // than 50 bytes; gvim has no byte offsets, so a move is large when it crosses at
@@ -13,7 +16,7 @@ const (
 
 // jumpMark is the place the caret was in before an action ran.
 type jumpMark struct {
-	en jumpEntry
+	en document.JumpEntry
 	Ok bool
 }
 
@@ -24,7 +27,7 @@ func (e *Editor) markJump() jumpMark {
 	if d == nil || e.pristineUntitled() {
 		return jumpMark{}
 	}
-	return jumpMark{en: jumpEntryOf(d), Ok: true}
+	return jumpMark{en: document.JumpEntryOf(d), Ok: true}
 }
 
 // recordJump adds the place from markJump to the navigation history when the

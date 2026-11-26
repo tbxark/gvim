@@ -39,7 +39,7 @@ func (i ImageInfo) Label() string { return strings.ToUpper(i.Format) }
 
 // String describes the image in one line: "PNG 2.3 MB (1920x1080) · RGBA".
 func (i ImageInfo) String() string {
-	return fmt.Sprintf("%s %s (%dx%d) · %s", i.Label(), formatSize(i.Size), i.Width, i.Height, i.Color)
+	return fmt.Sprintf("%s %s (%dx%d) · %s", i.Label(), FormatSize(i.Size), i.Width, i.Height, i.Color)
 }
 
 // imageFormats are the image formats an image document holds. A format the image
@@ -182,7 +182,7 @@ func colorModelName(m color.Model) string {
 // newImageDocument builds the read-only image document for path from the
 // header's facts, the summary being its text. The image itself is drawn by the UI
 // from Image(); the file is read again only when the terminal can draw pictures.
-func newImageDocument(path string, disk diskState, info ImageInfo) *Document {
+func newImageDocument(path string, disk DiskState, info ImageInfo) *Document {
 	text := strings.Join([]string{
 		filepath.Base(path),
 		"",
@@ -190,7 +190,7 @@ func newImageDocument(path string, disk diskState, info ImageInfo) *Document {
 		"",
 		imageSummaryHint,
 	}, "\n")
-	d := newDocument(path, text)
+	d := NewDocument(path, text)
 	d.Disk = disk
 	d.Codec = "binary"
 	d.encoding = info.Label()
@@ -237,5 +237,5 @@ func (d *Document) ImagePtr() *ImageInfo {
 // reopened, not when the file changes underneath it. Both are zero for a
 // document without a disk state.
 func (d *Document) ImageStat() (size, mtime int64) {
-	return d.Disk.Size, mtimeNano(d.Disk)
+	return d.Disk.Size, MtimeNano(d.Disk)
 }

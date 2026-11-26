@@ -100,7 +100,7 @@ func withDabbrevDocs(active int, texts ...string) *Editor {
 	e := New(Options{Rows: 5, Cols: 80})
 	e.docs = nil
 	for _, text := range texts {
-		e.docs = append(e.docs, newDocument("", text))
+		e.docs = append(e.docs, document.NewDocument("", text))
 	}
 	e.switchTo(active)
 	return e
@@ -305,9 +305,9 @@ func TestRecentTabIndicesMRUOrder(t *testing.T) {
 	// activated. Identity is the document, so the active tab is first and the rest keep
 	// their add/activation order.
 	r := New(Options{Empty: true})
-	r.addDoc(newDocument("", "x"))
-	r.addDoc(newDocument("", "y"))
-	r.addDoc(newDocument("", "z"))
+	r.addDoc(document.NewDocument("", "x"))
+	r.addDoc(document.NewDocument("", "y"))
+	r.addDoc(document.NewDocument("", "z"))
 	r.ActivateTab(1)
 	if got, want := r.RecentTabIndices(), []int{1, 2, 0}; !slices.Equal(got, want) {
 		t.Fatalf("RecentTabIndices after restore = %v, want %v", got, want)
@@ -354,15 +354,15 @@ func TestSharedOwnershipHandoffKeepsMRURank(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A: the shared file, then two own tabs. MRU before the handoff: X (active), P, Y.
-	a.addDoc(newDocument("", "aaax\n"))
-	a.addDoc(newDocument("", "aaay\n"))
+	a.addDoc(document.NewDocument("", "aaax\n"))
+	a.addDoc(document.NewDocument("", "aaay\n"))
 	a.switchTo(2)
 	a.switchTo(0)
 	a.switchTo(1)
 	// B: own tabs Z and W, then the same path loaded while B is not focused (the
 	// startup-restore deferral path). MRU before the handoff: W (active), P, Z.
-	b.addDoc(newDocument("", "fooz\n"))
-	b.addDoc(newDocument("", "zz fo\n"))
+	b.addDoc(document.NewDocument("", "fooz\n"))
+	b.addDoc(document.NewDocument("", "zz fo\n"))
 	b.switchTo(1)
 	if err := b.OpenFile(path); err != nil {
 		t.Fatal(err)

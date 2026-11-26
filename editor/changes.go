@@ -2,13 +2,14 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"slices"
 )
 
 // ChangeListener is called for every change of every document, synchronously,
 // before the edit that caused it returns. It must not edit the document. doc is
 // the id of the document that changed.
-type ChangeListener func(doc DocID, c buffer.Change)
+type ChangeListener func(doc document.DocID, c buffer.Change)
 
 type listenerEntry struct {
 	Key string
@@ -108,13 +109,13 @@ func (e *Editor) TrackChanges(key string, on bool) {
 }
 
 // observe installs the change observer on d's buffer.
-func (e *Editor) observe(d *Document) {
+func (e *Editor) observe(d *document.Document) {
 	d.Seam().Obs = func(c buffer.Change) { e.changed(d, c) }
 	d.Buffer.SetObserver(d.Seam().Obs)
 }
 
 // changed records c in the ring of d and calls the listeners.
-func (e *Editor) changed(d *Document, c buffer.Change) {
+func (e *Editor) changed(d *document.Document, c buffer.Change) {
 	d.RingFor().Add(c)
 	for _, l := range e.seam.listeners {
 		l.fn(d.Seam().ID, c)
@@ -131,7 +132,7 @@ func (e *Editor) changed(d *Document, c buffer.Change) {
 // changes (the ring of 256 records, or of 1 MiB of text, wrapped), when any of
 // them is coarse (a large file, or a replaced buffer: the text must be read
 // again), or when their text totals over 256 KiB. An unknown id returns nothing.
-func (e *Editor) TakeChanges(id DocID, consumer string) (changes []buffer.Change, overflow bool) {
+func (e *Editor) TakeChanges(id document.DocID, consumer string) (changes []buffer.Change, overflow bool) {
 	d, _, ok := e.DocByID(id)
 	if !ok || d.Seam().Ring == nil {
 		return nil, false

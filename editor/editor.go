@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"strings"
 
@@ -63,7 +64,7 @@ type Options struct {
 	// local filesystem, non-nil means every read, stat and save goes through it (a
 	// remote authority). The app installs it with SetFileAccess once a remote slot is
 	// connected, before the remote file is opened.
-	FileAccess fileAccess
+	FileAccess document.FileAccess
 	// SessionDir is the directory of the saved session, which InterruptedSaves reads.
 	// Empty means there is no session, and InterruptedSaves lists nothing.
 	SessionDir string
@@ -98,9 +99,6 @@ type Options struct {
 	AutoReadOnly bool
 	// ReadOnly forces all opened documents to be read-only (gvim -R / --view / --read-only).
 	ReadOnly bool
-	// SnapshotInterval is editor.snapshot_interval (default 100): the edits between undo
-	// snapshots.
-	SnapshotInterval int
 	// ConfirmQuit is editor.confirm_quit (default false): quit asks even when no buffer
 	// has unsaved edits (see QuitNeedsConfirm).
 	ConfirmQuit bool
@@ -135,7 +133,7 @@ type Options struct {
 	// a zero fullLoadMax maxFullLoad and a zero indexBatch indexBatchBytes. openSrc is
 	// a pointer so that Options stays comparable.
 	largeGeom   buffer.LargeOptions
-	openSrc     *sourceOpener
+	openSrc     *document.SourceOpener
 	fullLoadMax int64
 	indexBatch  int64
 }
@@ -178,7 +176,7 @@ type Dirty struct {
 
 // Editor is one editing session. Use New to create one; the zero value is not usable.
 type Editor struct {
-	docs      []*Document
+	docs      []*document.Document
 	active    int
 	clipboard string
 	rows      int
@@ -198,11 +196,11 @@ type Editor struct {
 	// rowWin reports the rows around a column of a line too long to list (SetRowWindowMapper).
 	rowWin RowWindowMapper
 	// languages resolves the per-language settings (SetLanguageSettings).
-	languages SettingsResolver
+	languages document.SettingsResolver
 	// inString tells whether a position is inside a string literal (SetStringContext).
-	inString StringContext
+	inString document.StringContext
 	// nonCode masks comments and strings for the indent rules (SetNonCodeContext).
-	nonCode NonCodeContext
+	nonCode document.NonCodeContext
 	// ephemeral holds editor.ephemeral_file_patterns (SetEphemeralFilePatterns).
 	ephemeral []string
 	// rulers holds editor.rulers (SetRulers), the columns every new text buffer starts with.
@@ -216,12 +214,12 @@ type Editor struct {
 	autoSaved time.Time
 	// prevDoc is the document that was active before the current one, for
 	// switch_to_previous_tab. It is a pointer, so a closed tab is not found.
-	prevDoc *Document
+	prevDoc *document.Document
 	// recent is the editor's MRU tab history: the active document first, then the
 	// documents in the order they were last active. Closed documents are dropped by
 	// releaseDoc; missing ones are skipped when the order is read. Multi-buffer
 	// completion and dabbrev read it (RecentTabIndices).
-	recent []*Document
+	recent []*document.Document
 	// formatters maps a language name or file extension to its formatter command. See
 	// SetFormatters.
 	formatters map[string]string
@@ -253,7 +251,7 @@ func New(opts Options) *Editor {
 	}
 	e := &Editor{rows: rows, cols: cols, opts: opts, shared: opts.Shared}
 	if !opts.Empty {
-		d := newDocument("", "")
+		d := document.NewDocument("", "")
 		d.Eol = e.defaultEOL()
 		e.addDoc(d)
 	}
@@ -263,10 +261,10 @@ func New(opts Options) *Editor {
 // defaultEOL is the line ending of a document with no file to read it from:
 // CRLF when Options.DefaultLineEnding says so, LF otherwise.
 func (e *Editor) defaultEOL() string {
-	if e.opts.DefaultLineEnding == eolCRLF {
-		return eolCRLF
+	if e.opts.DefaultLineEnding == document.EolCRLF {
+		return document.EolCRLF
 	}
-	return eolLF
+	return document.EolLF
 }
 
 // Empty reports whether no tab is open. Active returns nil then, Tabs returns
@@ -287,11 +285,15 @@ func (e *Editor) SetViewport(rows, cols int) {
 // only absolute or ~-rooted paths are accepted: a relative path must not be resolved
 // against the local working directory (that would silently name a different file).
 func (e *Editor) openPath(path string) (string, error) {
-	if e.opts.FileAccess == nil {
-		return absPath(path)
+	return resolveOpenPath(e.opts.FileAccess, path)
+}
+
+func resolveOpenPath(access document.FileAccess, path string) (string, error) {
+	if access == nil {
+		return document.AbsPath(path)
 	}
 	if path == "" {
-		return "", ErrEmptyPath
+		return "", document.ErrEmptyPath
 	}
 	if filepath.IsAbs(path) || path == "~" || strings.HasPrefix(path, "~/") {
 		return path, nil
@@ -302,7 +304,7 @@ func (e *Editor) openPath(path string) (string, error) {
 // SetFileAccess installs the file I/O seam for documents opened from now on, and for
 // the ones already open: a remote authority connects after the editor exists, before the
 // remote file is opened. Nil returns the editor to the local filesystem.
-func (e *Editor) SetFileAccess(a fileAccess) {
+func (e *Editor) SetFileAccess(a document.FileAccess) {
 	e.opts.FileAccess = a
 	for _, d := range e.docs {
 		d.SetFileAccess(a)
@@ -321,7 +323,7 @@ func (e *Editor) SetFileAccess(a fileAccess) {
 // ErrLargeNeedsFullLoad, and the caller may load it with LoadFullFunc.
 func (e *Editor) OpenFile(path string) error {
 	if path == "" {
-		err := fmt.Errorf("open: %w", ErrEmptyPath)
+		err := fmt.Errorf("open: %w", document.ErrEmptyPath)
 		e.setError(err)
 		return err
 	}
@@ -347,7 +349,7 @@ func (e *Editor) OpenFile(path string) error {
 		e.setStatus("Opened " + e.docs[i].Name())
 		return nil
 	}
-	d, err := loadDocument(path, e.loadSpec())
+	d, err := document.LoadDocument(path, e.loadSpec())
 	if err != nil {
 		e.setError(err)
 		return err
@@ -357,7 +359,7 @@ func (e *Editor) OpenFile(path string) error {
 }
 
 // Active returns the document in the active tab, or nil when no tab is open.
-func (e *Editor) Active() *Document {
+func (e *Editor) Active() *document.Document {
 	if len(e.docs) == 0 {
 		return nil
 	}
@@ -367,7 +369,7 @@ func (e *Editor) Active() *Document {
 // DocAt returns the document of tab i, or nil when there is no tab i. Unlike
 // Active it does not change the active tab, so a split pane can show a tab that is
 // not active.
-func (e *Editor) DocAt(i int) *Document {
+func (e *Editor) DocAt(i int) *document.Document {
 	if i < 0 || i >= len(e.docs) {
 		return nil
 	}
@@ -507,8 +509,8 @@ func (e *Editor) dirtyTabs() []Dirty {
 }
 
 // Actions returns every action name Do understands, sorted.
-func Actions() []Action {
-	names := make([]Action, 0, len(handlers))
+func Actions() []document.Action {
+	names := make([]document.Action, 0, len(handlers))
 	for a := range handlers {
 		names = append(names, a)
 	}
@@ -517,7 +519,7 @@ func Actions() []Action {
 }
 
 // IsAction reports whether Do understands a.
-func IsAction(a Action) bool {
+func IsAction(a document.Action) bool {
 	_, ok := handlers[a]
 	return ok
 }
@@ -525,7 +527,7 @@ func IsAction(a Action) bool {
 // Do runs action a. args carries action parameters: insert_char takes "text",
 // and close_tab and quit take "force" (bool). Do never panics on bad arguments;
 // it reports them through Result.Err and Status.
-func (e *Editor) Do(a Action, args map[string]any) Result {
+func (e *Editor) Do(a document.Action, args map[string]any) Result {
 	h, ok := handlers[a]
 	if !ok {
 		err := fmt.Errorf("%w: %s", ErrUnknownAction, a)
@@ -557,7 +559,7 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 	}
 	// A refusal belongs to the action that caused it, so none from before is left over.
 	// A refused action in a large document puts the carets back (see takeRefusal).
-	var carets *cursorSnapshot
+	var carets *document.CursorSnapshot
 	if d != nil && d.LargeState() != nil {
 		_ = d.TakeRefusal()
 		carets = d.SnapCursors()
@@ -601,7 +603,7 @@ func (e *Editor) finish(err error) Result {
 
 // worksWithoutDocument lists the actions that run with no tab open. Every other
 // action needs a document, and Do refuses it with ErrNoDocument.
-var worksWithoutDocument = map[Action]bool{
+var worksWithoutDocument = map[document.Action]bool{
 	"new":                      true,
 	"noop":                     true,
 	"quit":                     true,
@@ -616,7 +618,7 @@ var worksWithoutDocument = map[Action]bool{
 
 // typingKind groups consecutive edits that should share one undo step.
 // Any other action returns "" and always ends the current step.
-func typingKind(a Action) string {
+func typingKind(a document.Action) string {
 	switch a {
 	case "insert_char", "insert_newline", "insert_tab":
 		return "insert"
@@ -647,7 +649,7 @@ func (e *Editor) switchTo(i int) {
 // ensureVisible scrolls the document so its cursor line is inside the pane,
 // keeping the scroll-off margin from the pane edge once the caret has moved. It
 // does nothing when d is nil.
-func (e *Editor) ensureVisible(d *Document) {
+func (e *Editor) ensureVisible(d *document.Document) {
 	if d == nil {
 		return
 	}
@@ -674,9 +676,9 @@ func (e *Editor) ensureVisible(d *Document) {
 
 // newUntitled returns an empty buffer named Untitled-N, where N is the next
 // number of this session. Numbers start at 1.
-func (e *Editor) newUntitled() *Document {
+func (e *Editor) newUntitled() *document.Document {
 	e.untitledSeq++
-	d := newDocument("", "")
+	d := document.NewDocument("", "")
 	d.SetUntitledNumber(e.untitledSeq)
 	d.Eol = e.defaultEOL()
 	return d

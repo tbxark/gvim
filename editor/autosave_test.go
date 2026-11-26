@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,7 +139,7 @@ func TestAutoSaveReportsFailuresAndSavesTheRest(t *testing.T) {
 	}
 
 	err := e.AutoSave(time.Now())
-	if !errors.Is(err, ErrChangedOnDisk) {
+	if !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("AutoSave err = %v, want ErrChangedOnDisk", err)
 	}
 	if got := readFile(t, pathY); got != "2y.txt\n" {

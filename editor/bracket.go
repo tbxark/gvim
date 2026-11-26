@@ -2,12 +2,13 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 )
 
 // registerBracketHandlers registers goto_matching_bracket.
-func registerBracketHandlers(h map[Action]handler) {
+func registerBracketHandlers(h map[document.Action]handler) {
 	h["goto_matching_bracket"] = gotoMatchingBracket
 }
 
@@ -18,16 +19,16 @@ func registerBracketHandlers(h map[Action]handler) {
 func gotoMatchingBracket(e *Editor, _ map[string]any) error {
 	d := e.Active()
 	pairs := e.bracketPairsOf(d)
-	at, ok, limited := bracketTarget(d, pairs)
+	at, ok, limited := document.BracketTarget(d, pairs)
 	if limited {
-		return ErrScanLimit
+		return document.ErrScanLimit
 	}
 	if !ok {
 		return errors.New("no bracket at cursor")
 	}
-	to, ok, limited := matchingBracket(d.Buffer, at, pairs)
+	to, ok, limited := document.MatchingBracket(d.Buffer, at, pairs)
 	if limited {
-		return ErrScanLimit
+		return document.ErrScanLimit
 	}
 	if !ok {
 		return errors.New("no matching bracket found")
@@ -38,13 +39,13 @@ func gotoMatchingBracket(e *Editor, _ map[string]any) error {
 }
 
 // bracketPairsOf returns the bracket pairs of d's language.
-func (e *Editor) bracketPairsOf(d *Document) [][2]rune {
+func (e *Editor) bracketPairsOf(d *document.Document) [][2]rune {
 	lang := e.SettingsFor(d).Language
 	if lang == "" {
 		lang = strings.ToLower(d.Language())
 	}
 	if lang == "html" || lang == "templ" {
-		return append(slices.Clip(bracketPairs), angleBrackets)
+		return append(slices.Clip(document.BracketPairs), document.AngleBrackets)
 	}
-	return bracketPairs
+	return document.BracketPairs
 }

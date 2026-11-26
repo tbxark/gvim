@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -13,7 +14,7 @@ func TestFindSelectionNextAndPrevious(t *testing.T) {
 	tests := []struct {
 		Name    string
 		Text    string
-		action  Action
+		action  document.Action
 		caret   int
 		Anchor  int // selection anchor column; -1 for no selection
 		Head    int // selection head column

@@ -1,6 +1,9 @@
 package editor
 
-import "time"
+import (
+	"github.com/tbxark/gvim/document"
+	"time"
+)
 
 // AutoSaveDue reports whether AutoSave should run at now. Auto-save is on when
 // Options.AutoSaveInterval is positive, and then it is due once that interval has
@@ -24,7 +27,7 @@ func (e *Editor) AutoSaveDue(now time.Time) bool {
 // With auto-save off, AutoSave does nothing and records no time.
 func (e *Editor) AutoSave(now time.Time) error {
 	jobs := e.PlanAutoSave(now)
-	results := make([]SaveResult, len(jobs))
+	results := make([]document.SaveResult, len(jobs))
 	for i, j := range jobs {
 		results[i] = j.Run()
 	}

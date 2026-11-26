@@ -40,7 +40,7 @@ var ErrOverlappingEdits = errors.New("overlapping edits")
 
 // bulkEditMin is the number of edits above which ApplyEdits replaces the touched
 // span of lines in one step, instead of making each edit through the buffer.
-const bulkEditMin = 64
+const BulkEditMin = 64
 
 // ApplyEditList is ApplyEdits on a document. lenient applies overlapping edits one
 // by one, as ApplyLSPEdits does, instead of refusing them.
@@ -71,14 +71,14 @@ func (d *Document) ApplyEditList(edits []LSPEdit, o EditOptions, lenient bool) e
 		}
 	}
 	// The carets are mapped from the positions the document has now.
-	var carets []caret
+	var carets []CaretState
 	if o.Cursor == CursorMap || o.Cursor == CursorKeep {
 		carets = d.AllCarets()
 	}
 	if d.large != nil {
 		_ = d.TakeRefusal()
 	}
-	if !overlap && len(sorted) > bulkEditMin && d.large == nil {
+	if !overlap && len(sorted) > BulkEditMin && d.large == nil {
 		from, to, text, err := spanReplacement(d.Buffer, sorted)
 		if err != nil {
 			return err
@@ -118,10 +118,10 @@ func (d *Document) sortedEdits(edits []LSPEdit) []LSPEdit {
 		out[i] = ed
 	}
 	slices.SortStableFunc(out, func(a, b LSPEdit) int {
-		if c := comparePos(a.From, b.From); c != 0 {
+		if c := ComparePos(a.From, b.From); c != 0 {
 			return c
 		}
-		return comparePos(a.To, b.To)
+		return ComparePos(a.To, b.To)
 	})
 	return out
 }
@@ -164,7 +164,7 @@ func spanReplacement(b *buffer.Buffer, sorted []LSPEdit) (from, to buffer.Pos, t
 
 // afterEdits sets the carets and the bookkeeping of a document whose text was
 // just changed by the sorted edits. carets are those of the document before.
-func (d *Document) afterEdits(sorted []LSPEdit, carets []caret, mode CursorMode) {
+func (d *Document) afterEdits(sorted []LSPEdit, carets []CaretState, mode CursorMode) {
 	switch mode {
 	case CursorMap:
 		for i, c := range carets {
@@ -186,8 +186,8 @@ func (d *Document) afterEdits(sorted []LSPEdit, carets []caret, mode CursorMode)
 		d.ClearCarets()
 	}
 	d.Want = -1
-	d.Block = nil
-	d.LastMulti = nil
+	d.block = nil
+	d.lastMulti = nil
 	d.FindRange = nil
 	if d.preview && d.Modified() {
 		d.preview = false
@@ -233,7 +233,7 @@ func (d *Document) PlaceCursor(p buffer.Pos, extend bool) {
 			anchor = d.Sel.Anchor
 		}
 		if anchor.Less(p) {
-			snapped.Col = nextBoundary(d.Buffer, p.Line, snapped.Col)
+			snapped.Col = NextBoundary(d.Buffer, p.Line, snapped.Col)
 		}
 	}
 	d.Move(snapped, extend)

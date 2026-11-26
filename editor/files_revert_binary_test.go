@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ func TestRevertOfTextTabIntoBinaryFileIsRefused(t *testing.T) {
 	t.Parallel()
 	e, path := openFixture(t, Options{}, "hello\n")
 	putFile(t, path, "\x00\x01\x02abc\x7f\n")
-	if err := e.Revert(false); !errors.Is(err, ErrBinary) {
+	if err := e.Revert(false); !errors.Is(err, document.ErrBinary) {
 		t.Fatalf("Revert err = %v, want ErrBinary", err)
 	}
 	d := e.Active()
@@ -95,7 +96,7 @@ func TestRevertActionStillRefusesReadOnlyTab(t *testing.T) {
 	e, path := openRevertable(t, "a\n")
 	run(t, e, "toggle_read_only")
 	putFile(t, path, "b\n")
-	if r := e.Do("revert", nil); !errors.Is(r.Err, ErrReadOnly) {
+	if r := e.Do("revert", nil); !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 	}
 }
@@ -107,7 +108,7 @@ func TestEncodingAndLineEndingKeepReadOnlyTabClean(t *testing.T) {
 	tests := []struct {
 		Name   string
 		binary bool
-		action Action
+		action document.Action
 		Args   map[string]any
 	}{
 		{"binary, line ending", true, "set_line_ending", map[string]any{"value": "crlf"}},

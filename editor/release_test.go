@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,12 +49,12 @@ func (s *trackedSource) Close() error {
 func ledgerOptions() (Options, *sourceLedger) {
 	l := &sourceLedger{}
 	opts := largeOptions()
-	opts.openSrc = &sourceOpener{Open: l.open}
+	opts.openSrc = &document.SourceOpener{Open: l.open}
 	return opts, l
 }
 
 // openLargeNamed opens a large file called name, with content, in e and returns the document.
-func openLargeNamed(t *testing.T, e *Editor, name, content string) *Document {
+func openLargeNamed(t *testing.T, e *Editor, name, content string) *document.Document {
 	t.Helper()
 	if err := e.OpenFile(writeLargeFile(t, name, content)); err != nil {
 		t.Fatalf("OpenFile: %v", err)
@@ -69,35 +70,35 @@ func TestReleaseDocClosesSourceOnEverySite(t *testing.T) {
 		Name string
 		// scan is how far the scan of the document has got when it is dropped.
 		Scan string
-		drop func(t *testing.T, e *Editor, d *Document)
+		drop func(t *testing.T, e *Editor, d *document.Document)
 	}{
-		{"close_tab force", "none", func(t *testing.T, e *Editor, d *Document) {
+		{"close_tab force", "none", func(t *testing.T, e *Editor, d *document.Document) {
 			if err := e.CloseTab(e.indexOfDoc(d), true); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"close_tab with a scan that is not running", "idle", func(t *testing.T, e *Editor, d *Document) {
+		{"close_tab with a scan that is not running", "idle", func(t *testing.T, e *Editor, d *document.Document) {
 			if err := e.CloseTab(e.indexOfDoc(d), true); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"close_tab action", "idle", func(t *testing.T, e *Editor, d *Document) {
+		{"close_tab action", "idle", func(t *testing.T, e *Editor, d *document.Document) {
 			e.switchTo(e.indexOfDoc(d))
 			if err := e.Do("close_tab", map[string]any{"force": true}).Err; err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"CloseByPath", "idle", func(t *testing.T, e *Editor, d *Document) {
+		{"CloseByPath", "idle", func(t *testing.T, e *Editor, d *document.Document) {
 			if err := e.CloseByPath(d.Path, true); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"CloseByPath on the folder", "idle", func(t *testing.T, e *Editor, d *Document) {
+		{"CloseByPath on the folder", "idle", func(t *testing.T, e *Editor, d *document.Document) {
 			if err := e.CloseByPath(filepath.Dir(d.Path), true); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"preview replaced", "idle", func(t *testing.T, e *Editor, d *Document) {
+		{"preview replaced", "idle", func(t *testing.T, e *Editor, d *document.Document) {
 			// A large document is never a preview, so the test makes one.
 			d.SetPreview(true)
 			small := writeLargeFile(t, "small.txt", "tiny\n")
@@ -108,7 +109,7 @@ func TestReleaseDocClosesSourceOnEverySite(t *testing.T) {
 				t.Fatal("the preview tab was not replaced")
 			}
 		}},
-		{"Editor.Close", "idle", func(_ *testing.T, e *Editor, _ *Document) {
+		{"Editor.Close", "idle", func(_ *testing.T, e *Editor, _ *document.Document) {
 			e.Close()
 		}},
 	}
@@ -146,7 +147,7 @@ func TestReleaseDocWithAJobRunningClosesWhenTheResultArrives(t *testing.T) {
 	opts, ledger := ledgerOptions()
 	e := New(opts)
 	d := openLargeNamed(t, e, "big.txt", lineText(400))
-	e.docs = append(e.docs, newDocument("", "other"))
+	e.docs = append(e.docs, document.NewDocument("", "other"))
 	job, ok := e.PlanIndex()
 	if !ok {
 		t.Fatal("no job")
@@ -173,7 +174,7 @@ func TestReleaseDocWithAJobRunningClosesWhenTheResultArrives(t *testing.T) {
 func TestReleaseDocDropsPendingWork(t *testing.T) {
 	t.Parallel()
 	e, d := openLarge(t, largeOptions(), lineText(400))
-	e.docs = append(e.docs, newDocument("", "other"))
+	e.docs = append(e.docs, document.NewDocument("", "other"))
 	if err := e.GotoLine(390, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +320,7 @@ func TestReloadWithEncodingRefusesLarge(t *testing.T) {
 		before := d.Buffer
 		read := ledger.opened.Load()
 		err := e.Do("reload_with_encoding", map[string]any{"name": "iso-8859-1"}).Err
-		if !errors.Is(err, ErrLargeFile) {
+		if !errors.Is(err, document.ErrLargeFile) {
 			t.Fatalf("err = %v, want ErrLargeFile", err)
 		}
 		if d.Buffer != before || !d.Large() || d.Buffer.Line(1) != "line 0001" || ledger.opened.Load() != read {
@@ -341,13 +342,13 @@ func TestReloadWithEncodingRefusesLarge(t *testing.T) {
 			t.Fatal(err)
 		}
 		err := e.Do("reload_with_encoding", map[string]any{"name": "utf-8"}).Err
-		if !errors.Is(err, ErrLargeFile) {
+		if !errors.Is(err, document.ErrLargeFile) {
 			t.Fatalf("err = %v, want ErrLargeFile", err)
 		}
 		if d.Buffer.Text() != "small\n" {
 			t.Fatalf("text = %q", d.Buffer.Text())
 		}
-		if _, err := e.PlanRevert(false); !errors.Is(err, ErrLargeFile) {
+		if _, err := e.PlanRevert(false); !errors.Is(err, document.ErrLargeFile) {
 			t.Fatalf("PlanRevert err = %v, want ErrLargeFile", err)
 		}
 	})
@@ -374,7 +375,7 @@ func TestApplyRevertRefusesALargeDocument(t *testing.T) {
 	if res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	if err := e.ApplyRevert(plan, res); !errors.Is(err, ErrLargeFile) {
+	if err := e.ApplyRevert(plan, res); !errors.Is(err, document.ErrLargeFile) {
 		t.Fatalf("ApplyRevert err = %v, want ErrLargeFile", err)
 	}
 	if d.Buffer.Version() != version || d.Buffer.Modified() || !d.Large() {
@@ -401,8 +402,8 @@ func TestFollowDiskLargeNoReadFile(t *testing.T) {
 	}
 	// The record is the one taken at open, and a move that keeps size and time still
 	// agrees with it, so the next save does not take the move for an outside change.
-	if !d.Disk.SameAs(recorded) || !diskStateOf(old).SameAs(d.Disk) {
-		t.Fatalf("disk record = %+v, file = %+v", d.Disk, diskStateOf(old))
+	if !d.Disk.SameAs(recorded) || !document.DiskStateOf(old).SameAs(d.Disk) {
+		t.Fatalf("disk record = %+v, file = %+v", d.Disk, document.DiskStateOf(old))
 	}
 	// A file that changed is not adopted: the old record stays, and a save refuses it.
 	later := time.Now().Add(time.Hour)

@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/buffer"
 )
@@ -16,12 +17,12 @@ var ErrNotOpen = errors.New("document is not open")
 // The carets and selections go through the edits (CursorMap), so a format that adds
 // or removes lines above the caret leaves it on its text. It returns ErrNotOpen when no open document has path, and ErrReadOnly
 // for a read-only document, which is then left unchanged.
-func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
+func (e *Editor) ApplyLSPEdits(path string, edits []document.LSPEdit) error {
 	d := e.docWithPath(path)
 	if d == nil {
 		return fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
-	return d.ApplyEditList(edits, EditOptions{Cursor: CursorMap}, true)
+	return d.ApplyEditList(edits, document.EditOptions{Cursor: document.CursorMap}, true)
 }
 
 // ApplyCompletionAtCarets replaces the identifier prefix before EVERY caret of the open
@@ -33,13 +34,13 @@ func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
 // It returns the number of carets whose prefix was replaced (which is also the number of
 // edits), and ErrNotOpen for a path no open document has. An extra caret with an empty
 // prefix gets the text inserted, as Fresh does.
-func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *Version) (int, error) {
+func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *document.Version) (int, error) {
 	d := e.docWithPath(path)
 	if d == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
 	edits := caretPrefixEdits(d, text, wordChars)
-	if err := d.ApplyEditList(edits, EditOptions{Cursor: CursorMap, Expect: expect}, false); err != nil {
+	if err := d.ApplyEditList(edits, document.EditOptions{Cursor: document.CursorMap, Expect: expect}, false); err != nil {
 		return 0, err
 	}
 	return len(edits), nil
@@ -47,13 +48,13 @@ func (e *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *V
 
 // caretPrefixEdits returns, for the primary caret and every extra one of d, the edit that
 // replaces the identifier prefix before the caret with text.
-func caretPrefixEdits(d *Document, text, wordChars string) []LSPEdit {
+func caretPrefixEdits(d *document.Document, text, wordChars string) []document.LSPEdit {
 	positions := make([]buffer.Pos, 0, 1+len(d.Cursors()))
 	positions = append(positions, d.Cursor)
 	for _, c := range d.Cursors() {
 		positions = append(positions, c.Cursor)
 	}
-	edits := make([]LSPEdit, 0, len(positions))
+	edits := make([]document.LSPEdit, 0, len(positions))
 	for _, p := range positions {
 		p = d.Buffer.Clamp(p)
 		line := []rune(d.Buffer.Line(p.Line))
@@ -80,7 +81,7 @@ func caretPrefixEdits(d *Document, text, wordChars string) []LSPEdit {
 				}
 			}
 		}
-		edits = append(edits, LSPEdit{From: buffer.Pos{Line: p.Line, Col: start}, To: p, Text: text})
+		edits = append(edits, document.LSPEdit{From: buffer.Pos{Line: p.Line, Col: start}, To: p, Text: text})
 	}
 	return edits
 }

@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func TestSaveAsOntoOpenPathIsRefused(t *testing.T) {
 	typeText(t, e, "!")
 
 	err := e.SaveAs(a)
-	if !errors.Is(err, ErrAlreadyOpen) {
+	if !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("SaveAs err = %v, want ErrAlreadyOpen", err)
 	}
 	if !strings.Contains(err.Error(), a) {
@@ -62,7 +63,7 @@ func TestSaveAsOntoOpenPathRefusedEvenWithForce(t *testing.T) {
 	e := openTwo(t, a, b)
 	typeText(t, e, "!")
 
-	if r := e.Do("save_as", map[string]any{"path": a, "force": true}); !errors.Is(r.Err, ErrAlreadyOpen) {
+	if r := e.Do("save_as", map[string]any{"path": a, "force": true}); !errors.Is(r.Err, document.ErrAlreadyOpen) {
 		t.Fatalf("save_as with force err = %v, want ErrAlreadyOpen", r.Err)
 	}
 	if got := readFile(t, a); got != "a" {
@@ -81,7 +82,7 @@ func TestSaveAsOntoOpenPathWritesNothing(t *testing.T) {
 	e := withTabs("a", "b")
 	e.ActivateTab(1)
 	err := e.SaveAs("/fake/a")
-	if !errors.Is(err, ErrAlreadyOpen) {
+	if !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("SaveAs err = %v, want ErrAlreadyOpen", err)
 	}
 	if e.Active().Path != "/fake/b" {
@@ -122,7 +123,7 @@ func TestSaveAsSameFileThroughAnotherSpellingIsRefused(t *testing.T) {
 	e := openTwo(t, a, b)
 	// The same file under an unclean spelling is still open in tab 0.
 	spelled := dir + "/x/../a.txt"
-	if err := e.SaveAs(spelled); !errors.Is(err, ErrAlreadyOpen) {
+	if err := e.SaveAs(spelled); !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("SaveAs(%q) err = %v, want ErrAlreadyOpen", spelled, err)
 	}
 }
@@ -138,7 +139,7 @@ func TestRenamePathOntoOpenPathIsRefusedAndChangesNothing(t *testing.T) {
 	before := e.Tabs()
 
 	err := e.RenamePath(a, b)
-	if !errors.Is(err, ErrAlreadyOpen) {
+	if !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("RenamePath err = %v, want ErrAlreadyOpen", err)
 	}
 	if !strings.Contains(err.Error(), b) {
@@ -162,7 +163,7 @@ func TestRenamePathFolderOntoOpenPathIsRefused(t *testing.T) {
 	e := openTwo(t, pkgX, libX)
 
 	// Renaming pkg to lib would move pkg/x.go onto the open lib/x.go.
-	if err := e.RenamePath(filepath.Join(dir, "pkg"), filepath.Join(dir, "lib")); !errors.Is(err, ErrAlreadyOpen) {
+	if err := e.RenamePath(filepath.Join(dir, "pkg"), filepath.Join(dir, "lib")); !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("RenamePath folder err = %v, want ErrAlreadyOpen", err)
 	}
 	if got := e.docs[0].Path; got != pkgX {
@@ -190,7 +191,7 @@ func TestRenamePathFolderPartialConflictChangesNothing(t *testing.T) {
 		}
 	}
 	err := e.RenamePath(filepath.Join(dir, "src"), filepath.Join(dir, "dst"))
-	if !errors.Is(err, ErrAlreadyOpen) {
+	if !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("RenamePath err = %v, want ErrAlreadyOpen", err)
 	}
 	if e.docs[0].Path != a1 || e.docs[1].Path != a2 {

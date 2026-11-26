@@ -3,6 +3,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,12 +27,12 @@ func TestReadDocumentRefusesSpecialFile(t *testing.T) {
 		}
 	})
 	type result struct {
-		d   *Document
+		d   *document.Document
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		d, err := readDocument(path, loadSpec{})
+		d, err := document.ReadDocument(path, document.LoadSpec{})
 		done <- result{d, err}
 	}()
 	select {

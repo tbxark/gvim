@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -11,7 +12,7 @@ func TestUndoRedoIDWorkOnAnyTab(t *testing.T) {
 	t.Parallel()
 	e, ids := tabsWith("one", "two")
 	// Edit the second tab, which is not active, as one undo step.
-	err := e.ApplyEdits(ids[1], []LSPEdit{lspEdit(0, 0, 0, 0, "X"), lspEdit(0, 3, 0, 3, "Y")}, EditOptions{})
+	err := e.ApplyEdits(ids[1], []document.LSPEdit{lspEdit(0, 0, 0, 0, "X"), lspEdit(0, 3, 0, 3, "Y")}, document.EditOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,10 +50,10 @@ func TestUndoIDRefusals(t *testing.T) {
 	}
 	d, _, _ := e.DocByID(ids[0])
 	d.SetReadOnly(true)
-	if _, err := e.UndoID(ids[0]); !errors.Is(err, ErrReadOnly) {
+	if _, err := e.UndoID(ids[0]); !errors.Is(err, document.ErrReadOnly) {
 		t.Errorf("UndoID on a read-only document = %v, want ErrReadOnly", err)
 	}
-	if _, err := e.RedoID(ids[0]); !errors.Is(err, ErrReadOnly) {
+	if _, err := e.RedoID(ids[0]); !errors.Is(err, document.ErrReadOnly) {
 		t.Errorf("RedoID on a read-only document = %v, want ErrReadOnly", err)
 	}
 }

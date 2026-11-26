@@ -2,17 +2,18 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"github.com/tbxark/gvim/i18n"
 )
 
 // copyAction copies the selections, or the lines of the carets.
-func copyAction(e *Editor, d *Document, _ map[string]any) error {
+func copyAction(e *Editor, d *document.Document, _ map[string]any) error {
 	text, lines, err := d.CopyText()
 	if err != nil {
 		return err
 	}
 	if text == "" {
-		return ErrNothingSelected
+		return document.ErrNothingSelected
 	}
 	e.clipboard, e.resultText = text, text
 	if lines {
@@ -24,13 +25,13 @@ func copyAction(e *Editor, d *Document, _ map[string]any) error {
 }
 
 // cutAction copies like copyAction and deletes what it copied.
-func cutAction(e *Editor, d *Document, _ map[string]any) error {
+func cutAction(e *Editor, d *document.Document, _ map[string]any) error {
 	text, lines, err := d.CopyText()
 	if err != nil {
 		return err
 	}
 	if text == "" {
-		return ErrNothingSelected
+		return document.ErrNothingSelected
 	}
 	if lines {
 		d.CutLines()
@@ -54,15 +55,15 @@ func cutAction(e *Editor, d *Document, _ map[string]any) error {
 
 // pasteAction inserts the "text" argument, which the UI fills from the system
 // clipboard or a bracketed paste, or else the private register.
-func pasteAction(e *Editor, d *Document, args map[string]any) error {
+func pasteAction(e *Editor, d *document.Document, args map[string]any) error {
 	text, ok := args["text"].(string)
 	if !ok {
 		text = e.clipboard
 	}
 	if len(text) > buffer.MaxMaterialize {
-		return ErrPasteTooLarge
+		return document.ErrPasteTooLarge
 	}
-	if text = normalizePaste(text); text != "" {
+	if text = document.NormalizePaste(text); text != "" {
 		d.PasteText(text)
 		e.setStatus(i18n.T("", "clipboard.pasted", nil))
 	}

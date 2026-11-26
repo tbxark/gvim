@@ -17,14 +17,14 @@ const saveBufferSize = 1 << 20
 
 // errFileChanged is the refusal of a save of a large document whose file changed on disk
 // under it. Nothing more can be read from the file safely, so nothing is written.
-var errFileChanged = &largeError{
+var ErrFileChanged = &LargeError{
 	Msg:  "File changed on disk: reload or Save As after reloading",
 	Errs: []error{buffer.ErrSourceChanged},
 }
 
 // errFileGrew is the refusal of a save over a file that grew while the document was
 // open. The new bytes are not in the document, and the rename would drop them.
-var errFileGrew = &largeError{
+var ErrFileGrew = &LargeError{
 	Msg:  "File grew on disk: Save As to another path or reload",
 	Errs: []error{buffer.ErrSourceGrew},
 }
@@ -63,7 +63,7 @@ type largeSave struct {
 // because the end of the document is not known. A document with no changes saved to its
 // own file is a no-op. Only then are the save-time edits made, and the snapshot is taken
 // after them, so it holds the text that is written.
-func (d *Document) planSaveLarge(path string, o Settings, job SaveJob) SaveJob {
+func (d *Document) planSaveLarge(path string, o SaveOptions, job SaveJob) SaveJob {
 	if d.Restoring() {
 		// The text on screen is the file as it is on disk until the stash is back, and a
 		// save now would write that and look like the end of the unsaved changes.
@@ -73,23 +73,23 @@ func (d *Document) planSaveLarge(path string, o Settings, job SaveJob) SaveJob {
 	_ = d.CheckSource()
 	switch err := d.Buffer.SourceErr(); {
 	case errors.Is(err, buffer.ErrSourceChanged):
-		job.err = errFileChanged
+		job.err = ErrFileChanged
 	case err != nil:
 		job.err = fmt.Errorf("save %s: %w", path, err)
 	}
 	if job.err != nil {
 		return job
 	}
-	own := sameFile(path, d.Path)
+	own := SameFile(path, d.Path)
 	grew := d.Buffer.SourceGrew()
 	switch info := d.Index(); {
 	case grew && own:
-		job.err = errFileGrew
+		job.err = ErrFileGrew
 	case d.large.IndexErr != nil:
 		job.err = fmt.Errorf("save %s: line index failed: %w", path, d.large.IndexErr)
 	case !info.Complete:
-		job.err = &largeError{
-			Msg:  scanningStatus(info) + ": save when the index is done",
+		job.err = &LargeError{
+			Msg:  ScanningStatus(info) + ": save when the index is done",
 			Errs: []error{ErrIndexing},
 		}
 	}
@@ -100,7 +100,7 @@ func (d *Document) planSaveLarge(path string, o Settings, job SaveJob) SaveJob {
 		Buf: d.Buffer, Eol: "\n", Noop: own && !d.Dirty(),
 		AllowGrown: grew, SrcPath: d.Path, SrcSize: d.large.Size,
 	}
-	if d.Eol == eolCRLF {
+	if d.Eol == EolCRLF {
 		lg.Eol = "\r\n"
 	}
 	if d.CodecName() == "utf-8-bom" {
@@ -135,15 +135,15 @@ func (j SaveJob) writeLarge(ctx context.Context) SaveResult {
 	}, func(fi os.FileInfo) { tmp = fi })
 	switch {
 	case errors.Is(err, buffer.ErrSourceChanged):
-		return SaveResult{Job: j, err: errFileChanged}
+		return SaveResult{Job: j, err: ErrFileChanged}
 	case errors.Is(err, buffer.ErrSourceGrew):
-		return SaveResult{Job: j, err: errFileGrew}
+		return SaveResult{Job: j, err: ErrFileGrew}
 	case err != nil:
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
 	}
-	r := SaveResult{Job: j, Disk: diskStateOf(j.Path), Res: res, Tmp: tmp, Note: lg.Note}
+	r := SaveResult{Job: j, Disk: DiskStateOf(j.Path), Res: res, Tmp: tmp, Note: lg.Note}
 	if lg.AllowGrown {
-		if now := diskStateOf(lg.SrcPath); now.Exists && now.Size > lg.SrcSize {
+		if now := DiskStateOf(lg.SrcPath); now.Exists && now.Size > lg.SrcSize {
 			r.Note = fmt.Sprintf("Saved without %d appended bytes", now.Size-lg.SrcSize)
 		}
 	}
@@ -183,7 +183,7 @@ func (j SaveJob) writeLargeRemote(ctx context.Context, access FileAccess) SaveRe
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
 	}
 	disk := now.diskState()
-	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && disk.Exists {
+	if j.RefuseExisting && !SameFile(j.OwnPath, j.Path) && disk.Exists {
 		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
 	}
 	if j.CheckDisk && disk.Exists && !disk.SameAs(j.Expect) {
@@ -216,9 +216,9 @@ func (j SaveJob) writeLargeRemote(ctx context.Context, access FileAccess) SaveRe
 	case errors.Is(werr, errRemoteLargeSaveTooBig):
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %s; the merged file is over the remote windowed-save bound", j.Path, errRemoteLargeSaveTooBig.Error())}
 	case errors.Is(werr, buffer.ErrSourceChanged):
-		return SaveResult{Job: j, err: errFileChanged}
+		return SaveResult{Job: j, err: ErrFileChanged}
 	case errors.Is(werr, buffer.ErrSourceGrew):
-		return SaveResult{Job: j, err: errFileGrew}
+		return SaveResult{Job: j, err: ErrFileGrew}
 	case werr != nil:
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, werr)}
 	}
@@ -227,7 +227,7 @@ func (j SaveJob) writeLargeRemote(ctx context.Context, access FileAccess) SaveRe
 	}
 	after, err := access.Stat(j.Path)
 	if err != nil {
-		return SaveResult{Job: j, Disk: diskState{Exists: true, Size: res.Bytes}, Res: res}
+		return SaveResult{Job: j, Disk: DiskState{Exists: true, Size: res.Bytes}, Res: res}
 	}
 	var src buffer.Source
 	if fresh, openErr := newRemoteWindowSource(ctx, accessRange, j.Path, int64(lw.buf.Len())); openErr == nil {
@@ -248,10 +248,10 @@ func (j SaveJob) writeLargeRemoteStreamed(ctx context.Context, access FileAccess
 	switch {
 	case errors.Is(werr, buffer.ErrSourceChanged):
 		cleanup()
-		return SaveResult{Job: j, err: errFileChanged}
+		return SaveResult{Job: j, err: ErrFileChanged}
 	case errors.Is(werr, buffer.ErrSourceGrew):
 		cleanup()
-		return SaveResult{Job: j, err: errFileGrew}
+		return SaveResult{Job: j, err: ErrFileGrew}
 	case werr != nil:
 		cleanup()
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, werr)}
@@ -262,7 +262,7 @@ func (j SaveJob) writeLargeRemoteStreamed(ctx context.Context, access FileAccess
 	}
 	after, err := access.Stat(j.Path)
 	if err != nil {
-		return SaveResult{Job: j, Disk: diskState{Exists: true, Size: res.Bytes}, Res: res, Note: lg.Note}
+		return SaveResult{Job: j, Disk: DiskState{Exists: true, Size: res.Bytes}, Res: res, Note: lg.Note}
 	}
 	var src buffer.Source
 	if fresh, openErr := newRemoteWindowSource(ctx, accessRange, j.Path, res.Bytes); openErr == nil {
@@ -300,9 +300,9 @@ func saveNote(note, owner string) string {
 
 // writtenOf describes the file that the save of r wrote. Its modification time is the
 // one of the temporary file that was renamed to the path.
-func writtenOf(r SaveResult) *writtenFile {
+func WrittenOf(r SaveResult) *writtenFile {
 	lg := r.Job.large
-	mtime := mtimeNano(r.Disk)
+	mtime := MtimeNano(r.Disk)
 	if r.Tmp != nil {
 		mtime = r.Tmp.ModTime().UnixNano()
 	}
@@ -316,7 +316,7 @@ func writtenOf(r SaveResult) *writtenFile {
 // find actions are limited to, and the work that waits for the line index. The jump list
 // and the bookmarks need nothing: every jump clamps its place into the text.
 func (d *Document) ResetHistoryState() {
-	d.LastMulti = nil
+	d.lastMulti = nil
 	d.FindRange = nil
 	if d.large != nil {
 		d.large.Pending = nil
@@ -343,7 +343,7 @@ func (d *Document) SavedStatus() string {
 // just written there. info is the state of the open file itself, taken from its
 // descriptor and not from the path, so the caller can tell which file was opened. It is
 // nil for a source that is not a file.
-func openSavedSource(path string) (src buffer.Source, info os.FileInfo, err error) {
+func OpenSavedSource(path string) (src buffer.Source, info os.FileInfo, err error) {
 	src, err = buffer.OpenFileSource(path)
 	if err != nil {
 		return nil, nil, err

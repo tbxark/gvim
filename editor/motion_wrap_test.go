@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -28,21 +29,21 @@ func TestWrappedVerticalMotionMovesByDisplayRow(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Start buffer.Pos
-		steps []Action
+		steps []document.Action
 		Want  buffer.Pos
 	}{
-		{"down moves to the next row of the line", caretPos(0, 3), []Action{"move_down"}, caretPos(0, 13)},
-		{"down twice reaches the last row", caretPos(0, 3), []Action{"move_down", "move_down"}, caretPos(0, 23)},
-		{"down from the last row goes to the next line", caretPos(0, 23), []Action{"move_down"}, caretPos(1, 3)},
-		{"up from a short line lands on the last row above", caretPos(1, 2), []Action{"move_up"}, caretPos(0, 22)},
-		{"up moves to the previous row", caretPos(0, 14), []Action{"move_up"}, caretPos(0, 4)},
-		{"the goal column survives a short row", caretPos(0, 7), []Action{"move_down", "move_down", "move_down", "move_down"}, caretPos(2, 7)},
-		{"a short last row clamps the goal column", caretPos(0, 7), []Action{"move_down", "move_down", "move_down", "move_down", "move_down"}, caretPos(2, 12)},
-		{"up through a wrapped line keeps the goal column", caretPos(2, 7), []Action{"move_up", "move_up", "move_up", "move_up"}, caretPos(0, 7)},
-		{"a row end is not the next row start", caretPos(0, 9), []Action{"move_down"}, caretPos(0, 19)},
-		{"shift down selects to the next row", caretPos(0, 3), []Action{"select_down"}, caretPos(0, 13)},
-		{"up on the first row of the first line goes to the start", caretPos(0, 3), []Action{"move_up"}, caretPos(0, 0)},
-		{"down on the last line goes to the end", caretPos(3, 1), []Action{"move_down"}, caretPos(3, 3)},
+		{"down moves to the next row of the line", caretPos(0, 3), []document.Action{"move_down"}, caretPos(0, 13)},
+		{"down twice reaches the last row", caretPos(0, 3), []document.Action{"move_down", "move_down"}, caretPos(0, 23)},
+		{"down from the last row goes to the next line", caretPos(0, 23), []document.Action{"move_down"}, caretPos(1, 3)},
+		{"up from a short line lands on the last row above", caretPos(1, 2), []document.Action{"move_up"}, caretPos(0, 22)},
+		{"up moves to the previous row", caretPos(0, 14), []document.Action{"move_up"}, caretPos(0, 4)},
+		{"the goal column survives a short row", caretPos(0, 7), []document.Action{"move_down", "move_down", "move_down", "move_down"}, caretPos(2, 7)},
+		{"a short last row clamps the goal column", caretPos(0, 7), []document.Action{"move_down", "move_down", "move_down", "move_down", "move_down"}, caretPos(2, 12)},
+		{"up through a wrapped line keeps the goal column", caretPos(2, 7), []document.Action{"move_up", "move_up", "move_up", "move_up"}, caretPos(0, 7)},
+		{"a row end is not the next row start", caretPos(0, 9), []document.Action{"move_down"}, caretPos(0, 19)},
+		{"shift down selects to the next row", caretPos(0, 3), []document.Action{"select_down"}, caretPos(0, 13)},
+		{"up on the first row of the first line goes to the start", caretPos(0, 3), []document.Action{"move_up"}, caretPos(0, 0)},
+		{"down on the last line goes to the end", caretPos(3, 1), []document.Action{"move_down"}, caretPos(3, 3)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -73,18 +74,18 @@ func TestWrappedHomeAndEnd(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Start buffer.Pos
-		steps []Action
+		steps []document.Action
 		Want  buffer.Pos
 	}{
-		{"home on a continuation row goes to the row start", caretPos(0, 15), []Action{"smart_home"}, caretPos(0, 10)},
-		{"home again goes to the previous row start", caretPos(0, 15), []Action{"smart_home", "smart_home"}, caretPos(0, 0)},
-		{"home on the first row is the smart home", caretPos(0, 4), []Action{"smart_home"}, caretPos(0, 0)},
-		{"move_line_start walks the rows back", caretPos(0, 25), []Action{"move_line_start", "move_line_start", "move_line_start"}, caretPos(0, 0)},
-		{"end goes to the last character of the row", caretPos(0, 3), []Action{"move_line_end"}, caretPos(0, 9)},
-		{"end again goes to the next row end", caretPos(0, 3), []Action{"move_line_end", "move_line_end"}, caretPos(0, 19)},
-		{"end on the last row goes to the line end", caretPos(0, 3), []Action{"move_line_end", "move_line_end", "move_line_end", "move_line_end"}, caretPos(0, 25)},
-		{"end on an unwrapped line is the line end", caretPos(1, 0), []Action{"move_line_end"}, caretPos(1, 3)},
-		{"shift end selects to the row end", caretPos(0, 3), []Action{"select_line_end"}, caretPos(0, 9)},
+		{"home on a continuation row goes to the row start", caretPos(0, 15), []document.Action{"smart_home"}, caretPos(0, 10)},
+		{"home again goes to the previous row start", caretPos(0, 15), []document.Action{"smart_home", "smart_home"}, caretPos(0, 0)},
+		{"home on the first row is the smart home", caretPos(0, 4), []document.Action{"smart_home"}, caretPos(0, 0)},
+		{"move_line_start walks the rows back", caretPos(0, 25), []document.Action{"move_line_start", "move_line_start", "move_line_start"}, caretPos(0, 0)},
+		{"end goes to the last character of the row", caretPos(0, 3), []document.Action{"move_line_end"}, caretPos(0, 9)},
+		{"end again goes to the next row end", caretPos(0, 3), []document.Action{"move_line_end", "move_line_end"}, caretPos(0, 19)},
+		{"end on the last row goes to the line end", caretPos(0, 3), []document.Action{"move_line_end", "move_line_end", "move_line_end", "move_line_end"}, caretPos(0, 25)},
+		{"end on an unwrapped line is the line end", caretPos(1, 0), []document.Action{"move_line_end"}, caretPos(1, 3)},
+		{"shift end selects to the row end", caretPos(0, 3), []document.Action{"select_line_end"}, caretPos(0, 9)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -120,7 +121,7 @@ func TestPageInATallWrappedLineMovesByRows(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Start buffer.Pos
-		act   Action
+		act   document.Action
 		Want  buffer.Pos
 	}{
 		{"page down moves one page of rows", caretPos(0, 3), "move_page_down", caretPos(0, 53)}, // 8 rows less 3 of overlap

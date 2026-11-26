@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -16,7 +17,7 @@ func docAt(text string, line, col int) *Editor {
 // withExtras gives the active document extra carets at the given positions.
 func withExtras(e *Editor, ps ...buffer.Pos) {
 	for _, p := range ps {
-		e.Active().Extra = append(e.Active().Extra, Caret{Cursor: p})
+		e.Active().Extra = append(e.Active().Extra, document.Caret{Cursor: p})
 	}
 }
 
@@ -26,18 +27,18 @@ func TestPlainMoveCollapsesSelectionToEdge(t *testing.T) {
 		Name  string
 		Text  string
 		Start buffer.Pos
-		steps []Action
+		steps []document.Action
 		Want  buffer.Pos
 		Sel   bool
 	}{
-		{"left goes to the selection start", "abcdef", caretPos(0, 1), []Action{"select_right", "select_right", "select_right", "move_left"}, caretPos(0, 1), false},
-		{"right goes to the selection end", "abcdef", caretPos(0, 1), []Action{"select_right", "select_right", "select_right", "move_right"}, caretPos(0, 4), false},
-		{"left on a backward selection goes to its start", "abcdef", caretPos(0, 4), []Action{"select_left", "select_left", "move_left"}, caretPos(0, 2), false},
-		{"right on a backward selection goes to its end", "abcdef", caretPos(0, 4), []Action{"select_left", "select_left", "move_right"}, caretPos(0, 4), false},
-		{"up starts from the selection start", "abcdef\nabcdef\nabcdef", caretPos(1, 1), []Action{"select_right", "select_right", "select_right", "move_up"}, caretPos(0, 1), false},
-		{"down starts from the selection end", "abcdef\nabcdef\nabcdef", caretPos(1, 1), []Action{"select_right", "select_right", "select_right", "move_down"}, caretPos(2, 4), false},
-		{"mark mode keeps extending", "abcdef", caretPos(0, 1), []Action{"set_mark", "move_right", "move_right", "move_left"}, caretPos(0, 2), true},
-		{"word motions do not collapse", "abc def ghi", caretPos(0, 0), []Action{"select_right", "move_word_right"}, caretPos(0, 4), false},
+		{"left goes to the selection start", "abcdef", caretPos(0, 1), []document.Action{"select_right", "select_right", "select_right", "move_left"}, caretPos(0, 1), false},
+		{"right goes to the selection end", "abcdef", caretPos(0, 1), []document.Action{"select_right", "select_right", "select_right", "move_right"}, caretPos(0, 4), false},
+		{"left on a backward selection goes to its start", "abcdef", caretPos(0, 4), []document.Action{"select_left", "select_left", "move_left"}, caretPos(0, 2), false},
+		{"right on a backward selection goes to its end", "abcdef", caretPos(0, 4), []document.Action{"select_left", "select_left", "move_right"}, caretPos(0, 4), false},
+		{"up starts from the selection start", "abcdef\nabcdef\nabcdef", caretPos(1, 1), []document.Action{"select_right", "select_right", "select_right", "move_up"}, caretPos(0, 1), false},
+		{"down starts from the selection end", "abcdef\nabcdef\nabcdef", caretPos(1, 1), []document.Action{"select_right", "select_right", "select_right", "move_down"}, caretPos(2, 4), false},
+		{"mark mode keeps extending", "abcdef", caretPos(0, 1), []document.Action{"set_mark", "move_right", "move_right", "move_left"}, caretPos(0, 2), true},
+		{"word motions do not collapse", "abc def ghi", caretPos(0, 0), []document.Action{"select_right", "move_word_right"}, caretPos(0, 4), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -57,17 +58,17 @@ func TestVerticalMoveAtDocumentEdges(t *testing.T) {
 	tests := []struct {
 		Name     string
 		Start    buffer.Pos
-		steps    []Action
+		steps    []document.Action
 		Want     buffer.Pos
 		wantAnch *buffer.Pos
 	}{
-		{"up on the first line goes to the start", caretPos(0, 3), []Action{"move_up"}, caretPos(0, 0), nil},
-		{"shift up on the first line selects to the start", caretPos(0, 3), []Action{"select_up"}, caretPos(0, 0), &buffer.Pos{Col: 3}},
-		{"down on the last line goes to the end", caretPos(1, 1), []Action{"move_down"}, caretPos(1, 4), nil},
-		{"shift down on the last line selects to the end", caretPos(1, 1), []Action{"select_down"}, caretPos(1, 4), &buffer.Pos{Line: 1, Col: 1}},
-		{"a plain edge move clears the selection", caretPos(1, 1), []Action{"select_right", "move_down"}, caretPos(1, 4), nil},
-		{"up at the very start stays put", caretPos(0, 0), []Action{"move_up"}, caretPos(0, 0), nil},
-		{"down in the middle is unchanged", caretPos(0, 3), []Action{"move_down"}, caretPos(1, 3), nil},
+		{"up on the first line goes to the start", caretPos(0, 3), []document.Action{"move_up"}, caretPos(0, 0), nil},
+		{"shift up on the first line selects to the start", caretPos(0, 3), []document.Action{"select_up"}, caretPos(0, 0), &buffer.Pos{Col: 3}},
+		{"down on the last line goes to the end", caretPos(1, 1), []document.Action{"move_down"}, caretPos(1, 4), nil},
+		{"shift down on the last line selects to the end", caretPos(1, 1), []document.Action{"select_down"}, caretPos(1, 4), &buffer.Pos{Line: 1, Col: 1}},
+		{"a plain edge move clears the selection", caretPos(1, 1), []document.Action{"select_right", "move_down"}, caretPos(1, 4), nil},
+		{"up at the very start stays put", caretPos(0, 0), []document.Action{"move_up"}, caretPos(0, 0), nil},
+		{"down in the middle is unchanged", caretPos(0, 3), []document.Action{"move_down"}, caretPos(1, 3), nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -97,16 +98,16 @@ func TestVerticalMoveKeepsDisplayColumn(t *testing.T) {
 		Name  string
 		Text  string
 		Start buffer.Pos
-		steps []Action
+		steps []document.Action
 		Want  buffer.Pos
 	}{
-		{"wide characters count two cells", "你好xy\nabcdef", caretPos(0, 2), []Action{"move_down"}, caretPos(1, 4)},
-		{"back up lands after the wide characters", "你好xy\nabcdef", caretPos(1, 4), []Action{"move_up"}, caretPos(0, 2)},
-		{"never splits a wide character", "你好xy\nabcdef", caretPos(1, 3), []Action{"move_up"}, caretPos(0, 2)},
-		{"a tab counts to the next tab stop", "\tab\nabcdefgh", caretPos(0, 1), []Action{"move_down"}, caretPos(1, 4)},
-		{"a tab line below keeps the cells", "abcdefgh\n\tab", caretPos(0, 4), []Action{"move_down"}, caretPos(1, 1)},
-		{"combining marks take no cell", "e\u0301x\nabc", caretPos(0, 2), []Action{"move_down"}, caretPos(1, 1)},
-		{"the wanted column survives a short line", "abcdef\n你\nabcdef", caretPos(0, 4), []Action{"move_down", "move_down"}, caretPos(2, 4)},
+		{"wide characters count two cells", "你好xy\nabcdef", caretPos(0, 2), []document.Action{"move_down"}, caretPos(1, 4)},
+		{"back up lands after the wide characters", "你好xy\nabcdef", caretPos(1, 4), []document.Action{"move_up"}, caretPos(0, 2)},
+		{"never splits a wide character", "你好xy\nabcdef", caretPos(1, 3), []document.Action{"move_up"}, caretPos(0, 2)},
+		{"a tab counts to the next tab stop", "\tab\nabcdefgh", caretPos(0, 1), []document.Action{"move_down"}, caretPos(1, 4)},
+		{"a tab line below keeps the cells", "abcdefgh\n\tab", caretPos(0, 4), []document.Action{"move_down"}, caretPos(1, 1)},
+		{"combining marks take no cell", "e\u0301x\nabc", caretPos(0, 2), []document.Action{"move_down"}, caretPos(1, 1)},
+		{"the wanted column survives a short line", "abcdef\n你\nabcdef", caretPos(0, 4), []document.Action{"move_down", "move_down"}, caretPos(2, 4)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -239,7 +240,7 @@ func TestGraphemeClusterMovementAndDeletion(t *testing.T) {
 		Name     string
 		Text     string
 		Start    int
-		action   Action
+		action   document.Action
 		wantCol  int
 		wantText string
 	}{
@@ -286,43 +287,43 @@ func TestMotionsRunAtEveryCaret(t *testing.T) {
 		Text  string
 		Start buffer.Pos
 		Extra buffer.Pos
-		steps []Action
+		steps []document.Action
 		Want  carets
 	}{
 		{
 			Name: "right moves both", Text: "abcd\nefgh", Start: caretPos(0, 1), Extra: caretPos(1, 1),
-			steps: []Action{"move_right"},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 2)}}},
+			steps: []document.Action{"move_right"},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 2)}, extras: []document.Caret{{Cursor: caretPos(1, 2)}}},
 		},
 		{
 			Name: "select_right extends both", Text: "abcd\nefgh", Start: caretPos(0, 1), Extra: caretPos(1, 1),
-			steps: []Action{"select_right"},
+			steps: []document.Action{"select_right"},
 			Want: carets{
-				Primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 1), caretPos(0, 2))},
-				extras:  []Caret{{Cursor: caretPos(1, 2), Sel: caretSel(caretPos(1, 1), caretPos(1, 2))}},
+				Primary: document.Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 1), caretPos(0, 2))},
+				extras:  []document.Caret{{Cursor: caretPos(1, 2), Sel: caretSel(caretPos(1, 1), caretPos(1, 2))}},
 			},
 		},
 		{
 			Name: "each caret keeps its own wanted column", Text: "abcd\nx\nabcdef\ny", Start: caretPos(0, 3), Extra: caretPos(2, 5),
-			steps: []Action{"move_down", "move_up"},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 3)}, extras: []Caret{{Cursor: caretPos(2, 5)}}},
+			steps: []document.Action{"move_down", "move_up"},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 3)}, extras: []document.Caret{{Cursor: caretPos(2, 5)}}},
 		},
 		{
 			Name: "carets that meet merge", Text: "abcd", Start: caretPos(0, 1), Extra: caretPos(0, 2),
-			steps: []Action{"move_line_start"},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 0)}},
+			steps: []document.Action{"move_line_start"},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 0)}},
 		},
 		{
 			Name: "end of line moves both", Text: "ab\ncdef", Start: caretPos(0, 0), Extra: caretPos(1, 0),
-			steps: []Action{"move_line_end"},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
+			steps: []document.Action{"move_line_end"},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 2)}, extras: []document.Caret{{Cursor: caretPos(1, 4)}}},
 		},
 		{
 			Name: "select_word selects at both", Text: "ab cd\nef gh", Start: caretPos(0, 1), Extra: caretPos(1, 4),
-			steps: []Action{"select_word"},
+			steps: []document.Action{"select_word"},
 			Want: carets{
-				Primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 0), caretPos(0, 2))},
-				extras:  []Caret{{Cursor: caretPos(1, 5), Sel: caretSel(caretPos(1, 3), caretPos(1, 5))}},
+				Primary: document.Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 0), caretPos(0, 2))},
+				extras:  []document.Caret{{Cursor: caretPos(1, 5), Sel: caretSel(caretPos(1, 3), caretPos(1, 5))}},
 			},
 		},
 	}

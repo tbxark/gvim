@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func TestClusterBoundariesOfAVeryLongLine(t *testing.T) {
 	pieces := []string{"abc ", "日本語", "é", "👨‍👩‍👧", "é", "漢字かな", "ñ", " x ", "กำ", "ab"}
 	rng := rand.New(rand.NewPCG(6, 1))
 	var sb strings.Builder
-	for len([]rune(sb.String())) < 3*clusterWholeLine {
+	for len([]rune(sb.String())) < 3*document.ClusterWholeLine {
 		sb.WriteString(pieces[rng.IntN(len(pieces))])
 	}
 	text := sb.String()
@@ -57,10 +58,10 @@ func TestClusterBoundariesOfAVeryLongLine(t *testing.T) {
 				break
 			}
 		}
-		if got := prevBoundary(b, 1, col); got != prev {
+		if got := document.PrevBoundary(b, 1, col); got != prev {
 			t.Fatalf("prevBoundary(%d) = %d, want %d", col, got, prev)
 		}
-		if got := nextBoundary(b, 1, col); got != next {
+		if got := document.NextBoundary(b, 1, col); got != next {
 			t.Fatalf("nextBoundary(%d) = %d, want %d", col, got, next)
 		}
 	}

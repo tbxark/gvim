@@ -54,7 +54,7 @@ func (d *Document) FollowDisk(path string) {
 		// reads as no change, and any other move reads as an outside change on save.
 		return
 	}
-	now := diskStateOf(path)
+	now := DiskStateOf(path)
 	if !now.Exists {
 		return
 	}
@@ -79,7 +79,7 @@ func (d *Document) FollowDisk(path string) {
 // which is the usual case and includes the macOS /var link, the caller's spelling
 // is kept, so the stored path matches the spelling the explorer uses. A directory
 // part that does not exist keeps the lexical result.
-func absPath(path string) (string, error) {
+func AbsPath(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
@@ -134,7 +134,7 @@ func sameDirectory(a, b string) bool {
 // within reports whether path is root or lies under it. It returns the part of
 // path below root, using the platform separator, and "" when path is root. Both
 // paths are cleaned before comparing. An empty path never matches.
-func within(path, root string) (rest string, ok bool) {
+func Within(path, root string) (rest string, ok bool) {
 	if path == "" || root == "" {
 		return "", false
 	}
@@ -154,7 +154,7 @@ func within(path, root string) (rest string, ok bool) {
 
 // sameFile reports whether a and b name the same file on disk. An empty name
 // never matches.
-func sameFile(a, b string) bool {
+func SameFile(a, b string) bool {
 	if a == "" || b == "" {
 		return false
 	}

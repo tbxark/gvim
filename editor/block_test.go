@@ -1,13 +1,14 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
 )
 
 // actionStep runs the actions in order as one step of a block selection test.
-func actionStep(as ...Action) func(t *testing.T, e *Editor) {
+func actionStep(as ...document.Action) func(t *testing.T, e *Editor) {
 	return func(t *testing.T, e *Editor) {
 		t.Helper()
 		run(t, e, as...)
@@ -36,8 +37,8 @@ func TestBlockSelect(t *testing.T) {
 			Start: caretPos(0, 1),
 			steps: []func(*testing.T, *Editor){actionStep("block_select_down")},
 			Want: carets{
-				Primary: Caret{Cursor: caretPos(1, 1)},
-				extras:  []Caret{{Cursor: caretPos(0, 1)}},
+				Primary: document.Caret{Cursor: caretPos(1, 1)},
+				extras:  []document.Caret{{Cursor: caretPos(0, 1)}},
 			},
 		},
 		{
@@ -48,8 +49,8 @@ func TestBlockSelect(t *testing.T) {
 				actionStep("block_select_down", "block_select_down", "block_select_right", "block_select_right"),
 			},
 			Want: carets{
-				Primary: Caret{Cursor: caretPos(2, 3), Sel: caretSel(caretPos(2, 1), caretPos(2, 3))},
-				extras: []Caret{
+				Primary: document.Caret{Cursor: caretPos(2, 3), Sel: caretSel(caretPos(2, 1), caretPos(2, 3))},
+				extras: []document.Caret{
 					{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 1), caretPos(0, 3))},
 					{Cursor: caretPos(1, 3), Sel: caretSel(caretPos(1, 1), caretPos(1, 3))},
 				},
@@ -61,7 +62,7 @@ func TestBlockSelect(t *testing.T) {
 			Start: caretPos(0, 3),
 			steps: []func(*testing.T, *Editor){actionStep("block_select_left")},
 			Want: carets{
-				Primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 3), caretPos(0, 2))},
+				Primary: document.Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 3), caretPos(0, 2))},
 			},
 		},
 		{
@@ -69,14 +70,14 @@ func TestBlockSelect(t *testing.T) {
 			Text:  "abcd\nefgh",
 			Start: caretPos(0, 1),
 			steps: []func(*testing.T, *Editor){actionStep("block_select_up")},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 1)}},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 1)}},
 		},
 		{
 			Name:  "block_select_right at the end of a line stops there",
 			Text:  "abcd\nefgh",
 			Start: caretPos(0, 4),
 			steps: []func(*testing.T, *Editor){actionStep("block_select_right")},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 4)}},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 4)}},
 		},
 		{
 			Name:  "down onto a shorter line clamps the caret and keeps the rectangle",
@@ -84,8 +85,8 @@ func TestBlockSelect(t *testing.T) {
 			Start: caretPos(0, 4),
 			steps: []func(*testing.T, *Editor){actionStep("block_select_down", "block_select_down")},
 			Want: carets{
-				Primary: Caret{Cursor: caretPos(2, 2), Sel: caretSel(caretPos(2, 4), caretPos(2, 2))},
-				extras: []Caret{
+				Primary: document.Caret{Cursor: caretPos(2, 2), Sel: caretSel(caretPos(2, 4), caretPos(2, 2))},
+				extras: []document.Caret{
 					{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 4), caretPos(0, 2))},
 					{Cursor: caretPos(1, 2)},
 				},
@@ -100,7 +101,7 @@ func TestBlockSelect(t *testing.T) {
 				moveStep(caretPos(0, 3)),
 				actionStep("block_select_right"),
 			},
-			Want: carets{Primary: Caret{Cursor: caretPos(0, 4), Sel: caretSel(caretPos(0, 3), caretPos(0, 4))}},
+			Want: carets{Primary: document.Caret{Cursor: caretPos(0, 4), Sel: caretSel(caretPos(0, 3), caretPos(0, 4))}},
 		},
 		{
 			Name:  "remove_secondary_cursors ends the block",
@@ -111,7 +112,7 @@ func TestBlockSelect(t *testing.T) {
 				actionStep("remove_secondary_cursors"),
 				actionStep("block_select_right"),
 			},
-			Want: carets{Primary: Caret{Cursor: caretPos(1, 2), Sel: caretSel(caretPos(1, 1), caretPos(1, 2))}},
+			Want: carets{Primary: document.Caret{Cursor: caretPos(1, 2), Sel: caretSel(caretPos(1, 1), caretPos(1, 2))}},
 		},
 	}
 	for _, tt := range tests {
@@ -141,8 +142,8 @@ func TestTypingReplacesEachLineOfABlock(t *testing.T) {
 		t.Fatalf("text = %q, want %q", text(e), "aXd\neXh")
 	}
 	want := carets{
-		Primary: Caret{Cursor: caretPos(1, 2)},
-		extras:  []Caret{{Cursor: caretPos(0, 2)}},
+		Primary: document.Caret{Cursor: caretPos(1, 2)},
+		extras:  []document.Caret{{Cursor: caretPos(0, 2)}},
 	}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %v, want %v", got, want)
@@ -156,20 +157,20 @@ func TestBlockSelectHorizontalStepMovesByCluster(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Start buffer.Pos
-		steps []Action
+		steps []document.Action
 		Want  carets
 	}{
 		{
 			Name:  "right steps over the whole cluster",
 			Start: caretPos(0, 0),
-			steps: []Action{"block_select_right", "block_select_right"},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
+			steps: []document.Action{"block_select_right", "block_select_right"},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
 		},
 		{
 			Name:  "left steps back over the whole cluster",
 			Start: caretPos(0, 3),
-			steps: []Action{"block_select_left"},
-			Want:  carets{Primary: Caret{Cursor: caretPos(0, 1), Sel: caretSel(caretPos(0, 3), caretPos(0, 1))}},
+			steps: []document.Action{"block_select_left"},
+			Want:  carets{Primary: document.Caret{Cursor: caretPos(0, 1), Sel: caretSel(caretPos(0, 3), caretPos(0, 1))}},
 		},
 	}
 	for _, tt := range tests {

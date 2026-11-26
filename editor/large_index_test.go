@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"regexp"
 	"strings"
 	"sync"
@@ -127,7 +128,7 @@ func TestPlanIndexChoosesDocuments(t *testing.T) {
 		}
 		e.ApplyIndex(job.Run(context.Background()))
 		// Both documents finish, whichever is active.
-		for _, d := range []*Document{a, b} {
+		for _, d := range []*document.Document{a, b} {
 			for !d.Index().Complete {
 				indexStep(e)
 			}
@@ -143,7 +144,7 @@ func TestApplyIndexDropsStaleResults(t *testing.T) {
 	t.Run("tab closed", func(t *testing.T) {
 		t.Parallel()
 		e, d := openLarge(t, largeOptions(), lineText(400))
-		e.docs = append(e.docs, newDocument("", "other"))
+		e.docs = append(e.docs, document.NewDocument("", "other"))
 		job, _ := e.PlanIndex()
 		res := job.Run(context.Background())
 		if err := e.CloseTab(0, true); err != nil {

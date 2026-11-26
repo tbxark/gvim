@@ -11,8 +11,8 @@ import (
 func pageViewDoc(t *testing.T, content string) *Editor {
 	t.Helper()
 	e := docWith(Options{}, content)
-	e.SetLanguageSettings(func(language, path string) LanguageSettings {
-		return LanguageSettings{TabSize: 4, LineWrap: true}
+	e.SetLanguageSettings(func(language, path string) document.LanguageSettings {
+		return document.LanguageSettings{TabSize: 4, LineWrap: true}
 	})
 	return e
 }
@@ -67,8 +67,8 @@ func TestPageViewCopyUsesTheSourceMarkers(t *testing.T) {
 func TestPageViewTurnsVirtualSpaceOff(t *testing.T) {
 	t.Parallel()
 	e := docWith(Options{VirtualSpace: document.VirtualSpaceOn}, "abc\n")
-	e.SetLanguageSettings(func(language, path string) LanguageSettings {
-		return LanguageSettings{TabSize: 4, LineWrap: false}
+	e.SetLanguageSettings(func(language, path string) document.LanguageSettings {
+		return document.LanguageSettings{TabSize: 4, LineWrap: false}
 	})
 	e.SetCursor(buffer.Pos{Line: 0, Col: 3}, false)
 	run(t, e, "move_right")

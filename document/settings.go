@@ -82,37 +82,12 @@ type IndentRules struct {
 // (Document.Language, which may be empty) and file path (which may be empty).
 type SettingsResolver func(language, path string) LanguageSettings
 
-// Settings are the editor options one document reads while it edits and saves.
-// The editor builds them from its Options and refreshes a document's settings
-// when the options or the language settings change, so the document side never
-// reads the session state. See editor.Options.
-type Settings struct {
+// SaveOptions are the save-time tidying options a Document applies when saving.
+type SaveOptions struct {
 	// TrimTrailingWhitespace strips trailing spaces and tabs from every line on
 	// save. The buffer is changed to match, as one undo step.
 	TrimTrailingWhitespace bool
 	// EnsureFinalNewline ends the saved text with a line break, and the buffer
 	// gets it too. An empty text stays empty.
 	EnsureFinalNewline bool
-	// UseTabs makes Tab insert a literal tab; TabSize is the columns per tab
-	// stop and the width of one indent unit in spaces.
-	UseTabs    bool
-	TabSize    int
-	AutoIndent bool
-	// AutoClose and AutoSurround are the typing assists; they can be switched
-	// off per language, and the editor resolves which wins.
-	AutoClose    bool
-	AutoSurround bool
-	// DefaultLineEnding is the line ending for a document with no file to read
-	// it from: "LF" or "CRLF".
-	DefaultLineEnding string
-	// AutoReadOnly opens files that are not writable, or that sit in a library
-	// folder, as read-only.
-	AutoReadOnly bool
-	// SnapshotInterval is the edits between undo snapshots.
-	SnapshotInterval int
-	// LargeFileThresholdBytes is the file size from which a file opens in large
-	// file mode; LargeFileMode is the switch that enables the mode.
-	LargeFileThresholdBytes int
-	EstimatedLineLength     int
-	LargeFileMode           bool
 }

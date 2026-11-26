@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -24,10 +25,10 @@ func clipEditor(t *testing.T, text string) *Editor {
 func caretsAt(t *testing.T, e *Editor, ps ...buffer.Pos) {
 	t.Helper()
 	d := e.Active()
-	d.SetCarets(func() []caret {
-		out := make([]caret, len(ps))
+	d.SetCarets(func() []document.CaretState {
+		out := make([]document.CaretState, len(ps))
 		for i, p := range ps {
-			out[i] = caret{Anchor: p, Head: p, Primary: i == 0}
+			out[i] = document.CaretState{Anchor: p, Head: p, Primary: i == 0}
 		}
 		return out
 	}())
@@ -40,7 +41,7 @@ func TestCopyCut(t *testing.T) {
 		Name      string
 		Text      string
 		setup     func(t *testing.T, e *Editor)
-		action    Action
+		action    document.Action
 		wantClip  string
 		wantText  string
 		wantState string
@@ -163,9 +164,9 @@ func TestCopyCut(t *testing.T) {
 // selectCarets makes one caret per range, the first being the primary one.
 func selectCarets(t *testing.T, e *Editor, ranges ...[2]buffer.Pos) {
 	t.Helper()
-	cs := make([]caret, len(ranges))
+	cs := make([]document.CaretState, len(ranges))
 	for i, r := range ranges {
-		cs[i] = caret{Anchor: r[0], Head: r[1], Primary: i == 0}
+		cs[i] = document.CaretState{Anchor: r[0], Head: r[1], Primary: i == 0}
 	}
 	e.Active().SetCarets(cs)
 }
@@ -174,7 +175,7 @@ func TestCopyOfNothingFails(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
 	r := e.Do("copy", nil)
-	if !errors.Is(r.Err, ErrNothingSelected) {
+	if !errors.Is(r.Err, document.ErrNothingSelected) {
 		t.Fatalf("copy err = %v, want ErrNothingSelected", r.Err)
 	}
 	if r.Text != "" || e.clipboard != "" {
@@ -271,7 +272,7 @@ func TestPasteOverTheCapIsRefused(t *testing.T) {
 	e := clipEditor(t, "abc")
 	big := strings.Repeat("x", buffer.MaxMaterialize+1)
 	r := e.Do("paste", map[string]any{"text": big})
-	if !errors.Is(r.Err, ErrPasteTooLarge) {
+	if !errors.Is(r.Err, document.ErrPasteTooLarge) {
 		t.Fatalf("err = %v, want ErrPasteTooLarge", r.Err)
 	}
 	if got := text(e); got != "abc" {
@@ -287,7 +288,7 @@ func TestPasteTextIsRefusedWhenReadOnly(t *testing.T) {
 	e := clipEditor(t, "abc")
 	run(t, e, "toggle_read_only")
 	r := e.Do("paste", map[string]any{"text": "x"})
-	if !errors.Is(r.Err, ErrReadOnly) {
+	if !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 	}
 	if got := text(e); got != "abc" {

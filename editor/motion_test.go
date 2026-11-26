@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,18 +19,18 @@ func TestWordMotions(t *testing.T) {
 		fn    func(*buffer.Buffer, buffer.Pos) buffer.Pos
 		Want  buffer.Pos
 	}{
-		{"left from end of word", buffer.Pos{Line: 0, Col: 7}, wordLeft, buffer.Pos{Line: 0, Col: 4}},
-		{"left across punctuation", buffer.Pos{Line: 0, Col: 8}, wordLeft, buffer.Pos{Line: 0, Col: 7}},
-		{"left skips spaces", buffer.Pos{Line: 0, Col: 4}, wordLeft, buffer.Pos{Line: 0, Col: 0}},
-		{"left at start", buffer.Pos{Line: 0, Col: 0}, wordLeft, buffer.Pos{Line: 0, Col: 0}},
-		{"left from line start lands on previous word", buffer.Pos{Line: 1, Col: 0}, wordLeft, buffer.Pos{Line: 0, Col: 8}},
-		{"right to next word", buffer.Pos{Line: 0, Col: 0}, wordRight, buffer.Pos{Line: 0, Col: 4}},
-		{"right over punctuation", buffer.Pos{Line: 0, Col: 7}, wordRight, buffer.Pos{Line: 0, Col: 8}},
-		{"right crosses line", buffer.Pos{Line: 0, Col: 11}, wordRight, buffer.Pos{Line: 1, Col: 2}},
-		{"right at end", buffer.Pos{Line: 1, Col: 5}, wordRight, buffer.Pos{Line: 1, Col: 5}},
-		{"end from start", buffer.Pos{Line: 0, Col: 0}, wordEnd, buffer.Pos{Line: 0, Col: 3}},
-		{"end from end of word", buffer.Pos{Line: 0, Col: 3}, wordEnd, buffer.Pos{Line: 0, Col: 7}},
-		{"end at last word", buffer.Pos{Line: 1, Col: 2}, wordEnd, buffer.Pos{Line: 1, Col: 5}},
+		{"left from end of word", buffer.Pos{Line: 0, Col: 7}, document.WordLeft, buffer.Pos{Line: 0, Col: 4}},
+		{"left across punctuation", buffer.Pos{Line: 0, Col: 8}, document.WordLeft, buffer.Pos{Line: 0, Col: 7}},
+		{"left skips spaces", buffer.Pos{Line: 0, Col: 4}, document.WordLeft, buffer.Pos{Line: 0, Col: 0}},
+		{"left at start", buffer.Pos{Line: 0, Col: 0}, document.WordLeft, buffer.Pos{Line: 0, Col: 0}},
+		{"left from line start lands on previous word", buffer.Pos{Line: 1, Col: 0}, document.WordLeft, buffer.Pos{Line: 0, Col: 8}},
+		{"right to next word", buffer.Pos{Line: 0, Col: 0}, document.WordRight, buffer.Pos{Line: 0, Col: 4}},
+		{"right over punctuation", buffer.Pos{Line: 0, Col: 7}, document.WordRight, buffer.Pos{Line: 0, Col: 8}},
+		{"right crosses line", buffer.Pos{Line: 0, Col: 11}, document.WordRight, buffer.Pos{Line: 1, Col: 2}},
+		{"right at end", buffer.Pos{Line: 1, Col: 5}, document.WordRight, buffer.Pos{Line: 1, Col: 5}},
+		{"end from start", buffer.Pos{Line: 0, Col: 0}, document.WordEnd, buffer.Pos{Line: 0, Col: 3}},
+		{"end from end of word", buffer.Pos{Line: 0, Col: 3}, document.WordEnd, buffer.Pos{Line: 0, Col: 7}},
+		{"end at last word", buffer.Pos{Line: 1, Col: 2}, document.WordEnd, buffer.Pos{Line: 1, Col: 5}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

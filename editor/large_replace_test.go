@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestLargeReplaceMatchNoMatchAndReadOnly(t *testing.T) {
 	assertUntouched(t, d, version)
 
 	d.SetReadOnly(true)
-	if _, err := e.ReplaceMatch(search.Query{Text: "line"}, "x", stale); !errors.Is(err, ErrReadOnly) {
+	if _, err := e.ReplaceMatch(search.Query{Text: "line"}, "x", stale); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("ReplaceMatch in a read-only document = %v, want ErrReadOnly", err)
 	}
 	assertUntouched(t, d, version)
@@ -92,10 +93,10 @@ func TestLargeSearchActionsStayRefused(t *testing.T) {
 	t.Parallel()
 	e, d := openIndexed(t, largeOptions(), lineText(200))
 	version := d.Buffer.Version()
-	if _, err := e.ReplaceMatches(search.Query{Text: "line"}, "x"); !errors.Is(err, ErrLargeFile) {
+	if _, err := e.ReplaceMatches(search.Query{Text: "line"}, "x"); !errors.Is(err, document.ErrLargeFile) {
 		t.Errorf("ReplaceMatches = %v, want ErrLargeFile", err)
 	}
-	if r := e.Do("find_selection_next", nil); !errors.Is(r.Err, ErrLargeFile) {
+	if r := e.Do("find_selection_next", nil); !errors.Is(r.Err, document.ErrLargeFile) {
 		t.Errorf("find_selection_next = %v, want ErrLargeFile", r.Err)
 	}
 	assertUntouched(t, d, version)

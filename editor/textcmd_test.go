@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 )
 
 // selectedText returns the text of the selection of d, or "" when nothing is selected.
-func selectedText(d *Document) string {
+func selectedText(d *document.Document) string {
 	if !d.HasSelection() {
 		return ""
 	}
@@ -18,7 +19,7 @@ func selectedText(d *Document) string {
 }
 
 // newActions are the actions the editor text, document and tab commands add.
-var newActions = []Action{
+var newActions = []document.Action{
 	"sort_lines", "expand_selection", "duplicate_line_above", "trim_trailing_whitespace",
 	"ensure_final_newline", "copy_with_theme", "copy_file_path", "copy_relative_file_path",
 	"revert", "reset_buffer_settings", "clear_search", "find_in_selection",
@@ -93,7 +94,7 @@ func TestSortLines(t *testing.T) {
 			Text:     "c\nb",
 			At:       placed{caret: buffer.Pos{}},
 			wantText: "c\nb",
-			wantErr:  ErrReadOnly,
+			wantErr:  document.ErrReadOnly,
 			readOnly: true,
 		},
 	}
@@ -390,7 +391,7 @@ func TestEnsureFinalNewlineIsOneUndoStep(t *testing.T) {
 // document, with and without a selection. The text must not change.
 func TestNewTextChangesRefuseReadOnly(t *testing.T) {
 	t.Parallel()
-	actions := []Action{"sort_lines", "duplicate_line_above", "trim_trailing_whitespace", "ensure_final_newline"}
+	actions := []document.Action{"sort_lines", "duplicate_line_above", "trim_trailing_whitespace", "ensure_final_newline"}
 	for _, a := range actions {
 		t.Run(string(a), func(t *testing.T) {
 			t.Parallel()
@@ -400,7 +401,7 @@ func TestNewTextChangesRefuseReadOnly(t *testing.T) {
 					e.SelectRange(buffer.Pos{}, buffer.Pos{Line: 1, Col: 1})
 				}
 				run(t, e, "toggle_read_only")
-				if r := e.Do(a, nil); !errors.Is(r.Err, ErrReadOnly) {
+				if r := e.Do(a, nil); !errors.Is(r.Err, document.ErrReadOnly) {
 					t.Fatalf("%s (selected %t) err = %v, want ErrReadOnly", a, selected, r.Err)
 				}
 				if got := e.Active().Buffer.Text(); got != "b  \na" {
@@ -431,7 +432,7 @@ func TestCopyWithThemeWithoutSelectionFails(t *testing.T) {
 	t.Parallel()
 	e := docWith(Options{}, "hello")
 	e.clipboard = "keep"
-	if r := e.Do("copy_with_theme", nil); !errors.Is(r.Err, ErrNothingSelected) {
+	if r := e.Do("copy_with_theme", nil); !errors.Is(r.Err, document.ErrNothingSelected) {
 		t.Fatalf("err = %v, want ErrNothingSelected", r.Err)
 	}
 	if e.clipboard != "keep" {

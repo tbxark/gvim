@@ -9,7 +9,7 @@ import (
 
 // normalizePaste turns CRLF and CR into LF. The buffer is always LF in memory,
 // and the line ending is applied on save.
-func normalizePaste(s string) string {
+func NormalizePaste(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
 }
 
@@ -33,7 +33,7 @@ func (d *Document) CopyText() (text string, lines bool, err error) {
 		return d.copyVirtualBlockText(rect)
 	}
 	cs := d.AllCarets()
-	if slices.ContainsFunc(cs, func(c caret) bool { lo, hi := c.Bounds(); return lo != hi }) {
+	if slices.ContainsFunc(cs, func(c CaretState) bool { lo, hi := c.Bounds(); return lo != hi }) {
 		block := d.blockInProgress()
 		parts := make([]string, 0, len(cs))
 		total := 0
@@ -100,17 +100,17 @@ func (d *Document) copyVirtualBlockText(rect BlockRect) (string, bool, error) {
 func (d *Document) CutLines() {
 	prev := -1
 	var prevTo buffer.Pos
-	d.EditAtCarets(func(c caret) edit {
+	d.EditAtCarets(func(c CaretState) Edit {
 		line := c.Head.Line
 		if line == prev {
-			return edit{From: prevTo, To: prevTo}
+			return Edit{From: prevTo, To: prevTo}
 		}
 		prev = line
 		prevTo = buffer.Pos{Line: line + 1}
 		if line+1 >= d.Buffer.Lines() {
 			prevTo = buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)}
 		}
-		return edit{From: buffer.Pos{Line: line}, To: prevTo}
+		return Edit{From: buffer.Pos{Line: line}, To: prevTo}
 	})
 }
 
@@ -125,12 +125,12 @@ func (d *Document) PasteText(text string) {
 	}
 	column := len(lines) > 1 && len(lines) == len(d.AllCarets())
 	i := 0
-	d.EditAtCarets(func(c caret) edit {
+	d.EditAtCarets(func(c CaretState) Edit {
 		if !column {
-			return replaceEdit(c, text)
+			return ReplaceEdit(c, text)
 		}
 		i++
-		return replaceEdit(c, lines[i-1])
+		return ReplaceEdit(c, lines[i-1])
 	})
 }
 

@@ -3,6 +3,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -26,7 +27,7 @@ func TestUnwritableDoesNotOpenTheFile(t *testing.T) {
 		}
 	})
 	done := make(chan bool, 1)
-	go func() { done <- unwritable(path) }()
+	go func() { done <- document.Unwritable(path) }()
 	select {
 	case got := <-done:
 		if got {

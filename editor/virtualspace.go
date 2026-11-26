@@ -18,7 +18,7 @@ func (e *Editor) VirtualSpaceEnabled() bool { return e.virtualSpace(e.Active()) 
 // virtualSpace reports whether d may put its caret past the end of a line.
 // Multi-caret editing is not taught about virtual space, and neither is large file
 // mode, so both keep the caret on the text.
-func (e *Editor) virtualSpace(d *Document) bool {
+func (e *Editor) virtualSpace(d *document.Document) bool {
 	if e == nil || d == nil || len(d.Extra) != 0 || d.LargeState() != nil {
 		return false
 	}
@@ -40,7 +40,7 @@ func (e *Editor) VirtualSpaceOn() bool { return e.opts.VirtualSpace == document.
 // lines: editor.virtual_space "block" or "on", the per-buffer switch when the
 // document set one, and unwrapped lines of a document in memory. The per-buffer
 // switch is a boolean, so its "on" also enables block rectangles.
-func (e *Editor) virtualBlock(d *Document) bool {
+func (e *Editor) virtualBlock(d *document.Document) bool {
 	if e == nil || d == nil || d.LargeState() != nil {
 		return false
 	}
@@ -57,7 +57,7 @@ func (e *Editor) virtualBlock(d *Document) bool {
 // edits virtual space teaches, the clipboard actions that do not move the caret,
 // and the per-buffer switch itself. Every other action ends the virtual position
 // first (see Do).
-var virtualSpaceActions = map[Action]bool{
+var virtualSpaceActions = map[document.Action]bool{
 	"move_left": true, "move_right": true, "move_up": true, "move_down": true,
 	"move_left_in_line": true, "move_right_in_line": true, "vi_move_up": true, "vi_move_down": true,
 	"select_left": true, "select_right": true, "select_up": true, "select_down": true,
@@ -99,7 +99,7 @@ const (
 // virtualMove handles a plain (not selecting) left, right, up or down move in
 // virtual space. It reports whether it took the move; false means the normal
 // motion runs.
-func (e *Editor) virtualMove(d *Document, kind virtualMoveKind, extend bool) bool {
+func (e *Editor) virtualMove(d *document.Document, kind virtualMoveKind, extend bool) bool {
 	if !e.virtualSpace(d) {
 		d.ClearVirtual()
 		return false
@@ -143,7 +143,7 @@ func (e *Editor) virtualMove(d *Document, kind virtualMoveKind, extend bool) boo
 				return true
 			}
 			if d.Cursor == d.Buffer.End() {
-				d.SetVirtualLines(1, cellColumn(d.Buffer, d.Cursor, tab)+d.VirtualColumns())
+				d.SetVirtualLines(1, document.CellColumn(d.Buffer, d.Cursor, tab)+d.VirtualColumns())
 				return true
 			}
 		} else if n := d.VirtualLines(); n > 0 {
@@ -162,16 +162,16 @@ func (e *Editor) virtualMove(d *Document, kind virtualMoveKind, extend bool) boo
 			// The caret stays where it is past the top and bottom of the buffer.
 			return true
 		}
-		goal := cellColumn(d.Buffer, d.Cursor, tab) + d.VirtualColumns()
+		goal := document.CellColumn(d.Buffer, d.Cursor, tab) + d.VirtualColumns()
 		d.Want = goal
 		d.ClearVirtual()
-		width := cellColumn(d.Buffer, buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)}, tab)
+		width := document.CellColumn(d.Buffer, buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)}, tab)
 		if goal > width {
 			d.Move(buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)}, false)
 			d.SetVirtualColumns(goal - width)
 			return true
 		}
-		d.Move(buffer.Pos{Line: line, Col: colAtCell(d.Buffer, line, goal, tab)}, false)
+		d.Move(buffer.Pos{Line: line, Col: document.ColAtCell(d.Buffer, line, goal, tab)}, false)
 		return true
 	}
 	return false
@@ -180,14 +180,14 @@ func (e *Editor) virtualMove(d *Document, kind virtualMoveKind, extend bool) boo
 // stepVirtualLineUp moves the caret one virtual line up: it stays at the buffer
 // end, and from the first virtual line it takes the horizontal virtual column the
 // wanted column implies, so the round-2 caret appears again.
-func (e *Editor) stepVirtualLineUp(d *Document, lines, tab int) {
+func (e *Editor) stepVirtualLineUp(d *document.Document, lines, tab int) {
 	if lines > 1 {
 		d.SetVirtualLines(lines-1, d.VirtualLineColumn())
 		return
 	}
 	goal := d.VirtualLineColumn()
 	d.ClearVirtualLines()
-	width := cellColumn(d.Buffer, d.Buffer.End(), tab)
+	width := document.CellColumn(d.Buffer, d.Buffer.End(), tab)
 	if goal > width {
 		d.SetVirtualColumns(goal - width)
 	}

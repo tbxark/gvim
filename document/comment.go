@@ -6,7 +6,7 @@ import (
 
 // lineEdit is one edit inside a line: the runes inserted at col, or the runes
 // removed from col on.
-type lineEdit struct {
+type LineEdit struct {
 	Line, Col         int
 	Inserted, Removed int
 }
@@ -17,7 +17,7 @@ type lineEdit struct {
 // insertion, a position past col moves forward by the inserted length. A
 // position at col moves only when strict is false: a caret moves with the text
 // it sits in front of, while a selection end stays where it was.
-func (e lineEdit) Move(p buffer.Pos, strict bool) buffer.Pos {
+func (e LineEdit) Move(p buffer.Pos, strict bool) buffer.Pos {
 	if p.Line != e.Line {
 		return p
 	}

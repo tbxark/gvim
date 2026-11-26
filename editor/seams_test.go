@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"math/rand/v2"
 	"os"
 	"slices"
@@ -15,16 +16,16 @@ import (
 
 func pos(l, c int) buffer.Pos { return buffer.Pos{Line: l, Col: c} }
 
-func lspEdit(fl, fc, tl, tc int, text string) LSPEdit {
-	return LSPEdit{From: pos(fl, fc), To: pos(tl, tc), Text: text}
+func lspEdit(fl, fc, tl, tc int, text string) document.LSPEdit {
+	return document.LSPEdit{From: pos(fl, fc), To: pos(tl, tc), Text: text}
 }
 
 // tabsWith returns an editor with one untitled tab per text, the first active.
-func tabsWith(texts ...string) (*Editor, []DocID) {
+func tabsWith(texts ...string) (*Editor, []document.DocID) {
 	e := New(Options{})
 	e.docs = nil
 	for _, s := range texts {
-		e.addDoc(newDocument("", s))
+		e.addDoc(document.NewDocument("", s))
 	}
 	e.switchTo(0)
 	return e, e.DocIDs()
@@ -49,7 +50,7 @@ func TestDocIDsAreStableAndMonotonic(t *testing.T) {
 	if err := e.ActivateID(ids[2]); err != nil {
 		t.Fatal(err)
 	}
-	want := []DocID{ids[2], ids[0]}
+	want := []document.DocID{ids[2], ids[0]}
 	if got := e.DocIDs(); !slices.Equal(got, want) {
 		t.Fatalf("DocIDs = %v, want %v", got, want)
 	}
@@ -58,7 +59,7 @@ func TestDocIDsAreStableAndMonotonic(t *testing.T) {
 		t.Fatalf("DocByID(%d) = %v, %d, %v", ids[0], d, i, ok)
 	}
 	// A new tab gets an id above every earlier one, also above a closed tab's.
-	e.addDoc(newDocument("", "n"))
+	e.addDoc(document.NewDocument("", "n"))
 	if got := e.DocIDs(); got[2] <= ids[2] {
 		t.Fatalf("new id %d is not above %d", got[2], ids[2])
 	}
@@ -165,7 +166,7 @@ func TestMoveTab(t *testing.T) {
 
 func TestDocumentGenBumpedBySetBuffer(t *testing.T) {
 	t.Parallel()
-	d := newDocument("", "abc")
+	d := document.NewDocument("", "abc")
 	g0 := d.Gen()
 	if g0 == 0 || d.Gen() != g0 {
 		t.Fatalf("Gen = %d then %d, want a stable non-zero number", g0, d.Gen())
@@ -182,7 +183,7 @@ func TestDocumentGenBumpedBySetBuffer(t *testing.T) {
 	if d.Version() == v0 {
 		t.Error("a replaced buffer gave the same Version")
 	}
-	if other := newDocument("", ""); other.Gen() == d.Gen() {
+	if other := document.NewDocument("", ""); other.Gen() == d.Gen() {
 		t.Error("two documents share a Gen")
 	}
 }
@@ -235,7 +236,7 @@ func TestSetBufferEmitsCoarseAndReinstallsObserver(t *testing.T) {
 	t.Parallel()
 	e, ids := tabsWith("abc")
 	var got []buffer.Change
-	e.AddChangeListener("t", func(id DocID, c buffer.Change) {
+	e.AddChangeListener("t", func(id document.DocID, c buffer.Change) {
 		if id != ids[0] {
 			t.Errorf("listener got id %d, want %d", id, ids[0])
 		}
@@ -275,7 +276,7 @@ func TestTrackChangesRefCounted(t *testing.T) {
 	t.Parallel()
 	e, ids := tabsWith("a", "b")
 	var n int
-	e.AddChangeListener("count", func(DocID, buffer.Change) { n++ })
+	e.AddChangeListener("count", func(document.DocID, buffer.Change) { n++ })
 	insert := func() { e.Active().Buffer.Insert(pos(0, 0), "x") }
 
 	insert()
@@ -290,7 +291,7 @@ func TestTrackChangesRefCounted(t *testing.T) {
 		t.Fatalf("n = %d after tracking, want 1", n)
 	}
 	// A document added while tracking is observed at once.
-	e.addDoc(newDocument("", "late"))
+	e.addDoc(document.NewDocument("", "late"))
 	e.docs[2].Buffer.Insert(pos(0, 0), "y")
 	if n != 2 {
 		t.Fatalf("n = %d after an edit of a new document, want 2", n)
@@ -326,9 +327,9 @@ func TestListenersRunSynchronouslyInOrder(t *testing.T) {
 	e, ids := tabsWith("abc")
 	e.TrackChanges("events", true)
 	var log []string
-	e.AddChangeListener("decor", func(id DocID, c buffer.Change) { log = append(log, "decor:"+c.Text) })
-	e.AddChangeListener("events", func(id DocID, c buffer.Change) { log = append(log, "events:"+c.Text) })
-	rm := e.AddChangeListener("third", func(id DocID, c buffer.Change) { log = append(log, "third:"+c.Text) })
+	e.AddChangeListener("decor", func(id document.DocID, c buffer.Change) { log = append(log, "decor:"+c.Text) })
+	e.AddChangeListener("events", func(id document.DocID, c buffer.Change) { log = append(log, "events:"+c.Text) })
+	rm := e.AddChangeListener("third", func(id document.DocID, c buffer.Change) { log = append(log, "third:"+c.Text) })
 
 	e.Active().Buffer.Insert(pos(0, 1), "X")
 	log = append(log, "returned")
@@ -339,7 +340,7 @@ func TestListenersRunSynchronouslyInOrder(t *testing.T) {
 
 	// A key registered again replaces its function and keeps its place.
 	log = nil
-	e.AddChangeListener("decor", func(id DocID, c buffer.Change) { log = append(log, "decor2:"+c.Text) })
+	e.AddChangeListener("decor", func(id document.DocID, c buffer.Change) { log = append(log, "decor2:"+c.Text) })
 	rm()
 	rm() // removing twice is harmless
 	e.Active().Buffer.Insert(pos(0, 0), "Y")
@@ -351,7 +352,7 @@ func TestListenersRunSynchronouslyInOrder(t *testing.T) {
 	// already changed, and may remove itself while it runs.
 	var self func()
 	var seen string
-	self = e.AddChangeListener("once", func(id DocID, c buffer.Change) {
+	self = e.AddChangeListener("once", func(id document.DocID, c buffer.Change) {
 		seen = e.Active().Buffer.Text()
 		self()
 	})
@@ -372,8 +373,8 @@ func TestRemoveOfAReplacedListenerKeepsTheNewOne(t *testing.T) {
 	e, _ := tabsWith("abc")
 	e.TrackChanges("events", true)
 	var log []string
-	rm1 := e.AddChangeListener("k", func(DocID, buffer.Change) { log = append(log, "old") })
-	rm2 := e.AddChangeListener("k", func(DocID, buffer.Change) { log = append(log, "new") })
+	rm1 := e.AddChangeListener("k", func(document.DocID, buffer.Change) { log = append(log, "old") })
+	rm2 := e.AddChangeListener("k", func(document.DocID, buffer.Change) { log = append(log, "new") })
 	rm1() // the teardown of the plugin instance that was replaced
 	e.Active().Buffer.Insert(pos(0, 0), "X")
 	if want := []string{"new"}; !slices.Equal(log, want) {
@@ -386,7 +387,7 @@ func TestRemoveOfAReplacedListenerKeepsTheNewOne(t *testing.T) {
 		t.Errorf("after its own remove the listener still ran: %v", log)
 	}
 	// A key removed and added again is a new registration too.
-	rm3 := e.AddChangeListener("k", func(DocID, buffer.Change) { log = append(log, "third") })
+	rm3 := e.AddChangeListener("k", func(document.DocID, buffer.Change) { log = append(log, "third") })
 	rm2()
 	e.Active().Buffer.Insert(pos(0, 0), "Z")
 	if want := []string{"third"}; !slices.Equal(log, want) {
@@ -399,7 +400,7 @@ func TestApplyEditsReportsInvalidUTF8AsStored(t *testing.T) {
 	t.Parallel()
 	e, ids := tabsWith("ab\n")
 	e.TrackChanges("events", true)
-	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 1, 0, 1, "\xff")}, EditOptions{}); err != nil {
+	if err := e.ApplyEdits(ids[0], []document.LSPEdit{lspEdit(0, 1, 0, 1, "\xff")}, document.EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	changes, overflow := e.TakeChanges(ids[0], "events")
@@ -476,13 +477,13 @@ func TestTakeChangesOverflow(t *testing.T) {
 		e, ids := tabsWith("")
 		e.TrackChanges("events", true)
 		b := e.Active().Buffer
-		for range changeRingRecords {
+		for range document.ChangeRingRecords {
 			b.Insert(pos(0, 0), "x")
 		}
-		if got, over := e.TakeChanges(ids[0], "events"); over || len(got) != changeRingRecords {
+		if got, over := e.TakeChanges(ids[0], "events"); over || len(got) != document.ChangeRingRecords {
 			t.Fatalf("a full ring: %d changes overflow %v", len(got), over)
 		}
-		for range changeRingRecords + 1 {
+		for range document.ChangeRingRecords + 1 {
 			b.Insert(pos(0, 0), "x")
 		}
 		if got, over := e.TakeChanges(ids[0], "events"); !over || got != nil {
@@ -540,7 +541,7 @@ func TestChangesPayloadCap(t *testing.T) {
 	// One record over the cap is kept without its text, as a coarse change.
 	e, ids := tabsWith("")
 	e.TrackChanges("events", true)
-	e.Active().Buffer.Insert(pos(0, 0), strings.Repeat("q", changePayloadMax+1))
+	e.Active().Buffer.Insert(pos(0, 0), strings.Repeat("q", document.ChangePayloadMax+1))
 	if got, over := e.TakeChanges(ids[0], "events"); !over || got != nil {
 		t.Errorf("one huge change: %d records overflow %v", len(got), over)
 	}
@@ -551,7 +552,7 @@ func TestChangesPayloadCap(t *testing.T) {
 		e.Active().Buffer.Insert(pos(0, 0), strings.Repeat("r", 200<<10))
 	}
 	ring := e.Active().Seam().Ring
-	if ring.Bytes > changeRingBytes || len(ring.Recs)-ring.Start < 1 {
+	if ring.Bytes > document.ChangeRingBytes || len(ring.Recs)-ring.Start < 1 {
 		t.Errorf("ring keeps %d bytes in %d records", ring.Bytes, len(ring.Recs)-ring.Start)
 	}
 	if got, over := e.TakeChanges(ids[0], "events"); !over || got != nil {
@@ -564,25 +565,25 @@ func TestApplyEditsTable(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Text  string
-		edits []LSPEdit
+		edits []document.LSPEdit
 		Want  string
 	}{
-		{"replace", "hello world", []LSPEdit{lspEdit(0, 6, 0, 11, "gvim")}, "hello gvim"},
-		{"unsorted edits", "a b c", []LSPEdit{lspEdit(0, 4, 0, 5, "z"), lspEdit(0, 0, 0, 1, "x")}, "x b z"},
-		{"inserts at one point keep list order", "ab", []LSPEdit{lspEdit(0, 1, 0, 1, "1"), lspEdit(0, 1, 0, 1, "2"), lspEdit(0, 1, 0, 1, "3")}, "a123b"},
-		{"insert before a replace at the same point", "abc", []LSPEdit{lspEdit(0, 1, 0, 2, "X"), lspEdit(0, 1, 0, 1, "I")}, "aIXc"},
-		{"touching edits are not overlapping", "abcd", []LSPEdit{lspEdit(0, 0, 0, 2, "X"), lspEdit(0, 2, 0, 4, "Y")}, "XY"},
-		{"across lines", "one\ntwo\nthree", []LSPEdit{lspEdit(0, 1, 2, 2, "-")}, "o-ree"},
-		{"multibyte columns are runes", "é日x", []LSPEdit{lspEdit(0, 1, 0, 2, "o")}, "éox"},
-		{"clamped", "abc\n", []LSPEdit{lspEdit(0, 1, 9, 0, "!")}, "a!"},
-		{"reversed range", "abcd", []LSPEdit{lspEdit(0, 3, 0, 1, "X")}, "aXd"},
-		{"newline inserted", "ab", []LSPEdit{lspEdit(0, 1, 0, 1, "\n")}, "a\nb"},
-		{"delete", "abc", []LSPEdit{lspEdit(0, 1, 0, 2, "")}, "ac"},
+		{"replace", "hello world", []document.LSPEdit{lspEdit(0, 6, 0, 11, "gvim")}, "hello gvim"},
+		{"unsorted edits", "a b c", []document.LSPEdit{lspEdit(0, 4, 0, 5, "z"), lspEdit(0, 0, 0, 1, "x")}, "x b z"},
+		{"inserts at one point keep list order", "ab", []document.LSPEdit{lspEdit(0, 1, 0, 1, "1"), lspEdit(0, 1, 0, 1, "2"), lspEdit(0, 1, 0, 1, "3")}, "a123b"},
+		{"insert before a replace at the same point", "abc", []document.LSPEdit{lspEdit(0, 1, 0, 2, "X"), lspEdit(0, 1, 0, 1, "I")}, "aIXc"},
+		{"touching edits are not overlapping", "abcd", []document.LSPEdit{lspEdit(0, 0, 0, 2, "X"), lspEdit(0, 2, 0, 4, "Y")}, "XY"},
+		{"across lines", "one\ntwo\nthree", []document.LSPEdit{lspEdit(0, 1, 2, 2, "-")}, "o-ree"},
+		{"multibyte columns are runes", "é日x", []document.LSPEdit{lspEdit(0, 1, 0, 2, "o")}, "éox"},
+		{"clamped", "abc\n", []document.LSPEdit{lspEdit(0, 1, 9, 0, "!")}, "a!"},
+		{"reversed range", "abcd", []document.LSPEdit{lspEdit(0, 3, 0, 1, "X")}, "aXd"},
+		{"newline inserted", "ab", []document.LSPEdit{lspEdit(0, 1, 0, 1, "\n")}, "a\nb"},
+		{"delete", "abc", []document.LSPEdit{lspEdit(0, 1, 0, 2, "")}, "ac"},
 		{"nothing", "abc", nil, "abc"},
 	}
 	for _, tt := range tests {
 		e, ids := tabsWith("zzz", tt.Text)
-		if err := e.ApplyEdits(ids[1], tt.edits, EditOptions{}); err != nil {
+		if err := e.ApplyEdits(ids[1], tt.edits, document.EditOptions{}); err != nil {
 			t.Errorf("%s: %v", tt.Name, err)
 			continue
 		}
@@ -600,7 +601,7 @@ func TestApplyEditsErrors(t *testing.T) {
 	t.Parallel()
 	e, ids := tabsWith("hello world")
 	d := e.Active()
-	good := []LSPEdit{lspEdit(0, 0, 0, 1, "H")}
+	good := []document.LSPEdit{lspEdit(0, 0, 0, 1, "H")}
 	v := d.Version()
 	stale := &v
 	d.Buffer.Insert(pos(0, 0), "x")
@@ -612,15 +613,15 @@ func TestApplyEditsErrors(t *testing.T) {
 	}
 	cases := []struct {
 		Name  string
-		Id    DocID
-		edits []LSPEdit
-		opts  EditOptions
+		Id    document.DocID
+		edits []document.LSPEdit
+		opts  document.EditOptions
 		Want  error
 	}{
-		{"unknown id", 999, good, EditOptions{}, ErrNotOpen},
-		{"overlap", ids[0], []LSPEdit{lspEdit(0, 0, 0, 5, "a"), lspEdit(0, 3, 0, 7, "b")}, EditOptions{}, ErrOverlappingEdits},
-		{"insert inside a replace", ids[0], []LSPEdit{lspEdit(0, 0, 0, 5, "a"), lspEdit(0, 3, 0, 3, "b")}, EditOptions{}, ErrOverlappingEdits},
-		{"stale", ids[0], good, EditOptions{Expect: stale}, ErrStale},
+		{"unknown id", 999, good, document.EditOptions{}, ErrNotOpen},
+		{"overlap", ids[0], []document.LSPEdit{lspEdit(0, 0, 0, 5, "a"), lspEdit(0, 3, 0, 7, "b")}, document.EditOptions{}, document.ErrOverlappingEdits},
+		{"insert inside a replace", ids[0], []document.LSPEdit{lspEdit(0, 0, 0, 5, "a"), lspEdit(0, 3, 0, 3, "b")}, document.EditOptions{}, document.ErrOverlappingEdits},
+		{"stale", ids[0], good, document.EditOptions{Expect: stale}, document.ErrStale},
 	}
 	for _, c := range cases {
 		before := d.Buffer.Text()
@@ -633,7 +634,7 @@ func TestApplyEditsErrors(t *testing.T) {
 	}
 	// A current token passes, also after Undo returns an earlier state.
 	cur := d.Version()
-	if err := e.ApplyEdits(ids[0], good, EditOptions{Expect: &cur}); err != nil {
+	if err := e.ApplyEdits(ids[0], good, document.EditOptions{Expect: &cur}); err != nil {
 		t.Fatalf("current token: %v", err)
 	}
 	if d.Buffer.Text() != "Hello world" {
@@ -643,12 +644,12 @@ func TestApplyEditsErrors(t *testing.T) {
 	if d.Version() != cur {
 		t.Fatalf("undo gave %+v, want the equal token %+v", d.Version(), cur)
 	}
-	if err := e.ApplyEdits(ids[0], good, EditOptions{Expect: &cur}); err != nil {
+	if err := e.ApplyEdits(ids[0], good, document.EditOptions{Expect: &cur}); err != nil {
 		t.Fatalf("token after undo: %v", err)
 	}
 	// Read-only.
 	d.SetReadOnly(true)
-	if err := e.ApplyEdits(ids[0], good, EditOptions{}); !errors.Is(err, ErrReadOnly) {
+	if err := e.ApplyEdits(ids[0], good, document.EditOptions{}); !errors.Is(err, document.ErrReadOnly) {
 		t.Errorf("read-only: %v", err)
 	}
 }
@@ -665,7 +666,7 @@ func TestUndoRestoresEqualToken(t *testing.T) {
 	if _, ok := d.Buffer.Undo(); !ok || d.Version() != orig {
 		t.Fatalf("token after undo = %+v, want %+v", d.Version(), orig)
 	}
-	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 0, 0, 1, "A")}, EditOptions{Expect: &orig}); err != nil {
+	if err := e.ApplyEdits(ids[0], []document.LSPEdit{lspEdit(0, 0, 0, 1, "A")}, document.EditOptions{Expect: &orig}); err != nil {
 		t.Fatalf("the original token was refused after undo: %v", err)
 	}
 }
@@ -680,23 +681,23 @@ func TestStaleOnUneditedBuffer(t *testing.T) {
 		t.Fatalf("token of a fresh buffer = %+v, want Ver 0 and a Gen", tok)
 	}
 	d.Buffer.Insert(pos(0, 0), "x")
-	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 0, 0, 1, "")}, EditOptions{Expect: &tok}); !errors.Is(err, ErrStale) {
+	if err := e.ApplyEdits(ids[0], []document.LSPEdit{lspEdit(0, 0, 0, 1, "")}, document.EditOptions{Expect: &tok}); !errors.Is(err, document.ErrStale) {
 		t.Fatalf("err = %v, want ErrStale", err)
 	}
 }
 
 func TestApplyEditsIsOneUndoStep(t *testing.T) {
 	t.Parallel()
-	for _, n := range []int{3, bulkEditMin + 20} {
+	for _, n := range []int{3, document.BulkEditMin + 20} {
 		var sb strings.Builder
-		var edits []LSPEdit
+		var edits []document.LSPEdit
 		for i := range n {
 			fmt.Fprintf(&sb, "line %d\n", i)
 			edits = append(edits, lspEdit(i, 0, i, 4, "LINE"))
 		}
 		text := sb.String()
 		e, ids := tabsWith(text)
-		if err := e.ApplyEdits(ids[0], edits, EditOptions{}); err != nil {
+		if err := e.ApplyEdits(ids[0], edits, document.EditOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		b := e.Active().Buffer
@@ -719,13 +720,13 @@ func TestApplyEditsIsOneUndoStep(t *testing.T) {
 func TestApplyEditsBulkSingleUndoStep(t *testing.T) {
 	t.Parallel()
 	e, ids := tabsWith(strings.Repeat("abc def\n", 300))
-	var edits []LSPEdit
+	var edits []document.LSPEdit
 	for i := range 300 {
 		edits = append(edits, lspEdit(i, 4, i, 7, "XYZ"))
 	}
 	b := e.Active().Buffer
 	before := b.Text()
-	if err := e.ApplyEdits(ids[0], edits, EditOptions{}); err != nil {
+	if err := e.ApplyEdits(ids[0], edits, document.EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(b.Text(), "abc XYZ\nabc XYZ\n") || b.Lines() != 301 {
@@ -741,8 +742,8 @@ func TestApplyEditsBulkSingleUndoStep(t *testing.T) {
 
 // randomEdits returns n non-overlapping edits over text, in random order, with
 // multi-byte and multi-line replacements.
-func randomEdits(rng *rand.Rand, b *buffer.Buffer, n int) []LSPEdit {
-	var edits []LSPEdit
+func randomEdits(rng *rand.Rand, b *buffer.Buffer, n int) []document.LSPEdit {
+	var edits []document.LSPEdit
 	cur := pos(0, 0)
 	repl := []string{"", "x", "é", "日本", "a\nb", "\n", "long replacement text", "😀\n😀"}
 	for range n {
@@ -752,7 +753,7 @@ func randomEdits(rng *rand.Rand, b *buffer.Buffer, n int) []LSPEdit {
 		if b.End().Less(to) {
 			break
 		}
-		edits = append(edits, LSPEdit{From: from, To: to, Text: repl[rng.IntN(len(repl))]})
+		edits = append(edits, document.LSPEdit{From: from, To: to, Text: repl[rng.IntN(len(repl))]})
 		cur = to
 		if rng.IntN(4) == 0 && to == from {
 			cur = advanceBy(b, to, 1)
@@ -776,14 +777,14 @@ func advanceBy(b *buffer.Buffer, p buffer.Pos, n int) buffer.Pos {
 }
 
 // applyOneByOne is the reference: the edits made through the buffer, last first.
-func applyOneByOne(text string, edits []LSPEdit) string {
+func applyOneByOne(text string, edits []document.LSPEdit) string {
 	b := buffer.New(text)
 	sorted := slices.Clone(edits)
-	slices.SortStableFunc(sorted, func(x, y LSPEdit) int {
-		if c := comparePos(x.From, y.From); c != 0 {
+	slices.SortStableFunc(sorted, func(x, y document.LSPEdit) int {
+		if c := document.ComparePos(x.From, y.From); c != 0 {
 			return c
 		}
-		return comparePos(x.To, y.To)
+		return document.ComparePos(x.To, y.To)
 	})
 	for _, ed := range slices.Backward(sorted) {
 		b.Delete(ed.From, ed.To)
@@ -808,7 +809,7 @@ func TestApplyEditsBulkMatchesIncremental(t *testing.T) {
 		e, ids := tabsWith(text)
 		edits := randomEdits(rng, e.Active().Buffer, n)
 		want := applyOneByOne(text, edits)
-		if err := e.ApplyEdits(ids[0], edits, EditOptions{}); err != nil {
+		if err := e.ApplyEdits(ids[0], edits, document.EditOptions{}); err != nil {
 			t.Fatalf("seed %d (%d edits): %v", seed, len(edits), err)
 		}
 		if got := e.Active().Buffer.Text(); got != want {
@@ -825,7 +826,7 @@ func TestApplyEditsChangeRecordsReplayToTheSameText(t *testing.T) {
 		e, ids := tabsWith(text)
 		e.TrackChanges("events", true)
 		edits := randomEdits(rng, e.Active().Buffer, n)
-		if err := e.ApplyEdits(ids[0], edits, EditOptions{}); err != nil {
+		if err := e.ApplyEdits(ids[0], edits, document.EditOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		changes, over := e.TakeChanges(ids[0], "events")
@@ -870,12 +871,12 @@ func TestApplyEditsBulkPerf(t *testing.T) {
 		fmt.Fprintf(&sb, "line %d some text\n", i)
 	}
 	e, ids := tabsWith(sb.String())
-	edits := make([]LSPEdit, 0, 50_000)
+	edits := make([]document.LSPEdit, 0, 50_000)
 	for i := range 50_000 {
 		edits = append(edits, lspEdit(i*2, 0, i*2, 4, "LINE"))
 	}
 	start := time.Now()
-	if err := e.ApplyEdits(ids[0], edits, EditOptions{}); err != nil {
+	if err := e.ApplyEdits(ids[0], edits, document.EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if took := time.Since(start); took > 5*time.Second {
@@ -890,33 +891,33 @@ func TestApplyEditsBulkPerf(t *testing.T) {
 func TestApplyEditsCursorModes(t *testing.T) {
 	t.Parallel()
 	// "hello world\nsecond line": edit "world" -> "gvim!" and insert "> " at (1,0).
-	edits := []LSPEdit{lspEdit(0, 6, 0, 11, "gvim!"), lspEdit(1, 0, 1, 0, "> ")}
+	edits := []document.LSPEdit{lspEdit(0, 6, 0, 11, "gvim!"), lspEdit(1, 0, 1, 0, "> ")}
 	tests := []struct {
 		Name    string
-		Mode    CursorMode
+		Mode    document.CursorMode
 		Cursor  buffer.Pos
 		Want    buffer.Pos
 		Sel     *buffer.Selection
 		wantSel *buffer.Selection
 	}{
-		{"map: before the edit", CursorMap, pos(0, 2), pos(0, 2), nil, nil},
-		{"map: at the start of a replaced range", CursorMap, pos(0, 6), pos(0, 6), nil, nil},
-		{"map: inside a replaced range goes after the text", CursorMap, pos(0, 8), pos(0, 11), nil, nil},
-		{"map: at the end of a replaced range", CursorMap, pos(0, 11), pos(0, 11), nil, nil},
-		{"map: at an insert point moves with it", CursorMap, pos(1, 0), pos(1, 2), nil, nil},
-		{"map: after an insert on its line", CursorMap, pos(1, 4), pos(1, 6), nil, nil},
-		{"map: selection", CursorMap, pos(1, 3), pos(1, 5),
+		{"map: before the edit", document.CursorMap, pos(0, 2), pos(0, 2), nil, nil},
+		{"map: at the start of a replaced range", document.CursorMap, pos(0, 6), pos(0, 6), nil, nil},
+		{"map: inside a replaced range goes after the text", document.CursorMap, pos(0, 8), pos(0, 11), nil, nil},
+		{"map: at the end of a replaced range", document.CursorMap, pos(0, 11), pos(0, 11), nil, nil},
+		{"map: at an insert point moves with it", document.CursorMap, pos(1, 0), pos(1, 2), nil, nil},
+		{"map: after an insert on its line", document.CursorMap, pos(1, 4), pos(1, 6), nil, nil},
+		{"map: selection", document.CursorMap, pos(1, 3), pos(1, 5),
 			&buffer.Selection{Anchor: pos(0, 0), Head: pos(1, 3)}, &buffer.Selection{Anchor: pos(0, 0), Head: pos(1, 5)}},
-		{"keep", CursorKeep, pos(1, 4), pos(1, 4),
+		{"keep", document.CursorKeep, pos(1, 4), pos(1, 4),
 			&buffer.Selection{Anchor: pos(0, 1), Head: pos(1, 4)}, &buffer.Selection{Anchor: pos(0, 1), Head: pos(1, 4)}},
-		{"end: the end of the last edit", CursorEnd, pos(0, 0), pos(1, 2),
+		{"end: the end of the last edit", document.CursorEnd, pos(0, 0), pos(1, 2),
 			&buffer.Selection{Anchor: pos(0, 1), Head: pos(0, 0)}, nil},
 	}
 	for _, tt := range tests {
 		e, ids := tabsWith("hello world\nsecond line")
 		d := e.Active()
 		d.Cursor, d.Sel = tt.Cursor, tt.Sel
-		if err := e.ApplyEdits(ids[0], edits, EditOptions{Cursor: tt.Mode}); err != nil {
+		if err := e.ApplyEdits(ids[0], edits, document.EditOptions{Cursor: tt.Mode}); err != nil {
 			t.Fatalf("%s: %v", tt.Name, err)
 		}
 		if d.Cursor != tt.Want || !sameSel(d.Sel, tt.wantSel) {
@@ -937,8 +938,8 @@ func TestApplyEditsMapsExtraCaretsAndMergesThem(t *testing.T) {
 	e, ids := tabsWith("aaa bbb ccc")
 	d := e.Active()
 	d.Cursor = pos(0, 0)
-	d.Extra = []Caret{{Cursor: pos(0, 4)}, {Cursor: pos(0, 8)}}
-	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 0, 0, 0, ">>"), lspEdit(0, 4, 0, 7, "B")}, EditOptions{}); err != nil {
+	d.Extra = []document.Caret{{Cursor: pos(0, 4)}, {Cursor: pos(0, 8)}}
+	if err := e.ApplyEdits(ids[0], []document.LSPEdit{lspEdit(0, 0, 0, 0, ">>"), lspEdit(0, 4, 0, 7, "B")}, document.EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if d.Buffer.Text() != ">>aaa B ccc" {
@@ -958,8 +959,8 @@ func TestApplyEditsMapsExtraCaretsAndMergesThem(t *testing.T) {
 	e, ids = tabsWith("abcdef")
 	d = e.Active()
 	d.Cursor = pos(0, 2)
-	d.Extra = []Caret{{Cursor: pos(0, 4)}}
-	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 1, 0, 5, "X")}, EditOptions{}); err != nil {
+	d.Extra = []document.Caret{{Cursor: pos(0, 4)}}
+	if err := e.ApplyEdits(ids[0], []document.LSPEdit{lspEdit(0, 1, 0, 5, "X")}, document.EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(d.Cursors()) != 0 || d.Cursor != pos(0, 2) {
@@ -972,7 +973,7 @@ func TestApplyEditsOnLargeDocument(t *testing.T) {
 	e, d := openLarge(t, largeOptions(), lineText(300))
 	indexAll(t, e)
 	id := d.ID()
-	if err := e.ApplyEdits(id, []LSPEdit{lspEdit(5, 0, 5, 4, "LINE"), lspEdit(7, 9, 7, 9, "!")}, EditOptions{}); err != nil {
+	if err := e.ApplyEdits(id, []document.LSPEdit{lspEdit(5, 0, 5, 4, "LINE"), lspEdit(7, 9, 7, 9, "!")}, document.EditOptions{}); err != nil {
 		t.Fatalf("ApplyEdits: %v", err)
 	}
 	if d.Buffer.Line(5) != "LINE 0005" || d.Buffer.Line(7) != "line 0007!" {
@@ -982,18 +983,18 @@ func TestApplyEditsOnLargeDocument(t *testing.T) {
 		t.Fatal("the edits are not one undo step")
 	}
 	// More than the bulk threshold still goes edit by edit, never materialising.
-	var many []LSPEdit
-	for i := range bulkEditMin + 20 {
+	var many []document.LSPEdit
+	for i := range document.BulkEditMin + 20 {
 		many = append(many, lspEdit(i, 0, i, 4, "LINE"))
 	}
 	reads := d.Buffer.Stats().MaterializedBytes
-	if err := e.ApplyEdits(id, many, EditOptions{}); err != nil {
+	if err := e.ApplyEdits(id, many, document.EditOptions{}); err != nil {
 		t.Fatalf("many edits: %v", err)
 	}
 	if d.Buffer.Line(80) != "LINE 0080" || d.Buffer.Stats().MaterializedBytes != reads {
 		t.Errorf("line 80 = %q, materialized %d -> %d", d.Buffer.Line(80), reads, d.Buffer.Stats().MaterializedBytes)
 	}
-	if err := e.ApplyEdits(id, []LSPEdit{lspEdit(1, 0, 1, 1, "x"), lspEdit(1, 0, 1, 2, "y")}, EditOptions{}); !errors.Is(err, ErrOverlappingEdits) {
+	if err := e.ApplyEdits(id, []document.LSPEdit{lspEdit(1, 0, 1, 1, "x"), lspEdit(1, 0, 1, 2, "y")}, document.EditOptions{}); !errors.Is(err, document.ErrOverlappingEdits) {
 		t.Errorf("overlap: %v", err)
 	}
 }
@@ -1008,7 +1009,7 @@ func TestApplyEditsRefusedInLargeDocumentChangesNothing(t *testing.T) {
 	e, d := openLarge(t, opts, content)
 	indexAll(t, e)
 	before := d.Version()
-	err := e.ApplyEdits(d.ID(), []LSPEdit{lspEdit(2, 0, 2, 4, "LINE"), lspEdit(100, 0, 100, 1, "x")}, EditOptions{})
+	err := e.ApplyEdits(d.ID(), []document.LSPEdit{lspEdit(2, 0, 2, 4, "LINE"), lspEdit(100, 0, 100, 1, "x")}, document.EditOptions{})
 	if err == nil {
 		t.Fatal("an edit of an invalid line was accepted")
 	}

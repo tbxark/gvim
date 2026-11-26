@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,10 +107,10 @@ func TestCheckRenameAgreesWithRenamePathForRelativeOpen(t *testing.T) {
 	if err := e.OpenFile("b.txt"); err != nil {
 		t.Fatalf("OpenFile b: %v", err)
 	}
-	if check := e.CheckRename(a, b); !errors.Is(check, ErrAlreadyOpen) {
+	if check := e.CheckRename(a, b); !errors.Is(check, document.ErrAlreadyOpen) {
 		t.Fatalf("CheckRename: err = %v, want ErrAlreadyOpen", check)
 	}
-	if rename := e.RenamePath(a, b); !errors.Is(rename, ErrAlreadyOpen) {
+	if rename := e.RenamePath(a, b); !errors.Is(rename, document.ErrAlreadyOpen) {
 		t.Fatalf("RenamePath: err = %v, want ErrAlreadyOpen", rename)
 	}
 }
@@ -183,7 +184,7 @@ func TestDotDotInOneDirectoryKeepsTheCallersSpelling(t *testing.T) {
 	}
 	sep := string(filepath.Separator)
 	spelled := root + sep + "sub" + sep + ".." + sep + "f.txt"
-	got, err := absPath(spelled)
+	got, err := document.AbsPath(spelled)
 	if err != nil {
 		t.Fatal(err)
 	}

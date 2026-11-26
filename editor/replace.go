@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/search"
@@ -27,13 +28,13 @@ func (e *Editor) ReplaceMatch(q search.Query, repl string, m search.Match) (stri
 // refusal (a line that cannot be edited, too many unsaved changes, a match over
 // the size that is read to check it) leaves the text as it was and goes to the
 // status row in the words of the other large-file refusals.
-func replaceMatchLarge(e *Editor, d *Document, q search.Query, repl string, m search.Match) (string, error) {
+func replaceMatchLarge(e *Editor, d *document.Document, q search.Query, repl string, m search.Match) (string, error) {
 	out, err := search.ReplaceAt(d.Buffer, q, repl, m)
 	switch {
 	case err == nil:
 		return out, nil
 	case errors.Is(err, search.ErrMatchTooLarge):
-		err = &largeError{Msg: "replace: match too large for large file mode", Errs: []error{ErrLargeFile, err}}
+		err = &document.LargeError{Msg: "replace: match too large for large file mode", Errs: []error{document.ErrLargeFile, err}}
 	case errors.Is(err, buffer.ErrLineTooLong), errors.Is(err, buffer.ErrInvalidUTF8),
 		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrLineOverBudget), errors.Is(err, buffer.ErrSourceChanged):
 		err = d.RefusalError(err)
@@ -56,7 +57,7 @@ func (e *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 	}
 	if d.LargeState() != nil {
 		// Replace All lists every match of the document.
-		err := &largeError{Msg: "Replace All is not available in large file mode", Errs: []error{ErrLargeFile}}
+		err := &document.LargeError{Msg: "Replace All is not available in large file mode", Errs: []error{document.ErrLargeFile}}
 		e.setError(err)
 		return 0, err
 	}
@@ -84,14 +85,14 @@ func (e *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 // writableActive returns the active document when a replacement may change it. A
 // replacement changes the text outside Do, so the record of the last multi-caret
 // edit and the search range end here too.
-func (e *Editor) writableActive() (*Document, error) {
+func (e *Editor) writableActive() (*document.Document, error) {
 	d := e.Active()
 	var err error
 	switch {
 	case d == nil:
 		err = ErrNoDocument
 	case d.ReadOnly():
-		err = ErrReadOnly
+		err = document.ErrReadOnly
 	default:
 		err = d.RefuseEditWhileRestoring("replace")
 	}
@@ -99,7 +100,7 @@ func (e *Editor) writableActive() (*Document, error) {
 		e.setError(err)
 		return nil, err
 	}
-	d.LastMulti = nil
+	d.ClearLastMulti()
 	d.FindRange = nil
 	return d, nil
 }

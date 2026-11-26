@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 )
 
 // handler runs one action against the editor.
@@ -10,7 +11,7 @@ type handler func(e *Editor, args map[string]any) error
 
 // moveSpec pairs a cursor motion with its plain and selecting action names.
 type moveSpec struct {
-	Move, Sel Action
+	Move, Sel document.Action
 	motion    motion
 	// vertical moves keep the wanted column; all others reset it.
 	vertical bool
@@ -39,8 +40,8 @@ var moves = []moveSpec{
 // handlers maps every action name to its implementation.
 var handlers = buildHandlers()
 
-func buildHandlers() map[Action]handler {
-	h := make(map[Action]handler, 2*len(moves)+32)
+func buildHandlers() map[document.Action]handler {
+	h := make(map[document.Action]handler, 2*len(moves)+32)
 	for _, m := range moves {
 		h[m.Move] = moveHandler(m.motion, false, m.vertical, m.virtual)
 		h[m.Sel] = moveHandler(m.motion, true, m.vertical, m.virtual)
@@ -49,25 +50,25 @@ func buildHandlers() map[Action]handler {
 	h["select_page_up"] = pageHandler(-1, true)
 	h["move_page_down"] = pageHandler(1, false)
 	h["select_page_down"] = pageHandler(1, true)
-	h["select_word"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["select_word"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.SelectWord()
 		return nil
 	})
-	h["select_all"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["select_all"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.SelectAll()
 		return nil
 	})
 	h["insert_char"] = docAction(typeAtCarets)
-	h["insert_newline"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["insert_newline"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.ClearVirtual()
 		e.newline(d)
 		return nil
 	})
-	h["insert_tab"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["insert_tab"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.insertTab(d)
 		return nil
 	})
-	h["dedent_selection"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["dedent_selection"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		// A blank Markdown list item de-indents and cycles its bullet, as Fresh's
 		// markdown-source mode does; every other line keeps the usual dedent.
 		if e.markdownDedent(d) {
@@ -76,46 +77,46 @@ func buildHandlers() map[Action]handler {
 		d.Dedent(e.tabSizeOf(d))
 		return nil
 	})
-	h["duplicate_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["duplicate_line"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DuplicateLines(false)
 		return nil
 	})
-	h["delete_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_line"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DeleteLine()
 		return nil
 	})
-	h["open_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["open_line"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.OpenLine()
 		return nil
 	})
-	h["select_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["select_line"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.SelectLine()
 		return nil
 	})
-	h["expand_line_selection"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["expand_line_selection"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.ExpandLineSelection()
 		return nil
 	})
-	h["move_to_paragraph_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["move_to_paragraph_up"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		target, limited := paragraphUp(d.Buffer, d.Cursor.Line)
 		if limited {
-			return ErrScanLimit
+			return document.ErrScanLimit
 		}
 		d.JumpTo(target, false)
 		return nil
 	})
-	h["select_to_paragraph_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["select_to_paragraph_up"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		target, limited := paragraphUp(d.Buffer, d.Cursor.Line)
 		if limited {
-			return ErrScanLimit
+			return document.ErrScanLimit
 		}
 		d.JumpTo(target, true)
 		return nil
 	})
-	h["move_to_paragraph_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["move_to_paragraph_down"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		target, ok, limited := blankLineBelow(d.Buffer, d.Cursor.Line)
 		if limited {
-			return ErrScanLimit
+			return document.ErrScanLimit
 		}
 		if !ok {
 			target = paragraphEnd(d.Buffer)
@@ -125,10 +126,10 @@ func buildHandlers() map[Action]handler {
 		}
 		return nil
 	})
-	h["select_to_paragraph_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["select_to_paragraph_down"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		target, ok, limited := blankLineBelow(d.Buffer, d.Cursor.Line)
 		if limited {
-			return ErrScanLimit
+			return document.ErrScanLimit
 		}
 		if !ok {
 			target = d.Buffer.End()
@@ -136,70 +137,70 @@ func buildHandlers() map[Action]handler {
 		d.JumpTo(target, true)
 		return nil
 	})
-	h["to_upper_case"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.TransformCase(upperCase)
+	h["to_upper_case"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
+		d.TransformCase(document.UpperCase)
 		return nil
 	})
-	h["to_lower_case"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.TransformCase(lowerCase)
+	h["to_lower_case"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
+		d.TransformCase(document.LowerCase)
 		return nil
 	})
-	h["transpose_chars"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["transpose_chars"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.TransposeChars()
 		return nil
 	})
-	h["toggle_comment"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["toggle_comment"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		return e.toggleComment(d)
 	})
-	h["scroll_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["scroll_up"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.scrollView(d, -1)
 		return nil
 	})
-	h["scroll_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["scroll_down"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.scrollView(d, 1)
 		return nil
 	})
-	h["recenter"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["recenter"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.recenter(d)
 		return nil
 	})
-	h["scroll_cursor_top"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["scroll_cursor_top"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.scrollCursorTop(d)
 		return nil
 	})
-	h["scroll_cursor_bottom"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["scroll_cursor_bottom"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.scrollCursorBottom(d)
 		return nil
 	})
-	h["delete_backward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_backward"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		e.backspace(d)
 		return nil
 	})
-	h["delete_forward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_forward"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DeleteForward()
 		return nil
 	})
-	h["delete_word_backward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_word_backward"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DeleteWord(true)
 		return nil
 	})
-	h["delete_word_forward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_word_forward"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DeleteWord(false)
 		return nil
 	})
-	h["delete_to_line_start"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_to_line_start"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DeleteToLineStart()
 		return nil
 	})
-	h["delete_to_line_end"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["delete_to_line_end"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.DeleteToLineEnd()
 		return nil
 	})
-	h["move_line_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["move_line_up"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.MoveLines(-1)
 		return nil
 	})
-	h["move_line_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["move_line_down"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.MoveLines(1)
 		return nil
 	})
@@ -286,7 +287,7 @@ func buildHandlers() map[Action]handler {
 }
 
 // docAction adapts an action that works on the active document into a handler.
-func docAction(fn func(e *Editor, d *Document, args map[string]any) error) handler {
+func docAction(fn func(e *Editor, d *document.Document, args map[string]any) error) handler {
 	return func(e *Editor, args map[string]any) error {
 		return fn(e, e.Active(), args)
 	}
@@ -294,7 +295,7 @@ func docAction(fn func(e *Editor, d *Document, args map[string]any) error) handl
 
 // pageHandler moves the cursor one pane in direction dir (-1 up, +1 down).
 func pageHandler(dir int, extend bool) handler {
-	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	return docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		d.ClearVirtual()
 		e.pageCarets(d, dir, extend || e.marking(d))
 		return nil
@@ -309,7 +310,7 @@ const pageOverlap = 3
 // The top is clamped to the document, which can leave the caret short of the
 // full page at the end. If the viewport cannot scroll, the caret moves by the
 // same amount instead.
-func pageMove(e *Editor, d *Document, dir int, extend bool) {
+func pageMove(e *Editor, d *document.Document, dir int, extend bool) {
 	if e.pageInTallLine(d, dir, extend) {
 		return
 	}
@@ -338,7 +339,7 @@ func pageMove(e *Editor, d *Document, dir int, extend bool) {
 
 // moveHandler runs a cursor motion, optionally extending the selection.
 func moveHandler(m motion, extend, vertical bool, virtual virtualMoveKind) handler {
-	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	return docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		if e.virtualMove(d, virtual, extend || e.marking(d)) {
 			return nil
 		}
@@ -363,7 +364,7 @@ func forced(args map[string]any) bool {
 }
 
 // unsavedError names the first modified document, or returns nil if none is.
-func unsavedError(docs []*Document) error {
+func unsavedError(docs []*document.Document) error {
 	for _, d := range docs {
 		if d.Modified() {
 			return fmt.Errorf("%s: %w", d.Name(), ErrUnsaved)

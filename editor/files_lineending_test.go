@@ -1,25 +1,28 @@
 package editor
 
-import "testing"
+import (
+	"github.com/tbxark/gvim/document"
+	"testing"
+)
 
 func TestMixedLineEndingsAreKeptOnSave(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name    string
 		content string
-		actions []Action // run from the start of the document
-		typed   string   // typed after the actions
+		actions []document.Action // run from the start of the document
+		typed   string            // typed after the actions
 		Want    string
 	}{
 		{"unedited", "a\r\nb\nc\r\n", nil, "", "a\r\nb\nc\r\n"},
 		{"lf majority", "a\nb\r\nc\n", nil, "", "a\nb\r\nc\n"},
 		{"no final break", "a\r\nb\nc", nil, "", "a\r\nb\nc"},
-		{"edit a line", "a\r\nb\nc\r\n", []Action{"move_down", "move_line_end"}, "x", "a\r\nbx\nc\r\n"},
-		{"edit the first line", "a\r\nb\nc\r\n", []Action{"move_line_end"}, "x", "ax\r\nb\nc\r\n"},
-		{"delete a line", "a\r\nb\nc\r\n", []Action{"move_down", "delete_line"}, "", "a\r\nc\r\n"},
-		{"delete the first line", "a\r\nb\nc\r\n", []Action{"delete_line"}, "", "b\nc\r\n"},
-		{"new line takes the majority ending", "a\r\nb\nc\r\n", []Action{"move_down", "move_line_end", "insert_newline"}, "x", "a\r\nb\nx\r\nc\r\n"},
-		{"new line at the end takes the majority ending", "a\r\nb\nc\r\n", []Action{"move_document_end"}, "x", "a\r\nb\nc\r\nx"},
+		{"edit a line", "a\r\nb\nc\r\n", []document.Action{"move_down", "move_line_end"}, "x", "a\r\nbx\nc\r\n"},
+		{"edit the first line", "a\r\nb\nc\r\n", []document.Action{"move_line_end"}, "x", "ax\r\nb\nc\r\n"},
+		{"delete a line", "a\r\nb\nc\r\n", []document.Action{"move_down", "delete_line"}, "", "a\r\nc\r\n"},
+		{"delete the first line", "a\r\nb\nc\r\n", []document.Action{"delete_line"}, "", "b\nc\r\n"},
+		{"new line takes the majority ending", "a\r\nb\nc\r\n", []document.Action{"move_down", "move_line_end", "insert_newline"}, "x", "a\r\nb\nx\r\nc\r\n"},
+		{"new line at the end takes the majority ending", "a\r\nb\nc\r\n", []document.Action{"move_document_end"}, "x", "a\r\nb\nc\r\nx"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

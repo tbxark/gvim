@@ -6,18 +6,18 @@ import (
 )
 
 // lastCharCol returns the column of the last character of line, or 0 for an empty line.
-func lastCharCol(b *buffer.Buffer, line int) int {
+func LastCharCol(b *buffer.Buffer, line int) int {
 	n := b.LineLen(line)
 	if n == 0 {
 		return 0
 	}
-	return prevBoundary(b, line, n)
+	return PrevBoundary(b, line, n)
 }
 
 // onLastChar moves p back to the last character of its line when it is past it, which
 // is where a vertical move leaves the caret on a shorter line.
-func onLastChar(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
-	if last := lastCharCol(b, p.Line); p.Col > last {
+func OnLastChar(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
+	if last := LastCharCol(b, p.Line); p.Col > last {
 		p.Col = last
 	}
 	return p
@@ -25,7 +25,7 @@ func onLastChar(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
 
 // viLastLine is the last line vi can be on. The empty line after the final line break of
 // the text is not a line of the file.
-func viLastLine(b *buffer.Buffer) int {
+func ViLastLine(b *buffer.Buffer) int {
 	last := b.Lines() - 1
 	if last > 0 && b.LineLen(last) == 0 {
 		last--
@@ -58,7 +58,7 @@ func (d *Document) ToggleCase() {
 		if lo, hi := c.Bounds(); lo != hi {
 			old := d.PlanRange(lo, hi)
 			if swapped := toggleRunes(old); swapped != old {
-				plans[i].Edit = &edit{From: lo, To: hi, Text: swapped}
+				plans[i].Edit = &Edit{From: lo, To: hi, Text: swapped}
 			}
 			continue
 		}
@@ -66,16 +66,16 @@ func (d *Document) ToggleCase() {
 		if p.Col >= d.Buffer.LineLen(p.Line) {
 			continue
 		}
-		next := buffer.Pos{Line: p.Line, Col: nextBoundary(d.Buffer, p.Line, p.Col)}
+		next := buffer.Pos{Line: p.Line, Col: NextBoundary(d.Buffer, p.Line, p.Col)}
 		old := d.PlanRange(p, next)
 		if swapped := toggleRunes(old); swapped != old {
-			plans[i].Edit = &edit{From: p, To: next, Text: swapped}
+			plans[i].Edit = &Edit{From: p, To: next, Text: swapped}
 			continue
 		}
 		// Nothing to change (a digit, a symbol), but the caret still moves on. An empty
 		// edit at the caret carries it through the other carets' edits.
 		width := next.Col - p.Col
-		plans[i].Edit = &edit{From: p, To: p}
+		plans[i].Edit = &Edit{From: p, To: p}
 		plans[i].Place = func(end buffer.Pos) buffer.Pos { return buffer.Pos{Line: end.Line, Col: end.Col + width} }
 	}
 	d.applyPlans(cs, plans)

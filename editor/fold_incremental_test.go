@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/textlayout"
 )
 
 // After any run of edits, undo and redo, Folds gives the ranges of all the lines, though it reads
@@ -19,7 +20,13 @@ func TestFoldsFollowEveryEditWithoutReadingAllLines(t *testing.T) {
 	d := e.Active()
 	scratch := func(tab int) []fold.Range {
 		lines := strings.Split(d.Buffer.Text(), "\n")
-		return fold.Ranges(lines, tab)
+		return fold.RangesFunc(len(lines), func(i int) (int, bool) {
+			if strings.TrimSpace(lines[i]) == "" {
+				return 0, true
+			}
+			w, _ := textlayout.LineIndent(lines[i], tab)
+			return w, false
+		})
 	}
 	for step := range 300 {
 		p := d.Buffer.Clamp(buffer.Pos{Line: rng.IntN(d.Buffer.Lines()), Col: rng.IntN(8)})

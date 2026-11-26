@@ -2,11 +2,12 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strings"
 )
 
 // registerTabsExtraHandlers registers close and save_all.
-func registerTabsExtraHandlers(h map[Action]handler) {
+func registerTabsExtraHandlers(h map[document.Action]handler) {
 	// Fresh's close action runs the same code as close_tab, so in a single
 	// pane it closes the active tab.
 	h["close"] = closeTab
@@ -27,7 +28,7 @@ func saveAll(e *Editor, _ map[string]any) error {
 
 // saveAllStatus sets the status of the active tab from the results of a Save All:
 // the summary, or the summary with the first failure, which is also returned.
-func (e *Editor) saveAllStatus(results []SaveResult, p SavePlan) error {
+func (e *Editor) saveAllStatus(results []document.SaveResult, p SavePlan) error {
 	var first error
 	failed := 0
 	for _, r := range results {

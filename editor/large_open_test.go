@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ func TestLargeOpenReadsLazily(t *testing.T) {
 	if !d.Large() {
 		t.Fatal("not large")
 	}
-	if got := src.BytesRead(); got > largeSampleSize+64+32 {
+	if got := src.BytesRead(); got > document.LargeSampleSize+64+32 {
 		t.Fatalf("open read %d bytes of %d, want only the sample and the first chunks", got, len(content))
 	}
 	if d.Index().Complete {
@@ -135,7 +136,7 @@ func TestLargeEncodingAndLineEnding(t *testing.T) {
 func TestLargeSampleCutInsideARuneIsUTF8(t *testing.T) {
 	t.Parallel()
 	// The 64 KiB sample ends in the middle of the two-byte e-acute.
-	content := strings.Repeat("x", largeSampleSize-1) + "é\n" + strings.Repeat("y\n", 200)
+	content := strings.Repeat("x", document.LargeSampleSize-1) + "é\n" + strings.Repeat("y\n", 200)
 	opts := largeOptions()
 	opts.largeGeom.MaxLine = 0
 	opts.largeGeom.Chunk = 0
@@ -166,14 +167,14 @@ func TestLargeNonUTF8NeedsFullLoad(t *testing.T) {
 			e := New(largeOptions())
 			path := writeLargeFile(t, "enc.txt", tt.content)
 			_, err := e.LoadFunc(path)()
-			var need ErrLargeNeedsFullLoad
+			var need document.ErrLargeNeedsFullLoad
 			if !errors.As(err, &need) {
 				t.Fatalf("LoadFunc error = %v, want ErrLargeNeedsFullLoad", err)
 			}
 			if need.Path != path || need.Size != int64(len(tt.content)) || need.Codec == "" || need.Codec == "utf-8" {
 				t.Fatalf("error = %+v", need)
 			}
-			if want := "(" + formatSize(int64(len(tt.content))) + ") requires full load"; !strings.HasSuffix(need.Error(), want) {
+			if want := "(" + document.FormatSize(int64(len(tt.content))) + ") requires full load"; !strings.HasSuffix(need.Error(), want) {
 				t.Fatalf("message = %q, want it to end in %q", need.Error(), want)
 			}
 			if err := e.OpenFile(path); !errors.As(err, &need) {
@@ -193,8 +194,8 @@ func TestLargeNonUTF8OverTheLimitIsRefusedAtOnce(t *testing.T) {
 	e := New(opts)
 	path := writeLargeFile(t, "latin.txt", strings.Repeat("caf\xe9\n", 600))
 	_, err := e.LoadFunc(path)()
-	var need ErrLargeNeedsFullLoad
-	if !errors.Is(err, ErrTooLargeToTranscode) || errors.As(err, &need) {
+	var need document.ErrLargeNeedsFullLoad
+	if !errors.Is(err, document.ErrTooLargeToTranscode) || errors.As(err, &need) {
 		t.Fatalf("LoadFunc over the limit = %v, want ErrTooLargeToTranscode and no question", err)
 	}
 	small := writeLargeFile(t, "small.txt", strings.Repeat("caf\xe9\n", 300))
@@ -232,14 +233,14 @@ func TestLoadFullFuncRefusesOverTheLimit(t *testing.T) {
 	opts.fullLoadMax = 2048
 	e := New(opts)
 	path := writeLargeFile(t, "latin.txt", strings.Repeat("caf\xe9\n", 600))
-	if _, err := e.LoadFullFunc(path)(); !errors.Is(err, ErrTooLargeToTranscode) {
+	if _, err := e.LoadFullFunc(path)(); !errors.Is(err, document.ErrTooLargeToTranscode) {
 		t.Fatalf("LoadFullFunc over the limit = %v, want ErrTooLargeToTranscode", err)
 	}
 	small := writeLargeFile(t, "small.txt", strings.Repeat("caf\xe9\n", 300))
 	if _, err := e.LoadFullFunc(small)(); err != nil {
 		t.Fatalf("LoadFullFunc under the limit = %v", err)
 	}
-	if _, err := e.LoadFullFunc("")(); !errors.Is(err, ErrEmptyPath) {
+	if _, err := e.LoadFullFunc("")(); !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("LoadFullFunc of no path = %v", err)
 	}
 }
@@ -267,10 +268,10 @@ func TestLargeBinarySampleOpensAsSummary(t *testing.T) {
 			if e.Status() != "Opened big.txt (binary file, read-only)" {
 				t.Errorf("status = %q", e.Status())
 			}
-			if r := e.Do("insert_char", map[string]any{"text": "x"}); !errors.Is(r.Err, ErrReadOnly) {
+			if r := e.Do("insert_char", map[string]any{"text": "x"}); !errors.Is(r.Err, document.ErrReadOnly) {
 				t.Errorf("typing into a binary file = %v, want ErrReadOnly", r.Err)
 			}
-			if _, err := e.PlanSave(); !errors.Is(err, ErrReadOnly) {
+			if _, err := e.PlanSave(); !errors.Is(err, document.ErrReadOnly) {
 				t.Errorf("PlanSave = %v, want ErrReadOnly", err)
 			}
 		})
@@ -279,7 +280,7 @@ func TestLargeBinarySampleOpensAsSummary(t *testing.T) {
 
 func TestLargeNulBeyondTheSampleIsNotBinary(t *testing.T) {
 	t.Parallel()
-	content := strings.Repeat("x", largeSampleSize+100) + "\x00\n"
+	content := strings.Repeat("x", document.LargeSampleSize+100) + "\x00\n"
 	opts := largeOptions()
 	opts.largeGeom.Chunk = 0
 	opts.largeGeom.MaxLine = 0
@@ -305,11 +306,11 @@ func TestLargeOpenStatus(t *testing.T) {
 		t.Parallel()
 		// The status row of a 120 column terminal shows about 40 cells of the message.
 		e, _ := openLarge(t, largeOptions(), lineText(300))
-		if !strings.HasPrefix(e.Status(), largeLimitsHint) || utf8.RuneCountInString(largeLimitsHint) > 40 {
+		if !strings.HasPrefix(e.Status(), document.LargeLimitsHint) || utf8.RuneCountInString(document.LargeLimitsHint) > 40 {
 			t.Fatalf("status = %q: the hint must start it and be at most 40 cells", e.Status())
 		}
 		for _, off := range []string{"folds", "wrap", "LSP", "auto-save"} {
-			if !strings.Contains(largeLimitsHint, off) {
+			if !strings.Contains(document.LargeLimitsHint, off) {
 				t.Errorf("the hint does not name %q", off)
 			}
 		}
@@ -319,7 +320,7 @@ func TestLargeOpenStatus(t *testing.T) {
 		opts := largeOptions()
 		opts.largeGeom.InitialBytes = 1 << 20
 		e, _ := openLarge(t, opts, lineText(150))
-		if want := largeLimitsHint + " Large file (1.5 KB): 151 lines. "; !strings.HasPrefix(e.Status(), want) {
+		if want := document.LargeLimitsHint + " Large file (1.5 KB): 151 lines. "; !strings.HasPrefix(e.Status(), want) {
 			t.Fatalf("status = %q, want prefix %q", e.Status(), want)
 		}
 	})
@@ -383,7 +384,7 @@ func TestLoadFuncOpensLargeDocumentOffTheUpdateLoop(t *testing.T) {
 		t.Fatal("not large")
 	}
 	e.OpenLoaded(d)
-	if e.Active() != d || !strings.HasPrefix(e.Status(), largeLimitsHint+" Large file (") {
+	if e.Active() != d || !strings.HasPrefix(e.Status(), document.LargeLimitsHint+" Large file (") {
 		t.Fatalf("active = %v, status = %q", e.Active() == d, e.Status())
 	}
 }
@@ -429,13 +430,13 @@ func TestLargeSaveIsRefusedUntilTheIndexIsBuilt(t *testing.T) {
 	}
 	run(t, e, "move_line_end")
 	typeText(t, e, "!")
-	if err := e.Save(); !errors.Is(err, ErrIndexing) {
+	if err := e.Save(); !errors.Is(err, document.ErrIndexing) {
 		t.Fatalf("Save = %v, want ErrIndexing", err)
 	}
 	if jobs := e.PlanAutoSave(time.Now()); len(jobs) != 0 {
 		t.Fatalf("auto-save planned %d jobs for a large document", len(jobs))
 	}
-	if _, err := e.PlanRevert(true); !errors.Is(err, ErrLargeFile) {
+	if _, err := e.PlanRevert(true); !errors.Is(err, document.ErrLargeFile) {
 		t.Fatalf("PlanRevert = %v, want ErrLargeFile", err)
 	}
 	after, err := os.ReadFile(path)

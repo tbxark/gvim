@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"time"
 )
 
@@ -11,17 +12,17 @@ import (
 // final newline) are applied to its buffer here, as a save applies them. Untitled
 // and read-only documents get no job. With auto-save off it returns nil and records
 // no time. The caller runs the jobs with Run, then passes the results to ApplySaves.
-func (e *Editor) PlanAutoSave(now time.Time) []SaveJob {
+func (e *Editor) PlanAutoSave(now time.Time) []document.SaveJob {
 	if e.opts.AutoSaveInterval <= 0 {
 		return nil
 	}
 	e.autoSaved = now
-	var jobs []SaveJob
+	var jobs []document.SaveJob
 	for _, d := range e.docs {
 		if d.Ext().Virtual || d.Untitled() || d.ReadOnly() || d.LargeState() != nil || !d.Modified() {
 			continue
 		}
-		jobs = append(jobs, d.PlanSave(d.Path, e.opts.documentSettings()))
+		jobs = append(jobs, d.PlanSave(d.Path, e.opts.saveOptions()))
 	}
 	return jobs
 }
@@ -32,7 +33,7 @@ func (e *Editor) PlanAutoSave(now time.Time) []SaveJob {
 // edit made while the save ran keeps the document modified. A failed save keeps the
 // document's edits and shows its error in the document's status. It returns the
 // failures joined, or nil when all saves worked.
-func (e *Editor) ApplySaves(results []SaveResult) error {
+func (e *Editor) ApplySaves(results []document.SaveResult) error {
 	var errs []error
 	for _, r := range results {
 		d := r.Job.Doc
@@ -52,7 +53,7 @@ func (e *Editor) ApplySaves(results []SaveResult) error {
 		}
 		d.SetEncodingLabel(r.Job.Label)
 		d.Disk = r.Disk
-		if d.ContentMark() == (contentMark{Text: r.Job.Text}) {
+		if d.ContentMark() == (document.ContentMark{Text: r.Job.Text}) {
 			d.Buffer.MarkSaved()
 			d.MetaDirty = false
 		}

@@ -3,6 +3,7 @@ package editor
 import (
 	"bytes"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"image"
 	"image/png"
 	"io/fs"
@@ -96,7 +97,7 @@ func TestRevertIsOneUndoStep(t *testing.T) {
 func TestRevertWithoutPathFails(t *testing.T) {
 	t.Parallel()
 	e := pathDoc(Options{}, "", "text")
-	if r := e.Do("revert", nil); !errors.Is(r.Err, ErrNoPath) {
+	if r := e.Do("revert", nil); !errors.Is(r.Err, document.ErrNoPath) {
 		t.Fatalf("err = %v, want ErrNoPath", r.Err)
 	}
 }
@@ -128,10 +129,10 @@ func TestRevertRefusesAnImage(t *testing.T) {
 		t.Fatal("the opened PNG is not an image document")
 	}
 	plan, err := e.PlanRevert(false)
-	if !errors.Is(err, ErrImage) || plan.Path != "" {
+	if !errors.Is(err, document.ErrImage) || plan.Path != "" {
 		t.Fatalf("PlanRevert = (%+v, %v), want an ErrImage refusal", plan, err)
 	}
-	if err := e.Revert(false); !errors.Is(err, ErrImage) {
+	if err := e.Revert(false); !errors.Is(err, document.ErrImage) {
 		t.Fatalf("Revert = %v, want ErrImage", err)
 	}
 	if !e.Active().IsImage() {
@@ -160,7 +161,7 @@ func TestRevertRefusedOnReadOnlyDocument(t *testing.T) {
 	run(t, e, "toggle_read_only")
 	putFile(t, path, "b\n")
 	r := e.Do("revert", map[string]any{"force": true})
-	if !errors.Is(r.Err, ErrReadOnly) {
+	if !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 	}
 	if got := e.Active().Buffer.Text(); got != "a\n" {
@@ -207,7 +208,7 @@ func TestRevertOfARewrittenFileWithTheSameTextSaysReverted(t *testing.T) {
 	if d.Status != "Reverted a.txt" {
 		t.Errorf("status = %q", d.Status)
 	}
-	if !d.Disk.SameAs(diskStateOf(path)) {
+	if !d.Disk.SameAs(document.DiskStateOf(path)) {
 		t.Error("the disk state was not adopted")
 	}
 }

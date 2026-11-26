@@ -201,7 +201,7 @@ func (d *Document) ShrinkSelection() {
 // false when there is no word at either place.
 func (d *Document) wordAt(p buffer.Pos) (from, to buffer.Pos, ok bool) {
 	if d.Buffer.ClassAt(p) != buffer.ClassWord {
-		prev, has := prevPos(d.Buffer, p)
+		prev, has := PrevPos(d.Buffer, p)
 		if !has || d.Buffer.ClassAt(prev) != buffer.ClassWord {
 			return from, to, false
 		}

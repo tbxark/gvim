@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 )
 
 // RowMapper returns the rune column at which each display row of a buffer line
@@ -51,10 +52,10 @@ func (e *Editor) rowStartsAt(line, col int) (starts []int, tall bool) {
 // false when neither the row of p nor the target row is a wrapped line, or when p
 // is already on the first or last row of the text, and the buffer-line motion
 // answers instead. The wanted column is the offset from the start of the row.
-func (e *Editor) visualVertical(d *Document, from buffer.Pos, dir int) (buffer.Pos, bool) {
+func (e *Editor) visualVertical(d *document.Document, from buffer.Pos, dir int) (buffer.Pos, bool) {
 	b := d.Buffer
 	starts, tall := e.rowStartsAt(from.Line, from.Col)
-	row, line, target, targetTall := rowOf(starts, from.Col)+dir, from.Line, starts, tall
+	row, line, target, targetTall := document.RowOf(starts, from.Col)+dir, from.Line, starts, tall
 	switch {
 	case row < 0:
 		if line == 0 {
@@ -76,16 +77,16 @@ func (e *Editor) visualVertical(d *Document, from buffer.Pos, dir int) (buffer.P
 	}
 	tab := e.tabSizeOf(d)
 	if d.Want < 0 {
-		first, _ := rowBounds(starts, rowOf(starts, from.Col), b.LineLen(from.Line))
+		first, _ := document.RowBounds(starts, document.RowOf(starts, from.Col), b.LineLen(from.Line))
 		if tall {
 			// Counted from the row start: the line is not walked from its own.
-			d.Want = cellsFrom(b, from.Line, first, from.Col, 0, tab)
+			d.Want = document.CellsFrom(b, from.Line, first, from.Col, 0, tab)
 		} else {
-			d.Want = cellColumn(b, from, tab) - cellColumn(b, buffer.Pos{Line: from.Line, Col: first}, tab)
+			d.Want = document.CellColumn(b, from, tab) - document.CellColumn(b, buffer.Pos{Line: from.Line, Col: first}, tab)
 		}
 	}
-	first, last := rowBounds(target, row, b.LineLen(line))
-	col := colAtCellFrom(b, line, first, d.Want, last, tab, targetTall)
+	first, last := document.RowBounds(target, row, b.LineLen(line))
+	col := document.ColAtCellFrom(b, line, first, d.Want, last, tab, targetTall)
 	return buffer.Pos{Line: line, Col: min(col, last)}, true
 }
 
@@ -97,7 +98,7 @@ func (e *Editor) visualLineStart(p buffer.Pos) (buffer.Pos, bool) {
 	if starts == nil {
 		return p, false
 	}
-	r := rowOf(starts, p.Col)
+	r := document.RowOf(starts, p.Col)
 	if starts[r] == p.Col && r > 0 {
 		r--
 	}
@@ -112,10 +113,10 @@ func (e *Editor) visualLineEnd(b *buffer.Buffer, p buffer.Pos) (buffer.Pos, bool
 	if starts == nil {
 		return p, false
 	}
-	r := rowOf(starts, p.Col)
-	_, end := rowBounds(starts, r, b.LineLen(p.Line))
+	r := document.RowOf(starts, p.Col)
+	_, end := document.RowBounds(starts, r, b.LineLen(p.Line))
 	if p.Col == end && r+1 < len(starts) {
-		_, end = rowBounds(starts, r+1, b.LineLen(p.Line))
+		_, end = document.RowBounds(starts, r+1, b.LineLen(p.Line))
 	}
 	return buffer.Pos{Line: p.Line, Col: end}, true
 }
@@ -124,7 +125,7 @@ func (e *Editor) visualLineEnd(b *buffer.Buffer, p buffer.Pos) (buffer.Pos, bool
 // rows than the viewport holds. A page of buffer lines would jump over the line, or to
 // the end of the document, and the rows in between could never be reached. It reports
 // whether it moved. A line that fits the viewport pages by lines.
-func (e *Editor) pageInTallLine(d *Document, dir int, extend bool) bool {
+func (e *Editor) pageInTallLine(d *document.Document, dir int, extend bool) bool {
 	if starts, tall := e.rowStartsAt(d.Cursor.Line, d.Cursor.Col); !tall && len(starts) <= e.rows {
 		return false
 	}

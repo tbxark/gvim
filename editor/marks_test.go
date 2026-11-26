@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
@@ -66,9 +67,9 @@ func TestBookmarkSlotsRoundTrip(t *testing.T) {
 func TestBookmarkJumpReturnsToItsTab(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Rows: 5, Cols: 80})
-	e.docs = []*Document{
-		newDocument("/fake/a.txt", "one\ntwo\nthree"),
-		newDocument("/fake/b.txt", "x\ny"),
+	e.docs = []*document.Document{
+		document.NewDocument("/fake/a.txt", "one\ntwo\nthree"),
+		document.NewDocument("/fake/b.txt", "x\ny"),
 	}
 	e.switchTo(0)
 	marksCaret(e, 1, 1)
@@ -90,9 +91,9 @@ func TestBookmarkJumpReturnsToItsTab(t *testing.T) {
 func TestBookmarkOfClosedTabCannotBeJumpedTo(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Rows: 5, Cols: 80})
-	e.docs = []*Document{
-		newDocument("/fake/a.txt", "one\ntwo"),
-		newDocument("/fake/b.txt", "x"),
+	e.docs = []*document.Document{
+		document.NewDocument("/fake/a.txt", "one\ntwo"),
+		document.NewDocument("/fake/b.txt", "x"),
 	}
 	e.switchTo(0)
 	marksCaret(e, 1, 0)
@@ -114,17 +115,17 @@ func TestMarkModeExtendsSelectionUntilCancelled(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name    string
-		steps   []Action
+		steps   []document.Action
 		wantSel string
 		wantCol int
 	}{
-		{"set_mark then moves select", []Action{"set_mark", "move_right", "move_right"}, "bc", 3},
-		{"moves without a mark select nothing", []Action{"move_right", "move_right"}, "", 3},
-		{"mark mode lasts over several moves", []Action{"set_mark", "move_right", "move_right", "move_right"}, "bcd", 4},
-		{"cancel_mark keeps the selection", []Action{"set_mark", "move_right", "cancel_mark"}, "b", 2},
-		{"a move after cancel_mark collapses the selection to its right edge", []Action{"set_mark", "move_right", "cancel_mark", "move_right"}, "", 2},
-		{"clear_mark drops the selection at once", []Action{"set_mark", "move_right", "clear_mark"}, "", 2},
-		{"clear_mark leaves mark mode off", []Action{"set_mark", "clear_mark", "move_right", "move_right"}, "", 3},
+		{"set_mark then moves select", []document.Action{"set_mark", "move_right", "move_right"}, "bc", 3},
+		{"moves without a mark select nothing", []document.Action{"move_right", "move_right"}, "", 3},
+		{"mark mode lasts over several moves", []document.Action{"set_mark", "move_right", "move_right", "move_right"}, "bcd", 4},
+		{"cancel_mark keeps the selection", []document.Action{"set_mark", "move_right", "cancel_mark"}, "b", 2},
+		{"a move after cancel_mark collapses the selection to its right edge", []document.Action{"set_mark", "move_right", "cancel_mark", "move_right"}, "", 2},
+		{"clear_mark drops the selection at once", []document.Action{"set_mark", "move_right", "clear_mark"}, "", 2},
+		{"clear_mark leaves mark mode off", []document.Action{"set_mark", "clear_mark", "move_right", "move_right"}, "", 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -174,7 +175,7 @@ func TestEditorBookmarksList(t *testing.T) {
 
 func TestMarkAndBookmarkActionsNeedADocument(t *testing.T) {
 	t.Parallel()
-	for _, a := range []Action{"set_mark", "cancel_mark", "clear_mark", "set_bookmark", "jump_to_bookmark"} {
+	for _, a := range []document.Action{"set_mark", "cancel_mark", "clear_mark", "set_bookmark", "jump_to_bookmark"} {
 		e := New(Options{Empty: true})
 		if r := e.Do(a, slotArgs("1")); r.Err != ErrNoDocument {
 			t.Errorf("Do(%s) with no tab: err = %v, want ErrNoDocument", a, r.Err)
@@ -185,7 +186,7 @@ func TestMarkAndBookmarkActionsNeedADocument(t *testing.T) {
 func TestE2ActionsAreRegistered(t *testing.T) {
 	t.Parallel()
 	names := Actions()
-	for _, want := range []Action{
+	for _, want := range []document.Action{
 		"set_bookmark", "jump_to_bookmark", "set_mark", "cancel_mark", "clear_mark",
 		"navigate_back", "navigate_forward", "goto_matching_bracket", "dabbrev_expand",
 		"find_selection_next", "find_selection_previous", "close", "save_all",

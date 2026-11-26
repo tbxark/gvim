@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 // withDoc returns a 5-row editor whose only tab holds text.
 func withDoc(text string) *Editor {
 	e := New(Options{Rows: 5, Cols: 80})
-	e.docs = []*Document{newDocument("", text)}
+	e.docs = []*document.Document{document.NewDocument("", text)}
 	e.switchTo(0)
 	return e
 }
@@ -23,7 +24,7 @@ func withTabs(names ...string) *Editor {
 	e := New(Options{Rows: 5, Cols: 80})
 	e.docs = nil
 	for _, n := range names {
-		e.docs = append(e.docs, newDocument("/fake/"+n, ""))
+		e.docs = append(e.docs, document.NewDocument("/fake/"+n, ""))
 	}
 	e.switchTo(0)
 	return e

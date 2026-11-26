@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 )
 
 // SavePlan is an explicit save prepared on the editor's goroutine: Save, Save As or
@@ -12,7 +13,7 @@ import (
 // plan, a run and an apply in one call, so the synchronous and the asynchronous saves
 // write the same way.
 type SavePlan struct {
-	jobs     []SaveJob
+	jobs     []document.SaveJob
 	all      bool   // Save All: the status is the summary of the tabs
 	untitled int    // Save All: modified tabs with no file name, skipped
 	readOnly int    // Save All: modified read-only tabs, skipped
@@ -33,7 +34,7 @@ func (p SavePlan) Release() {
 
 // Run writes the planned files one after another and returns their results. It reads
 // only the plan, so it may run in a command.
-func (p SavePlan) Run() []SaveResult {
+func (p SavePlan) Run() []document.SaveResult {
 	return p.RunContext(context.Background())
 }
 
@@ -41,8 +42,8 @@ func (p SavePlan) Run() []SaveResult {
 // being written stops at the next step of about 1 MiB when ctx is cancelled, removes
 // its temporary file and reports the context's error. The files after it are not
 // written, and carry the same error.
-func (p SavePlan) RunContext(ctx context.Context) []SaveResult {
-	results := make([]SaveResult, len(p.jobs))
+func (p SavePlan) RunContext(ctx context.Context) []document.SaveResult {
+	results := make([]document.SaveResult, len(p.jobs))
 	for i, j := range p.jobs {
 		results[i] = j.RunContext(ctx)
 	}
@@ -61,27 +62,27 @@ func (e *Editor) PlanSave() (SavePlan, error) {
 		return SavePlan{}, err
 	}
 	if d.Ext().Virtual {
-		e.setError(ErrVirtual)
-		return SavePlan{}, ErrVirtual
+		e.setError(document.ErrVirtual)
+		return SavePlan{}, document.ErrVirtual
 	}
 	// A large document whose file changed under it is read-only, but the reason is the
 	// change, not a setting.
 	_ = d.CheckSource()
 	if d.Frozen() {
-		e.setError(errFileChanged)
-		return SavePlan{}, errFileChanged
+		e.setError(document.ErrFileChanged)
+		return SavePlan{}, document.ErrFileChanged
 	}
 	if d.ReadOnly() {
-		err := ErrReadOnly
+		err := document.ErrReadOnly
 		e.setError(err)
 		return SavePlan{}, err
 	}
 	if d.Untitled() {
-		err := ErrNoPath
+		err := document.ErrNoPath
 		e.setError(err)
 		return SavePlan{}, err
 	}
-	return SavePlan{jobs: []SaveJob{d.PlanSave(d.Path, e.opts.documentSettings())}}, nil
+	return SavePlan{jobs: []document.SaveJob{d.PlanSave(d.Path, e.opts.saveOptions())}}, nil
 }
 
 // PlanSaveAs prepares the write of the active document to path, as SaveAs does, and
@@ -100,8 +101,8 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		return SavePlan{}, err
 	}
 	if d.Ext().Virtual {
-		e.setError(ErrVirtual)
-		return SavePlan{}, ErrVirtual
+		e.setError(document.ErrVirtual)
+		return SavePlan{}, document.ErrVirtual
 	}
 	path, err := e.openPath(path)
 	if err != nil {
@@ -109,12 +110,12 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		return SavePlan{}, err
 	}
 	if i := e.openElsewhere(path, e.active); i >= 0 {
-		err := fmt.Errorf("save as %s: %w", path, ErrAlreadyOpen)
+		err := fmt.Errorf("save as %s: %w", path, document.ErrAlreadyOpen)
 		e.setError(err)
 		return SavePlan{}, err
 	}
 	if path == "" {
-		err := fmt.Errorf("save as: %w", ErrEmptyPath)
+		err := fmt.Errorf("save as: %w", document.ErrEmptyPath)
 		e.setError(err)
 		return SavePlan{}, err
 	}
@@ -127,11 +128,11 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 			return SavePlan{}, rerr
 		}
 	}
-	job := d.PlanSave(path, e.opts.documentSettings())
+	job := d.PlanSave(path, e.opts.saveOptions())
 	job.CheckDisk = false
 	job.RefuseExisting = !force
 	job.OwnPath = d.Path
-	return SavePlan{jobs: []SaveJob{job}, renameTo: path, reservation: reservation}, nil
+	return SavePlan{jobs: []document.SaveJob{job}, renameTo: path, reservation: reservation}, nil
 }
 
 // PlanSaveAll prepares the save of every modified tab, as save_all does, and changes
@@ -154,7 +155,7 @@ func (e *Editor) PlanSaveAll() (SavePlan, error) {
 		case d.Untitled():
 			p.untitled++
 		default:
-			p.jobs = append(p.jobs, d.PlanSave(d.Path, e.opts.documentSettings()))
+			p.jobs = append(p.jobs, d.PlanSave(d.Path, e.opts.saveOptions()))
 		}
 	}
 	return p, nil
@@ -165,7 +166,7 @@ func (e *Editor) PlanSaveAll() (SavePlan, error) {
 // its path and becomes a permanent tab. The document that was saved gets the status
 // "Saved", or the failure. Save All sets the active tab's status to its summary. It
 // returns the failure, or nil when every write worked.
-func (e *Editor) ApplySavePlan(p SavePlan, results []SaveResult) error {
+func (e *Editor) ApplySavePlan(p SavePlan, results []document.SaveResult) error {
 	// Release the Save As target claim on every outcome, including an error or a
 	// cancelled write; the writes have finished by the time this applies.
 	defer p.Release()

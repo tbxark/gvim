@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"testing"
 
@@ -79,8 +80,8 @@ func TestToggleCommentFollowsSetLanguage(t *testing.T) {
 func TestToggleCommentUsesTheConfiguredPrefix(t *testing.T) {
 	t.Parallel()
 	e := docWith(Options{}, "x")
-	e.SetLanguageSettings(func(string, string) LanguageSettings {
-		return LanguageSettings{CommentPrefix: "REM"}
+	e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+		return document.LanguageSettings{CommentPrefix: "REM"}
 	})
 	run(t, e, "toggle_comment")
 	if got := text(e); got != "REM x" {
@@ -184,14 +185,14 @@ func TestToggleCommentCaretRules(t *testing.T) {
 func TestToggleCommentEmptyCaretsLeaveNoSelection(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "foo\nbar")
-	e.Active().SetCarets([]caret{
+	e.Active().SetCarets([]document.CaretState{
 		{Anchor: caretPos(0, 0), Head: caretPos(0, 0), Primary: true},
 		{Anchor: caretPos(1, 0), Head: caretPos(1, 0)},
 	})
 	run(t, e, "toggle_comment")
 	want := carets{
-		Primary: Caret{Cursor: caretPos(0, 3)},
-		extras:  []Caret{{Cursor: caretPos(1, 3)}},
+		Primary: document.Caret{Cursor: caretPos(0, 3)},
+		extras:  []document.Caret{{Cursor: caretPos(1, 3)}},
 	}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
@@ -293,7 +294,7 @@ func TestToggleCommentWithoutACommentPrefixDoesNothing(t *testing.T) {
 func TestToggleCommentAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "a\n  b\nc\nd")
-	e.Active().SetCarets([]caret{
+	e.Active().SetCarets([]document.CaretState{
 		{Anchor: caretPos(0, 1), Head: caretPos(0, 1), Primary: true},
 		{Anchor: caretPos(1, 3), Head: caretPos(1, 3)},
 		{Anchor: caretPos(3, 0), Head: caretPos(3, 1)},
@@ -303,8 +304,8 @@ func TestToggleCommentAtEveryCaret(t *testing.T) {
 		t.Fatalf("text = %q", got)
 	}
 	want := carets{
-		Primary: Caret{Cursor: caretPos(0, 4)},
-		extras: []Caret{
+		Primary: document.Caret{Cursor: caretPos(0, 4)},
+		extras: []document.Caret{
 			{Cursor: caretPos(1, 6)},
 			{Cursor: caretPos(3, 4), Sel: caretSel(caretPos(3, 0), caretPos(3, 4))},
 		},
@@ -321,7 +322,7 @@ func TestToggleCommentAtEveryCaret(t *testing.T) {
 func TestToggleCommentUncommentsOnlyWhenEveryCaretLineIsCommented(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "// a\nb\n// c")
-	e.Active().SetCarets([]caret{
+	e.Active().SetCarets([]document.CaretState{
 		{Anchor: caretPos(0, 0), Head: caretPos(0, 0), Primary: true},
 		{Anchor: caretPos(1, 0), Head: caretPos(1, 0)},
 	})
@@ -329,7 +330,7 @@ func TestToggleCommentUncommentsOnlyWhenEveryCaretLineIsCommented(t *testing.T) 
 	if got := text(e); got != "// // a\n// b\n// c" {
 		t.Fatalf("text = %q, want both caret lines commented", got)
 	}
-	e.Active().SetCarets([]caret{
+	e.Active().SetCarets([]document.CaretState{
 		{Anchor: caretPos(0, 0), Head: caretPos(0, 0), Primary: true},
 		{Anchor: caretPos(2, 0), Head: caretPos(2, 0)},
 	})

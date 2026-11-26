@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ import (
 // file is not read, so the path can be made up.
 func pathDoc(opts Options, path, text string) *Editor {
 	e := New(opts)
-	e.docs = []*Document{newDocument(path, text)}
+	e.docs = []*document.Document{document.NewDocument(path, text)}
 	e.switchTo(0)
 	return e
 }
@@ -21,7 +22,7 @@ func TestCopyFilePath(t *testing.T) {
 		Name   string
 		Path   string
 		root   string
-		action Action
+		action document.Action
 		Want   string
 	}{
 		{Name: "the absolute path is copied", Path: path, root: "/work/proj", action: "copy_file_path", Want: path},
@@ -75,12 +76,12 @@ func TestSetRootMovesTheRelativePath(t *testing.T) {
 
 func TestCopyPathOfUntitledBufferFails(t *testing.T) {
 	t.Parallel()
-	for _, a := range []Action{"copy_file_path", "copy_relative_file_path"} {
+	for _, a := range []document.Action{"copy_file_path", "copy_relative_file_path"} {
 		t.Run(string(a), func(t *testing.T) {
 			t.Parallel()
 			e := pathDoc(Options{Root: "/work"}, "", "text")
 			e.clipboard = "keep"
-			if r := e.Do(a, nil); !errors.Is(r.Err, ErrNoPath) {
+			if r := e.Do(a, nil); !errors.Is(r.Err, document.ErrNoPath) {
 				t.Fatalf("err = %v, want ErrNoPath", r.Err)
 			}
 			if e.clipboard != "keep" {
@@ -98,7 +99,7 @@ func TestCopyPathThenPasteInsertsIt(t *testing.T) {
 	tests := []struct {
 		Name   string
 		root   string
-		action Action
+		action document.Action
 		Want   string
 	}{
 		{Name: "the absolute path", action: "copy_file_path", Want: path},

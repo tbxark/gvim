@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"strconv"
 	"strings"
 
@@ -52,8 +53,8 @@ func (e *Editor) gotoLine(line, col int, selecting bool) error {
 		// A new goto replaces the one that waits for the index.
 		d.LargeState().Pending = nil
 		if info := d.Index(); line > info.Lines && !info.Complete {
-			d.LargeState().Pending = &pending{Kind: pendingGoto, Line: line, Col: col, Selecting: selecting, From: jumpEntryOf(d)}
-			e.setStatus(scanningStatus(info))
+			d.LargeState().Pending = &document.Pending{Kind: document.PendingGoto, Line: line, Col: col, Selecting: selecting, From: document.JumpEntryOf(d)}
+			e.setStatus(document.ScanningStatus(info))
 			return nil
 		}
 	}
@@ -65,7 +66,7 @@ func (e *Editor) gotoLine(line, col int, selecting bool) error {
 // gotoIn moves the caret of d to a 1-based line and column, as GotoLine does, with the
 // line and column clamped into the text. d need not be the active document. With
 // selecting set and mark mode on, the move extends the selection from its anchor.
-func (e *Editor) gotoIn(d *Document, line, col int, selecting bool) {
+func (e *Editor) gotoIn(d *document.Document, line, col int, selecting bool) {
 	target := buffer.Pos{Line: min(line, d.Buffer.Lines()) - 1, Col: max(col, 1) - 1}
 	d.Want = -1
 	d.Move(d.Buffer.Clamp(target), selecting && e.marking(d))

@@ -1,13 +1,15 @@
 package editor
 
+import "github.com/tbxark/gvim/document"
+
 // registerDocCmdHandlers registers the document commands: the file path copies,
 // revert, format, the find range, the line count, and the buffer settings reset.
 // Each one is implemented in its doc_*.go file.
-func registerDocCmdHandlers(h map[Action]handler) {
-	h["copy_file_path"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+func registerDocCmdHandlers(h map[document.Action]handler) {
+	h["copy_file_path"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		return copyPath(e, d, false)
 	})
-	h["copy_relative_file_path"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+	h["copy_relative_file_path"] = docAction(func(e *Editor, d *document.Document, _ map[string]any) error {
 		return copyPath(e, d, true)
 	})
 	h["revert"] = docAction(revertDocument)

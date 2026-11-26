@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -15,7 +16,7 @@ func TestCaseTransformUsesUnicodeSpecialCasing(t *testing.T) {
 	}
 	tests := []struct {
 		Name    string
-		action  Action
+		action  document.Action
 		Text    string
 		Want    string
 		wantSel buffer.Selection

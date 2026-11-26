@@ -18,6 +18,50 @@ var (
 	errLastLine  = errors.New("already at last line")
 )
 
+// ClearLastMulti clears the record of the last multi-caret edit.
+func (d *Document) ClearLastMulti() {
+	d.lastMulti = nil
+}
+
+// HasLastMulti reports whether a multi-caret undo/redo record is active.
+func (d *Document) HasLastMulti() bool {
+	return d.lastMulti != nil
+}
+
+// Undo reverts the newest undo group, placing the primary caret back where it
+// was before a multi-caret edit when that group is the last multi-caret edit.
+func (d *Document) Undo() {
+	m := d.lastMulti
+	if m == nil || m.Undone {
+		d.lastMulti = nil
+		if pos, ok := d.Buffer.Undo(); ok {
+			d.PlacePrimary(pos)
+		}
+		return
+	}
+	if _, ok := d.Buffer.Undo(); ok {
+		m.Undone = true
+		d.PlacePrimary(m.Before)
+	}
+}
+
+// Redo reapplies the newest undone group, placing the primary caret where it
+// was after a multi-caret edit when that group is the last multi-caret edit.
+func (d *Document) Redo() {
+	m := d.lastMulti
+	if m == nil || !m.Undone {
+		d.lastMulti = nil
+		if pos, ok := d.Buffer.Redo(); ok {
+			d.PlacePrimary(pos)
+		}
+		return
+	}
+	if _, ok := d.Buffer.Redo(); ok {
+		m.Undone = false
+		d.PlacePrimary(m.After)
+	}
+}
+
 // Caret is a caret other than the primary one: where it sits and the selection
 // it carries. Sel is nil when the caret has no selection, as Document.Sel is.
 type Caret struct {
@@ -50,7 +94,7 @@ func (d *Document) Cursors() []Caret {
 // caret is one caret as the multi-caret operations see it: the selection it
 // covers, with the anchor and head of buffer.Selection (equal when it has
 // none), and whether it is the primary caret.
-type caret struct {
+type CaretState struct {
 	Anchor, Head buffer.Pos
 	Primary      bool
 	// want is the wanted column of vertical moves, plus one. Zero is unset.
@@ -64,7 +108,7 @@ type caret struct {
 
 // Bounds returns the caret's selection in document order. An empty caret has
 // lo equal to hi.
-func (c caret) Bounds() (lo, hi buffer.Pos) {
+func (c CaretState) Bounds() (lo, hi buffer.Pos) {
 	if c.Head.Less(c.Anchor) {
 		return c.Head, c.Anchor
 	}
@@ -72,7 +116,7 @@ func (c caret) Bounds() (lo, hi buffer.Pos) {
 }
 
 // Selection returns the caret's selection, or nil when it has none.
-func (c caret) Selection() *buffer.Selection {
+func (c CaretState) Selection() *buffer.Selection {
 	if c.Anchor == c.Head {
 		return nil
 	}
@@ -82,7 +126,7 @@ func (c caret) Selection() *buffer.Selection {
 // meets reports whether c and o become one caret: their selections overlap, or
 // they touch and one of them is empty. Two selections that only touch, such as
 // [0,2) and [2,4), stay apart.
-func (c caret) meets(o caret) bool {
+func (c CaretState) meets(o CaretState) bool {
 	lo1, hi1 := c.Bounds()
 	lo2, hi2 := o.Bounds()
 	if lo2.Less(lo1) {
@@ -96,11 +140,11 @@ func (c caret) meets(o caret) bool {
 
 // normalize sorts cs into document order and merges the carets that meet. See
 // mergeCarets. The slice is reordered in place.
-func normalize(cs []caret) []caret {
-	slices.SortStableFunc(cs, func(a, b caret) int {
+func Normalize(cs []CaretState) []CaretState {
+	slices.SortStableFunc(cs, func(a, b CaretState) int {
 		alo, _ := a.Bounds()
 		blo, _ := b.Bounds()
-		return comparePos(alo, blo)
+		return ComparePos(alo, blo)
 	})
 	out := cs[:0]
 	for _, c := range cs {
@@ -116,7 +160,7 @@ func normalize(cs []caret) []caret {
 // mergeCarets returns one caret covering a and b, where a comes first in
 // document order. The merged caret is the primary one if either was. Its
 // direction is the primary's, or a's when neither is primary.
-func mergeCarets(a, b caret) caret {
+func mergeCarets(a, b CaretState) CaretState {
 	lo, hi := a.Bounds()
 	if _, h := b.Bounds(); hi.Less(h) {
 		hi = h
@@ -125,7 +169,7 @@ func mergeCarets(a, b caret) caret {
 	if b.Primary {
 		w = b
 	}
-	m := caret{Primary: a.Primary || b.Primary, Want: w.Want}
+	m := CaretState{Primary: a.Primary || b.Primary, Want: w.Want}
 	if w.Head.Less(w.Anchor) {
 		m.Anchor, m.Head = hi, lo
 	} else {
@@ -135,7 +179,7 @@ func mergeCarets(a, b caret) caret {
 }
 
 // comparePos orders p and q in document order, as cmp.Compare orders numbers.
-func comparePos(p, q buffer.Pos) int {
+func ComparePos(p, q buffer.Pos) int {
 	return cmp.Or(cmp.Compare(p.Line, q.Line), cmp.Compare(p.Col, q.Col))
 }
 
@@ -144,21 +188,21 @@ func comparePos(p, q buffer.Pos) int {
 //
 // The positions are clamped into the text. An extra caret can be stale after an
 // action that changed the text, and an edit must not use a position past the end.
-func (d *Document) AllCarets() []caret {
-	p := caret{Anchor: d.Cursor, Head: d.Cursor, Primary: true, Want: d.Want + 1}
+func (d *Document) AllCarets() []CaretState {
+	p := CaretState{Anchor: d.Cursor, Head: d.Cursor, Primary: true, Want: d.Want + 1}
 	if d.Sel != nil {
 		p.Anchor = d.Sel.Anchor
 	}
-	cs := make([]caret, 0, 1+len(d.Extra))
+	cs := make([]CaretState, 0, 1+len(d.Extra))
 	cs = append(cs, d.clampCaret(p))
 	for _, x := range d.Extra {
-		c := caret{Anchor: x.Cursor, Head: x.Cursor, Want: x.Want}
+		c := CaretState{Anchor: x.Cursor, Head: x.Cursor, Want: x.Want}
 		if x.Sel != nil {
 			c.Anchor = x.Sel.Anchor
 		}
 		cs = append(cs, d.clampCaret(c))
 	}
-	cs = normalize(cs)
+	cs = Normalize(cs)
 	// A virtual block selection edits every line of the rectangle: a line whose
 	// end is left of the rectangle's left edge gets the gap as spaces first.
 	if rect, ok := d.BlockSelection(); ok && rect.Virtual {
@@ -170,7 +214,7 @@ func (d *Document) AllCarets() []caret {
 }
 
 // clampCaret returns c with its anchor and head clamped into the text.
-func (d *Document) clampCaret(c caret) caret {
+func (d *Document) clampCaret(c CaretState) CaretState {
 	c.Anchor = d.Buffer.Clamp(c.Anchor)
 	c.Head = d.Buffer.Clamp(c.Head)
 	return c
@@ -180,12 +224,12 @@ func (d *Document) clampCaret(c caret) caret {
 // primary caret becomes Cursor and Sel, and the others become the extra carets.
 // Each caret keeps its wanted column, and the block selection is reset, so a
 // block step sets its block after it calls setCarets.
-func (d *Document) SetCarets(cs []caret) {
-	cs = normalize(cs)
+func (d *Document) SetCarets(cs []CaretState) {
+	cs = Normalize(cs)
 	d.Want = -1
 	d.virtual = 0
 	d.virtualLines = 0
-	d.Block = nil
+	d.block = nil
 	d.Extra = nil
 	for _, c := range cs {
 		if c.Primary {
@@ -214,12 +258,12 @@ func (d *Document) HasAnySelection() bool {
 // caret and its selection stay.
 func (d *Document) ClearCarets() {
 	d.Extra = nil
-	d.Block = nil
+	d.block = nil
 }
 
 // edit replaces the text between from and to with text. An edit where from
 // equals to only inserts.
-type edit struct {
+type Edit struct {
 	From, To buffer.Pos
 	Text     string
 }
@@ -229,7 +273,7 @@ type edit struct {
 // The edits must be in document order and must not overlap. They are applied
 // from the last to the first, so the positions of the earlier edits stay valid,
 // and each recorded end moves past the edits applied after it.
-func (d *Document) applyEdits(edits []edit) []buffer.Pos {
+func (d *Document) applyEdits(edits []Edit) []buffer.Pos {
 	ends := make([]buffer.Pos, len(edits))
 	if d.PlanErr != nil {
 		// The planning failed (see failPlan): no edit is made.
@@ -279,10 +323,10 @@ type multiEditRecord struct {
 // noteMultiEdit records a multi-caret edit whose edits were applied, with before
 // as the primary caret before them. Edits that change nothing record nothing.
 // Call it after setCarets, so that d.Cursor is the caret after the edit.
-func (d *Document) noteMultiEdit(before buffer.Pos, edits []edit) {
+func (d *Document) noteMultiEdit(before buffer.Pos, edits []Edit) {
 	for _, x := range edits {
 		if x.From != x.To || x.Text != "" {
-			d.LastMulti = &multiEditRecord{Before: before, After: d.Cursor}
+			d.lastMulti = &multiEditRecord{Before: before, After: d.Cursor}
 			return
 		}
 	}
@@ -300,10 +344,10 @@ func (d *Document) PlacePrimary(p buffer.Pos) {
 // edit for a caret. It is called for every caret, in document order, before any
 // edit is applied, so it sees the text as it was. Afterwards each caret sits just
 // after the text its edit inserted, and carets that meet are merged.
-func (d *Document) EditAtCarets(plan func(c caret) edit) {
+func (d *Document) EditAtCarets(plan func(c CaretState) Edit) {
 	cs := d.AllCarets()
 	before := d.Cursor
-	edits := make([]edit, len(cs))
+	edits := make([]Edit, len(cs))
 	for i, c := range cs {
 		edits[i] = plan(c)
 	}
@@ -311,9 +355,9 @@ func (d *Document) EditAtCarets(plan func(c caret) edit) {
 	if d.editRefused() {
 		return
 	}
-	out := make([]caret, len(cs))
+	out := make([]CaretState, len(cs))
 	for i, c := range cs {
-		out[i] = caret{Anchor: ends[i], Head: ends[i], Primary: c.Primary}
+		out[i] = CaretState{Anchor: ends[i], Head: ends[i], Primary: c.Primary}
 	}
 	d.SetCarets(out)
 	d.noteMultiEdit(before, edits)
@@ -323,28 +367,28 @@ func (d *Document) EditAtCarets(plan func(c caret) edit) {
 // empty caret inserts text at its position. A caret of a virtual block selection
 // with a pad inserts the pad as spaces before the text, so the rectangle's left
 // edge materializes in the same undo step.
-func replaceEdit(c caret, text string) edit {
+func ReplaceEdit(c CaretState, text string) Edit {
 	if c.Pad > 0 {
-		return edit{From: c.Head, To: c.Head, Text: strings.Repeat(" ", c.Pad) + text}
+		return Edit{From: c.Head, To: c.Head, Text: strings.Repeat(" ", c.Pad) + text}
 	}
 	lo, hi := c.Bounds()
-	return edit{From: lo, To: hi, Text: text}
+	return Edit{From: lo, To: hi, Text: text}
 }
 
 // DeleteAtCarets removes each caret's selection, and inserts nothing, as one undo
 // step. Unlike replaceEdit it never materializes a virtual block's padding: the
 // gap holds no text to delete.
 func (d *Document) DeleteAtCarets() {
-	d.EditAtCarets(func(c caret) edit {
+	d.EditAtCarets(func(c CaretState) Edit {
 		lo, hi := c.Bounds()
-		return edit{From: lo, To: hi}
+		return Edit{From: lo, To: hi}
 	})
 }
 
 // caretLines returns the first and last line a caret covers: its own line, or
 // the lines of its selection. A selection that ends at column 0 leaves its last
 // line out, as selectedLines does for the primary caret.
-func caretLines(c caret) (first, last int) {
+func CaretLines(c CaretState) (first, last int) {
 	lo, hi := c.Bounds()
 	last = hi.Line
 	if hi.Col == 0 && hi.Line > lo.Line {
@@ -364,16 +408,16 @@ func (d *Document) IndentSelectedLines(unit string) {
 		if c.Anchor == c.Head {
 			continue
 		}
-		first, last := caretLines(c)
+		first, last := CaretLines(c)
 		for line := first; line <= last; line++ {
 			lines[line] = true
 		}
 	}
-	edits := make([]edit, 0, len(lines))
+	edits := make([]Edit, 0, len(lines))
 	width := utf8.RuneCountInString(unit)
 	for _, line := range slices.Sorted(maps.Keys(lines)) {
 		p := buffer.Pos{Line: line}
-		edits = append(edits, edit{From: p, To: p, Text: unit})
+		edits = append(edits, Edit{From: p, To: p, Text: unit})
 	}
 	for i := range cs {
 		c := &cs[i]
@@ -415,13 +459,13 @@ func (d *Document) AddCaretVertical(dir, tabSize int) error {
 		return errLastLine
 	}
 	// The same cells as a vertical move: wide characters take two, marks none.
-	col := cellColumn(d.Buffer, d.Cursor, tabSize)
-	p := buffer.Pos{Line: line, Col: colAtCell(d.Buffer, line, col, tabSize)}
+	col := CellColumn(d.Buffer, d.Cursor, tabSize)
+	p := buffer.Pos{Line: line, Col: ColAtCell(d.Buffer, line, col, tabSize)}
 	cs := d.AllCarets()
 	for i := range cs {
 		cs[i].Primary = false
 	}
-	d.SetCarets(append(cs, caret{Anchor: p, Head: p, Primary: true}))
+	d.SetCarets(append(cs, CaretState{Anchor: p, Head: p, Primary: true}))
 	return nil
 }
 
@@ -433,20 +477,20 @@ func (d *Document) CursorsToLineEnds() {
 	if d.large != nil {
 		n := 0
 		for _, c := range d.AllCarets() {
-			first, last := caretLines(c)
+			first, last := CaretLines(c)
 			n += last - first + 1
 		}
-		if n > maxLargeCarets {
+		if n > MaxLargeCarets {
 			d.failPlan(errTooManyCarets())
 			return
 		}
 	}
-	var out []caret
+	var out []CaretState
 	for _, c := range d.AllCarets() {
-		first, last := caretLines(c)
+		first, last := CaretLines(c)
 		for line := first; line <= last; line++ {
 			p := buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)}
-			out = append(out, caret{Anchor: p, Head: p, Primary: c.Primary && line == first})
+			out = append(out, CaretState{Anchor: p, Head: p, Primary: c.Primary && line == first})
 		}
 	}
 	d.SetCarets(out)
@@ -476,7 +520,7 @@ func (d *Document) ToggleCursorAt(p buffer.Pos) bool {
 			d.Seen = d.Cursor
 			return true
 		}
-		if c.Anchor != c.Head && (caret{Anchor: p, Head: p}).meets(c) {
+		if c.Anchor != c.Head && (CaretState{Anchor: p, Head: p}).meets(c) {
 			return false
 		}
 	}
@@ -484,7 +528,7 @@ func (d *Document) ToggleCursorAt(p buffer.Pos) bool {
 	for i := range cs {
 		cs[i].Primary = false
 	}
-	cs = append(cs, caret{Anchor: p, Head: p, Primary: true})
+	cs = append(cs, CaretState{Anchor: p, Head: p, Primary: true})
 	d.SetCarets(cs)
 	d.Seen = d.Cursor
 	return true

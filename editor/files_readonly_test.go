@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func TestBinaryFileOpensReadOnlyAndNeverAsGarbage(t *testing.T) {
 	if st := e.Status(); !strings.Contains(st, "binary") {
 		t.Errorf("Status() = %q, want a binary notice", st)
 	}
-	if r := e.Do("insert_char", map[string]any{"text": "x"}); !errors.Is(r.Err, ErrReadOnly) {
+	if r := e.Do("insert_char", map[string]any{"text": "x"}); !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Errorf("insert_char err = %v, want ErrReadOnly", r.Err)
 	}
 	if r := e.Do("toggle_read_only", nil); r.Err == nil || !d.ReadOnly() {
@@ -94,7 +95,7 @@ func TestUnwritableFileOpensReadOnly(t *testing.T) {
 				t.Fatalf("ReadOnly() = %v, want %v", got, tt.Want)
 			}
 			r := e.Do("insert_char", map[string]any{"text": "x"})
-			if tt.Want != errors.Is(r.Err, ErrReadOnly) {
+			if tt.Want != errors.Is(r.Err, document.ErrReadOnly) {
 				t.Fatalf("insert_char err = %v, want ErrReadOnly = %v", r.Err, tt.Want)
 			}
 			if tt.Want && !strings.Contains(e.Status(), "read-only") {
@@ -144,7 +145,7 @@ func TestLibraryPath(t *testing.T) {
 		{"/home/u/usr/include/a.h", false},
 	}
 	for _, tt := range tests {
-		if got := libraryPath(tt.Path); got != tt.Want {
+		if got := document.LibraryPath(tt.Path); got != tt.Want {
 			t.Errorf("libraryPath(%q) = %v, want %v", tt.Path, got, tt.Want)
 		}
 	}

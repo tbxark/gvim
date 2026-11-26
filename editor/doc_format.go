@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -41,7 +42,7 @@ func (e *Editor) SetLanguageNamer(namer func(path string) string) { e.languageNa
 // name is tried first (the one set with SetLanguage, else the one the namer gives the file),
 // then the file extension with its dot, so a file with no language still finds the formatter
 // of its extension.
-func (e *Editor) formatterOf(d *Document) string {
+func (e *Editor) formatterOf(d *document.Document) string {
 	lang := d.Language()
 	if lang == "" && e.languageNamer != nil && d.Path != "" {
 		lang = e.languageNamer(d.Path)
@@ -87,7 +88,7 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		return ShellJob{}, ErrNoDocument
 	}
 	if d.ReadOnly() {
-		return ShellJob{}, ErrReadOnly
+		return ShellJob{}, document.ErrReadOnly
 	}
 	command := e.formatterOf(d)
 	if command == "" {
@@ -98,7 +99,7 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 	}
 	if d.LargeState() != nil {
 		// The formatter takes the whole text of the file.
-		return ShellJob{}, errLargeAction("format_buffer")
+		return ShellJob{}, document.ErrLargeAction("format_buffer")
 	}
 	text := d.Buffer.Text()
 	return ShellJob{
@@ -112,7 +113,7 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		Doc:      d,
 		From:     buffer.Pos{},
 		To:       d.Buffer.End(),
-		snapshot: contentMark{Text: text},
+		snapshot: document.ContentMark{Text: text},
 	}, nil
 }
 
@@ -141,7 +142,7 @@ func formatLine(hunks []diff.Hunk, line int) int {
 // expandFile replaces $FILE in a formatter command with the path of d, quoted for the shell:
 // prettier and ruff read the text on standard input and use the name to pick their parser. A
 // document with no path gives its name.
-func expandFile(command string, d *Document) string {
+func expandFile(command string, d *document.Document) string {
 	if !strings.Contains(command, "$FILE") {
 		return command
 	}

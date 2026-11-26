@@ -1,24 +1,26 @@
 package editor
 
+import "github.com/tbxark/gvim/document"
+
 // UndoID reverts the newest undo group of document id and reports whether there was one.
 // The caret goes where Undo puts it. A read-only document returns ErrReadOnly, and one
 // whose stashed edits are still being restored an error that wraps ErrRestoring.
-func (e *Editor) UndoID(id DocID) (bool, error) {
+func (e *Editor) UndoID(id document.DocID) (bool, error) {
 	return e.historyID(id, "undo", undoAction)
 }
 
 // RedoID is UndoID for the newest undone group.
-func (e *Editor) RedoID(id DocID) (bool, error) {
+func (e *Editor) RedoID(id document.DocID) (bool, error) {
 	return e.historyID(id, "redo", redoAction)
 }
 
-func (e *Editor) historyID(id DocID, what string, act func(*Editor, *Document, map[string]any) error) (bool, error) {
+func (e *Editor) historyID(id document.DocID, what string, act func(*Editor, *document.Document, map[string]any) error) (bool, error) {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return false, err
 	}
 	if d.ReadOnly() {
-		return false, ErrReadOnly
+		return false, document.ErrReadOnly
 	}
 	if err := d.RefuseEditWhileRestoring(what); err != nil {
 		return false, err
@@ -34,7 +36,7 @@ func (e *Editor) historyID(id DocID, what string, act func(*Editor, *Document, m
 // view has to move, the caret line goes to the middle of the pane. With center the caret
 // line is put in the middle whether or not it was visible. The viewport size is the one
 // SetViewport gave, so the result is meant for the active document.
-func (e *Editor) RevealID(id DocID, center bool) error {
+func (e *Editor) RevealID(id document.DocID, center bool) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err

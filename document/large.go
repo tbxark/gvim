@@ -43,25 +43,25 @@ func (e ErrLargeNeedsFullLoad) Error() string {
 	if name == "" {
 		name = e.Codec
 	}
-	return fmt.Sprintf("%s (%s) requires full load", name, formatSize(e.Size))
+	return fmt.Sprintf("%s (%s) requires full load", name, FormatSize(e.Size))
 }
 
 const (
 	// largeSampleSize is how much of the head of a large file decides its
 	// encoding, its line ending and whether it is binary.
-	largeSampleSize = 64 << 10
+	LargeSampleSize = 64 << 10
 	// maxFullLoad is the largest file that LoadFullFunc loads whole.
-	maxFullLoad = 256 << 20
+	MaxFullLoad = 256 << 20
 )
 
 // sourceOpener opens the source of a large document. Tests set it to read from a
 // generated source instead of a file.
-type sourceOpener struct {
+type SourceOpener struct {
 	Open func(path string) (buffer.Source, error)
 }
 
 // largeSpec is how a load decides whether a file opens in large file mode.
-type largeSpec struct {
+type LargeSpec struct {
 	// threshold is the file size from which a file is large. Zero means large
 	// file mode is off.
 	Threshold int64
@@ -78,11 +78,11 @@ type largeSpec struct {
 
 // loadSpec is what a load of a file needs from the editor's options. It is
 // copied out of the editor, so the load can run in a command.
-type loadSpec struct {
+type LoadSpec struct {
 	Eol       string
 	AutoRO    bool
 	ReadOnly  bool
-	LargeConf largeSpec
+	LargeConf LargeSpec
 	// Access is the file I/O seam of the load: nil means the local filesystem, non-nil
 	// means every read and stat of the new document goes through it (a remote
 	// authority). The loaded document keeps it for its saves.
@@ -90,7 +90,7 @@ type loadSpec struct {
 }
 
 // orDefault returns v, or def when v is zero.
-func orDefault(v, def int64) int64 {
+func OrDefault(v, def int64) int64 {
 	if v == 0 {
 		return def
 	}
@@ -98,7 +98,7 @@ func orDefault(v, def int64) int64 {
 }
 
 // IsLarge reports whether a file of size bytes opens in large file mode.
-func (s largeSpec) IsLarge(size int64) bool {
+func (s LargeSpec) IsLarge(size int64) bool {
 	return s.Threshold > 0 && size >= s.Threshold
 }
 
@@ -121,7 +121,7 @@ var utf8BOM = []byte{0xef, 0xbb, 0xbf}
 // sampleOf reads the head of src. truncated is true when src is longer.
 func sampleOf(src buffer.Source) (sample []byte, truncated bool, err error) {
 	size := src.Size()
-	sample = make([]byte, min(size, largeSampleSize))
+	sample = make([]byte, min(size, LargeSampleSize))
 	n, err := src.ReadAt(sample, 0)
 	switch {
 	case n == len(sample):
@@ -157,9 +157,9 @@ func validUTF8Head(head []byte, truncated bool) bool {
 func detectEOL(data []byte) string {
 	crlf := bytes.Count(data, []byte("\r\n"))
 	if crlf > bytes.Count(data, []byte("\n"))-crlf {
-		return eolCRLF
+		return EolCRLF
 	}
-	return eolLF
+	return EolLF
 }
 
 // readSample decides from the head of a large file how to open it. A file whose
@@ -170,7 +170,7 @@ func readSample(path string, src buffer.Source) (sampleInfo, error) {
 	if err != nil {
 		return sampleInfo{}, fmt.Errorf("open %s: %w", path, err)
 	}
-	info := sampleInfo{Codec: defaultCodec}
+	info := sampleInfo{Codec: DefaultCodec}
 	body := sample
 	switch {
 	case bytes.HasPrefix(sample, utf8BOM):
@@ -197,7 +197,7 @@ func readSample(path string, src buffer.Source) (sampleInfo, error) {
 		return sampleInfo{}, ErrLargeNeedsFullLoad{Path: path, Size: src.Size(), Codec: encoding.Detect(body)}
 	}
 	info.Eol = detectEOL(body)
-	info.Label = encodingLabel(info.Codec, string(body))
+	info.Label = EncodingLabel(info.Codec, string(body))
 	return info, nil
 }
 
@@ -206,7 +206,7 @@ func readSample(path string, src buffer.Source) (sampleInfo, error) {
 // file and indexes the first few MiB, never the whole file. disk is the state of the
 // file taken before the read. It returns ErrLargeNeedsFullLoad for a file that is not
 // UTF-8.
-func readLargeDocument(path string, disk diskState, spec largeSpec) (*Document, error) {
+func readLargeDocument(path string, disk DiskState, spec LargeSpec) (*Document, error) {
 	openSrc := spec.Open
 	if openSrc == nil {
 		openSrc = buffer.OpenFileSource
@@ -251,7 +251,7 @@ func readLargeDocument(path string, disk diskState, spec largeSpec) (*Document, 
 	d.encoding = info.Label
 	d.large = &largeDoc{
 		Size: src.Size(), EstLine: spec.EstLine, Batch: spec.Batch, Notes: leftoverTemps(path),
-		Mtime: mtimeNano(disk), Skip: info.Skip, StashDir: spec.StashDir,
+		Mtime: MtimeNano(disk), Skip: info.Skip, StashDir: spec.StashDir,
 	}
 	return d, nil
 }
@@ -275,7 +275,7 @@ func leftoverTemps(path string) []string {
 }
 
 // formatSize writes a byte count for the status row, such as "2.1 GB".
-func formatSize(n int64) string {
+func FormatSize(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
@@ -293,23 +293,23 @@ func formatSize(n int64) string {
 
 // largeLimitsHint is the start of the status of a large document that was just opened:
 // what the document cannot do. It is short enough to survive the cut of the status row.
-const largeLimitsHint = "LARGE: folds, wrap, LSP, auto-save off."
+const LargeLimitsHint = "LARGE: folds, wrap, LSP, auto-save off."
 
 // largeOpenStatus is the status row text for a large document that was just opened.
 func (d *Document) largeOpenStatus() string {
 	var sb strings.Builder
 	// The status row cuts the message to about 40 cells on a terminal of 120 columns,
 	// so what the user must know comes first, and fits.
-	sb.WriteString(largeLimitsHint + " ")
+	sb.WriteString(LargeLimitsHint + " ")
 	if d.binary {
 		sb.WriteString("Binary file: read-only. ")
 	}
-	fmt.Fprintf(&sb, "Large file (%s)", formatSize(d.large.Size))
+	fmt.Fprintf(&sb, "Large file (%s)", FormatSize(d.large.Size))
 	if d.large.RemoteWindowed {
 		save := "a save streams the merged file into one atomic write"
 		if _, ok := d.access.(StreamAccess); !ok {
 			// Only an access without the streaming surface keeps the bounded merge.
-			save = "a save writes the merged file in one atomic write, up to " + formatSize(remoteLargeSaveMax)
+			save = "a save writes the merged file in one atomic write, up to " + FormatSize(remoteLargeSaveMax)
 		}
 		sb.WriteString(" remote large file (windowed): the bytes stay on the remote host and load as you scroll; " + save)
 	} else if d.readOnly && !d.binary {
@@ -363,9 +363,9 @@ func (d *Document) CheckSource() error {
 	switch {
 	case errors.Is(err, buffer.ErrSourceChanged):
 		d.readOnly = true
-		d.Fail(errFileChanged)
+		d.Fail(ErrFileChanged)
 	case errors.Is(err, buffer.ErrSourceGrew):
-		d.Fail(errFileGrew)
+		d.Fail(ErrFileGrew)
 	default:
 		return err
 	}

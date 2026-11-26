@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 
 	"github.com/tbxark/gvim/buffer"
@@ -81,7 +82,7 @@ func (e *Editor) ScrollTo(top int) {
 }
 
 // clampTop keeps a viewport top inside the document.
-func clampTop(d *Document, top int) int {
+func clampTop(d *document.Document, top int) int {
 	return min(max(top, 0), max(d.Buffer.Lines()-1, 0))
 }
 
@@ -89,7 +90,7 @@ func clampTop(d *Document, top int) int {
 // scroll_down. The caret stays where it is while it is still shown. When the
 // scroll takes it off screen, it moves to the nearest line that is shown and
 // keeps its wanted column. A scroll down stops at the last page.
-func (e *Editor) scrollView(d *Document, dir int) {
+func (e *Editor) scrollView(d *document.Document, dir int) {
 	top := clampTop(d, d.Top+dir)
 	if dir > 0 && top > d.Buffer.Lines()-e.rows {
 		// As in Fresh, a scroll down stops when the last line is at the bottom of the
@@ -114,17 +115,17 @@ func (e *Editor) scrollView(d *Document, dir int) {
 // recenter sets the viewport so that the caret line is in its middle. The top
 // is clamped at the start of the document only, so near the end the lower rows
 // may be empty, as they are in Fresh.
-func (e *Editor) recenter(d *Document) {
+func (e *Editor) recenter(d *document.Document) {
 	d.Top = clampTop(d, d.Cursor.Line-e.rows/2)
 }
 
 // scrollCursorTop sets the viewport so that the caret line is at the top of the viewport.
-func (e *Editor) scrollCursorTop(d *Document) {
+func (e *Editor) scrollCursorTop(d *document.Document) {
 	d.Top = clampTop(d, d.Cursor.Line)
 }
 
 // scrollCursorBottom sets the viewport so that the caret line is at the bottom of the viewport.
-func (e *Editor) scrollCursorBottom(d *Document) {
+func (e *Editor) scrollCursorBottom(d *document.Document) {
 	d.Top = clampTop(d, d.Cursor.Line-(e.rows-1))
 }
 
@@ -222,7 +223,7 @@ func (e *Editor) reopenEmpty() {
 	if !e.opts.AutoCreateEmptyBufferOnLastBufferClose || len(e.docs) != 0 {
 		return
 	}
-	d := newDocument("", "")
+	d := document.NewDocument("", "")
 	d.Eol = e.defaultEOL()
 	e.addDoc(d)
 	e.switchTo(0)
@@ -237,7 +238,7 @@ func (e *Editor) previewIndex() int {
 			d.SetPreview(false)
 		}
 	}
-	return slices.IndexFunc(e.docs, func(d *Document) bool { return d.Preview() })
+	return slices.IndexFunc(e.docs, func(d *document.Document) bool { return d.Preview() })
 }
 
 // pathIndex returns the index of the first tab opened from path, or -1. The
@@ -247,5 +248,5 @@ func (e *Editor) pathIndex(path string) int {
 	if path == "" {
 		return -1
 	}
-	return slices.IndexFunc(e.docs, func(d *Document) bool { return sameFile(d.Path, path) })
+	return slices.IndexFunc(e.docs, func(d *document.Document) bool { return document.SameFile(d.Path, path) })
 }

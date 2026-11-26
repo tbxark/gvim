@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 
 	"github.com/tbxark/gvim/buffer"
@@ -22,7 +23,7 @@ func isBlankLine(b *buffer.Buffer, line int) bool {
 // budget (see scanBudget); limited reports that it stopped there, with no blank
 // line found.
 func paragraphUp(b *buffer.Buffer, line int) (pos buffer.Pos, limited bool) {
-	budget := newScanBudget(b)
+	budget := document.NewScanBudget(b)
 	for i := line - 1; i >= 0; i-- {
 		if !budget.Take(b, i) {
 			return buffer.Pos{}, true
@@ -41,7 +42,7 @@ func paragraphUp(b *buffer.Buffer, line int) (pos buffer.Pos, limited bool) {
 // that it stopped at either, with no blank line found.
 func blankLineBelow(b *buffer.Buffer, line int) (pos buffer.Pos, ok, limited bool) {
 	last := b.Lines() - 1
-	budget := newScanBudget(b)
+	budget := document.NewScanBudget(b)
 	for i := line + 1; i <= last; i++ {
 		if !budget.Take(b, i) {
 			return buffer.Pos{}, false, true
@@ -53,7 +54,7 @@ func blankLineBelow(b *buffer.Buffer, line int) (pos buffer.Pos, ok, limited boo
 			return buffer.Pos{Line: i}, true, false
 		}
 	}
-	return buffer.Pos{}, false, indexUnfinished(b)
+	return buffer.Pos{}, false, document.IndexUnfinished(b)
 }
 
 // paragraphEnd returns the last character of the text. A move down ends here

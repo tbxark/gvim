@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,7 +105,7 @@ func TestShellCommandReplaceChangesTextOnlyOnSuccess(t *testing.T) {
 
 func TestShellCommandNeedsTheCommandArgument(t *testing.T) {
 	t.Parallel()
-	for _, a := range []Action{"shell_command", "shell_command_replace"} {
+	for _, a := range []document.Action{"shell_command", "shell_command_replace"} {
 		e := withDoc("x")
 		if r := e.Do(a, nil); r.Err == nil {
 			t.Errorf("Do(%s) without a command returned nil, want an error", a)
@@ -158,10 +159,10 @@ func TestBeginShellRefusesOnlyReplaceOnReadOnly(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name    string
-		action  Action
+		action  document.Action
 		wantErr error
 	}{
-		{"replace refuses a read-only document", "shell_command_replace", ErrReadOnly},
+		{"replace refuses a read-only document", "shell_command_replace", document.ErrReadOnly},
 		{"a new document is allowed on a read-only document", "shell_command", nil},
 	}
 	for _, tt := range tests {

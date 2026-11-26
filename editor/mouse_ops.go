@@ -1,6 +1,9 @@
 package editor
 
-import "github.com/tbxark/gvim/buffer"
+import (
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
+)
 
 // ExtendSelection updates the selection during a mouse drag, with the pointer
 // now at p. The unit says what the selection grows by:
@@ -79,13 +82,21 @@ func (e *Editor) OpenPreview(path string) error {
 		e.setStatus("Opened " + e.docs[i].Name())
 		return nil
 	}
+	if e.shared != nil {
+		if handled, err := e.shared.Open(e, path); handled {
+			if err != nil {
+				e.setError(err)
+			}
+			return err
+		}
+	}
 	if e.isLargePath(path) {
 		// A preview loads on the update loop. A large file opens through LoadFunc
 		// or OpenFile, which a click on it does not do.
 		e.setStatus("Large file: open it to load")
 		return nil
 	}
-	d, err := loadDocument(path, e.loadSpec())
+	d, err := document.LoadDocument(path, e.loadSpec())
 	if err != nil {
 		e.setError(err)
 		return err
@@ -131,5 +142,5 @@ func (e *Editor) ReplaceActiveRange(from, to buffer.Pos, text string) bool {
 	if d == nil {
 		return false
 	}
-	return d.ApplyEditList([]LSPEdit{{From: from, To: to, Text: text}}, EditOptions{Cursor: CursorKeep}, false) == nil
+	return d.ApplyEditList([]document.LSPEdit{{From: from, To: to, Text: text}}, document.EditOptions{Cursor: document.CursorKeep}, false) == nil
 }

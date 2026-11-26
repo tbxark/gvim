@@ -53,3 +53,26 @@ func TestNewAfterVersionsAreFresh(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkUnsavedKeepsTextAndHistory(t *testing.T) {
+	t.Parallel()
+	b := buffer.New("abc")
+	before := b.Version()
+	b.MarkUnsaved()
+	if !b.Modified() {
+		t.Fatal("MarkUnsaved left the buffer unmodified")
+	}
+	if b.Version() == before {
+		t.Fatal("MarkUnsaved reused the version")
+	}
+	if got := b.Text(); got != "abc" {
+		t.Fatalf("text = %q, want abc", got)
+	}
+	if _, ok := b.Undo(); ok {
+		t.Fatal("MarkUnsaved added an undo step")
+	}
+	b.MarkSaved()
+	if b.Modified() {
+		t.Fatal("MarkSaved did not clear the mark")
+	}
+}

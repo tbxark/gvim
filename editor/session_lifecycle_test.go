@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 
 // restoringDoc returns an editor with one large document whose stashed edit ("edited " at
 // line 100) waits for the line index, which has not got there yet.
-func restoringDoc(t *testing.T) (*Editor, *Document) {
+func restoringDoc(t *testing.T) (*Editor, *document.Document) {
 	t.Helper()
 	opts := largeOptions()
 	e, d := openLarge(t, opts, lineText(150))
@@ -30,7 +31,7 @@ func restoringDoc(t *testing.T) (*Editor, *Document) {
 
 // failedRestoreDoc returns an editor whose large document had a stash that could not be
 // put back once the index was complete.
-func failedRestoreDoc(t *testing.T) (*Editor, *Document) {
+func failedRestoreDoc(t *testing.T) (*Editor, *document.Document) {
 	t.Helper()
 	opts := largeOptions()
 	e, d := openLarge(t, opts, lineText(150))
@@ -53,7 +54,7 @@ func TestAStashThatWaitsOrFailedIsUnsavedForCloseAndQuit(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		Name string
-		make func(*testing.T) (*Editor, *Document)
+		make func(*testing.T) (*Editor, *document.Document)
 	}{
 		{"waiting", restoringDoc},
 		{"failed", failedRestoreDoc},
@@ -93,22 +94,22 @@ func TestNothingEditsADocumentWhileItsStashWaits(t *testing.T) {
 	ver := d.Buffer.Version()
 	_, err := e.ReplaceMatch(search.Query{Text: "line 0000"}, "REPLACED",
 		search.Match{Start: buffer.Pos{}, End: buffer.Pos{Col: 9}})
-	if !errors.Is(err, ErrRestoring) {
+	if !errors.Is(err, document.ErrRestoring) {
 		t.Errorf("ReplaceMatch = %v, want ErrRestoring", err)
 	}
-	if _, err := e.ReplaceMatches(search.Query{Text: "line"}, "x"); !errors.Is(err, ErrRestoring) {
+	if _, err := e.ReplaceMatches(search.Query{Text: "line"}, "x"); !errors.Is(err, document.ErrRestoring) {
 		t.Errorf("ReplaceMatches = %v, want ErrRestoring", err)
 	}
 	e.SelectRange(buffer.Pos{}, buffer.Pos{Col: 4})
-	if _, err := e.BeginShell("shell_command_replace", map[string]any{"command": "tr a-z A-Z"}); !errors.Is(err, ErrRestoring) {
+	if _, err := e.BeginShell("shell_command_replace", map[string]any{"command": "tr a-z A-Z"}); !errors.Is(err, document.ErrRestoring) {
 		t.Errorf("BeginShell replace = %v, want ErrRestoring", err)
 	}
 	job := ShellJob{Replace: true, Doc: d, To: buffer.Pos{Col: 4}, snapshot: d.ContentMark()}
-	if res := e.EndShell(job, "XXXX", nil); !errors.Is(res.Err, ErrRestoring) {
+	if res := e.EndShell(job, "XXXX", nil); !errors.Is(res.Err, document.ErrRestoring) {
 		t.Errorf("EndShell replace = %v, want ErrRestoring", res.Err)
 	}
-	err = e.ApplyLSPEdits(d.Path, []LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 4}, Text: "LINE"}})
-	if !errors.Is(err, ErrRestoring) {
+	err = e.ApplyLSPEdits(d.Path, []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 4}, Text: "LINE"}})
+	if !errors.Is(err, document.ErrRestoring) {
 		t.Errorf("ApplyLSPEdits = %v, want ErrRestoring", err)
 	}
 	if d.Buffer.Version() != ver || d.Buffer.Modified() {
@@ -168,7 +169,7 @@ func TestReplaceOverlayTakesTheNewerStashOverRestoredEdits(t *testing.T) {
 	}
 	stale := newer
 	stale.Size++
-	if err := e2.ReplaceOverlay(d2, stale); !errors.Is(err, ErrStashStale) {
+	if err := e2.ReplaceOverlay(d2, stale); !errors.Is(err, document.ErrStashStale) {
 		t.Fatalf("ReplaceOverlay of a stash for another file = %v, want ErrStashStale", err)
 	}
 	if !d2.Restoring() {
@@ -205,7 +206,7 @@ func TestOverlayStashLaterIsTheStashAsItWasWhenTaken(t *testing.T) {
 	if text := restoredText(t, largeOptions(), d, got); strings.Contains(text, "second ") || !strings.Contains(text, "first ") {
 		t.Errorf("the stash holds edits made after it was taken, or lacks the ones before")
 	}
-	if _, ok := (&Document{Buffer: buffer.New("")}).OverlayStashLater(); ok {
+	if _, ok := (&document.Document{Buffer: buffer.New("")}).OverlayStashLater(); ok {
 		t.Error("a document that is not large has a stash")
 	}
 }

@@ -15,9 +15,9 @@ func TestFollowDiskIgnoresLocalFileOfRemoteDocument(t *testing.T) {
 	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d := newDocument(path, "hello\n")
+	d := NewDocument(path, "hello\n")
 	d.access = &fakeRangeAccess{}
-	remote := diskState{Exists: true, Size: 6, Mtime: time.Unix(1, 0)}
+	remote := DiskState{Exists: true, Size: 6, Mtime: time.Unix(1, 0)}
 	d.Disk = remote
 	d.FollowDisk(path)
 	if !d.Disk.SameAs(remote) {
@@ -31,10 +31,10 @@ func TestFollowDiskLocalDocument(t *testing.T) {
 	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d := newDocument(path, "hello\n")
-	d.Disk = diskState{Exists: true, Size: 6, Mtime: time.Unix(1, 0)}
+	d := NewDocument(path, "hello\n")
+	d.Disk = DiskState{Exists: true, Size: 6, Mtime: time.Unix(1, 0)}
 	d.FollowDisk(path)
-	if !d.Disk.SameAs(diskStateOf(path)) {
+	if !d.Disk.SameAs(DiskStateOf(path)) {
 		t.Errorf("Disk = %+v, want the state of the moved file", d.Disk)
 	}
 }

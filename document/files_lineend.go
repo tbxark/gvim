@@ -7,7 +7,7 @@ import (
 // lineEnds returns the ending of every line break of data, "\n" or "\r\n", when
 // the file mixes the two. It returns nil for a file that uses one ending, which
 // the document's eol describes.
-func lineEnds(data string) []string {
+func LineEnds(data string) []string {
 	if strings.IndexByte(data, '\r') == -1 {
 		return nil
 	}
@@ -36,7 +36,7 @@ func (d *Document) breaks(text string) []string {
 	lines := strings.Split(text, "\n")
 	old := strings.Split(d.Saved, "\n")
 	own := "\n"
-	if d.Eol == eolCRLF {
+	if d.Eol == EolCRLF {
 		own = "\r\n"
 	}
 	prefix := 0

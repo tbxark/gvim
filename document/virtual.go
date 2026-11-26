@@ -15,7 +15,7 @@ var ErrVirtual = errors.New("a virtual buffer is not a file and cannot be saved"
 const MaxVirtualText = buffer.MaxMaterialize
 
 // maxVirtualName bounds the name of a virtual document, in runes.
-const maxVirtualName = 64
+const MaxVirtualName = 64
 
 // VirtualOptions describes a new virtual document. Text uses "\n" as its line break.
 type VirtualOptions struct {
@@ -36,7 +36,7 @@ type PropSpan struct {
 
 // docExt is the plugin-facing state of a document: whether it is virtual, its name, the
 // plugin's buffer-local input mode (any document may have one) and the text properties.
-type docExt struct {
+type DocExt struct {
 	Virtual bool
 	Name    string // the name inside the asterisks of the tab
 	Owner   string // who made the virtual document
@@ -56,15 +56,15 @@ func (d *Document) Mode() string { return d.ext.Mode }
 
 // cleanVirtualName makes name fit a tab: control characters become blanks, the ends are
 // trimmed and the length is bounded.
-func cleanVirtualName(name string) string {
+func CleanVirtualName(name string) string {
 	name = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || r == utf8.RuneError {
 			return ' '
 		}
 		return r
 	}, name))
-	if r := []rune(name); len(r) > maxVirtualName {
-		name = string(r[:maxVirtualName])
+	if r := []rune(name); len(r) > MaxVirtualName {
+		name = string(r[:MaxVirtualName])
 	}
 	if name == "" {
 		name = "virtual"
@@ -73,7 +73,7 @@ func cleanVirtualName(name string) string {
 }
 
 // cmpLineCol orders two (line, byte column) positions.
-func cmpLineCol(l1, c1, l2, c2 int) int {
+func CmpLineCol(l1, c1, l2, c2 int) int {
 	if l1 != l2 {
 		return l1 - l2
 	}

@@ -13,7 +13,7 @@ var ErrReadOnly = errors.New("read-only")
 // refused by Editor.Save, and save_as is allowed, because it writes a new file.
 // TestEveryActionLeavesReadOnlyTextAlone fails for a text-changing action that is
 // missing from this list.
-var textChanging = map[Action]bool{
+var TextChanging = map[Action]bool{
 	"insert_char":              true,
 	"insert_newline":           true,
 	"insert_tab":               true,

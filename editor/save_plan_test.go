@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,7 +60,7 @@ func TestPlanSaveStates(t *testing.T) {
 				run(t, e, "toggle_read_only")
 				return e, path
 			},
-			PlanErr: ErrReadOnly,
+			PlanErr: document.ErrReadOnly,
 			file:    "abc\n",
 			dirty:   true,
 			Status:  "read-only",
@@ -72,7 +73,7 @@ func TestPlanSaveStates(t *testing.T) {
 				typeText(t, e, "x")
 				return e, ""
 			},
-			PlanErr: ErrNoPath,
+			PlanErr: document.ErrNoPath,
 			dirty:   true,
 			Status:  "buffer has no file name",
 		},
@@ -88,7 +89,7 @@ func TestPlanSaveStates(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			runErr: ErrChangedOnDisk,
+			runErr: document.ErrChangedOnDisk,
 			file:   "other\n",
 			dirty:  true,
 			Status: "doc.txt changed on disk since it was opened; not saved. Save As keeps your version",
@@ -152,10 +153,10 @@ func TestPlanSaveAsStates(t *testing.T) {
 		renamed bool // the document takes the target path after the run
 	}{
 		{Name: "new file", target: func(dir string) string { return filepath.Join(dir, "new.txt") }, renamed: true},
-		{Name: "existing file without force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, Exists: true, runErr: ErrExists},
+		{Name: "existing file without force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, Exists: true, runErr: document.ErrExists},
 		{Name: "existing file with force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, Exists: true, force: true, renamed: true},
-		{Name: "open in another tab", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, other: true, Exists: true, force: true, PlanErr: ErrAlreadyOpen},
-		{Name: "empty path", target: func(string) string { return "" }, PlanErr: ErrEmptyPath},
+		{Name: "open in another tab", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, other: true, Exists: true, force: true, PlanErr: document.ErrAlreadyOpen},
+		{Name: "empty path", target: func(string) string { return "" }, PlanErr: document.ErrEmptyPath},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

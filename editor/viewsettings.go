@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"strings"
 )
@@ -10,7 +11,7 @@ import (
 // viewFlag is one per-document flag action: the field it sets, the default that
 // applies with no override and no value, and the status text it leaves.
 type viewFlag struct {
-	field func(*ViewSettings) **bool
+	field func(*document.ViewSettings) **bool
 	def   func(*Editor) bool
 	Label string
 }
@@ -23,37 +24,37 @@ func constDefault(v bool) func(*Editor) bool {
 // viewFlags lists the flag actions that set one override. A flag that has a UI
 // global (line numbers, wrap, current line, occurrences, whitespace) is sent with
 // its value, so the default here matters only for a call without one.
-var viewFlags = map[Action]viewFlag{
+var viewFlags = map[document.Action]viewFlag{
 	"toggle_line_numbers_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.LineNumbers }, constDefault(true), "Line numbers",
+		func(s *document.ViewSettings) **bool { return &s.LineNumbers }, constDefault(true), "Line numbers",
 	},
 	"toggle_line_wrap_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.LineWrap }, constDefault(true), "Line wrap",
+		func(s *document.ViewSettings) **bool { return &s.LineWrap }, constDefault(true), "Line wrap",
 	},
 	"toggle_current_line_highlight_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.CurrentLine }, constDefault(true), "Current line highlight",
+		func(s *document.ViewSettings) **bool { return &s.CurrentLine }, constDefault(true), "Current line highlight",
 	},
 	"toggle_occurrence_highlight_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.Occurrences }, constDefault(false), "Occurrence highlight",
+		func(s *document.ViewSettings) **bool { return &s.Occurrences }, constDefault(false), "Occurrence highlight",
 	},
 	"toggle_whitespace_indicators": {
-		func(s *ViewSettings) **bool { return &s.Whitespace }, constDefault(false), "Whitespace indicators",
+		func(s *document.ViewSettings) **bool { return &s.Whitespace }, constDefault(false), "Whitespace indicators",
 	},
 	"toggle_indentation_guide_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.IndentGuides }, constDefault(false), "Indentation guides",
+		func(s *document.ViewSettings) **bool { return &s.IndentGuides }, constDefault(false), "Indentation guides",
 	},
 	"toggle_fold_indicators_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.FoldIndicators }, constDefault(true), "Fold indicators",
+		func(s *document.ViewSettings) **bool { return &s.FoldIndicators }, constDefault(true), "Fold indicators",
 	},
 	"toggle_tab_indicators": {
-		func(s *ViewSettings) **bool { return &s.TabIndicators }, constDefault(true), "Tab indicators",
+		func(s *document.ViewSettings) **bool { return &s.TabIndicators }, constDefault(true), "Tab indicators",
 	},
 	"toggle_virtual_space_current_buffer": {
-		func(s *ViewSettings) **bool { return &s.VirtualSpace }, constDefault(false),
+		func(s *document.ViewSettings) **bool { return &s.VirtualSpace }, constDefault(false),
 		"Virtual space",
 	},
 	"toggle_indentation_style": {
-		func(s *ViewSettings) **bool { return &s.IndentTabs }, func(e *Editor) bool { return e.opts.UseTabs },
+		func(s *document.ViewSettings) **bool { return &s.IndentTabs }, func(e *Editor) bool { return e.opts.UseTabs },
 		"Indentation with tabs",
 	},
 }
@@ -61,7 +62,7 @@ var viewFlags = map[Action]viewFlag{
 // registerViewHandlers adds the per-document view actions to h. The init below adds
 // them to the handler table once handlers.go has built it, so guardDocument does not
 // wrap them: none of them changes text.
-func registerViewHandlers(h map[Action]handler) {
+func registerViewHandlers(h map[document.Action]handler) {
 	for name, f := range viewFlags {
 		h[name] = toggleViewFlag(f)
 	}
@@ -80,7 +81,7 @@ func init() {
 // toggleViewFlag sets one flag. A "value" bool argument sets it; without one the
 // flag flips from its current value.
 func toggleViewFlag(f viewFlag) handler {
-	return docAction(func(e *Editor, d *Document, args map[string]any) error {
+	return docAction(func(e *Editor, d *document.Document, args map[string]any) error {
 		value, err := boolArg(args, "value", !f.current(e, d))
 		if err != nil {
 			return err
@@ -94,15 +95,15 @@ func toggleViewFlag(f viewFlag) handler {
 }
 
 // current reads the flag as the document has it now.
-func (f viewFlag) current(e *Editor, d *Document) bool {
-	return OverrideOr(*f.field(d.View()), f.def(e))
+func (f viewFlag) current(e *Editor, d *document.Document) bool {
+	return document.OverrideOr(*f.field(d.View()), f.def(e))
 }
 
 // togglePageView sets the page view flag of the buffer. The page view is drawn
 // from the per-document view state (docs/markdown.md): the text is centered in a
 // page and, for Markdown, the inline marks are composed.
-func togglePageView(e *Editor, d *Document, args map[string]any) error {
-	current, err := boolArg(args, "value", !OverrideOr(d.View().PageView, false))
+func togglePageView(e *Editor, d *document.Document, args map[string]any) error {
+	current, err := boolArg(args, "value", !document.OverrideOr(d.View().PageView, false))
 	if err != nil {
 		return err
 	}
@@ -113,8 +114,8 @@ func togglePageView(e *Editor, d *Document, args map[string]any) error {
 
 // addRuler adds a ruler at the column given by "column". A ruler already there
 // stays once.
-func addRuler(e *Editor, d *Document, args map[string]any) error {
-	col, err := intArg(args, "column", 1, MaxViewColumn)
+func addRuler(e *Editor, d *document.Document, args map[string]any) error {
+	col, err := intArg(args, "column", 1, document.MaxViewColumn)
 	if err != nil {
 		return err
 	}
@@ -127,8 +128,8 @@ func addRuler(e *Editor, d *Document, args map[string]any) error {
 
 // removeRuler removes the ruler at the column given by "column". It is an error
 // when no ruler is there.
-func removeRuler(e *Editor, d *Document, args map[string]any) error {
-	col, err := intArg(args, "column", 1, MaxViewColumn)
+func removeRuler(e *Editor, d *document.Document, args map[string]any) error {
+	col, err := intArg(args, "column", 1, document.MaxViewColumn)
 	if err != nil {
 		return err
 	}
@@ -142,8 +143,8 @@ func removeRuler(e *Editor, d *Document, args map[string]any) error {
 }
 
 // setTabSize sets the columns per tab stop of the document, from "size".
-func setTabSize(e *Editor, d *Document, args map[string]any) error {
-	size, err := intArg(args, "size", 1, MaxViewTabSize)
+func setTabSize(e *Editor, d *document.Document, args map[string]any) error {
+	size, err := intArg(args, "size", 1, document.MaxViewTabSize)
 	if err != nil {
 		return err
 	}
@@ -154,8 +155,8 @@ func setTabSize(e *Editor, d *Document, args map[string]any) error {
 
 // setPageWidth sets the page view width of the document, from "width". The page
 // view draws the text in a page of that many columns; see docs/markdown.md.
-func setPageWidth(e *Editor, d *Document, args map[string]any) error {
-	width, err := intArg(args, "width", 1, MaxViewColumn)
+func setPageWidth(e *Editor, d *document.Document, args map[string]any) error {
+	width, err := intArg(args, "width", 1, document.MaxViewColumn)
 	if err != nil {
 		return err
 	}
@@ -166,7 +167,7 @@ func setPageWidth(e *Editor, d *Document, args map[string]any) error {
 
 // setLanguage names the language of the document, from "name". The name is kept
 // as the tab's language; an empty name clears it.
-func setLanguage(e *Editor, d *Document, args map[string]any) error {
+func setLanguage(e *Editor, d *document.Document, args map[string]any) error {
 	name, err := stringArg(args, "name")
 	if err != nil {
 		return err

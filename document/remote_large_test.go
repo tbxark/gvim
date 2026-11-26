@@ -153,9 +153,9 @@ func TestRemoteLargeWindowSourceLRUAndCancellation(t *testing.T) {
 func TestReadRemoteLargeDocumentWindowedEditable(t *testing.T) {
 	t.Parallel()
 	access := &fakeRangeAccess{data: remoteLargeContent(300000, 20)} // ~6 MiB
-	d, err := readDocument("/remote/large.txt", loadSpec{
+	d, err := ReadDocument("/remote/large.txt", LoadSpec{
 		Access: access,
-		LargeConf: largeSpec{
+		LargeConf: LargeSpec{
 			Threshold: 1,
 			Geom: buffer.LargeOptions{
 				Chunk: 64 << 10, CachePages: 4, InitialBytes: 4096,
@@ -182,9 +182,9 @@ func TestReadRemoteLargeDocumentWindowedEditable(t *testing.T) {
 func TestReadRemoteLargeDocumentMissLoadRepaint(t *testing.T) {
 	t.Parallel()
 	access := &fakeRangeAccess{data: remoteLargeContent(600000, 20)} // 12 MiB
-	d, err := readDocument("/remote/big.txt", loadSpec{
+	d, err := ReadDocument("/remote/big.txt", LoadSpec{
 		Access: access,
-		LargeConf: largeSpec{
+		LargeConf: LargeSpec{
 			Threshold: 1,
 			Geom: buffer.LargeOptions{
 				Chunk: 64 << 10, CachePages: 4, InitialBytes: 4096,
@@ -275,9 +275,9 @@ func TestReadRemoteLargeDocumentMissLoadRepaint(t *testing.T) {
 func TestReadRemoteLargeDocumentNonUTF8FailsClearly(t *testing.T) {
 	t.Parallel()
 	access := &fakeRangeAccess{data: []byte{0xff, 0xfe, 0x00, 0x41, 0x00, 0x42}} // UTF-16 BOM
-	_, err := readDocument("/remote/bin.txt", loadSpec{
+	_, err := ReadDocument("/remote/bin.txt", LoadSpec{
 		Access: access,
-		LargeConf: largeSpec{
+		LargeConf: LargeSpec{
 			Threshold: 1,
 			Geom:      buffer.LargeOptions{Chunk: 8, CachePages: 2, InitialBytes: 8},
 		},
@@ -355,9 +355,9 @@ func ensureRemoteLine(t *testing.T, d *Document, line int) {
 func openRemoteLargeForSave(t *testing.T, content []byte) (*Document, *fakeRangeAccess) {
 	t.Helper()
 	access := &fakeRangeAccess{data: content}
-	d, err := readDocument("/remote/save.txt", loadSpec{
+	d, err := ReadDocument("/remote/save.txt", LoadSpec{
 		Access: access,
-		LargeConf: largeSpec{
+		LargeConf: LargeSpec{
 			Threshold: 1,
 			Geom: buffer.LargeOptions{
 				Chunk: 64 << 10, CachePages: 4, InitialBytes: 4096,
@@ -382,7 +382,7 @@ func TestRemoteLargeEditInsideWindowSaves(t *testing.T) {
 	if !d.Buffer.Modified() {
 		t.Fatal("an overlay edit did not mark the document modified")
 	}
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	res := job.Run()
 	if err := res.Err(); err != nil {
 		t.Fatalf("save: %v", err)
@@ -420,7 +420,7 @@ func TestRemoteLargeEditAcrossWindowsSaves(t *testing.T) {
 	if ref := d.Buffer.Refusal(); ref != nil {
 		t.Fatalf("edit refused: %v", ref)
 	}
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	res := job.Run()
 	if err := res.Err(); err != nil {
 		t.Fatalf("save across windows: %v", err)
@@ -443,7 +443,7 @@ func TestRemoteLargeSaveBoundRefusal(t *testing.T) {
 	old := remoteLargeSaveMax
 	remoteLargeSaveMax = int64(len(content) / 2)
 	defer func() { remoteLargeSaveMax = old }()
-	res := d.PlanSave(d.Path, Settings{}).Run()
+	res := d.PlanSave(d.Path, SaveOptions{}).Run()
 	err := res.Err()
 	if err == nil || !strings.Contains(err.Error(), "windowed-save bound") {
 		t.Fatalf("save over the bound = %v, want the windowed-save bound error", err)
@@ -460,7 +460,7 @@ func TestRemoteLargeSaveRefusesChangedRemote(t *testing.T) {
 	d, access := openRemoteLargeForSave(t, content)
 	d.Buffer.Insert(buffer.Pos{Line: 1, Col: 0}, "EDIT ")
 	access.change(append(append([]byte(nil), content...), []byte("changed elsewhere\n")...))
-	res := d.PlanSave(d.Path, Settings{}).Run()
+	res := d.PlanSave(d.Path, SaveOptions{}).Run()
 	if !errors.Is(res.Err(), ErrChangedOnDisk) {
 		t.Fatalf("save over a changed remote file = %v, want ErrChangedOnDisk", res.Err())
 	}
@@ -497,7 +497,7 @@ func TestRemoteLargeSaveAsOtherPath(t *testing.T) {
 	d, access := openRemoteLargeForSave(t, content)
 	d.Buffer.Insert(buffer.Pos{Line: 2, Col: 0}, "AS ")
 	other := filepath.Join(t.TempDir(), "copy.txt")
-	job := d.PlanSave(other, Settings{})
+	job := d.PlanSave(other, SaveOptions{})
 	job.CheckDisk = false
 	res := job.Run()
 	if err := res.Err(); err != nil {

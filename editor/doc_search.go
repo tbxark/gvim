@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 
 	"github.com/tbxark/gvim/buffer"
@@ -21,9 +22,9 @@ func (e *Editor) SearchRange() (buffer.Selection, bool) {
 
 // findInSelection limits the find actions to the selection, in document order. It
 // needs a selection, and it changes no text.
-func findInSelection(e *Editor, d *Document, _ map[string]any) error {
+func findInSelection(e *Editor, d *document.Document, _ map[string]any) error {
 	if !d.HasSelection() {
-		return fmt.Errorf("find_in_selection: %w", ErrNothingSelected)
+		return fmt.Errorf("find_in_selection: %w", document.ErrNothingSelected)
 	}
 	from, to := d.Sel.Ordered()
 	d.FindRange = &buffer.Selection{Anchor: from, Head: to}
@@ -33,7 +34,7 @@ func findInSelection(e *Editor, d *Document, _ map[string]any) error {
 
 // clearSearch drops the search range. The search text and the highlights belong to the
 // find bar in the UI, which is not told by the editor.
-func clearSearch(e *Editor, d *Document, _ map[string]any) error {
+func clearSearch(e *Editor, d *document.Document, _ map[string]any) error {
 	d.FindRange = nil
 	e.setStatus("Search cleared")
 	return nil

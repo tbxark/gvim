@@ -1,5 +1,7 @@
 package editor
 
+import "github.com/tbxark/gvim/document"
+
 // Motions at every caret. A motion is written for the primary caret (Cursor, Sel
 // and want of the Document). With extra carets, forEachCaret installs each caret
 // as the primary one in turn, runs the step, and reads the result back, so the
@@ -7,7 +9,7 @@ package editor
 
 // moveCarets runs the motion m at every caret. extend grows each selection from
 // its anchor; otherwise each caret moves and drops its selection.
-func (e *Editor) moveCarets(d *Document, m motion, extend, vertical bool) {
+func (e *Editor) moveCarets(d *document.Document, m motion, extend, vertical bool) {
 	step := func(bool) {
 		if !vertical {
 			d.Want = -1
@@ -26,7 +28,7 @@ func (e *Editor) moveCarets(d *Document, m motion, extend, vertical bool) {
 
 // pageCarets moves the primary caret by a page, as pageMove does, and shifts
 // every other caret by the same number of lines.
-func (e *Editor) pageCarets(d *Document, dir int, extend bool) {
+func (e *Editor) pageCarets(d *document.Document, dir int, extend bool) {
 	from := d.Cursor.Line
 	pageMove(e, d, dir, extend)
 	if len(d.Extra) == 0 {
@@ -43,7 +45,7 @@ func (e *Editor) pageCarets(d *Document, dir int, extend bool) {
 // atEveryCaret wraps a handler that works on the primary caret, so that it runs
 // at every caret when there are extra ones. It returns the first error.
 func atEveryCaret(single handler) handler {
-	return withCarets(single, func(e *Editor, d *Document, args map[string]any) error {
+	return withCarets(single, func(e *Editor, d *document.Document, args map[string]any) error {
 		var first error
 		d.ForEachCaret(func(bool) {
 			if err := single(e, args); err != nil && first == nil {
@@ -56,8 +58,8 @@ func atEveryCaret(single handler) handler {
 
 // registerMotionCaretHandlers makes the selection and paragraph actions that
 // have no motion form work at every caret.
-func registerMotionCaretHandlers(h map[Action]handler) {
-	for _, a := range []Action{
+func registerMotionCaretHandlers(h map[document.Action]handler) {
+	for _, a := range []document.Action{
 		"select_word",
 		"move_to_paragraph_up", "select_to_paragraph_up",
 		"move_to_paragraph_down", "select_to_paragraph_down",

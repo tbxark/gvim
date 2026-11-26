@@ -2,6 +2,8 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,7 +51,7 @@ func TestUndecodableFileIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := New(Options{})
-	if err := e.OpenFile(path); !errors.Is(err, ErrNotDecodable) {
+	if err := e.OpenFile(path); !errors.Is(err, document.ErrNotDecodable) {
 		t.Fatalf("OpenFile err = %v, want ErrNotDecodable", err)
 	}
 	if tabs := e.Tabs(); len(tabs) != 1 || tabs[0].Path != "" {
@@ -123,14 +125,14 @@ func TestEncodingActionsRefuseBadArguments(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name    string
-		action  Action
+		action  document.Action
 		Args    map[string]any
 		wantErr error // nil means any error will do
 	}{
-		{"set_encoding unknown name", "set_encoding", map[string]any{"name": "klingon"}, ErrUnknownEncoding},
+		{"set_encoding unknown name", "set_encoding", map[string]any{"name": "klingon"}, document.ErrUnknownEncoding},
 		{"set_encoding missing name", "set_encoding", nil, nil},
 		{"set_encoding name not a string", "set_encoding", map[string]any{"name": 1}, nil},
-		{"reload_with_encoding unknown name", "reload_with_encoding", map[string]any{"name": "klingon"}, ErrUnknownEncoding},
+		{"reload_with_encoding unknown name", "reload_with_encoding", map[string]any{"name": "klingon"}, document.ErrUnknownEncoding},
 		{"reload_with_encoding missing name", "reload_with_encoding", nil, nil},
 	}
 	for _, tt := range tests {
@@ -178,6 +180,65 @@ func TestReloadWithEncodingDecodesTheFileAgain(t *testing.T) {
 	}
 }
 
+func TestReloadWithEncodingClearsCaretAndHistoryState(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, "abc\ndef\nghi\n")
+	d := e.Active()
+	before := d.Buffer.Version()
+	d.BlockStep(1, 1, false)
+	d.BlockStep(1, 0, false)
+	if len(d.Extra) == 0 {
+		t.Fatal("fixture: the block selection should have added carets")
+	}
+	d.FindRange = &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: 2}}
+	if r := e.Do("reload_with_encoding", map[string]any{"name": "windows-1252", "force": true}); r.Err != nil {
+		t.Fatalf("reload_with_encoding: %v", r.Err)
+	}
+	d = e.Active()
+	if len(d.Extra) != 0 {
+		t.Errorf("extra carets = %d, want 0", len(d.Extra))
+	}
+	if _, ok := d.BlockSelection(); ok {
+		t.Error("block selection survived the reload")
+	}
+	if d.FindRange != nil {
+		t.Errorf("FindRange = %v, want nil", d.FindRange)
+	}
+	if d.Sel != nil {
+		t.Errorf("Sel = %v, want nil", d.Sel)
+	}
+	if got := d.Buffer.Version(); got == before {
+		t.Errorf("buffer version %d was reused; a cache keyed on it would take the new text for the old", got)
+	}
+}
+
+// remoteAccess is a FileAccess whose file is never on the local disk.
+type remoteAccess struct{ data string }
+
+func (a remoteAccess) ReadFile(string, int64) ([]byte, error) { return []byte(a.data), nil }
+func (a remoteAccess) Stat(string) (document.AccessStat, error) {
+	return document.AccessStat{Exists: true, Size: int64(len(a.data))}, nil
+}
+func (a remoteAccess) WriteFileAtomic(string, []byte) error { return nil }
+
+func TestReloadWithEncodingRefusesRemoteWorkspace(t *testing.T) {
+	t.Parallel()
+	e := New(Options{FileAccess: remoteAccess{data: "caf\xc3\xa9"}})
+	if err := e.OpenFile("/remote/doc.txt"); err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	r := e.Do("reload_with_encoding", map[string]any{"name": "windows-1252"})
+	if !errors.Is(r.Err, document.ErrRemoteUnsupported) {
+		t.Fatalf("err = %v, want ErrRemoteUnsupported", r.Err)
+	}
+	if errors.Is(r.Err, document.ErrLargeFile) {
+		t.Fatalf("err = %v, must not be reported as a large file", r.Err)
+	}
+	if got := e.Active().Buffer.Text(); got != "café" {
+		t.Fatalf("refused reload changed the text to %q", got)
+	}
+}
+
 func TestReloadWithEncodingGuardsEditsAndPaths(t *testing.T) {
 	t.Parallel()
 	t.Run("edited buffer is refused unless forced", func(t *testing.T) {
@@ -201,7 +262,7 @@ func TestReloadWithEncodingGuardsEditsAndPaths(t *testing.T) {
 	t.Run("untitled buffer has no file to reload", func(t *testing.T) {
 		t.Parallel()
 		e := New(Options{})
-		if r := e.Do("reload_with_encoding", map[string]any{"name": "utf-8"}); !errors.Is(r.Err, ErrNoPath) {
+		if r := e.Do("reload_with_encoding", map[string]any{"name": "utf-8"}); !errors.Is(r.Err, document.ErrNoPath) {
 			t.Fatalf("err = %v, want ErrNoPath", r.Err)
 		}
 	})
@@ -210,7 +271,7 @@ func TestReloadWithEncodingGuardsEditsAndPaths(t *testing.T) {
 		e, _ := openFixture(t, Options{}, "abc")
 		// Three bytes are an odd length for UTF-16, so utf-16le cannot decode them.
 		r := e.Do("reload_with_encoding", map[string]any{"name": "utf-16le"})
-		if !errors.Is(r.Err, ErrNotDecodable) {
+		if !errors.Is(r.Err, document.ErrNotDecodable) {
 			t.Fatalf("err = %v, want ErrNotDecodable", r.Err)
 		}
 		if got := e.Active().Buffer.Text(); got != "abc" {
@@ -273,7 +334,7 @@ func TestUndecodableWindows1252FileStillRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := New(Options{})
-	if err := e.OpenFile(path); !errors.Is(err, ErrNotDecodable) {
+	if err := e.OpenFile(path); !errors.Is(err, document.ErrNotDecodable) {
 		t.Fatalf("OpenFile err = %v, want ErrNotDecodable", err)
 	}
 }

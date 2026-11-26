@@ -12,20 +12,20 @@ import (
 type caretPlan struct {
 	// edit is the change, or nil when the caret changes nothing and only moves with
 	// the text around it.
-	Edit *edit
+	Edit *Edit
 	// place gives the head from the end of the edit's inserted text, in the final
 	// text. Nil puts the head at that end. anchor does the same for the anchor and
 	// defaults to the head, which leaves no selection.
-	Place, Anchor placeFn
+	Place, Anchor PlaceFn
 }
 
 // applyPlans makes the plans of cs as one undo step. cs and plans are parallel. A
 // caret without an edit keeps its selection, moved with the edits before it. A caret
 // whose edit or position falls inside another caret's edit is merged into that
 // caret, which then is the primary caret if either was.
-func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
+func (d *Document) applyPlans(cs []CaretState, plans []caretPlan) {
 	type entry struct {
-		e     edit
+		e     Edit
 		caret int
 		part  int // 0 for the edit, 1 and 2 for the anchor and the head of an unchanged caret
 	}
@@ -36,12 +36,12 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 			continue
 		}
 		entries = append(entries,
-			entry{edit{From: cs[i].Anchor, To: cs[i].Anchor}, i, 1},
-			entry{edit{From: cs[i].Head, To: cs[i].Head}, i, 2})
+			entry{Edit{From: cs[i].Anchor, To: cs[i].Anchor}, i, 1},
+			entry{Edit{From: cs[i].Head, To: cs[i].Head}, i, 2})
 	}
 	weight := func(x entry) int { return min(x.part, 1) ^ 1 } // marks first at one position
 	slices.SortStableFunc(entries, func(a, b entry) int {
-		return cmp.Or(comparePos(a.e.From, b.e.From), cmp.Compare(weight(a), weight(b)))
+		return cmp.Or(ComparePos(a.e.From, b.e.From), cmp.Compare(weight(a), weight(b)))
 	})
 	absorbed := make(map[int]int) // dropped caret -> the caret whose edit took it in
 	var last *entry
@@ -59,7 +59,7 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 		}
 	}
 	var live []entry
-	var edits, resolved []edit
+	var edits, resolved []Edit
 	for _, x := range entries {
 		if _, gone := absorbed[x.caret]; gone {
 			continue
@@ -75,7 +75,7 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 	if d.editRefused() {
 		return
 	}
-	at := make([]caret, len(cs))
+	at := make([]CaretState, len(cs))
 	for i, x := range live {
 		c := &at[x.caret]
 		switch x.part {
@@ -101,7 +101,7 @@ func (d *Document) applyPlans(cs []caret, plans []caretPlan) {
 			primary[to] = primary[to] || c.Primary
 		}
 	}
-	out := make([]caret, 0, len(cs))
+	out := make([]CaretState, 0, len(cs))
 	for i := range cs {
 		if _, gone := absorbed[i]; !gone {
 			at[i].Primary = primary[i]
@@ -120,10 +120,10 @@ type lineBlock struct{ first, last int }
 // caretBlocks returns the lines the carets cover as blocks in document order.
 // Blocks that share a line are merged, and with touching set so are blocks that
 // are next to each other.
-func caretBlocks(cs []caret, touching bool) []lineBlock {
+func caretBlocks(cs []CaretState, touching bool) []lineBlock {
 	var blocks []lineBlock
 	for _, c := range cs {
-		first, last := caretLines(c)
+		first, last := CaretLines(c)
 		blocks = append(blocks, lineBlock{first, last})
 	}
 	slices.SortFunc(blocks, func(a, b lineBlock) int { return cmp.Compare(a.first, b.first) })
@@ -178,9 +178,9 @@ func (d *Document) DeleteLine() {
 	}
 	slices.Sort(lines)
 	lines = slices.Compact(lines)
-	edits := make([]edit, len(lines))
+	edits := make([]Edit, len(lines))
 	for i, line := range lines {
-		edits[i] = edit{From: buffer.Pos{Line: line}, To: buffer.Pos{Line: line + 1}}
+		edits[i] = Edit{From: buffer.Pos{Line: line}, To: buffer.Pos{Line: line + 1}}
 		if line+1 >= d.Buffer.Lines() {
 			edits[i].To = buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)}
 		}
@@ -190,10 +190,10 @@ func (d *Document) DeleteLine() {
 	if d.editRefused() {
 		return
 	}
-	out := make([]caret, len(lines))
+	out := make([]CaretState, len(lines))
 	for i, line := range lines {
 		p := d.Buffer.Clamp(buffer.Pos{Line: line - i})
-		out[i] = caret{Anchor: p, Head: p, Primary: line == primary}
+		out[i] = CaretState{Anchor: p, Head: p, Primary: line == primary}
 	}
 	d.SetCarets(out)
 	if len(cs) > 1 {
@@ -209,19 +209,19 @@ func (d *Document) DeleteLine() {
 func (d *Document) DuplicateLines(above bool) {
 	cs := d.AllCarets()
 	blocks := caretBlocks(cs, false)
-	edits := make([]edit, len(blocks))
+	edits := make([]Edit, len(blocks))
 	before := make([]int, len(blocks)) // lines the earlier blocks inserted
 	added := 0
 	for i, b := range blocks {
 		text := d.blockText(b)
 		switch {
 		case above:
-			edits[i] = edit{From: buffer.Pos{Line: b.first}, To: buffer.Pos{Line: b.first}, Text: text + "\n"}
+			edits[i] = Edit{From: buffer.Pos{Line: b.first}, To: buffer.Pos{Line: b.first}, Text: text + "\n"}
 		case b.last+1 < d.Buffer.Lines():
-			edits[i] = edit{From: buffer.Pos{Line: b.last + 1}, To: buffer.Pos{Line: b.last + 1}, Text: text + "\n"}
+			edits[i] = Edit{From: buffer.Pos{Line: b.last + 1}, To: buffer.Pos{Line: b.last + 1}, Text: text + "\n"}
 		default:
 			end := buffer.Pos{Line: b.last, Col: d.Buffer.LineLen(b.last)}
-			edits[i] = edit{From: end, To: end, Text: "\n" + text}
+			edits[i] = Edit{From: end, To: end, Text: "\n" + text}
 		}
 		before[i] = added
 		added += b.last - b.first + 1
@@ -231,7 +231,7 @@ func (d *Document) DuplicateLines(above bool) {
 	if d.editRefused() {
 		return
 	}
-	out := make([]caret, len(cs))
+	out := make([]CaretState, len(cs))
 	for i, c := range cs {
 		k := blockIndex(blocks, min(c.Anchor.Line, c.Head.Line))
 		shift := before[k]
@@ -259,7 +259,7 @@ func (d *Document) MoveLines(dir int) {
 	blocks := caretBlocks(cs, true)
 	phantom := lines > 1 && d.Buffer.LineLen(lines-1) == 0
 	moves := make([]bool, len(blocks))
-	var edits []edit
+	var edits []Edit
 	for i, b := range blocks {
 		if dir < 0 && b.first == 0 || dir > 0 && (b.last+1 >= lines || b.last+1 == lines-1 && phantom) {
 			continue
@@ -268,10 +268,10 @@ func (d *Document) MoveLines(dir int) {
 		block := d.blockText(b)
 		if dir < 0 {
 			end := buffer.Pos{Line: b.last, Col: d.Buffer.LineLen(b.last)}
-			edits = append(edits, edit{From: buffer.Pos{Line: b.first - 1}, To: end, Text: block + "\n" + d.blockText(lineBlock{b.first - 1, b.first - 1})})
+			edits = append(edits, Edit{From: buffer.Pos{Line: b.first - 1}, To: end, Text: block + "\n" + d.blockText(lineBlock{b.first - 1, b.first - 1})})
 		} else {
 			end := buffer.Pos{Line: b.last + 1, Col: d.Buffer.LineLen(b.last + 1)}
-			edits = append(edits, edit{From: buffer.Pos{Line: b.first}, To: end, Text: d.blockText(lineBlock{b.last + 1, b.last + 1}) + "\n" + block})
+			edits = append(edits, Edit{From: buffer.Pos{Line: b.first}, To: end, Text: d.blockText(lineBlock{b.last + 1, b.last + 1}) + "\n" + block})
 		}
 	}
 	if len(edits) == 0 {
@@ -307,7 +307,7 @@ func (d *Document) MoveLines(dir int) {
 	if d.editRefused() {
 		return
 	}
-	out := make([]caret, len(cs))
+	out := make([]CaretState, len(cs))
 	for i, c := range cs {
 		lo, hi := c.Bounds()
 		own := blockIndex(blocks, lo.Line)
@@ -332,7 +332,7 @@ func (d *Document) Dedent(tabSize int) {
 	cs := d.AllCarets()
 	widths := make(map[int]int)
 	for _, c := range cs {
-		first, last := caretLines(c)
+		first, last := CaretLines(c)
 		for line := first; line <= last; line++ {
 			if w := indentWidth(d.Buffer.Line(line), tabSize); w > 0 {
 				widths[line] = w
@@ -342,9 +342,9 @@ func (d *Document) Dedent(tabSize int) {
 	if len(widths) == 0 {
 		return
 	}
-	edits := make([]edit, 0, len(widths))
+	edits := make([]Edit, 0, len(widths))
 	for _, line := range slices.Sorted(maps.Keys(widths)) {
-		edits = append(edits, edit{From: buffer.Pos{Line: line}, To: buffer.Pos{Line: line, Col: widths[line]}})
+		edits = append(edits, Edit{From: buffer.Pos{Line: line}, To: buffer.Pos{Line: line, Col: widths[line]}})
 	}
 	back := func(p buffer.Pos) buffer.Pos {
 		p.Col = max(p.Col-widths[p.Line], 0)
@@ -366,7 +366,7 @@ func (d *Document) Dedent(tabSize int) {
 
 // deleteByRange deletes, at every caret, its selection, or else the range that
 // target gives for the caret. A caret whose range is empty changes nothing.
-func (d *Document) deleteByRange(target func(c caret) (from, to buffer.Pos)) {
+func (d *Document) deleteByRange(target func(c CaretState) (from, to buffer.Pos)) {
 	cs := d.AllCarets()
 	plans := make([]caretPlan, len(cs))
 	for i, c := range cs {
@@ -376,7 +376,7 @@ func (d *Document) deleteByRange(target func(c caret) (from, to buffer.Pos)) {
 		}
 		from, to = d.Buffer.Clamp(from), d.Buffer.Clamp(to)
 		if from != to {
-			plans[i].Edit = &edit{From: from, To: to}
+			plans[i].Edit = &Edit{From: from, To: to}
 		}
 	}
 	d.applyPlans(cs, plans)
@@ -384,20 +384,20 @@ func (d *Document) deleteByRange(target func(c caret) (from, to buffer.Pos)) {
 
 // DeleteWord deletes the selection, or the word before (back) or after each caret.
 func (d *Document) DeleteWord(back bool) {
-	d.deleteByRange(func(c caret) (buffer.Pos, buffer.Pos) {
+	d.deleteByRange(func(c CaretState) (buffer.Pos, buffer.Pos) {
 		if back {
-			return wordLeft(d.Buffer, c.Head), c.Head
+			return WordLeft(d.Buffer, c.Head), c.Head
 		}
-		return c.Head, wordRight(d.Buffer, c.Head)
+		return c.Head, WordRight(d.Buffer, c.Head)
 	})
 }
 
 // DeleteToLineStart deletes the selection, or the text from the start of the line to
 // each caret. A caret at column 0 deletes the line break before it.
 func (d *Document) DeleteToLineStart() {
-	d.deleteByRange(func(c caret) (buffer.Pos, buffer.Pos) {
+	d.deleteByRange(func(c CaretState) (buffer.Pos, buffer.Pos) {
 		if c.Head.Col == 0 {
-			prev, _ := prevPos(d.Buffer, c.Head)
+			prev, _ := PrevPos(d.Buffer, c.Head)
 			return prev, c.Head
 		}
 		return buffer.Pos{Line: c.Head.Line}, c.Head
@@ -407,10 +407,10 @@ func (d *Document) DeleteToLineStart() {
 // DeleteToLineEnd deletes the selection, or the text from each caret to the end of
 // its line. A caret at the end of the line deletes the line break after it.
 func (d *Document) DeleteToLineEnd() {
-	d.deleteByRange(func(c caret) (buffer.Pos, buffer.Pos) {
+	d.deleteByRange(func(c CaretState) (buffer.Pos, buffer.Pos) {
 		end := buffer.Pos{Line: c.Head.Line, Col: d.Buffer.LineLen(c.Head.Line)}
 		if c.Head == end {
-			next, _ := nextPos(d.Buffer, c.Head)
+			next, _ := NextPos(d.Buffer, c.Head)
 			return c.Head, next
 		}
 		return c.Head, end
@@ -429,9 +429,9 @@ func (d *Document) TransposeChars() {
 		if p.Col == 0 || p.Col >= d.Buffer.LineLen(p.Line) {
 			continue
 		}
-		from := buffer.Pos{Line: p.Line, Col: prevBoundary(d.Buffer, p.Line, p.Col)}
-		to := buffer.Pos{Line: p.Line, Col: nextBoundary(d.Buffer, p.Line, p.Col)}
-		plans[i].Edit = &edit{From: from, To: to, Text: d.Buffer.Range(p, to) + d.Buffer.Range(from, p)}
+		from := buffer.Pos{Line: p.Line, Col: PrevBoundary(d.Buffer, p.Line, p.Col)}
+		to := buffer.Pos{Line: p.Line, Col: NextBoundary(d.Buffer, p.Line, p.Col)}
+		plans[i].Edit = &Edit{From: from, To: to, Text: d.Buffer.Range(p, to) + d.Buffer.Range(from, p)}
 	}
 	d.applyPlans(cs, plans)
 }
@@ -451,7 +451,7 @@ func (d *Document) TransformCase(fn func(string) string) {
 		}
 		old := d.PlanRange(from, to)
 		if converted := fn(old); converted != old {
-			plans[i].Edit = &edit{From: from, To: to, Text: converted}
+			plans[i].Edit = &Edit{From: from, To: to, Text: converted}
 			if c.Anchor != c.Head {
 				plans[i].Place, plans[i].Anchor = keepSelection(from, converted, c.Head.Less(c.Anchor))
 			}
@@ -462,7 +462,7 @@ func (d *Document) TransformCase(fn func(string) string) {
 
 // caseRange returns the range that a case conversion changes for c: its selection,
 // or the word it is in or directly after. ok is false when there is neither.
-func (d *Document) caseRange(c caret) (from, to buffer.Pos, ok bool) {
+func (d *Document) caseRange(c CaretState) (from, to buffer.Pos, ok bool) {
 	if lo, hi := c.Bounds(); lo != hi {
 		return lo, hi, true
 	}
@@ -473,14 +473,14 @@ func (d *Document) caseRange(c caret) (from, to buffer.Pos, ok bool) {
 // that share lines sort together. Each sorted selection then covers its sorted lines.
 func (d *Document) sortLinesAtCarets() {
 	cs := d.AllCarets()
-	var withSel []caret
+	var withSel []CaretState
 	for _, c := range cs {
 		if c.Anchor != c.Head {
 			withSel = append(withSel, c)
 		}
 	}
 	blocks := caretBlocks(withSel, false)
-	var edits []edit
+	var edits []Edit
 	var sorted []lineBlock
 	for _, b := range blocks {
 		if b.last <= b.first {
@@ -492,7 +492,7 @@ func (d *Document) sortLinesAtCarets() {
 		if slices.Equal(lines, order) {
 			continue
 		}
-		edits = append(edits, edit{
+		edits = append(edits, Edit{
 			From: buffer.Pos{Line: b.first},
 			To:   buffer.Pos{Line: b.last, Col: d.Buffer.LineLen(b.last)},
 			Text: strings.Join(order, "\n"),
@@ -511,7 +511,7 @@ func (d *Document) sortLinesAtCarets() {
 		if c.Anchor == c.Head {
 			continue
 		}
-		first, _ := caretLines(c)
+		first, _ := CaretLines(c)
 		if k := blockIndex(sorted, first); k >= 0 {
 			b := sorted[k]
 			cs[i].Anchor = buffer.Pos{Line: b.first}

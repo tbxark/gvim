@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -29,12 +30,12 @@ func windowEvery(e *Editor, width, tallFrom int) RowWindowMapper {
 func TestTallRowWindowMovesLikeTheListOfRows(t *testing.T) {
 	t.Parallel()
 	text := strings.Join([]string{strings.Repeat("a", 95), "xyz", strings.Repeat("b", 130), "end"}, "\n")
-	actions := []Action{"move_down", "move_up", "smart_home", "move_line_start", "move_line_end", "select_down", "select_up", "select_line_end"}
+	actions := []document.Action{"move_down", "move_up", "smart_home", "move_line_start", "move_line_end", "select_down", "select_up", "select_line_end"}
 	rng := rand.New(rand.NewPCG(2, 9))
 	for trial := range 400 {
 		line := rng.IntN(4)
 		col := rng.IntN(len([]rune(strings.Split(text, "\n")[line])) + 1)
-		var steps []Action
+		var steps []document.Action
 		for range 1 + rng.IntN(6) {
 			steps = append(steps, actions[rng.IntN(len(actions))])
 		}

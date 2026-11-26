@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 )
 
@@ -20,19 +21,19 @@ func TestSaveResultWritten(t *testing.T) {
 	if len(ok) != 1 {
 		t.Fatalf("PlanSave ran %d jobs, want 1", len(ok))
 	}
-	failed := SaveResult{Job: ok[0].Job}.WithErr(errors.New("disk full"))
-	skipped := SaveResult{Job: ok[0].Job, Skipped: true}
+	failed := document.SaveResult{Job: ok[0].Job}.WithErr(errors.New("disk full"))
+	skipped := document.SaveResult{Job: ok[0].Job, Skipped: true}
 	tests := []struct {
 		Name     string
-		r        SaveResult
+		r        document.SaveResult
 		wantOK   bool
 		wantPath string
-		wantID   DocID
+		wantID   document.DocID
 	}{
 		{"written", ok[0], true, path, id},
 		{"failed", failed, false, "", 0},
 		{"large save with nothing to write", skipped, false, "", 0},
-		{"zero value", SaveResult{}, false, "", 0},
+		{"zero value", document.SaveResult{}, false, "", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

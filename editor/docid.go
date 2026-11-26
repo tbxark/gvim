@@ -2,14 +2,15 @@ package editor
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/document"
 )
 
 // adopt gives d an id, if it has none, and starts observing its buffer when
 // changes are tracked. It is the one place that assigns ids.
-func (e *Editor) adopt(d *Document) {
+func (e *Editor) adopt(d *document.Document) {
 	if d.Seam().ID == 0 {
 		e.seam.nextID++
-		d.Seam().ID = DocID(e.seam.nextID)
+		d.Seam().ID = document.DocID(e.seam.nextID)
 	}
 	if e.seam.tracked > 0 && d.Seam().Obs == nil && !d.SharedMirror() {
 		e.observe(d)
@@ -17,7 +18,7 @@ func (e *Editor) adopt(d *Document) {
 }
 
 // addDoc appends d as the last tab. Every place that adds a tab calls it.
-func (e *Editor) addDoc(d *Document) {
+func (e *Editor) addDoc(d *document.Document) {
 	e.adopt(d)
 	e.seedRulers(d)
 	e.docs = append(e.docs, d)
@@ -25,7 +26,7 @@ func (e *Editor) addDoc(d *Document) {
 }
 
 // setDoc puts d in place of tab i, whose document the caller has released.
-func (e *Editor) setDoc(i int, d *Document) {
+func (e *Editor) setDoc(i int, d *document.Document) {
 	if i >= 0 && i < len(e.docs) {
 		e.forgetRecent(e.docs[i])
 	}
@@ -47,7 +48,7 @@ func (e *Editor) adoptAll() {
 }
 
 // DocByID returns the document with the given id and the index of its tab.
-func (e *Editor) DocByID(id DocID) (*Document, int, bool) {
+func (e *Editor) DocByID(id document.DocID) (*document.Document, int, bool) {
 	e.adoptAll()
 	for i, d := range e.docs {
 		if d.Seam().ID == id && id != 0 {
@@ -58,7 +59,7 @@ func (e *Editor) DocByID(id DocID) (*Document, int, bool) {
 }
 
 // ActiveID returns the id of the active document, or 0 when no tab is open.
-func (e *Editor) ActiveID() DocID {
+func (e *Editor) ActiveID() document.DocID {
 	e.adoptAll()
 	if d := e.Active(); d != nil {
 		return d.Seam().ID
@@ -67,9 +68,9 @@ func (e *Editor) ActiveID() DocID {
 }
 
 // DocIDs returns the ids of the open documents in tab order.
-func (e *Editor) DocIDs() []DocID {
+func (e *Editor) DocIDs() []document.DocID {
 	e.adoptAll()
-	ids := make([]DocID, len(e.docs))
+	ids := make([]document.DocID, len(e.docs))
 	for i, d := range e.docs {
 		ids[i] = d.Seam().ID
 	}
@@ -77,7 +78,7 @@ func (e *Editor) DocIDs() []DocID {
 }
 
 // docByID is DocByID for the methods that return an error.
-func (e *Editor) docByID(id DocID) (*Document, int, error) {
+func (e *Editor) docByID(id document.DocID) (*document.Document, int, error) {
 	d, i, ok := e.DocByID(id)
 	if !ok {
 		return nil, -1, fmt.Errorf("%w: id %d", ErrNotOpen, id)

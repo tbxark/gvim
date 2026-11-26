@@ -33,12 +33,15 @@ func NewMirrorDocument(owner *Document) (*Document, error) {
 	}
 	text, err := owner.Buffer.TextChecked()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errSharedUnsupported, err)
+		return nil, fmt.Errorf("%w: %w", errSharedUnsupported, err)
 	}
 	if len(text) > MaxSharedDocumentBytes {
 		return nil, fmt.Errorf("%w: the text is over %d bytes", errSharedUnsupported, MaxSharedDocumentBytes)
 	}
-	d := newDocument(owner.Path, text)
+	d := NewDocument(owner.Path, text)
+	if owner.Buffer.Modified() {
+		d.Buffer.MarkUnsaved()
+	}
 	d.sharedMirror = true
 	d.sharedVersion = owner.Buffer.Version()
 	d.sharedSelfVersion = d.Buffer.Version()
@@ -80,18 +83,20 @@ func (d *Document) SyncMirrorFrom(owner *Document) error {
 	}
 	text, err := owner.Buffer.TextChecked()
 	if err != nil {
-		return fmt.Errorf("%w: %v", errSharedUnsupported, err)
+		return fmt.Errorf("%w: %w", errSharedUnsupported, err)
 	}
 	if len(text) > MaxSharedDocumentBytes {
 		return fmt.Errorf("%w: the text is over %d bytes", errSharedUnsupported, MaxSharedDocumentBytes)
 	}
-	d.Buffer.Delete(buffer.Pos{}, d.Buffer.End())
-	if text != "" {
-		d.Buffer.Insert(buffer.Pos{}, text)
+	// The text is swapped in as a new buffer: the mirror is read-only, so replaying a
+	// full-file delete and insert would only grow its undo stack on every sync.
+	old := d.Buffer
+	fresh := buffer.NewAfter(text, old)
+	if owner.Buffer.Modified() {
+		fresh.MarkUnsaved()
 	}
-	if !owner.Buffer.Modified() {
-		d.Buffer.MarkSaved()
-	}
+	d.SetBuffer(fresh)
+	_ = old.Close()
 	d.ClampToText()
 	d.sharedVersion = owner.Buffer.Version()
 	d.sharedSelfVersion = d.Buffer.Version()
@@ -133,6 +138,7 @@ func (d *Document) ApplyOwnerChange(owner *Document, c buffer.Change) error {
 	if c.Text != "" {
 		d.Buffer.Insert(c.From, c.Text)
 	}
+	d.ClampToText()
 	d.sharedVersion = c.Version
 	d.sharedSelfVersion = d.Buffer.Version()
 	d.Disk = owner.Disk

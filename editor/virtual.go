@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"sort"
 )
@@ -13,13 +14,13 @@ var ErrNotVirtual = errors.New("not a virtual buffer")
 
 // NewVirtual opens a virtual document as the last tab and returns its id. It does not
 // make the tab active.
-func (e *Editor) NewVirtual(o VirtualOptions) DocID {
-	text, _ := splitLineEnding(o.Text)
-	d := newDocument("", text)
-	d.Eol = eolLF
+func (e *Editor) NewVirtual(o document.VirtualOptions) document.DocID {
+	text, _ := document.SplitLineEnding(o.Text)
+	d := document.NewDocument("", text)
+	d.Eol = document.EolLF
 	d.SetLanguage(o.Language)
 	d.SetReadOnly(o.ReadOnly)
-	d.SetExt(docExt{Virtual: true, Name: cleanVirtualName(o.Name), Owner: o.Owner, Size: len(text), Mode: o.Mode})
+	d.SetExt(document.DocExt{Virtual: true, Name: document.CleanVirtualName(o.Name), Owner: o.Owner, Size: len(text), Mode: o.Mode})
 	e.addDoc(d)
 	return d.Seam().ID
 }
@@ -59,7 +60,7 @@ func (e *Editor) virtualUsage(match func(owner string) bool) (count, bytes int) 
 
 // VirtualOwner returns the owner and the size in bytes of the text last set in the
 // virtual document id.
-func (e *Editor) VirtualOwner(id DocID) (owner string, size int, err error) {
+func (e *Editor) VirtualOwner(id document.DocID) (owner string, size int, err error) {
 	d, err := e.virtualDoc(id)
 	if err != nil {
 		return "", 0, err
@@ -68,7 +69,7 @@ func (e *Editor) VirtualOwner(id DocID) (owner string, size int, err error) {
 }
 
 // virtualDoc returns the virtual document with the given id.
-func (e *Editor) virtualDoc(id DocID) (*Document, error) {
+func (e *Editor) virtualDoc(id document.DocID) (*document.Document, error) {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return nil, err
@@ -86,15 +87,15 @@ func (e *Editor) virtualDoc(id DocID) (*Document, error) {
 // the old text. The Buffer is replaced, so the document's Version gets a new generation, and the new Buffer's version
 // numbers start after every one the old Buffer issued, so a cache keyed on the Buffer version
 // alone cannot take the new text for the old.
-func (e *Editor) SetVirtualText(id DocID, text string) error {
+func (e *Editor) SetVirtualText(id document.DocID, text string) error {
 	d, err := e.virtualDoc(id)
 	if err != nil {
 		return err
 	}
-	if len(text) > MaxVirtualText {
-		return fmt.Errorf("%w: virtual text is over %d bytes", buffer.ErrOverCap, MaxVirtualText)
+	if len(text) > document.MaxVirtualText {
+		return fmt.Errorf("%w: virtual text is over %d bytes", buffer.ErrOverCap, document.MaxVirtualText)
 	}
-	text, _ = splitLineEnding(text)
+	text, _ = document.SplitLineEnding(text)
 	cursor, top := d.Cursor, d.Top
 	old := d.Buffer
 	d.SetBuffer(buffer.NewAfter(text, old))
@@ -114,7 +115,7 @@ func (e *Editor) SetVirtualText(id DocID, text string) error {
 
 // SetVirtualProps records the properties of the current text of a virtual document, in
 // place of the ones before. They answer VirtualProps until the text changes.
-func (e *Editor) SetVirtualProps(id DocID, spans []PropSpan) error {
+func (e *Editor) SetVirtualProps(id document.DocID, spans []document.PropSpan) error {
 	d, err := e.virtualDoc(id)
 	if err != nil {
 		return err
@@ -127,7 +128,7 @@ func (e *Editor) SetVirtualProps(id DocID, spans []PropSpan) error {
 // VirtualProps returns the properties of the run of text that covers the position (line,
 // UTF-8 byte column), or nil when none does. The end of the document belongs to the last
 // run when it ends there. A document edited since SetVirtualProps has none.
-func (e *Editor) VirtualProps(id DocID, line, col int) (map[string]any, error) {
+func (e *Editor) VirtualProps(id document.DocID, line, col int) (map[string]any, error) {
 	d, err := e.virtualDoc(id)
 	if err != nil {
 		return nil, err
@@ -142,13 +143,13 @@ func (e *Editor) VirtualProps(id DocID, line, col int) (map[string]any, error) {
 	// n is the first span that starts after the position; the one before it is the only
 	// candidate, as spans do not overlap.
 	n := sort.Search(len(d.Ext().Props), func(i int) bool {
-		return cmpLineCol(d.Ext().Props[i].FromLine, d.Ext().Props[i].FromCol, line, col) > 0
+		return document.CmpLineCol(d.Ext().Props[i].FromLine, d.Ext().Props[i].FromCol, line, col) > 0
 	})
 	if n == 0 {
 		return nil, nil
 	}
 	s := d.Ext().Props[n-1]
-	switch c := cmpLineCol(line, col, s.ToLine, s.ToCol); {
+	switch c := document.CmpLineCol(line, col, s.ToLine, s.ToCol); {
 	case c < 0:
 		return s.Props, nil
 	case c == 0 && line == b.Lines()-1 && col == b.LineBytes(line):
@@ -158,7 +159,7 @@ func (e *Editor) VirtualProps(id DocID, line, col int) (map[string]any, error) {
 }
 
 // SetReadOnlyID sets the read-only flag of a virtual document.
-func (e *Editor) SetReadOnlyID(id DocID, ro bool) error {
+func (e *Editor) SetReadOnlyID(id document.DocID, ro bool) error {
 	d, err := e.virtualDoc(id)
 	if err != nil {
 		return err
@@ -168,7 +169,7 @@ func (e *Editor) SetReadOnlyID(id DocID, ro bool) error {
 }
 
 // SetModeID sets the buffer-local input mode of any document; "" clears it.
-func (e *Editor) SetModeID(id DocID, mode string) error {
+func (e *Editor) SetModeID(id document.DocID, mode string) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -179,7 +180,7 @@ func (e *Editor) SetModeID(id DocID, mode string) error {
 
 // UpdateViewSettings lets fn change the per-document display settings of document id,
 // as the per-buffer view actions do.
-func (e *Editor) UpdateViewSettings(id DocID, fn func(*ViewSettings)) error {
+func (e *Editor) UpdateViewSettings(id document.DocID, fn func(*document.ViewSettings)) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err

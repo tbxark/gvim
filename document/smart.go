@@ -11,7 +11,7 @@ type StringContext func(d *Document, p buffer.Pos) bool
 
 // pairFor returns the closer that typing ch inserts, for the languages Fresh
 // pairs in (get_auto_close_char). Plain text pairs no quotes, and markdown no '.
-func pairFor(ch rune, enabled bool, lang string) (rune, bool) {
+func PairFor(ch rune, enabled bool, lang string) (rune, bool) {
 	if !enabled {
 		return 0, false
 	}
@@ -37,28 +37,28 @@ func pairFor(ch rune, enabled bool, lang string) (rune, bool) {
 
 // isCloser reports whether ch is a closing bracket, the characters that re-indent a
 // line as they are typed.
-func isCloser(ch rune) bool { return ch == '}' || ch == ')' || ch == ']' }
+func IsCloser(ch rune) bool { return ch == '}' || ch == ')' || ch == ']' }
 
 // asciiWordRune is Fresh's test for "alphanumeric after the caret": auto-close does
 // not fire in front of a word.
-func asciiWordRune(r rune) bool {
+func ASCIIWordRune(r rune) bool {
 	return r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
 // placeFn maps the end of an edit's inserted text, in the final document, to where
 // the caret goes. Nil puts the caret at that end.
-type placeFn func(end buffer.Pos) buffer.Pos
+type PlaceFn func(end buffer.Pos) buffer.Pos
 
 // EditPlaced makes one edit per caret and puts each caret where its place function
 // says. With extra carets the edits are one undo step, as editAtCarets makes them.
 // A single caret edits the buffer directly, so its typing still merges into the
 // undo step of the typing around it. When the planned edits overlap, which two
 // carets in one line's leading blanks can cause, plain gives the edits instead.
-func (d *Document) EditPlaced(plan func(c caret) (edit, placeFn), plain func(c caret) edit) {
+func (d *Document) EditPlaced(plan func(c CaretState) (Edit, PlaceFn), plain func(c CaretState) Edit) {
 	cs := d.AllCarets()
 	before := d.Cursor
-	edits := make([]edit, len(cs))
-	places := make([]placeFn, len(cs))
+	edits := make([]Edit, len(cs))
+	places := make([]PlaceFn, len(cs))
 	for i, c := range cs {
 		edits[i], places[i] = plan(c)
 	}
@@ -99,13 +99,13 @@ func (d *Document) EditPlaced(plan func(c caret) (edit, placeFn), plain func(c c
 	if d.editRefused() {
 		return
 	}
-	out := make([]caret, len(cs))
+	out := make([]CaretState, len(cs))
 	for i, c := range cs {
 		p := ends[i]
 		if places[i] != nil {
 			p = places[i](p)
 		}
-		out[i] = caret{Anchor: p, Head: p, Primary: c.Primary}
+		out[i] = CaretState{Anchor: p, Head: p, Primary: c.Primary}
 	}
 	d.SetCarets(out)
 	if len(cs) > 1 {
@@ -115,16 +115,16 @@ func (d *Document) EditPlaced(plan func(c caret) (edit, placeFn), plain func(c c
 
 // maxIndentScan is how many runes of a line, from its start, count as its indent. A line
 // with more blanks than this before the caret is not indented, as far as typing goes.
-const maxIndentScan = 1024
+const MaxIndentScan = 1024
 
 // pairedBrackets reports whether open and closer are a matching ( ) [ ] or { }.
-func pairedBrackets(open, closer rune) bool {
+func PairedBrackets(open, closer rune) bool {
 	return (open == '(' && closer == ')') || (open == '[' && closer == ']') || (open == '{' && closer == '}')
 }
 
 // pairedQuotes reports whether the two runes are a pair that auto-close inserts:
 // brackets, or the same quote twice.
-func pairedQuotes(open, closer rune) bool {
-	return pairedBrackets(open, closer) ||
+func PairedQuotes(open, closer rune) bool {
+	return PairedBrackets(open, closer) ||
 		((open == '"' || open == '\'' || open == '`') && open == closer)
 }

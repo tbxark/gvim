@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ func TestSaveRefusesFileChangedOnDisk(t *testing.T) {
 	putFile(t, path, "someone else wrote a longer line\n")
 
 	err := e.Save()
-	if !errors.Is(err, ErrChangedOnDisk) {
+	if !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save: err = %v, want ErrChangedOnDisk", err)
 	}
 	if !strings.Contains(err.Error(), "saved.txt changed on disk") {
@@ -42,7 +43,7 @@ func TestSaveRefusesFileCreatedAfterOpen(t *testing.T) {
 	putFile(t, path, "external\n")
 	typeText(t, e, "mine")
 
-	if err := e.Save(); !errors.Is(err, ErrChangedOnDisk) {
+	if err := e.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save: err = %v, want ErrChangedOnDisk", err)
 	}
 	if got := readFile(t, path); got != "external\n" {
@@ -86,7 +87,7 @@ func TestSaveAsKeepsBufferOverChangedFile(t *testing.T) {
 	e, path := openTemp(t, "one\n")
 	typeText(t, e, "mine ")
 	putFile(t, path, "someone else wrote a longer line\n")
-	if err := e.Save(); !errors.Is(err, ErrChangedOnDisk) {
+	if err := e.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save: err = %v, want ErrChangedOnDisk", err)
 	}
 	if err := e.SaveAs(path); err != nil {
@@ -193,7 +194,7 @@ func TestSaveAfterMoveStillRefusesChangedSize(t *testing.T) {
 	if err := e.RenamePath(path, moved); err != nil {
 		t.Fatalf("RenamePath: %v", err)
 	}
-	if err := e.Save(); !errors.Is(err, ErrChangedOnDisk) {
+	if err := e.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save: err = %v, want ErrChangedOnDisk", err)
 	}
 	if got := readFile(t, moved); got != "someone else wrote a longer line\n" {
@@ -218,7 +219,7 @@ func TestSaveAfterMoveRefusesSameSizeOutsideEdit(t *testing.T) {
 	if err := e.RenamePath(path, moved); err != nil {
 		t.Fatalf("RenamePath: %v", err)
 	}
-	if err := e.Save(); !errors.Is(err, ErrChangedOnDisk) {
+	if err := e.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save: err = %v, want ErrChangedOnDisk", err)
 	}
 	if got := readFile(t, moved); got != "bravo\n" {

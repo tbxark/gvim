@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ func refCellColumn(line string, col, tab int) int {
 	cells, n := 0, 0
 	for rest := line; rest != "" && n < col; {
 		cluster, tail, w, _ := uniseg.FirstGraphemeClusterInString(rest, -1)
-		cells += clusterCells(cluster, w, cells, tab)
+		cells += document.ClusterCells(cluster, w, cells, tab)
 		n += len([]rune(cluster))
 		rest = tail
 	}
@@ -26,7 +27,7 @@ func refColAtCell(line string, target, tab int) int {
 	cells, col := 0, 0
 	for rest := line; rest != "" && cells < target; {
 		cluster, tail, w, _ := uniseg.FirstGraphemeClusterInString(rest, -1)
-		cells += clusterCells(cluster, w, cells, tab)
+		cells += document.ClusterCells(cluster, w, cells, tab)
 		col += len([]rune(cluster))
 		rest = tail
 	}
@@ -40,11 +41,11 @@ func TestClusterWalkMatchesAWalkOfTheWholeLine(t *testing.T) {
 	pad := func(n int) string { return strings.Repeat("a", n) }
 	lines := map[string]string{
 		"ascii":            pad(5000),
-		"mark at the edge": pad(walkChunk-1) + "é" + pad(100),
-		"mark after edge":  pad(walkChunk) + "́" + pad(100),
-		"emoji at edge":    pad(walkChunk-2) + "👨‍👩‍👧" + pad(50),
-		"wide at edge":     pad(walkChunk-1) + "日本語日本語" + pad(10),
-		"tabs":             "\t" + pad(10) + "\t\t" + pad(walkChunk) + "\tx",
+		"mark at the edge": pad(document.WalkChunk-1) + "é" + pad(100),
+		"mark after edge":  pad(document.WalkChunk) + "́" + pad(100),
+		"emoji at edge":    pad(document.WalkChunk-2) + "👨‍👩‍👧" + pad(50),
+		"wide at edge":     pad(document.WalkChunk-1) + "日本語日本語" + pad(10),
+		"tabs":             "\t" + pad(10) + "\t\t" + pad(document.WalkChunk) + "\tx",
 		"mixed":            strings.Repeat("ab日\té́", 900),
 		"short":            "hello",
 		"empty":            "",
@@ -56,13 +57,13 @@ func TestClusterWalkMatchesAWalkOfTheWholeLine(t *testing.T) {
 			n := len([]rune(text))
 			for _, tab := range []int{4, 8} {
 				for col := 0; col <= n+2; col += max(n/97, 1) {
-					if got, want := cellColumn(b, buffer.Pos{Line: 1, Col: col}, tab), refCellColumn(text, col, tab); got != want {
+					if got, want := document.CellColumn(b, buffer.Pos{Line: 1, Col: col}, tab), refCellColumn(text, col, tab); got != want {
 						t.Fatalf("tab %d: cellColumn(col %d) = %d, want %d", tab, col, got, want)
 					}
 				}
 				total := refCellColumn(text, n, tab)
 				for target := 0; target <= total+2; target += max(total/89, 1) {
-					if got, want := colAtCell(b, 1, target, tab), refColAtCell(text, target, tab); got != want {
+					if got, want := document.ColAtCell(b, 1, target, tab), refColAtCell(text, target, tab); got != want {
 						t.Fatalf("tab %d: colAtCell(target %d) = %d, want %d", tab, target, got, want)
 					}
 				}
@@ -75,10 +76,10 @@ func TestClusterWalkMatchesAWalkOfTheWholeLine(t *testing.T) {
 func TestMotionOnAVeryLongLine(t *testing.T) {
 	t.Parallel()
 	b := buffer.New(strings.Repeat("x", 3_000_000))
-	if got := cellColumn(b, buffer.Pos{Col: 10}, 4); got != 10 {
+	if got := document.CellColumn(b, buffer.Pos{Col: 10}, 4); got != 10 {
 		t.Fatalf("cellColumn = %d, want 10", got)
 	}
-	if got := colAtCell(b, 0, 25, 4); got != 25 {
+	if got := document.ColAtCell(b, 0, 25, 4); got != 25 {
 		t.Fatalf("colAtCell = %d, want 25", got)
 	}
 }

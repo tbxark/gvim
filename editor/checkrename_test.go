@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -41,7 +42,7 @@ func TestCheckRenameIsADryRun(t *testing.T) {
 	if err := e.CheckRename(a, c); err != nil {
 		t.Fatalf("CheckRename to a free path: %v", err)
 	}
-	if err := e.CheckRename(a, b); !errors.Is(err, ErrAlreadyOpen) {
+	if err := e.CheckRename(a, b); !errors.Is(err, document.ErrAlreadyOpen) {
 		t.Fatalf("CheckRename onto an open tab: err = %v, want ErrAlreadyOpen", err)
 	}
 	if got := tabPaths(e); !slices.Equal(got, before) {
@@ -68,10 +69,10 @@ func TestCheckRenameAgreesWithRenamePath(t *testing.T) {
 	}{
 		{"free name", []string{a, b}, a, c, nil},
 		{"same name", []string{a, b}, a, a, nil},
-		{"onto an open tab", []string{a, b}, a, b, ErrAlreadyOpen},
-		{"folder onto an open tab", []string{filepath.Join(sub, "x.txt"), filepath.Join(other, "x.txt")}, sub, other, ErrAlreadyOpen},
-		{"empty old path", []string{a}, "", c, ErrEmptyPath},
-		{"empty new path", []string{a}, a, "", ErrEmptyPath},
+		{"onto an open tab", []string{a, b}, a, b, document.ErrAlreadyOpen},
+		{"folder onto an open tab", []string{filepath.Join(sub, "x.txt"), filepath.Join(other, "x.txt")}, sub, other, document.ErrAlreadyOpen},
+		{"empty old path", []string{a}, "", c, document.ErrEmptyPath},
+		{"empty new path", []string{a}, a, "", document.ErrEmptyPath},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

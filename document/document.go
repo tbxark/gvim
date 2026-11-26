@@ -34,7 +34,7 @@ type Document struct {
 	// document order. It is nil when there is one caret. See Cursors.
 	Extra []Caret
 	// block is the block selection in progress, or nil. See blockStep.
-	Block *blockState
+	block *blockState
 	// selHistory records previous selections for ShrinkSelection.
 	selHistory []buffer.Selection
 	// selHistoryAt is the selection the last ExpandSelection or ShrinkSelection left. A
@@ -51,7 +51,7 @@ type Document struct {
 	preview bool
 
 	// foldMemo is the fold ranges found last, see Folds.
-	FoldMemo foldMemo
+	foldMemo foldMemo
 	// externalFolds are the fold ranges an external source (a language server)
 	// gave for the current text, ordered by start line, and externalRev counts the
 	// sets. Folds merges them with the indentation folds; the revision invalidates
@@ -69,11 +69,11 @@ type Document struct {
 	outlineRev   uint64
 	outlineSet   bool
 	// changesMemo is the change marks computed last, see MemoChanges.
-	ChangesMemo changesMemo
+	changesMemo changesMemo
 	// valueMemo holds what MemoValue kept for the current text.
-	ValueMemo valueMemo
+	valueMemo valueMemo
 	// longMemo is the answer HasLongLine gave last.
-	LongMemo longMemo
+	longMemo longMemo
 
 	// saved is the text as it was at open or the last save. It is the only
 	// saved-state record: SavedLines and LinesChangedSinceSave read it.
@@ -82,7 +82,7 @@ type Document struct {
 	SavedGen uint64
 	// savedSplit is saved split into lines, kept for the savedGen it was split at, so
 	// that the change marks of a big document do not split the text on every edit.
-	SavedSplit splitMemo
+	savedSplit splitMemo
 	// encoding is the label of the encoding the saved text is written in (see
 	// encodingLabel). It is computed on open, on save and on set_encoding so
 	// that rendering never scans the text.
@@ -96,7 +96,7 @@ type Document struct {
 	Ends []string
 	// disk is the state of the file when it was opened or last saved. A save
 	// compares it with the file on disk, so an outside change is not overwritten.
-	Disk diskState
+	Disk DiskState
 
 	// want is the column that vertical moves try to keep. -1 means unset,
 	// so the next vertical move takes the current column.
@@ -163,7 +163,7 @@ type Document struct {
 	// folded holds the start lines of the folds that are collapsed. See fold.go.
 	folded map[int]bool
 	// lastMulti is the last multi-caret edit, for undo and redo. See multiEditRecord.
-	LastMulti *multiEditRecord
+	lastMulti *multiEditRecord
 	// view holds the display settings of the document. See viewsettings.go.
 	view ViewSettings
 	// large is the state of a document in large file mode, and nil for any other.
@@ -175,21 +175,19 @@ type Document struct {
 	seam docSeam
 	// ext is the plugin-facing state: virtual documents, buffer mode, text properties.
 	// See virtual.go.
-	ext docExt
-	// settings are the editor options this document reads. See Settings.
-	Settings Settings
+	ext DocExt
 }
 
 // Line endings a document can save with.
 const (
-	eolLF   = "LF"
-	eolCRLF = "CRLF"
+	EolLF   = "LF"
+	EolCRLF = "CRLF"
 )
 
 // newDocument returns a Document holding text at path. An empty path means
 // an unnamed buffer. Its line ending is LF until the caller sets another.
-func newDocument(path, text string) *Document {
-	return &Document{Path: path, Buffer: buffer.New(text), Saved: text, encoding: encodingOf(path, text), Want: -1, Eol: eolLF}
+func NewDocument(path, text string) *Document {
+	return &Document{Path: path, Buffer: buffer.New(text), Saved: text, encoding: encodingOf(path, text), Want: -1, Eol: EolLF}
 }
 
 // NewStdinDocument returns an untitled document holding text read from standard input.
@@ -198,8 +196,8 @@ func newDocument(path, text string) *Document {
 // The document is unmodified: its saved state is the piped text. The caller names it
 // with SetLabel (the stdin buffer uses "[stdin]").
 func NewStdinDocument(text string) *Document {
-	normalized, eol := splitLineEnding(text)
-	d := newDocument("", normalized)
+	normalized, eol := SplitLineEnding(text)
+	d := NewDocument("", normalized)
 	d.Eol = eol
 	return d
 }
@@ -208,15 +206,15 @@ func NewStdinDocument(text string) *Document {
 // holds, and reports the ending the file uses. CRLF wins only when its breaks
 // outnumber the bare LF breaks, so a tie, or a text with no break, is LF. The
 // ending of each break of a mixed file is kept by lineEnds.
-func splitLineEnding(data string) (text, eol string) {
+func SplitLineEnding(data string) (text, eol string) {
 	if strings.IndexByte(data, '\r') == -1 {
-		return data, eolLF
+		return data, EolLF
 	}
 	crlf := strings.Count(data, "\r\n")
 	lf := strings.Count(data, "\n") - crlf
-	eol = eolLF
+	eol = EolLF
 	if crlf > lf {
-		eol = eolCRLF
+		eol = EolCRLF
 	}
 	return strings.ReplaceAll(data, "\r\n", "\n"), eol
 }
@@ -234,11 +232,11 @@ func (d *Document) SetSaved(text string) {
 // between calls, so the caller must not change them.
 func (d *Document) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, scroll map[int]bool) {
 	key := changesKey{Gen: d.Gen(), Ver: d.Buffer.Version(), Saved: d.SavedGen}
-	if !d.ChangesMemo.Ok || d.ChangesMemo.Key != key {
-		d.ChangesMemo.Bar, d.ChangesMemo.Scroll = compute()
-		d.ChangesMemo.Key, d.ChangesMemo.Ok = key, true
+	if !d.changesMemo.Ok || d.changesMemo.Key != key {
+		d.changesMemo.Bar, d.changesMemo.Scroll = compute()
+		d.changesMemo.Key, d.changesMemo.Ok = key, true
 	}
-	return d.ChangesMemo.Bar, d.ChangesMemo.Scroll
+	return d.changesMemo.Bar, d.changesMemo.Scroll
 }
 
 // MemoValue returns the value kept for key, or calls compute and keeps what it returns.
@@ -246,7 +244,7 @@ func (d *Document) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, 
 // from the text, such as the layout of a long line, across the repaints and the queries
 // of a single edit. At most memoValues are kept.
 func (d *Document) MemoValue(key any, compute func() any) any {
-	m := &d.ValueMemo
+	m := &d.valueMemo
 	ver := changesKey{Gen: d.Gen(), Ver: d.Buffer.Version()}
 	if m.Vals == nil || m.Key != ver {
 		m.Key, m.Vals = ver, make(map[any]any)
@@ -272,7 +270,7 @@ func (d *Document) HasLongLine(limit int) bool {
 	if d.large != nil {
 		return false
 	}
-	m := &d.LongMemo
+	m := &d.longMemo
 	key := changesKey{Gen: d.Gen(), Ver: d.Buffer.Version()}
 	if !m.Ok || m.Key != key || m.Limit != limit {
 		m.Has = false
@@ -335,10 +333,10 @@ func (d *Document) SavedLinesShared() []string {
 	if d.large != nil {
 		return nil
 	}
-	if m := &d.SavedSplit; !m.Ok || m.Gen != d.SavedGen {
+	if m := &d.savedSplit; !m.Ok || m.Gen != d.SavedGen {
 		m.Lines, m.Gen, m.Ok = strings.Split(d.Saved, "\n"), d.SavedGen, true
 	}
-	return d.SavedSplit.Lines
+	return d.savedSplit.Lines
 }
 
 // EditedLines returns the lines [lo, hi) that may differ from the saved text: the lines
@@ -434,10 +432,10 @@ var ErrChangedOnDisk = errors.New("changed on disk since it was opened; not save
 // path. That document takes the spec's line ending, the ending for a new file. A file
 // of at least the spec's large threshold opens in large file mode instead, without
 // being read whole (see readLargeDocument).
-func readDocument(path string, spec loadSpec) (*Document, error) {
+func ReadDocument(path string, spec LoadSpec) (*Document, error) {
 	// The state is taken before the read. A change between the two then shows
 	// as a difference on save, which is the safe side.
-	var disk diskState
+	var disk DiskState
 	if spec.Access != nil {
 		// A non-local document never consults os.Stat/os.ReadFile: its only file I/O is
 		// the access. A missing remote path is an error, not an empty buffer: the editor
@@ -455,7 +453,7 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		}
 		disk = st.diskState()
 	} else {
-		disk = diskStateOf(path)
+		disk = DiskStateOf(path)
 	}
 	if disk.Special {
 		return nil, fmt.Errorf("open %s: not a regular file", path)
@@ -480,7 +478,7 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	// file that disappeared after the stat) falls through to the whole read, which
 	// turns it into the usual empty buffer.
 	if disk.Exists {
-		if head, _, err := readHead(path, spec.Access, disk.Size, largeSampleSize); err == nil {
+		if head, _, err := readHead(path, spec.Access, disk.Size, LargeSampleSize); err == nil {
 			more := func(n int64) ([]byte, error) {
 				b, _, err := readHead(path, spec.Access, disk.Size, n)
 				return b, err
@@ -505,7 +503,7 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		// recorded residual), so a remote file over the cap fails clearly.
 		fullMax := spec.LargeConf.FullMax
 		if fullMax <= 0 {
-			fullMax = maxFullLoad
+			fullMax = MaxFullLoad
 		}
 		data, err = spec.Access.ReadFile(path, fullMax)
 	} else {
@@ -515,7 +513,7 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		if spec.Access != nil {
 			return nil, fmt.Errorf("open %s: %w", path, err)
 		}
-		d := newDocument(path, "")
+		d := NewDocument(path, "")
 		d.Eol = spec.Eol
 		return d, nil
 	}
@@ -536,13 +534,13 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	text, eol := splitLineEnding(decoded)
-	d := newDocument(path, text)
+	text, eol := SplitLineEnding(decoded)
+	d := NewDocument(path, text)
 	d.Eol = eol
-	d.Ends = lineEnds(decoded)
+	d.Ends = LineEnds(decoded)
 	d.Disk = disk
 	d.Codec = codec
-	d.encoding = encodingLabel(codec, text)
+	d.encoding = EncodingLabel(codec, text)
 	d.access = spec.Access
 	return d, nil
 }
@@ -602,7 +600,7 @@ func (d *Document) fileText(text string) string {
 	if d.Ends != nil {
 		return d.mixedText(text)
 	}
-	if d.Eol == eolCRLF {
+	if d.Eol == EolCRLF {
 		return strings.ReplaceAll(text, "\n", "\r\n")
 	}
 	return text
@@ -615,7 +613,7 @@ func (d *Document) fileText(text string) string {
 // and only with the final newline: trimming would edit every line of the file. A
 // refused edit leaves the document as it is: the file is saved without that change,
 // and the status after the save says so (see Document.SavedStatus).
-func (d *Document) TidyForSave(o Settings) {
+func (d *Document) TidyForSave(o SaveOptions) {
 	if !o.TrimTrailingWhitespace && !o.EnsureFinalNewline {
 		return
 	}
@@ -636,7 +634,7 @@ func (d *Document) TidyForSave(o Settings) {
 	}
 	if d.Buffer.Version() != before {
 		// The edit is the newest undo group now, so a multi-caret record is stale.
-		d.LastMulti = nil
+		d.lastMulti = nil
 	}
 	d.ClampToText()
 }
@@ -713,7 +711,7 @@ func (d *Document) DeleteSelection() bool {
 // open and save, and can only go from ASCII to UTF-8 as text is typed into it. An
 // untitled document keeps "UTF-8".
 func (d *Document) Encoding() string {
-	if d.CodecName() != defaultCodec || d.Path == "" {
+	if d.CodecName() != DefaultCodec || d.Path == "" {
 		return d.encoding
 	}
 	if d.large != nil {

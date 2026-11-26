@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,19 +13,19 @@ import (
 // it names reads want.
 type viewFlagCase struct {
 	Name   string
-	action Action
+	action document.Action
 	Args   map[string]any
-	flag   func(ViewSettings) bool
+	flag   func(document.ViewSettings) bool
 	Want   bool
 }
 
 func TestViewFlagActionsSetTheirOverride(t *testing.T) {
 	t.Parallel()
-	lineNumbers := func(s ViewSettings) bool { return OverrideOr(s.LineNumbers, false) }
-	wrap := func(s ViewSettings) bool { return OverrideOr(s.LineWrap, false) }
-	current := func(s ViewSettings) bool { return OverrideOr(s.CurrentLine, false) }
-	occurrences := func(s ViewSettings) bool { return OverrideOr(s.Occurrences, false) }
-	whitespace := func(s ViewSettings) bool { return OverrideOr(s.Whitespace, false) }
+	lineNumbers := func(s document.ViewSettings) bool { return document.OverrideOr(s.LineNumbers, false) }
+	wrap := func(s document.ViewSettings) bool { return document.OverrideOr(s.LineWrap, false) }
+	current := func(s document.ViewSettings) bool { return document.OverrideOr(s.CurrentLine, false) }
+	occurrences := func(s document.ViewSettings) bool { return document.OverrideOr(s.Occurrences, false) }
+	whitespace := func(s document.ViewSettings) bool { return document.OverrideOr(s.Whitespace, false) }
 	tests := []viewFlagCase{
 		{"line numbers on", "toggle_line_numbers_current_buffer", map[string]any{"value": true}, lineNumbers, true},
 		{"line numbers off", "toggle_line_numbers_current_buffer", map[string]any{"value": false}, lineNumbers, false},
@@ -33,15 +34,15 @@ func TestViewFlagActionsSetTheirOverride(t *testing.T) {
 		{"occurrences on", "toggle_occurrence_highlight_current_buffer", map[string]any{"value": true}, occurrences, true},
 		{"whitespace on", "toggle_whitespace_indicators", map[string]any{"value": true}, whitespace, true},
 		{"virtual space on", "toggle_virtual_space_current_buffer", map[string]any{"value": true},
-			func(s ViewSettings) bool { return s.VirtualSpaceOn() }, true},
+			func(s document.ViewSettings) bool { return s.VirtualSpaceOn() }, true},
 		{"indent guides on", "toggle_indentation_guide_current_buffer", map[string]any{"value": true},
-			func(s ViewSettings) bool { return s.IndentGuidesOn() }, true},
+			func(s document.ViewSettings) bool { return s.IndentGuidesOn() }, true},
 		{"fold indicators off", "toggle_fold_indicators_current_buffer", map[string]any{"value": false},
-			func(s ViewSettings) bool { return s.FoldIndicatorsOn() }, false},
+			func(s document.ViewSettings) bool { return s.FoldIndicatorsOn() }, false},
 		{"tab indicators off", "toggle_tab_indicators", map[string]any{"value": false},
-			func(s ViewSettings) bool { return s.TabIndicatorsOn() }, false},
+			func(s document.ViewSettings) bool { return s.TabIndicatorsOn() }, false},
 		{"page view on", "toggle_page_view", map[string]any{"value": true},
-			func(s ViewSettings) bool { return s.PageView != nil && *s.PageView }, true},
+			func(s document.ViewSettings) bool { return s.PageView != nil && *s.PageView }, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -60,7 +61,7 @@ func TestViewFlagActionsSetTheirOverride(t *testing.T) {
 func TestViewFlagWithoutValueFlipsFromItsDefault(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		action Action
+		action document.Action
 		Before bool // the flag as a new document reads it
 	}{
 		{"toggle_fold_indicators_current_buffer", true},
@@ -87,7 +88,7 @@ func TestViewFlagWithoutValueFlipsFromItsDefault(t *testing.T) {
 }
 
 // viewFlagOf reads the flag that action names, for the flip tests.
-func viewFlagOf(s ViewSettings, action Action) bool {
+func viewFlagOf(s document.ViewSettings, action document.Action) bool {
 	switch action {
 	case "toggle_fold_indicators_current_buffer":
 		return s.FoldIndicatorsOn()
@@ -108,7 +109,7 @@ func TestIndentationStyleFlipsFromTheEditorOption(t *testing.T) {
 	for _, useTabs := range []bool{false, true} {
 		e, _ := openFixture(t, Options{UseTabs: useTabs}, "abc\n")
 		run(t, e, "toggle_indentation_style")
-		if got := OverrideOr(e.Active().ViewSettings().IndentTabs, !useTabs); got == useTabs {
+		if got := document.OverrideOr(e.Active().ViewSettings().IndentTabs, !useTabs); got == useTabs {
 			t.Fatalf("UseTabs=%v: one toggle kept the style, want it flipped", useTabs)
 		}
 	}
@@ -118,7 +119,7 @@ func TestRulersAddOnceAndRemove(t *testing.T) {
 	t.Parallel()
 	e, _ := openFixture(t, Options{}, "abc\n")
 	ruler := func() []int { return e.Active().ViewSettings().Rulers }
-	run := func(a Action, col int) error {
+	run := func(a document.Action, col int) error {
 		return e.Do(a, map[string]any{"column": col}).Err
 	}
 	if err := run("add_ruler", 80); err != nil {
@@ -183,7 +184,7 @@ func TestConfigRulersSeedEveryBuffer(t *testing.T) {
 	if got := rulers(); !slices.Equal(got, []int{20, 40}) {
 		t.Fatalf("after reset rulers = %v, want the configured [20 40] back", got)
 	}
-	id := e.NewVirtual(VirtualOptions{Name: "list", Text: "x\n"})
+	id := e.NewVirtual(document.VirtualOptions{Name: "list", Text: "x\n"})
 	d, _, err := e.docByID(id)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +209,7 @@ func TestRulerRejectsBadColumns(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name   string
-		action Action
+		action document.Action
 		Args   map[string]any
 	}{
 		{"no column", "add_ruler", nil},
@@ -235,26 +236,26 @@ func TestTabSizeAndPageWidthAreStoredPerDocument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name    string
-		action  Action
+		action  document.Action
 		Args    map[string]any
 		wantErr bool
-		check   func(ViewSettings) int
+		check   func(document.ViewSettings) int
 		Want    int
 	}{
 		{"tab size 2", "set_tab_size", map[string]any{"size": 2}, false,
-			func(s ViewSettings) int { return s.TabSize }, 2},
+			func(s document.ViewSettings) int { return s.TabSize }, 2},
 		{"tab size from JSON number", "set_tab_size", map[string]any{"size": float64(8)}, false,
-			func(s ViewSettings) int { return s.TabSize }, 8},
+			func(s document.ViewSettings) int { return s.TabSize }, 8},
 		{"tab size zero", "set_tab_size", map[string]any{"size": 0}, true,
-			func(s ViewSettings) int { return s.TabSize }, 0},
+			func(s document.ViewSettings) int { return s.TabSize }, 0},
 		{"tab size too big", "set_tab_size", map[string]any{"size": 17}, true,
-			func(s ViewSettings) int { return s.TabSize }, 0},
+			func(s document.ViewSettings) int { return s.TabSize }, 0},
 		{"tab size missing", "set_tab_size", nil, true,
-			func(s ViewSettings) int { return s.TabSize }, 0},
+			func(s document.ViewSettings) int { return s.TabSize }, 0},
 		{"page width 100", "set_page_width", map[string]any{"width": 100}, false,
-			func(s ViewSettings) int { return s.PageWidth }, 100},
+			func(s document.ViewSettings) int { return s.PageWidth }, 100},
 		{"page width zero", "set_page_width", map[string]any{"width": 0}, true,
-			func(s ViewSettings) int { return s.PageWidth }, 0},
+			func(s document.ViewSettings) int { return s.PageWidth }, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -318,7 +319,7 @@ func TestOverrideOrReturnsTheDefaultWithoutAnOverride(t *testing.T) {
 		{"override off beats default on", &no, true, false},
 	}
 	for _, tt := range tests {
-		if got := OverrideOr(tt.p, tt.def); got != tt.Want {
+		if got := document.OverrideOr(tt.p, tt.def); got != tt.Want {
 			t.Errorf("%s: OverrideOr = %v, want %v", tt.Name, got, tt.Want)
 		}
 	}

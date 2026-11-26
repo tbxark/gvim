@@ -18,7 +18,7 @@ var ErrUnknownEncoding = errors.New("unknown encoding")
 
 // defaultCodec is the encoding of text that was not read from a file in another
 // encoding, and the one a Document with no codec set saves in.
-const defaultCodec = "utf-8"
+const DefaultCodec = "utf-8"
 
 // labels are the Encoding labels of the encodings that are not utf-8. utf-8 has
 // its own rule in encodingLabel.
@@ -65,7 +65,7 @@ func decodeFile(data []byte) (text, codec string, err error) {
 		if rest, ok := strings.CutPrefix(string(data), byteOrderMark); ok {
 			return rest, "utf-8-bom", nil
 		}
-		return string(data), defaultCodec, nil
+		return string(data), DefaultCodec, nil
 	}
 	codec = encoding.Detect(data)
 	candidates := []string{codec}
@@ -110,7 +110,7 @@ func encodeText(codec, text string) ([]byte, error) {
 // CodecName is the encoding the document saves in.
 func (d *Document) CodecName() string {
 	if d.Codec == "" {
-		return defaultCodec
+		return DefaultCodec
 	}
 	return d.Codec
 }
@@ -118,8 +118,8 @@ func (d *Document) CodecName() string {
 // encodingLabel is the label Encoding reports for text in codec. Utf-8 text with
 // no byte above 0x7f is "ASCII", as it has always been reported. Utf-8 text with
 // any other byte is "UTF-8".
-func encodingLabel(codec, text string) string {
-	if codec == "" || codec == defaultCodec {
+func EncodingLabel(codec, text string) string {
+	if codec == "" || codec == DefaultCodec {
 		if IsASCII(text) {
 			return "ASCII"
 		}
@@ -142,7 +142,7 @@ func IsASCII(s string) bool {
 // document, and the head of a large document, as when the file was opened.
 func (d *Document) TextSample() string {
 	if d.large != nil {
-		return d.Buffer.TextPrefix(largeSampleSize)
+		return d.Buffer.TextPrefix(LargeSampleSize)
 	}
 	return d.Buffer.Text()
 }

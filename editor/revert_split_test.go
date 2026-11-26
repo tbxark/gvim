@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -48,7 +49,7 @@ func TestPlanRevertRefusals(t *testing.T) {
 		{
 			Name:    "an untitled buffer has no file",
 			setup:   func(t *testing.T) *Editor { return New(Options{}) },
-			wantErr: ErrNoPath,
+			wantErr: document.ErrNoPath,
 		},
 		{
 			Name: "a modified document is refused without force",
@@ -139,7 +140,7 @@ func TestApplyRevertRefusesAChangedText(t *testing.T) {
 		t.Fatalf("RunRevert: %v", res.Err)
 	}
 	typeText(t, e, "x")
-	if err := e.ApplyRevert(plan, res); !errors.Is(err, ErrStaleRevert) {
+	if err := e.ApplyRevert(plan, res); !errors.Is(err, document.ErrStaleRevert) {
 		t.Fatalf("ApplyRevert err = %v, want ErrStaleRevert", err)
 	}
 	if got := e.Active().Buffer.Text(); got != "xa\n" {
@@ -227,7 +228,7 @@ func TestApplyRevertRefusesAPathOnlyPlanForAnEditedTab(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("RunRevert: %v", res.Err)
 	}
-	if err := e.ApplyRevert(plan, res); !errors.Is(err, ErrStaleRevert) {
+	if err := e.ApplyRevert(plan, res); !errors.Is(err, document.ErrStaleRevert) {
 		t.Fatalf("ApplyRevert err = %v, want ErrStaleRevert", err)
 	}
 	if got := e.DocAt(0).Buffer.Text(); got != "xa\n" {

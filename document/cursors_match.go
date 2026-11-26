@@ -43,7 +43,7 @@ func (d *Document) AddNextMatch() error {
 	if d.large != nil {
 		// The next occurrence is found in the whole text, which a large document
 		// does not hold.
-		return errLargeAction("add_cursor_next_match")
+		return ErrLargeAction("add_cursor_next_match")
 	}
 	lo, hi := d.Sel.Ordered()
 	backward := d.Sel.Head.Less(d.Sel.Anchor)
@@ -62,7 +62,7 @@ func (d *Document) AddNextMatch() error {
 			return errAllMatchesSelected
 		}
 		seen[off] = true
-		m := caret{
+		m := CaretState{
 			Anchor: posAtOffset(text, off),
 			Head:   posAtOffset(text, off+len(pattern)),
 		}

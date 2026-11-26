@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -79,7 +80,7 @@ func TestOpenLoadedActivatesAnOpenPath(t *testing.T) {
 func TestLoadFuncEmptyPathIsAnError(t *testing.T) {
 	t.Parallel()
 	_, err := New(Options{}).LoadFunc("")()
-	if !errors.Is(err, ErrEmptyPath) {
+	if !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("err = %v, want ErrEmptyPath", err)
 	}
 }

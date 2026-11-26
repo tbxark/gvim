@@ -1,13 +1,14 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 // navDo runs one action with no arguments and fails the test on error.
-func navDo(t *testing.T, e *Editor, a Action) {
+func navDo(t *testing.T, e *Editor, a document.Action) {
 	t.Helper()
 	if r := e.Do(a, nil); r.Err != nil {
 		t.Fatalf("Do(%s): %v", a, r.Err)

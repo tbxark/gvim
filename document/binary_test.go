@@ -20,7 +20,7 @@ func TestBinaryDocumentIsASummary(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := readDocument(path, loadSpec{Eol: eolLF})
+	d, err := ReadDocument(path, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestBinaryOpenReadsOnlyTheHead(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := readDocument(path, loadSpec{Eol: eolLF, LargeConf: largeSpec{Threshold: 4096, FullMax: maxFullLoad}})
+	d, err := ReadDocument(path, LoadSpec{Eol: EolLF, LargeConf: LargeSpec{Threshold: 4096, FullMax: MaxFullLoad}})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}
@@ -104,11 +104,11 @@ func (a *countingRangeAccess) ReadRange(_ context.Context, _ string, off, n int6
 // result alone cannot tell the two apart, so the access counts the bytes.
 func TestBinaryOpenDoesNotReadTheWholeFile(t *testing.T) {
 	t.Parallel()
-	size := int64(largeSampleSize * 8)
+	size := int64(LargeSampleSize * 8)
 	data := append([]byte{0x00, 0x01, 0x02}, make([]byte, size-3)...)
 	access := &countingRangeAccess{data: data}
-	d, err := readDocument("/remote/big.bin", loadSpec{
-		Eol:    eolLF,
+	d, err := ReadDocument("/remote/big.bin", LoadSpec{
+		Eol:    EolLF,
 		Access: access,
 	})
 	if err != nil {
@@ -117,8 +117,8 @@ func TestBinaryOpenDoesNotReadTheWholeFile(t *testing.T) {
 	if !d.Binary() {
 		t.Fatal("the file did not open as a binary summary")
 	}
-	if access.bytes > largeSampleSize {
-		t.Fatalf("the open read %d bytes, want at most the %d-byte sample", access.bytes, largeSampleSize)
+	if access.bytes > LargeSampleSize {
+		t.Fatalf("the open read %d bytes, want at most the %d-byte sample", access.bytes, LargeSampleSize)
 	}
 }
 
@@ -127,12 +127,12 @@ func TestBinaryOpenDoesNotReadTheWholeFile(t *testing.T) {
 // a window, so the file does not become a text document with a line index.
 func TestBinaryOpenCatchesALateMarker(t *testing.T) {
 	t.Parallel()
-	data := append(make([]byte, largeSampleSize+1024), 0x00, 0x01, 0x02)
+	data := append(make([]byte, LargeSampleSize+1024), 0x00, 0x01, 0x02)
 	access := &countingRangeAccess{data: data}
-	d, err := readDocument("/remote/late.bin", loadSpec{
-		Eol:       eolLF,
+	d, err := ReadDocument("/remote/late.bin", LoadSpec{
+		Eol:       EolLF,
 		Access:    access,
-		LargeConf: largeSpec{Threshold: 1, FullMax: maxFullLoad},
+		LargeConf: LargeSpec{Threshold: 1, FullMax: MaxFullLoad},
 	})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
@@ -140,8 +140,8 @@ func TestBinaryOpenCatchesALateMarker(t *testing.T) {
 	if !d.Binary() || d.Large() || d.AsyncLarge() {
 		t.Fatalf("Binary = %v, Large = %v, AsyncLarge = %v; want a binary summary", d.Binary(), d.Large(), d.AsyncLarge())
 	}
-	if access.bytes > largeSampleSize {
-		t.Fatalf("the open read %d bytes, want at most the %d-byte head sample", access.bytes, largeSampleSize)
+	if access.bytes > LargeSampleSize {
+		t.Fatalf("the open read %d bytes, want at most the %d-byte head sample", access.bytes, LargeSampleSize)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestReadBinaryRangeLocal(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := readDocument(path, loadSpec{Eol: eolLF})
+	d, err := ReadDocument(path, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestReadBinaryRangeRefusesTextAndImage(t *testing.T) {
 	if err := os.WriteFile(textPath, []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	text, err := readDocument(textPath, loadSpec{Eol: eolLF})
+	text, err := ReadDocument(textPath, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestReadBinaryRangeRefusesTextAndImage(t *testing.T) {
 	if err := os.WriteFile(imagePath, pngBytes(t, 2, 2), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	imageDoc, err := readDocument(imagePath, loadSpec{Eol: eolLF})
+	imageDoc, err := ReadDocument(imagePath, LoadSpec{Eol: EolLF})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,10 +206,10 @@ func TestReadBinaryRangeRefusesTextAndImage(t *testing.T) {
 func TestReadBinaryRangeRemote(t *testing.T) {
 	t.Parallel()
 	access := &fakeRangeAccess{data: []byte("\x00\x01abcdefghij")}
-	d, err := readDocument("/remote/blob.bin", loadSpec{
-		Eol:       eolLF,
+	d, err := ReadDocument("/remote/blob.bin", LoadSpec{
+		Eol:       EolLF,
 		Access:    access,
-		LargeConf: largeSpec{Threshold: 4, FullMax: maxFullLoad},
+		LargeConf: LargeSpec{Threshold: 4, FullMax: MaxFullLoad},
 	})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
@@ -232,7 +232,7 @@ func TestReadBinaryRangeRemote(t *testing.T) {
 func TestReadBinaryRangeRemoteUnsupported(t *testing.T) {
 	t.Parallel()
 	access := &wholeFileOnlyAccess{data: []byte("\x00\x01")}
-	d, err := readDocument("/remote/blob.bin", loadSpec{Eol: eolLF, Access: access})
+	d, err := ReadDocument("/remote/blob.bin", LoadSpec{Eol: EolLF, Access: access})
 	if err != nil {
 		t.Fatalf("readDocument: %v", err)
 	}

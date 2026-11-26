@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,10 +23,63 @@ func TestToggleReadOnlyFlipsTheFlag(t *testing.T) {
 	}
 }
 
+func TestToggleReadOnlyRefusesMirrorAndFrozen(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		open func(t *testing.T) *Editor
+	}{
+		{"shared mirror", func(t *testing.T) *Editor {
+			shared := NewSharedBuffers()
+			a := New(Options{Empty: true, Shared: shared})
+			b := New(Options{Empty: true, Shared: shared})
+			path := writeSharedFile(t, "one\n")
+			shared.Focus(a)
+			if err := a.OpenFile(path); err != nil {
+				t.Fatal(err)
+			}
+			shared.Focus(b)
+			if err := b.OpenFile(path); err != nil {
+				t.Fatal(err)
+			}
+			if !a.Active().SharedMirror() {
+				t.Fatal("fixture: the first workspace is not a mirror")
+			}
+			return a
+		}},
+		{"frozen large document", func(t *testing.T) *Editor {
+			opts, _ := ledgerOptions()
+			e, d := openIndexed(t, opts, lineText(200))
+			if err := os.Truncate(d.Path, 1200); err != nil {
+				t.Fatal(err)
+			}
+			_ = d.CheckSource()
+			if !d.Frozen() {
+				t.Fatal("fixture: the document is not frozen")
+			}
+			return e
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := tt.open(t)
+			d := e.Active()
+			r := e.Do("toggle_read_only", nil)
+			if !errors.Is(r.Err, document.ErrReadOnly) {
+				t.Fatalf("err = %v, want ErrReadOnly", r.Err)
+			}
+			if !d.ReadOnly() {
+				t.Fatal("toggle_read_only unlocked the document")
+			}
+		})
+	}
+}
+
 func TestReadOnlyRefusesTextChanges(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		action Action
+		action document.Action
 		Args   map[string]any
 	}{
 		{"insert_char", map[string]any{"text": "x"}},
@@ -61,7 +115,7 @@ func TestReadOnlyRefusesTextChanges(t *testing.T) {
 			e, path := openFixture(t, Options{}, "abc\ndef\n")
 			run(t, e, "select_all", "toggle_read_only")
 			r := e.Do(tt.action, tt.Args)
-			if !errors.Is(r.Err, ErrReadOnly) {
+			if !errors.Is(r.Err, document.ErrReadOnly) {
 				t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 			}
 			if e.Status() != "read-only" {
@@ -80,7 +134,7 @@ func TestReadOnlyRefusesTextChanges(t *testing.T) {
 func TestReadOnlyAllowsMovementSelectionAndSaveAs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		action Action
+		action document.Action
 		Args   map[string]any
 	}{
 		{"move_right", nil},
@@ -133,10 +187,10 @@ func TestReadOnlyRefusesSave(t *testing.T) {
 	typeText(t, e, "x")
 	run(t, e, "toggle_read_only")
 	r := e.Do("save", nil)
-	if !errors.Is(r.Err, ErrReadOnly) {
+	if !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("save err = %v, want ErrReadOnly", r.Err)
 	}
-	if err := e.Save(); !errors.Is(err, ErrReadOnly) {
+	if err := e.Save(); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("Save err = %v, want ErrReadOnly", err)
 	}
 	if got := readFile(t, path); got != "abc\n" {
@@ -191,7 +245,7 @@ func TestEveryActionLeavesReadOnlyTextAlone(t *testing.T) {
 
 func TestTextChangingActionsAreRegistered(t *testing.T) {
 	t.Parallel()
-	for name := range textChanging {
+	for name := range document.TextChanging {
 		if _, ok := handlers[name]; !ok {
 			t.Errorf("textChanging lists %q, which is not a registered action", name)
 		}
@@ -235,7 +289,7 @@ func TestDocumentSaveRefusesReadOnly(t *testing.T) {
 	e, path := openFixture(t, Options{}, "abc\n")
 	typeText(t, e, "x")
 	run(t, e, "toggle_read_only")
-	if err := e.Save(); !errors.Is(err, ErrReadOnly) {
+	if err := e.Save(); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("Save err = %v, want ErrReadOnly", err)
 	}
 	if got := readFile(t, path); got != "abc\n" {
@@ -252,7 +306,7 @@ func TestEditorReadOnlyOptionProtectsFiles(t *testing.T) {
 		t.Fatal("e.Active().ReadOnly() = false, want true")
 	}
 	r := e.Do("insert_char", map[string]any{"text": "x"})
-	if !errors.Is(r.Err, ErrReadOnly) {
+	if !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("insert_char err = %v, want ErrReadOnly", r.Err)
 	}
 }

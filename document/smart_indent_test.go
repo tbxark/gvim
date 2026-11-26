@@ -12,7 +12,7 @@ func TestLeadColumnsStopsAtTabStops(t *testing.T) {
 		{"   \t x", 5},
 		{"    \tx", 8},
 	} {
-		if got := leadColumns([]rune(tt.line), 100, 4); got != tt.want {
+		if got := LeadColumns([]rune(tt.line), 100, 4); got != tt.want {
 			t.Errorf("leadColumns(%q) = %d, want %d", tt.line, got, tt.want)
 		}
 	}

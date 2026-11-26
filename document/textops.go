@@ -69,12 +69,12 @@ func (d *Document) SelectLine() {
 func (d *Document) ExpandLineSelection() {
 	if _, block := d.BlockSelection(); !block {
 		if cs := d.AllCarets(); len(cs) > 1 {
-			grown := make([]caret, len(cs))
+			grown := make([]CaretState, len(cs))
 			for i, c := range cs {
 				low, high := c.Bounds()
 				start, _ := buffer.LineBounds(d.Buffer, low.Line)
 				_, end := buffer.LineBounds(d.Buffer, high.Line)
-				grown[i] = caret{Anchor: start, Head: end, Primary: c.Primary, Want: c.Want, Pad: c.Pad}
+				grown[i] = CaretState{Anchor: start, Head: end, Primary: c.Primary, Want: c.Want, Pad: c.Pad}
 			}
 			d.SetCarets(grown)
 			return

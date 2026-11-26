@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 	"time"
 )
@@ -55,7 +56,7 @@ func TestEncodingAndLineEndingChangesMarkTheDocumentModified(t *testing.T) {
 	tests := []struct {
 		Name   string
 		file   string
-		action Action
+		action document.Action
 		Args   map[string]any
 		Want   bool // modified after the action
 	}{

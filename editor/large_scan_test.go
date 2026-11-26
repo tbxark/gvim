@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,25 +13,25 @@ import (
 )
 
 // lineCalls returns how many base lines d has read from its source so far.
-func lineCalls(d *Document) int64 { return d.Buffer.Stats().LineCalls }
+func lineCalls(d *document.Document) int64 { return d.Buffer.Stats().LineCalls }
 
 func TestScanBudget(t *testing.T) {
 	t.Parallel()
 	small := buffer.New(strings.Repeat("line\n", 50))
-	if got := newScanBudget(small); got != nil {
+	if got := document.NewScanBudget(small); got != nil {
 		t.Fatalf("budget of a memory buffer = %+v, want none", got)
 	}
-	var none *scanBudget
+	var none *document.ScanBudget
 	if !none.Take(small, 0) || (none != nil && none.Spent) {
 		t.Fatal("a nil budget must allow every line")
 	}
 
 	_, d := openIndexed(t, largeOptions(), strings.Repeat("0123456789\n", 200))
-	b := newScanBudget(d.Buffer)
-	if b.Lines != ScanLinesCap || b.Bytes != ScanBytesBudget {
+	b := document.NewScanBudget(d.Buffer)
+	if b.Lines != document.ScanLinesCap || b.Bytes != document.ScanBytesBudget {
 		t.Fatalf("budget = %+v", b)
 	}
-	b = &scanBudget{Lines: 3, Bytes: 1 << 20}
+	b = &document.ScanBudget{Lines: 3, Bytes: 1 << 20}
 	for i := range 3 {
 		if !b.Take(d.Buffer, i) {
 			t.Fatalf("line %d refused with lines left", i)
@@ -39,7 +40,7 @@ func TestScanBudget(t *testing.T) {
 	if b.Take(d.Buffer, 3) || !b.Spent {
 		t.Fatal("the fourth line must be refused")
 	}
-	b = &scanBudget{Lines: 100, Bytes: 25}
+	b = &document.ScanBudget{Lines: 100, Bytes: 25}
 	if !b.Take(d.Buffer, 0) || !b.Take(d.Buffer, 1) || b.Take(d.Buffer, 2) {
 		t.Fatal("a budget of 25 bytes holds two lines of 10")
 	}
@@ -58,11 +59,11 @@ func TestBracketMatchStopsAtTheLineCap(t *testing.T) {
 	}
 	at, version, before := d.Cursor, d.Buffer.Version(), lineCalls(d)
 	r := e.Do("goto_matching_bracket", nil)
-	if !errors.Is(r.Err, ErrScanLimit) {
+	if !errors.Is(r.Err, document.ErrScanLimit) {
 		t.Fatalf("goto_matching_bracket = %v, want ErrScanLimit", r.Err)
 	}
-	if got := lineCalls(d) - before; got > ScanLinesCap+10 {
-		t.Errorf("the scan read %d lines, want at most %d", got, ScanLinesCap)
+	if got := lineCalls(d) - before; got > document.ScanLinesCap+10 {
+		t.Errorf("the scan read %d lines, want at most %d", got, document.ScanLinesCap)
 	}
 	if d.Cursor != at || d.Buffer.Version() != version {
 		t.Errorf("caret %v -> %v: a stopped scan must not move", at, d.Cursor)
@@ -81,15 +82,15 @@ func TestBracketMatchStopsAtTheByteBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := d.Buffer.Stats()
-	if r := e.Do("goto_matching_bracket", nil); !errors.Is(r.Err, ErrScanLimit) {
+	if r := e.Do("goto_matching_bracket", nil); !errors.Is(r.Err, document.ErrScanLimit) {
 		t.Fatalf("goto_matching_bracket = %v, want ErrScanLimit", r.Err)
 	}
 	after := d.Buffer.Stats()
-	if got, want := after.LineCalls-before.LineCalls, int64(ScanBytesBudget/width+3); got > want {
+	if got, want := after.LineCalls-before.LineCalls, int64(document.ScanBytesBudget/width+3); got > want {
 		t.Errorf("the scan read %d lines of %d KiB, want at most %d", got, width>>10, want)
 	}
-	if got := after.ReadBytes - before.ReadBytes; got > 2*ScanBytesBudget {
-		t.Errorf("the scan read %d bytes from the source, want about %d", got, ScanBytesBudget)
+	if got := after.ReadBytes - before.ReadBytes; got > 2*document.ScanBytesBudget {
+		t.Errorf("the scan read %d bytes from the source, want about %d", got, document.ScanBytesBudget)
 	}
 }
 
@@ -115,7 +116,7 @@ func TestBracketForwardScanStopsAtTheKnownIndex(t *testing.T) {
 		t.Fatal("the index is complete")
 	}
 	d.Cursor = buffer.Pos{Line: 0, Col: 5}
-	if r := e.Do("goto_matching_bracket", nil); !errors.Is(r.Err, ErrScanLimit) {
+	if r := e.Do("goto_matching_bracket", nil); !errors.Is(r.Err, document.ErrScanLimit) {
 		t.Fatalf("goto_matching_bracket = %v, want ErrScanLimit: the match may be past the index", r.Err)
 	}
 }
@@ -126,7 +127,7 @@ func TestParagraphMotionNeverReadsALine(t *testing.T) {
 	e, d, _ := openVirtual(t, 20_000*width, width)
 	indexAll(t, e)
 	for _, tt := range []struct {
-		Name   Action
+		Name   document.Action
 		Line   int
 		target int
 	}{
@@ -139,7 +140,7 @@ func TestParagraphMotionNeverReadsALine(t *testing.T) {
 			t.Fatal(err)
 		}
 		at, before := d.Cursor, d.Buffer.Stats()
-		if r := e.Do(tt.Name, nil); !errors.Is(r.Err, ErrScanLimit) {
+		if r := e.Do(tt.Name, nil); !errors.Is(r.Err, document.ErrScanLimit) {
 			t.Errorf("Do(%s) = %v, want ErrScanLimit", tt.Name, r.Err)
 		}
 		after := d.Buffer.Stats()
@@ -176,7 +177,7 @@ func TestParagraphMotionWaitsForTheIndex(t *testing.T) {
 	if d.Index().Complete {
 		t.Fatal("the index is complete")
 	}
-	if r := e.Do("move_to_paragraph_down", nil); !errors.Is(r.Err, ErrScanLimit) || d.Cursor != (buffer.Pos{}) {
+	if r := e.Do("move_to_paragraph_down", nil); !errors.Is(r.Err, document.ErrScanLimit) || d.Cursor != (buffer.Pos{}) {
 		t.Fatalf("move_to_paragraph_down = %v, caret %v: it must not jump to the end of the known text", r.Err, d.Cursor)
 	}
 }
@@ -192,11 +193,11 @@ func TestDabbrevStopsAtTheLineCap(t *testing.T) {
 	run(t, e, "move_line_end")
 	before, version := lineCalls(d), d.Buffer.Version()
 	r := e.Do("dabbrev_expand", nil)
-	if !errors.Is(r.Err, ErrScanLimit) {
+	if !errors.Is(r.Err, document.ErrScanLimit) {
 		t.Fatalf("dabbrev_expand = %v, want ErrScanLimit", r.Err)
 	}
-	if got := lineCalls(d) - before; got > ScanLinesCap+10 {
-		t.Errorf("the scan read %d lines, want at most %d", got, ScanLinesCap)
+	if got := lineCalls(d) - before; got > document.ScanLinesCap+10 {
+		t.Errorf("the scan read %d lines, want at most %d", got, document.ScanLinesCap)
 	}
 	if d.Buffer.Version() != version {
 		t.Error("a failed expansion changed the text")
@@ -204,7 +205,7 @@ func TestDabbrevStopsAtTheLineCap(t *testing.T) {
 }
 
 // openBlank opens a large document of blank lines with the smart typing rules on.
-func openBlank(t *testing.T, lines int) (*Editor, *Document) {
+func openBlank(t *testing.T, lines int) (*Editor, *document.Document) {
 	t.Helper()
 	opts := largeOptions()
 	opts.AutoIndent, opts.TabSize = true, 4
@@ -223,8 +224,8 @@ func TestIndentScansStopAtTheLineCap(t *testing.T) {
 	before := lineCalls(d)
 	run(t, e, "insert_newline")
 	// Without a cap the scan up reads 19 000 lines and the scan down 1 000.
-	if got := lineCalls(d) - before; got > ScanLinesCap+1_000+10 {
-		t.Errorf("Enter read %d lines, want at most %d", got, ScanLinesCap+1_000)
+	if got := lineCalls(d) - before; got > document.ScanLinesCap+1_000+10 {
+		t.Errorf("Enter read %d lines, want at most %d", got, document.ScanLinesCap+1_000)
 	}
 	if d.Cursor.Line != 19_000 {
 		t.Errorf("caret line = %d: Enter must start a line below", d.Cursor.Line)
@@ -233,8 +234,8 @@ func TestIndentScansStopAtTheLineCap(t *testing.T) {
 	typeText(t, e, "    ")
 	before = lineCalls(d)
 	typeText(t, e, "}")
-	if got := lineCalls(d) - before; got > ScanLinesCap+10 {
-		t.Errorf("typing a closer read %d lines, want at most %d", got, ScanLinesCap)
+	if got := lineCalls(d) - before; got > document.ScanLinesCap+10 {
+		t.Errorf("typing a closer read %d lines, want at most %d", got, document.ScanLinesCap)
 	}
 	if st := d.Buffer.Stats(); st.OverCap != 0 {
 		t.Errorf("OverCap = %d", st.OverCap)

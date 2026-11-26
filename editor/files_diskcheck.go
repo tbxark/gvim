@@ -26,7 +26,7 @@ type DiskChange struct {
 func (e *Editor) PlanDiskCheck() func() []DiskChange {
 	type recorded struct {
 		Path   string
-		was    diskState
+		was    document.DiskState
 		access document.FileAccess
 	}
 	var files []recorded

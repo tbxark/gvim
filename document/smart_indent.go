@@ -25,7 +25,7 @@ func lastNonBlank(line []rune) (rune, bool) {
 
 // leadColumns returns the display width of the blanks at the start of line,
 // looking at no more than limit runes.
-func leadColumns(line []rune, limit, tabSize int) int {
+func LeadColumns(line []rune, limit, tabSize int) int {
 	w := 0
 	for i := 0; i < len(line) && i < limit; i++ {
 		switch line[i] {
@@ -45,7 +45,7 @@ func leadColumns(line []rune, limit, tabSize int) int {
 
 // indentString returns the blanks of display width w: tabs and then spaces for the
 // remainder when useTabs is set, else only spaces.
-func indentString(w int, useTabs bool, tabSize int) string {
+func IndentString(w int, useTabs bool, tabSize int) string {
 	if useTabs && tabSize > 0 {
 		return strings.Repeat("\t", w/tabSize) + strings.Repeat(" ", w%tabSize)
 	}
@@ -53,7 +53,7 @@ func indentString(w int, useTabs bool, tabSize int) string {
 }
 
 // blankPrefix reports whether line[:col] holds only spaces and tabs.
-func blankPrefix(line []rune, col int) bool {
+func BlankPrefix(line []rune, col int) bool {
 	for _, r := range line[:col] {
 		if r != ' ' && r != '\t' {
 			return false
@@ -65,14 +65,14 @@ func blankPrefix(line []rune, col int) bool {
 // newLineIndent returns the width of the indent for the line that Enter starts at
 // p. In plain text a blank line keeps the caret column, because a blank line ends a
 // block of prose.
-func newLineIndent(b *buffer.Buffer, p buffer.Pos, tabSize int, plainText bool) int {
+func NewLineIndent(b *buffer.Buffer, p buffer.Pos, tabSize int, plainText bool) int {
 	line := []rune(b.Line(p.Line))
-	if blankPrefix(line, min(p.Col, len(line))) {
+	if BlankPrefix(line, min(p.Col, len(line))) {
 		// The caret sits in the leading blanks: the text after it keeps its column.
 		rest := line[min(p.Col, len(line)):]
 		_, content := lastNonBlank(rest)
 		if content || plainText {
-			return leadColumns(line, p.Col, tabSize)
+			return LeadColumns(line, p.Col, tabSize)
 		}
 	}
 	return patternIndent(b, p, tabSize)
@@ -89,9 +89,9 @@ func patternIndent(b *buffer.Buffer, p buffer.Pos, tabSize int) int {
 	last, hasText := lastNonBlank(line[:col])
 	ref := 0
 	if hasText {
-		ref = leadColumns(line, col, tabSize)
+		ref = LeadColumns(line, col, tabSize)
 	} else {
-		budget := newScanBudget(b)
+		budget := NewScanBudget(b)
 		for q := p.Line - 1; q >= 0; q-- {
 			if !budget.Take(b, q) {
 				break
@@ -101,7 +101,7 @@ func patternIndent(b *buffer.Buffer, p buffer.Pos, tabSize int) int {
 			if !ok {
 				continue
 			}
-			ref = leadColumns(l, len(l), tabSize)
+			ref = LeadColumns(l, len(l), tabSize)
 			if strings.ContainsRune(indentTriggers, c) {
 				return ref + tabSize
 			}
@@ -120,7 +120,7 @@ func patternIndent(b *buffer.Buffer, p buffer.Pos, tabSize int) int {
 // nextIndentUnlessCloser returns the indent of the first line at or after p (the
 // rest of p's line first) that has text, unless that text starts with a closer.
 func nextIndentUnlessCloser(b *buffer.Buffer, p buffer.Pos, tabSize int) (int, bool) {
-	budget := newScanBudget(b)
+	budget := NewScanBudget(b)
 	for q := p.Line; q < b.Lines(); q++ {
 		if !budget.Take(b, q) {
 			break
@@ -152,9 +152,9 @@ func nextIndentUnlessCloser(b *buffer.Buffer, p buffer.Pos, tabSize int) (int, b
 // the line that holds the opener it matches. Lines are scanned upward and judged by
 // their last character, as Fresh's calculate_dedent_pattern does: a line that ends
 // in a closer skips the next opener. It is 0 when no opener is found.
-func closerIndent(b *buffer.Buffer, p buffer.Pos, tabSize int) int {
+func CloserIndent(b *buffer.Buffer, p buffer.Pos, tabSize int) int {
 	depth := 0
-	budget := newScanBudget(b)
+	budget := NewScanBudget(b)
 	for q := p.Line; q >= 0; q-- {
 		if !budget.Take(b, q) {
 			break
@@ -172,7 +172,7 @@ func closerIndent(b *buffer.Buffer, p buffer.Pos, tabSize int) int {
 			depth++
 		case '{', '[', '(':
 			if depth == 0 {
-				return leadColumns(l, len(l), tabSize)
+				return LeadColumns(l, len(l), tabSize)
 			}
 			depth--
 		}

@@ -22,7 +22,7 @@ const (
 var ErrScanLimit = errors.New("no match within scan limit")
 
 // scanBudget is what is left of the budget of one scan. A nil budget is unlimited.
-type scanBudget struct {
+type ScanBudget struct {
 	Lines, Bytes int
 	// spent is set when take refused a line.
 	Spent bool
@@ -30,17 +30,17 @@ type scanBudget struct {
 
 // newScanBudget returns the budget of a scan of b: ScanLinesCap lines and
 // ScanBytesBudget bytes for a large buffer, and nil, no limit, for a memory buffer.
-func newScanBudget(b *buffer.Buffer) *scanBudget {
+func NewScanBudget(b *buffer.Buffer) *ScanBudget {
 	if !b.Large() {
 		return nil
 	}
-	return &scanBudget{Lines: ScanLinesCap, Bytes: ScanBytesBudget}
+	return &ScanBudget{Lines: ScanLinesCap, Bytes: ScanBytesBudget}
 }
 
 // Take charges line of b to the budget before the line is read, and reports whether
 // the scan may read it. The charge is the stored length of the line, which the buffer
 // knows without reading it. A refused scan stays refused.
-func (s *scanBudget) Take(b *buffer.Buffer, line int) bool {
+func (s *ScanBudget) Take(b *buffer.Buffer, line int) bool {
 	if s == nil {
 		return true
 	}
@@ -59,6 +59,6 @@ func (s *scanBudget) Take(b *buffer.Buffer, line int) bool {
 
 // indexUnfinished reports whether b is a large buffer whose line index is incomplete,
 // so that a scan that ran to its last line has not seen the end of the document.
-func indexUnfinished(b *buffer.Buffer) bool {
+func IndexUnfinished(b *buffer.Buffer) bool {
 	return b.Large() && !b.Index(0).Complete
 }

@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -9,11 +10,11 @@ import (
 
 // configResolver gives an editor the per-language settings that the default config
 // has, as the app does, so a test sees the real built-in language entries.
-func configResolver() SettingsResolver {
+func configResolver() document.SettingsResolver {
 	cfg := config.Defaults()
-	return func(language, path string) LanguageSettings {
+	return func(language, path string) document.LanguageSettings {
 		s := cfg.EditorFor(language, path)
-		return LanguageSettings{
+		return document.LanguageSettings{
 			Language: s.Language, TabSize: s.TabSize, UseTabs: s.UseTabs, AutoIndent: s.AutoIndent,
 			AutoClose: s.AutoClose, AutoSurround: s.AutoSurround, CommentPrefix: s.CommentPrefix,
 		}
@@ -97,8 +98,8 @@ func TestAutoCloseLanguageExceptions(t *testing.T) {
 		t.Run(tt.language+" "+tt.typed, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(smartOpts, "")
-			e.SetLanguageSettings(func(string, string) LanguageSettings {
-				return LanguageSettings{Language: tt.language, TabSize: 4, AutoClose: true}
+			e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+				return document.LanguageSettings{Language: tt.language, TabSize: 4, AutoClose: true}
 			})
 			typeText(t, e, tt.typed)
 			if got := text(e); got != tt.Want {
@@ -124,7 +125,7 @@ func TestQuoteInsideAStringIsNotPaired(t *testing.T) {
 	for _, inside := range []bool{false, true} {
 		e := docWith(smartOpts, "")
 		var asked []buffer.Pos
-		e.SetStringContext(func(_ *Document, p buffer.Pos) bool {
+		e.SetStringContext(func(_ *document.Document, p buffer.Pos) bool {
 			asked = append(asked, p)
 			return inside
 		})
@@ -197,8 +198,8 @@ func TestAutoSurroundIsOneUndoStep(t *testing.T) {
 func TestAutoSurroundHonoursLanguageExceptions(t *testing.T) {
 	t.Parallel()
 	e := docWith(smartOpts, "hello")
-	e.SetLanguageSettings(func(string, string) LanguageSettings {
-		return LanguageSettings{Language: "text", TabSize: 4, AutoSurround: true}
+	e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+		return document.LanguageSettings{Language: "text", TabSize: 4, AutoSurround: true}
 	})
 	e.SelectRange(buffer.Pos{Col: 0}, buffer.Pos{Col: 5})
 	typeText(t, e, `"`)
@@ -216,7 +217,7 @@ func TestAutoCloseAtEveryCaret(t *testing.T) {
 	if got := text(e); got != "a() b\nc() d" {
 		t.Fatalf("text = %q, want a pair at both carets", got)
 	}
-	want := carets{Primary: Caret{Cursor: caretPos(1, 2)}, extras: []Caret{{Cursor: caretPos(0, 2)}}}
+	want := carets{Primary: document.Caret{Cursor: caretPos(1, 2)}, extras: []document.Caret{{Cursor: caretPos(0, 2)}}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
 	}
@@ -224,7 +225,7 @@ func TestAutoCloseAtEveryCaret(t *testing.T) {
 	if got := text(e); got != "a() b\nc() d" {
 		t.Fatalf("text after the closers = %q, want both stepped over", got)
 	}
-	want = carets{Primary: Caret{Cursor: caretPos(1, 3)}, extras: []Caret{{Cursor: caretPos(0, 3)}}}
+	want = carets{Primary: document.Caret{Cursor: caretPos(1, 3)}, extras: []document.Caret{{Cursor: caretPos(0, 3)}}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
 	}
@@ -233,7 +234,7 @@ func TestAutoCloseAtEveryCaret(t *testing.T) {
 func TestAutoSurroundAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	e := docWith(smartOpts, "ab\ncd")
-	e.Active().SetCarets([]caret{
+	e.Active().SetCarets([]document.CaretState{
 		{Anchor: caretPos(0, 0), Head: caretPos(0, 2), Primary: true},
 		{Anchor: caretPos(1, 0), Head: caretPos(1, 2)},
 	})
@@ -348,7 +349,7 @@ func TestEnterBetweenBracketsAtEveryCaret(t *testing.T) {
 	if got := text(e); got != "{\n    \n}\n[\n    \n]" {
 		t.Fatalf("text = %q", got)
 	}
-	want := carets{Primary: Caret{Cursor: caretPos(4, 4)}, extras: []Caret{{Cursor: caretPos(1, 4)}}}
+	want := carets{Primary: document.Caret{Cursor: caretPos(4, 4)}, extras: []document.Caret{{Cursor: caretPos(1, 4)}}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
 	}
@@ -418,8 +419,8 @@ func TestEnterOnABlankLine(t *testing.T) {
 			t.Parallel()
 			e := docWith(smartOpts, tt.Text)
 			if tt.plainText {
-				e.SetLanguageSettings(func(string, string) LanguageSettings {
-					return LanguageSettings{Language: "text", TabSize: 4, AutoIndent: true}
+				e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+					return document.LanguageSettings{Language: "text", TabSize: 4, AutoIndent: true}
 				})
 			}
 			e.SetCursor(buffer.Pos{Line: tt.Line}, false)
@@ -513,7 +514,7 @@ func TestBackspaceBetweenAPairDeletesBoth(t *testing.T) {
 func TestBackspaceAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	e := docWith(smartOpts, "()\n    x\n[]")
-	e.Active().SetCarets([]caret{
+	e.Active().SetCarets([]document.CaretState{
 		{Anchor: caretPos(0, 1), Head: caretPos(0, 1), Primary: true},
 		{Anchor: caretPos(1, 4), Head: caretPos(1, 4)},
 		{Anchor: caretPos(2, 1), Head: caretPos(2, 1)},
@@ -545,9 +546,9 @@ func TestBackspaceWithCaretsCloserThanATabSizeDoesNotOverlap(t *testing.T) {
 		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(smartOpts, tt.Text)
-			var cs []caret
+			var cs []document.CaretState
 			for i, col := range tt.cols {
-				cs = append(cs, caret{Anchor: caretPos(0, col), Head: caretPos(0, col), Primary: i == 0})
+				cs = append(cs, document.CaretState{Anchor: caretPos(0, col), Head: caretPos(0, col), Primary: i == 0})
 			}
 			e.Active().SetCarets(cs)
 			run(t, e, "delete_backward")

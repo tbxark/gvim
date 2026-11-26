@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"maps"
 	"slices"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // "" when its language has none. A language chosen with Set Language decides when it
 // has a prefix. Otherwise the effective settings of the file decide, which hold the
 // languages.<id>.comment_prefix of the config and Fresh's built-in prefixes.
-func (e *Editor) commentPrefix(d *Document) string {
+func (e *Editor) commentPrefix(d *document.Document) string {
 	if d.Language() != "" && e.languages != nil {
 		if p := strings.TrimSpace(e.languages(d.Language(), "").CommentPrefix); p != "" {
 			return p
@@ -28,7 +29,7 @@ func (e *Editor) commentPrefix(d *Document) string {
 // uncomment removes one space after the token when there is one. Every caret and
 // selection moves with the text. The token is the comment_prefix of the document's
 // language (see commentPrefix). It does nothing, as Fresh does, when the language has none.
-func (e *Editor) toggleComment(d *Document) error {
+func (e *Editor) toggleComment(d *document.Document) error {
 	token := e.commentPrefix(d)
 	if token == "" {
 		return nil
@@ -37,7 +38,7 @@ func (e *Editor) toggleComment(d *Document) error {
 	cs := d.AllCarets()
 	lineSet := make(map[int]bool)
 	for _, c := range cs {
-		first, last := caretLines(c)
+		first, last := document.CaretLines(c)
 		for line := first; line <= last; line++ {
 			lineSet[line] = true
 		}
@@ -50,12 +51,12 @@ func (e *Editor) toggleComment(d *Document) error {
 			break
 		}
 	}
-	var edits []lineEdit
+	var edits []document.LineEdit
 	d.Buffer.Group(func() {
 		for _, line := range lines {
 			if !allCommented {
 				d.Buffer.Insert(buffer.Pos{Line: line}, token+" ")
-				edits = append(edits, lineEdit{Line: line, Inserted: width + 1})
+				edits = append(edits, document.LineEdit{Line: line, Inserted: width + 1})
 				continue
 			}
 			runes := []rune(d.Buffer.Line(line))
@@ -68,7 +69,7 @@ func (e *Editor) toggleComment(d *Document) error {
 				n++
 			}
 			d.Buffer.Delete(buffer.Pos{Line: line, Col: indent}, buffer.Pos{Line: line, Col: indent + n})
-			edits = append(edits, lineEdit{Line: line, Col: indent, Removed: n})
+			edits = append(edits, document.LineEdit{Line: line, Col: indent, Removed: n})
 		}
 	})
 	if d.EditRefused() {

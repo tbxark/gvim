@@ -827,7 +827,7 @@ func TestSharedBuffersSaveAsAsyncWindowNoIndependentCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanSaveAs: %v", err)
 	}
-	written := make(chan []SaveResult, 1)
+	written := make(chan []document.SaveResult, 1)
 	go func() { written <- plan.Run() }()
 	// The command is writing off the UI goroutine. A competing open during this window
 	// must not load an independent copy of the file.
@@ -967,5 +967,92 @@ func TestSharedBuffersEditUnrelatedTabDoesNotCorruptMirror(t *testing.T) {
 	}
 	if mirrorEd.Active().Modified() {
 		t.Fatal("mirror was falsely marked modified by an unrelated tab edit")
+	}
+}
+
+// sharedPair returns two workspaces of one registry that have path open: a owns it and
+// b mirrors it.
+func sharedPair(t *testing.T, path string) (shared *SharedBuffers, a, b *Editor) {
+	t.Helper()
+	shared = NewSharedBuffers()
+	a = New(Options{Empty: true, Shared: shared})
+	b = New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	shared.Focus(a)
+	if a.Active().SharedMirror() || !b.Active().SharedMirror() {
+		t.Fatal("fixture: a should own the file and b mirror it")
+	}
+	return shared, a, b
+}
+
+func TestSharedBuffersRenamePathRekeysEntry(t *testing.T) {
+	tests := []struct {
+		name   string
+		rename func(a, b *Editor, oldPath, newPath string) error
+	}{
+		{"owner renames", func(a, _ *Editor, o, n string) error { return a.RenamePath(o, n) }},
+		{"mirror renames", func(_, b *Editor, o, n string) error { return b.RenamePath(o, n) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldPath := writeSharedFile(t, "one\n")
+			newPath := filepath.Join(filepath.Dir(oldPath), "renamed.txt")
+			shared, a, b := sharedPair(t, oldPath)
+			if err := os.Rename(oldPath, newPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.rename(a, b, oldPath, newPath); err != nil {
+				t.Fatalf("RenamePath: %v", err)
+			}
+			if shared.Has(shared.CanonicalPath(oldPath)) {
+				t.Error("the old path is still registered")
+			}
+			if !shared.Has(shared.CanonicalPath(newPath)) {
+				t.Fatal("the entry was not rekeyed to the new path")
+			}
+			if a.Active().Path != newPath || b.Active().Path != newPath {
+				t.Errorf("paths = %q, %q, want both %q", a.Active().Path, b.Active().Path, newPath)
+			}
+			// Closing the owner must find the entry and promote the mirror, instead of
+			// leaving the entry and its change listener behind.
+			if err := a.CloseByPath(newPath, false); err != nil {
+				t.Fatalf("CloseByPath: %v", err)
+			}
+			if b.Active().SharedMirror() {
+				t.Error("the mirror was not promoted after the owner closed")
+			}
+		})
+	}
+}
+
+func TestSharedBuffersOpenPreviewJoinsTheShare(t *testing.T) {
+	path := writeSharedFile(t, "one\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	if err := b.OpenPreview(path); err != nil {
+		t.Fatalf("OpenPreview: %v", err)
+	}
+	if b.Active().SharedMirror() {
+		t.Fatal("the focused workspace did not take ownership")
+	}
+	if !a.Active().SharedMirror() {
+		t.Fatal("the preview opened an independent copy of a file another workspace owned")
+	}
+	b.Active().Buffer.Insert(buffer.Pos{}, "X")
+	if got := a.Active().Buffer.Text(); got != "Xone\n" {
+		t.Fatalf("the other workspace's view = %q, want the shared edit", got)
 	}
 }

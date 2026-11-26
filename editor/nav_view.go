@@ -1,5 +1,7 @@
 package editor
 
+import "github.com/tbxark/gvim/document"
+
 // scrollMargin is the number of lines kept between the caret and the top or
 // bottom of the pane (Options.ScrollOffset), at most half the pane.
 func (e *Editor) scrollMargin() int {
@@ -9,7 +11,7 @@ func (e *Editor) scrollMargin() int {
 // ensureVisibleForJump scrolls to the caret after a jump. A jump that has to
 // scroll puts the caret in the middle of the pane, so the context above and
 // below it shows, as Fresh does.
-func (e *Editor) ensureVisibleForJump(d *Document) {
+func (e *Editor) ensureVisibleForJump(d *document.Document) {
 	top := d.Top
 	e.ensureVisible(d)
 	if d.Top != top {

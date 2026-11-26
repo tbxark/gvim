@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -38,7 +39,7 @@ func TestEmptyEditorHasNoDocumentAndNoPanics(t *testing.T) {
 
 func TestEmptyEditorDoRefusesDocumentActionsWithStatus(t *testing.T) {
 	t.Parallel()
-	for _, a := range []Action{"insert_char", "undo", "redo", "copy", "paste", "move_left", "select_all"} {
+	for _, a := range []document.Action{"insert_char", "undo", "redo", "copy", "paste", "move_left", "select_all"} {
 		e := New(Options{Empty: true})
 		res := e.Do(a, map[string]any{"text": "x"})
 		if !errors.Is(res.Err, ErrNoDocument) {
@@ -53,7 +54,7 @@ func TestEmptyEditorDoRefusesDocumentActionsWithStatus(t *testing.T) {
 func TestEmptyEditorTabActionsDoNotPanic(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Empty: true})
-	for _, a := range []Action{"next_buffer", "prev_buffer", "close_tab", "save_as", "remove_secondary_cursors", "goto_line"} {
+	for _, a := range []document.Action{"next_buffer", "prev_buffer", "close_tab", "save_as", "remove_secondary_cursors", "goto_line"} {
 		res := e.Do(a, nil)
 		if a == "close_tab" && !errors.Is(res.Err, ErrNoDocument) {
 			t.Errorf("Do(close_tab) on an empty editor = %v, want ErrNoDocument", res.Err)

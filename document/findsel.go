@@ -11,13 +11,13 @@ import (
 // frame its matches are painted, a search reads the document in windows of 1 MiB so
 // it cannot find a longer text that lies across two of them, and an error that quotes
 // it would be as large as the selection.
-const maxSearchSelection = 64 << 10
+const MaxSearchSelection = 64 << 10
 
 // errSearchTextTooLarge is the refusal of find_selection on a selection that is too
 // large to be the search text of a large document. It matches ErrLargeFile.
-func errSearchTextTooLarge() error {
-	return &largeError{
-		Msg:  fmt.Sprintf("selection too large to search for in large file mode (over %d KiB)", maxSearchSelection>>10),
+func ErrSearchTextTooLarge() error {
+	return &LargeError{
+		Msg:  fmt.Sprintf("selection too large to search for in large file mode (over %d KiB)", MaxSearchSelection>>10),
 		Errs: []error{ErrLargeFile},
 	}
 }
@@ -27,13 +27,13 @@ func errSearchTextTooLarge() error {
 // from the line index. A range it lets through may still be a little over.
 func (d *Document) SearchTextTooLarge(from, to buffer.Pos) bool {
 	if from.Line == to.Line {
-		return to.Col-from.Col > maxSearchSelection
+		return to.Col-from.Col > MaxSearchSelection
 	}
 	// The lines between are whole, and the last one is read up to its column, which is
 	// at least that many bytes.
 	size := to.Col + 1
-	for line := from.Line + 1; line < to.Line && size <= maxSearchSelection; line++ {
+	for line := from.Line + 1; line < to.Line && size <= MaxSearchSelection; line++ {
 		size += d.Buffer.LineBytes(line) + 1
 	}
-	return size > maxSearchSelection
+	return size > MaxSearchSelection
 }

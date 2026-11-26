@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -129,7 +130,7 @@ func TestPendingGotoSurvivesEdit(t *testing.T) {
 func TestDocumentEndActionsWaitAndReplay(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		action  Action
+		action  document.Action
 		wantSel bool
 	}{
 		{action: "move_document_end"},
@@ -188,9 +189,9 @@ func TestEditingActionNotQueuedWhileIndexing(t *testing.T) {
 	t.Parallel()
 	e, d := openLarge(t, largeOptions(), lineText(400))
 	version := d.Buffer.Version()
-	for _, a := range []Action{"sort_lines", "ensure_final_newline"} {
+	for _, a := range []document.Action{"sort_lines", "ensure_final_newline"} {
 		r := e.Do(a, nil)
-		if !errors.Is(r.Err, ErrIndexing) {
+		if !errors.Is(r.Err, document.ErrIndexing) {
 			t.Errorf("Do(%s) = %v, want ErrIndexing", a, r.Err)
 		}
 		if !strings.HasPrefix(e.Status(), string(a)+": ") {
@@ -198,9 +199,9 @@ func TestEditingActionNotQueuedWhileIndexing(t *testing.T) {
 		}
 	}
 	// A large document never does these, so waiting for the index would not help.
-	for _, a := range []Action{"trim_trailing_whitespace", "format_buffer"} {
+	for _, a := range []document.Action{"trim_trailing_whitespace", "format_buffer"} {
 		r := e.Do(a, nil)
-		if !errors.Is(r.Err, ErrLargeFile) {
+		if !errors.Is(r.Err, document.ErrLargeFile) {
 			t.Errorf("Do(%s) = %v, want ErrLargeFile", a, r.Err)
 		}
 	}
@@ -210,7 +211,7 @@ func TestEditingActionNotQueuedWhileIndexing(t *testing.T) {
 	// With a selection, sort works on that selection alone.
 	d.Sel = &buffer.Selection{Anchor: buffer.Pos{Line: 1}, Head: buffer.Pos{Line: 3}}
 	d.Cursor = d.Sel.Head
-	if r := e.Do("sort_lines", nil); errors.Is(r.Err, ErrIndexing) {
+	if r := e.Do("sort_lines", nil); errors.Is(r.Err, document.ErrIndexing) {
 		t.Fatalf("sort_lines of a selection = %v", r.Err)
 	}
 	// Ordinary editing and movement are not held back.
@@ -318,8 +319,8 @@ func TestPendingProgressShowsInTheStatus(t *testing.T) {
 // whole document was selected.
 func TestEditAfterAQueuedSelectionWaitsForTheIndex(t *testing.T) {
 	t.Parallel()
-	for _, queued := range []Action{"select_all", "select_document_end"} {
-		for _, a := range []Action{"copy", "cut", "paste", "insert_char", "delete_backward", "delete_line", "undo"} {
+	for _, queued := range []document.Action{"select_all", "select_document_end"} {
+		for _, a := range []document.Action{"copy", "cut", "paste", "insert_char", "delete_backward", "delete_line", "undo"} {
 			t.Run(string(queued)+" then "+string(a), func(t *testing.T) {
 				t.Parallel()
 				e, d := openLarge(t, largeOptions(), lineText(400))
@@ -331,7 +332,7 @@ func TestEditAfterAQueuedSelectionWaitsForTheIndex(t *testing.T) {
 				version, cursor := d.Buffer.Version(), d.Cursor
 				e.clipboard = "kept"
 				r := e.Do(a, map[string]any{"text": "x"})
-				if !errors.Is(r.Err, ErrIndexing) {
+				if !errors.Is(r.Err, document.ErrIndexing) {
 					t.Fatalf("Do(%s) = %v, want ErrIndexing", a, r.Err)
 				}
 				if d.Buffer.Version() != version || d.Cursor != cursor || e.clipboard != "kept" {

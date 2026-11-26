@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -12,7 +13,7 @@ func TestSettingsForWithoutResolverUsesOptions(t *testing.T) {
 	if got.TabSize != 2 || !got.UseTabs || !got.AutoIndent || !got.AutoClose || got.AutoSurround {
 		t.Errorf("settings = %+v, want the Options values", got)
 	}
-	if !got.LineWrap || got.PageWidth != DefaultPageWidth || !got.IndentationGuide ||
+	if !got.LineWrap || got.PageWidth != document.DefaultPageWidth || !got.IndentationGuide ||
 		!got.WhitespaceTabsLeading || !got.WhitespaceTabsInner || !got.WhitespaceTabsTrailing {
 		t.Errorf("settings = %+v, want the view defaults", got)
 	}
@@ -21,9 +22,9 @@ func TestSettingsForWithoutResolverUsesOptions(t *testing.T) {
 func TestSettingsForPassesLanguageAndPathToTheResolver(t *testing.T) {
 	e := New(Options{TabSize: 4})
 	var gotLang, gotPath string
-	e.SetLanguageSettings(func(language, path string) LanguageSettings {
+	e.SetLanguageSettings(func(language, path string) document.LanguageSettings {
 		gotLang, gotPath = language, path
-		return LanguageSettings{Language: "go", TabSize: 8, UseTabs: true}
+		return document.LanguageSettings{Language: "go", TabSize: 8, UseTabs: true}
 	})
 	d := e.Active()
 	d.Path = "/src/main.go"
@@ -44,27 +45,27 @@ func TestSettingsForViewSettingsWinOverLanguage(t *testing.T) {
 	yes, no := true, false
 	tests := []struct {
 		Name  string
-		view  ViewSettings
-		check func(LanguageSettings) bool
+		view  document.ViewSettings
+		check func(document.LanguageSettings) bool
 	}{
-		{"no override", ViewSettings{}, func(s LanguageSettings) bool {
+		{"no override", document.ViewSettings{}, func(s document.LanguageSettings) bool {
 			return s.TabSize == 8 && s.UseTabs && s.LineWrap && !s.PageView && s.PageWidth == 72
 		}},
-		{"tab size", ViewSettings{TabSize: 3}, func(s LanguageSettings) bool { return s.TabSize == 3 }},
-		{"indent tabs off", ViewSettings{IndentTabs: &no}, func(s LanguageSettings) bool { return !s.UseTabs }},
-		{"line wrap off", ViewSettings{LineWrap: &no}, func(s LanguageSettings) bool { return !s.LineWrap }},
-		{"page view", ViewSettings{PageView: &yes, PageWidth: 100}, func(s LanguageSettings) bool {
+		{"tab size", document.ViewSettings{TabSize: 3}, func(s document.LanguageSettings) bool { return s.TabSize == 3 }},
+		{"indent tabs off", document.ViewSettings{IndentTabs: &no}, func(s document.LanguageSettings) bool { return !s.UseTabs }},
+		{"line wrap off", document.ViewSettings{LineWrap: &no}, func(s document.LanguageSettings) bool { return !s.LineWrap }},
+		{"page view", document.ViewSettings{PageView: &yes, PageWidth: 100}, func(s document.LanguageSettings) bool {
 			return s.PageView && s.PageWidth == 100
 		}},
-		{"line wrap on keeps the rest", ViewSettings{LineWrap: &yes}, func(s LanguageSettings) bool {
+		{"line wrap on keeps the rest", document.ViewSettings{LineWrap: &yes}, func(s document.LanguageSettings) bool {
 			return s.LineWrap && s.TabSize == 8
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			e := New(Options{})
-			e.SetLanguageSettings(func(string, string) LanguageSettings {
-				return LanguageSettings{TabSize: 8, UseTabs: true, LineWrap: true, PageWidth: 72}
+			e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+				return document.LanguageSettings{TabSize: 8, UseTabs: true, LineWrap: true, PageWidth: 72}
 			})
 			d := e.Active()
 			d.SetView(tt.view)
@@ -89,7 +90,7 @@ func TestEphemeralFilePatternsAreCopied(t *testing.T) {
 // language tab size of 8, and holds text.
 func widthEditor(text string) *Editor {
 	e := docWith(Options{TabSize: 4}, text)
-	e.SetLanguageSettings(func(string, string) LanguageSettings { return LanguageSettings{TabSize: 8} })
+	e.SetLanguageSettings(func(string, string) document.LanguageSettings { return document.LanguageSettings{TabSize: 8} })
 	return e
 }
 

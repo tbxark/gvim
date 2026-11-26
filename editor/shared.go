@@ -278,7 +278,7 @@ func (s *SharedBuffers) Register(e *Editor, d *document.Document) {
 func (s *SharedBuffers) watchLocked(entry *sharedEntry, owner *Editor) {
 	entry.watchKey = "workspace-shared:" + entry.canonical
 	entry.watchEditor = owner
-	entry.watchRemove = owner.AddChangeListener(entry.watchKey, func(doc DocID, c buffer.Change) {
+	entry.watchRemove = owner.AddChangeListener(entry.watchKey, func(doc document.DocID, c buffer.Change) {
 		s.onOwnerChange(entry, doc, c)
 	})
 	owner.TrackChanges(entry.watchKey, true)
@@ -295,7 +295,7 @@ func (s *SharedBuffers) unwatchLocked(entry *sharedEntry) {
 
 // onOwnerChange propagates an owner change to every mirror through the document
 // stale-version guard; a mirror that cannot apply it reloads the whole text.
-func (s *SharedBuffers) onOwnerChange(entry *sharedEntry, doc DocID, c buffer.Change) {
+func (s *SharedBuffers) onOwnerChange(entry *sharedEntry, doc document.DocID, c buffer.Change) {
 	if s == nil || entry == nil {
 		return
 	}
@@ -702,19 +702,7 @@ func (s *SharedBuffers) AfterSaveAs(e *Editor, d *document.Document, oldPath, ne
 			// The buffer was renamed: keep one canonical document and one entry, now
 			// keyed by the new path. The views in other workspaces follow it, matching
 			// Fresh's "view state is per split, buffer identity is shared".
-			delete(s.entries, oldCanonical)
-			s.unwatchLocked(entry)
-			entry.canonical = newCanonical
-			for _, mirror := range entry.mirrors {
-				mirror.Rename(d.Path)
-				if err := mirror.SyncMirrorFrom(d); err != nil {
-					mirror.SetSharedMirrorStatus("Cross-workspace mirror: " + err.Error())
-				} else {
-					mirror.SetSharedMirrorStatus("Mirror of " + s.label(e) + ": read-only until focused")
-				}
-			}
-			s.entries[newCanonical] = entry
-			s.watchLocked(entry, e)
+			s.rekeyLocked(entry, newCanonical)
 			return
 		}
 	}
@@ -730,6 +718,63 @@ func (s *SharedBuffers) AfterSaveAs(e *Editor, d *document.Document, oldPath, ne
 	entry := &sharedEntry{canonical: newCanonical, owner: e, doc: d, mirrors: map[*Editor]*document.Document{}}
 	s.entries[newCanonical] = entry
 	s.watchLocked(entry, e)
+}
+
+// rekeyLocked moves entry to the key newCanonical after its canonical document took a new
+// path. The mirrors follow the document's path and are synced from it, and the owner's
+// change listener is installed again. s.mu is held.
+func (s *SharedBuffers) rekeyLocked(entry *sharedEntry, newCanonical string) {
+	delete(s.entries, entry.canonical)
+	s.unwatchLocked(entry)
+	entry.canonical = newCanonical
+	for _, mirror := range entry.mirrors {
+		mirror.Rename(entry.doc.Path)
+		if err := mirror.SyncMirrorFrom(entry.doc); err != nil {
+			mirror.SetSharedMirrorStatus("Cross-workspace mirror: " + err.Error())
+		} else {
+			mirror.SetSharedMirrorStatus("Mirror of " + s.label(entry.owner) + ": read-only until focused")
+		}
+	}
+	s.entries[newCanonical] = entry
+	s.watchLocked(entry, entry.owner)
+}
+
+// AfterRename updates the registry after e renamed the path of d (RenamePath), whose Path
+// is already the new one. The file moved on disk, so the entry d belongs to is rekeyed to
+// the new path, and the canonical document and the mirrors follow it: otherwise the entry
+// stays under the old key, a later close never finds it, and the other views keep a stale
+// path. The entry is found by the document rather than by its old path, which no longer
+// resolves. A document that is not shared, or whose new path another entry already holds,
+// is left alone.
+func (s *SharedBuffers) AfterRename(e *Editor, d *document.Document) {
+	if s == nil || e == nil || d == nil || d.Path == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entry *sharedEntry
+	for _, cand := range s.entries {
+		if cand.mirrors[e] == d || (cand.owner == e && cand.doc == d) {
+			entry = cand
+			break
+		}
+	}
+	if entry == nil || entry.doc == nil || entry.owner == nil {
+		return
+	}
+	newCanonical := SharedCanonical(d.Path)
+	if entry.canonical == newCanonical {
+		return
+	}
+	if _, taken := s.entries[newCanonical]; taken {
+		return
+	}
+	if entry.doc != d {
+		// A mirror was renamed first: the file moved, so the owner's document follows.
+		entry.doc.Rename(d.Path)
+		entry.doc.FollowDisk(d.Path)
+	}
+	s.rekeyLocked(entry, newCanonical)
 }
 
 // CanonicalPath returns the registry key of path (exposed for the app's open-path

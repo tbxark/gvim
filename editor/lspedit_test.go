@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"path/filepath"
 	"testing"
 
@@ -13,19 +14,19 @@ func TestApplyLSPEdits(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Text  string
-		edits []LSPEdit
+		edits []document.LSPEdit
 		Want  string
 	}{
 		{
 			Name:  "replace one word",
 			Text:  "hello world\n",
-			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 6}, To: buffer.Pos{Line: 0, Col: 11}, Text: "gvim"}},
+			edits: []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 6}, To: buffer.Pos{Line: 0, Col: 11}, Text: "gvim"}},
 			Want:  "hello gvim\n",
 		},
 		{
 			Name: "several edits apply in any order",
 			Text: "a b c\n",
-			edits: []LSPEdit{
+			edits: []document.LSPEdit{
 				{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 1}, Text: "x"},
 				{From: buffer.Pos{Line: 0, Col: 4}, To: buffer.Pos{Line: 0, Col: 5}, Text: "z"},
 			},
@@ -34,19 +35,19 @@ func TestApplyLSPEdits(t *testing.T) {
 		{
 			Name:  "insertion at a point",
 			Text:  "ab\n",
-			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 0, Col: 1}, Text: "-"}},
+			edits: []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 0, Col: 1}, Text: "-"}},
 			Want:  "a-b\n",
 		},
 		{
 			Name:  "range across lines",
 			Text:  "one\ntwo\nthree\n",
-			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 2, Col: 5}, Text: "X"}},
+			edits: []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 2, Col: 5}, Text: "X"}},
 			Want:  "X\n",
 		},
 		{
 			Name:  "position past the end is clamped",
 			Text:  "abc\n",
-			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 9, Col: 0}, Text: "!"}},
+			edits: []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 9, Col: 0}, Text: "!"}},
 			Want:  "a!",
 		},
 	}
@@ -67,7 +68,7 @@ func TestApplyLSPEdits(t *testing.T) {
 func TestApplyLSPEditsIsOneUndoStep(t *testing.T) {
 	t.Parallel()
 	e, path := openFixture(t, Options{}, "a b c\n")
-	edits := []LSPEdit{
+	edits := []document.LSPEdit{
 		{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 1}, Text: "x"},
 		{From: buffer.Pos{Line: 0, Col: 4}, To: buffer.Pos{Line: 0, Col: 5}, Text: "z"},
 	}
@@ -86,14 +87,14 @@ func TestApplyLSPEditsIsOneUndoStep(t *testing.T) {
 func TestApplyLSPEditsRefusesReadOnlyAndUnknownPath(t *testing.T) {
 	t.Parallel()
 	e, path := openFixture(t, Options{}, "abc\n")
-	edit := []LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "x"}}
+	edit := []document.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "x"}}
 
 	if err := e.ApplyLSPEdits(filepath.Join(t.TempDir(), "other.txt"), edit); !errors.Is(err, ErrNotOpen) {
 		t.Fatalf("unknown path: err = %v, want ErrNotOpen", err)
 	}
 
 	run(t, e, "toggle_read_only")
-	if err := e.ApplyLSPEdits(path, edit); !errors.Is(err, ErrReadOnly) {
+	if err := e.ApplyLSPEdits(path, edit); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("read-only: err = %v, want ErrReadOnly", err)
 	}
 	if got := e.Active().Buffer.Text(); got != "abc\n" {
@@ -106,7 +107,7 @@ func TestApplyLSPEditsClampsTheCaret(t *testing.T) {
 	e, path := openFixture(t, Options{}, "one\ntwo\nthree\n")
 	d := e.Active()
 	d.Cursor = buffer.Pos{Line: 2, Col: 4}
-	edit := []LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 2, Col: 5}, Text: "x"}}
+	edit := []document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 2, Col: 5}, Text: "x"}}
 	if err := e.ApplyLSPEdits(path, edit); err != nil {
 		t.Fatal(err)
 	}
@@ -126,17 +127,17 @@ func TestApplyLSPEditsKeepsTheCaretOnItsText(t *testing.T) {
 		Name  string
 		Text  string
 		caret buffer.Pos
-		edits []LSPEdit
+		edits []document.LSPEdit
 		Want  buffer.Pos
 	}{
 		{"a line inserted above", "a\nb\nc\n", buffer.Pos{Line: 2, Col: 1},
-			[]LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}, buffer.Pos{Line: 3, Col: 1}},
+			[]document.LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}, buffer.Pos{Line: 3, Col: 1}},
 		{"lines removed above", "a\nb\nc\nd\n", buffer.Pos{Line: 3, Col: 1},
-			[]LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 2}}}, buffer.Pos{Line: 1, Col: 1}},
+			[]document.LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 2}}}, buffer.Pos{Line: 1, Col: 1}},
 		{"an edit on the caret's line before it", "x := 1\n", buffer.Pos{Line: 0, Col: 6},
-			[]LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 0, Col: 1}, Text: "yy"}}, buffer.Pos{Line: 0, Col: 8}},
+			[]document.LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 0, Col: 1}, Text: "yy"}}, buffer.Pos{Line: 0, Col: 8}},
 		{"an edit below leaves it", "a\nb\n", buffer.Pos{Line: 0, Col: 1},
-			[]LSPEdit{{From: buffer.Pos{Line: 1}, To: buffer.Pos{Line: 1, Col: 1}, Text: "zzz"}}, buffer.Pos{Line: 0, Col: 1}},
+			[]document.LSPEdit{{From: buffer.Pos{Line: 1}, To: buffer.Pos{Line: 1, Col: 1}, Text: "zzz"}}, buffer.Pos{Line: 0, Col: 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -165,7 +166,7 @@ func TestApplyLSPEditsKeepsTheExtraCarets(t *testing.T) {
 		t.Fatalf("setup: %d extra carets, want 1", len(d.Cursors()))
 	}
 	lines := []int{d.Cursor.Line, d.Cursors()[0].Cursor.Line}
-	edit := []LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}
+	edit := []document.LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}
 	if err := e.ApplyLSPEdits(path, edit); err != nil {
 		t.Fatal(err)
 	}

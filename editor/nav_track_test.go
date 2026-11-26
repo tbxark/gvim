@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -12,15 +13,15 @@ func TestLargeMovesEnterNavigationHistory(t *testing.T) {
 	tests := []struct {
 		Name  string
 		Start buffer.Pos
-		steps []Action
+		steps []document.Action
 		far   bool
 	}{
-		{"document end", caretPos(1, 1), []Action{"move_document_end"}, true},
-		{"page down", caretPos(1, 1), []Action{"move_page_down"}, true},
-		{"matching bracket across lines", caretPos(0, 0), []Action{"goto_matching_bracket"}, true},
-		{"end of a long line", caretPos(34, 0), []Action{"move_line_end"}, true},
-		{"arrows leave no trail", caretPos(5, 0), []Action{"move_down", "move_down"}, false},
-		{"one word is not far", caretPos(10, 0), []Action{"move_word_right"}, false},
+		{"document end", caretPos(1, 1), []document.Action{"move_document_end"}, true},
+		{"page down", caretPos(1, 1), []document.Action{"move_page_down"}, true},
+		{"matching bracket across lines", caretPos(0, 0), []document.Action{"goto_matching_bracket"}, true},
+		{"end of a long line", caretPos(34, 0), []document.Action{"move_line_end"}, true},
+		{"arrows leave no trail", caretPos(5, 0), []document.Action{"move_down", "move_down"}, false},
+		{"one word is not far", caretPos(10, 0), []document.Action{"move_word_right"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -81,21 +82,21 @@ func TestScrollMarginKeepsLinesAroundTheCaret(t *testing.T) {
 		margin  int
 		Start   int // caret line
 		top     int
-		steps   []Action
+		steps   []document.Action
 		wantTop int
 	}{
-		{"no margin scrolls at the edge", 0, 7, 0, []Action{"move_down", "move_down", "move_down"}, 1},
-		{"margin scrolls early", 2, 5, 0, []Action{"move_down", "move_down", "move_down"}, 1},
-		{"margin scrolls up early", 2, 12, 10, []Action{"move_up"}, 9},
-		{"margin is capped to half the pane", 9, 3, 0, []Action{"move_down", "move_down", "move_down"}, 1},
-		{"margin does not scroll past the end", 3, 28, 20, []Action{"move_down", "move_down"}, 20},
-		{"margin at the top of the document", 3, 1, 0, []Action{"move_up"}, 0},
+		{"no margin scrolls at the edge", 0, 7, 0, []document.Action{"move_down", "move_down", "move_down"}, 1},
+		{"margin scrolls early", 2, 5, 0, []document.Action{"move_down", "move_down", "move_down"}, 1},
+		{"margin scrolls up early", 2, 12, 10, []document.Action{"move_up"}, 9},
+		{"margin is capped to half the pane", 9, 3, 0, []document.Action{"move_down", "move_down", "move_down"}, 1},
+		{"margin does not scroll past the end", 3, 28, 20, []document.Action{"move_down", "move_down"}, 20},
+		{"margin at the top of the document", 3, 1, 0, []document.Action{"move_up"}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{Rows: 10, Cols: 40, ScrollOffset: tt.margin})
-			e.docs = []*Document{newDocument("", numbered(30))}
+			e.docs = []*document.Document{document.NewDocument("", numbered(30))}
 			e.switchTo(0)
 			marksCaret(e, tt.Start, 0)
 			e.Active().Top = tt.top
@@ -115,7 +116,7 @@ func TestScrollMarginKeepsLinesAroundTheCaret(t *testing.T) {
 func TestScrollMarginLeavesAClickedCaretAlone(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Rows: 10, Cols: 40, ScrollOffset: 3})
-	e.docs = []*Document{newDocument("", numbered(60))}
+	e.docs = []*document.Document{document.NewDocument("", numbered(60))}
 	e.switchTo(0)
 	e.Active().Top = 20
 	e.SetCursor(caretPos(20, 0), false) // a click on the top row
@@ -128,7 +129,7 @@ func TestScrollMarginLeavesAClickedCaretAlone(t *testing.T) {
 func TestScrollViewKeepsTheCaretInsideTheMargin(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Rows: 10, Cols: 40, ScrollOffset: 3})
-	e.docs = []*Document{newDocument("", numbered(60))}
+	e.docs = []*document.Document{document.NewDocument("", numbered(60))}
 	e.switchTo(0)
 	e.Active().Top = 10
 	marksCaret(e, 12, 0)
@@ -175,7 +176,7 @@ func TestJumpsRecenterTheView(t *testing.T) {
 		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{Rows: 11, Cols: 40})
-			e.docs = []*Document{newDocument("", numbered(60))}
+			e.docs = []*document.Document{document.NewDocument("", numbered(60))}
 			e.switchTo(0)
 			tt.do(t, e)
 			d := e.Active()
@@ -192,7 +193,7 @@ func TestJumpsRecenterTheView(t *testing.T) {
 func TestJumpWithinTheViewDoesNotRecenter(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Rows: 11, Cols: 40})
-	e.docs = []*Document{newDocument("", numbered(60))}
+	e.docs = []*document.Document{document.NewDocument("", numbered(60))}
 	e.switchTo(0)
 	if err := e.GotoLine(4, 1); err != nil {
 		t.Fatal(err)
@@ -205,7 +206,7 @@ func TestJumpWithinTheViewDoesNotRecenter(t *testing.T) {
 func TestScrollMarginNeverScrollsUpOnMoveDown(t *testing.T) {
 	t.Parallel()
 	e := New(Options{Rows: 10, Cols: 40, ScrollOffset: 3})
-	e.docs = []*Document{newDocument("", numbered(30))}
+	e.docs = []*document.Document{document.NewDocument("", numbered(30))}
 	e.switchTo(0)
 	e.ScrollBy(22) // the wheel may scroll past the end
 	marksCaret(e, 28, 0)

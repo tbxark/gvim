@@ -23,6 +23,10 @@ type FileAccess interface {
 	WriteFileAtomic(path string, data []byte) error
 }
 
+// ErrRemoteUnsupported is returned, wrapped, by an action that only works on a file of the
+// local filesystem when the document belongs to a remote workspace.
+var ErrRemoteUnsupported = errors.New("not available for a remote workspace file")
+
 // AccessStat is what a FileAccess reports about one path.
 type AccessStat struct {
 	Exists bool
@@ -37,8 +41,8 @@ type AccessStat struct {
 }
 
 // diskState converts the access answer to the document's disk state.
-func (a AccessStat) diskState() diskState {
-	return diskState{Exists: a.Exists, Special: a.Special, Size: a.Size, Mtime: a.Mtime}
+func (a AccessStat) diskState() DiskState {
+	return DiskState{Exists: a.Exists, Special: a.Special, Size: a.Size, Mtime: a.Mtime}
 }
 
 // WriteStream is one open streamed write of a file that is larger than memory. The
@@ -94,7 +98,7 @@ func DiskStateAt(access FileAccess, path string) DiskState {
 		}
 		return st.diskState()
 	}
-	return diskStateOf(path)
+	return DiskStateOf(path)
 }
 
 // errNoRemoteLarge refuses a remote large-file save: large-file mode streams the file

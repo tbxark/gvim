@@ -1,13 +1,14 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"strings"
 )
 
 // insertTab handles Tab. With a selection it indents the selected lines.
 // Without one it inserts one indent unit, as Fresh does: a literal tab when
 // UseTabs is set, and otherwise tab_size spaces whatever the column.
-func (e *Editor) insertTab(d *Document) {
+func (e *Editor) insertTab(d *document.Document) {
 	if d.HasSelection() {
 		d.IndentLines(e.indentUnit(d))
 		return
@@ -22,7 +23,7 @@ func (e *Editor) insertTab(d *Document) {
 
 // indentUnit is the text one indent level adds at the start of a line: a tab
 // when the document inserts tabs, and one tab stop of spaces otherwise.
-func (e *Editor) indentUnit(d *Document) string {
+func (e *Editor) indentUnit(d *document.Document) string {
 	if e.indentTabs(d) {
 		return "\t"
 	}
@@ -31,13 +32,13 @@ func (e *Editor) indentUnit(d *Document) string {
 
 // indentTabs reports whether Tab inserts a tab character in d: the effective
 // use_tabs of its language (SettingsFor), which the document's own setting overrides.
-func (e *Editor) indentTabs(d *Document) bool {
+func (e *Editor) indentTabs(d *document.Document) bool {
 	return e.SettingsFor(d).UseTabs
 }
 
 // tabSizeOf is the columns per tab stop of d: the effective tab_size of its
 // language (SettingsFor), which the document's own TabSize overrides.
-func (e *Editor) tabSizeOf(d *Document) int {
+func (e *Editor) tabSizeOf(d *document.Document) int {
 	if n := e.SettingsFor(d).TabSize; n > 0 {
 		return n
 	}

@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -23,8 +24,8 @@ func markdownEditor(t *testing.T, path, text string) *Editor {
 func markdownLanguageEditor(t *testing.T, language, text string) *Editor {
 	t.Helper()
 	e := docWith(Options{TabSize: 4}, text)
-	e.SetLanguageSettings(func(string, string) LanguageSettings {
-		return LanguageSettings{Language: language, TabSize: 4}
+	e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+		return document.LanguageSettings{Language: language, TabSize: 4}
 	})
 	return e
 }
@@ -268,8 +269,8 @@ func TestMarkdownAutoCloseSingleQuote(t *testing.T) {
 		t.Helper()
 		e := docWith(Options{AutoClose: true, TabSize: 4}, "")
 		e.Active().Path = path
-		e.SetLanguageSettings(func(string, string) LanguageSettings {
-			return LanguageSettings{Language: language, TabSize: 4, AutoClose: true}
+		e.SetLanguageSettings(func(string, string) document.LanguageSettings {
+			return document.LanguageSettings{Language: language, TabSize: 4, AutoClose: true}
 		})
 		return e
 	}

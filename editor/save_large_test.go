@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ func tempFiles(t *testing.T, dir string) []string {
 }
 
 // docText returns the text of a large document, line by line.
-func docText(d *Document) string {
+func docText(d *document.Document) string {
 	lines := make([]string, d.Buffer.Lines())
 	for i := range lines {
 		lines[i] = d.Buffer.Line(i)
@@ -307,7 +308,7 @@ func TestLargeSaveRefusesAFileThatAnotherProgramReplaced(t *testing.T) {
 		t.Fatalf("the display changed: %q, %d lines", d.Buffer.Line(1), d.Buffer.Lines())
 	}
 	err := e.Save()
-	if !errors.Is(err, ErrChangedOnDisk) {
+	if !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
 	}
 	if readFile(t, d.Path) != replacement {
@@ -401,7 +402,7 @@ func TestLargeSaveMovesOntoTheNewFileWithoutAScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Buffer.Insert(buffer.Pos{Line: 20}, "second ")
-	d.Disk = diskState{}
+	d.Disk = document.DiskState{}
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +463,7 @@ func TestLargeSaveOfAnUnmodifiedDocumentWritesOverAChangedFileOnForce(t *testing
 	if err := os.Rename(other, d.Path); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Save(); !errors.Is(err, ErrChangedOnDisk) {
+	if err := e.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
 	}
 	p, err := e.PlanSaveForce()
@@ -495,7 +496,7 @@ func TestPlanSaveIncompleteIndexDoesNotTidy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.jobs) != 1 || !errors.Is(plan.jobs[0].Err(), ErrIndexing) {
+	if len(plan.jobs) != 1 || !errors.Is(plan.jobs[0].Err(), document.ErrIndexing) {
 		t.Fatalf("job error = %v, want ErrIndexing", plan.jobs[0].Err())
 	}
 	if !strings.Contains(plan.jobs[0].Err().Error(), "Scanning...") {
@@ -531,7 +532,7 @@ func TestPlanSaveReportsAnIndexFailure(t *testing.T) {
 	}
 	plan, _ := e.PlanSave()
 	got := plan.jobs[0].Err()
-	if got == nil || errors.Is(got, ErrIndexing) || !strings.Contains(got.Error(), "disk on fire") {
+	if got == nil || errors.Is(got, document.ErrIndexing) || !strings.Contains(got.Error(), "disk on fire") {
 		t.Fatalf("error = %v, want the index failure", got)
 	}
 }
@@ -701,7 +702,7 @@ func TestSaveRebaseForeignFileEqualSize(t *testing.T) {
 	// The next save still goes through the disk check, which sees the foreign file as a
 	// changed one. The document is still correct, and saves once the user overwrites.
 	d.Buffer.Insert(buffer.Pos{}, "more ")
-	if err := e.Save(); !errors.Is(err, ErrChangedOnDisk) {
+	if err := e.Save(); !errors.Is(err, document.ErrChangedOnDisk) {
 		t.Fatalf("second save = %v, want ErrChangedOnDisk", err)
 	}
 	p, err := e.PlanSaveForce()
@@ -827,7 +828,15 @@ func TestRedoAfterRebaseReturnsFalseCaretUnchanged(t *testing.T) {
 		t.Fatal("no undo")
 	}
 	d.Cursor = buffer.Pos{Line: 7, Col: 3}
-	d.LastMulti = &multiEditRecord{}
+	d.Extra = []document.Caret{{Cursor: buffer.Pos{Line: 8, Col: 3}}}
+	d.EditAtCarets(func(c document.CaretState) document.Edit {
+		return document.Edit{From: c.Head, To: c.Head, Text: "Z"}
+	})
+	if !d.HasLastMulti() {
+		t.Fatal("expected active multi-caret edit record before save")
+	}
+	d.ClearCarets()
+	d.Cursor = buffer.Pos{Line: 7, Col: 3}
 	d.FindRange = &buffer.Selection{}
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
@@ -838,7 +847,7 @@ func TestRedoAfterRebaseReturnsFalseCaretUnchanged(t *testing.T) {
 	if d.Cursor != (buffer.Pos{Line: 7, Col: 3}) {
 		t.Errorf("cursor = %v", d.Cursor)
 	}
-	if d.LastMulti != nil || d.FindRange != nil {
+	if d.HasLastMulti() || d.FindRange != nil {
 		t.Error("the records of the old history are still there")
 	}
 }
@@ -851,7 +860,7 @@ func TestLargeSaveRacesWithEdits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var results []SaveResult
+	var results []document.SaveResult
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		results = plan.Run()
@@ -892,7 +901,7 @@ func TestCheckSourceInTheDiskPoll(t *testing.T) {
 	_, _ = f.WriteString("more\n")
 	_ = f.Close()
 	_ = e.PlanDiskCheck()
-	if want := errFileGrew.Error(); d.Status != want {
+	if want := document.ErrFileGrew.Error(); d.Status != want {
 		t.Fatalf("status = %q, want %q", d.Status, want)
 	}
 	// The poll says it once.
@@ -914,7 +923,7 @@ func TestLargeSaveOfAVirtualSourceWaitsForTheIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !errors.Is(plan.jobs[0].Err(), ErrIndexing) {
+	if !errors.Is(plan.jobs[0].Err(), document.ErrIndexing) {
 		t.Fatalf("err = %v, want ErrIndexing", plan.jobs[0].Err())
 	}
 	if got := src.BytesRead(); got > 16<<20 {

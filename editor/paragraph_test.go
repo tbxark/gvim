@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/document"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
@@ -15,7 +16,7 @@ func TestParagraphMoves(t *testing.T) {
 		Name       string
 		Text       string
 		caret      buffer.Pos
-		action     Action
+		action     document.Action
 		wantCursor buffer.Pos
 		wantSel    *buffer.Selection
 	}{

@@ -13,8 +13,8 @@ import (
 func virtualDoc(t *testing.T, mode, content string) *Editor {
 	t.Helper()
 	e := docWith(Options{VirtualSpace: mode}, content)
-	e.SetLanguageSettings(func(language, path string) LanguageSettings {
-		return LanguageSettings{TabSize: 4, LineWrap: false}
+	e.SetLanguageSettings(func(language, path string) document.LanguageSettings {
+		return document.LanguageSettings{TabSize: 4, LineWrap: false}
 	})
 	return e
 }
@@ -213,7 +213,7 @@ func TestVirtualSpacePerBufferOverride(t *testing.T) {
 	if got := e.Active().VirtualColumns(); got != 0 {
 		t.Fatalf("virtual %d before the override", got)
 	}
-	if err := e.UpdateViewSettings(e.ActiveID(), func(s *ViewSettings) {
+	if err := e.UpdateViewSettings(e.ActiveID(), func(s *document.ViewSettings) {
 		on := true
 		s.VirtualSpace = &on
 	}); err != nil {

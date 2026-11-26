@@ -26,7 +26,7 @@ func (d *Document) DeleteForward() {
 	if d.DeleteSelection() {
 		return
 	}
-	next, ok := nextPos(d.Buffer, d.Cursor)
+	next, ok := NextPos(d.Buffer, d.Cursor)
 	if !ok {
 		return
 	}

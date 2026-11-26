@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"slices"
 	"testing"
 
@@ -16,7 +17,7 @@ const foldText = "a\n  b\n  c\nd\n"
 const nestedFoldText = "a\n  b\n    c\n    d\ne"
 
 // foldedStarts returns the lines among 0..n-1 whose fold is collapsed.
-func foldedStarts(d *Document, n int) []int {
+func foldedStarts(d *document.Document, n int) []int {
 	var out []int
 	for line := range n {
 		if d.Folded(line) {
@@ -55,8 +56,8 @@ func TestToggleFoldAtCaretLine(t *testing.T) {
 		folded  []int
 	}{
 		{"fold starts on the caret line", 0, nil, []int{0}},
-		{"body line starts no fold", 1, ErrNoFold, nil},
-		{"blank line starts no fold", 3, ErrNoFold, nil},
+		{"body line starts no fold", 1, document.ErrNoFold, nil},
+		{"blank line starts no fold", 3, document.ErrNoFold, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -116,7 +117,7 @@ func TestCaretLeavesFoldedLines(t *testing.T) {
 		Text   string
 		folds  []int      // folded fold starts before the action
 		caret  buffer.Pos // caret before the action
-		action Action
+		action document.Action
 		Want   buffer.Pos
 	}{
 		{
@@ -216,7 +217,7 @@ func TestCollapsingAFoldMovesExtraCaretsOutOfItsBody(t *testing.T) {
 		t.Fatalf("setup carets = %v, want two extra carets", got)
 	}
 	run(t, e, "toggle_fold")
-	want := carets{Primary: Caret{Cursor: caretPos(0, 1)}}
+	want := carets{Primary: document.Caret{Cursor: caretPos(0, 1)}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets after collapsing = %v, want %v", got, want)
 	}
@@ -230,7 +231,7 @@ func TestFoldRevealRunsOnTheTabThatBecomesActive(t *testing.T) {
 	folded := e.Active()
 	folded.SetFoldedLines(map[int]bool{0: true})
 	folded.Cursor = caretPos(1, 0)
-	e.docs = append(e.docs, newDocument("", "x\n"))
+	e.docs = append(e.docs, document.NewDocument("", "x\n"))
 	e.switchTo(1)
 	run(t, e, "prev_buffer")
 	if e.Active() != folded {

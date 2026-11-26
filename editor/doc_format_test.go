@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"testing"
@@ -110,10 +111,10 @@ func TestFormatBufferRefusedOnReadOnlyDocument(t *testing.T) {
 	t.Parallel()
 	e := formatDoc("b", "go", map[string]string{"go": "tr a-z A-Z"})
 	run(t, e, "toggle_read_only")
-	if r := e.Do("format_buffer", nil); !errors.Is(r.Err, ErrReadOnly) {
+	if r := e.Do("format_buffer", nil); !errors.Is(r.Err, document.ErrReadOnly) {
 		t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 	}
-	if _, err := e.BeginShell("format_buffer", nil); !errors.Is(err, ErrReadOnly) {
+	if _, err := e.BeginShell("format_buffer", nil); !errors.Is(err, document.ErrReadOnly) {
 		t.Fatalf("BeginShell err = %v, want ErrReadOnly", err)
 	}
 	if got := e.Active().Buffer.Text(); got != "b" {

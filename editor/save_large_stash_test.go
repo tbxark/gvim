@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ var errTestOpen = errors.New("cannot open")
 
 // restoredText opens the file at the path of d again, puts st back and returns the text
 // of the new document once the index is complete.
-func restoredText(t *testing.T, opts Options, d *Document, st session.OverlayStash) string {
+func restoredText(t *testing.T, opts Options, d *document.Document, st session.OverlayStash) string {
 	t.Helper()
 	fresh, nd := sameFileOpened(t, opts, d.Path)
 	if err := fresh.RestoreOverlay(nd, st); err != nil {
@@ -31,32 +32,32 @@ func TestStashAfterSaveWithEditsDuringTheWrite(t *testing.T) {
 	tests := []struct {
 		Name string
 		// during edits the buffer between the snapshot and the apply.
-		during func(d *Document)
+		during func(d *document.Document)
 		// before edits the buffer before the save is planned.
-		Before func(d *Document)
+		Before func(d *document.Document)
 	}{
 		{
 			Name:   "edit on another line",
-			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{}, "A") },
-			during: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 1}, "B") },
+			Before: func(d *document.Document) { d.Buffer.Insert(buffer.Pos{}, "A") },
+			during: func(d *document.Document) { d.Buffer.Insert(buffer.Pos{Line: 1}, "B") },
 		},
 		{
 			Name:   "edit on the line that was saved",
-			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "A") },
-			during: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "B") },
+			Before: func(d *document.Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "A") },
+			during: func(d *document.Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "B") },
 		},
 		{
 			Name:   "lines added and removed after the saved ones",
-			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 10}, "x\ny\nz") },
-			during: func(d *Document) {
+			Before: func(d *document.Document) { d.Buffer.Insert(buffer.Pos{Line: 10}, "x\ny\nz") },
+			during: func(d *document.Document) {
 				d.Buffer.Delete(buffer.Pos{Line: 20}, buffer.Pos{Line: 25})
 				d.Buffer.Insert(buffer.Pos{Line: 140}, "tail\n")
 			},
 		},
 		{
 			Name:   "line deleted after the saved edit",
-			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 5}, "A") },
-			during: func(d *Document) { d.Buffer.Delete(buffer.Pos{Line: 5}, buffer.Pos{Line: 6}) },
+			Before: func(d *document.Document) { d.Buffer.Insert(buffer.Pos{Line: 5}, "A") },
+			during: func(d *document.Document) { d.Buffer.Delete(buffer.Pos{Line: 5}, buffer.Pos{Line: 6}) },
 		},
 	}
 	for _, tt := range tests {
@@ -116,7 +117,7 @@ func TestStashAfterSaveWhoseRebaseFailed(t *testing.T) {
 	t.Parallel()
 	opts := largeOptions()
 	fail := false
-	opts.openSrc = &sourceOpener{Open: func(path string) (buffer.Source, error) {
+	opts.openSrc = &document.SourceOpener{Open: func(path string) (buffer.Source, error) {
 		if fail {
 			return nil, errTestOpen
 		}

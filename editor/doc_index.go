@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 )
 
 // IndexJob is one step of the background scan that builds the line index of a large
 // document. PlanIndex creates it on the editor's goroutine, Run does the reading
 // anywhere, and ApplyIndex records the result on the editor's goroutine.
 type IndexJob struct {
-	Doc   *Document
+	Doc   *document.Document
 	Buf   *buffer.Buffer
 	Scan  *buffer.IndexScan
 	Batch int64
@@ -19,7 +20,7 @@ type IndexJob struct {
 
 // IndexResult is what IndexJob.Run read. It is applied by Editor.ApplyIndex.
 type IndexResult struct {
-	Doc   *Document
+	Doc   *document.Document
 	Buf   *buffer.Buffer
 	Scan  *buffer.IndexScan
 	Batch buffer.IndexBatch
@@ -33,7 +34,7 @@ type IndexResult struct {
 // there is nothing to scan. It runs on the editor's goroutine, and so does the
 // ApplyIndex that must follow every job.
 func (e *Editor) PlanIndex() (job IndexJob, ok bool) {
-	order := make([]*Document, 0, len(e.docs))
+	order := make([]*document.Document, 0, len(e.docs))
 	if d := e.Active(); d != nil {
 		order = append(order, d)
 	}
@@ -115,12 +116,12 @@ func (e *Editor) ApplyIndex(r IndexResult) (more bool) {
 	case info.Complete:
 		l.Scan.Close()
 		l.Scan = nil
-		d.Status = lineIndexStatus(info.Lines)
+		d.Status = document.LineIndexStatus(info.Lines)
 		if restoreNote != "" {
 			d.Status += ". " + restoreNote
 		}
 	case l.Pending != nil:
-		d.Status = scanningStatus(info)
+		d.Status = document.ScanningStatus(info)
 	}
 	e.resolvePending(d)
 	return !info.Complete
@@ -131,16 +132,16 @@ func (e *Editor) ApplyIndex(r IndexResult) (more bool) {
 // large document reports the progress of its scan, or the line count once the scan
 // is done. After a scan stopped on an error it starts the scan again: the next
 // PlanIndex returns a job.
-func scanLineIndex(e *Editor, d *Document, _ map[string]any) error {
+func scanLineIndex(e *Editor, d *document.Document, _ map[string]any) error {
 	info := d.Index()
 	switch {
 	case info.Complete:
-		e.setStatus(lineIndexStatus(info.Lines))
+		e.setStatus(document.LineIndexStatus(info.Lines))
 	case d.LargeState() != nil && d.LargeState().IndexErr != nil:
 		d.LargeState().IndexErr = nil
-		e.setStatus("Retrying line index... " + scanningStatus(info))
+		e.setStatus("Retrying line index... " + document.ScanningStatus(info))
 	default:
-		e.setStatus(scanningStatus(info))
+		e.setStatus(document.ScanningStatus(info))
 	}
 	return nil
 }

@@ -23,7 +23,7 @@ var (
 )
 
 // libraryPath reports whether path is in a library folder.
-func libraryPath(path string) bool {
+func LibraryPath(path string) bool {
 	path = filepath.ToSlash(path)
 	for _, p := range libraryContains {
 		if strings.Contains(path, p) {
@@ -40,7 +40,7 @@ func libraryPath(path string) bool {
 
 // unwritable reports whether the file at path exists and cannot be opened for
 // writing by this process. It does not change the file.
-func unwritable(path string) bool {
+func Unwritable(path string) bool {
 	return errors.Is(writeAccess(path), fs.ErrPermission)
 }
 
@@ -49,8 +49,8 @@ func unwritable(path string) bool {
 // written or is a library file. A library file is one whose own path and whose
 // target after symbolic links are both in a library folder, so a dotfile linked to
 // /nix/store stays editable. It reads the disk, so it may run in a command.
-func loadDocument(path string, spec loadSpec) (*Document, error) {
-	d, err := readDocument(path, spec)
+func LoadDocument(path string, spec LoadSpec) (*Document, error) {
+	d, err := ReadDocument(path, spec)
 	if err != nil {
 		return d, err
 	}
@@ -61,10 +61,10 @@ func loadDocument(path string, spec loadSpec) (*Document, error) {
 	if spec.Access != nil || !spec.AutoRO || !d.Disk.Exists {
 		return d, err
 	}
-	if target, err := filepath.EvalSymlinks(path); err == nil && libraryPath(path) && libraryPath(target) {
+	if target, err := filepath.EvalSymlinks(path); err == nil && LibraryPath(path) && LibraryPath(target) {
 		d.readOnly = true
 	}
-	if unwritable(path) {
+	if Unwritable(path) {
 		d.readOnly = true
 	}
 	return d, nil

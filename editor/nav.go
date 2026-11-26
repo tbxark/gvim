@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 	"slices"
 )
 
@@ -12,14 +13,14 @@ const jumpHistoryMax = 100
 // walk. cur is the index of the place the user is at in the list. It is only
 // meaningful while entries is not empty.
 type jumpHistory struct {
-	entries []jumpEntry
+	entries []document.JumpEntry
 	cur     int
 }
 
 // push records en as the newest place. Places after cur are dropped first, so
 // a new jump clears the forward history. Recording the place already at cur is
 // a no-op. The oldest place goes when the list is full.
-func (h *jumpHistory) push(en jumpEntry) {
+func (h *jumpHistory) push(en document.JumpEntry) {
 	if len(h.entries) > 0 {
 		h.entries = h.entries[:h.cur+1]
 		if h.entries[h.cur] == en {
@@ -34,7 +35,7 @@ func (h *jumpHistory) push(en jumpEntry) {
 }
 
 // registerNavHandlers registers navigate_back and navigate_forward.
-func registerNavHandlers(h map[Action]handler) {
+func registerNavHandlers(h map[document.Action]handler) {
 	h["navigate_back"] = navigateBack
 	h["navigate_forward"] = navigateForward
 }
@@ -47,12 +48,12 @@ func (e *Editor) pushJump() {
 	if d == nil || e.pristineUntitled() {
 		return
 	}
-	e.extras.jumps.push(jumpEntryOf(d))
+	e.extras.jumps.push(document.JumpEntryOf(d))
 }
 
 // goToJump switches to the tab of en and puts the caret at its position. A
 // place whose tab has been closed is skipped without an error.
-func (e *Editor) goToJump(en jumpEntry) {
+func (e *Editor) goToJump(en document.JumpEntry) {
 	i := e.indexOfDoc(en.Doc)
 	if i < 0 {
 		return
@@ -78,7 +79,7 @@ func navigateBack(e *Editor, _ map[string]any) error {
 	}
 	if h.cur == len(h.entries)-1 {
 		if d := e.Active(); d != nil {
-			h.push(jumpEntryOf(d))
+			h.push(document.JumpEntryOf(d))
 		}
 	}
 	e.stepJump(-1)

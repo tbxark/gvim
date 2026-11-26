@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,14 +44,14 @@ type ShellJob struct {
 
 	// doc, from, to and selected say where Input came from, so that EndShell
 	// replaces the same text, and only when the text is still the same (see snapshot).
-	Doc      *Document
+	Doc      *document.Document
 	From, To buffer.Pos
 	Selected bool
 	// snapshot marks the whole text of doc when BeginShell ran (see contentMark).
 	// EndShell applies a replace only while the text is still the same, so an edit
 	// anywhere in the document while the command runs stops the result, not only an
 	// edit inside the range.
-	snapshot contentMark
+	snapshot document.ContentMark
 	// format is true for format_buffer, so that the status says it formatted.
 	format bool
 }
@@ -70,13 +71,13 @@ func (e *Editor) envOverlay() []string {
 
 // registerShellHandlers registers shell_command and shell_command_replace. Each
 // one runs the three steps of the split in turn, as Do runs any action.
-func registerShellHandlers(h map[Action]handler) {
+func registerShellHandlers(h map[document.Action]handler) {
 	h["shell_command"] = shellHandler("shell_command")
 	h["shell_command_replace"] = shellHandler("shell_command_replace")
 }
 
 // shellHandler runs a shell action in the three steps of the split.
-func shellHandler(action Action) handler {
+func shellHandler(action document.Action) handler {
 	return func(e *Editor, args map[string]any) error {
 		job, err := e.BeginShell(action, args)
 		if err != nil {
@@ -93,7 +94,7 @@ func shellHandler(action Action) handler {
 // read-only document with ErrReadOnly. BeginShell changes no text. It ends the typing
 // group, as Do does before any action that is not typing. The action format_buffer
 // takes no "command" argument; its job is built by beginFormat.
-func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error) {
+func (e *Editor) BeginShell(action document.Action, args map[string]any) (ShellJob, error) {
 	// Do ends the typing group before an action that is not typing. The root runs
 	// the job without Do, so BeginShell ends the group here.
 	if d := e.Active(); d != nil {
@@ -113,7 +114,7 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 	}
 	replace := action == "shell_command_replace"
 	if replace && d.ReadOnly() {
-		return ShellJob{}, ErrReadOnly
+		return ShellJob{}, document.ErrReadOnly
 	}
 	if replace {
 		if err := d.RefuseEditWhileRestoring(string(action)); err != nil {
@@ -126,7 +127,7 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 		from, to = d.Sel.Ordered()
 	} else if d.LargeState() != nil {
 		// The input would be the whole text of the file.
-		return ShellJob{}, errLargeAction(action)
+		return ShellJob{}, document.ErrLargeAction(action)
 	}
 	_ = d.TakeRefusal()
 	input, err := d.ReadRange(from, to)
@@ -134,7 +135,7 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 		return ShellJob{}, fmt.Errorf("%s: %w", action, err)
 	}
 	// Without a selection the input is the whole text, so it is the snapshot too.
-	snapshot := contentMark{Text: input}
+	snapshot := document.ContentMark{Text: input}
 	if selected {
 		snapshot = d.ContentMark()
 	}
@@ -189,7 +190,7 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 	}
 	d := job.Doc
 	if d.ReadOnly() {
-		return ErrReadOnly
+		return document.ErrReadOnly
 	}
 	if err := d.RefuseEditWhileRestoring("shell_command_replace"); err != nil {
 		return err
@@ -214,7 +215,7 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 		d.Buffer.Delete(job.From, job.To)
 		after = d.Buffer.Insert(job.From, out)
 	})
-	d.LastMulti = nil
+	d.ClearLastMulti()
 	switch {
 	case job.Selected:
 		d.Cursor = after
@@ -235,7 +236,7 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 
 // shellDir is the directory a command runs in: the directory of the document,
 // or the working directory for an unnamed buffer.
-func shellDir(d *Document) string {
+func shellDir(d *document.Document) string {
 	if d.Path != "" {
 		return filepath.Dir(d.Path)
 	}

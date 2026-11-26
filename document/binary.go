@@ -28,18 +28,18 @@ var ErrBinaryRangeUnsupported = errors.New("binary range reads are not supported
 // The bytes stay in the file: the summary can be opened without reading a large
 // blob into memory, and Toggle Hex View reads bounded ranges through
 // ReadBinaryRange.
-func binaryDocument(path string, disk diskState) *Document {
+func binaryDocument(path string, disk DiskState) *Document {
 	text := strings.Join([]string{
 		filepath.Base(path),
 		"",
 		"Binary file",
-		"Size: " + formatSize(disk.Size),
+		"Size: " + FormatSize(disk.Size),
 		"",
 		"Binary file: read-only.",
 		"",
 		"Run Toggle Hex View to inspect the bytes.",
 	}, "\n")
-	d := newDocument(path, text)
+	d := NewDocument(path, text)
 	d.Disk = disk
 	d.Codec = "binary"
 	d.encoding = "Binary"
@@ -54,7 +54,7 @@ func (d *Document) Binary() bool { return d.binary }
 // BinaryStat is the size and modification time the binary file had when it was
 // opened. It is zero for a document without a disk state.
 func (d *Document) BinaryStat() (size, mtime int64) {
-	return d.Disk.Size, mtimeNano(d.Disk)
+	return d.Disk.Size, MtimeNano(d.Disk)
 }
 
 // ReadBinaryRange reads at most n bytes at off from a binary document. It reads

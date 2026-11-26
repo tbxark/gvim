@@ -306,12 +306,12 @@ func readRemoteHead(ctx context.Context, access RangeAccess, path string, size, 
 // readRemoteLargeDocument opens path in large-file mode over a windowed remote
 // source. Edits are an in-memory overlay over the windowed base; a non-UTF-8 file
 // fails with ErrTooLargeToTranscode instead of loading whole.
-func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, spec loadSpec, access RangeAccess) (*Document, error) {
+func readRemoteLargeDocument(ctx context.Context, path string, disk DiskState, spec LoadSpec, access RangeAccess) (*Document, error) {
 	// Probe the head before building the windowed source. A binary or an image
 	// needs no line index, and the source would eagerly fetch a 1 MiB window only
 	// to throw it away; text still opens the source below. The probe itself is
 	// bounded to the same 64 KiB sample the local large path reads.
-	head, _, err := readRemoteHead(ctx, access, path, disk.Size, largeSampleSize)
+	head, _, err := readRemoteHead(ctx, access, path, disk.Size, LargeSampleSize)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -378,7 +378,7 @@ func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, s
 	d.encoding = info.Label
 	d.large = &largeDoc{
 		Size: src.Size(), EstLine: spec.LargeConf.EstLine, Batch: spec.LargeConf.Batch,
-		Mtime: mtimeNano(disk), Skip: info.Skip, StashDir: spec.LargeConf.StashDir,
+		Mtime: MtimeNano(disk), Skip: info.Skip, StashDir: spec.LargeConf.StashDir,
 		RemoteWindowed: true,
 	}
 	return d, nil

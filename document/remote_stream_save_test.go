@@ -128,9 +128,9 @@ func (a *fakeStreamAccess) lastStream() *fakeSaveStream {
 func openRemoteLargeStreamSave(t *testing.T, content []byte) (*Document, *fakeStreamAccess) {
 	t.Helper()
 	access := &fakeStreamAccess{fakeRangeAccess: &fakeRangeAccess{data: content}}
-	d, err := readDocument("/remote/stream-save.txt", loadSpec{
+	d, err := ReadDocument("/remote/stream-save.txt", LoadSpec{
 		Access: access,
-		LargeConf: largeSpec{
+		LargeConf: LargeSpec{
 			Threshold: 1,
 			Geom:      bufferLargeOpts(),
 		},
@@ -162,7 +162,7 @@ func TestRemoteLargeStreamedSaveHash(t *testing.T) {
 	if ref := d.Buffer.Refusal(); ref != nil {
 		t.Fatalf("edit refused: %v", ref)
 	}
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	if job.err != nil {
 		t.Fatalf("PlanSave: %v", job.err)
 	}
@@ -205,7 +205,7 @@ func TestRemoteLargeStreamedSaveMidStreamFailure(t *testing.T) {
 	d, access := openRemoteLargeStreamSave(t, content)
 	ensureRemoteLine(t, d, 100000)
 	d.Buffer.Insert(buffer.Pos{Line: 100000, Col: 0}, "EDIT ")
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	if job.err != nil {
 		t.Fatalf("PlanSave: %v", job.err)
 	}
@@ -241,7 +241,7 @@ func TestRemoteLargeStreamedSaveCancellationAborts(t *testing.T) {
 	d, access := openRemoteLargeStreamSave(t, content)
 	ensureRemoteLine(t, d, 50000)
 	d.Buffer.Insert(buffer.Pos{Line: 50000, Col: 0}, "EDIT ")
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	if job.err != nil {
 		t.Fatalf("PlanSave: %v", job.err)
 	}
@@ -269,7 +269,7 @@ func TestRemoteLargeStreamedSaveChangedRefuses(t *testing.T) {
 	d, access := openRemoteLargeStreamSave(t, content)
 	d.Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "EDIT ")
 	access.change(append([]byte(nil), content...))
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	if job.err == nil {
 		if err := job.Run().Err(); err == nil {
 			t.Fatal("a changed remote file did not refuse the streamed save")
@@ -293,7 +293,7 @@ func TestRemoteLargeSaveWithoutStreamKeepsBound(t *testing.T) {
 	old := remoteLargeSaveMax
 	remoteLargeSaveMax = 64
 	t.Cleanup(func() { remoteLargeSaveMax = old })
-	job := d.PlanSave(d.Path, Settings{})
+	job := d.PlanSave(d.Path, SaveOptions{})
 	if job.err != nil {
 		t.Fatalf("PlanSave: %v", job.err)
 	}

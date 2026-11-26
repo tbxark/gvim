@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"slices"
 )
 
@@ -11,7 +12,7 @@ import (
 var ErrNoPreviousTab = errors.New("no previous tab")
 
 // registerTabSwitchHandlers registers switch_to_previous_tab and switch_to_tab_by_name.
-func registerTabSwitchHandlers(h map[Action]handler) {
+func registerTabSwitchHandlers(h map[document.Action]handler) {
 	h["switch_to_previous_tab"] = func(e *Editor, _ map[string]any) error {
 		i := slices.Index(e.docs, e.prevDoc)
 		if i < 0 || e.docs[i] == e.Active() {
@@ -28,7 +29,7 @@ func registerTabSwitchHandlers(h map[Action]handler) {
 		if !ok {
 			return errors.New("switch_to_tab_by_name: missing string argument \"name\"")
 		}
-		i := slices.IndexFunc(e.docs, func(d *Document) bool { return d.Name() == name })
+		i := slices.IndexFunc(e.docs, func(d *document.Document) bool { return d.Name() == name })
 		if i < 0 {
 			return fmt.Errorf("switch_to_tab_by_name: no tab named %q", name)
 		}

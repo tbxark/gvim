@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ func typeAt(t *testing.T, e *Editor, line, col int, text string) {
 }
 
 // stashOf returns the stash of the unsaved edits of d, and fails when there is none.
-func stashOf(t *testing.T, d *Document) session.OverlayStash {
+func stashOf(t *testing.T, d *document.Document) session.OverlayStash {
 	t.Helper()
 	st, ok := d.OverlayStash()
 	if !ok {
@@ -35,7 +36,7 @@ func stashOf(t *testing.T, d *Document) session.OverlayStash {
 
 // sameFileOpened opens the file of d again in a new editor made from opts, as a new
 // session does.
-func sameFileOpened(t *testing.T, opts Options, path string) (*Editor, *Document) {
+func sameFileOpened(t *testing.T, opts Options, path string) (*Editor, *document.Document) {
 	t.Helper()
 	e := New(opts)
 	if err := e.OpenFile(path); err != nil {
@@ -57,7 +58,7 @@ func TestOverlayStashFollowsTheEdits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Path != d.Path || st.Size != info.Size() || st.MTimeUnixNano != info.ModTime().UnixNano() || st.Skip != 0 || st.EOL != eolLF {
+	if st.Path != d.Path || st.Size != info.Size() || st.MTimeUnixNano != info.ModTime().UnixNano() || st.Skip != 0 || st.EOL != document.EolLF {
 		t.Errorf("identity = %+v, want path %s size %d mtime %d", st, d.Path, info.Size(), info.ModTime().UnixNano())
 	}
 	if st.Overlay.Empty() {
@@ -116,9 +117,9 @@ func TestRestoreOverlayWaitsForTheIndexAndRefusesEditsMeanwhile(t *testing.T) {
 	if got := fresh.UnsavedDocs(); len(got) != 1 || got[0] != nd {
 		t.Errorf("UnsavedDocs() = %v, want the document that waits", got)
 	}
-	for _, action := range []Action{"insert_char", "delete_backward", "undo", "paste"} {
+	for _, action := range []document.Action{"insert_char", "delete_backward", "undo", "paste"} {
 		res := fresh.Do(action, map[string]any{"text": "z"})
-		if !errors.Is(res.Err, ErrRestoring) {
+		if !errors.Is(res.Err, document.ErrRestoring) {
 			t.Errorf("%s while restoring: %v, want ErrRestoring", action, res.Err)
 		}
 	}
@@ -171,11 +172,11 @@ func TestSaveAndRevertWaitForTheRestore(t *testing.T) {
 	}
 	plan, _ := fresh.PlanSave()
 	for _, r := range plan.Run() {
-		if !errors.Is(r.Err(), ErrRestoring) {
+		if !errors.Is(r.Err(), document.ErrRestoring) {
 			t.Errorf("save while restoring: %v, want ErrRestoring", r.Err())
 		}
 	}
-	if _, err := fresh.PlanRevert(true); !errors.Is(err, ErrRestoring) {
+	if _, err := fresh.PlanRevert(true); !errors.Is(err, document.ErrRestoring) {
 		t.Errorf("PlanRevert while restoring: %v, want ErrRestoring", err)
 	}
 	if again, ok := nd.OverlayStash(); !ok || again.Overlay.TailFirst != st.Overlay.TailFirst {
@@ -274,7 +275,7 @@ func TestRestoreOverlayRefusesAFileThatChanged(t *testing.T) {
 			if tc.stash != nil {
 				tc.stash(&in)
 			}
-			if err := fresh.RestoreOverlay(nd, in); !errors.Is(err, ErrStashStale) {
+			if err := fresh.RestoreOverlay(nd, in); !errors.Is(err, document.ErrStashStale) {
 				t.Fatalf("RestoreOverlay() = %v, want ErrStashStale", err)
 			}
 			if nd.Buffer.Modified() || nd.Restoring() {

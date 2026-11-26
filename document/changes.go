@@ -10,12 +10,12 @@ const (
 	// changeRingRecords and changeRingBytes bound a ring: the most records, and
 	// the most bytes of inserted and removed text, that it keeps. The newest
 	// record always stays.
-	changeRingRecords = 256
-	changeRingBytes   = 1 << 20
+	ChangeRingRecords = 256
+	ChangeRingBytes   = 1 << 20
 	// changePayloadMax bounds one record, and the total of the records one
 	// TakeChanges returns. A record over it is kept without its text, as a
 	// coarse change; a total over it is reported as overflow.
-	changePayloadMax = 256 << 10
+	ChangePayloadMax = 256 << 10
 )
 
 // RingFor returns the change ring of d, made when first needed.
@@ -43,18 +43,18 @@ func payload(c buffer.Change) int { return len(c.Text) + len(c.Removed) }
 func (r *changeRing) Next() uint64 { return r.Base + uint64(len(r.Recs)-r.Start) }
 
 func (r *changeRing) Add(c buffer.Change) {
-	if payload(c) > changePayloadMax {
+	if payload(c) > ChangePayloadMax {
 		c = buffer.Change{Coarse: true, Undo: c.Undo, Version: c.Version}
 	}
 	r.Recs = append(r.Recs, c)
 	r.Bytes += payload(c)
-	for n := len(r.Recs) - r.Start; n > 1 && (n > changeRingRecords || r.Bytes > changeRingBytes); n-- {
+	for n := len(r.Recs) - r.Start; n > 1 && (n > ChangeRingRecords || r.Bytes > ChangeRingBytes); n-- {
 		r.Bytes -= payload(r.Recs[r.Start])
 		r.Recs[r.Start] = buffer.Change{}
 		r.Start++
 		r.Base++
 	}
-	if r.Start >= changeRingRecords {
+	if r.Start >= ChangeRingRecords {
 		r.Recs = append(r.Recs[:0], r.Recs[r.Start:]...)
 		r.Start = 0
 	}
@@ -74,7 +74,7 @@ func (r *changeRing) Take(consumer string) ([]buffer.Change, bool) {
 	total := 0
 	for _, c := range recs {
 		total += payload(c)
-		if c.Coarse || total > changePayloadMax {
+		if c.Coarse || total > ChangePayloadMax {
 			return nil, true
 		}
 	}

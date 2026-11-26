@@ -27,7 +27,7 @@ func EncodingChoices() []EncodingChoice {
 	choices := make([]EncodingChoice, len(names))
 	for i, n := range names {
 		label := labels[n]
-		if n == defaultCodec {
+		if n == DefaultCodec {
 			label = "UTF-8"
 		}
 		choices[i] = EncodingChoice{Name: n, Label: label}

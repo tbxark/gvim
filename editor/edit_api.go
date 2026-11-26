@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 )
 
 // ApplyEdits applies edits to the open document id as one undo step. Every
@@ -17,7 +18,7 @@ import (
 // More are made by cutting the lines from the first touched one to the last,
 // applying the edits to that text in memory, and putting it back, so the cost
 // does not grow with the number of edits times the size of the text.
-func (e *Editor) ApplyEdits(id DocID, edits []LSPEdit, o EditOptions) error {
+func (e *Editor) ApplyEdits(id document.DocID, edits []document.LSPEdit, o document.EditOptions) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -28,7 +29,7 @@ func (e *Editor) ApplyEdits(id DocID, edits []LSPEdit, o EditOptions) error {
 // Group runs fn so that every edit it makes to the document is one undo step.
 // It nests, and does not merge with typing before or after it. It returns the
 // error of fn, or the id's error when no document has it.
-func (e *Editor) Group(id DocID, fn func() error) error {
+func (e *Editor) Group(id document.DocID, fn func() error) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -38,7 +39,7 @@ func (e *Editor) Group(id DocID, fn func() error) error {
 }
 
 // SetCursorID is SetCursor for document id. It does not record a jump.
-func (e *Editor) SetCursorID(id DocID, p buffer.Pos, extend bool) error {
+func (e *Editor) SetCursorID(id document.DocID, p buffer.Pos, extend bool) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -48,7 +49,7 @@ func (e *Editor) SetCursorID(id DocID, p buffer.Pos, extend bool) error {
 }
 
 // SelectID is SelectRange for document id. It does not record a jump.
-func (e *Editor) SelectID(id DocID, anchor, head buffer.Pos) error {
+func (e *Editor) SelectID(id document.DocID, anchor, head buffer.Pos) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -58,7 +59,7 @@ func (e *Editor) SelectID(id DocID, anchor, head buffer.Pos) error {
 }
 
 // SetLanguageID is SetLanguage for document id.
-func (e *Editor) SetLanguageID(id DocID, name string) error {
+func (e *Editor) SetLanguageID(id document.DocID, name string) error {
 	d, _, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -69,7 +70,7 @@ func (e *Editor) SetLanguageID(id DocID, name string) error {
 
 // CloseID is CloseTab for the tab of document id. A modified document is kept,
 // and ErrUnsaved returned, unless force is set.
-func (e *Editor) CloseID(id DocID, force bool) error {
+func (e *Editor) CloseID(id document.DocID, force bool) error {
 	_, i, err := e.docByID(id)
 	if err != nil {
 		return err
@@ -78,7 +79,7 @@ func (e *Editor) CloseID(id DocID, force bool) error {
 }
 
 // ActivateID makes the tab of document id the active one.
-func (e *Editor) ActivateID(id DocID) error {
+func (e *Editor) ActivateID(id document.DocID) error {
 	_, i, err := e.docByID(id)
 	if err != nil {
 		return err

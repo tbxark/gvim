@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func TestUntitledSaveReturnsErrNoPath(t *testing.T) {
 	e := New(Options{})
 	run(t, e, "new")
 	typeText(t, e, "hello")
-	if err := e.Save(); !errors.Is(err, ErrNoPath) {
+	if err := e.Save(); !errors.Is(err, document.ErrNoPath) {
 		t.Fatalf("Save on untitled err = %v, want ErrNoPath", err)
 	}
 	if !e.Active().Untitled() {
@@ -302,7 +303,7 @@ func TestOpenMissingPathBindsEmptyBufferToPath(t *testing.T) {
 func TestOpenEmptyPathFails(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
-	if err := e.OpenFile(""); !errors.Is(err, ErrEmptyPath) {
+	if err := e.OpenFile(""); !errors.Is(err, document.ErrEmptyPath) {
 		t.Fatalf("OpenFile(\"\") err = %v, want ErrEmptyPath", err)
 	}
 }
@@ -330,7 +331,7 @@ func TestStatusIsPerTab(t *testing.T) {
 
 	// An error on one tab stays on that tab.
 	run(t, e, "next_buffer")
-	if r := e.Do("save", nil); !errors.Is(r.Err, ErrNoPath) {
+	if r := e.Do("save", nil); !errors.Is(r.Err, document.ErrNoPath) {
 		t.Fatalf("save untitled err = %v", r.Err)
 	}
 	run(t, e, "prev_buffer")
@@ -338,7 +339,7 @@ func TestStatusIsPerTab(t *testing.T) {
 		t.Fatalf("status leaked from the untitled tab: %q", e.Status())
 	}
 	run(t, e, "next_buffer")
-	if e.Status() != ErrNoPath.Error() {
+	if e.Status() != document.ErrNoPath.Error() {
 		t.Fatalf("untitled tab lost its status: %q", e.Status())
 	}
 }

@@ -1,5 +1,7 @@
 package editor
 
+import "github.com/tbxark/gvim/document"
+
 // releaseDoc ends the life of a document that leaves the editor: a closed tab, a
 // preview that another file replaces, a placeholder that a file replaces, and a document
 // that was loaded but not opened because its file is already open. It drops the work
@@ -13,7 +15,7 @@ package editor
 //
 // The document is not changed otherwise: a caller that still holds it sees a closed
 // buffer, whose lines read as empty.
-func (e *Editor) releaseDoc(d *Document) {
+func (e *Editor) releaseDoc(d *document.Document) {
 	if d == nil {
 		return
 	}
@@ -23,7 +25,7 @@ func (e *Editor) releaseDoc(d *Document) {
 
 // releaseDocResources cancels any pending/in-flight large scan and closes the
 // document's buffer while keeping d's position in e.recent.
-func (e *Editor) releaseDocResources(d *Document) {
+func (e *Editor) releaseDocResources(d *document.Document) {
 	if d == nil {
 		return
 	}
