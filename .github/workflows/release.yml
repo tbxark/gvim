@@ -23,11 +23,22 @@ jobs:
 
       - name: Run tests before releasing
         run: |
+          go vet ./...
           bash tools/purity_check.sh
           bash tools/import_rules_check.sh
           bash tools/i18n_check.sh
-          python3 tools/gen_menus.py --check
-          go test ./...
+          missing="$(go list -f '{{if not .Doc}}{{.ImportPath}}{{end}}' ./...)"
+          if [ -n "$missing" ]; then
+            echo "Missing package doc comments:"
+            echo "$missing"
+            exit 1
+          fi
+          go test -short -p 2 ./...
+          go test -race -short -p 2 \
+            ./authority/... ./finder/... ./cmd/gvimdebug/... \
+            ./internal/app/... ./internal/daemon/... ./internal/tui/... \
+            ./internal/lsphost/... ./internal/filewatch/... ./internal/pluginhost/... \
+            ./internal/terminal/... ./internal/uitest/... ./lsp/... ./plugin/...
 
       - name: Release with GoReleaser
         uses: goreleaser/goreleaser-action@v6

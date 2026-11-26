@@ -15,8 +15,8 @@ safely. It ships as a single static binary with no runtime dependencies.
 - **LSP navigation**: definition, implementation, references with preview, document and workspace
   symbols, call hierarchy, hover, diagnostics, and a cross-file back/forward history
   (`Alt+Left` / `Alt+Right`).
-- **Git and diff**: side-by-side file comparison (`gvim --diff a b`), gutter change markers,
-  inline blame, commit log, and a review-diff mode for staged, unstaged, and untracked changes.
+- **Git and diff**: built-in Review Diff Mode (`gvim --review` or `Alt+Shift+R`), side-by-side
+  file comparison (`gvim --diff a b`), gutter change markers, inline blame, and commit log.
 - **Fast search**: fuzzy Quick Open (`Ctrl+P`, with `:line`, `#buffers`, `>commands`), project-wide
   Live Grep (`Alt+/`), in-file find and replace, and Flash Jump.
 - **Markdown**: rendered view, source view, or a synchronized dual view, plus an outline in the
@@ -24,7 +24,7 @@ safely. It ships as a single static binary with no runtime dependencies.
 - **Pure Go, cross-platform**: macOS, Linux, and Windows, with `default`, `vscode`, `emacs`,
   `macos`, and `macos-gui` keymaps.
 
-Some features (Git Log, Review Diff, Merge conflict resolution, Flash Jump, and the LSP symbol
+Some features (Git Log, Merge conflict resolution, Flash Jump, and the LSP symbol
 and call-hierarchy commands) are bundled plugins that are off by default. See
 [`docs/plugins/bundled.md`](docs/plugins/bundled.md) for how to enable them.
 

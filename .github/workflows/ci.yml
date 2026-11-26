@@ -11,12 +11,8 @@ permissions:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    name: Test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +24,7 @@ jobs:
       - name: Pure-Go build
         run: |
           CGO_ENABLED=0 go build ./...
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
 
       - name: Static checks and package boundaries
@@ -36,7 +33,6 @@ jobs:
           bash tools/purity_check.sh
           bash tools/import_rules_check.sh
           bash tools/i18n_check.sh
-          python3 tools/gen_menus.py --check
 
       - name: Check Go doc coverage
         run: |
@@ -52,16 +48,17 @@ jobs:
       - name: Run tests
         run: go test -short -p 2 ./...
 
-      # Only the packages that run goroutines gate a pull request under the race detector; the
-      # pure-logic packages are covered by the nightly full race run.
+      # Packages that run goroutines gate pull requests under the race detector;
+      # nightly.yml runs the full suite under -race.
       - name: Run concurrent packages with race detector
         run: |
           go test -race -short -p 2 \
+            ./authority/... ./finder/... ./cmd/gvimdebug/... \
             ./internal/app/... ./internal/daemon/... ./internal/tui/... \
             ./internal/lsphost/... ./internal/filewatch/... ./internal/pluginhost/... \
-            ./internal/terminal/... ./lsp/... ./plugin/...
+            ./internal/terminal/... ./internal/uitest/... ./lsp/... ./plugin/...
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: v2.1.6

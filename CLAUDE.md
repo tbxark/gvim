@@ -78,7 +78,6 @@ golangci-lint run ./...                          # v2; reports 0 issues
 bash tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
 bash tools/import_rules_check.sh       # layering gate R1-R16, prints IMPORT_RULES_OK
 bash tools/i18n_check.sh               # locale catalogue gate
-python3 tools/gen_menus.py --check     # generated menu table is in sync
 go test ./...
 go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
@@ -141,7 +140,7 @@ package maps). The shape that needs several files to see:
   column's section stack and Contents widget), `split`, `tabstrip`, `dock`,
   `editorpane`, `menubar`,
   `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `pluginpanel` (the
-  plugin API's declarative widget panel), `searchpanel` (project search and replace),
+  plugin API's declarative widget panel), `reviewdiff` (the built-in Review Diff Mode), `searchpanel` (project search and replace),
   `popup`, `ctxmenu`, `dialog`, `style`, `grid`, `icons`, `space`, `textsafe` (the
   sanitizer for untrusted text)) must not import the root
   `tui`.
@@ -173,15 +172,10 @@ package maps). The shape that needs several files to see:
 - Test domain packages (`buffer`, `editor`, `search`, `fuzzy`, ...) directly, without Bubble Tea.
 - Fix a bug with a regression test that fails first. Run the single package's tests while
   iterating, then `go test ./...` before finishing.
-- The existing `testdata` fixture (`commands/testdata`) stays as it is. Do not extend it, and
-  do not regenerate it to make a failing test pass.
 
-### Generated and reference code
+### Reference code
 
-- `commands/commands_gen.go`: regenerate with
-  `python3 commands/gen/generate.py refs/fresh`. Do not edit by hand.
-- `internal/tui/menubar/menu_table_gen.go`: regenerate with `python3 tools/gen_menus.py`
-  (`--check` reports drift). It reads `refs/fresh`. Do not edit by hand.
+- `commands/builtin.go` and `internal/tui/menubar/menus.go` are hand-maintained native Go tables.
 - `refs/` (crush, fresh, lazygit, micro, orbiton, toast, zed; gitignored) are read-only reference checkouts. They
   are not part of the build (`go list ./...` lists nothing under `refs`). Do not edit or import
   them.
