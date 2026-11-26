@@ -361,10 +361,16 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 		local spawned = {}
 		local bound = {}
 		rex = {
-			block = { call = function() return nil end },
+			call = function(method)
+				assert(method == "server.version")
+				return { platform = _TEST_PLATFORM }
+			end,
+			block = { call = function(_, method)
+				if method == "pwd" then return { pwd = _TEST_PWD } end
+			end },
 			layout = { block = function(o) return o end },
 			session = { new_layer = function(o)
-				spawned[#spawned + 1] = o.layout.options.command
+				spawned[#spawned + 1] = o.layout.options
 				return true, nil
 			end },
 			action = function(a) actions[a.name] = a end,
@@ -386,6 +392,7 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	mod := l.Get(-1)
 	l.SetGlobal("gvim_mod", mod)
 	if err := l.DoString(`
+		_TEST_PLATFORM = "darwin_arm64"
 		gvim_mod.setup({
 			bin = { "/opt/bin/gvim" },
 			keys = { open = "cmd+shift+e", review = "cmd+shift+r" },
@@ -407,7 +414,12 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	}
 	spawned := l.GetGlobal("_TEST_SPAWNED").(*lua.LTable)
 	readCmd := func(idx int) []string {
-		tbl := spawned.RawGetInt(idx).(*lua.LTable)
+		t.Helper()
+		options := spawned.RawGetInt(idx).(*lua.LTable)
+		if got := options.RawGetString("shell").String(); got != "none" {
+			t.Fatalf("spawn %d shell = %q, want none", idx, got)
+		}
+		tbl := options.RawGetString("command").(*lua.LTable)
 		var out []string
 		for i := 1; i <= tbl.Len(); i++ {
 			out = append(out, tbl.RawGetInt(i).String())
@@ -429,6 +441,7 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	}
 	// A remote pane must not run the local absolute path from bin.
 	if err := l.DoString(`
+		_TEST_PLATFORM = "linux_amd64"
 		_TEST_ACTIONS.gvim_open.run({ server = "nvidia" }, { target = "-dash.txt" })
 		_TEST_ACTIONS.gvim_review.run({ server = "nvidia" })
 	`); err != nil {
@@ -441,5 +454,25 @@ func TestRexLuaPathAndDashDashTarget(t *testing.T) {
 	wantRemoteReview := []string{"/bin/sh", "-c", "PATH=\"$PATH:$HOME/go/bin:$HOME/.local/bin\"; exec gvim \"$@\"", "gvim", "--review", "."}
 	if got := readCmd(5); !slices.Equal(got, wantRemoteReview) {
 		t.Fatalf("remote gvim_review cmd = %v, want %v", got, wantRemoteReview)
+	}
+	if err := l.DoString(`
+		_TEST_PLATFORM = "windows_amd64"
+		_TEST_PWD = "file:///C:/My%20Project"
+		_TEST_ACTIONS.gvim_open.run({ server = "windows", block_id = "pane" }, { target = "-a & b.txt" })
+		gvim_mod.setup({ bin = { [[C:\Program Files\gvim\gvim.exe]] } })
+		_TEST_ACTIONS.gvim_review.run({})
+	`); err != nil {
+		t.Fatal(err)
+	}
+	wantWindowsRemote := []string{"gvim.exe", "--", "-a & b.txt"}
+	if got := readCmd(6); !slices.Equal(got, wantWindowsRemote) {
+		t.Fatalf("Windows remote gvim_open cmd = %q, want %q", got, wantWindowsRemote)
+	}
+	if got := spawned.RawGetInt(6).(*lua.LTable).RawGetString("cwd").String(); got != "C:/My Project" {
+		t.Fatalf("Windows remote cwd = %q, want C:/My Project", got)
+	}
+	wantWindowsLocal := []string{`C:\Program Files\gvim\gvim.exe`, "--review", "."}
+	if got := readCmd(7); !slices.Equal(got, wantWindowsLocal) {
+		t.Fatalf("Windows local gvim_review cmd = %q, want %q", got, wantWindowsLocal)
 	}
 }

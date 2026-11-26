@@ -43,13 +43,15 @@ local function default_path()
 end
 
 -- decode_file_url turns an OSC 7 style file:// URL into a path.
-local function decode_file_url(url)
+local function decode_file_url(url, windows)
   if type(url) ~= "string" then return nil end
   local path = url:match("^file://[^/]*(/.*)$")
   if path == nil then return nil end
-  return (path:gsub("%%(%x%x)", function(hex)
+  path = path:gsub("%%(%x%x)", function(hex)
     return string.char(tonumber(hex, 16))
-  end))
+  end)
+  if windows and path:match("^/%a:/") then return path:sub(2) end
+  return path
 end
 
 function M.setup(opts)
@@ -58,34 +60,27 @@ function M.setup(opts)
   if type(bin) == "string" then bin = { bin } end
   local path = opts.path or default_path()
 
-  -- The argv of gvim with ARGS appended.
-  local function argv(args)
+  -- Remote panes resolve gvim on their own server. On Unix, add the usual
+  -- install directories to the server's PATH before launching it.
+  local function command(ctx, args, windows)
     local out = {}
-    for _, part in ipairs(bin) do out[#out + 1] = part end
-    for _, part in ipairs(args) do out[#out + 1] = part end
-    return out
-  end
-
-  -- The command for a pane. A local pane gets an explicit PATH because
-  -- shell = "none" inherits the Rex server's minimal one. A remote pane
-  -- runs on another machine, where the local path in bin does not exist: it
-  -- runs the gvim found there, on the host's own PATH plus the usual
-  -- user install directories.
-  local function command(ctx, args)
-    if ctx.server ~= nil then
-      local out = { "/bin/sh", "-c",
+    if windows then
+      local executable = ctx.server ~= nil and { "gvim.exe" } or bin
+      for _, part in ipairs(executable) do out[#out + 1] = part end
+    elseif ctx.server ~= nil then
+      out = { "/bin/sh", "-c",
         'PATH="$PATH:$HOME/go/bin:$HOME/.local/bin"; exec gvim "$@"', "gvim" }
-      for _, part in ipairs(args) do out[#out + 1] = part end
-      return out
+    else
+      out = { "/usr/bin/env", "PATH=" .. path }
+      for _, part in ipairs(bin) do out[#out + 1] = part end
     end
-    local out = { "/usr/bin/env", "PATH=" .. path }
-    for _, part in ipairs(argv(args)) do out[#out + 1] = part end
+    for _, part in ipairs(args) do out[#out + 1] = part end
     return out
   end
 
   -- Where the program in front works, which is right for an editor too; or
   -- else what the shell last reported.
-  local function cwd(ctx)
+  local function cwd(ctx, windows)
     if ctx.block_id == nil then return nil end
     local info = rex.block.call(TERMINAL, "process", { block_id = ctx.block_id })
     if type(info) == "table" and type(info.foreground) == "table"
@@ -94,15 +89,22 @@ function M.setup(opts)
     end
     local pwd = rex.block.call(TERMINAL, "pwd", { block_id = ctx.block_id })
     if type(pwd) ~= "table" or type(pwd.pwd) ~= "string" then return nil end
-    local path = decode_file_url(pwd.pwd)
+    local path = decode_file_url(pwd.pwd, windows)
     if path ~= nil then return path end
     if pwd.pwd:sub(1, 1) == "/" then return pwd.pwd end
+    if windows and (pwd.pwd:match("^%a:[/\\]") or pwd.pwd:sub(1, 2) == "\\\\") then
+      return pwd.pwd
+    end
     return nil
   end
 
   local function open(ctx, label, args)
-    local options = { shell = "none", command = command(ctx, args) }
-    local dir = cwd(ctx)
+    -- Rex routes this call to the server that owns the target pane.
+    local version = rex.call("server.version")
+    local windows = type(version) == "table" and type(version.platform) == "string"
+      and version.platform:match("^windows_") ~= nil
+    local options = { shell = "none", command = command(ctx, args, windows) }
+    local dir = cwd(ctx, windows)
     if dir ~= nil and dir ~= "" then options.cwd = dir end
     -- A floating layer keeps the editor wide; the file explorer and the
     -- contents panel take too much of a half-width split. Fed up with the
