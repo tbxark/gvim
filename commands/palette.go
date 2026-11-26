@@ -1,11 +1,10 @@
 // Package commands is the command registry behind the command palette: the
-// entries, the query modes, the availability rules and the filtering and
-// ranking for a query, following Fresh's command registry
-// (crates/fresh-editor/src/input/command_registry.rs).
+// entries, the query modes, the availability rules, and the filtering and
+// ranking for a query.
 //
-// The builtin command table (commands_gen.go) is generated from the Fresh
-// sources by gen/generate.py. Each entry's Keybinding comes from a keymap.Map,
-// so rebinding a key updates the palette too.
+// All built-in commands live in the declarative table in builtin.go. Each
+// entry's Keybinding comes from a keymap.Map, so rebinding a key updates the
+// palette too.
 //
 // The query has four modes, chosen by its first character: no prefix searches
 // files; ">" runs commands; ":" jumps to a line; "#" picks a buffer. Nothing is
@@ -48,21 +47,17 @@ type Entry struct {
 	// "!read_only", "language:go"). The ui evaluates them; available does not read them.
 	When []string
 
-	contexts       []string // KeyContext names the command is scoped to; empty means any
-	customContexts []string // custom context keys that must be active to show it
+	contexts []string // KeyContext names the command is scoped to; empty means any
 }
 
-// builtinCommand is one generated row of commands_gen.go.
+// builtinCommand is one row of builtin.go.
 type builtinCommand struct {
 	Name        string
 	Description string
 	Action      string
-	// Key and DescKey are Fresh's catalogue keys for Name and Description (the
-	// generated table always fills them; a hand-written row may leave them empty).
-	Key            string
-	DescKey        string
-	Contexts       []string
-	CustomContexts []string
+	Key         string
+	DescKey     string
+	Contexts    []string
 }
 
 // Commands returns the builtin command entries in palette order. Keybinding is
@@ -80,34 +75,16 @@ func Commands(km *keymap.Map) []Entry {
 	if km == nil {
 		km = keymap.Default()
 	}
-	out := make([]Entry, 0, len(builtinCommands)+len(compareCommands)+len(markdownCommands)+len(terminalCommands)+len(pluginCommands)+len(binaryCommands))
-	for _, c := range slices.Concat(builtinCommands, compareCommands, markdownCommands, terminalCommands, pluginCommands, binaryCommands) {
-		key, descKey := c.Key, c.DescKey
-		if r, ok := gvimRenames[c.Action]; ok {
-			if r.Name != "" {
-				c.Name = r.Name
-				key = ""
-			}
-			if r.Description != "" || r.Name != "" {
-				c.Description = r.Description
-				descKey = ""
-			}
-		}
-		if k, ok := gvimCommandKeys[c.Action]; ok {
-			key = k
-		}
-		if k, ok := gvimCommandDescKeys[c.Action]; ok {
-			descKey = k
-		}
+	out := make([]Entry, 0, len(builtinCommands))
+	for _, c := range builtinCommands {
 		e := Entry{
-			Name:           c.Name,
-			Description:    c.Description,
-			Action:         c.Action,
-			I18nKey:        key,
-			DescKey:        descKey,
-			Source:         SourceBuiltin,
-			contexts:       c.Contexts,
-			customContexts: c.CustomContexts,
+			Name:        c.Name,
+			Description: c.Description,
+			Action:      c.Action,
+			I18nKey:     c.Key,
+			DescKey:     c.DescKey,
+			Source:      SourceBuiltin,
+			contexts:    c.Contexts,
 		}
 		if b, ok := km.Primary(c.Action); ok && (b.When == keymap.ContextNormal || b.When == keymap.ContextGlobal) {
 			e.Keybinding = FormatChord(b.Chord)
@@ -197,9 +174,6 @@ func SearchInHistory(entries []Entry, query string, st State, history []string) 
 	}
 	visible := make([]Entry, 0, len(entries))
 	for _, e := range entries {
-		if len(e.customContexts) > 0 {
-			continue // custom contexts are never active in this port
-		}
 		e.Disabled = !available(e, st)
 		visible = append(visible, e)
 	}
