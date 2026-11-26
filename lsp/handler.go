@@ -39,8 +39,7 @@ type clientHandler struct {
 	rootURI string
 }
 
-// PublishDiagnostics forwards the notification to the Diagnostics channel. The
-// send never blocks; see Client.publish for the drop-oldest policy.
+// PublishDiagnostics records the notification as the latest event of its document.
 func (h *clientHandler) PublishDiagnostics(_ context.Context, p *protocol.PublishDiagnosticsParams) error {
 	ev := DiagnosticsEvent{
 		URI:         string(p.URI),

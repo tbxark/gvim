@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/document"
 	"maps"
 	"os"
 	"path"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -21,7 +21,6 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/lsp/manager"
@@ -36,32 +35,6 @@ var lspRequestTimeout = 10 * time.Second
 // lspStopTimeout bounds the shutdown of the servers, on lsp_stop and at exit.
 const lspStopTimeout = 5 * time.Second
 
-// ExternalLocationRequest describes the server that answered a location request. A
-// provider must use Program/Command and Env as the authoritative launch context instead
-// of hard-coding a PATH program: the same binary and environment that served the LSP
-// request should print synthetic source. Program is the absolute executable the manager
-// passed to lsp.Start; it is empty only when the manager left a bare command to the child's
-// own PATH lookup (a documented residual for exact-binary identity).
-type ExternalLocationRequest struct {
-	URI      string
-	Language string
-	Root     string
-	Program  string
-	Command  []string
-	Env      []string
-}
-
-// ExternalLocationOpener resolves a non-file URI (for example slang-synth://core/
-// core.builtin) to generated local content. It must parse and validate the URI, use the
-// workspace authority/trust gate for any process, bound its own work, and return an
-// absolute regular file path. The app installs it; a port without one reports the
-// external location instead of guessing a filesystem path.
-type ExternalLocationOpener func(ctx context.Context, req ExternalLocationRequest) (path string, err error)
-
-// externalLocationTimeout bounds one external URI resolution (the opener has its own
-// smaller process timeout too).
-const externalLocationTimeout = 10 * time.Second
-
 // newPort builds the port for the plan. lspEnabled is the lsp_enabled master
 // switch; it is false when the workspace is untrusted, and then no server starts
 // on its own, though a manual start still runs one.
@@ -75,7 +48,6 @@ func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 		startable:        make(map[string]bool, len(plan.startable)),
 		managers:         make(map[string]*manager.Manager),
 		rootCache:        make(map[string]remoteRootCacheEntry),
-		rootProviders:    make(map[string]func(language string) (manager.ServerConfig, bool)),
 		docs:             make(map[string]lspDocRec),
 		muted:            make(map[string]bool),
 		forced:           make(map[string]bool),
@@ -125,9 +97,6 @@ type lspPort struct {
 	// are never called on remote paths.
 	remoteReadFile func(ctx context.Context, path string) ([]byte, error)
 	remoteReadDir  func(ctx context.Context, dir string) ([]string, error)
-	// externalOpener resolves non-file LSP locations (slang-synth and similar) to
-	// generated local content; nil means no provider.
-	externalOpener ExternalLocationOpener
 	// The server plan: SetConfig replaces it under mu, so a read after construction
 	// takes mu too.
 	servers   map[string][]manager.ServerConfig // by language ID
@@ -138,21 +107,12 @@ type lspPort struct {
 	status    []tui.LSPServerStatus // every configured server, for the popup
 
 	mu sync.Mutex
-	// selectionMu serializes per-root provider updates with an explicit Start/Restart
-	// applying them, so an async selection cannot change between the snapshot and the
-	// manager replacement.
+	// selectionMu serializes SetConfig/RefreshServerPlans with an explicit Start/Restart,
+	// so the server plan cannot change between the snapshot and the manager replacement.
 	selectionMu sync.Mutex
 	root        string
 	managers    map[string]*manager.Manager // by root
-	// rootProviders lets the app provide a per-root server override (Deno auto-selection)
-	// without rebuilding the port. A provider is consulted only when the manager for its
-	// exact root is created; it may return a replacement config for a language.
-	rootProviders map[string]func(language string) (manager.ServerConfig, bool)
-	// rootChanged is the app's project-root switch callback (Deno auto-selection re-probes
-	// the new root and clears the old root's decision). It is called off SetRoot, out of the
-	// lock; nil means nobody listens.
-	rootChanged func(root string)
-	docs        map[string]lspDocRec // by path: the documents the port has open
+	docs        map[string]lspDocRec        // by path: the documents the port has open
 	// pending holds the workspace edits servers asked for, in arrival order. They
 	// are converted to the port's form when the root drains them, because the
 	// conversion reads the files the edits touch.
@@ -280,19 +240,6 @@ func (p *lspPort) SetRoot(root string) {
 	p.rootGen++
 	p.rootCache = make(map[string]remoteRootCacheEntry)
 	p.rootCacheOrder = nil
-	changed := p.rootChanged
-	p.mu.Unlock()
-	if changed != nil {
-		changed(root)
-	}
-}
-
-// SetRootChangeListener installs the app's project-root switch callback. It is called
-// outside the port lock when SetRoot names a root, so the listener may probe/cancel without
-// deadlocking. The listener is not called for the current root here.
-func (p *lspPort) SetRootChangeListener(fn func(root string)) {
-	p.mu.Lock()
-	p.rootChanged = fn
 	p.mu.Unlock()
 }
 
@@ -860,7 +807,7 @@ func (p *lspPort) workspaceEdit(edit *protocol.WorkspaceEdit, label string) (tui
 			if err != nil {
 				return err
 			}
-			op.Edits = append(op.Edits, editor.LSPEdit{
+			op.Edits = append(op.Edits, document.LSPEdit{
 				From: lines.fromLSP(te.Range.Start),
 				To:   lines.fromLSP(te.Range.End),
 				Text: te.NewText,
@@ -1068,7 +1015,7 @@ func (p *lspPort) Request(path, method string, params any) (any, error) {
 // edits in rune columns of text. When the server holds older text than text, it is
 // sent first, so the positions fit. A server with no formatting answers with no
 // edits.
-func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]editor.LSPEdit, error) {
+func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]document.LSPEdit, error) {
 	rec, ok := p.doc(path)
 	if !ok {
 		return nil, errors.New("the document is not open on a language server")
@@ -1089,9 +1036,9 @@ func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]e
 		return nil, err
 	}
 	lines := newTextLines(text)
-	out := make([]editor.LSPEdit, 0, len(edits))
+	out := make([]document.LSPEdit, 0, len(edits))
 	for _, e := range edits {
-		out = append(out, editor.LSPEdit{From: lines.fromLSP(e.Range.Start), To: lines.fromLSP(e.Range.End), Text: e.NewText})
+		out = append(out, document.LSPEdit{From: lines.fromLSP(e.Range.Start), To: lines.fromLSP(e.Range.End), Text: e.NewText})
 	}
 	return out, nil
 }
@@ -1101,7 +1048,6 @@ func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]e
 // root and the settings service call it from a command.
 func (p *lspPort) StartLanguage(language string) error {
 	p.selectionMu.Lock()
-	defer p.selectionMu.Unlock()
 	type managerDesired struct {
 		root    string
 		mgr     *manager.Manager
@@ -1122,25 +1068,30 @@ func (p *lspPort) StartLanguage(language string) error {
 	delete(p.muted, language)
 	list := make([]managerDesired, 0, len(p.managers))
 	for root, mgr := range p.managers {
-		list = append(list, managerDesired{root: root, mgr: mgr, desired: slices.Clone(p.serverConfigsFor(root)[language])})
+		list = append(list, managerDesired{root: root, mgr: mgr, desired: slices.Clone(p.servers[language])})
 	}
 	p.mu.Unlock()
 
 	var errs []error
+	var reopenRoots []string
 	for _, item := range list {
 		if !reflect.DeepEqual(item.mgr.CurrentServers(language), item.desired) {
-			// The completed per-root selection differs from this existing manager's config
-			// (for example Deno was confirmed after the manager was created, or a config
-			// reload removed/disabled the override). Applying it is explicit: Start/Restart
+			// The server plan differs from this existing manager's config (a config reload
+			// changed it after the manager was created). Applying it is explicit: Start/Restart
 			// only, and only this language's servers are stopped by ReplaceServers.
 			err := item.mgr.ReplaceServers(language, item.desired)
 			errs = append(errs, err)
 			if err == nil {
-				errs = append(errs, p.reopenDocs(item.root, language)...)
+				reopenRoots = append(reopenRoots, item.root)
 			}
 			continue
 		}
 		errs = append(errs, item.mgr.StartLanguage(language))
+	}
+	// Release selectionMu before reopenDocs: reopenDocs calls p.Open, which acquires selectionMu.
+	p.selectionMu.Unlock()
+	for _, root := range reopenRoots {
+		errs = append(errs, p.reopenDocs(root, language)...)
 	}
 	p.finishManual(language, startSeq, trustSeq, persist)
 	return errors.Join(errs...)
@@ -1301,7 +1252,6 @@ func (p *lspPort) restartServerAt(root, language, name string) error {
 	// The pull may be asking this very server: cancel it before the restart.
 	p.wsPulls.cancelAll()
 	p.selectionMu.Lock()
-	defer p.selectionMu.Unlock()
 	p.mu.Lock()
 	p.actionSeq[language]++
 	startSeq := p.actionSeq[language]
@@ -1313,18 +1263,22 @@ func (p *lspPort) restartServerAt(root, language, name string) error {
 		mgr = p.newManagerLocked(root)
 		p.managers[root] = mgr
 	}
-	desired := slices.Clone(p.serverConfigsFor(root)[language])
+	desired := slices.Clone(p.servers[language])
 	p.mu.Unlock()
 	var err error
+	reopen := false
 	if !reflect.DeepEqual(mgr.CurrentServers(language), desired) {
-		// Explicit Restart Server applies a completed per-root selection to the existing
-		// manager (only this language's servers are stopped by ReplaceServers).
+		// Explicit Restart Server applies a changed server plan to the existing manager
+		// (only this language's servers are stopped by ReplaceServers).
 		err = mgr.ReplaceServers(language, desired)
-		if err == nil {
-			err = errors.Join(p.reopenDocs(root, language)...)
-		}
+		reopen = err == nil
 	} else {
 		err = mgr.RestartServer(language, name)
+	}
+	// Release selectionMu before reopenDocs: reopenDocs calls p.Open, which acquires selectionMu.
+	p.selectionMu.Unlock()
+	if reopen {
+		err = errors.Join(p.reopenDocs(root, language)...)
 	}
 	p.finishManual(language, startSeq, trustSeq, persist)
 	return err
@@ -1406,42 +1360,17 @@ func (p *lspPort) reopenDocs(root, language string) []error {
 	return errs
 }
 
-// locationFile resolves one protocol location URI to a local path. A file URI is
-// converted directly; any other scheme goes through the app's external-location opener,
-// which owns validation, trust/authority checks and generation. The returned readOnly
-// marks generated content that the TUI must open non-editable.
-func (p *lspPort) locationFile(ctx context.Context, raw string, target ExternalLocationRequest) (file string, readOnly bool, err error) {
+// locationFile resolves one protocol location URI to a local path. Only file URIs (and
+// scheme-less paths) are accepted; any other scheme is refused rather than guessed at.
+func (p *lspPort) locationFile(raw string) (string, error) {
 	u, err := uri.ParseStrict(raw)
 	if err != nil {
-		return "", false, fmt.Errorf("lsp location %q: %w", raw, err)
+		return "", fmt.Errorf("lsp location %q: %w", raw, err)
 	}
 	if u.IsFile() || u.Scheme() == "" {
-		return u.FsPath(), false, nil
+		return u.FsPath(), nil
 	}
-	p.mu.Lock()
-	opener := p.externalOpener
-	p.mu.Unlock()
-	if opener == nil {
-		return "", false, fmt.Errorf("external location %q: no URI provider", raw)
-	}
-	ctx, cancel := context.WithTimeout(ctx, externalLocationTimeout)
-	defer cancel()
-	target.URI = raw
-	path, err := opener(ctx, target)
-	if err != nil {
-		return "", false, fmt.Errorf("external location %q: %w", raw, err)
-	}
-	if path == "" || !filepath.IsAbs(path) {
-		return "", false, fmt.Errorf("external location %q: provider returned a non-absolute path %q", raw, path)
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		return "", false, fmt.Errorf("external location %q: %w", raw, err)
-	}
-	if !st.Mode().IsRegular() {
-		return "", false, fmt.Errorf("external location %q: %q is not a regular file", raw, path)
-	}
-	return path, true, nil
+	return "", fmt.Errorf("lsp location %q: unsupported URI scheme %q", raw, u.Scheme())
 }
 
 // locations runs a request that returns locations, and converts the result to rune
@@ -1461,17 +1390,10 @@ func (p *lspPort) locations(path string, at buffer.Pos, feature manager.Feature,
 	if err != nil {
 		return nil, err
 	}
-	target := ExternalLocationRequest{
-		Language: rec.lang,
-		Root:     rec.root,
-		Program:  h.Program(),
-		Command:  h.Command(),
-		Env:      h.LaunchEnv(),
-	}
 	texts := make(map[string]textLines)
 	out := make([]tui.LSPLocation, 0, len(locs))
 	for _, l := range locs {
-		file, readOnly, err := p.locationFile(context.Background(), string(l.URI), target)
+		file, err := p.locationFile(string(l.URI))
 		if err != nil {
 			return nil, err
 		}
@@ -1480,7 +1402,7 @@ func (p *lspPort) locations(path string, at buffer.Pos, feature manager.Feature,
 			lines = newTextLines(p.textOf(file))
 			texts[file] = lines
 		}
-		out = append(out, tui.LSPLocation{Path: file, Start: lines.fromLSP(l.Range.Start), End: lines.fromLSP(l.Range.End), ReadOnly: readOnly})
+		out = append(out, tui.LSPLocation{Path: file, Start: lines.fromLSP(l.Range.Start), End: lines.fromLSP(l.Range.End)})
 	}
 	return out, nil
 }
@@ -1517,14 +1439,19 @@ func (p *lspPort) handles(path string, feature manager.Feature) ([]*manager.Hand
 		hs = []*manager.Handle{h}
 	}
 	if len(hs) == 0 {
-		if err := mgr.Open(path, rec.lang, rec.text); err != nil {
-			return nil, rec, err
-		}
-		rec = p.resetReopenedDoc(path, mgr)
-		if feature.Merged() {
-			hs = mgr.AllFor(path, feature)
-		} else if h, ok := mgr.FirstFor(path, feature); ok {
-			hs = []*manager.Handle{h}
+		// Only reopen when no live server currently holds path; if a live server already
+		// has the document open and simply does not advertise feature, reopening would
+		// trigger a didClose+didOpen storm and wipe semantic/pull caches on every request.
+		if _, live := mgr.HandleForPath(path); !live {
+			if err := mgr.Open(path, rec.lang, rec.text); err != nil {
+				return nil, rec, err
+			}
+			rec = p.resetReopenedDoc(path, mgr)
+			if feature.Merged() {
+				hs = mgr.AllFor(path, feature)
+			} else if h, ok := mgr.FirstFor(path, feature); ok {
+				hs = []*manager.Handle{h}
+			}
 		}
 	}
 	if len(hs) == 0 {
@@ -1608,8 +1535,7 @@ func (p *lspPort) rootMarkers(language string) []string {
 
 // SetConfig reapplies the server plan of a settings reload: future managers and explicit
 // Start/Restart use the new baseline, while existing managers keep their current config until
-// an explicit Start/Restart applies a difference. It does not touch running servers or the
-// per-root Deno providers (they re-read the live config too).
+// an explicit Start/Restart applies a difference. It does not touch running servers.
 func (p *lspPort) SetConfig(cfg config.Config) {
 	plan := lspPlanFor(cfg)
 	p.selectionMu.Lock()
@@ -1633,8 +1559,8 @@ func (p *lspPort) RefreshServerPlans() {
 	defer p.selectionMu.Unlock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for root, mgr := range p.managers {
-		mgr.UpdateServerPlan(p.serverConfigsFor(root), p.universal)
+	for _, mgr := range p.managers {
+		mgr.UpdateServerPlan(p.servers, p.universal)
 	}
 }
 
@@ -1655,65 +1581,6 @@ func (p *lspPort) WaitBaseline() {
 	}
 }
 
-// SetExternalLocationOpener installs the app's resolver for non-file LSP locations.
-// The caller validates the URI/trust/authority and returns generated local content;
-// nil disables external locations.
-func (p *lspPort) SetExternalLocationOpener(fn ExternalLocationOpener) {
-	p.mu.Lock()
-	p.externalOpener = fn
-	p.mu.Unlock()
-}
-
-// SetRootServerProvider installs a per-root server replacement resolver. The provider is
-// consulted when the manager for exactly root is created (never for another root); it may
-// return a replacement config for a language. A nil provider clears it. Existing managers
-// are not rebuilt: a running or already-created server keeps its config (Deno auto-selection
-// therefore lands on future roots/managers only).
-func (p *lspPort) SetRootServerProvider(root string, provider func(language string) (manager.ServerConfig, bool)) {
-	p.selectionMu.Lock()
-	defer p.selectionMu.Unlock()
-	p.mu.Lock()
-	if p.rootProviders == nil {
-		p.rootProviders = make(map[string]func(language string) (manager.ServerConfig, bool))
-	}
-	if provider == nil {
-		delete(p.rootProviders, root)
-	} else {
-		p.rootProviders[root] = provider
-	}
-	p.mu.Unlock()
-}
-
-// ClearRootServerProvider removes the per-root provider for root.
-func (p *lspPort) ClearRootServerProvider(root string) {
-	p.selectionMu.Lock()
-	defer p.selectionMu.Unlock()
-	p.mu.Lock()
-	delete(p.rootProviders, root)
-	p.mu.Unlock()
-}
-
-// serverConfigsFor returns the language configs a manager of root starts with: the
-// port's plan, with the root provider's replacement applied to each language it answers
-// for. p.mu must be held.
-func (p *lspPort) serverConfigsFor(root string) map[string][]manager.ServerConfig {
-	if p.rootProviders == nil {
-		return p.servers
-	}
-	provider := p.rootProviders[root]
-	if provider == nil {
-		return p.servers
-	}
-	servers := make(map[string][]manager.ServerConfig, len(p.servers))
-	for lang, list := range p.servers {
-		servers[lang] = list
-		if cfg, ok := provider(lang); ok {
-			servers[lang] = []manager.ServerConfig{cfg}
-		}
-	}
-	return servers
-}
-
 // managerFor returns the manager of root, creating it on first use.
 func (p *lspPort) managerFor(root string) *manager.Manager {
 	p.mu.Lock()
@@ -1729,7 +1596,7 @@ func (p *lspPort) managerFor(root string) *manager.Manager {
 // newManagerLocked builds the manager of root and applies the manual starts. p.mu
 // must be held.
 func (p *lspPort) newManagerLocked(root string) *manager.Manager {
-	mgr := manager.NewManager(root, p.serverConfigsFor(root), p.universal)
+	mgr := manager.NewManager(root, p.servers, p.universal)
 	mgr.SetApplyEdit(p.enqueueEdit)
 	mgr.SetSpawnEnv(p.spawnEnv)
 	mgr.SetGate(p.spawnGate)

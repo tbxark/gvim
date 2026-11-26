@@ -19,6 +19,7 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/lsp/lsptest"
 )
 
 type fakeDiagServer struct {
@@ -149,13 +150,13 @@ func (s *fakeDiagServer) sendRefresh(t testing.TB, id int64) {
 	}
 }
 
-func waitClientDiag(t testing.TB, c *lsp.Client) {
+// publishAndWait has the fake server publish diagnostics for file, and waits until c has
+// recorded the publish.
+func publishAndWait(t testing.TB, srv *fakeDiagServer, c *lsp.Client, file, message string, line, startChar, endChar uint32) {
 	t.Helper()
-	select {
-	case <-c.Diagnostics():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for client diagnostics event")
-	}
+	rev := c.DiagnosticsRev()
+	srv.publish(file, message, line, startChar, endChar)
+	lsptest.WaitRev(t, c.DiagnosticsRev, rev, "client diagnostics event")
 }
 
 func TestWorkspaceDiagnosticsCachesLocalUnopenedAndInvalidates(t *testing.T) {
@@ -180,10 +181,8 @@ func TestWorkspaceDiagnosticsCachesLocalUnopenedAndInvalidates(t *testing.T) {
 	}
 	client := port.managerFor(dir).AllHandles()[0].Client()
 
-	srv.publish(openFile, "open-err", 0, 3, 4)
-	waitClientDiag(t, client)
-	srv.publish(unopenedFile, "err1", 0, 3, 4)
-	waitClientDiag(t, client)
+	publishAndWait(t, srv, client, openFile, "open-err", 0, 3, 4)
+	publishAndWait(t, srv, client, unopenedFile, "err1", 0, 3, 4)
 
 	got1 := port.WorkspaceDiagnostics()
 	if len(got1) != 2 {
@@ -228,8 +227,7 @@ func TestWorkspaceDiagnosticsCachesLocalUnopenedAndInvalidates(t *testing.T) {
 	}
 
 	// New publishDiagnostics increments client.DiagnosticsRev() and invalidates cache.
-	srv.publish(unopenedFile, "err2", 0, 3, 4)
-	waitClientDiag(t, client)
+	publishAndWait(t, srv, client, unopenedFile, "err2", 0, 3, 4)
 	got4 := port.WorkspaceDiagnostics()
 	if got4[1].Items[0].Message != "err2" {
 		t.Fatalf("after publish Message = %q, want err2", got4[1].Items[0].Message)
@@ -311,8 +309,7 @@ func TestWorkspaceDiagnosticsCachesRemoteUnopenedWithoutReReading(t *testing.T) 
 	}
 	client := port.managerFor(dir).AllHandles()[0].Client()
 
-	srv.publish(remotePublished, "remote-pub-1", 0, 3, 4)
-	waitClientDiag(t, client)
+	publishAndWait(t, srv, client, remotePublished, "remote-pub-1", 0, 3, 4)
 	srv.setWorkspaceDiagnostic(remotePulled, "remote-ws-1", 0, 3, 4)
 	srv.sendRefresh(t, 200)
 
@@ -342,8 +339,7 @@ func TestWorkspaceDiagnosticsCachesRemoteUnopenedWithoutReReading(t *testing.T) 
 	}
 
 	// Invalidate via publishDiagnostics (diagRev).
-	srv.publish(remotePublished, "remote-pub-2", 0, 3, 4)
-	waitClientDiag(t, client)
+	publishAndWait(t, srv, client, remotePublished, "remote-pub-2", 0, 3, 4)
 	gotAfterPub := port.WorkspaceDiagnostics()
 	if gotAfterPub[0].Items[0].Message != "remote-pub-2" {
 		t.Fatalf("after publish Message = %q, want remote-pub-2", gotAfterPub[0].Items[0].Message)
@@ -387,16 +383,14 @@ func BenchmarkWorkspaceDiagnosticsCachedPoll(b *testing.B) {
 		b.Fatal(err)
 	}
 	client := port.managerFor(dir).AllHandles()[0].Client()
-	srv.publish(openFile, "open-err", 1, 4, 5)
-	waitClientDiag(b, client)
+	publishAndWait(b, srv, client, openFile, "open-err", 1, 4, 5)
 
 	for i := range 20 {
 		f := filepath.Join(dir, fmt.Sprintf("file_%02d.go", i))
 		if err := os.WriteFile(f, []byte("package p\nvar y = 2\n"), 0o644); err != nil {
 			b.Fatal(err)
 		}
-		srv.publish(f, "err", 1, 4, 5)
-		waitClientDiag(b, client)
+		publishAndWait(b, srv, client, f, "err", 1, 4, 5)
 	}
 
 	if got := port.WorkspaceDiagnostics(); len(got) != 21 {

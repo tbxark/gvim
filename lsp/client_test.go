@@ -203,7 +203,8 @@ func TestDiagnosticsDelivery(t *testing.T) {
 			if err := f.client.DidOpen(ctx, docURI, "go", 1, tt.openText); err != nil {
 				t.Fatalf("DidOpen: %v", err)
 			}
-			open := lsptest.Recv(t, f.client.Diagnostics(), "diagnostics after didOpen")
+			rev := lsptest.WaitRev(t, f.client.DiagnosticsRev, 0, "diagnostics after didOpen")
+			open, _ := f.client.DiagnosticsFor(docURI)
 			if open.URI != docURI || open.Version != 1 {
 				t.Fatalf("event = {URI:%q Version:%d}, want {%q 1}", open.URI, open.Version, docURI)
 			}
@@ -220,7 +221,8 @@ func TestDiagnosticsDelivery(t *testing.T) {
 			if err := f.client.DidChange(ctx, docURI, 2, "ERR only\n"); err != nil {
 				t.Fatalf("DidChange: %v", err)
 			}
-			change := lsptest.Recv(t, f.client.Diagnostics(), "diagnostics after didChange")
+			lsptest.WaitRev(t, f.client.DiagnosticsRev, rev, "diagnostics after didChange")
+			change, _ := f.client.DiagnosticsFor(docURI)
 			if change.Version != 2 || len(change.Diagnostics) != 1 {
 				t.Fatalf("didChange event = version %d with %d diagnostics, want version 2 with 1", change.Version, len(change.Diagnostics))
 			}
@@ -238,39 +240,6 @@ func TestDiagnosticsDelivery(t *testing.T) {
 				t.Fatalf("server saw didOpen text %q, want %q", got.TextDocument.Text, tt.openText)
 			}
 		})
-	}
-}
-
-func TestDiagnosticsDropOldestWhenFull(t *testing.T) {
-	f := newFixture(t, Config{}, nil)
-	ctx := newTestContext(t)
-
-	const total = diagnosticsBuffer + 36
-	const docURI = "file:///work/proj/busy.go"
-	for v := int32(1); v <= total; v++ {
-		if err := f.client.DidChange(ctx, docURI, v, "ERR\n"); err != nil {
-			t.Fatalf("DidChange %d: %v", v, err)
-		}
-	}
-	// Shutdown is answered after every earlier notification has been handled,
-	// so all events are in the channel when it returns.
-	if err := f.client.Shutdown(ctx); err != nil {
-		t.Fatalf("Shutdown: %v", err)
-	}
-
-	var versions []int32
-	for len(f.client.Diagnostics()) > 0 {
-		ev := lsptest.Recv(t, f.client.Diagnostics(), "queued diagnostics")
-		versions = append(versions, ev.Version)
-	}
-	if len(versions) != diagnosticsBuffer {
-		t.Fatalf("queued events = %d, want %d", len(versions), diagnosticsBuffer)
-	}
-	if want := int32(total - diagnosticsBuffer + 1); versions[0] != want {
-		t.Fatalf("oldest kept version = %d, want %d", versions[0], want)
-	}
-	if versions[len(versions)-1] != total {
-		t.Fatalf("newest kept version = %d, want %d", versions[len(versions)-1], total)
 	}
 }
 
@@ -361,12 +330,9 @@ func TestServerClosesPipe(t *testing.T) {
 	}
 
 	select {
-	case _, ok := <-f.client.Diagnostics():
-		if ok {
-			t.Fatal("Diagnostics delivered an event after the server closed the pipe")
-		}
+	case <-f.client.Done():
 	case <-time.After(lsptest.Timeout):
-		t.Fatal("Diagnostics channel was not closed after the server closed the pipe")
+		t.Fatal("the connection did not end after the server closed the pipe")
 	}
 }
 
@@ -426,21 +392,17 @@ func TestCloseIsIdempotent(t *testing.T) {
 				t.Fatal("DidOpen after Close returned nil error")
 			}
 			select {
-			case _, ok := <-f.client.Diagnostics():
-				if ok {
-					t.Fatal("Diagnostics delivered an event after Close")
-				}
+			case <-f.client.Done():
 			case <-time.After(lsptest.Timeout):
-				t.Fatal("Diagnostics channel was not closed by Close")
+				t.Fatal("the connection did not end after Close")
 			}
 		})
 	}
 }
 
 // TestCloseReleasesGoroutines counts goroutines before the connection starts and
-// after Close. The read loop, the Diagnostics closer, and any handler goroutines
-// must all be gone. The count is polled because the closer goroutine can finish
-// a moment after Close returns.
+// after Close. The read loop and any handler goroutines must all be gone. The count
+// is polled because they can finish a moment after Close returns.
 func TestCloseReleasesGoroutines(t *testing.T) {
 	baseline := runtime.NumGoroutine()
 
@@ -452,7 +414,7 @@ func TestCloseReleasesGoroutines(t *testing.T) {
 	if err := p.client.DidOpen(ctx, "file:///work/proj/a.go", "go", 1, "ERR\n"); err != nil {
 		t.Fatalf("DidOpen: %v", err)
 	}
-	lsptest.Recv(t, p.client.Diagnostics(), "diagnostics")
+	lsptest.WaitRev(t, p.client.DiagnosticsRev, 0, "diagnostics")
 
 	if err := p.client.Close(); err != nil {
 		t.Fatalf("Close: %v", err)

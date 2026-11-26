@@ -36,8 +36,18 @@ const (
 	// sshFilesMaxDirEntries bounds one remote directory listing: the local port
 	// returns every entry, but a remote listing is also a network and memory budget.
 	sshFilesMaxDirEntries = 5000
-	// sshFilesWatchInterval is the poll interval of the remote watcher.
+	// sshFilesWatchInterval is the poll interval of the remote watcher while its path
+	// changes, and where every backoff starts.
 	sshFilesWatchInterval = 500 * time.Millisecond
+	// sshFilesWatchIdlePolls is how many polls in a row may find nothing changed before
+	// the interval starts to double, up to sshFilesWatchIdleMax.
+	sshFilesWatchIdlePolls = 10
+	// sshFilesWatchIdleMax is the longest interval between polls of a path that does not
+	// change.
+	sshFilesWatchIdleMax = 5 * time.Second
+	// sshFilesWatchOfflineMax is the longest interval between the checks of a watcher
+	// whose carrier is down or whose polls fail.
+	sshFilesWatchOfflineMax = 10 * time.Second
 	// sshFilesMaxLinks bounds the symlink resolution of an atomic save.
 	sshFilesMaxLinks = 16
 	// sshFilesMaxReadBytes is the transport cap of one whole-file read: a caller's
@@ -378,8 +388,11 @@ func (f *sshFiles) ReadDir(ctx context.Context, path string, hidden bool) ([]hos
 
 // Watch polls the path because a remote host has no fsnotify channel: a bounded
 // stat (or directory snapshot) every sshFilesWatchInterval, coalesced over the
-// debounce window. A rename is reported as remove+create, since polling cannot tell
-// them apart; that and the poll latency are documented limits.
+// debounce window. A path that stays unchanged is polled less often (up to
+// sshFilesWatchIdleMax), and while the carrier is down the watcher polls nothing and
+// checks again after a growing delay (up to sshFilesWatchOfflineMax). A rename is
+// reported as remove+create, since polling cannot tell them apart; that and the poll
+// latency are documented limits.
 func (f *sshFiles) Watch(ctx context.Context, path string, o hostos.WatchOptions) (hostos.Watch, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -393,7 +406,7 @@ func (f *sshFiles) Watch(ctx context.Context, path string, o hostos.WatchOptions
 		debounce = 50 * time.Millisecond
 	}
 	w := &sshPollWatch{
-		files: f, root: path, dir: snap.dir, debounce: debounce,
+		files: f, root: path, dir: snap.dir, debounce: debounce, pace: defaultSSHWatchPace,
 		events: make(chan hostos.WatchEvent, 32),
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -459,33 +472,77 @@ type sshPollWatch struct {
 	done     chan struct{}
 	stopOnce sync.Once
 	prev     map[string]hostos.DirEntry
+	pace     sshWatchPace
+}
+
+// sshWatchPace is the poll schedule of one sshPollWatch.
+type sshWatchPace struct {
+	base       time.Duration // the delay after a change, and where every backoff starts
+	idlePolls  int           // unchanged polls in a row before the delay starts to grow
+	idleMax    time.Duration // the longest delay of a path that does not change
+	offlineMax time.Duration // the longest delay while the carrier is down or a poll fails
+}
+
+var defaultSSHWatchPace = sshWatchPace{
+	base:       sshFilesWatchInterval,
+	idlePolls:  sshFilesWatchIdlePolls,
+	idleMax:    sshFilesWatchIdleMax,
+	offlineMax: sshFilesWatchOfflineMax,
+}
+
+// afterQuiet is the delay before the next poll when the last one found nothing changed,
+// and quiet is how many polls in a row that is now.
+func (p sshWatchPace) afterQuiet(cur time.Duration, quiet int) time.Duration {
+	if quiet <= p.idlePolls {
+		return p.base
+	}
+	return min(cur*2, p.idleMax)
+}
+
+// afterFailure is the delay before the next check when the carrier is down or the last
+// poll failed.
+func (p sshWatchPace) afterFailure(cur time.Duration) time.Duration {
+	return min(max(cur, p.base)*2, p.offlineMax)
 }
 
 func (w *sshPollWatch) loop(ctx context.Context) {
 	defer close(w.done)
 	prev := w.prev
-	ticker := time.NewTicker(sshFilesWatchInterval)
-	defer ticker.Stop()
+	delay, quiet := w.pace.base, 0
+	pollTimer := time.NewTimer(delay)
+	defer pollTimer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-w.stop:
 			return
-		case <-ticker.C:
+		case <-pollTimer.C:
+		}
+		if !w.files.b.Connected() {
+			// A poll could only fail: wait for the carrier without a command or an event.
+			delay, quiet = w.pace.afterFailure(delay), 0
+			pollTimer.Reset(delay)
+			continue
 		}
 		next, err := w.pollSnapshot(ctx)
 		if err != nil {
 			if !w.emit(ctx, hostos.WatchEvent{Path: w.root, Kind: "error", Err: err.Error()}) {
 				return
 			}
+			delay, quiet = w.pace.afterFailure(delay), 0
+			pollTimer.Reset(delay)
 			continue
 		}
 		diff := diffSnapshots(w.root, w.dir, prev, next.entries)
 		if len(diff) == 0 {
 			prev = next.entries
+			quiet++
+			delay = w.pace.afterQuiet(delay, quiet)
+			pollTimer.Reset(delay)
 			continue
 		}
+		delay, quiet = w.pace.base, 0
 		// Coalesce a burst: after the debounce window, diff once more against the same
 		// baseline so the reader sees one settle, not every intermediate state.
 		timer := time.NewTimer(w.debounce)
@@ -508,6 +565,7 @@ func (w *sshPollWatch) loop(ctx context.Context) {
 			}
 		}
 		prev = next.entries
+		pollTimer.Reset(delay)
 	}
 }
 

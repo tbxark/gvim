@@ -41,9 +41,6 @@ func TestCapabilitiesAreUnknownBeforeInitialize(t *testing.T) {
 	if f.client.Capabilities().Initialized {
 		t.Fatal("a client that has not initialized reports capabilities")
 	}
-	if _, ok := f.client.InitializeResult(); ok {
-		t.Fatal("a client that has not initialized has an initialize result")
-	}
 }
 
 func TestInitializeKeepsCapabilitiesAndOptions(t *testing.T) {
@@ -52,7 +49,8 @@ func TestInitializeKeepsCapabilitiesAndOptions(t *testing.T) {
 	ctx := newTestContext(t)
 
 	f.srv.Canned.Caps = capsWith(true, true, true, false)
-	if _, err := f.client.Initialize(ctx); err != nil {
+	res, err := f.client.Initialize(ctx)
+	if err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	init := lsptest.Recv(t, f.srv.InitCh, "initialize params")
@@ -60,9 +58,8 @@ func TestInitializeKeepsCapabilitiesAndOptions(t *testing.T) {
 		t.Fatalf("initializationOptions = %s, want %s", init.InitializationOptions, options)
 	}
 
-	res, ok := f.client.InitializeResult()
-	if !ok || res == nil {
-		t.Fatal("InitializeResult reports no result after Initialize")
+	if res == nil {
+		t.Fatal("Initialize returned no result")
 	}
 	caps := f.client.Capabilities()
 	if !caps.Initialized {
@@ -325,15 +322,6 @@ func TestTypedRequests(t *testing.T) {
 	dp := nextRequest[*protocol.SemanticTokensDeltaParams](t, f.srv, "semantic tokens delta params")
 	if dp.PreviousResultID != "1" {
 		t.Fatalf("previousResultId = %q, want 1", dp.PreviousResultID)
-	}
-
-	f.srv.Canned.SemanticTokensRange = &protocol.SemanticTokens{Data: []uint32{1, 0, 3, 1, 0}}
-	if _, err := f.client.SemanticTokensRange(ctx, reqDocURI, rng(2, 0, 3, 0)); err != nil {
-		t.Fatalf("SemanticTokensRange: %v", err)
-	}
-	rp := nextRequest[*protocol.SemanticTokensRangeParams](t, f.srv, "semantic tokens range params")
-	if rp.Range != rng(2, 0, 3, 0) {
-		t.Fatalf("range = %+v", rp.Range)
 	}
 
 	f.srv.Canned.FoldingRanges = []protocol.FoldingRange{{StartLine: 1, EndLine: 4}}

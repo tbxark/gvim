@@ -172,7 +172,7 @@ func TestUniversalServerServesEveryLanguage(t *testing.T) {
 		t.Fatalf("universal didOpen languageId = %q, want go", open.TextDocument.LanguageID)
 	}
 	h, ok := m.FirstFor(mgrAPath, FeatureHover)
-	if !ok || !h.Universal() || h.Name() != "spell" {
+	if !ok || !h.universal || h.Name() != "spell" {
 		t.Fatalf("FirstFor(hover) = %v, want the universal server", handleName(h, ok))
 	}
 	servers := m.Servers()

@@ -11,7 +11,6 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/lsp"
-	"github.com/tbxark/gvim/lsp/manager"
 )
 
 // TestClearForcedDropsManualBypassButKeepsManualStart checks the live-trust hook seam: a
@@ -198,12 +197,7 @@ func TestStartLanguageClearForcedRaceLeavesNoForcedBypass(t *testing.T) {
 	})
 	port.SetAutoStartGate(func() bool { return true })
 	_, _ = port.Open(filepath.Join(root, "a.ts"), "typescript", "const a = 1\n")
-	port.SetRootServerProvider(root, func(language string) (manager.ServerConfig, bool) {
-		if language != "typescript" {
-			return manager.ServerConfig{}, false
-		}
-		return manager.ServerConfig{Command: []string{"deno"}, Args: []string{"lsp"}, Name: "deno", AutoStart: false}, true
-	})
+	reloadTypescript(port, config.LSPServer{Command: "new-ts", Dormant: true})
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once

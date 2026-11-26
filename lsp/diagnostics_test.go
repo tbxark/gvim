@@ -21,7 +21,7 @@ func TestDiagnosticsForTracksLatestPerURI(t *testing.T) {
 	if err := f.client.DidOpen(ctx, mainURI, "go", 1, "ERR one\nERR two\n"); err != nil {
 		t.Fatalf("DidOpen: %v", err)
 	}
-	lsptest.Recv(t, f.client.Diagnostics(), "open event")
+	rev := lsptest.WaitRev(t, f.client.DiagnosticsRev, 0, "open event")
 	ev, ok := f.client.DiagnosticsFor(mainURI)
 	if !ok || ev.Version != 1 || len(ev.Diagnostics) != 2 {
 		t.Fatalf("snapshot after open = %+v, %v; want version 1 with 2 diagnostics", ev, ok)
@@ -30,7 +30,7 @@ func TestDiagnosticsForTracksLatestPerURI(t *testing.T) {
 	if err := f.client.DidOpen(ctx, otherURI, "go", 5, "ok\n"); err != nil {
 		t.Fatalf("DidOpen other: %v", err)
 	}
-	lsptest.Recv(t, f.client.Diagnostics(), "other open event")
+	rev = lsptest.WaitRev(t, f.client.DiagnosticsRev, rev, "other open event")
 	if ev, ok := f.client.DiagnosticsFor(otherURI); !ok || ev.Version != 5 || len(ev.Diagnostics) != 0 {
 		t.Fatalf("snapshot for other = %+v, %v; want version 5 with no diagnostics", ev, ok)
 	}
@@ -41,19 +41,19 @@ func TestDiagnosticsForTracksLatestPerURI(t *testing.T) {
 	if err := f.client.DidChange(ctx, mainURI, 2, "ok\n"); err != nil {
 		t.Fatalf("DidChange: %v", err)
 	}
-	lsptest.Recv(t, f.client.Diagnostics(), "change event")
+	lsptest.WaitRev(t, f.client.DiagnosticsRev, rev, "change event")
 	ev, ok = f.client.DiagnosticsFor(mainURI)
 	if !ok || ev.Version != 2 || len(ev.Diagnostics) != 0 {
 		t.Fatalf("snapshot after clean change = %+v, %v; want version 2 cleared", ev, ok)
 	}
 }
 
-func TestDiagnosticsForSurvivesDroppedEvents(t *testing.T) {
+func TestDiagnosticsForKeepsTheLatestOfManyPublishes(t *testing.T) {
 	const docURI = "file:///work/proj/busy.go"
 	f := newFixture(t, Config{}, nil)
 	ctx := newTestContext(t)
 
-	const total = diagnosticsBuffer + 36
+	const total = 100
 	for v := int32(1); v <= total; v++ {
 		if err := f.client.DidChange(ctx, docURI, v, "ERR\n"); err != nil {
 			t.Fatalf("DidChange %d: %v", v, err)
@@ -79,7 +79,7 @@ func TestDiagnosticsForReturnsCopy(t *testing.T) {
 	if err := f.client.DidOpen(ctx, docURI, "go", 1, "ERR\n"); err != nil {
 		t.Fatalf("DidOpen: %v", err)
 	}
-	lsptest.Recv(t, f.client.Diagnostics(), "open event")
+	lsptest.WaitRev(t, f.client.DiagnosticsRev, 0, "open event")
 
 	ev, _ := f.client.DiagnosticsFor(docURI)
 	if len(ev.Diagnostics) != 1 {
@@ -106,7 +106,7 @@ func TestDiagnosticsRevIncrementsOnPublish(t *testing.T) {
 	if err := f.client.DidOpen(ctx, docURI, "go", 1, "ERR\n"); err != nil {
 		t.Fatalf("DidOpen: %v", err)
 	}
-	lsptest.Recv(t, f.client.Diagnostics(), "open event")
+	lsptest.WaitRev(t, f.client.DiagnosticsRev, 0, "open event")
 	rev1 := f.client.DiagnosticsRev()
 	if rev1 != 1 {
 		t.Fatalf("DiagnosticsRev after DidOpen = %d, want 1", rev1)
@@ -115,7 +115,7 @@ func TestDiagnosticsRevIncrementsOnPublish(t *testing.T) {
 	if err := f.client.DidChange(ctx, docURI, 2, "ok\n"); err != nil {
 		t.Fatalf("DidChange: %v", err)
 	}
-	lsptest.Recv(t, f.client.Diagnostics(), "change event")
+	lsptest.WaitRev(t, f.client.DiagnosticsRev, rev1, "change event")
 	rev2 := f.client.DiagnosticsRev()
 	if rev2 != 2 {
 		t.Fatalf("DiagnosticsRev after DidChange = %d, want 2", rev2)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
@@ -246,7 +246,7 @@ func TestOpenLanguageTellsTsxFromTypeScript(t *testing.T) {
 func TestPortFormatReturnsTheServersEditsInRuneColumns(t *testing.T) {
 	port, path := startFakeLSPPort(t)
 	f, ok := port.(interface {
-		Format(path, text string, tabSize int, insertSpaces bool) ([]editor.LSPEdit, error)
+		Format(path, text string, tabSize int, insertSpaces bool) ([]document.LSPEdit, error)
 	})
 	if !ok {
 		t.Fatal("the port cannot format")
@@ -256,7 +256,7 @@ func TestPortFormatReturnsTheServersEditsInRuneColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Format: %v", err)
 	}
-	want := []editor.LSPEdit{{From: buffer.Pos{Line: 1, Col: 4}, To: buffer.Pos{Line: 1, Col: 6}, Text: " "}}
+	want := []document.LSPEdit{{From: buffer.Pos{Line: 1, Col: 4}, To: buffer.Pos{Line: 1, Col: 6}, Text: " "}}
 	if !slices.Equal(edits, want) {
 		t.Errorf("edits = %+v, want %+v", edits, want)
 	}

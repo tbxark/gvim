@@ -294,18 +294,6 @@ func (c *Client) SemanticTokensDelta(ctx context.Context, docURI, previousResult
 	return res, nil
 }
 
-// SemanticTokensRange asks for the semantic tokens of rng in docURI.
-func (c *Client) SemanticTokensRange(ctx context.Context, docURI string, rng protocol.Range) (*protocol.SemanticTokens, error) {
-	tokens, err := c.server.SemanticTokensRange(ctx, &protocol.SemanticTokensRangeParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
-		Range:        rng,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("lsp: semantic tokens range %s: %w", docURI, err)
-	}
-	return tokens, nil
-}
-
 // positionParams builds the document and position part shared by most requests.
 func positionParams(docURI string, pos protocol.Position) protocol.TextDocumentPositionParams {
 	return protocol.TextDocumentPositionParams{

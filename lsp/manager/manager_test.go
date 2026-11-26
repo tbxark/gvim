@@ -193,11 +193,11 @@ func TestManagerStartsOneServerPerLanguage(t *testing.T) {
 		t.Fatalf("didOpen = %+v, want go document a.go version 1", open.TextDocument)
 	}
 
-	c, ok := m.ClientFor(mgrAPath)
+	c, ok := clientFor(m, mgrAPath)
 	if !ok || c != goSrv.client {
 		t.Fatal("ClientFor did not return the client that opened a.go")
 	}
-	lsptest.Recv(t, c.Diagnostics(), "diagnostics for a.go")
+	lsptest.WaitRev(t, c.DiagnosticsRev, 0, "diagnostics for a.go")
 	if ev, ok := c.DiagnosticsFor(mgrAURI); !ok || len(ev.Diagnostics) != 1 {
 		t.Fatalf("snapshot for a.go = %+v, %v; want one diagnostic", ev, ok)
 	}
@@ -209,7 +209,7 @@ func TestManagerStartsOneServerPerLanguage(t *testing.T) {
 		t.Fatalf("second go document started another server: %d starts", len(log.cfgs))
 	}
 	lsptest.Recv(t, goSrv.srv.OpenCh, "didOpen b.go")
-	if cb, ok := m.ClientFor(mgrBPath); !ok || cb != c {
+	if cb, ok := clientFor(m, mgrBPath); !ok || cb != c {
 		t.Fatal("documents of one language do not share a client")
 	}
 
@@ -257,10 +257,10 @@ func TestManagerChangeAndClose(t *testing.T) {
 	if got := lsptest.Recv(t, srv.CloseCh, "didClose a.go"); got.TextDocument.URI != mgrAURI {
 		t.Fatalf("didClose for %q, want %q", got.TextDocument.URI, mgrAURI)
 	}
-	if _, ok := m.ClientFor(mgrAPath); ok {
+	if _, ok := clientFor(m, mgrAPath); ok {
 		t.Fatal("ClientFor still reports a.go after Close")
 	}
-	if _, ok := m.ClientFor(mgrBPath); !ok {
+	if _, ok := clientFor(m, mgrBPath); !ok {
 		t.Fatal("closing a.go also forgot b.go")
 	}
 	if err := m.Change(mgrAPath, "late"); !errors.Is(err, ErrNotOpen) {
@@ -346,7 +346,7 @@ func TestManagerOpenErrors(t *testing.T) {
 			if len(log.cfgs) != tt.wantStarts {
 				t.Fatalf("servers started = %d, want %d", len(log.cfgs), tt.wantStarts)
 			}
-			if _, ok := m.ClientFor(mgrAPath); ok {
+			if _, ok := clientFor(m, mgrAPath); ok {
 				t.Fatal("ClientFor reports a document whose Open failed")
 			}
 			if tt.wantClosedClient {
@@ -392,7 +392,7 @@ func TestManagerShutdownStopsServersAndForgetsDocuments(t *testing.T) {
 		t.Fatalf("Shutdown: %v", err)
 	}
 	for _, path := range []string{mgrAPath, mgrBPath} {
-		if _, ok := m.ClientFor(path); ok {
+		if _, ok := clientFor(m, path); ok {
 			t.Fatalf("ClientFor(%q) still reports a document after Shutdown", path)
 		}
 	}
@@ -416,21 +416,23 @@ func onlyPair(t *testing.T, log *startLog) pair {
 	return log.pairs[0]
 }
 
-// expectClientClosed checks that c has closed its connection, which closes the
-// Diagnostics channel. Events still queued from earlier publishes are drained
-// first.
+// clientFor returns the client of the server that holds the open document at path, and
+// false when no server holds it.
+func clientFor(m *Manager, path string) (*lsp.Client, bool) {
+	h, ok := m.HandleForPath(path)
+	if !ok {
+		return nil, false
+	}
+	return h.Client(), true
+}
+
+// expectClientClosed checks that c has closed its connection.
 func expectClientClosed(t *testing.T, c *lsp.Client) {
 	t.Helper()
-	deadline := time.After(lsptest.Timeout)
-	for {
-		select {
-		case _, ok := <-c.Diagnostics():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("client was not closed")
-		}
+	select {
+	case <-c.Done():
+	case <-time.After(lsptest.Timeout):
+		t.Fatal("client was not closed")
 	}
 }
 
@@ -517,10 +519,10 @@ func TestManagerReplacesServerThatExited(t *testing.T) {
 	}
 	second := log.pairs[1]
 	lsptest.Recv(t, second.srv.OpenCh, "didOpen b.go on the new server")
-	if c, ok := m.ClientFor(mgrBPath); !ok || c != second.client {
+	if c, ok := clientFor(m, mgrBPath); !ok || c != second.client {
 		t.Fatal("ClientFor(b.go) is not the new server's client")
 	}
-	if _, ok := m.ClientFor(mgrAPath); ok {
+	if _, ok := clientFor(m, mgrAPath); ok {
 		t.Fatal("ClientFor(a.go) reports a document that the exited server held")
 	}
 	if err := m.Change(mgrAPath, "late\n"); !errors.Is(err, ErrNotOpen) {
@@ -540,7 +542,7 @@ func TestStalledWriteDoesNotBlockShutdown(t *testing.T) {
 	if err := m.Open(mgrAPath, "go", "ok\n"); err != nil {
 		t.Fatalf("Open a.go: %v", err)
 	}
-	first, ok := m.ClientFor(mgrAPath)
+	first, ok := clientFor(m, mgrAPath)
 	if !ok {
 		t.Fatal("ClientFor(a.go) reports no client after Open")
 	}
@@ -573,7 +575,7 @@ func TestStalledWriteDoesNotBlockShutdown(t *testing.T) {
 		t.Fatal("Open(b.go) did not return after its write stalled")
 	}
 	expectClientClosed(t, first)
-	if _, ok := m.ClientFor(mgrAPath); ok {
+	if _, ok := clientFor(m, mgrAPath); ok {
 		t.Fatal("ClientFor(a.go) still reports a document after Shutdown")
 	}
 
@@ -649,7 +651,7 @@ func TestShutdownDuringStartClosesTheNewServer(t *testing.T) {
 		t.Fatal("Open did not return after the start finished")
 	}
 	expectClientClosed(t, server)
-	if _, ok := m.ClientFor(mgrAPath); ok {
+	if _, ok := clientFor(m, mgrAPath); ok {
 		t.Fatal("ClientFor(a.go) reports a document after Shutdown")
 	}
 }
@@ -762,7 +764,7 @@ func TestConcurrentOpensShareOneServerStart(t *testing.T) {
 		t.Fatalf("servers started = %d, want 1 shared by both opens", n)
 	}
 	for _, p := range []string{mgrAPath, mgrBPath} {
-		if _, ok := m.ClientFor(p); !ok {
+		if _, ok := clientFor(m, p); !ok {
 			t.Fatalf("ClientFor(%s) reports no document after its Open", p)
 		}
 	}

@@ -168,10 +168,6 @@ type Handle struct {
 	universal bool
 	cfg       ServerConfig
 	client    *lsp.Client
-	// program is the absolute executable passed to lsp.Start, or "" when a bare
-	// command was left to the child PATH. launchEnv is the extra server environment.
-	program   string
-	launchEnv []string
 	filter    FeatureFilter
 	// docs holds the paths this server has been sent didOpen for.
 	docs map[string]bool
@@ -183,33 +179,12 @@ func (h *Handle) Name() string { return h.cfg.DisplayName() }
 // Client returns the connection to the server.
 func (h *Handle) Client() *lsp.Client { return h.client }
 
-// Universal reports whether the server serves every language.
-func (h *Handle) Universal() bool { return h.universal }
-
-// Language returns the language key the server is configured under; empty for a
-// universal server.
-func (h *Handle) Language() string { return h.language }
-
 // Can reports whether the server takes feature: its filter allows it and its
 // initialize result advertises it. A server whose initialize has not finished
 // takes nothing.
 func (h *Handle) Can(feature Feature) bool {
 	return h.filter.Allows(feature) && Capability(h.client.Capabilities(), feature)
 }
-
-// Command is the program and arguments the server runs with.
-func (h *Handle) Command() []string { return h.cfg.CommandLine() }
-
-// Program is the absolute executable the manager passed to lsp.Start, or "" when the
-// server's bare command was resolved by the child's own PATH lookup.
-func (h *Handle) Program() string { return h.program }
-
-// LaunchEnv is the extra environment the server was launched with (project overlay plus
-// its configured env), for a resolver that must run the same binary/environment.
-func (h *Handle) LaunchEnv() []string { return slices.Clone(h.launchEnv) }
-
-// Install is how to install the server, when it is missing.
-func (h *Handle) Install() string { return h.cfg.Install }
 
 // Capabilities returns the server's capability snapshot: the initialize result
 // plus the providers it registered dynamically.
@@ -628,18 +603,6 @@ func (m *Manager) closeDoc(path string) error {
 	return errors.Join(errs...)
 }
 
-// ClientFor returns a client whose server holds the open document at path. It
-// returns false when path is not open, or when no server for it is running.
-// It is the single-server view the plugin request uses; the request reaches the
-// first server of the document's language, then a universal server.
-func (m *Manager) ClientFor(path string) (*lsp.Client, bool) {
-	h, ok := m.HandleForPath(path)
-	if !ok {
-		return nil, false
-	}
-	return h.client, true
-}
-
 // HandleForPath returns the first live handle that has the document at path open:
 // a server of its language first, then a universal server.
 func (m *Manager) HandleForPath(path string) (*Handle, bool) {
@@ -875,8 +838,8 @@ func (m *Manager) CurrentServers(language string) []ServerConfig {
 }
 
 // ReplaceServers replaces the configured servers of language and starts them as a manual
-// start. It is for an explicit Start/Restart after a completed per-root selection (Deno
-// auto-selection): it stops only the running servers of that language (never another
+// start. It is for an explicit Start/Restart after the server plan changed (a settings
+// reload): it stops only the running servers of that language (never another
 // language or a universal server), waits for any in-flight start of the language so a late
 // old-config handle cannot survive, clears old stopped/failure/resume bookkeeping, then
 // starts the new configs. It is not called from automatic paths.
@@ -1190,8 +1153,6 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool,
 		universal: universal,
 		cfg:       cfg,
 		client:    c,
-		program:   program,
-		launchEnv: slices.Clone(serverEnv),
 		filter:    ParseFeatureFilter(cfg.OnlyFeatures, cfg.ExceptFeatures),
 		docs:      make(map[string]bool),
 	}, nil

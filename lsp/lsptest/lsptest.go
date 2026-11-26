@@ -73,6 +73,23 @@ func Recv[T any](t *testing.T, ch <-chan T, what string) T {
 	return zero
 }
 
+// WaitRev waits until rev reports a value above after, and returns it, or fails the test
+// after Timeout. A client's DiagnosticsRev is the rev, taken before the action that makes
+// the server publish.
+func WaitRev(t testing.TB, rev func() uint64, after uint64, what string) uint64 {
+	t.Helper()
+	deadline := time.Now().Add(Timeout)
+	for {
+		if got := rev(); got > after {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: timed out after %v", what, Timeout)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // ErrRefused is the error the fake server returns from every request method
 // while Canned.Fail is set. Tests check that it reaches the caller.
 var ErrRefused = errors.New("fake server refused")

@@ -23,6 +23,10 @@ func TestExpandSnippet(t *testing.T) {
 		{"a trailing tabstop expands empty", "$5", "", 0},
 		{"last final stop wins", "a$0b$0c", "abc", 2},
 		{"nested default", "x$" + "{1:$" + "{2:y}}", "xy", 2},
+		{"escaped tabstop inside default", "$" + "{1:\\$0}", "$0", 2},
+		{"escaped nested placeholder inside default", "$" + "{1:\\$" + "{2:foo}}", "${2:foo}", 8},
+		{"escaped backslash before tabstop inside default", "$" + "{1:\\\\$2}", "\\", 1},
+		{"escaped comma in choice", "$" + "{1|a\\,b,c|}", "a,b", 3},
 		{"rune offsets for CJK", "x($" + "{1:参数}$0)", "x(参数)", 4},
 		{"rune offsets for emoji", "e$0moji", "emoji", 1},
 	}

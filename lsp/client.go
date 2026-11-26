@@ -27,9 +27,6 @@ import (
 	"go.lsp.dev/uri"
 )
 
-// diagnosticsBuffer is the capacity of the Diagnostics channel.
-const diagnosticsBuffer = 64
-
 // ErrNoCommand is returned by Start when Config.Command is empty.
 var ErrNoCommand = errors.New("lsp: no server command")
 
@@ -82,12 +79,8 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// diags is closed after the read loop exits, so no send can follow the close.
-	diags chan DiagnosticsEvent
-
 	// diagMu guards diagByURI, the latest publishDiagnostics event per document,
-	// and diagRev, which increments on each publish. Unlike diags, diagByURI is
-	// never trimmed by the drop-oldest policy.
+	// and diagRev, which increments on each publish.
 	diagMu    sync.Mutex
 	diagByURI map[string]DiagnosticsEvent
 	diagRev   uint64
@@ -115,7 +108,6 @@ type Client struct {
 	caps      Capabilities
 	capStatic Capabilities
 	dyn       map[string]dynRegistration
-	initRes   *protocol.InitializeResult
 
 	// proc is set only by Start. stderr holds the tail of its error output, and
 	// limitsNote what happened to the process limits it was started with.
@@ -267,7 +259,6 @@ func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
 		rootURI:     cfg.RootURI,
 		ctx:         ctx,
 		cancel:      cancel,
-		diags:       make(chan DiagnosticsEvent, diagnosticsBuffer),
 		diagByURI:   make(map[string]DiagnosticsEvent),
 		applyEdit:   cfg.ApplyEdit,
 		initOptions: cfg.InitializationOptions,
@@ -278,13 +269,6 @@ func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
 
 	h := &clientHandler{c: c, rootURI: cfg.RootURI}
 	c.conn.Go(ctx, protocol.ClientHandler(h, jsonrpc2.MethodNotFoundHandler))
-
-	// The read loop is the only sender on diags. Done closes after the loop has
-	// exited, so closing diags here cannot race with a send.
-	go func() {
-		<-c.conn.Done()
-		close(c.diags)
-	}()
 	return c
 }
 
@@ -309,7 +293,6 @@ func (c *Client) Initialize(ctx context.Context) (*protocol.InitializeResult, er
 		return nil, fmt.Errorf("lsp: initialize: %w", err)
 	}
 	c.capMu.Lock()
-	c.initRes = res
 	c.capStatic = summarizeCapabilities(res.Capabilities)
 	c.caps = c.capStatic
 	for _, reg := range c.dyn {
@@ -317,14 +300,6 @@ func (c *Client) Initialize(ctx context.Context) (*protocol.InitializeResult, er
 	}
 	c.capMu.Unlock()
 	return res, nil
-}
-
-// InitializeResult returns the server's initialize result. ok is false before
-// Initialize returns.
-func (c *Client) InitializeResult() (*protocol.InitializeResult, bool) {
-	c.capMu.Lock()
-	defer c.capMu.Unlock()
-	return c.initRes, c.initRes != nil
 }
 
 // Capabilities returns what the server can serve: the providers it advertised in
@@ -460,21 +435,9 @@ func (c *Client) Done() <-chan struct{} {
 	return c.conn.Done()
 }
 
-// Diagnostics returns the channel of publishDiagnostics events. The channel is
-// closed when the connection ends, either after Close or after the server
-// closes its side of the transport.
-//
-// Delivery policy: the channel has capacity 64, and the read loop never blocks
-// on it. When the buffer is full, the oldest queued event is dropped to make room
-// for the newest one. A consumer that falls behind therefore sees the most
-// recent state of each document, not every intermediate version.
-func (c *Client) Diagnostics() <-chan DiagnosticsEvent {
-	return c.diags
-}
-
-// DiagnosticsFor returns the latest publishDiagnostics event for docURI. Use it
-// for the current state of a document; Diagnostics is a bounded queue and can
-// omit intermediate events. ok is false until the server publishes for docURI.
+// DiagnosticsFor returns the latest publishDiagnostics event for docURI. It is the
+// current state of a document, not every intermediate event: DiagnosticsRev says when
+// to ask again. ok is false until the server publishes for docURI.
 // An ok event with no diagnostics means the server cleared them. The returned
 // slice is a copy.
 func (c *Client) DiagnosticsFor(docURI string) (DiagnosticsEvent, bool) {
@@ -508,26 +471,12 @@ func (c *Client) DiagnosticsRev() uint64 {
 	return c.diagRev
 }
 
-// publish records ev as the latest event for its document and queues it without
-// blocking. Only the read loop calls it, so a single-producer drop-oldest loop
-// always finishes after at most one drop.
+// publish records ev as the latest event for its document.
 func (c *Client) publish(ev DiagnosticsEvent) {
 	c.diagMu.Lock()
 	c.diagByURI[ev.URI] = ev
 	c.diagRev++
 	c.diagMu.Unlock()
-
-	for {
-		select {
-		case c.diags <- ev:
-			return
-		default:
-		}
-		select {
-		case <-c.diags: // drop the oldest queued event
-		default:
-		}
-	}
 }
 
 // Close tears the connection down. It does not send shutdown or exit, so call
@@ -536,7 +485,7 @@ func (c *Client) publish(ev DiagnosticsEvent) {
 //  1. cancels the read loop context and closes the transport. This unblocks
 //     the read loop even when requests are still pending, and pending requests
 //     return an error.
-//  2. waits for the connection to terminate, which closes Diagnostics.
+//  2. waits for the connection to terminate, which closes Done.
 //  3. for a process started by Start, closes its stdin and waits for it to
 //     exit, killing it after a short grace period.
 //

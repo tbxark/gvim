@@ -26,7 +26,7 @@ func ExpandSnippet(snippet string) SnippetExpansion {
 	for i := 0; i < len(runes); i++ {
 		switch runes[i] {
 		case '\\':
-			if i+1 < len(runes) && (runes[i+1] == '$' || runes[i+1] == '\\' || runes[i+1] == '}') {
+			if i+1 < len(runes) && (runes[i+1] == '$' || runes[i+1] == '\\' || runes[i+1] == '}' || runes[i+1] == '|') {
 				out = append(out, runes[i+1])
 				i++
 				continue
@@ -88,8 +88,10 @@ func parseBracedSnippet(rest []rune) (expanded []rune, final bool, consumed int)
 			}
 			content = append(content, '}')
 		case '\\':
-			if i+1 < len(rest) && (rest[i+1] == '$' || rest[i+1] == '\\' || rest[i+1] == '}' || rest[i+1] == '|') {
-				content = append(content, rest[i+1])
+			if i+1 < len(rest) && (rest[i+1] == '$' || rest[i+1] == '\\' || rest[i+1] == '}' || rest[i+1] == '|' || rest[i+1] == ',') {
+				// Keep the backslash intact so the recursive ExpandSnippet or choice
+				// parser unescapes once instead of double-unescaping nested defaults.
+				content = append(content, '\\', rest[i+1])
 				i++
 				continue
 			}
@@ -124,16 +126,30 @@ func parseSnippetPlaceholder(content string) (text string, final bool) {
 		return ExpandSnippet(defaults).Text, final
 	case '|':
 		choices := trimTrailingPipes(string(runes[digits+1:]))
-		first := choices
-		for i, r := range choices {
-			if r == ',' {
-				first = choices[:i]
-				break
-			}
-		}
-		return first, final
+		return firstSnippetChoice(choices), final
 	}
 	return "", final
+}
+
+// firstSnippetChoice returns the unescaped first choice of a choices placeholder.
+func firstSnippetChoice(choices string) string {
+	runes := []rune(choices)
+	var out []rune
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '\\' && i+1 < len(runes) {
+			switch runes[i+1] {
+			case '$', '\\', '}', '|', ',':
+				out = append(out, runes[i+1])
+				i++
+				continue
+			}
+		}
+		if runes[i] == ',' {
+			break
+		}
+		out = append(out, runes[i])
+	}
+	return string(out)
 }
 
 // trimTrailingPipes removes the closing pipes of a choices placeholder.

@@ -3,6 +3,7 @@ package lsphost
 import (
 	"context"
 	"errors"
+	"github.com/tbxark/gvim/document"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/lsp/manager"
@@ -206,7 +206,7 @@ func TestWorkspaceEditConvertsTextAndResourceOperations(t *testing.T) {
 		t.Errorf("op 0 = %+v, want a create of /p/new.go", op)
 	}
 	op := got.Ops[1]
-	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 5}, To: buffer.Pos{Line: 0, Col: 8}, Text: "bar"}
+	want := document.LSPEdit{From: buffer.Pos{Line: 0, Col: 5}, To: buffer.Pos{Line: 0, Col: 8}, Text: "bar"}
 	if op.Kind != tui.WorkspaceOpText || op.Path != "/p/b.go" || op.Version == nil || *op.Version != version ||
 		len(op.Edits) != 1 || op.Edits[0] != want {
 		t.Errorf("op 1 = %+v, want the text edit with its version", op)

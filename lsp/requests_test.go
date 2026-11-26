@@ -514,10 +514,6 @@ func TestRequestsReturnWhenContextEnds(t *testing.T) {
 			_, err := c.SemanticTokensDelta(ctx, reqDocURI, "prev")
 			return err
 		}},
-		{"semantic tokens range", func(ctx context.Context, c *Client) error {
-			_, err := c.SemanticTokensRange(ctx, reqDocURI, rng(0, 0, 1, 0))
-			return err
-		}},
 		{"folding ranges", func(ctx context.Context, c *Client) error {
 			_, err := c.FoldingRanges(ctx, reqDocURI)
 			return err
