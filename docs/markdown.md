@@ -62,8 +62,8 @@ reader's delimiters rather than moving the parser:
 - **task-list boxes**: a list item's "[ ]" / "[x]" box becomes a checkbox glyph
   (☐ / ☑) with one blank after it, so the item's text keeps its place; the raw box
   shows under the caret like the other conceals;
-- **images**: an image's leading "!" is part of its opening marker, so
-  `![alt](url)` composes to its alt text (the page view has no image renderer);
+- **images**: the rendered pane shows the alt text and can add a local image
+  below it. The source pane shows the complete Markdown link.
   the raw syntax shows under the caret;
 - **inline HTML** is left literal: the page view has no cell renderer for it, and
   hiding it would lose visible text.
@@ -75,6 +75,21 @@ hover decoration.
 
 Block-level heading text keeps the existing heading kind; the ATX `#` markers and a setext
 underline are concealed (see Headings below).
+
+## Local images
+
+Put `![Diagram](assets/diagram.png)` on its own line to display it in Rendered mode
+or on the rendered side of Dual mode. Paths are relative to the Markdown file.
+Use angle brackets for spaces, as in `![Diagram](<assets/my diagram.png>)`.
+PNG, JPEG, GIF, and WebP are supported.
+
+The image occupies display rows beneath its source line, so editing, copying, and
+dual-pane scroll synchronization still use the source text. Terminals that support
+Kitty graphics display the image pixels, with colored half blocks as the fallback.
+The first eight distinct image references in
+each rendered buffer are eligible for asynchronous decoding. Missing, oversized,
+unsupported, and network images keep their alt text. Set `image_protocol: "off"`
+to disable the pictures.
 
 ## Code-fence frames
 

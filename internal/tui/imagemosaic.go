@@ -112,22 +112,28 @@ func mosaicLoadCmd(path string, size, mtime int64) tea.Cmd {
 		if len(data) > imageMaxBytes {
 			return mosaicLoadedMsg{path: path, size: size, mtime: mtime, err: errImageTooLarge}
 		}
-		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-		if err != nil {
-			return mosaicLoadedMsg{path: path, size: size, mtime: mtime, err: err}
-		}
-		if cfg.Width <= 0 || cfg.Height <= 0 {
-			return mosaicLoadedMsg{path: path, size: size, mtime: mtime, err: errImageUndecodable}
-		}
-		if cfg.Height > imageMaxPixels/cfg.Width {
-			return mosaicLoadedMsg{path: path, size: size, mtime: mtime, err: errImageTooLarge}
-		}
-		img, _, err := image.Decode(bytes.NewReader(data))
-		if err != nil {
-			return mosaicLoadedMsg{path: path, size: size, mtime: mtime, err: err}
-		}
-		return mosaicLoadedMsg{path: path, size: size, mtime: mtime, img: mosaicBound(img)}
+		img, _, err := decodeMosaic(data, imageMaxPixels)
+		return mosaicLoadedMsg{path: path, size: size, mtime: mtime, img: img, err: err}
 	}
+}
+
+func decodeMosaic(data []byte, maxPixels int) (image.Image, image.Point, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, image.Point{}, err
+	}
+	size := image.Pt(cfg.Width, cfg.Height)
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, size, errImageUndecodable
+	}
+	if cfg.Height > maxPixels/cfg.Width {
+		return nil, size, errImageTooLarge
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, size, err
+	}
+	return mosaicBound(img), size, nil
 }
 
 // mosaicBound downscales img so its longer side is at most mosaicMaxSide, never
@@ -181,12 +187,10 @@ func (m *Model) mosaicPane(p split.Pane, doc Document, info document.ImageInfo) 
 	if fit.w <= 0 || fit.h <= 0 {
 		return pg, true
 	}
-	if e.render.w != fit.w || e.render.h != fit.h || len(e.render.cells) != fit.w*fit.h {
-		e.render = mosaicRender{w: fit.w, h: fit.h, cells: mosaicCells(e.img, fit.w, fit.h)}
-	}
+	cells := e.render.pictureCells(e.img, fit.w, fit.h)
 	for row := range fit.h {
 		for col := range fit.w {
-			c := e.render.cells[row*fit.w+col]
+			c := cells[row*fit.w+col]
 			pg.Set(fit.x-area.x+col, fit.y-area.y+row, c.Text, c.Style)
 		}
 	}

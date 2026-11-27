@@ -16,11 +16,12 @@ safely. It ships as a single static binary with no runtime dependencies.
   symbols, call hierarchy, hover, diagnostics, and a cross-file back/forward history
   (`Alt+Left` / `Alt+Right`).
 - **Git and diff**: built-in Review Diff Mode (`gvim --review` or `Alt+Shift+R`), side-by-side
-  file comparison (`gvim --diff a b`), gutter change markers, inline blame, and commit log.
+  file comparison (`gvim --diff a b`), staged and unstaged views, image diffs,
+  gutter change markers, inline blame, and commit log.
 - **Fast search**: fuzzy Quick Open (`Ctrl+P`, with `:line`, `#buffers`, `>commands`), project-wide
   Live Grep (`Alt+/`), in-file find and replace, and Flash Jump.
-- **Markdown**: rendered view, source view, or a synchronized dual view, plus an outline in the
-  sidebar.
+- **Markdown**: rendered view with local images, source view, or a synchronized dual view,
+  plus an outline in the sidebar.
 - **Pure Go, cross-platform**: macOS, Linux, and Windows, with `default`, `vscode`, `emacs`,
   `macos`, and `macos-gui` keymaps.
 
@@ -52,6 +53,7 @@ gvim -R .                       # Read-only code-viewer mode
 gvim -R main.go:42:10           # Open file at line 42, column 10
 gvim --diff fileA.go fileB.go   # Compare two files side by side
 git show HEAD | gvim -          # View piped stdin in a scratch buffer
+gvim preview --lines 20 main.go  # Print a file preview to stdout
 ```
 
 Run `gvim --help` for every flag; the full list is in [`docs/usage.md`](docs/usage.md).

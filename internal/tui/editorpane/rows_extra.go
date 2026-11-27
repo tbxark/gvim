@@ -39,6 +39,9 @@ type ExtraTextOverlay struct {
 type ExtraRow struct {
 	Text  string
 	Style grid.Style
+	// Draw paints a native display row, such as an embedded image. It runs
+	// only for visible rows. Coordinates are relative to the pane.
+	Draw func(g *grid.Grid, y int)
 	// GutterText draws one cell in the gutter column of the row (the last gutter column).
 	GutterText  string
 	GutterStyle grid.Style
@@ -389,6 +392,10 @@ func (f frame) paintExtraRow(g *grid.Grid, i int, er ExtraRow, y int, cur bool) 
 			}
 			g.Set(f.gutter-1, y, er.GutterText, st)
 		}
+	}
+	if er.Draw != nil {
+		er.Draw(g, y)
+		return
 	}
 	st := er.Style
 	if cur && f.styles.CurrentLine.BG != nil {

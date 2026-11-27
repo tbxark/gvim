@@ -2,6 +2,9 @@ package tui
 
 import (
 	"context"
+	"image"
+	"image/color"
+	"image/draw"
 	"strings"
 	"testing"
 
@@ -18,10 +21,12 @@ type fakeReviewGit struct {
 	diffs         map[string]*reviewdiff.FileDiff // keyed by base + "\x00" + path
 	refs          []string
 	changesCalls  int
+	lastScope     reviewdiff.Scope
 }
 
-func (f *fakeReviewGit) Changes(_ context.Context, _ string, baseRef string) (ReviewChangesResult, error) {
+func (f *fakeReviewGit) Changes(_ context.Context, _ string, baseRef string, scope reviewdiff.Scope) (ReviewChangesResult, error) {
 	f.changesCalls++
+	f.lastScope = scope
 	if res, ok := f.changesByBase[baseRef]; ok {
 		return res, nil
 	}
@@ -31,9 +36,36 @@ func (f *fakeReviewGit) Changes(_ context.Context, _ string, baseRef string) (Re
 func (f *fakeReviewGit) FileDiff(_ context.Context, _ string, baseRef string, entry reviewdiff.FileEntry) (*reviewdiff.FileDiff, error) {
 	if fd, ok := f.diffs[baseRef+"\x00"+entry.Path]; ok {
 		cp := *fd
+		cp.Scope = entry.Scope
 		return &cp, nil
 	}
 	return &reviewdiff.FileDiff{Path: entry.Path, Status: entry.Status, BaseRef: baseRef}, nil
+}
+
+func TestReviewScopesAndImageRenderInFrame(t *testing.T) {
+	port := newSampleReviewGit()
+	m := newReviewTestModel(t, port, true)
+	for _, tc := range []struct {
+		key, title string
+		scope      reviewdiff.Scope
+	}{
+		{"2", "Staged", reviewdiff.ScopeStaged},
+		{"3", "Unstaged", reviewdiff.ScopeUnstaged},
+		{"1", "vs HEAD", reviewdiff.ScopeWorkingTree},
+	} {
+		drainReviewCmds(m, press(m, typed(tc.key)))
+		if port.lastScope != tc.scope || !frameHas(m, tc.title) {
+			t.Fatalf("press %s routed %v, frame lacks %q", tc.key, port.lastScope, tc.title)
+		}
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 96, 64))
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{B: 255, A: 255}), image.Point{}, draw.Src)
+	m.review.model.SetDiff(&reviewdiff.FileDiff{Path: "pic.png", Binary: true, Scope: reviewdiff.ScopeStaged,
+		Images: &[2]reviewdiff.ImageSide{{Pixels: img, Size: img.Bounds().Size()}, {}},
+	}, "")
+	if !frameRowHas(m, "HEAD · 96×64", "Index") || !frameHas(m, "Image absent") || !frameHas(m, "▀") {
+		t.Fatalf("review frame lacks image labels, absent state, or pixels: %q", frameText(m))
+	}
 }
 
 func (f *fakeReviewGit) Refs(_ context.Context, _ string) ([]string, error) {

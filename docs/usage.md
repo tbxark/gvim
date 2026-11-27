@@ -34,9 +34,33 @@ git show HEAD | gvim -          # View piped stdin in a scratch buffer
 | `--daemon[=NAME]` | Run the editor as a daemon on a Unix socket (foreground) |
 | `-a`, `--attach[=NAME]` | Attach this terminal to a running daemon |
 
-Subcommands: `gvim config` (inspect the configuration), `gvim grammar list` (the syntax
-grammars), `gvim rex install` / `gvim rex uninstall` (the Rex terminal integration) and
-`gvim version`. `gvim --help` has the full description of each flag.
+Subcommands include `gvim config` to inspect the configuration, `gvim grammar list` to list syntax
+grammars, `gvim preview` to print a file, `gvim rex install` / `gvim rex uninstall` to manage the
+Rex terminal integration, and `gvim version`. Run `gvim --help` for all options.
+
+### Print a file preview
+
+`gvim preview FILE` prints a local UTF-8 file to stdout without starting an editor session.
+
+```sh
+gvim preview --skip 10 --lines 20 --line-numbers main.go
+gvim preview --color=always --lines 30 --width 80 -- main.go
+```
+
+| Flag | Description |
+|---|---|
+| `--skip N` | Skip the first N source lines. Defaults to 0. |
+| `--lines N` | Print up to N source lines. The default, 0, prints through EOF. |
+| `--width N` | Clip each output row to N terminal columns, including line numbers. The default, 0, uses no column limit. |
+| `--line-numbers` | Show original source line numbers when there is room for a number and file text. |
+| `--tab-size N` | Display each tab as N spaces (1–32, default 4). |
+| `--color MODE` | Use `auto` (default), `always`, or `never`. Use `always` to pass ANSI colors through a pipe. `auto` respects `NO_COLOR`. |
+| `--theme NAME` | Override the syntax theme from the user config when color is enabled. |
+
+Preview reads the file sequentially. Lines longer than 32 KiB have a shortened display with an
+ellipsis. Syntax highlighting uses a bounded window, so its multiline context can differ from the
+interactive editor. A leading UTF-8 BOM and terminal control characters are removed from the output.
+Use `gvim -- preview` to open a file or directory named `preview` in the editor.
 
 ## Keybinding cheat sheet
 
@@ -104,6 +128,15 @@ The symbol, call-hierarchy, outline and breadcrumb rows (`Go to LSP Symbol` thro
 Git Log, Merge conflict resolution and Flash Jump are bundled plugins that are
 **off by default**; enable one with `"plugins": { "flash": { "enabled": true } }` in
 `config.json` (see [`plugins/bundled.md`](plugins/bundled.md)). Git Gutter and Git Blame are on.
+
+In Review Diff Mode, press `1` for the working tree against the chosen ref, `2`
+for staged changes (HEAD → index), or `3` for unstaged changes (index → working
+tree, including untracked files). The header picker (`b`) also selects these
+views. The views read the Git index.
+
+Press Enter or click a hidden-context header to expand or collapse it. Press
+`e` on the header to reveal more lines while keeping it expanded. Image changes
+show both revisions with their dimensions and label an absent side.
 
 ## Scrollbar overview ruler
 

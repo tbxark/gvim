@@ -699,7 +699,7 @@ func (m *Model) viewPane(sp split.Pane, p editorpane.Pane, doc Document) editorp
 	if p.PageView.On && p.PageView.Markdown {
 		// The Markdown table's top and bottom borders and the wrapped-cell rows are
 		// display rows no source line owns; the shared inserted-row hook adds them.
-		p.PageExtraRows = editorpane.PageViewTableBordersFor(doc, p.Styles, p.PageView.NoCaretReveal)
+		p.PageExtraRows = m.markdownImageExtraRows(sp, doc, editorpane.PageViewTableBordersFor(doc, p.Styles, p.PageView.NoCaretReveal))
 		p.TrackMarks = m.markdownHeadingMarks(doc, p)
 	}
 	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes

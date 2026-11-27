@@ -421,6 +421,9 @@ func (m *Model) PaintHeaderBar(g *grid.Grid, x, y, w int, st Styles, _ icons.Mod
 
 	// Right-aligned clickable action pills, priority ordered from most important.
 	baseLabel := " vs " + textsafe.Clean(m.BaseRef) + " ▾ "
+	if m.Scope != ScopeWorkingTree {
+		baseLabel = " " + m.Scope.Label() + " ▾ "
+	}
 	viewLabel := " " + m.EffectiveViewMode(w).Label() + " "
 	ctxLabel := " Hunks "
 	if m.FullFile {
@@ -437,10 +440,12 @@ func (m *Model) PaintHeaderBar(g *grid.Grid, x, y, w int, st Styles, _ icons.Mod
 		label  string
 	}
 	candidates := []candidate{
-		{HeaderEdit, editLabel},
 		{HeaderViewMode, viewLabel},
 		{HeaderBaseRef, baseLabel},
 		{HeaderFullFile, ctxLabel},
+	}
+	if m.Scope != ScopeStaged {
+		candidates = append([]candidate{{HeaderEdit, editLabel}}, candidates...)
 	}
 	if m.EffectiveViewMode(w) == ViewUnified {
 		candidates = append(candidates, candidate{HeaderWrap, wrapLabel})
@@ -642,6 +647,9 @@ func (m *Model) PaintDiff(g *grid.Grid, r DiffRect, st Styles) {
 			msgStyle.BG = st.Text.BG
 		case len(m.Files) == 0:
 			msg = "Working tree clean — no changes against " + m.BaseRef + "."
+			if m.Scope != ScopeWorkingTree {
+				msg = "No " + strings.ToLower(m.Scope.Label()) + " changes."
+			}
 		case len(m.Filtered) == 0:
 			msg = "No files match the current filter."
 		default:

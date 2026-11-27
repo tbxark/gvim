@@ -554,16 +554,14 @@ func (f frame) rowAt(row int) displayRow {
 		return f.rowAtFilled(row)
 	}
 	last := f.lines - 1
-	if row < 0 && !f.isTall(f.top) && f.topRow+row >= 0 {
-		// A row of the top line that is scrolled off above the body.
-		rows := f.lineRows(f.top, false, 0, f.topRow+row+1)
-		return displayOf(f.top, rows[f.topRow+row], true)
-	}
-	if row < 0 {
+	if row < 0 && (f.isTall(f.top) || f.topRow+row < 0) {
 		i := min(max(f.top+row, 0), last)
 		return displayOf(i, f.lastRowOf(i), true)
 	}
 	k := row
+	if !f.isTall(f.top) {
+		k += f.topRow
+	}
 	for i := f.top; i < f.lines; i = f.next(i) {
 		if f.isTall(i) {
 			anchor := 0
@@ -583,14 +581,8 @@ func (f frame) rowAt(row int) displayRow {
 		if k < above {
 			return displayRow{line: i, ln: ln, span: ln.spans[0], extra: 1, first: true, valid: true}
 		}
-		anchor := 0
-		if i == f.top {
-			// The layout rows of the top line that are scrolled off.
-			anchor = max(f.topRow-above, 0)
-		}
-		rows := f.lineRows(i, false, anchor, max(k-above+1, 1))
-		if k-above < len(rows) {
-			return displayOf(i, rows[k-above], true)
+		if r := k - above; r < len(ln.spans) {
+			return displayRow{line: i, ln: ln, span: ln.spans[r], k: r, first: r == 0, last: r == len(ln.spans)-1, valid: true}
 		}
 		if k < n {
 			// One of the rows below the line.

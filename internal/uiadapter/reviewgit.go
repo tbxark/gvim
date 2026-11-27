@@ -48,9 +48,9 @@ type ReviewGit struct {
 
 var _ tui.ReviewGitPort = ReviewGit{}
 
-// Changes lists all working-tree changes relative to baseRef plus untracked
-// files in a single flat list (each changed path appears once).
-func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.ReviewChangesResult, error) {
+// Changes lists the differences for scope. The working-tree scope compares
+// against baseRef, while staged and unstaged use the index as one side.
+func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string, scope reviewdiff.Scope) (tui.ReviewChangesResult, error) {
 	if dir == "" {
 		return tui.ReviewChangesResult{NotRepo: true, BaseRef: defaultBase(baseRef)}, nil
 	}
@@ -76,13 +76,22 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 
 	branch := g.readBranch(ctx, repoRoot)
 
-	effectiveBase, _, err := g.resolveBase(ctx, repoRoot, baseRef)
-	if err != nil {
-		return tui.ReviewChangesResult{RepoRoot: repoRoot, Branch: branch, BaseRef: baseRef}, err
+	var operands []string
+	switch scope {
+	case reviewdiff.ScopeStaged:
+		operands = []string{"--cached"}
+	case reviewdiff.ScopeWorkingTree:
+		effectiveBase, _, err := g.resolveBase(ctx, repoRoot, baseRef)
+		if err != nil {
+			return tui.ReviewChangesResult{RepoRoot: repoRoot, Branch: branch, BaseRef: baseRef}, err
+		}
+		operands = []string{effectiveBase}
 	}
+	names := append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", "--name-status", "-z"}, operands...)
+	statsArgs := append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", "--numstat", "-z"}, operands...)
 
 	// 1. Tracked changes relative to effectiveBase (working tree vs base commit).
-	nsRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, "diff", "--no-color", "-M", "--name-status", "-z", effectiveBase, "--")
+	nsRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, append(names, "--")...)
 	if err != nil {
 		return tui.ReviewChangesResult{}, err
 	}
@@ -90,9 +99,21 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 		return tui.ReviewChangesResult{RepoRoot: repoRoot, Branch: branch, BaseRef: baseRef}, gitErr("diff --name-status", nsRes)
 	}
 	entries := parseNameStatusZ(nsRes.Stdout)
+	if scope != reviewdiff.ScopeWorkingTree {
+		// An unmerged index can appear as both U and M for the same path.
+		conflicted := make(map[string]bool)
+		for _, entry := range entries {
+			if entry.Status == reviewdiff.StatusConflicted {
+				conflicted[entry.Path] = true
+			}
+		}
+		entries = slices.DeleteFunc(entries, func(entry reviewdiff.FileEntry) bool {
+			return conflicted[entry.Path] && entry.Status != reviewdiff.StatusConflicted
+		})
+	}
 
 	// 2. Per-file line stats (+add/-del and binary flag).
-	statRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, "diff", "--no-color", "-M", "--numstat", "-z", effectiveBase, "--")
+	statRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, append(statsArgs, "--")...)
 	if err == nil && statRes.Code == 0 {
 		stats := parseNumstatZ(statRes.Stdout)
 		for i := range entries {
@@ -109,35 +130,40 @@ func (g ReviewGit) Changes(ctx context.Context, dir, baseRef string) (tui.Review
 	for _, e := range entries {
 		byPath[e.Path] = struct{}{}
 	}
-	lsRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, "ls-files", "--others", "--exclude-standard", "-z")
-	if err == nil && lsRes.Code == 0 {
-		untracked := parseNullList(lsRes.Stdout)
-		first := len(entries)
-		statCount := 0
-		for _, p := range untracked {
-			if _, exists := byPath[p]; exists {
-				continue
+	if scope != reviewdiff.ScopeStaged {
+		lsRes, err := g.runGit(ctx, repoRoot, reviewMaxStatusBytes, "ls-files", "--others", "--exclude-standard", "-z")
+		if err == nil && lsRes.Code == 0 {
+			untracked := parseNullList(lsRes.Stdout)
+			first := len(entries)
+			statCount := 0
+			for _, p := range untracked {
+				if _, exists := byPath[p]; exists {
+					continue
+				}
+				byPath[p] = struct{}{}
+				fe := reviewdiff.FileEntry{
+					Path:   p,
+					Status: reviewdiff.StatusUntracked,
+				}
+				if statCount < reviewMaxUntrackedStats {
+					statCount++
+				} else {
+					fe.StatOnly = true
+				}
+				entries = append(entries, fe)
+				if len(entries) >= reviewMaxFiles {
+					break
+				}
 			}
-			byPath[p] = struct{}{}
-			fe := reviewdiff.FileEntry{
-				Path:   p,
-				Status: reviewdiff.StatusUntracked,
-			}
-			if statCount < reviewMaxUntrackedStats {
-				statCount++
-			} else {
-				fe.StatOnly = true
-			}
-			entries = append(entries, fe)
-			if len(entries) >= reviewMaxFiles {
-				break
-			}
+			g.statUntracked(ctx, repoRoot, entries[first:])
 		}
-		g.statUntracked(ctx, repoRoot, entries[first:])
 	}
 
 	if len(entries) > reviewMaxFiles {
 		entries = entries[:reviewMaxFiles]
+	}
+	for i := range entries {
+		entries[i].Scope = scope
 	}
 	slices.SortFunc(entries, func(a, b reviewdiff.FileEntry) int {
 		return strings.Compare(a.Path, b.Path)
@@ -171,6 +197,7 @@ func (g ReviewGit) statUntracked(ctx context.Context, repoRoot string, entries [
 			defer func() { <-sem; wg.Done() }()
 			fe := &entries[i]
 			raw, _, err := g.readWorkFile(ctx, repoRoot, fe.Path, reviewUntrackedStatBytes)
+			raw = trimAtLineBoundary(raw, reviewUntrackedStatBytes)
 			switch {
 			case err != nil:
 				fe.StatOnly = true
@@ -189,64 +216,101 @@ func (g ReviewGit) statUntracked(ctx context.Context, repoRoot string, entries [
 func (g ReviewGit) FileDiff(ctx context.Context, repoRoot, baseRef string, entry reviewdiff.FileEntry) (*reviewdiff.FileDiff, error) {
 	baseRef = defaultBase(baseRef)
 	out := &reviewdiff.FileDiff{
-		Path:    entry.Path,
-		OldPath: entry.OldPath,
-		Status:  entry.Status,
-		BaseRef: baseRef,
-		Binary:  entry.Binary,
+		Path: entry.Path, OldPath: entry.OldPath, Status: entry.Status,
+		BaseRef: baseRef, Scope: entry.Scope, Binary: entry.Binary,
 	}
-	if entry.Binary {
+	if entry.Status == reviewdiff.StatusConflicted && entry.Scope != reviewdiff.ScopeWorkingTree {
+		out.Binary = true
+		out.Message = "Unmerged file — resolve the conflict before reviewing the index"
+		return out, nil
+	}
+	imageFile := tui.ImagePreviewPath(entry.Path) || tui.ImagePreviewPath(entry.OldPath)
+	if entry.Binary && !imageFile {
 		out.Message = "Binary file changed"
 		return out, nil
 	}
 
-	effectiveBase, unborn, err := g.resolveBase(ctx, repoRoot, baseRef)
-	if err != nil {
+	oldRef := ":"
+	unborn := false
+	if entry.Scope != reviewdiff.ScopeUnstaged {
+		ref := baseRef
+		if entry.Scope == reviewdiff.ScopeStaged {
+			ref = "HEAD"
+		}
+		resolved, empty, err := g.resolveBase(ctx, repoRoot, ref)
+		if err != nil {
+			return nil, err
+		}
+		oldRef, unborn = resolved+":", empty
+	}
+
+	oldPath := entry.Path
+	if entry.OldPath != "" {
+		oldPath = entry.OldPath
+	}
+	hasOld := !unborn && entry.Status != reviewdiff.StatusUntracked && entry.Status != reviewdiff.StatusAdded
+	hasNew := entry.Status != reviewdiff.StatusDeleted
+	newRef := ""
+	if entry.Scope == reviewdiff.ScopeStaged {
+		newRef = ":"
+	}
+
+	limit := reviewMaxFileBytes
+	if imageFile {
+		limit = tui.ImagePreviewMaxBytes
+	}
+	var data [2][]byte
+	var cut [2]bool
+	var readErr [2]error
+	for i, side := range [2]struct {
+		path, ref string
+		present   bool
+	}{{oldPath, oldRef, hasOld}, {entry.Path, newRef, hasNew}} {
+		if side.present {
+			data[i], cut[i], readErr[i] = g.readDiffSide(ctx, repoRoot, side.path, side.ref, limit)
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	var oldRaw, newRaw []byte
-	var truncated bool
-
-	// Read old side from git object store unless newly created/untracked/unborn.
-	if !unborn && entry.Status != reviewdiff.StatusUntracked && entry.Status != reviewdiff.StatusAdded {
-		oldPath := entry.Path
-		if entry.OldPath != "" {
-			oldPath = entry.OldPath
-		}
-		res, rerr := g.runGit(ctx, repoRoot, reviewMaxFileBytes+1, "show", effectiveBase+":"+oldPath)
-		if rerr != nil {
-			return nil, rerr
-		}
-		if res.Code == 0 {
-			oldRaw = res.Stdout
-			if res.Truncated || len(oldRaw) > reviewMaxFileBytes {
-				oldRaw = trimAtLineBoundary(oldRaw, reviewMaxFileBytes)
-				truncated = true
+	if imageFile {
+		var images [2]reviewdiff.ImageSide
+		var hasImage bool
+		for i, raw := range data {
+			var err error
+			switch {
+			case readErr[i] != nil:
+				err = readErr[i]
+			case cut[i]:
+				images[i].Error = "Image exceeds the preview limit"
+			case raw != nil:
+				images[i].Pixels, images[i].Size, err = tui.DecodeImagePreview(raw)
 			}
+			if err != nil {
+				images[i].Error = err.Error()
+			}
+			hasImage = hasImage || images[i].Pixels != nil
+		}
+		if hasImage || entry.Binary {
+			out.Binary, out.Images = true, &images
+			out.Message = "Image file changed"
+			return out, nil
 		}
 	}
-
-	// Read new side from the working tree unless deleted.
-	if entry.Status != reviewdiff.StatusDeleted {
-		raw, trunc, rerr := g.readWorkFile(ctx, repoRoot, entry.Path, reviewMaxFileBytes)
-		if rerr != nil {
-			if !errors.Is(rerr, os.ErrNotExist) {
-				return nil, rerr
-			}
-		} else {
-			newRaw = raw
-			if trunc {
-				truncated = true
-			}
+	for _, err := range readErr {
+		if err != nil {
+			return nil, err
 		}
 	}
-
+	oldRaw, newRaw := data[0], data[1]
 	if looksBinary(oldRaw) || looksBinary(newRaw) {
 		out.Binary = true
 		out.Message = "Binary file changed"
 		return out, nil
 	}
+	truncated := cut[0] || cut[1] || len(oldRaw) > reviewMaxFileBytes || len(newRaw) > reviewMaxFileBytes
+	oldRaw = trimAtLineBoundary(oldRaw, reviewMaxFileBytes)
+	newRaw = trimAtLineBoundary(newRaw, reviewMaxFileBytes)
 
 	oldLines, oldCut := splitLinesBounded(oldRaw, reviewMaxLines)
 	newLines, newCut := splitLinesBounded(newRaw, reviewMaxLines)
@@ -261,6 +325,25 @@ func (g ReviewGit) FileDiff(ctx context.Context, repoRoot, baseRef string, entry
 	}
 	out.Hunks = diff.Lines(oldLines, newLines)
 	return out, nil
+}
+
+// readDiffSide returns raw bytes; callers applying text limits trim to a line boundary.
+func (g ReviewGit) readDiffSide(ctx context.Context, root, file, ref string, limit int) ([]byte, bool, error) {
+	if ref == "" {
+		data, cut, err := g.readWorkFile(ctx, root, file, limit)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return data, cut, err
+	}
+	res, err := g.runGit(ctx, root, limit+1, "show", ref+file)
+	if err != nil {
+		return nil, false, err
+	}
+	if res.Code != 0 {
+		return nil, false, gitErr("show", res)
+	}
+	return res.Stdout, res.Truncated || len(res.Stdout) > limit, nil
 }
 
 // Refs lists HEAD followed by local branches, remote branches, and tags sorted
@@ -326,12 +409,12 @@ func (g ReviewGit) readBranch(ctx context.Context, repoRoot string) string {
 }
 
 func (g ReviewGit) resolveBase(ctx context.Context, repoRoot, baseRef string) (resolved string, unborn bool, err error) {
-	res, err := g.runGit(ctx, repoRoot, 4096, "rev-parse", "--verify", "--quiet", baseRef+"^{commit}")
+	res, err := g.runGit(ctx, repoRoot, 4096, "rev-parse", "--verify", "--quiet", "--end-of-options", baseRef+"^{commit}")
 	if err != nil {
 		return "", false, err
 	}
 	if res.Code == 0 {
-		return baseRef, false, nil
+		return strings.TrimSpace(string(res.Stdout)), false, nil
 	}
 	if baseRef == "HEAD" {
 		// Brand-new repo with no commits yet: diff against empty tree.
@@ -430,7 +513,7 @@ func (g ReviewGit) readWorkFile(ctx context.Context, repoRoot, rel string, maxBy
 			return nil, false, err
 		}
 		if len(raw) > maxBytes {
-			return trimAtLineBoundary(raw, maxBytes), true, nil
+			return raw, true, nil
 		}
 		return raw, false, nil
 	}
@@ -444,7 +527,7 @@ func (g ReviewGit) readWorkFile(ctx context.Context, repoRoot, rel string, maxBy
 		return nil, false, err
 	}
 	if len(raw) > maxBytes {
-		return trimAtLineBoundary(raw, maxBytes), true, nil
+		return raw, true, nil
 	}
 	return raw, false, nil
 }

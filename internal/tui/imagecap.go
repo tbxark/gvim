@@ -226,12 +226,12 @@ func (m *Model) applyImageProtocol(value string) tea.Cmd {
 		// An off terminal should not keep pictures it cannot show: release the
 		// uploads, and turning the mode back on uploads them again.
 		cmd := m.releaseImages()
-		next.cellW, next.cellH, next.localOnly = m.img.cellW, m.img.cellH, m.img.localOnly
+		next.cellW, next.cellH, next.localOnly, next.nextID = m.img.cellW, m.img.cellH, m.img.localOnly, m.img.nextID
 		m.img = next
 		return cmd
 	}
 	if m.img.off {
-		next.cellW, next.cellH, next.localOnly = m.img.cellW, m.img.cellH, m.img.localOnly
+		next.cellW, next.cellH, next.localOnly, next.nextID = m.img.cellW, m.img.cellH, m.img.localOnly, m.img.nextID
 		m.img = next
 		return m.imageQueue()
 	}
@@ -275,12 +275,11 @@ func (m *Model) releaseImages() tea.Cmd {
 			ids = append(ids, id)
 		}
 	}
-	m.img.nextID = 0
 	return imageDeleteCmd(ids)
 }
 
-// imageReleaseClosed removes the image entries whose files are no longer open as
-// images and returns one raw command that deletes their terminal resources.
+// imageReleaseClosed deletes terminal resources no longer owned by an open
+// image tab or a rendered Markdown document.
 func (m *Model) imageReleaseClosed() tea.Cmd {
 	if len(m.img.sent) == 0 {
 		return nil
@@ -289,6 +288,13 @@ func (m *Model) imageReleaseClosed() tea.Cmd {
 	for _, f := range m.openTabFiles() {
 		if f.image {
 			open[filepath.Clean(f.path)] = true
+		}
+	}
+	for _, state := range m.markdownImages {
+		for path, picture := range state.byPath {
+			if picture != nil {
+				open[path] = true
+			}
 		}
 	}
 	var ids []int
@@ -398,6 +404,9 @@ func (m *Model) imageMessage(msg tea.Msg) (tea.Cmd, bool) {
 			func() tea.Msg { return imageUploadedMsg{path: msg.path, id: msg.id} },
 		), true
 	case imageUploadedMsg:
+		if !m.img.uploadCurrent(msg.path, msg.id) {
+			return imageDeleteCmd([]int{msg.id}), true
+		}
 		m.img.markUploaded(msg.path, msg.id)
 		return nil, true
 	case mosaicLoadedMsg:

@@ -1,9 +1,12 @@
 package uiadapter
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +20,86 @@ import (
 	"github.com/tbxark/gvim/authority/authoritytest"
 	"github.com/tbxark/gvim/internal/tui/reviewdiff"
 )
+
+func TestReviewGitComparesIndexAndWorkingTree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is unavailable")
+	}
+	dir := t.TempDir()
+	g := ReviewGit{}
+	runGitTest(t, dir, "init", "-b", "main")
+	writeTestFile(t, dir, "both.txt", []byte("base\n"))
+	writeTestFile(t, dir, "pic.png", testReviewPNG(t, 2, 3))
+	runGitTest(t, dir, "add", ".")
+	runGitTest(t, dir, "commit", "-m", "base")
+	writeTestFile(t, dir, "both.txt", []byte("index\n"))
+	writeTestFile(t, dir, "pic.png", testReviewPNG(t, 4, 5))
+	runGitTest(t, dir, "add", ".")
+	writeTestFile(t, dir, "both.txt", []byte("worktree\n"))
+	writeTestFile(t, dir, "pic.png", testReviewPNG(t, 6, 7))
+	writeTestFile(t, dir, "untracked.png", testReviewPNG(t, 1, 1))
+
+	for _, tc := range []struct {
+		scope    reviewdiff.Scope
+		paths    []string
+		old, new string
+		sizes    [2]image.Point
+	}{
+		{reviewdiff.ScopeStaged, []string{"both.txt", "pic.png"}, "base", "index", [2]image.Point{image.Pt(2, 3), image.Pt(4, 5)}},
+		{reviewdiff.ScopeUnstaged, []string{"both.txt", "pic.png", "untracked.png"}, "index", "worktree", [2]image.Point{image.Pt(4, 5), image.Pt(6, 7)}},
+	} {
+		t.Run(tc.scope.Label(), func(t *testing.T) {
+			res, err := g.Changes(t.Context(), dir, "HEAD", tc.scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var paths []string
+			for _, entry := range res.Files {
+				paths = append(paths, entry.Path)
+			}
+			if !slices.Equal(paths, tc.paths) {
+				t.Fatalf("paths = %v, want %v", paths, tc.paths)
+			}
+			fd, err := g.FileDiff(t.Context(), res.RepoRoot, "HEAD", res.Files[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fd.Scope != tc.scope || !slices.Equal(fd.OldLines, []string{tc.old}) || !slices.Equal(fd.NewLines, []string{tc.new}) {
+				t.Fatalf("text diff = %+v, want %s → %s", fd, tc.old, tc.new)
+			}
+			fd, err = g.FileDiff(t.Context(), res.RepoRoot, "HEAD", res.Files[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fd.Images == nil {
+				t.Fatalf("binary image did not have a preview: %+v", fd)
+			}
+			for i, side := range fd.Images {
+				if side.Pixels == nil || side.Size != tc.sizes[i] {
+					t.Fatalf("image side %d = %+v, want %v with pixels", i, side, tc.sizes[i])
+				}
+			}
+			if len(res.Files) == 3 {
+				fd, err := g.FileDiff(t.Context(), res.RepoRoot, "HEAD", res.Files[2])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fd.Images == nil || fd.Images[0].Pixels != nil || fd.Images[0].Error != "" || fd.Images[1].Pixels == nil {
+					t.Fatalf("untracked image must have an absent old side and a new raster: %+v", fd.Images)
+				}
+			}
+		})
+	}
+}
+
+func testReviewPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	if err := png.Encode(&out, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
 
 func runGitTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -48,7 +131,7 @@ func writeTestFile(t *testing.T, dir, rel string, content []byte) {
 func TestReviewGitNotRepo(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	res, err := (ReviewGit{}).Changes(context.Background(), dir, "HEAD")
+	res, err := (ReviewGit{}).Changes(context.Background(), dir, "HEAD", reviewdiff.ScopeWorkingTree)
 	if err != nil {
 		t.Fatalf("Changes err = %v, want nil", err)
 	}
@@ -93,7 +176,7 @@ func TestReviewGitChangesDiffAndBaseRef(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Default vs HEAD: every file appears once in flat list.
-	res, err := rg.Changes(ctx, dir, "HEAD")
+	res, err := rg.Changes(ctx, dir, "HEAD", reviewdiff.ScopeWorkingTree)
 	if err != nil {
 		t.Fatalf("Changes(HEAD): %v", err)
 	}
@@ -144,7 +227,7 @@ func TestReviewGitChangesDiffAndBaseRef(t *testing.T) {
 	}
 
 	// 3. Switching base ref to main includes branch_only.txt as well.
-	mainRes, err := rg.Changes(ctx, dir, "main")
+	mainRes, err := rg.Changes(ctx, dir, "main", reviewdiff.ScopeWorkingTree)
 	if err != nil {
 		t.Fatalf("Changes(main): %v", err)
 	}

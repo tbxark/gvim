@@ -62,7 +62,7 @@ type ReviewChangesResult struct {
 // available refs for Review Diff Mode. All methods run off the update loop in
 // tea.Cmds and work against both local and remote authorities.
 type ReviewGitPort interface {
-	Changes(ctx context.Context, dir, baseRef string) (ReviewChangesResult, error)
+	Changes(ctx context.Context, dir, baseRef string, scope reviewdiff.Scope) (ReviewChangesResult, error)
 	FileDiff(ctx context.Context, repoRoot, baseRef string, entry reviewdiff.FileEntry) (*reviewdiff.FileDiff, error)
 	Refs(ctx context.Context, dir string) ([]string, error)
 }

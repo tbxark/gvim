@@ -1,6 +1,37 @@
 package reviewdiff
 
-import "github.com/tbxark/gvim/diff"
+import (
+	"image"
+
+	"github.com/tbxark/gvim/diff"
+)
+
+// Scope selects the two Git snapshots compared in Review Diff Mode.
+type Scope uint8
+
+const (
+	ScopeWorkingTree Scope = iota
+	ScopeStaged
+	ScopeUnstaged
+)
+
+func (s Scope) Label() string {
+	switch s {
+	case ScopeStaged:
+		return "Staged"
+	case ScopeUnstaged:
+		return "Unstaged"
+	default:
+		return "Working Tree"
+	}
+}
+
+// ImageSide holds the bounded raster and original dimensions of one revision.
+type ImageSide struct {
+	Pixels image.Image
+	Size   image.Point
+	Error  string
+}
 
 // FileStatus classifies a changed path shown in the Changes sidebar.
 type FileStatus uint8
@@ -43,6 +74,7 @@ type FileEntry struct {
 	Deleted  int
 	Binary   bool
 	StatOnly bool // true when line counts are unknown (e.g. binary or huge untracked)
+	Scope    Scope
 }
 
 // FileDiff is the old/new content and diff metadata of one changed file.
@@ -60,6 +92,8 @@ type FileDiff struct {
 	Binary    bool
 	Truncated bool
 	Message   string // non-empty for binary, too-large, or empty-diff notes
+	Scope     Scope
+	Images    *[2]ImageSide // old and new; an empty side denotes a missing file
 }
 
 // ViewMode selects how the right-hand diff pane renders changes.

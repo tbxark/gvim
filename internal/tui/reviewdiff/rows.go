@@ -299,7 +299,7 @@ func buildRows(
 	appendHeader := func(gapID, hidden, oldStart, oldCount, newStart, newCount int, trailing bool) {
 		var hdr string
 		if trailing {
-			hdr = fmt.Sprintf("↓ %d hidden lines at end of file (Enter/click to expand)", hidden)
+			hdr = fmt.Sprintf("↓ %d hidden lines at end of file", hidden)
 		} else {
 			oDisp := oldStart + 1
 			if oldCount == 0 {
@@ -311,8 +311,16 @@ func buildRows(
 			}
 			hdr = fmt.Sprintf("@@ -%d,%d +%d,%d @@", oDisp, oldCount, nDisp, newCount)
 			if hidden > 0 {
-				hdr += fmt.Sprintf("  ↕ %d hidden lines (Enter/click to expand)", hidden)
+				hdr += fmt.Sprintf("  ↕ %d hidden lines", hidden)
 			}
+		}
+		if gaps[gapID] > 0 {
+			if trailing && hidden == 0 {
+				hdr = "End of file context"
+			}
+			hdr += "  (Enter/click to collapse)"
+		} else if gapID >= 0 {
+			hdr += "  (Enter/click to expand)"
 		}
 		unified = append(unified, UnifiedRow{
 			Kind:        RowHunkHeader,
@@ -367,9 +375,9 @@ func buildRows(
 		dispOldCount := g.oldEnd - dispOldStart
 		dispNewCount := g.newEnd - dispNewStart
 
-		if gi == 0 || hidden > 0 {
+		if gi == 0 || gapLen > 0 {
 			gapID := -1
-			if hidden > 0 {
+			if gapLen > 0 {
 				gapID = gi
 			}
 			appendHeader(gapID, hidden, dispOldStart, dispOldCount, dispNewStart, dispNewCount, false)
@@ -408,9 +416,7 @@ func buildRows(
 			if exp > 0 {
 				appendContext(last.oldEnd, last.newEnd, exp)
 			}
-			if hidden := trailLen - exp; hidden > 0 {
-				appendHeader(trailID, hidden, 0, 0, 0, 0, true)
-			}
+			appendHeader(trailID, trailLen-exp, 0, 0, 0, 0, true)
 		}
 	}
 

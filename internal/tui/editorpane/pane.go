@@ -503,7 +503,7 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 			// The view of a tall line starts at a rune column, any column of the row it names.
 			f.topRow = min(p.TopRow, f.runeLen(f.top))
 		} else {
-			f.topRow = min(p.TopRow, len(f.layoutLine(f.top, false).spans)-1)
+			f.topRow = min(p.TopRow, f.rowCount(f.top)-1)
 		}
 	}
 	f.placeHorizontal(p.Left, h)
@@ -825,16 +825,26 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 			rows = append(rows, rowInfo{y: y, line: i})
 			y++
 		}
-		textAnchor := skip
-		for _, rd := range f.lineRows(i, true, textAnchor, f.h-y) {
-			if f.fill != nil && i == f.top && above+rd.k < f.topRow {
-				continue // a pane with fillers counts the rows of the top block in topRow
+		below := ex.Below
+		showText := true
+		if skip > 0 && len(below) > 0 {
+			textCount := len(f.layoutLine(i, false).spans)
+			if skip >= textCount {
+				below = below[min(skip-textCount, len(below)):]
+				showText = false
 			}
-			rows = f.paintLineRow(g, rows, i, rd, y, cur)
-			y++
+		}
+		if showText {
+			for _, rd := range f.lineRows(i, true, skip, f.h-y) {
+				if f.fill != nil && i == f.top && above+rd.k < f.topRow {
+					continue // a pane with fillers counts the rows of the top block in topRow
+				}
+				rows = f.paintLineRow(g, rows, i, rd, y, cur)
+				y++
+			}
 		}
 		// The extra rows below the line, in slice order: the first one is nearest the line.
-		for _, er := range ex.Below {
+		for _, er := range below {
 			if y >= f.h {
 				break
 			}

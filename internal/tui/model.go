@@ -258,7 +258,9 @@ type Model struct {
 	large largeState
 	// img is the host terminal's image-graphics state and the transmissions made
 	// (see imagecap.go and imageview.go).
-	img imageState
+	img                imageState
+	markdownImages     map[markdownImageDocKey]*markdownImageState
+	markdownImageSlots chan struct{}
 	// hexViews holds the read-only hex state of binary tabs, keyed by file path
 	// (see hexview.go). A path with no entry is showing its summary.
 	hexViews map[string]*hexView
@@ -511,6 +513,8 @@ var dockCloseWait = 2 * time.Second
 // the process.
 func (m *Model) Close() {
 	m.closed.Store(true)
+	m.clearMarkdownImages()
+	m.review.cancelDiff()
 	m.cancelPromptClipOp()
 	// A signal ends the program without a quit, so the writes in flight are stopped here
 	// and waited for: they remove their temporary files before the process exits.
@@ -612,6 +616,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if cmd, ok := m.imageMessage(msg); ok {
 		return m, cmd
+	}
+	if loaded, ok := msg.(markdownImagesLoaded); ok {
+		if m.markdownImages[loaded.key] == loaded.state {
+			loaded.state.byLine, loaded.state.byPath = loaded.lines, loaded.paths
+			return m, tea.Batch(m.imageReleaseClosed(), m.imageQueue())
+		}
+		return m, nil
 	}
 	if forced, ok := msg.(updateForcedMsg); ok {
 		m.applyUpdateStatus(forced.status)
@@ -777,8 +788,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	// An image tab that was just opened needs its picture read once. This runs after
 	// the update, so the read never blocks an update; a command does the file I/O.
-	cmd = tea.Batch(cmd, m.imageReleaseClosed())
-	cmd = tea.Batch(cmd, m.imageQueue())
+	cmd = tea.Batch(cmd, m.markdownImageQueue())
+	cmd = tea.Batch(cmd, m.imageReleaseClosed(), m.imageQueue())
 	m.hexReleaseClosed()
 	cmd = tea.Batch(cmd, m.hexQueue())
 	if isMotion && m.canSkipMotionView(moMsg, prevStrip, prevStatus, prevGrip, prevBorderHover, prevDockHover, prevExDrag, before, beforeStatus, cmd) {
@@ -2581,13 +2592,12 @@ func (m *Model) View() tea.View {
 }
 
 // imageQueue returns the commands the viewer starts after an update: the
-// capability query the first time an image tab is opened, and the read of a
-// picture the terminal does not have yet. It runs at the end of Update, before the
+// capability query the first time a picture is shown, and the read of a picture
+// the terminal does not have yet. It runs before the
 // frame: the text summary is painted while the read is in flight, and the
 // placeholders are painted only after the upload's Raw message has landed.
 //
-// Nothing is started while no image tab is open, so a session of text files never
-// sends a graphics query.
+// A session without visible images never sends a graphics query.
 func (m *Model) imageQueue() tea.Cmd {
 	if m.ed == nil {
 		return nil
@@ -2595,34 +2605,50 @@ func (m *Model) imageQueue() tea.Cmd {
 	if m.img.off || m.img.localOnly {
 		return nil
 	}
-	if !m.imageDocShown() {
+	showTabs := m.imageDocShown()
+	if !showTabs && len(m.markdownImages) == 0 {
 		// Computing the layout is the cost of the walk below, and every update comes
 		// here: a session of text files stops at this cheap look at the pane documents.
 		return nil
 	}
 	type imageTarget struct {
-		path string
-		doc  Document
+		path        string
+		size, mtime int64
+		standalone  bool
 	}
 	var targets []imageTarget
 	seen := make(map[string]bool)
-	for _, pane := range m.layout().Panes {
-		doc := m.paneDoc(pane)
-		if doc == nil {
-			continue
+	if showTabs {
+		for _, pane := range m.layout().Panes {
+			doc := m.paneDoc(pane)
+			if doc == nil {
+				continue
+			}
+			path, ok := m.imagePathOf(doc)
+			if !ok || path == "" || seen[path] {
+				continue
+			}
+			size, mtime := m.imageStatOf(doc)
+			seen[path] = true
+			targets = append(targets, imageTarget{path: path, size: size, mtime: mtime, standalone: true})
 		}
-		path, ok := m.imagePathOf(doc)
-		if !ok || path == "" || seen[path] {
-			continue
+	}
+	if !m.img.probed || m.img.imageEnabled() {
+		for _, state := range m.markdownImages {
+			for path, picture := range state.byPath {
+				if picture == nil || seen[path] {
+					continue
+				}
+				seen[path] = true
+				targets = append(targets, imageTarget{path: path, size: picture.bytes, mtime: picture.mtime})
+			}
 		}
-		seen[path] = true
-		targets = append(targets, imageTarget{path: path, doc: doc})
 	}
 	if len(targets) == 0 {
 		return nil
 	}
 	if !m.img.probed && !m.img.arming {
-		// The first image tab asks the terminal once. It is not part of Init, so a
+		// The first image asks the terminal once. It is not part of Init, so a
 		// session of text files, and a test that counts Init's commands, is unaffected.
 		m.img.arming = true
 		return func() tea.Msg { return imageProbeArmMsg{} }
@@ -2636,7 +2662,10 @@ func (m *Model) imageQueue() tea.Cmd {
 		// a missing or stale one is (re)read.
 		var cmds []tea.Cmd
 		for _, target := range targets {
-			size, mtime := m.imageStatOf(target.doc)
+			if !target.standalone {
+				continue
+			}
+			size, mtime := target.size, target.mtime
 			if e, ok := m.img.mosaic[target.path]; ok && e.size == size && e.mtime == mtime {
 				continue
 			}
@@ -2652,8 +2681,7 @@ func (m *Model) imageQueue() tea.Cmd {
 	for _, target := range targets {
 		// imageID allocates the id (and says whether the file changed since it was
 		// sent). An upload in flight is not queued twice.
-		size, mtime := m.imageStatOf(target.doc)
-		id, send := m.img.imageID(target.path, size, mtime)
+		id, send := m.img.imageID(target.path, target.size, target.mtime)
 		if !send || m.img.pending[id] {
 			continue
 		}

@@ -7,6 +7,12 @@ the query goes unanswered — gets a half-block approximation of the picture dra
 from ordinary styled cells, and `image_protocol: "off"` keeps the text summary.
 Nothing is ever printed to the screen as a stray escape sequence.
 
+Rendered Markdown uses Kitty graphics where supported, and colored half blocks
+as a fallback. Review Diff Mode uses colored half blocks for the images loaded
+from the Git snapshots shown above them. Both respect `image_protocol: "off"`,
+limit each image to 16 MiB and 16,777,216 pixels, and display the first frame of
+animated files.
+
 ## What opens as an image
 
 `png`, `jpeg`, `gif` and `webp` files are image documents (see
@@ -34,7 +40,7 @@ read-only hex dump; see [binary.md](binary.md).
 
 The viewer does not write the pixel data into the frame. Instead:
 
-1. **The capability query.** The first time an image tab is opened, gvim sends the
+1. **The capability query.** The first time an image tab or a Markdown image is shown, gvim sends the
    protocol's query (`a=q`, a 1x1 RGB image with id `4294967295`) together with
    `CSI 16 t` for the cell's pixel size. A terminal that supports the protocol
    answers with that id, which arrives as an ultraviolet `KittyGraphicsEvent`. The
@@ -89,7 +95,7 @@ keeps the summary and is not retried until the file changes.
 
 | Value | Meaning |
 |---|---|
-| `auto` (default) | Ask the terminal the first time an image tab opens. No answer draws the half-block fallback. |
+| `auto` (default) | Ask the terminal the first time an image tab or a Markdown image is shown. No answer draws the half-block fallback. |
 | `kitty` | Trust the terminal without asking. Use it behind a multiplexer or a wrapper that swallows the reply. |
 | `off` | Never draw an image; the summary text is shown. |
 

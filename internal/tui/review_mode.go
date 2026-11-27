@@ -42,6 +42,8 @@ type reviewModeState struct {
 	styles       reviewdiff.Styles
 	repoRoot     string
 	headerLayout reviewdiff.HeaderLayout
+	imageDiff    *[2]reviewdiff.ImageSide
+	imageRender  [2]mosaicRender
 
 	changesGen      uint64
 	diffGen         uint64
@@ -49,6 +51,7 @@ type reviewModeState struct {
 	previewSeq      uint64
 	watchRefreshSeq uint64
 	pendingLastHunk bool
+	diffCancel      context.CancelFunc
 
 	gripDrag       bool
 	diffScrollDrag bool
@@ -64,6 +67,7 @@ type (
 		gen     uint64
 		path    string
 		baseRef string
+		scope   reviewdiff.Scope
 		diff    *reviewdiff.FileDiff
 		err     error
 	}
@@ -180,6 +184,7 @@ func (m *Model) exitReviewMode() tea.Cmd {
 }
 
 func (m *Model) leaveReviewToEdit(focusEd bool) {
+	m.review.cancelDiff()
 	m.review.active = false
 	m.review.startedDirect = false
 	m.review.gripDrag = false
@@ -199,6 +204,13 @@ func (m *Model) leaveReviewToEdit(focusEd bool) {
 		m.diag.focus = m.review.savedDiagFocus && m.explorerOpen && m.diag.Open()
 	}
 	m.syncViewport()
+}
+
+func (r *reviewModeState) cancelDiff() {
+	if r.diffCancel != nil {
+		r.diffCancel()
+		r.diffCancel = nil
+	}
 }
 
 func (m *Model) reviewWorkDir() string {
@@ -226,9 +238,10 @@ func (m *Model) reviewRefreshCmd() tea.Cmd {
 	gen := m.review.changesGen
 	dir := m.reviewWorkDir()
 	baseRef := m.review.model.BaseRef
+	scope := m.review.model.Scope
 	m.review.model.LoadingFiles = true
 	return func() tea.Msg {
-		res, err := port.Changes(context.Background(), dir, baseRef)
+		res, err := port.Changes(context.Background(), dir, baseRef, scope)
 		return reviewChangesMsg{gen: gen, res: res, err: err}
 	}
 }
@@ -253,6 +266,7 @@ func (m *Model) scheduleReviewPreviewDiff() tea.Cmd {
 }
 
 func (m *Model) reviewLoadSelectedDiffCmd() tea.Cmd {
+	m.review.cancelDiff()
 	port := m.root.ports.ReviewGit
 	if port == nil {
 		return nil
@@ -270,11 +284,15 @@ func (m *Model) reviewLoadSelectedDiffCmd() tea.Cmd {
 	m.review.diffGen++
 	gen := m.review.diffGen
 	baseRef := m.review.model.BaseRef
+	entry.Scope = m.review.model.Scope
+	ctx, cancel := context.WithCancel(context.Background())
+	m.review.diffCancel = cancel
 	m.review.model.LoadingDiff = true
 	m.syncReviewUnsavedFlag()
 	return func() tea.Msg {
-		fd, err := port.FileDiff(context.Background(), repoRoot, baseRef, entry)
-		return reviewDiffMsg{gen: gen, path: entry.Path, baseRef: baseRef, diff: fd, err: err}
+		defer cancel()
+		fd, err := port.FileDiff(ctx, repoRoot, baseRef, entry)
+		return reviewDiffMsg{gen: gen, path: entry.Path, baseRef: baseRef, scope: entry.Scope, diff: fd, err: err}
 	}
 }
 
@@ -332,14 +350,21 @@ func (m *Model) openReviewBaseList(refs []string) {
 	if len(refs) == 0 {
 		refs = []string{"HEAD"}
 	}
-	cur := m.review.model.BaseRef
-	rows := make([]list.Row, 0, len(refs)+1)
+	model := &m.review.model
+	rows := make([]list.Row, 0, len(refs)+3)
 	for _, ref := range refs {
 		right := ""
-		if ref == cur {
+		if ref == model.BaseRef && model.Scope == reviewdiff.ScopeWorkingTree {
 			right = "current"
 		}
 		rows = append(rows, list.Row{Left: ref, Right: right, Value: ref})
+	}
+	for _, scope := range []reviewdiff.Scope{reviewdiff.ScopeStaged, reviewdiff.ScopeUnstaged} {
+		row := list.Row{Left: scope.Label(), Value: "\x00" + scope.Label()}
+		if scope == model.Scope {
+			row.Right = "current"
+		}
+		rows = append(rows, row)
 	}
 	rows = append(rows, list.Row{
 		Left:  uiText("gvim.review.custom_ref", "Enter custom ref / commit…"),
@@ -351,7 +376,12 @@ func (m *Model) openReviewBaseList(refs []string) {
 		m.listChrome(),
 		func(v *list.View, r list.Row) tea.Cmd {
 			v.Close()
-			if r.Value == "\x00custom" {
+			switch r.Value {
+			case "\x00Staged":
+				return m.setReviewScope(reviewdiff.ScopeStaged)
+			case "\x00Unstaged":
+				return m.setReviewScope(reviewdiff.ScopeUnstaged)
+			case "\x00custom":
 				m.openReviewCustomBasePrompt()
 				return nil
 			}
@@ -378,12 +408,30 @@ func (m *Model) setReviewBaseRef(ref string) tea.Cmd {
 	if ref == "" {
 		ref = "HEAD"
 	}
-	if m.review.model.BaseRef == ref {
+	if m.review.model.BaseRef == ref && m.review.model.Scope == reviewdiff.ScopeWorkingTree {
 		return nil
 	}
 	m.review.model.BaseRef = ref
+	m.review.model.Scope = reviewdiff.ScopeWorkingTree
+	m.review.previewSeq++
+	m.review.diffGen++
+	m.review.cancelDiff()
+	m.review.model.SetFiles(nil, m.review.model.Branch, "", m.review.model.NotRepo)
 	m.review.model.ClearDiff()
 	m.notice = fmt.Sprintf("Review Diff: comparing against %s", ref)
+	return m.reviewRefreshCmd()
+}
+
+func (m *Model) setReviewScope(scope reviewdiff.Scope) tea.Cmd {
+	if m.review.model.Scope == scope {
+		return nil
+	}
+	m.review.model.Scope = scope
+	m.review.previewSeq++
+	m.review.diffGen++
+	m.review.cancelDiff()
+	m.review.model.SetFiles(nil, m.review.model.Branch, "", m.review.model.NotRepo)
+	m.review.model.ClearDiff()
 	return m.reviewRefreshCmd()
 }
 
@@ -391,7 +439,7 @@ func (m *Model) setReviewBaseRef(ref string) tea.Cmd {
 func (m *Model) reviewMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case reviewChangesMsg:
-		if msg.gen != m.review.changesGen {
+		if msg.gen != m.review.changesGen || !m.review.active {
 			return nil, true
 		}
 		if msg.err != nil {
@@ -409,12 +457,12 @@ func (m *Model) reviewMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.reviewLoadSelectedDiffCmd(), true
 
 	case reviewDiffMsg:
-		if msg.gen != m.review.diffGen {
+		if msg.gen != m.review.diffGen || !m.review.active {
 			return nil, true
 		}
 		// Discard if selection or base ref moved on while loading.
 		cur, ok := m.review.model.SelectedFile()
-		if !ok || cur.Path != msg.path || m.review.model.BaseRef != msg.baseRef {
+		if !ok || cur.Path != msg.path || m.review.model.BaseRef != msg.baseRef || m.review.model.Scope != msg.scope {
 			return nil, true
 		}
 		if msg.err != nil {
@@ -490,7 +538,9 @@ func (m *Model) reviewDiffRect(l frame.Layout) reviewdiff.DiffRect {
 func (m *Model) paintReviewMode(g *grid.Grid, l frame.Layout) {
 	m.syncReviewUnsavedFlag()
 	m.review.headerLayout = m.review.model.PaintHeaderBar(g, l.EditorX, l.StripY, l.EditorW, m.review.styles, m.view.icons)
-	m.review.model.PaintDiff(g, m.reviewDiffRect(l), m.review.styles)
+	diffRect := m.reviewDiffRect(l)
+	m.review.model.PaintDiff(g, diffRect, m.review.styles)
+	m.paintReviewImages(g, diffRect)
 	m.dock.Draw(g, l, m.styles)
 	if l.ExplorerOpen {
 		m.review.model.PaintSidebar(g, m.reviewSidebarRect(l), m.review.styles, m.view.icons)
@@ -507,7 +557,11 @@ func (m *Model) reviewStatusInfo(s *frame.StatusView) {
 		diffW -= frame.ExplorerCols(m.width, m.explorerWidth)
 	}
 	var parts []string
-	parts = append(parts, "vs "+m.review.model.BaseRef)
+	if m.review.model.Scope == reviewdiff.ScopeWorkingTree {
+		parts = append(parts, "vs "+m.review.model.BaseRef)
+	} else {
+		parts = append(parts, m.review.model.Scope.Label())
+	}
 	if m.review.model.Branch != "" {
 		parts = append(parts, m.review.model.Branch)
 	}
@@ -524,13 +578,16 @@ func (m *Model) reviewStatusInfo(s *frame.StatusView) {
 	case m.review.model.SearchActive:
 		s.ReviewHints = "Type to search  Enter:confirm  Esc:cancel"
 	case m.review.model.Focus == reviewdiff.FocusFiles:
-		s.ReviewHints = "j/k:file  Tab/Enter:diff  /:filter  v:split  b:base  o:edit  q:exit"
+		s.ReviewHints = "j/k:file  Tab:diff  /:filter  1/2/3:scope  b:compare  q:exit"
 	default:
-		s.ReviewHints = "Tab:files  ]/[:hunk  v:split  f:full  w:wrap  /:find  Enter:edit  q:exit"
+		s.ReviewHints = "Tab:files  ]/[:hunk  Enter:context  v:split  /:find  q:exit"
 	}
 }
 
 func (m *Model) reviewJumpToEdit(relPath string, line int) tea.Cmd {
+	if m.review.model.Scope == reviewdiff.ScopeStaged {
+		return nil
+	}
 	full := m.reviewFullPath(relPath)
 	m.leaveReviewToEdit(true)
 	return m.openFileCmd(full, false, line, 1)
@@ -696,6 +753,12 @@ func (m *Model) handleReviewKey(k tea.Key, kp KeyPress, text string) tea.Cmd {
 			return nil
 		case "b":
 			return m.reviewOpenBasePickerCmd()
+		case "1":
+			return m.setReviewScope(reviewdiff.ScopeWorkingTree)
+		case "2":
+			return m.setReviewScope(reviewdiff.ScopeStaged)
+		case "3":
+			return m.setReviewScope(reviewdiff.ScopeUnstaged)
 		case "]":
 			return m.reviewStepHunk(1)
 		case "[":
@@ -830,7 +893,7 @@ func (m *Model) handleReviewDiffKey(k tea.Key, kp KeyPress, text string, hasMod 
 		}
 		return nil
 	case "Enter":
-		if m.review.model.ExpandAtCursor(diffW) {
+		if m.review.model.ChangeGapAtCursor(diffW, viewRows, true) {
 			return nil
 		}
 		if p, line, ok := m.review.model.EditTargetAtCursor(diffW); ok {
@@ -878,7 +941,7 @@ func (m *Model) handleReviewDiffKey(k tea.Key, kp KeyPress, text string, hasMod 
 				m.review.model.ScrollHorizontal(4)
 			}
 		case "e":
-			m.review.model.ExpandAtCursor(diffW)
+			m.review.model.ChangeGapAtCursor(diffW, viewRows, false)
 		}
 	}
 	return nil
@@ -1065,7 +1128,7 @@ func (m *Model) handleReviewClick(msg tea.MouseClickMsg) tea.Cmd {
 		m.review.model.Focus = reviewdiff.FocusDiff
 		m.review.model.FilterActive = false
 		m.review.model.Cursor = dh.RowIdx
-		m.review.model.ExpandGap(dh.GapID)
+		m.review.model.ChangeGapAtCursor(dr.W, m.review.model.DiffViewportRows(dr), true)
 		return nil
 	case reviewdiff.DiffHitRow:
 		m.review.model.Focus = reviewdiff.FocusDiff

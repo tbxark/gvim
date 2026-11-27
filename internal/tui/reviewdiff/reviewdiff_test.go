@@ -10,6 +10,46 @@ import (
 	"github.com/tbxark/gvim/theme"
 )
 
+func TestReviewContextGapCanCollapseInPlace(t *testing.T) {
+	old := make([]string, 85)
+	for i := range old {
+		old[i] = fmt.Sprintf("line %d", i)
+	}
+	next := append([]string{}, old...)
+	next[4], next[46], next[76] = "change one", "change two", "change three"
+	for _, mode := range []ViewMode{ViewUnified, ViewSplit} {
+		t.Run(mode.Label(), func(t *testing.T) {
+			m := NewModel()
+			m.ViewMode = mode
+			m.SetDiff(&FileDiff{Path: "a.txt", OldLines: old, NewLines: next}, "")
+			const width, height = 100, 6
+			for i := range m.LogicalRowCount(width) {
+				if m.gapIDAt(i, width) == 1 {
+					m.Cursor = i
+					break
+				}
+			}
+			if m.gapIDAt(m.Cursor, width) != 1 {
+				t.Fatal("interior context control is missing")
+			}
+			m.Scroll = m.visualRowOfCursor(width) - 2
+			before := m.LogicalRowCount(width)
+			if !m.ChangeGapAtCursor(width, height, true) {
+				t.Fatal("could not open gap")
+			}
+			if m.LogicalRowCount(width) != before+ExpandStep || m.visualRowOfCursor(width)-m.Scroll != 2 {
+				t.Fatalf("opening the gap moved its screen row or revealed the wrong number of lines")
+			}
+			if !m.ChangeGapAtCursor(width, height, true) {
+				t.Fatal("could not close gap")
+			}
+			if m.LogicalRowCount(width) != before || m.gapIDAt(m.Cursor, width) != 1 || m.visualRowOfCursor(width)-m.Scroll != 2 {
+				t.Fatalf("closing the gap did not restore the original context and control position")
+			}
+		})
+	}
+}
+
 func TestWordDiffRanges(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

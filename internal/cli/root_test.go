@@ -274,7 +274,7 @@ func TestExecuteHelpListsCommandTree(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
 	}
-	for _, want := range []string{"version", "config", "grammar", "completion", "help", "--config", "--keymap", "--theme", "--log-file", "--no-plugins", "--plugin", "--restore", "--no-restore", "--simple"} {
+	for _, want := range []string{"version", "config", "grammar", "preview", "completion", "help", "--config", "--keymap", "--theme", "--log-file", "--no-plugins", "--plugin", "--restore", "--no-restore", "--simple"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help misses %q:\n%s", want, stdout)
 		}

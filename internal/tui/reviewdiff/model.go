@@ -14,6 +14,7 @@ import (
 type Model struct {
 	BaseRef string
 	Branch  string
+	Scope   Scope
 
 	Files        []FileEntry
 	Filtered     []int
@@ -218,7 +219,7 @@ func (m *Model) SetDiff(d *FileDiff, errMsg string) {
 		m.rowGen++
 		return
 	}
-	sameFile := m.Diff != nil && m.Diff.Path == d.Path && m.Diff.BaseRef == d.BaseRef
+	sameFile := m.Diff != nil && m.Diff.Path == d.Path && m.Diff.BaseRef == d.BaseRef && m.Diff.Scope == d.Scope
 	oldLines := sanitizeLines(d.OldLines)
 	newLines := sanitizeLines(d.NewLines)
 	if len(d.Hunks) == 0 && !d.Binary && (len(oldLines) > 0 || len(newLines) > 0) {
@@ -445,6 +446,31 @@ func (m *Model) ExpandAtCursor(diffW int) bool {
 		return false
 	}
 	return m.ExpandGap(gapID)
+}
+
+// ChangeGapAtCursor keeps the context control at the same screen row when
+// possible. The expand shortcut can reveal additional chunks independently.
+func (m *Model) ChangeGapAtCursor(diffW, viewRows int, toggle bool) bool {
+	gapID := m.gapIDAt(m.Cursor, diffW)
+	if gapID < 0 {
+		return false
+	}
+	screenRow := m.visualRowOfCursor(diffW) - m.Scroll
+	if toggle && m.Gaps[gapID] > 0 {
+		delete(m.Gaps, gapID)
+		m.rebuildRows()
+	} else if !m.ExpandGap(gapID) {
+		return false
+	}
+	for row := range m.LogicalRowCount(diffW) {
+		if m.gapIDAt(row, diffW) == gapID {
+			m.Cursor = row
+			break
+		}
+	}
+	m.Scroll = max(0, m.visualRowOfCursor(diffW)-screenRow)
+	m.ensureCursorVisible(diffW, viewRows)
+	return true
 }
 
 // ExpandGap reveals ExpandStep more hidden lines for gapID and rebuilds rows.

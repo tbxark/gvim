@@ -225,7 +225,13 @@ command drops this client and leaves the editor running.`,
 		return configview.KeymapNames(), cobra.ShellCompDirectiveNoFileComp
 	})
 
-	root.AddCommand(newVersionCommand(), newConfigCommand(&configPath, &keymapName, &themeName), newGrammarCommand(), newRexCommand())
+	root.AddCommand(
+		newVersionCommand(),
+		newConfigCommand(&configPath, &keymapName, &themeName),
+		newGrammarCommand(),
+		newPreviewCommand(&configPath, &themeName),
+		newRexCommand(),
+	)
 	// Cobra adds the completion command only when the root has subcommands,
 	// so this call comes after AddCommand.
 	root.InitDefaultCompletionCmd()

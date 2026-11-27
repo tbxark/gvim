@@ -282,15 +282,17 @@ func paintImage(g *grid.Grid, area imageRegion, info document.ImageInfo, id, pla
 				// this cell is the first of them in the row-major paint order.
 				text = imageVirtualPlacement(id, placement, fit.w, fit.h) + text
 			}
-			st := fg
-			st.FG = imageIDColor(id)
-			// SGR 58 names the placement; SGR 4 would draw a visible line under
-			// every placeholder row.
-			st.Underline = false
-			st.UnderlineColor = imageIDColor(placement)
-			g.Set(fit.x-area.x+col, fit.y-area.y+row, text, st)
+			g.Set(fit.x-area.x+col, fit.y-area.y+row, text, imagePlaceholderStyle(id, placement, fg))
 		}
 	}
+}
+
+func imagePlaceholderStyle(id, placement int, bg grid.Style) grid.Style {
+	bg.FG = imageIDColor(id)
+	// SGR 58 names the placement without drawing a visible underline.
+	bg.Underline = false
+	bg.UnderlineColor = imageIDColor(placement)
+	return bg
 }
 
 // placeholderCell is the text of the placeholder at (row, col): the private-use
